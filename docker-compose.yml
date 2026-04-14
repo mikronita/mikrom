@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mikrom
+      POSTGRES_PASSWORD: mikrom_password
+      POSTGRES_DB: mikrom_api
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mikrom"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mikrom
+
+  mikrom-scheduler:
+    build:
+      context: .
+      dockerfile: mikrom-scheduler/Dockerfile
+    ports:
+      - "5002:5002"
+    networks:
+      - mikrom
+
+  mikrom-agent:
+    build:
+      context: .
+      dockerfile: mikrom-agent/Dockerfile
+    environment:
+      SCHEDULER_ADDR: http://mikrom-scheduler:5002
+      AGENT_PORT: "5003"
+    ports:
+      - "5003:5003"
+    depends_on:
+      - mikrom-scheduler
+    networks:
+      - mikrom
+
+  mikrom-api:
+    build:
+      context: .
+      dockerfile: mikrom-api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_api
+      SCHEDULER_ADDR: http://mikrom-scheduler:5002
+      JWT_SECRET: ${JWT_SECRET:-change_me_in_production}
+    ports:
+      - "5001:5001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mikrom-scheduler:
+        condition: service_started
+    networks:
+      - mikrom
+
+  mikrom-app:
+    build:
+      context: mikrom-app
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mikrom-api
+    networks:
+      - mikrom
+
+volumes:
+  postgres_data:
+
+networks:
+  mikrom:
+    driver: bridge
