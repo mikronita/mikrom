@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package mikrom.scheduler.v1;
+
+option go_package = "mikrom/scheduler/v1";
+
+service SchedulerService {
+  rpc RegisterWorker(RegisterWorkerRequest) returns (RegisterWorkerResponse);
+  rpc ReportMetrics(ReportMetricsRequest) returns (ReportMetricsResponse);
+  rpc DeployApp(DeployRequest) returns (DeployResponse);
+  rpc GetAppStatus(AppStatusRequest) returns (AppStatusResponse);
+  rpc CancelApp(CancelRequest) returns (CancelResponse);
+  rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
+}
+
+message RegisterWorkerRequest {
+  string host_id = 1;
+  string hostname = 2;
+  string ip_address = 3;
+  uint32 agent_port = 4;
+}
+
+message RegisterWorkerResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ReportMetricsRequest {
+  string host_id = 1;
+  float cpu_usage = 2;
+  uint64 ram_used_bytes = 3;
+  uint64 ram_total_bytes = 4;
+  uint64 disk_used_bytes = 5;
+  uint64 disk_total_bytes = 6;
+  uint32 apps_count = 7;
+  int64 timestamp = 8;
+}
+
+message ReportMetricsResponse {
+  bool success = 1;
+}
+
+message DeployRequest {
+  string app_id = 1;
+  string app_name = 2;
+  string image = 3;
+  AppConfig config = 4;
+  string user_id = 5;
+}
+
+message AppConfig {
+  uint32 vcpus = 1;
+  uint64 memory_mib = 2;
+  uint64 disk_mib = 3;
+  map<string, string> env = 4;
+}
+
+message DeployResponse {
+  string job_id = 1;
+  DeployStatus status = 2;
+  string host_id = 3;
+  string vm_id = 4;
+  string message = 5;
+}
+
+enum DeployStatus {
+  DEPLOY_STATUS_UNSPECIFIED = 0;
+  DEPLOY_STATUS_PENDING = 1;
+  DEPLOY_STATUS_SCHEDULED = 2;
+  DEPLOY_STATUS_RUNNING = 3;
+  DEPLOY_STATUS_FAILED = 4;
+  DEPLOY_STATUS_CANCELLED = 5;
+}
+
+message AppStatusRequest {
+  string job_id = 1;
+}
+
+message AppStatusResponse {
+  string job_id = 1;
+  DeployStatus status = 2;
+  string host_id = 3;
+  string vm_id = 4;
+  int64 scheduled_at = 5;
+  int64 started_at = 6;
+  int64 stopped_at = 7;
+  string error_message = 8;
+}
+
+message CancelRequest {
+  string job_id = 1;
+}
+
+message CancelResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ListAppsRequest {
+  string user_id = 1;
+  optional DeployStatus status = 2;
+}
+
+message ListAppsResponse {
+  repeated AppInfo apps = 1;
+}
+
+message AppInfo {
+  string job_id = 1;
+  string app_id = 2;
+  string app_name = 3;
+  string image = 4;
+  DeployStatus status = 5;
+  string host_id = 6;
+  string vm_id = 7;
+}

@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "mikrom-proto",
+    "mikrom-scheduler",
+    "mikrom-agent",
+    "mikrom-api",
+]
+resolver = "2"
+
+[workspace.dependencies]
+tonic = { version = "0.12", features = ["transport", "tls"] }
+prost = "0.13"
+tonic-build = "0.12"
+tokio = { version = "1", features = ["full"] }
+rcgen = { version = "0.13", features = ["crypto"] }
+tracing = "0.1"
+dotenvy = "0.15"
