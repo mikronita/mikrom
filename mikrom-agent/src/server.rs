@@ -257,8 +257,9 @@ impl AgentServer {
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                 
                 let metrics = metrics_collector.collect();
-                tracing::info!("Collected metrics: cpu={:.2} ram={}/{}", 
-                    metrics.cpu_usage, metrics.ram_used_bytes, metrics.ram_total_bytes);
+                tracing::info!("Collected metrics: cpu={:.2} ram={}/{} disk={}/{}",
+                    metrics.cpu_usage, metrics.ram_used_bytes, metrics.ram_total_bytes,
+                    metrics.disk_used_bytes, metrics.disk_total_bytes);
                 
                 match SchedulerServiceClient::connect(endpoint.clone()).await {
                     Ok(mut client) => {
