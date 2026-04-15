@@ -162,10 +162,19 @@ mod tests {
     use axum::{body::Body, http::Request};
     use tower::ServiceExt;
 
+    // Returns an app backed by a lazy (non-connecting) pool — sufficient for
+    // handlers that validate input and return before making any DB query.
+    fn make_test_app_no_db() -> axum::Router {
+        let pool = sqlx::PgPool::connect_lazy(
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api",
+        )
+        .expect("invalid pool URL");
+        create_test_app(pool)
+    }
+
     #[tokio::test]
     async fn test_register_empty_email() {
-        let pool = create_test_pool().await;
-        let app = create_test_app(pool);
+        let app = make_test_app_no_db();
 
         let response = app
             .oneshot(
@@ -184,8 +193,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_empty_password() {
-        let pool = create_test_pool().await;
-        let app = create_test_app(pool);
+        let app = make_test_app_no_db();
 
         let response = app
             .oneshot(
@@ -204,8 +212,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_short_password() {
-        let pool = create_test_pool().await;
-        let app = create_test_app(pool);
+        let app = make_test_app_no_db();
 
         let response = app
             .oneshot(
@@ -223,6 +230,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
     async fn test_register_success() {
         let pool = create_test_pool().await;
         let app = create_test_app(pool);
@@ -252,6 +260,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
     async fn test_register_duplicate_email() {
         let pool = create_test_pool().await;
         let app = create_test_app(pool);
@@ -290,8 +299,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_login_empty_email() {
-        let pool = create_test_pool().await;
-        let app = create_test_app(pool);
+        let app = make_test_app_no_db();
 
         let response = app
             .oneshot(
@@ -310,8 +318,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_login_empty_password() {
-        let pool = create_test_pool().await;
-        let app = create_test_app(pool);
+        let app = make_test_app_no_db();
 
         let response = app
             .oneshot(
@@ -329,6 +336,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
     async fn test_login_user_not_found() {
         let pool = create_test_pool().await;
         let app = create_test_app(pool);
@@ -349,6 +357,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
     async fn test_login_wrong_password() {
         let pool = create_test_pool().await;
         let app = create_test_app(pool);
@@ -388,6 +397,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
     async fn test_login_success() {
         let pool = create_test_pool().await;
         let app = create_test_app(pool);
@@ -487,7 +497,7 @@ mod tests {
     }
 
     fn create_test_app(pool: sqlx::PgPool) -> axum::Router {
-        let state = crate::AppState { db: pool };
+        let state = crate::AppState { db: pool, scheduler_client: None };
         axum::Router::new()
             .route("/auth/register", axum::routing::post(register))
             .route("/auth/login", axum::routing::post(login))

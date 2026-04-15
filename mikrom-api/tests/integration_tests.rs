@@ -20,7 +20,7 @@ async fn setup_test_pool() -> PgPool {
 }
 
 fn create_app(pool: PgPool) -> axum::Router {
-    let state = AppState { db: pool };
+    let state = AppState { db: pool, scheduler_client: None };
     axum::Router::new()
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))

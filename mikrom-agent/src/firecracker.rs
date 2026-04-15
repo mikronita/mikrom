@@ -125,3 +125,122 @@ impl Default for FirecrackerManager {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> VmConfig {
+        VmConfig { vcpus: 1, memory_mib: 256, disk_mib: 1024, env: Default::default() }
+    }
+
+    fn start(mgr: &FirecrackerManager, vm_id: &str) {
+        mgr.start_vm(vm_id.to_string(), "app-1".to_string(), "nginx:latest".to_string(), config()).unwrap();
+    }
+
+    #[test]
+    fn test_start_vm_succeeds() {
+        let mgr = FirecrackerManager::new();
+        assert!(mgr.start_vm("vm-1".to_string(), "app-1".to_string(), "img".to_string(), config()).is_ok());
+    }
+
+    #[test]
+    fn test_started_vm_has_starting_status() {
+        let mgr = FirecrackerManager::new();
+        start(&mgr, "vm-1");
+        assert_eq!(mgr.get_vm_status("vm-1").unwrap(), VmStatus::Starting);
+    }
+
+    #[test]
+    fn test_start_duplicate_vm_fails() {
+        let mgr = FirecrackerManager::new();
+        start(&mgr, "vm-1");
+        let result = mgr.start_vm("vm-1".to_string(), "app-1".to_string(), "img".to_string(), config());
+        assert!(matches!(result, Err(FirecrackerError::StartFailed(_))));
+    }
+
+    #[test]
+    fn test_stop_vm_transitions_to_stopping() {
+        let mgr = FirecrackerManager::new();
+        start(&mgr, "vm-1");
+        assert!(mgr.stop_vm("vm-1").is_ok());
+        assert_eq!(mgr.get_vm_status("vm-1").unwrap(), VmStatus::Stopping);
+    }
+
+    #[test]
+    fn test_stop_nonexistent_vm_returns_error() {
+        let mgr = FirecrackerManager::new();
+        assert!(matches!(mgr.stop_vm("ghost"), Err(FirecrackerError::VmNotFound(_))));
+    }
+
+    #[test]
+    fn test_get_status_nonexistent_returns_error() {
+        let mgr = FirecrackerManager::new();
+        assert!(matches!(mgr.get_vm_status("ghost"), Err(FirecrackerError::VmNotFound(_))));
+    }
+
+    #[test]
+    fn test_list_vms_empty() {
+        assert!(FirecrackerManager::new().list_vms().is_empty());
+    }
+
+    #[test]
+    fn test_list_vms_after_starts() {
+        let mgr = FirecrackerManager::new();
+        start(&mgr, "vm-1");
+        start(&mgr, "vm-2");
+        assert_eq!(mgr.list_vms().len(), 2);
+    }
+
+    #[test]
+    fn test_get_vm_returns_correct_info() {
+        let mgr = FirecrackerManager::new();
+        mgr.start_vm("vm-1".to_string(), "app-42".to_string(), "ubuntu:24.04".to_string(), config()).unwrap();
+        let vm = mgr.get_vm("vm-1").unwrap();
+        assert_eq!(vm.app_id, "app-42");
+        assert_eq!(vm.image, "ubuntu:24.04");
+        assert_eq!(vm.config.vcpus, 1);
+        assert_eq!(vm.config.memory_mib, 256);
+    }
+
+    #[test]
+    fn test_get_vm_nonexistent_returns_none() {
+        assert!(FirecrackerManager::new().get_vm("ghost").is_none());
+    }
+
+    #[test]
+    fn test_vm_status_default_is_stopped() {
+        assert_eq!(VmStatus::default(), VmStatus::Stopped);
+    }
+
+    #[test]
+    fn test_vm_info_serialization_roundtrip() {
+        let mgr = FirecrackerManager::new();
+        start(&mgr, "vm-1");
+        let vm = mgr.get_vm("vm-1").unwrap();
+        let json = serde_json::to_string(&vm).unwrap();
+        let restored: VmInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.vm_id, "vm-1");
+        assert_eq!(restored.status, VmStatus::Starting);
+    }
+
+    #[test]
+    fn test_vm_config_with_env_vars() {
+        let mut env = std::collections::HashMap::new();
+        env.insert("PORT".to_string(), "3000".to_string());
+        env.insert("ENV".to_string(), "prod".to_string());
+        let cfg = VmConfig { vcpus: 2, memory_mib: 512, disk_mib: 2048, env };
+        assert_eq!(cfg.env.get("PORT").unwrap(), "3000");
+        assert_eq!(cfg.vcpus, 2);
+    }
+
+    #[test]
+    fn test_error_messages_contain_vm_id() {
+        let err = FirecrackerError::VmNotFound("vm-99".to_string());
+        assert!(err.to_string().contains("vm-99"));
+        let err2 = FirecrackerError::StartFailed("already exists".to_string());
+        assert!(err2.to_string().contains("already exists"));
+        let err3 = FirecrackerError::StopFailed("busy".to_string());
+        assert!(err3.to_string().contains("busy"));
+    }
+}

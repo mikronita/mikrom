@@ -100,3 +100,101 @@ impl Default for MetricsCollector {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_system_metrics_default_zeroed() {
+        let m = SystemMetrics::default();
+        assert_eq!(m.cpu_usage, 0.0);
+        assert_eq!(m.ram_used_bytes, 0);
+        assert_eq!(m.ram_total_bytes, 0);
+        assert_eq!(m.disk_used_bytes, 0);
+        assert_eq!(m.disk_total_bytes, 0);
+        assert_eq!(m.apps_count, 0);
+        assert!(m.timestamp > 0);
+    }
+
+    #[test]
+    fn test_collect_returns_real_system_data() {
+        let collector = MetricsCollector::new();
+        let metrics = collector.collect();
+        assert!(metrics.ram_total_bytes > 0, "total RAM must be > 0");
+        assert!(metrics.timestamp > 0);
+    }
+
+    #[test]
+    fn test_cpu_usage_within_valid_range() {
+        let collector = MetricsCollector::new();
+        let metrics = collector.collect();
+        assert!(metrics.cpu_usage >= 0.0);
+        assert!(metrics.cpu_usage <= 1.0);
+    }
+
+    #[test]
+    fn test_ram_used_does_not_exceed_total() {
+        let collector = MetricsCollector::new();
+        let metrics = collector.collect();
+        assert!(metrics.ram_used_bytes <= metrics.ram_total_bytes);
+    }
+
+    #[test]
+    fn test_increment_app_count() {
+        let collector = MetricsCollector::new();
+        collector.increment_app_count();
+        collector.increment_app_count();
+        assert_eq!(collector.collect().apps_count, 2);
+    }
+
+    #[test]
+    fn test_decrement_app_count() {
+        let collector = MetricsCollector::new();
+        collector.increment_app_count();
+        collector.increment_app_count();
+        collector.decrement_app_count();
+        assert_eq!(collector.collect().apps_count, 1);
+    }
+
+    #[test]
+    fn test_decrement_saturates_at_zero() {
+        let collector = MetricsCollector::new();
+        collector.decrement_app_count();
+        collector.decrement_app_count();
+        assert_eq!(collector.collect().apps_count, 0);
+    }
+
+    #[test]
+    fn test_app_count_starts_at_zero() {
+        let collector = MetricsCollector::new();
+        assert_eq!(collector.collect().apps_count, 0);
+    }
+
+    #[test]
+    fn test_system_metrics_serialization_roundtrip() {
+        let m = SystemMetrics {
+            cpu_usage: 0.42,
+            ram_used_bytes: 1024,
+            ram_total_bytes: 4096,
+            disk_used_bytes: 500,
+            disk_total_bytes: 1000,
+            apps_count: 7,
+            timestamp: 1_700_000_000,
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        let restored: SystemMetrics = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.apps_count, 7);
+        assert!((restored.cpu_usage - 0.42).abs() < 0.001);
+        assert_eq!(restored.timestamp, 1_700_000_000);
+    }
+
+    #[test]
+    fn test_collector_is_cloneable() {
+        let collector = MetricsCollector::new();
+        collector.increment_app_count();
+        let clone = collector.clone();
+        // Cloned collector shares the same Arc state
+        assert_eq!(clone.collect().apps_count, 1);
+    }
+}
