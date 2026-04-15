@@ -72,8 +72,9 @@ impl SchedulerService for SchedulerServer {
         let success = self.scheduler.worker_registry().update_metrics(&req.host_id, metrics.clone());
 
         if success {
-            tracing::info!("Updated metrics for worker {}: cpu={:.2} ram={}/{}",
-                req.host_id, metrics.cpu_usage, metrics.ram_used_bytes, metrics.ram_total_bytes);
+            tracing::info!("Updated metrics for worker {}: cpu={:.2} ram={}/{} disk={}/{}",
+                req.host_id, metrics.cpu_usage, metrics.ram_used_bytes, metrics.ram_total_bytes,
+                metrics.disk_used_bytes, metrics.disk_total_bytes);
         } else {
             tracing::warn!("Failed to update metrics for worker {}", req.host_id);
         }
