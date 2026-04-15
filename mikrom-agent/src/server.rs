@@ -8,6 +8,7 @@ use mikrom_proto::agent::{
     agent_service_server::{AgentService, AgentServiceServer},
 };
 use mikrom_proto::scheduler::{RegisterWorkerRequest, ReportMetricsRequest, SchedulerServiceClient};
+use mikrom_proto::tls::ServiceCerts;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -38,9 +39,7 @@ impl AgentService for AgentServer {
         request: tonic::Request<RegisterRequest>,
     ) -> Result<Response<RegisterResponse>, Status> {
         let req = request.into_inner();
-        
         tracing::info!("Registering agent: {}", req.host_id);
-
         Ok(Response::new(RegisterResponse {
             success: true,
             message: "Registered successfully".to_string(),
@@ -52,11 +51,8 @@ impl AgentService for AgentServer {
         request: tonic::Request<UnregisterRequest>,
     ) -> Result<Response<UnregisterResponse>, Status> {
         let req = request.into_inner();
-        
         tracing::info!("Unregistering agent: {}", req.host_id);
-        
         *self.shutdown_flag.write() = true;
-
         Ok(Response::new(UnregisterResponse {
             success: true,
             message: "Unregistered successfully".to_string(),
@@ -68,20 +64,8 @@ impl AgentService for AgentServer {
         request: tonic::Request<MetricsRequest>,
     ) -> Result<Response<MetricsResponse>, Status> {
         let req = request.into_inner();
-
-        let metrics = SystemMetrics {
-            cpu_usage: req.cpu_usage,
-            ram_used_bytes: req.ram_used_bytes,
-            ram_total_bytes: req.ram_total_bytes,
-            disk_used_bytes: req.disk_used_bytes,
-            disk_total_bytes: req.disk_total_bytes,
-            apps_count: req.apps_count,
-            timestamp: req.timestamp,
-        };
-
         tracing::debug!("Reported metrics: cpu={:.2}, ram={}/{}",
-            metrics.cpu_usage, metrics.ram_used_bytes, metrics.ram_total_bytes);
-
+            req.cpu_usage, req.ram_used_bytes, req.ram_total_bytes);
         Ok(Response::new(MetricsResponse { success: true }))
     }
 
@@ -90,7 +74,6 @@ impl AgentService for AgentServer {
         _request: tonic::Request<GetMetricsRequest>,
     ) -> Result<Response<GetMetricsResponse>, Status> {
         let metrics = self.metrics_collector.collect();
-
         Ok(Response::new(GetMetricsResponse {
             host_id: self.host_id.clone(),
             cpu_usage: metrics.cpu_usage,
@@ -108,7 +91,7 @@ impl AgentService for AgentServer {
         request: tonic::Request<StartVmRequest>,
     ) -> Result<Response<StartVmResponse>, Status> {
         let req = request.into_inner();
-        
+
         let vm_id = if req.vm_id.is_empty() {
             Uuid::new_v4().to_string()
         } else {
@@ -125,7 +108,6 @@ impl AgentService for AgentServer {
         match self.firecracker.start_vm(vm_id.clone(), req.app_id, req.image, config) {
             Ok(()) => {
                 self.metrics_collector.increment_app_count();
-                
                 Ok(Response::new(StartVmResponse {
                     success: true,
                     vm_id,
@@ -145,11 +127,10 @@ impl AgentService for AgentServer {
         request: tonic::Request<StopVmRequest>,
     ) -> Result<Response<StopVmResponse>, Status> {
         let req = request.into_inner();
-        
+
         match self.firecracker.stop_vm(&req.vm_id) {
             Ok(()) => {
                 self.metrics_collector.decrement_app_count();
-                
                 Ok(Response::new(StopVmResponse {
                     success: true,
                     message: "VM stopped".to_string(),
@@ -167,18 +148,17 @@ impl AgentService for AgentServer {
         request: tonic::Request<GetVmStatusRequest>,
     ) -> Result<Response<GetVmStatusResponse>, Status> {
         let req = request.into_inner();
-        
+
         match self.firecracker.get_vm_status(&req.vm_id) {
             Ok(status) => {
                 let proto_status = match status {
                     crate::firecracker::VmStatus::Starting => 1,
-                    crate::firecracker::VmStatus::Running => 2,
+                    crate::firecracker::VmStatus::Running  => 2,
                     crate::firecracker::VmStatus::Stopping => 3,
-                    crate::firecracker::VmStatus::Stopped => 4,
-                    crate::firecracker::VmStatus::Failed => 5,
+                    crate::firecracker::VmStatus::Stopped  => 4,
+                    crate::firecracker::VmStatus::Failed   => 5,
                     _ => 0,
                 };
-                
                 Ok(Response::new(GetVmStatusResponse {
                     vm_id: req.vm_id,
                     status: proto_status,
@@ -205,116 +185,138 @@ impl AgentServer {
     }
 
     pub async fn serve(&self, addr: SocketAddr, use_tls: bool) -> Result<(), Box<dyn std::error::Error>> {
-        let host_id = self.host_id.clone();
-        let hostname = self.hostname.clone();
+        let host_id    = self.host_id.clone();
+        let hostname   = self.hostname.clone();
         let ip_address = self.ip_address.clone();
-        
         let metrics_collector = self.metrics_collector.clone();
-        
+
+        // Load certs once — they are moved into the background task and also
+        // used to configure the gRPC server below.
+        let certs: Option<ServiceCerts> = if use_tls {
+            let certs_dir = std::env::var("CERTS_DIR")
+                .unwrap_or_else(|_| "/certs/agent".to_string());
+            Some(ServiceCerts::load(&certs_dir)?)
+        } else {
+            None
+        };
+
+        let certs_for_task = certs.clone();
+
         tokio::spawn(async move {
-            let host_id = host_id;
-            let hostname = hostname;
-            let ip_address = ip_address;
-            
-            let scheduler_addr = std::env::var("SCHEDULER_ADDR")
+            let mut scheduler_addr = std::env::var("SCHEDULER_ADDR")
                 .unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
-            
-            let static_addr: &'static str = Box::leak(scheduler_addr.into_boxed_str());
-            
-            let endpoint = match tonic::transport::Endpoint::new(static_addr) {
-                Ok(e) => e,
-                Err(e) => {
-                    tracing::error!("Failed to create scheduler endpoint: {}", e);
-                    return;
+
+            // With mTLS the H2 `:scheme` pseudo-header must be "https".
+            // tonic derives the scheme from the URI, so switch to https:// here.
+            if certs_for_task.is_some() && scheduler_addr.starts_with("http://") {
+                scheduler_addr = scheduler_addr.replacen("http://", "https://", 1);
+            }
+
+            // Helper: build a fresh Endpoint (+ optional TLS config) for each call.
+            // We reconnect on every RPC; acceptable for low-frequency heartbeats.
+            let make_endpoint = |addr: &str, certs: &Option<ServiceCerts>|
+                -> Result<tonic::transport::Endpoint, Box<dyn std::error::Error + Send + Sync>>
+            {
+                let ep = tonic::transport::Endpoint::new(addr.to_owned())?;
+                match certs {
+                    Some(c) => Ok(ep.tls_config(c.client_tls_config("mikrom-scheduler"))?),
+                    None    => Ok(ep),
                 }
             };
-            
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            
-            match SchedulerServiceClient::connect(endpoint.clone()).await {
-                Ok(mut client) => {
-                    let req = RegisterWorkerRequest {
-                        host_id: host_id.clone(),
-                        hostname: hostname.clone(),
-                        ip_address: ip_address.clone(),
-                        agent_port: 5003,
-                    };
-                    match client.register_worker(req).await {
-                        Ok(resp) => {
-                            tracing::info!("Registered with scheduler: {}", resp.into_inner().success);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to register: {}", e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Failed to connect to scheduler for registration: {}", e);
-                }
-            }
-            
-            loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                
-                let metrics = metrics_collector.collect();
-                tracing::info!("Collected metrics: cpu={:.2} ram={}/{} disk={}/{}",
-                    metrics.cpu_usage, metrics.ram_used_bytes, metrics.ram_total_bytes,
-                    metrics.disk_used_bytes, metrics.disk_total_bytes);
-                
-                match SchedulerServiceClient::connect(endpoint.clone()).await {
-                    Ok(mut client) => {
-                        let req = ReportMetricsRequest {
-                            host_id: host_id.clone(),
-                            cpu_usage: metrics.cpu_usage,
-                            ram_used_bytes: metrics.ram_used_bytes,
-                            ram_total_bytes: metrics.ram_total_bytes,
-                            disk_used_bytes: metrics.disk_used_bytes,
-                            disk_total_bytes: metrics.disk_total_bytes,
-                            apps_count: metrics.apps_count,
-                            timestamp: metrics.timestamp,
-                        };
-                        match client.report_metrics(req).await {
-                            Ok(resp) => {
-                                tracing::info!("Metrics reported: {}", resp.into_inner().success);
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to report metrics: {}", e);
-                            }
-                        }
+
+            // ── Registration with retry/backoff ───────────────────────────────
+            // The scheduler may not be ready yet when this task first runs.
+            let register_req = RegisterWorkerRequest {
+                host_id: host_id.clone(),
+                hostname: hostname.clone(),
+                ip_address: ip_address.clone(),
+                agent_port: 5003,
+            };
+            let mut backoff_secs = 1u64;
+            for attempt in 1_u32.. {
+                tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs)).await;
+
+                let result: Result<_, Box<dyn std::error::Error + Send + Sync>> = (async {
+                    let ep = make_endpoint(&scheduler_addr, &certs_for_task)?;
+                    let channel = ep.connect().await?;
+                    let mut client = SchedulerServiceClient::new(channel);
+                    Ok(client.register_worker(register_req.clone()).await?)
+                }).await;
+
+                match result {
+                    Ok(resp) => {
+                        tracing::info!("Registered with scheduler: {}", resp.into_inner().success);
+                        break;
                     }
                     Err(e) => {
-                        tracing::error!("Failed to connect to scheduler for metrics: {}", e);
+                        tracing::warn!("Registration attempt {attempt} failed: {e:?}. Retrying in {backoff_secs}s...");
+                        backoff_secs = std::cmp::min(backoff_secs * 2, 30);
                     }
+                }
+            }
+
+            // ── Metrics heartbeat ─────────────────────────────────────────────
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+                let metrics = metrics_collector.collect();
+                tracing::info!(
+                    "Collected metrics: cpu={:.2} ram={}/{} disk={}/{}",
+                    metrics.cpu_usage,
+                    metrics.ram_used_bytes, metrics.ram_total_bytes,
+                    metrics.disk_used_bytes, metrics.disk_total_bytes,
+                );
+
+                match make_endpoint(&scheduler_addr, &certs_for_task) {
+                    Ok(ep) => match ep.connect().await {
+                        Ok(channel) => {
+                            let mut client = SchedulerServiceClient::new(channel);
+                            let req = ReportMetricsRequest {
+                                host_id: host_id.clone(),
+                                cpu_usage: metrics.cpu_usage,
+                                ram_used_bytes: metrics.ram_used_bytes,
+                                ram_total_bytes: metrics.ram_total_bytes,
+                                disk_used_bytes: metrics.disk_used_bytes,
+                                disk_total_bytes: metrics.disk_total_bytes,
+                                apps_count: metrics.apps_count,
+                                timestamp: metrics.timestamp,
+                            };
+                            match client.report_metrics(req).await {
+                                Ok(resp) => tracing::info!(
+                                    "Metrics reported: {}", resp.into_inner().success
+                                ),
+                                Err(e) => tracing::error!("Failed to report metrics: {}", e),
+                            }
+                        }
+                        Err(e) => tracing::error!("Failed to connect to scheduler for metrics: {}", e),
+                    },
+                    Err(e) => tracing::error!("Failed to build scheduler endpoint: {}", e),
                 }
             }
         });
 
+        // ── gRPC server ───────────────────────────────────────────────────────
         let service = AgentServiceServer::new(self.clone());
-        
-        if use_tls {
-            let tls_config = mikrom_proto::tls::TlsConfig::load_or_generate(&self.host_id, "./certs/agent")?;
-            if let Some(tls) = tls_config.create_server_tls_config() {
-                tracing::info!("Agent TLS enabled");
+
+        match certs {
+            Some(c) => {
+                let tls = c.server_tls_config()?;
+                tracing::info!("Agent mTLS enabled");
                 tonic::transport::Server::builder()
                     .tls_config(tls)?
                     .add_service(service)
                     .serve(addr)
                     .await?;
-            } else {
-                tracing::warn!("Agent TLS failed to configure, using insecure");
+            }
+            None => {
+                tracing::info!("Agent running without TLS");
                 tonic::transport::Server::builder()
                     .add_service(service)
                     .serve(addr)
                     .await?;
             }
-        } else {
-            tracing::info!("Agent running without TLS");
-            tonic::transport::Server::builder()
-                .add_service(service)
-                .serve(addr)
-                .await?;
         }
-        
+
         Ok(())
     }
 }

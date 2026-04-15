@@ -1,0 +1,25 @@
+# Build context: workspace root
+# docker build -f mikrom-proto/Dockerfile.cert-gen .
+
+FROM rust:trixie AS builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY Cargo.toml Cargo.lock ./
+COPY mikrom-proto/ mikrom-proto/
+COPY mikrom-agent/ mikrom-agent/
+COPY mikrom-api/ mikrom-api/
+COPY mikrom-scheduler/ mikrom-scheduler/
+
+RUN cargo build --release -p mikrom-proto --bin cert-gen
+
+
+FROM debian:trixie-slim
+
+COPY --from=builder /app/target/release/cert-gen /usr/local/bin/cert-gen
+
+CMD ["cert-gen"]

@@ -1,4 +1,13 @@
 services:
+  cert-gen:
+    build:
+      context: .
+      dockerfile: mikrom-proto/Dockerfile.cert-gen
+    environment:
+      CERTS_OUT_DIR: /certs
+    volumes:
+      - certs:/certs
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -19,8 +28,16 @@ services:
     build:
       context: .
       dockerfile: mikrom-scheduler/Dockerfile
+    environment:
+      USE_TLS: "true"
+      CERTS_DIR: /certs/scheduler
     ports:
       - "5002:5002"
+    volumes:
+      - certs:/certs
+    depends_on:
+      cert-gen:
+        condition: service_completed_successfully
     networks:
       - mikrom
 
@@ -31,10 +48,18 @@ services:
     environment:
       SCHEDULER_ADDR: http://mikrom-scheduler:5002
       AGENT_PORT: "5003"
+      AGENT_HOSTNAME: mikrom-agent
+      USE_TLS: "true"
+      CERTS_DIR: /certs/agent
     ports:
       - "5003:5003"
+    volumes:
+      - certs:/certs
     depends_on:
-      - mikrom-scheduler
+      cert-gen:
+        condition: service_completed_successfully
+      mikrom-scheduler:
+        condition: service_started
     networks:
       - mikrom
 
@@ -46,9 +71,15 @@ services:
       DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_api
       SCHEDULER_ADDR: http://mikrom-scheduler:5002
       JWT_SECRET: ${JWT_SECRET:-change_me_in_production}
+      USE_TLS: "true"
+      CERTS_DIR: /certs/api
     ports:
       - "5001:5001"
+    volumes:
+      - certs:/certs
     depends_on:
+      cert-gen:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       mikrom-scheduler:
@@ -69,6 +100,7 @@ services:
 
 volumes:
   postgres_data:
+  certs:
 
 networks:
   mikrom:

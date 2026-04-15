@@ -4,8 +4,8 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use tonic::transport::Endpoint;
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct DeployRequestBody {
@@ -26,44 +26,64 @@ pub struct DeployResponseBody {
     pub message: String,
 }
 
-#[derive(Debug, Serialize)]
-pub struct ErrorResponse {
-    pub error: String,
-}
-
 pub async fn deploy_app(
     State(_state): State<crate::AppState>,
     Json(payload): Json<DeployRequestBody>,
 ) -> impl IntoResponse {
     let job_id = Uuid::new_v4().to_string();
-    
+
     tracing::info!(
         "Deploy request: app={}, image={}, job_id={}",
         payload.app_name, payload.image, job_id
     );
 
-    let scheduler_uri = std::env::var("SCHEDULER_ADDR")
+    let use_tls = std::env::var("USE_TLS")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
+    let mut scheduler_uri = std::env::var("SCHEDULER_ADDR")
         .unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
 
-    let vcpus = payload.vcpus.unwrap_or(1);
-    let memory_mib = payload.memory_mib.unwrap_or(256);
-    let disk_mib = payload.disk_mib.unwrap_or(1024);
+    if use_tls && scheduler_uri.starts_with("http://") {
+        scheduler_uri = scheduler_uri.replacen("http://", "https://", 1);
+    }
 
-    let endpoint = match Endpoint::new(scheduler_uri) {
+    let vcpus      = payload.vcpus.unwrap_or(1);
+    let memory_mib = payload.memory_mib.unwrap_or(256);
+    let disk_mib   = payload.disk_mib.unwrap_or(1024);
+
+    let endpoint_result: Result<Endpoint, String> = (|| {
+        let ep = Endpoint::new(scheduler_uri)
+            .map_err(|e| format!("Invalid scheduler URI: {}", e))?;
+
+        if use_tls {
+            let certs_dir = std::env::var("CERTS_DIR")
+                .unwrap_or_else(|_| "/certs/api".to_string());
+            let certs = mikrom_proto::tls::ServiceCerts::load(&certs_dir)
+                .map_err(|e| format!("Failed to load TLS certificates: {}", e))?;
+            ep.tls_config(certs.client_tls_config("mikrom-scheduler"))
+                .map_err(|e| format!("TLS config error: {}", e))
+        } else {
+            Ok(ep)
+        }
+    })();
+
+    let endpoint = match endpoint_result {
         Ok(ep) => ep,
-        Err(e) => {
+        Err(msg) => {
             return Json(DeployResponseBody {
-                job_id: job_id.clone(),
+                job_id,
                 status: "error".to_string(),
                 host_id: None,
                 vm_id: None,
-                message: format!("Invalid scheduler URI: {}", e),
+                message: msg,
             });
         }
     };
 
-    let response = match mikrom_proto::scheduler::SchedulerServiceClient::connect(endpoint).await {
-        Ok(mut client) => {
+    let response = match endpoint.connect().await {
+        Ok(channel) => {
+            let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
             let req = mikrom_proto::scheduler::DeployRequest {
                 app_id: Uuid::new_v4().to_string(),
                 app_name: payload.app_name.clone(),
@@ -76,7 +96,7 @@ pub async fn deploy_app(
                 }),
                 user_id: "default".to_string(),
             };
-            
+
             match client.deploy_app(req).await {
                 Ok(response) => {
                     let inner = response.into_inner();
@@ -88,15 +108,13 @@ pub async fn deploy_app(
                         message: inner.message,
                     }
                 }
-                Err(status) => {
-                    DeployResponseBody {
-                        job_id: job_id.clone(),
-                        status: "error".to_string(),
-                        host_id: None,
-                        vm_id: None,
-                        message: status.message().to_string(),
-                    }
-                }
+                Err(status) => DeployResponseBody {
+                    job_id: job_id.clone(),
+                    status: "error".to_string(),
+                    host_id: None,
+                    vm_id: None,
+                    message: status.message().to_string(),
+                },
             }
         }
         Err(e) => {

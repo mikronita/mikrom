@@ -9,6 +9,7 @@ use mikrom_proto::scheduler::{
     scheduler_service_server::{SchedulerService, SchedulerServiceServer},
 };
 use mikrom_proto::agent::{StartVmRequest, StartVmResponse, agent_service_client::AgentServiceClient};
+use mikrom_proto::tls::ServiceCerts;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -19,6 +20,7 @@ use uuid::Uuid;
 pub struct SchedulerServer {
     scheduler: AppScheduler,
     agent_clients: Arc<RwLock<HashMap<String, AgentClient>>>,
+    certs: Option<ServiceCerts>,
 }
 
 #[derive(Clone)]
@@ -34,7 +36,7 @@ impl SchedulerService for SchedulerServer {
         request: tonic::Request<RegisterWorkerRequest>,
     ) -> Result<Response<RegisterWorkerResponse>, Status> {
         let req = request.into_inner();
-        
+
         tracing::info!("Registering worker: {} ({}) on {}:{}",
             req.hostname, req.host_id, req.ip_address, req.agent_port);
 
@@ -56,7 +58,7 @@ impl SchedulerService for SchedulerServer {
         request: tonic::Request<ReportMetricsRequest>,
     ) -> Result<Response<ReportMetricsResponse>, Status> {
         let req = request.into_inner();
-        
+
         let metrics = HostMetrics {
             cpu_usage: req.cpu_usage,
             ram_used_bytes: req.ram_used_bytes,
@@ -66,11 +68,11 @@ impl SchedulerService for SchedulerServer {
             apps_count: req.apps_count,
             timestamp: req.timestamp,
         };
-        
+
         let success = self.scheduler.worker_registry().update_metrics(&req.host_id, metrics.clone());
-        
+
         if success {
-            tracing::info!("Updated metrics for worker {}: cpu={:.2} ram={}/{}", 
+            tracing::info!("Updated metrics for worker {}: cpu={:.2} ram={}/{}",
                 req.host_id, metrics.cpu_usage, metrics.ram_used_bytes, metrics.ram_total_bytes);
         } else {
             tracing::warn!("Failed to update metrics for worker {}", req.host_id);
@@ -84,7 +86,7 @@ impl SchedulerService for SchedulerServer {
         request: tonic::Request<DeployRequest>,
     ) -> Result<Response<DeployResponse>, Status> {
         let req = request.into_inner();
-        
+
         let job_id = Uuid::new_v4().to_string();
         let vm_id = Uuid::new_v4().to_string();
 
@@ -102,7 +104,7 @@ impl SchedulerService for SchedulerServer {
                 let app_id = req.app_id.clone();
                 let image = req.image.clone();
                 let host_id = worker.host_id.clone();
-                
+
                 let mut job = crate::job::Job::new(
                     job_id.clone(),
                     req.app_id,
@@ -160,7 +162,7 @@ impl SchedulerService for SchedulerServer {
         request: tonic::Request<AppStatusRequest>,
     ) -> Result<Response<AppStatusResponse>, Status> {
         let req = request.into_inner();
-        
+
         match self.scheduler.get_job(&req.job_id) {
             Some(job) => {
                 let response = AppStatusResponse {
@@ -184,7 +186,7 @@ impl SchedulerService for SchedulerServer {
         request: tonic::Request<CancelRequest>,
     ) -> Result<Response<CancelResponse>, Status> {
         let req = request.into_inner();
-        
+
         if let Some(mut job) = self.scheduler.get_job(&req.job_id) {
             job.cancel();
             self.scheduler.update_job_status(&req.job_id, job.status);
@@ -210,9 +212,9 @@ impl SchedulerService for SchedulerServer {
         request: tonic::Request<ListAppsRequest>,
     ) -> Result<Response<ListAppsResponse>, Status> {
         let req = request.into_inner();
-        
+
         let jobs = self.scheduler.list_jobs(Some(req.user_id.as_str()), None);
-        
+
         let apps = jobs
             .into_iter()
             .map(|j| AppInfo {
@@ -231,50 +233,40 @@ impl SchedulerService for SchedulerServer {
 }
 
 impl SchedulerServer {
-    pub fn new(_addr: SocketAddr) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(certs: Option<ServiceCerts>) -> Result<Self, Box<dyn std::error::Error>> {
         let worker_registry = WorkerRegistry::new();
         let scheduler = AppScheduler::new(worker_registry);
 
         Ok(Self {
             scheduler,
             agent_clients: Arc::new(RwLock::new(HashMap::new())),
+            certs,
         })
     }
 
-    pub async fn serve(&self, use_tls: bool) -> Result<(), Box<dyn std::error::Error>> {
-        let addr: SocketAddr = "0.0.0.0:5002".parse()?;
-        
+    pub async fn serve(&self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
         let service = SchedulerServiceServer::new(self.clone());
-        
-        if use_tls {
-            let tls_config = mikrom_proto::tls::TlsConfig::load_or_generate("scheduler", "./certs/scheduler")?;
-            if let Some(tls) = tls_config.create_server_tls_config() {
-                tracing::info!("Scheduler TLS enabled");
+
+        match &self.certs {
+            Some(certs) => {
+                let tls = certs.server_tls_config()?;
+                tracing::info!("Scheduler mTLS enabled");
                 tonic::transport::Server::builder()
                     .tls_config(tls)?
                     .add_service(service)
                     .serve(addr)
                     .await?;
-            } else {
-                tracing::warn!("Scheduler TLS failed to configure, using insecure");
+            }
+            None => {
+                tracing::info!("Scheduler running without TLS");
                 tonic::transport::Server::builder()
                     .add_service(service)
                     .serve(addr)
                     .await?;
             }
-        } else {
-            tracing::info!("Scheduler running without TLS");
-            tonic::transport::Server::builder()
-                .add_service(service)
-.serve(addr)
-            .await?;
         }
-        
-        Ok(())
-    }
 
-    fn get_agent_client(&self, host_id: &str) -> Option<AgentClient> {
-        self.agent_clients.read().get(host_id).cloned()
+        Ok(())
     }
 
     async fn forward_deploy_to_agent(
@@ -287,17 +279,35 @@ impl SchedulerServer {
     ) -> Result<(), Status> {
         let worker = self.scheduler.worker_registry().get_worker(host_id)
             .ok_or_else(|| Status::not_found("Worker not found"))?;
-        
-        let addr = format!("http://{}:{}", worker.ip_address, worker.agent_port);
-        let static_addr: &'static str = Box::leak(addr.into_boxed_str());
-        
-        let endpoint = tonic::transport::Endpoint::new(static_addr)
-            .map_err(|e| Status::unavailable(format!("Failed to create endpoint: {}", e)))?;
-        
-        let mut client = AgentServiceClient::connect(endpoint)
+
+        // With mTLS: connect by hostname (must match the SAN in the agent's cert).
+        // Without TLS: connect by IP as before.
+        let (addr, domain) = match &self.certs {
+            Some(_) => (
+                format!("https://{}:{}", worker.hostname, worker.agent_port),
+                worker.hostname.clone(),
+            ),
+            None => (
+                format!("http://{}:{}", worker.ip_address, worker.agent_port),
+                String::new(),
+            ),
+        };
+
+        let mut endpoint = tonic::transport::Endpoint::new(addr)
+            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?;
+
+        if let Some(certs) = &self.certs {
+            endpoint = endpoint
+                .tls_config(certs.client_tls_config(&domain))
+                .map_err(|e| Status::internal(format!("TLS config error: {}", e)))?;
+        }
+
+        let channel = endpoint
+            .connect()
             .await
             .map_err(|e| Status::unavailable(format!("Failed to connect to agent: {}", e)))?;
-        
+        let mut client = AgentServiceClient::new(channel);
+
         let req = StartVmRequest {
             vm_id: vm_id.to_string(),
             app_id: app_id.to_string(),
@@ -309,11 +319,11 @@ impl SchedulerServer {
                 env: config.env.clone(),
             }),
         };
-        
+
         let resp = client.start_vm(req).await
             .map_err(|e| Status::internal(format!("Failed to start VM: {}", e)))?
             .into_inner();
-        
+
         if resp.success {
             tracing::info!("VM {} started on host {}", vm_id, host_id);
             Ok(())
@@ -333,6 +343,7 @@ impl Clone for SchedulerServer {
         Self {
             scheduler: AppScheduler::new(self.scheduler.worker_registry().clone()),
             agent_clients: self.agent_clients.clone(),
+            certs: self.certs.clone(),
         }
     }
 }

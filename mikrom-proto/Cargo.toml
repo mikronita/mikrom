@@ -15,6 +15,10 @@ rcgen = { version = "0.13", features = ["crypto"] }
 [build-dependencies]
 tonic-build = "0.12"
 
+[[bin]]
+name = "cert-gen"
+path = "src/bin/cert_gen.rs"
+
 [features]
 default = ["build"]
 build = []
