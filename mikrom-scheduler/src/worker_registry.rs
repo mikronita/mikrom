@@ -296,4 +296,151 @@ mod tests {
         let after = registry.get_worker("h1").unwrap().last_heartbeat;
         assert!(after >= before);
     }
+
+    // ── Concurrency ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_concurrent_register_from_multiple_threads() {
+        use std::sync::Arc;
+        let registry = Arc::new(WorkerRegistry::new());
+        let mut handles = vec![];
+
+        for i in 0..20u16 {
+            let reg = registry.clone();
+            handles.push(std::thread::spawn(move || {
+                reg.register(
+                    format!("host-{}", i),
+                    format!("node-{}", i),
+                    "127.0.0.1".to_string(),
+                    5000 + i,
+                );
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(registry.list_workers().len(), 20);
+        for i in 0..20 {
+            assert!(registry.is_registered(&format!("host-{}", i)));
+        }
+    }
+
+    #[test]
+    fn test_concurrent_update_metrics_from_multiple_threads() {
+        use std::sync::Arc;
+        let registry = Arc::new(WorkerRegistry::new());
+        // Pre-register 10 workers.
+        for i in 0..10u16 {
+            registry.register(
+                format!("h{}", i),
+                format!("n{}", i),
+                "127.0.0.1".to_string(),
+                5000 + i,
+            );
+        }
+
+        let mut handles = vec![];
+        for i in 0..10u16 {
+            let reg = registry.clone();
+            handles.push(std::thread::spawn(move || {
+                let ok = reg.update_metrics(
+                    &format!("h{}", i),
+                    HostMetrics {
+                        cpu_usage: i as f32 * 0.1,
+                        ram_used_bytes: (i as u64 + 1) * 100_000_000,
+                        ram_total_bytes: 8 * 1024 * 1024 * 1024,
+                        disk_used_bytes: 0,
+                        disk_total_bytes: 100 * 1024 * 1024 * 1024,
+                        apps_count: i as u32,
+                        timestamp: 0,
+                    },
+                );
+                assert!(ok);
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let available = registry.get_available_workers();
+        assert_eq!(available.len(), 10);
+    }
+
+    #[test]
+    fn test_concurrent_register_and_unregister() {
+        use std::sync::Arc;
+        let registry = Arc::new(WorkerRegistry::new());
+        // Register 10 workers first.
+        for i in 0..10u16 {
+            registry.register(
+                format!("h{}", i),
+                format!("n{}", i),
+                "127.0.0.1".to_string(),
+                5000 + i,
+            );
+        }
+
+        let mut handles = vec![];
+        // 5 threads register new workers.
+        for i in 10..15u16 {
+            let reg = registry.clone();
+            handles.push(std::thread::spawn(move || {
+                reg.register(
+                    format!("h{}", i),
+                    format!("n{}", i),
+                    "127.0.0.1".to_string(),
+                    5000 + i,
+                );
+            }));
+        }
+        // 5 threads unregister the pre-registered workers.
+        for i in 0..5u16 {
+            let reg = registry.clone();
+            handles.push(std::thread::spawn(move || {
+                reg.unregister(&format!("h{}", i));
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // Workers h0..h4 were unregistered; h5..h14 should remain.
+        let count = registry.list_workers().len();
+        assert_eq!(count, 10); // 5 old survivors + 5 new
+    }
+
+    #[test]
+    fn test_concurrent_read_while_writing() {
+        use std::sync::Arc;
+        let registry = Arc::new(WorkerRegistry::new());
+        for i in 0..5u16 {
+            registry.register(
+                format!("h{}", i),
+                format!("n{}", i),
+                "127.0.0.1".to_string(),
+                5000 + i,
+            );
+        }
+
+        let mut handles = vec![];
+        // Writers: update metrics concurrently.
+        for i in 0..5u16 {
+            let reg = registry.clone();
+            handles.push(std::thread::spawn(move || {
+                reg.update_metrics(&format!("h{}", i), sample_metrics());
+            }));
+        }
+        // Readers: list workers concurrently.
+        for _ in 0..5 {
+            let reg = registry.clone();
+            handles.push(std::thread::spawn(move || {
+                let _ = reg.list_workers();
+                let _ = reg.get_available_workers();
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
 }

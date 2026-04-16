@@ -330,4 +330,141 @@ mod tests {
         cloned.set_status_for_test("vm-1", VmStatus::Running);
         assert_eq!(mgr.get_vm_status("vm-1").unwrap(), VmStatus::Running);
     }
+
+    // ── Concurrency ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_concurrent_start_different_vms() {
+        use std::sync::Arc;
+        let mgr = Arc::new(FirecrackerManager::new());
+        let mut handles = vec![];
+
+        for i in 0..20 {
+            let m = mgr.clone();
+            handles.push(std::thread::spawn(move || {
+                let result = m.start_vm(
+                    format!("vm-{}", i),
+                    format!("app-{}", i),
+                    "nginx:latest".to_string(),
+                    config(),
+                );
+                assert!(result.is_ok(), "start_vm failed for vm-{}: {:?}", i, result);
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(mgr.list_vms().len(), 20);
+    }
+
+    #[test]
+    fn test_concurrent_start_same_vm_only_one_succeeds() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let mgr = Arc::new(FirecrackerManager::new());
+        let success_count = Arc::new(AtomicUsize::new(0));
+        let mut handles = vec![];
+
+        for _ in 0..10 {
+            let m = mgr.clone();
+            let counter = success_count.clone();
+            handles.push(std::thread::spawn(move || {
+                if m.start_vm(
+                    "shared-vm".to_string(),
+                    "app-1".to_string(),
+                    "nginx".to_string(),
+                    config(),
+                )
+                .is_ok()
+                {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(
+            success_count.load(Ordering::SeqCst),
+            1,
+            "exactly one thread should have started the shared VM"
+        );
+        assert_eq!(mgr.list_vms().len(), 1);
+    }
+
+    #[test]
+    fn test_concurrent_start_and_stop_different_vms() {
+        use std::sync::Arc;
+        let mgr = Arc::new(FirecrackerManager::new());
+
+        // Pre-start 10 VMs.
+        for i in 0..10 {
+            start(&mgr, &format!("vm-pre-{}", i));
+        }
+
+        let mut handles = vec![];
+        // 10 threads start new VMs.
+        for i in 10..20 {
+            let m = mgr.clone();
+            handles.push(std::thread::spawn(move || {
+                m.start_vm(
+                    format!("vm-{}", i),
+                    "app".to_string(),
+                    "img".to_string(),
+                    config(),
+                )
+                .unwrap();
+            }));
+        }
+        // 10 threads stop the pre-started VMs.
+        for i in 0..10 {
+            let m = mgr.clone();
+            handles.push(std::thread::spawn(move || {
+                m.stop_vm(&format!("vm-pre-{}", i)).unwrap();
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(mgr.list_vms().len(), 20);
+        for i in 0..10 {
+            assert_eq!(
+                mgr.get_vm_status(&format!("vm-pre-{}", i)).unwrap(),
+                VmStatus::Stopping
+            );
+        }
+        for i in 10..20 {
+            assert_eq!(
+                mgr.get_vm_status(&format!("vm-{}", i)).unwrap(),
+                VmStatus::Starting
+            );
+        }
+    }
+
+    #[test]
+    fn test_concurrent_reads_do_not_deadlock() {
+        use std::sync::Arc;
+        let mgr = Arc::new(FirecrackerManager::new());
+        for i in 0..5 {
+            start(&mgr, &format!("vm-{}", i));
+        }
+
+        let mut handles = vec![];
+        for _ in 0..20 {
+            let m = mgr.clone();
+            handles.push(std::thread::spawn(move || {
+                let _ = m.list_vms();
+                let _ = m.get_vm_status("vm-0");
+                let _ = m.get_vm("vm-1");
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
 }

@@ -16,14 +16,18 @@ impl PostgresUserRepository {
 impl UserRepository for PostgresUserRepository {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError> {
         let result = sqlx::query_as::<_, (sqlx::types::Uuid, String, String)>(
-            "SELECT id, email, password_hash FROM users WHERE email = $1"
+            "SELECT id, email, password_hash FROM users WHERE email = $1",
         )
         .bind(email)
         .fetch_optional(&*self.pool)
         .await;
 
         match result {
-            Ok(Some((id, email, password_hash))) => Ok(Some(User { id, email, password_hash })),
+            Ok(Some((id, email, password_hash))) => Ok(Some(User {
+                id,
+                email,
+                password_hash,
+            })),
             Ok(None) => Ok(None),
             Err(e) => Err(DbError::from(e)),
         }
@@ -31,14 +35,13 @@ impl UserRepository for PostgresUserRepository {
 
     async fn create(&self, user: NewUser) -> Result<sqlx::types::Uuid, DbError> {
         let id = sqlx::types::Uuid::new_v4();
-        let result = sqlx::query(
-            "INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)"
-        )
-        .bind(id)
-        .bind(&user.email)
-        .bind(&user.password_hash)
-        .execute(&*self.pool)
-        .await;
+        let result =
+            sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)")
+                .bind(id)
+                .bind(&user.email)
+                .bind(&user.password_hash)
+                .execute(&*self.pool)
+                .await;
 
         match result {
             Ok(_) => Ok(id),
@@ -47,16 +50,111 @@ impl UserRepository for PostgresUserRepository {
     }
 
     async fn count_by_email(&self, email: &str) -> Result<i64, DbError> {
-        let result = sqlx::query_as::<_, (i64,)>(
-            "SELECT COUNT(*) FROM users WHERE email = $1"
-        )
-        .bind(email)
-        .fetch_one(&*self.pool)
-        .await;
+        let result = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM users WHERE email = $1")
+            .bind(email)
+            .fetch_one(&*self.pool)
+            .await;
 
         match result {
             Ok((count,)) => Ok(count),
             Err(e) => Err(DbError::from(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn lazy_pool() -> Arc<PgPool> {
+        Arc::new(
+            PgPool::connect_lazy("postgres://mikrom:mikrom_password@localhost:5432/mikrom_api")
+                .expect("invalid pool URL"),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_new_creates_instance_without_panicking() {
+        let _repo = PostgresUserRepository::new(lazy_pool());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
+    async fn test_find_by_email_returns_none_for_unknown_email() {
+        let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
+        }))
+        .await
+        .expect("failed to connect");
+        let repo = PostgresUserRepository::new(Arc::new(pool));
+        let result: Result<Option<User>, DbError> =
+            repo.find_by_email("nonexistent@example.com").await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
+    async fn test_create_and_find_roundtrip() {
+        let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
+        }))
+        .await
+        .expect("failed to connect");
+        let repo = PostgresUserRepository::new(Arc::new(pool));
+        let email = format!("repo_test_{}@example.com", uuid::Uuid::new_v4());
+        let id = repo
+            .create(NewUser {
+                email: email.clone(),
+                password_hash: "hashed".to_string(),
+            })
+            .await
+            .expect("create failed");
+
+        let user: User = repo
+            .find_by_email(&email)
+            .await
+            .expect("find failed")
+            .expect("user not found");
+
+        assert_eq!(user.id, id);
+        assert_eq!(user.email, email);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
+    async fn test_count_by_email_returns_zero_for_unknown() {
+        let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
+        }))
+        .await
+        .expect("failed to connect");
+        let repo = PostgresUserRepository::new(Arc::new(pool));
+        let count: i64 = repo
+            .count_by_email("nobody_ever@example.com")
+            .await
+            .expect("count failed");
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
+    async fn test_count_by_email_returns_one_after_create() {
+        let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
+        }))
+        .await
+        .expect("failed to connect");
+        let repo = PostgresUserRepository::new(Arc::new(pool));
+        let email = format!("count_test_{}@example.com", uuid::Uuid::new_v4());
+        repo.create(NewUser {
+            email: email.clone(),
+            password_hash: "x".to_string(),
+        })
+        .await
+        .expect("create failed");
+        let count: i64 = repo.count_by_email(&email).await.expect("count failed");
+        assert_eq!(count, 1);
     }
 }

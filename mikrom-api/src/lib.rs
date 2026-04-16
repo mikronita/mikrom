@@ -5,6 +5,7 @@ pub mod auth;
 pub mod db;
 pub mod deploy;
 pub mod models;
+pub mod repositories;
 
 pub use deploy::deploy_app;
 

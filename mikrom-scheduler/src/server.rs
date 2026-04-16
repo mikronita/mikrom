@@ -766,6 +766,136 @@ mod tests {
         assert!(resp.success);
     }
 
+    // ── forward_deploy_to_agent ──────────────────────────────────────────────
+
+    fn default_vm_config() -> crate::job::VmConfig {
+        crate::job::VmConfig {
+            vcpus: 1,
+            memory_mib: 256,
+            disk_mib: 1024,
+            env: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_forward_deploy_to_agent_returns_not_found_for_unregistered_worker() {
+        let server = make_server();
+        let result = server
+            .forward_deploy_to_agent(
+                "nonexistent-host",
+                "app-1",
+                "nginx:latest",
+                "vm-1",
+                &default_vm_config(),
+            )
+            .await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_forward_deploy_to_agent_returns_unavailable_when_agent_port_not_listening() {
+        let server = make_server();
+        // Register a worker pointing at a port that has nothing listening.
+        server
+            .register_worker(Request::new(RegisterWorkerRequest {
+                host_id: "dead-host".to_string(),
+                hostname: "dead-node".to_string(),
+                ip_address: "127.0.0.1".to_string(),
+                agent_port: 59980,
+            }))
+            .await
+            .unwrap();
+
+        let result = server
+            .forward_deploy_to_agent(
+                "dead-host",
+                "app-1",
+                "nginx:latest",
+                "vm-1",
+                &default_vm_config(),
+            )
+            .await;
+        assert!(result.is_err());
+        let code = result.unwrap_err().code();
+        assert!(
+            code == tonic::Code::Unavailable || code == tonic::Code::Internal,
+            "expected Unavailable or Internal, got {:?}",
+            code
+        );
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_still_returns_scheduled_when_forward_to_agent_fails() {
+        // forward_deploy_to_agent result is intentionally ignored in deploy_app
+        // (the job is persisted with Scheduled status regardless).
+        let server = make_server();
+        // Worker registered but with unreachable port — forward will fail silently.
+        server
+            .register_worker(Request::new(RegisterWorkerRequest {
+                host_id: "unreachable".to_string(),
+                hostname: "unreachable-node".to_string(),
+                ip_address: "127.0.0.1".to_string(),
+                agent_port: 59981,
+            }))
+            .await
+            .unwrap();
+        server
+            .report_metrics(Request::new(ReportMetricsRequest {
+                host_id: "unreachable".to_string(),
+                cpu_usage: 0.1,
+                ram_used_bytes: 512 * 1024 * 1024,
+                ram_total_bytes: 4 * GIB,
+                disk_used_bytes: 10 * GIB,
+                disk_total_bytes: 100 * GIB,
+                apps_count: 0,
+                timestamp: 0,
+            }))
+            .await
+            .unwrap();
+
+        let resp = server
+            .deploy_app(Request::new(deploy_req("user-1")))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Job is Scheduled even though the agent forward will fail asynchronously.
+        assert_eq!(resp.status, crate::job::JobStatus::Scheduled as i32);
+        assert!(!resp.job_id.is_empty());
+        assert_eq!(resp.host_id, "unreachable");
+    }
+
+    #[tokio::test]
+    async fn test_stop_vm_on_agent_is_noop_and_returns_ok() {
+        let server = make_server();
+        // stop_vm_on_agent is currently a stub; it should not error.
+        let result = server.stop_vm_on_agent("any-host", "any-vm").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_cancel_app_calls_stop_vm_on_agent_without_error() {
+        // cancel_app ignores the result of stop_vm_on_agent; this test ensures
+        // the cancel path completes successfully even when there is no live agent.
+        let server = make_server();
+        register_worker(&server, "h1").await;
+        add_metrics(&server, "h1").await;
+        let job_id = server
+            .deploy_app(Request::new(deploy_req("user-1")))
+            .await
+            .unwrap()
+            .into_inner()
+            .job_id;
+
+        let resp = server
+            .cancel_app(Request::new(CancelRequest { job_id }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.success);
+    }
+
     #[tokio::test]
     async fn test_clone_does_not_share_jobs() {
         let original = make_server();

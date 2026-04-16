@@ -309,4 +309,209 @@ mod tests {
         assert!(s.contains("app_name"));
         assert!(s.contains("image"));
     }
+
+    // ── deploy_app handler ───────────────────────────────────────────────────
+    //
+    // Env-var-mutating tests are serialized with ENV_MUTEX to avoid data races
+    // when cargo test runs them in parallel within the same process.
+
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    // tokio::sync::Mutex is async-aware: safe to hold across await points.
+    static ENV_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    fn make_deploy_app() -> axum::Router {
+        let pool = sqlx::PgPool::connect_lazy(
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api",
+        )
+        .expect("invalid pool URL");
+        let state = crate::AppState {
+            db: pool,
+            scheduler_client: None,
+        };
+        axum::Router::new()
+            .route("/deploy", axum::routing::post(deploy_app))
+            .with_state(state)
+    }
+
+    fn deploy_body() -> Body {
+        Body::from(r#"{"app_name":"test-app","image":"nginx:latest"}"#)
+    }
+
+    async fn post_deploy(app: axum::Router) -> serde_json::Value {
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/deploy")
+                    .header("Content-Type", "application/json")
+                    .body(deploy_body())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_response_always_200_ok() {
+        let _guard = ENV_MUTEX.lock().await;
+        // Point to a definitely-unreachable address so no real scheduler needed.
+        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59990") };
+        let json = post_deploy(make_deploy_app()).await;
+        assert!(json.get("job_id").is_some());
+        assert!(json.get("status").is_some());
+        assert!(json.get("message").is_some());
+        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_response_job_id_is_non_empty_uuid() {
+        let _guard = ENV_MUTEX.lock().await;
+        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59991") };
+        let json = post_deploy(make_deploy_app()).await;
+        let job_id = json["job_id"].as_str().unwrap();
+        assert_eq!(job_id.len(), 36, "job_id should be a UUID (36 chars)");
+        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_scheduler_unreachable_returns_error_status() {
+        let _guard = ENV_MUTEX.lock().await;
+        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59992") };
+        let json = post_deploy(make_deploy_app()).await;
+        assert_eq!(json["status"], "error");
+        let msg = json["message"].as_str().unwrap();
+        assert!(!msg.is_empty(), "error message should be set");
+        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_scheduler_unreachable_host_and_vm_are_null() {
+        let _guard = ENV_MUTEX.lock().await;
+        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59993") };
+        let json = post_deploy(make_deploy_app()).await;
+        assert!(json["host_id"].is_null());
+        assert!(json["vm_id"].is_null());
+        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_tls_cert_loading_failure_returns_error_message() {
+        let _guard = ENV_MUTEX.lock().await;
+        unsafe {
+            std::env::set_var("USE_TLS", "true");
+            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59994");
+            std::env::set_var("CERTS_DIR", "/nonexistent-certs-dir-for-test");
+        }
+        let json = post_deploy(make_deploy_app()).await;
+        assert_eq!(json["status"], "error");
+        let msg = json["message"].as_str().unwrap().to_lowercase();
+        assert!(
+            msg.contains("tls") || msg.contains("cert") || msg.contains("failed"),
+            "expected TLS error in message, got: {}",
+            msg
+        );
+        unsafe {
+            std::env::remove_var("USE_TLS");
+            std::env::remove_var("SCHEDULER_ADDR");
+            std::env::remove_var("CERTS_DIR");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_http_rewritten_to_https_when_use_tls_true() {
+        // When USE_TLS=true and SCHEDULER_ADDR starts with http://,
+        // the handler rewrites it to https:// before building the endpoint.
+        // TLS cert loading will fail (no certs dir), proving the rewrite happened
+        // because a plain HTTP endpoint would produce a different error.
+        let _guard = ENV_MUTEX.lock().await;
+        unsafe {
+            std::env::set_var("USE_TLS", "true");
+            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59995");
+            std::env::set_var("CERTS_DIR", "/nonexistent-dir");
+        }
+        let json = post_deploy(make_deploy_app()).await;
+        // The error must come from TLS cert loading, not from an HTTP connection attempt,
+        // which confirms the URI was rewritten to https://.
+        assert_eq!(json["status"], "error");
+        let msg = json["message"].as_str().unwrap();
+        assert!(
+            msg.contains("TLS") || msg.contains("certificate") || msg.contains("Failed to load"),
+            "expected TLS-related error; got: {}",
+            msg
+        );
+        unsafe {
+            std::env::remove_var("USE_TLS");
+            std::env::remove_var("SCHEDULER_ADDR");
+            std::env::remove_var("CERTS_DIR");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_default_resource_values_accepted() {
+        let _guard = ENV_MUTEX.lock().await;
+        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59996") };
+        // Payload with no vcpus/memory/disk — handler must apply defaults without panicking.
+        let pool = sqlx::PgPool::connect_lazy(
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api",
+        )
+        .unwrap();
+        let state = crate::AppState {
+            db: pool,
+            scheduler_client: None,
+        };
+        let app = axum::Router::new()
+            .route("/deploy", axum::routing::post(deploy_app))
+            .with_state(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/deploy")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"app_name":"app","image":"alpine:latest"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_with_env_vars_in_payload() {
+        let _guard = ENV_MUTEX.lock().await;
+        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59997") };
+        let pool = sqlx::PgPool::connect_lazy(
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api",
+        )
+        .unwrap();
+        let state = crate::AppState {
+            db: pool,
+            scheduler_client: None,
+        };
+        let app = axum::Router::new()
+            .route("/deploy", axum::routing::post(deploy_app))
+            .with_state(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/deploy")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"app_name":"app","image":"alpine","env":{"PORT":"8080","ENV":"prod"}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+    }
 }

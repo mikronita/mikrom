@@ -377,6 +377,155 @@ mod tests {
         );
     }
 
+    // ── Malformed JSON responses ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_health_malformed_json_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("this is not json"))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        assert!(client.health().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_register_malformed_json_on_success_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth/register"))
+            .respond_with(ResponseTemplate::new(201).set_body_string("{bad json"))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        assert!(client.register("a@b.com", "password123").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_register_malformed_json_on_error_response_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth/register"))
+            .respond_with(ResponseTemplate::new(409).set_body_string("not json"))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        assert!(client.register("a@b.com", "pass").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_login_malformed_json_on_success_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth/login"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{{invalid"))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        assert!(client.login("a@b.com", "password123").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_login_malformed_json_on_error_response_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth/login"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        assert!(client.login("a@b.com", "wrong").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_deploy_malformed_json_on_success_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/deploy"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("definitely not json"))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        assert!(
+            client
+                .deploy("app", "img", None, None, None, HashMap::new())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_health_empty_body_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![]))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        assert!(client.health().await.is_err());
+    }
+
+    // ── Server unreachable ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_health_server_unreachable_returns_error() {
+        // Port 59970 is highly unlikely to have anything listening.
+        let client = MikromClient::new("http://127.0.0.1:59970".to_string(), None);
+        assert!(client.health().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_register_server_unreachable_returns_error() {
+        let client = MikromClient::new("http://127.0.0.1:59971".to_string(), None);
+        assert!(client.register("a@b.com", "password123").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_login_server_unreachable_returns_error() {
+        let client = MikromClient::new("http://127.0.0.1:59972".to_string(), None);
+        assert!(client.login("a@b.com", "password123").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_deploy_server_unreachable_returns_error() {
+        let client = MikromClient::new("http://127.0.0.1:59973".to_string(), None);
+        assert!(
+            client
+                .deploy("app", "img", None, None, None, HashMap::new())
+                .await
+                .is_err()
+        );
+    }
+
+    // ── Missing required fields in success response ───────────────────────────
+
+    #[tokio::test]
+    async fn test_health_response_missing_field_returns_error() {
+        let server = MockServer::start().await;
+        // Response has "status" but no "version" field.
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "ok"})),
+            )
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        // Deserialization should fail: "version" is a required field.
+        assert!(client.health().await.is_err());
+    }
+
     #[tokio::test]
     async fn test_deploy_no_auth_header_without_token() {
         let server = MockServer::start().await;
