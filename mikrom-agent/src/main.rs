@@ -8,16 +8,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
     tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::from_default_env()
-            .add_directive(tracing::Level::INFO.into()))
+        .with(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let host_id = std::env::var("HOST_ID")
-        .unwrap_or_else(|_| Uuid::new_v4().to_string());
+    let host_id = std::env::var("HOST_ID").unwrap_or_else(|_| Uuid::new_v4().to_string());
 
-    let scheduler_addr = std::env::var("SCHEDULER_ADDR")
-        .unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
+    let scheduler_addr =
+        std::env::var("SCHEDULER_ADDR").unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
 
     let use_tls = std::env::var("USE_TLS")
         .map(|v| v == "true")
@@ -45,7 +46,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(
         "Starting agent {} on {} (scheduler: {}, hostname: {}, mtls: {})",
-        host_id, addr, scheduler_addr, hostname, use_tls
+        host_id,
+        addr,
+        scheduler_addr,
+        hostname,
+        use_tls
     );
 
     let server = AgentServer::new(host_id, hostname, ip_address);

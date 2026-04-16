@@ -1,6 +1,6 @@
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType,
-    ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    KeyPair, KeyUsagePurpose,
 };
 use std::{fs, path::Path};
 
@@ -40,8 +40,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // pass when services connect to each other by service name.
     let services: &[(&str, &[&str])] = &[
         ("scheduler", &["localhost", "mikrom-scheduler"]),
-        ("agent",     &["localhost", "mikrom-agent"]),
-        ("api",       &["localhost", "mikrom-api"]),
+        ("agent", &["localhost", "mikrom-agent"]),
+        ("api", &["localhost", "mikrom-api"]),
     ];
 
     for (name, sans) in services {

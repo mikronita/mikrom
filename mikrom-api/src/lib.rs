@@ -1,13 +1,10 @@
-use axum::{
-    routing::get,
-    Router,
-};
+use axum::{Router, routing::get};
 use tower_http::cors::{Any, CorsLayer};
 
 pub mod auth;
 pub mod db;
-pub mod models;
 pub mod deploy;
+pub mod models;
 
 pub use deploy::deploy_app;
 
@@ -55,7 +52,10 @@ async fn health() -> axum::Json<HealthResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -75,7 +75,9 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "ok");
         assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));

@@ -61,8 +61,15 @@ mod tests {
         disk_total: u64,
         apps: u32,
     ) -> HostMetrics {
-        HostMetrics { cpu_usage: cpu, ram_used_bytes: ram_used, ram_total_bytes: ram_total,
-            disk_used_bytes: disk_used, disk_total_bytes: disk_total, apps_count: apps, timestamp: 0 }
+        HostMetrics {
+            cpu_usage: cpu,
+            ram_used_bytes: ram_used,
+            ram_total_bytes: ram_total,
+            disk_used_bytes: disk_used,
+            disk_total_bytes: disk_total,
+            apps_count: apps,
+            timestamp: 0,
+        }
     }
 
     const GIB: u64 = 1024 * 1024 * 1024;

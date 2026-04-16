@@ -7,8 +7,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
     tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::from_default_env()
-            .add_directive(tracing::Level::INFO.into()))
+        .with(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
@@ -17,8 +19,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(false);
 
     let certs = if use_tls {
-        let certs_dir = std::env::var("CERTS_DIR")
-            .unwrap_or_else(|_| "/certs/scheduler".to_string());
+        let certs_dir =
+            std::env::var("CERTS_DIR").unwrap_or_else(|_| "/certs/scheduler".to_string());
         tracing::info!("Loading TLS certificates from {}", certs_dir);
         Some(mikrom_proto::tls::ServiceCerts::load(&certs_dir)?)
     } else {

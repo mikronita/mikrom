@@ -104,7 +104,12 @@ mod tests {
             "app-1".to_string(),
             "my-app".to_string(),
             "nginx:latest".to_string(),
-            VmConfig { vcpus: 1, memory_mib: 256, disk_mib: 1024, env: Default::default() },
+            VmConfig {
+                vcpus: 1,
+                memory_mib: 256,
+                disk_mib: 1024,
+                env: Default::default(),
+            },
             "user-1".to_string(),
         )
     }
@@ -186,11 +191,26 @@ mod tests {
 
     #[test]
     fn test_job_status_serialization() {
-        assert_eq!(serde_json::to_string(&JobStatus::Pending).unwrap(), "\"pending\"");
-        assert_eq!(serde_json::to_string(&JobStatus::Scheduled).unwrap(), "\"scheduled\"");
-        assert_eq!(serde_json::to_string(&JobStatus::Running).unwrap(), "\"running\"");
-        assert_eq!(serde_json::to_string(&JobStatus::Failed).unwrap(), "\"failed\"");
-        assert_eq!(serde_json::to_string(&JobStatus::Cancelled).unwrap(), "\"cancelled\"");
+        assert_eq!(
+            serde_json::to_string(&JobStatus::Pending).unwrap(),
+            "\"pending\""
+        );
+        assert_eq!(
+            serde_json::to_string(&JobStatus::Scheduled).unwrap(),
+            "\"scheduled\""
+        );
+        assert_eq!(
+            serde_json::to_string(&JobStatus::Running).unwrap(),
+            "\"running\""
+        );
+        assert_eq!(
+            serde_json::to_string(&JobStatus::Failed).unwrap(),
+            "\"failed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&JobStatus::Cancelled).unwrap(),
+            "\"cancelled\""
+        );
     }
 
     #[test]
@@ -203,7 +223,12 @@ mod tests {
     fn test_vmconfig_with_env() {
         let mut env = std::collections::HashMap::new();
         env.insert("PORT".to_string(), "8080".to_string());
-        let config = VmConfig { vcpus: 2, memory_mib: 512, disk_mib: 2048, env };
+        let config = VmConfig {
+            vcpus: 2,
+            memory_mib: 512,
+            disk_mib: 2048,
+            env,
+        };
         assert_eq!(config.env.get("PORT").unwrap(), "8080");
     }
 

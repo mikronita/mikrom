@@ -1,6 +1,6 @@
-pub mod server;
-pub mod metrics;
 pub mod firecracker;
+pub mod metrics;
+pub mod server;
 
-pub use metrics::{SystemMetrics, MetricsCollector};
 pub use firecracker::FirecrackerManager;
+pub use metrics::{MetricsCollector, SystemMetrics};

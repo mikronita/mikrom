@@ -1,8 +1,4 @@
-use axum::{
-    extract::State,
-    response::IntoResponse,
-    Json,
-};
+use axum::{Json, extract::State, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use tonic::transport::Endpoint;
 use uuid::Uuid;
@@ -34,31 +30,32 @@ pub async fn deploy_app(
 
     tracing::info!(
         "Deploy request: app={}, image={}, job_id={}",
-        payload.app_name, payload.image, job_id
+        payload.app_name,
+        payload.image,
+        job_id
     );
 
     let use_tls = std::env::var("USE_TLS")
         .map(|v| v == "true")
         .unwrap_or(false);
 
-    let mut scheduler_uri = std::env::var("SCHEDULER_ADDR")
-        .unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
+    let mut scheduler_uri =
+        std::env::var("SCHEDULER_ADDR").unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
 
     if use_tls && scheduler_uri.starts_with("http://") {
         scheduler_uri = scheduler_uri.replacen("http://", "https://", 1);
     }
 
-    let vcpus      = payload.vcpus.unwrap_or(1);
+    let vcpus = payload.vcpus.unwrap_or(1);
     let memory_mib = payload.memory_mib.unwrap_or(256);
-    let disk_mib   = payload.disk_mib.unwrap_or(1024);
+    let disk_mib = payload.disk_mib.unwrap_or(1024);
 
     let endpoint_result: Result<Endpoint, String> = (|| {
-        let ep = Endpoint::new(scheduler_uri)
-            .map_err(|e| format!("Invalid scheduler URI: {}", e))?;
+        let ep =
+            Endpoint::new(scheduler_uri).map_err(|e| format!("Invalid scheduler URI: {}", e))?;
 
         if use_tls {
-            let certs_dir = std::env::var("CERTS_DIR")
-                .unwrap_or_else(|_| "/certs/api".to_string());
+            let certs_dir = std::env::var("CERTS_DIR").unwrap_or_else(|_| "/certs/api".to_string());
             let certs = mikrom_proto::tls::ServiceCerts::load(&certs_dir)
                 .map_err(|e| format!("Failed to load TLS certificates: {}", e))?;
             ep.tls_config(certs.client_tls_config("mikrom-scheduler"))
@@ -131,7 +128,9 @@ pub async fn deploy_app(
 
     tracing::info!(
         "Deployment {} - status: {}, message: {}",
-        response.job_id, response.status, response.message
+        response.job_id,
+        response.status,
+        response.message
     );
 
     Json(response)

@@ -28,8 +28,7 @@ impl ServiceCerts {
     pub fn server_tls_config(
         &self,
     ) -> Result<tonic::transport::ServerTlsConfig, tonic::transport::Error> {
-        let identity =
-            tonic::transport::Identity::from_pem(&self.cert_pem, &self.key_pem);
+        let identity = tonic::transport::Identity::from_pem(&self.cert_pem, &self.key_pem);
         let ca = tonic::transport::Certificate::from_pem(&self.ca_cert_pem);
         Ok(tonic::transport::ServerTlsConfig::new()
             .identity(identity)
@@ -41,8 +40,7 @@ impl ServiceCerts {
     /// `server_domain` must match a SAN in the server's certificate
     /// (e.g. "mikrom-scheduler", "mikrom-agent").
     pub fn client_tls_config(&self, server_domain: &str) -> tonic::transport::ClientTlsConfig {
-        let identity =
-            tonic::transport::Identity::from_pem(&self.cert_pem, &self.key_pem);
+        let identity = tonic::transport::Identity::from_pem(&self.cert_pem, &self.key_pem);
         let ca = tonic::transport::Certificate::from_pem(&self.ca_cert_pem);
         tonic::transport::ClientTlsConfig::new()
             .domain_name(server_domain)

@@ -1,19 +1,20 @@
-use crate::metrics::{MetricsCollector, SystemMetrics};
 use crate::firecracker::{FirecrackerManager, VmConfig};
+use crate::metrics::{MetricsCollector, SystemMetrics};
 use mikrom_proto::agent::{
-    RegisterRequest, RegisterResponse, UnregisterRequest, UnregisterResponse,
-    MetricsRequest, MetricsResponse, GetMetricsRequest, GetMetricsResponse,
-    StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse,
-    GetVmStatusRequest, GetVmStatusResponse, VmStatus,
+    GetMetricsRequest, GetMetricsResponse, GetVmStatusRequest, GetVmStatusResponse, MetricsRequest,
+    MetricsResponse, RegisterRequest, RegisterResponse, StartVmRequest, StartVmResponse,
+    StopVmRequest, StopVmResponse, UnregisterRequest, UnregisterResponse, VmStatus,
     agent_service_server::{AgentService, AgentServiceServer},
 };
-use mikrom_proto::scheduler::{RegisterWorkerRequest, ReportMetricsRequest, SchedulerServiceClient};
+use mikrom_proto::scheduler::{
+    RegisterWorkerRequest, ReportMetricsRequest, SchedulerServiceClient,
+};
 use mikrom_proto::tls::ServiceCerts;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tonic::{async_trait, Response, Status};
+use tonic::{Response, Status, async_trait};
 use uuid::Uuid;
 
 pub struct AgentServer {
@@ -64,8 +65,12 @@ impl AgentService for AgentServer {
         request: tonic::Request<MetricsRequest>,
     ) -> Result<Response<MetricsResponse>, Status> {
         let req = request.into_inner();
-        tracing::debug!("Reported metrics: cpu={:.2}, ram={}/{}",
-            req.cpu_usage, req.ram_used_bytes, req.ram_total_bytes);
+        tracing::debug!(
+            "Reported metrics: cpu={:.2}, ram={}/{}",
+            req.cpu_usage,
+            req.ram_used_bytes,
+            req.ram_total_bytes
+        );
         Ok(Response::new(MetricsResponse { success: true }))
     }
 
@@ -102,10 +107,17 @@ impl AgentService for AgentServer {
             vcpus: req.config.as_ref().map(|c| c.vcpus).unwrap_or(1),
             memory_mib: req.config.as_ref().map(|c| c.memory_mib).unwrap_or(256),
             disk_mib: req.config.as_ref().map(|c| c.disk_mib).unwrap_or(1024),
-            env: req.config.as_ref().map(|c| c.env.clone()).unwrap_or_default(),
+            env: req
+                .config
+                .as_ref()
+                .map(|c| c.env.clone())
+                .unwrap_or_default(),
         };
 
-        match self.firecracker.start_vm(vm_id.clone(), req.app_id, req.image, config) {
+        match self
+            .firecracker
+            .start_vm(vm_id.clone(), req.app_id, req.image, config)
+        {
             Ok(()) => {
                 self.metrics_collector.increment_app_count();
                 Ok(Response::new(StartVmResponse {
@@ -153,10 +165,10 @@ impl AgentService for AgentServer {
             Ok(status) => {
                 let proto_status = match status {
                     crate::firecracker::VmStatus::Starting => 1,
-                    crate::firecracker::VmStatus::Running  => 2,
+                    crate::firecracker::VmStatus::Running => 2,
                     crate::firecracker::VmStatus::Stopping => 3,
-                    crate::firecracker::VmStatus::Stopped  => 4,
-                    crate::firecracker::VmStatus::Failed   => 5,
+                    crate::firecracker::VmStatus::Stopped => 4,
+                    crate::firecracker::VmStatus::Failed => 5,
                     _ => 0,
                 };
                 Ok(Response::new(GetVmStatusResponse {
@@ -184,17 +196,21 @@ impl AgentServer {
         }
     }
 
-    pub async fn serve(&self, addr: SocketAddr, use_tls: bool) -> Result<(), Box<dyn std::error::Error>> {
-        let host_id    = self.host_id.clone();
-        let hostname   = self.hostname.clone();
+    pub async fn serve(
+        &self,
+        addr: SocketAddr,
+        use_tls: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let host_id = self.host_id.clone();
+        let hostname = self.hostname.clone();
         let ip_address = self.ip_address.clone();
         let metrics_collector = self.metrics_collector.clone();
 
         // Load certs once — they are moved into the background task and also
         // used to configure the gRPC server below.
         let certs: Option<ServiceCerts> = if use_tls {
-            let certs_dir = std::env::var("CERTS_DIR")
-                .unwrap_or_else(|_| "/certs/agent".to_string());
+            let certs_dir =
+                std::env::var("CERTS_DIR").unwrap_or_else(|_| "/certs/agent".to_string());
             Some(ServiceCerts::load(&certs_dir)?)
         } else {
             None
@@ -214,13 +230,16 @@ impl AgentServer {
 
             // Helper: build a fresh Endpoint (+ optional TLS config) for each call.
             // We reconnect on every RPC; acceptable for low-frequency heartbeats.
-            let make_endpoint = |addr: &str, certs: &Option<ServiceCerts>|
-                -> Result<tonic::transport::Endpoint, Box<dyn std::error::Error + Send + Sync>>
-            {
+            let make_endpoint = |addr: &str,
+                                 certs: &Option<ServiceCerts>|
+             -> Result<
+                tonic::transport::Endpoint,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 let ep = tonic::transport::Endpoint::new(addr.to_owned())?;
                 match certs {
                     Some(c) => Ok(ep.tls_config(c.client_tls_config("mikrom-scheduler"))?),
-                    None    => Ok(ep),
+                    None => Ok(ep),
                 }
             };
 
@@ -241,7 +260,8 @@ impl AgentServer {
                     let channel = ep.connect().await?;
                     let mut client = SchedulerServiceClient::new(channel);
                     Ok(client.register_worker(register_req.clone()).await?)
-                }).await;
+                })
+                .await;
 
                 match result {
                     Ok(resp) => {
@@ -249,7 +269,9 @@ impl AgentServer {
                         break;
                     }
                     Err(e) => {
-                        tracing::warn!("Registration attempt {attempt} failed: {e:?}. Retrying in {backoff_secs}s...");
+                        tracing::warn!(
+                            "Registration attempt {attempt} failed: {e:?}. Retrying in {backoff_secs}s..."
+                        );
                         backoff_secs = std::cmp::min(backoff_secs * 2, 30);
                     }
                 }
@@ -263,8 +285,10 @@ impl AgentServer {
                 tracing::info!(
                     "Collected metrics: cpu={:.2} ram={}/{} disk={}/{}",
                     metrics.cpu_usage,
-                    metrics.ram_used_bytes, metrics.ram_total_bytes,
-                    metrics.disk_used_bytes, metrics.disk_total_bytes,
+                    metrics.ram_used_bytes,
+                    metrics.ram_total_bytes,
+                    metrics.disk_used_bytes,
+                    metrics.disk_total_bytes,
                 );
 
                 match make_endpoint(&scheduler_addr, &certs_for_task) {
@@ -283,12 +307,15 @@ impl AgentServer {
                             };
                             match client.report_metrics(req).await {
                                 Ok(resp) => tracing::info!(
-                                    "Metrics reported: {}", resp.into_inner().success
+                                    "Metrics reported: {}",
+                                    resp.into_inner().success
                                 ),
                                 Err(e) => tracing::error!("Failed to report metrics: {}", e),
                             }
                         }
-                        Err(e) => tracing::error!("Failed to connect to scheduler for metrics: {}", e),
+                        Err(e) => {
+                            tracing::error!("Failed to connect to scheduler for metrics: {}", e)
+                        }
                     },
                     Err(e) => tracing::error!("Failed to build scheduler endpoint: {}", e),
                 }
@@ -339,8 +366,8 @@ impl Clone for AgentServer {
 mod tests {
     use super::*;
     use mikrom_proto::agent::{
-        GetMetricsRequest, GetVmStatusRequest, MetricsRequest, RegisterRequest,
-        StartVmRequest, StopVmRequest, UnregisterRequest,
+        GetMetricsRequest, GetVmStatusRequest, MetricsRequest, RegisterRequest, StartVmRequest,
+        StopVmRequest, UnregisterRequest,
     };
     use tonic::Request;
 
@@ -553,7 +580,9 @@ mod tests {
             .await
             .unwrap();
         let metrics = server
-            .get_metrics(Request::new(GetMetricsRequest { host_id: String::new() }))
+            .get_metrics(Request::new(GetMetricsRequest {
+                host_id: String::new(),
+            }))
             .await
             .unwrap()
             .into_inner();
@@ -591,7 +620,9 @@ mod tests {
             .await
             .unwrap();
         let metrics = server
-            .get_metrics(Request::new(GetMetricsRequest { host_id: String::new() }))
+            .get_metrics(Request::new(GetMetricsRequest {
+                host_id: String::new(),
+            }))
             .await
             .unwrap()
             .into_inner();
@@ -744,7 +775,9 @@ mod tests {
         assert_eq!(resp.status, 1); // Starting
         // Metrics state (apps_count) is also shared
         let metrics = cloned
-            .get_metrics(Request::new(GetMetricsRequest { host_id: String::new() }))
+            .get_metrics(Request::new(GetMetricsRequest {
+                host_id: String::new(),
+            }))
             .await
             .unwrap()
             .into_inner();

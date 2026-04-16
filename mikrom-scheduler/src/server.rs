@@ -1,20 +1,21 @@
+use crate::metrics::HostMetrics;
 use crate::scheduler::AppScheduler;
 use crate::worker_registry::WorkerRegistry;
-use crate::metrics::HostMetrics;
+use mikrom_proto::agent::{
+    StartVmRequest, StartVmResponse, agent_service_client::AgentServiceClient,
+};
 use mikrom_proto::scheduler::{
-    DeployRequest, DeployResponse, AppStatusRequest, AppStatusResponse,
-    CancelRequest, CancelResponse, ListAppsRequest, ListAppsResponse, AppInfo,
-    RegisterWorkerRequest, RegisterWorkerResponse,
-    ReportMetricsRequest, ReportMetricsResponse,
+    AppInfo, AppStatusRequest, AppStatusResponse, CancelRequest, CancelResponse, DeployRequest,
+    DeployResponse, ListAppsRequest, ListAppsResponse, RegisterWorkerRequest,
+    RegisterWorkerResponse, ReportMetricsRequest, ReportMetricsResponse,
     scheduler_service_server::{SchedulerService, SchedulerServiceServer},
 };
-use mikrom_proto::agent::{StartVmRequest, StartVmResponse, agent_service_client::AgentServiceClient};
 use mikrom_proto::tls::ServiceCerts;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tonic::{async_trait, Response, Status};
+use tonic::{Response, Status, async_trait};
 use uuid::Uuid;
 
 pub struct SchedulerServer {
@@ -37,8 +38,13 @@ impl SchedulerService for SchedulerServer {
     ) -> Result<Response<RegisterWorkerResponse>, Status> {
         let req = request.into_inner();
 
-        tracing::info!("Registering worker: {} ({}) on {}:{}",
-            req.hostname, req.host_id, req.ip_address, req.agent_port);
+        tracing::info!(
+            "Registering worker: {} ({}) on {}:{}",
+            req.hostname,
+            req.host_id,
+            req.ip_address,
+            req.agent_port
+        );
 
         let success = self.scheduler.worker_registry().register(
             req.host_id,
@@ -49,7 +55,11 @@ impl SchedulerService for SchedulerServer {
 
         Ok(Response::new(RegisterWorkerResponse {
             success,
-            message: if success { "Registered".to_string() } else { "Failed".to_string() },
+            message: if success {
+                "Registered".to_string()
+            } else {
+                "Failed".to_string()
+            },
         }))
     }
 
@@ -69,12 +79,21 @@ impl SchedulerService for SchedulerServer {
             timestamp: req.timestamp,
         };
 
-        let success = self.scheduler.worker_registry().update_metrics(&req.host_id, metrics.clone());
+        let success = self
+            .scheduler
+            .worker_registry()
+            .update_metrics(&req.host_id, metrics.clone());
 
         if success {
-            tracing::info!("Updated metrics for worker {}: cpu={:.2} ram={}/{} disk={}/{}",
-                req.host_id, metrics.cpu_usage, metrics.ram_used_bytes, metrics.ram_total_bytes,
-                metrics.disk_used_bytes, metrics.disk_total_bytes);
+            tracing::info!(
+                "Updated metrics for worker {}: cpu={:.2} ram={}/{} disk={}/{}",
+                req.host_id,
+                metrics.cpu_usage,
+                metrics.ram_used_bytes,
+                metrics.ram_total_bytes,
+                metrics.disk_used_bytes,
+                metrics.disk_total_bytes
+            );
         } else {
             tracing::warn!("Failed to update metrics for worker {}", req.host_id);
         }
@@ -95,7 +114,11 @@ impl SchedulerService for SchedulerServer {
             vcpus: req.config.as_ref().map(|c| c.vcpus).unwrap_or(1),
             memory_mib: req.config.as_ref().map(|c| c.memory_mib).unwrap_or(256),
             disk_mib: req.config.as_ref().map(|c| c.disk_mib).unwrap_or(1024),
-            env: req.config.as_ref().map(|c| c.env.clone()).unwrap_or_default(),
+            env: req
+                .config
+                .as_ref()
+                .map(|c| c.env.clone())
+                .unwrap_or_default(),
         };
 
         let result = self.scheduler.select_best_worker(&config);
@@ -117,13 +140,9 @@ impl SchedulerService for SchedulerServer {
                 job.schedule(host_id.clone(), vm_id.clone());
                 self.scheduler.add_job(job);
 
-                let _ = self.forward_deploy_to_agent(
-                    &host_id,
-                    &app_id,
-                    &image,
-                    &vm_id,
-                    &config,
-                ).await;
+                let _ = self
+                    .forward_deploy_to_agent(&host_id, &app_id, &image, &vm_id, &config)
+                    .await;
 
                 DeployResponse {
                     job_id: job_id.clone(),
@@ -193,7 +212,9 @@ impl SchedulerService for SchedulerServer {
             self.scheduler.update_job_status(&req.job_id, job.status);
 
             if let Some(vm_id) = &job.vm_id {
-                let _ = self.stop_vm_on_agent(job.host_id.as_deref().unwrap_or(""), vm_id).await;
+                let _ = self
+                    .stop_vm_on_agent(job.host_id.as_deref().unwrap_or(""), vm_id)
+                    .await;
             }
 
             Ok(Response::new(CancelResponse {
@@ -278,7 +299,10 @@ impl SchedulerServer {
         vm_id: &str,
         config: &crate::job::VmConfig,
     ) -> Result<(), Status> {
-        let worker = self.scheduler.worker_registry().get_worker(host_id)
+        let worker = self
+            .scheduler
+            .worker_registry()
+            .get_worker(host_id)
             .ok_or_else(|| Status::not_found("Worker not found"))?;
 
         // With mTLS: connect by hostname (must match the SAN in the agent's cert).
@@ -321,7 +345,9 @@ impl SchedulerServer {
             }),
         };
 
-        let resp = client.start_vm(req).await
+        let resp = client
+            .start_vm(req)
+            .await
             .map_err(|e| Status::internal(format!("Failed to start VM: {}", e)))?
             .into_inner();
 
@@ -353,8 +379,8 @@ impl Clone for SchedulerServer {
 mod tests {
     use super::*;
     use mikrom_proto::scheduler::{
-        AppConfig, AppStatusRequest, CancelRequest, DeployRequest,
-        ListAppsRequest, RegisterWorkerRequest, ReportMetricsRequest,
+        AppConfig, AppStatusRequest, CancelRequest, DeployRequest, ListAppsRequest,
+        RegisterWorkerRequest, ReportMetricsRequest,
     };
     use tonic::Request;
 
@@ -640,7 +666,9 @@ mod tests {
     async fn test_list_apps_returns_empty_initially() {
         let server = make_server();
         let resp = server
-            .list_apps(Request::new(ListAppsRequest { status: None, user_id: "user-1".to_string(),
+            .list_apps(Request::new(ListAppsRequest {
+                status: None,
+                user_id: "user-1".to_string(),
             }))
             .await
             .unwrap()
@@ -673,7 +701,9 @@ mod tests {
             .unwrap();
 
         let resp = server
-            .list_apps(Request::new(ListAppsRequest { status: None, user_id: "user-1".to_string(),
+            .list_apps(Request::new(ListAppsRequest {
+                status: None,
+                user_id: "user-1".to_string(),
             }))
             .await
             .unwrap()
@@ -697,7 +727,9 @@ mod tests {
             .unwrap();
 
         let resp = server
-            .list_apps(Request::new(ListAppsRequest { status: None, user_id: "user-1".to_string(),
+            .list_apps(Request::new(ListAppsRequest {
+                status: None,
+                user_id: "user-1".to_string(),
             }))
             .await
             .unwrap()

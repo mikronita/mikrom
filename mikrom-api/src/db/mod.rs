@@ -1,9 +1,9 @@
-use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 
 pub async fn connect() -> Result<PgPool, sqlx::Error> {
-    let database_url = std::env::var("DATABASE_URL")
-        .map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
+    let database_url =
+        std::env::var("DATABASE_URL").map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
     connect_to_url(&database_url).await
 }
 
@@ -20,9 +20,7 @@ pub fn get_migration_sql() -> &'static str {
 
 pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     let migration_sql = get_migration_sql();
-    sqlx::query(migration_sql)
-        .execute(pool)
-        .await?;
+    sqlx::query(migration_sql).execute(pool).await?;
     Ok(())
 }
 

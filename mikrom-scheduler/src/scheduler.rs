@@ -127,27 +127,44 @@ mod tests {
     }
 
     fn small_config() -> VmConfig {
-        VmConfig { vcpus: 1, memory_mib: 256, disk_mib: 1024, env: Default::default() }
+        VmConfig {
+            vcpus: 1,
+            memory_mib: 256,
+            disk_mib: 1024,
+            env: Default::default(),
+        }
     }
 
     fn make_job(id: &str) -> Job {
-        Job::new(id.to_string(), "app-1".to_string(), "my-app".to_string(),
-            "nginx:latest".to_string(), small_config(), "user-1".to_string())
+        Job::new(
+            id.to_string(),
+            "app-1".to_string(),
+            "my-app".to_string(),
+            "nginx:latest".to_string(),
+            small_config(),
+            "user-1".to_string(),
+        )
     }
 
     fn register_with_metrics(scheduler: &AppScheduler, host_id: &str, cpu: f32) {
         scheduler.worker_registry().register(
-            host_id.to_string(), "node".to_string(), "10.0.0.1".to_string(), 5003,
+            host_id.to_string(),
+            "node".to_string(),
+            "10.0.0.1".to_string(),
+            5003,
         );
-        scheduler.worker_registry().update_metrics(host_id, HostMetrics {
-            cpu_usage: cpu,
-            ram_used_bytes: 512 * 1024 * 1024,
-            ram_total_bytes: 4 * GIB,
-            disk_used_bytes: 10 * GIB,
-            disk_total_bytes: 100 * GIB,
-            apps_count: 1,
-            timestamp: 0,
-        });
+        scheduler.worker_registry().update_metrics(
+            host_id,
+            HostMetrics {
+                cpu_usage: cpu,
+                ram_used_bytes: 512 * 1024 * 1024,
+                ram_total_bytes: 4 * GIB,
+                disk_used_bytes: 10 * GIB,
+                disk_total_bytes: 100 * GIB,
+                apps_count: 1,
+                timestamp: 0,
+            },
+        );
     }
 
     #[test]
@@ -218,7 +235,12 @@ mod tests {
     #[test]
     fn test_select_best_worker_worker_without_metrics_is_unavailable() {
         let s = make_scheduler();
-        s.worker_registry().register("h1".to_string(), "n".to_string(), "1.1.1.1".to_string(), 5003);
+        s.worker_registry().register(
+            "h1".to_string(),
+            "n".to_string(),
+            "1.1.1.1".to_string(),
+            5003,
+        );
         // no metrics → get_available_workers returns empty → NoWorkers
         let result = s.select_best_worker(&small_config());
         assert!(matches!(result, Err(SchedulerError::NoWorkers)));
@@ -229,8 +251,16 @@ mod tests {
         let s = make_scheduler();
         register_with_metrics(&s, "h1", 0.1);
         // Request more RAM than the worker has available
-        let huge = VmConfig { vcpus: 1, memory_mib: 100_000, disk_mib: 1024, env: Default::default() };
-        assert!(matches!(s.select_best_worker(&huge), Err(SchedulerError::NoFit)));
+        let huge = VmConfig {
+            vcpus: 1,
+            memory_mib: 100_000,
+            disk_mib: 1024,
+            env: Default::default(),
+        };
+        assert!(matches!(
+            s.select_best_worker(&huge),
+            Err(SchedulerError::NoFit)
+        ));
     }
 
     #[test]
@@ -245,8 +275,8 @@ mod tests {
     #[test]
     fn test_select_best_worker_picks_highest_score() {
         let s = make_scheduler();
-        register_with_metrics(&s, "busy-host", 0.9);   // low score
-        register_with_metrics(&s, "idle-host", 0.05);  // high score
+        register_with_metrics(&s, "busy-host", 0.9); // low score
+        register_with_metrics(&s, "idle-host", 0.05); // high score
         let winner = s.select_best_worker(&small_config()).unwrap();
         assert_eq!(winner.host_id, "idle-host");
     }
@@ -269,8 +299,18 @@ mod tests {
 
     #[test]
     fn test_scheduler_error_display() {
-        assert_eq!(SchedulerError::NoWorkers.to_string(), "No available workers");
-        assert_eq!(SchedulerError::NoFit.to_string(), "No worker can fit the VM requirements");
-        assert!(SchedulerError::JobNotFound("j1".to_string()).to_string().contains("j1"));
+        assert_eq!(
+            SchedulerError::NoWorkers.to_string(),
+            "No available workers"
+        );
+        assert_eq!(
+            SchedulerError::NoFit.to_string(),
+            "No worker can fit the VM requirements"
+        );
+        assert!(
+            SchedulerError::JobNotFound("j1".to_string())
+                .to_string()
+                .contains("j1")
+        );
     }
 }

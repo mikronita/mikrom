@@ -1,9 +1,9 @@
 use std::net::SocketAddr;
 use tracing_subscriber;
 
+use mikrom_api::AppState;
 use mikrom_api::create_app;
 use mikrom_api::db;
-use mikrom_api::AppState;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
