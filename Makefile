@@ -64,6 +64,14 @@ run-agent: ## Run mikrom-agent  (port 5003)
 run-app: ## Run mikrom-app dev server  (port 3000)
 	cd mikrom-app && pnpm dev
 
+.PHONY: run-cli
+run-cli: ## Run mikrom-cli  →  make run-cli ARGS="health"
+	cargo run -p mikrom-cli -- $(ARGS)
+
+.PHONY: install-cli
+install-cli: ## Install the mikrom binary to ~/.cargo/bin
+	cargo install --path mikrom-cli
+
 # ── Next.js ───────────────────────────────────────────────────────────────────
 
 .PHONY: app-install

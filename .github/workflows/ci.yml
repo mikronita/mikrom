@@ -170,6 +170,10 @@ jobs:
             dockerfile: mikrom-proto/Dockerfile.cert-gen
             context: .
 
+          - image: mikrom-cli
+            dockerfile: mikrom-cli/Dockerfile
+            context: .
+
           # Next.js app: subdirectory as context (Dockerfile expects project root)
           - image: mikrom-app
             dockerfile: mikrom-app/Dockerfile
