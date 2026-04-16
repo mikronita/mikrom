@@ -36,6 +36,10 @@ test-verbose: ## Run unit tests with output
 test-one: ## Run a single test by name  →  make test-one NAME=test_score_idle
 	cargo test --lib $(NAME)
 
+.PHONY: test-cli
+test-cli: ## Run mikrom-cli unit tests
+	cargo test --lib -p mikrom-cli
+
 .PHONY: test-integration
 test-integration: ## Run integration tests (starts PostgreSQL via Docker)
 	cd mikrom-api && docker compose up -d postgres && \
@@ -111,6 +115,14 @@ logs: ## Follow logs of all services
 .PHONY: logs-api
 logs-api: ## Follow mikrom-api logs
 	docker compose logs -f mikrom-api
+
+.PHONY: logs-scheduler
+logs-scheduler: ## Follow mikrom-scheduler logs
+	docker compose logs -f mikrom-scheduler
+
+.PHONY: logs-agent
+logs-agent: ## Follow mikrom-agent logs
+	docker compose logs -f mikrom-agent
 
 .PHONY: db-start
 db-start: ## Start only PostgreSQL (for local development)

@@ -37,6 +37,7 @@ Defined in `mikrom-proto/proto/scheduler.proto`.
 | Variable | Default | Description |
 |---|---|---|
 | `USE_TLS` | `false` | Enable mutual TLS for gRPC |
+| `CERTS_DIR` | — | Directory containing TLS certificates (required when `USE_TLS=true`) |
 
 ## Development
 

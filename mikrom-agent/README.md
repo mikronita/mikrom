@@ -39,7 +39,9 @@ Stopped → Starting → Running
 | `SCHEDULER_ADDR` | `http://127.0.0.1:5002` | gRPC address of the scheduler |
 | `AGENT_PORT` | `5003` | Port the agent listens on |
 | `HOST_ID` | random UUID | Stable identifier for this node |
+| `AGENT_HOSTNAME` | — | Hostname/IP advertised to the scheduler (overrides auto-detected local IP; useful in Docker) |
 | `USE_TLS` | `false` | Enable mutual TLS for gRPC |
+| `CERTS_DIR` | — | Directory containing TLS certificates (required when `USE_TLS=true`) |
 
 ## Development
 

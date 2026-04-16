@@ -35,8 +35,11 @@ On each request the handler opens a new gRPC connection to `mikrom-scheduler` (`
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | — | PostgreSQL connection string |
+| `TEST_DATABASE_URL` | `postgres://mikrom:mikrom_password@localhost:5432/mikrom_api` | Connection string used by integration tests |
 | `JWT_SECRET` | — | Secret used to sign/verify JWT tokens |
 | `SCHEDULER_ADDR` | `http://127.0.0.1:5002` | gRPC address of the scheduler |
+| `USE_TLS` | `false` | Enable mutual TLS for the gRPC channel to the scheduler |
+| `CERTS_DIR` | — | Directory containing TLS certificates (required when `USE_TLS=true`) |
 
 Copy `.env.example` (if present) or set these variables in your shell / Docker environment.
 
