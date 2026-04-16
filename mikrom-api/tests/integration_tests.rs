@@ -1,4 +1,5 @@
 use std::env;
+use std::sync::Arc;
 
 use axum::{
     body::Body,
@@ -9,6 +10,7 @@ use tower::ServiceExt;
 
 use mikrom_api::AppState;
 use mikrom_api::auth::{login, register};
+use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 
 async fn setup_test_pool() -> PgPool {
     let connection_string = env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
@@ -28,8 +30,9 @@ async fn setup_test_pool() -> PgPool {
 }
 
 fn create_app(pool: PgPool) -> axum::Router {
+    let user_repo = PostgresUserRepository::new(Arc::new(pool));
     let state = AppState {
-        db: pool,
+        user_repo: Arc::new(user_repo),
         scheduler_client: None,
     };
     axum::Router::new()

@@ -6,9 +6,9 @@ use axum::{
 };
 use bcrypt::{DEFAULT_COST, hash, verify};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid as UuidType;
 
 use crate::AppState;
+use crate::repositories::user_repository::NewUser;
 
 #[derive(Debug, Deserialize)]
 pub struct RegisterRequest {
@@ -62,13 +62,8 @@ pub async fn register(
             .into_response();
     }
 
-    let existing: Result<(i64,), _> = sqlx::query_as("SELECT COUNT(*) FROM users WHERE email = $1")
-        .bind(&payload.email)
-        .fetch_one(&state.db)
-        .await;
-
-    let count = match existing {
-        Ok((c,)) => c,
+    let count = match state.user_repo.count_by_email(&payload.email).await {
+        Ok(c) => c,
         Err(_) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -103,17 +98,15 @@ pub async fn register(
         }
     };
 
-    let user_id = UuidType::new_v4();
-
-    let result = sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)")
-        .bind(user_id)
-        .bind(&payload.email)
-        .bind(&password_hash)
-        .execute(&state.db)
-        .await;
-
-    match result {
-        Ok(_) => (
+    match state
+        .user_repo
+        .create(NewUser {
+            email: payload.email.clone(),
+            password_hash,
+        })
+        .await
+    {
+        Ok(user_id) => (
             StatusCode::CREATED,
             Json(RegisterResponse {
                 message: "User registered successfully".to_string(),
@@ -145,13 +138,7 @@ pub async fn login(State(state): State<AppState>, Json(payload): Json<LoginReque
             .into_response();
     }
 
-    let result: Result<Option<(sqlx::types::Uuid, String)>, _> =
-        sqlx::query_as("SELECT id, password_hash FROM users WHERE email = $1")
-            .bind(&payload.email)
-            .fetch_optional(&state.db)
-            .await;
-
-    let user = match result {
+    let user = match state.user_repo.find_by_email(&payload.email).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return (
@@ -173,9 +160,9 @@ pub async fn login(State(state): State<AppState>, Json(payload): Json<LoginReque
         }
     };
 
-    if verify(&payload.password, &user.1).unwrap_or(false) {
+    if verify(&payload.password, &user.password_hash).unwrap_or(false) {
         let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string());
-        match crate::auth::jwt::create_token(&user.0.to_string(), &payload.email, &jwt_secret) {
+        match crate::auth::jwt::create_token(&user.id.to_string(), &user.email, &jwt_secret) {
             Ok(token) => (StatusCode::OK, Json(LoginResponse { token })).into_response(),
             Err(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -199,24 +186,119 @@ pub async fn login(State(state): State<AppState>, Json(payload): Json<LoginReque
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use axum::{body::Body, http::Request};
+    use sqlx::types::Uuid;
+    use std::sync::Arc;
     use tower::ServiceExt;
 
-    // Returns an app backed by a lazy (non-connecting) pool — sufficient for
-    // handlers that validate input and return before making any DB query.
-    fn make_test_app_no_db() -> axum::Router {
-        let pool = sqlx::PgPool::connect_lazy(
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api",
-        )
-        .expect("invalid pool URL");
-        create_test_app(pool)
+    use crate::repositories::user_repository::{DbError, NewUser, User, UserRepository};
+
+    // ── Test helpers ─────────────────────────────────────────────────────────
+
+    /// Repository whose write operations panic — used for validation-only tests
+    /// that return before any DB call is made.
+    struct PanicRepo;
+    #[async_trait]
+    impl UserRepository for PanicRepo {
+        async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
+            panic!("PanicRepo: find_by_email should not be called in this test")
+        }
+        async fn create(&self, _user: NewUser) -> Result<Uuid, DbError> {
+            panic!("PanicRepo: create should not be called in this test")
+        }
+        async fn count_by_email(&self, _email: &str) -> Result<i64, DbError> {
+            panic!("PanicRepo: count_by_email should not be called in this test")
+        }
     }
+
+    /// Repository that reports a given email as already taken (count = 1).
+    struct EmailTakenRepo;
+    #[async_trait]
+    impl UserRepository for EmailTakenRepo {
+        async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
+            Ok(None)
+        }
+        async fn create(&self, _user: NewUser) -> Result<Uuid, DbError> {
+            Ok(Uuid::new_v4())
+        }
+        async fn count_by_email(&self, _email: &str) -> Result<i64, DbError> {
+            Ok(1)
+        }
+    }
+
+    /// Repository that always succeeds with a fresh user id.
+    struct FreshRepo;
+    #[async_trait]
+    impl UserRepository for FreshRepo {
+        async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
+            Ok(None)
+        }
+        async fn create(&self, _user: NewUser) -> Result<Uuid, DbError> {
+            Ok(Uuid::new_v4())
+        }
+        async fn count_by_email(&self, _email: &str) -> Result<i64, DbError> {
+            Ok(0)
+        }
+    }
+
+    /// Repository that simulates a DB error on every call.
+    struct ErrorRepo;
+    #[async_trait]
+    impl UserRepository for ErrorRepo {
+        async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
+            Err(DbError {
+                message: "db error".to_string(),
+            })
+        }
+        async fn create(&self, _user: NewUser) -> Result<Uuid, DbError> {
+            Err(DbError {
+                message: "db error".to_string(),
+            })
+        }
+        async fn count_by_email(&self, _email: &str) -> Result<i64, DbError> {
+            Err(DbError {
+                message: "db error".to_string(),
+            })
+        }
+    }
+
+    /// Repository that returns a specific stored user on find_by_email.
+    struct StoredUserRepo(User);
+    #[async_trait]
+    impl UserRepository for StoredUserRepo {
+        async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
+            Ok(Some(self.0.clone()))
+        }
+        async fn create(&self, _user: NewUser) -> Result<Uuid, DbError> {
+            Ok(self.0.id)
+        }
+        async fn count_by_email(&self, _email: &str) -> Result<i64, DbError> {
+            Ok(1)
+        }
+    }
+
+    fn make_app(repo: impl UserRepository + 'static) -> axum::Router {
+        let state = crate::AppState {
+            user_repo: Arc::new(repo),
+            scheduler_client: None,
+        };
+        axum::Router::new()
+            .route("/auth/register", axum::routing::post(register))
+            .route("/auth/login", axum::routing::post(login))
+            .with_state(state)
+    }
+
+    async fn body_json(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    // ── register — input validation (no DB call) ──────────────────────────────
 
     #[tokio::test]
     async fn test_register_empty_email() {
-        let app = make_test_app_no_db();
-
-        let response = app
+        let resp = make_app(PanicRepo)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -227,15 +309,12 @@ mod tests {
             )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn test_register_empty_password() {
-        let app = make_test_app_no_db();
-
-        let response = app
+        let resp = make_app(PanicRepo)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -246,15 +325,12 @@ mod tests {
             )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn test_register_short_password() {
-        let app = make_test_app_no_db();
-
-        let response = app
+        let resp = make_app(PanicRepo)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -267,89 +343,73 @@ mod tests {
             )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
-    #[tokio::test]
-    #[ignore = "requires PostgreSQL"]
-    async fn test_register_success() {
-        let pool = create_test_pool().await;
-        let app = create_test_app(pool);
-        let email = format!("newuser_{}@example.com", uuid::Uuid::new_v4());
+    // ── register — repository outcomes ───────────────────────────────────────
 
-        let response = app
+    #[tokio::test]
+    async fn test_register_duplicate_email_returns_conflict() {
+        let resp = make_app(EmailTakenRepo)
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/auth/register")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
-                        serde_json::json!({
-                            "email": email,
-                            "password": "password123"
-                        })
-                        .to_string(),
+                        r#"{"email":"taken@example.com","password":"password123"}"#,
                     ))
                     .unwrap(),
             )
             .await
             .unwrap();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+    }
 
-        assert_eq!(response.status(), StatusCode::CREATED);
-
-        let body = axum::body::to_bytes(response.into_body(), 1024)
+    #[tokio::test]
+    async fn test_register_success_returns_created() {
+        let resp = make_app(FreshRepo)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/register")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"email":"new@example.com","password":"password123"}"#,
+                    ))
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp).await;
         assert_eq!(json["message"], "User registered successfully");
         assert!(json["user_id"].as_str().is_some());
     }
 
     #[tokio::test]
-    #[ignore = "requires PostgreSQL"]
-    async fn test_register_duplicate_email() {
-        let pool = create_test_pool().await;
-        let app = create_test_app(pool);
-        let email = format!("duplicate_{}@example.com", uuid::Uuid::new_v4());
-        let body = serde_json::json!({
-            "email": email,
-            "password": "password123"
-        })
-        .to_string();
-
-        let _ = app
-            .clone()
+    async fn test_register_db_error_returns_500() {
+        let resp = make_app(ErrorRepo)
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/auth/register")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(body.clone()))
-                    .unwrap(),
-            )
-            .await;
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/auth/register")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(body))
+                    .body(Body::from(
+                        r#"{"email":"new@example.com","password":"password123"}"#,
+                    ))
                     .unwrap(),
             )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
+
+    // ── login — input validation ──────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_login_empty_email() {
-        let app = make_test_app_no_db();
-
-        let response = app
+        let resp = make_app(PanicRepo)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -360,15 +420,12 @@ mod tests {
             )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn test_login_empty_password() {
-        let app = make_test_app_no_db();
-
-        let response = app
+        let resp = make_app(PanicRepo)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -379,132 +436,101 @@ mod tests {
             )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
-    #[tokio::test]
-    #[ignore = "requires PostgreSQL"]
-    async fn test_login_user_not_found() {
-        let pool = create_test_pool().await;
-        let app = create_test_app(pool);
+    // ── login — repository outcomes ───────────────────────────────────────────
 
-        let response = app
+    #[tokio::test]
+    async fn test_login_user_not_found_returns_unauthorized() {
+        let resp = make_app(FreshRepo) // find_by_email returns None
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/auth/login")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
-                        r#"{"email":"nonexistent@example.com","password":"password123"}"#,
+                        r#"{"email":"nobody@example.com","password":"password123"}"#,
                     ))
                     .unwrap(),
             )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
-    #[ignore = "requires PostgreSQL"]
-    async fn test_login_wrong_password() {
-        let pool = create_test_pool().await;
-        let app = create_test_app(pool);
-        let email = format!("loginwrong_{}@example.com", uuid::Uuid::new_v4());
-
-        let _ = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/auth/register")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(
-                        serde_json::json!({
-                            "email": email,
-                            "password": "correctpassword"
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await;
-
-        let response = app
+    async fn test_login_wrong_password_returns_unauthorized() {
+        // StoredUserRepo returns a user with a real bcrypt hash of "correctpassword".
+        let hash = bcrypt::hash("correctpassword", 4).unwrap();
+        let user = User {
+            id: Uuid::new_v4(),
+            email: "user@example.com".to_string(),
+            password_hash: hash,
+        };
+        let resp = make_app(StoredUserRepo(user))
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/auth/login")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
-                        serde_json::json!({
-                            "email": email,
-                            "password": "wrongpassword"
-                        })
-                        .to_string(),
+                        r#"{"email":"user@example.com","password":"wrongpassword"}"#,
                     ))
                     .unwrap(),
             )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
-    #[ignore = "requires PostgreSQL"]
-    async fn test_login_success() {
-        let pool = create_test_pool().await;
-        let app = create_test_app(pool);
-        let email = format!("loginok_{}@example.com", uuid::Uuid::new_v4());
-
-        let _ = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/auth/register")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(
-                        serde_json::json!({
-                            "email": email,
-                            "password": "validpassword123"
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await;
-
+    async fn test_login_success_returns_token() {
+        let hash = bcrypt::hash("validpassword", 4).unwrap();
+        let user = User {
+            id: Uuid::new_v4(),
+            email: "user@example.com".to_string(),
+            password_hash: hash,
+        };
         unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
-
-        let response = app
+        let resp = make_app(StoredUserRepo(user))
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/auth/login")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
-                        serde_json::json!({
-                            "email": email,
-                            "password": "validpassword123"
-                        })
-                        .to_string(),
+                        r#"{"email":"user@example.com","password":"validpassword"}"#,
                     ))
                     .unwrap(),
             )
             .await
             .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp).await;
+        assert!(json["token"].as_str().is_some());
+        assert!(!json["token"].as_str().unwrap().is_empty());
+    }
 
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(response.into_body(), 1024)
+    #[tokio::test]
+    async fn test_login_db_error_returns_500() {
+        let resp = make_app(ErrorRepo)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"email":"user@example.com","password":"password123"}"#,
+                    ))
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(json["token"].as_str().is_some());
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
+
+    // ── serialization ─────────────────────────────────────────────────────────
 
     #[test]
     fn test_register_request_deserialization() {
@@ -549,26 +575,5 @@ mod tests {
         };
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("Something went wrong"));
-    }
-
-    async fn create_test_pool() -> sqlx::PgPool {
-        let database_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
-        });
-
-        sqlx::PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database")
-    }
-
-    fn create_test_app(pool: sqlx::PgPool) -> axum::Router {
-        let state = crate::AppState {
-            db: pool,
-            scheduler_client: None,
-        };
-        axum::Router::new()
-            .route("/auth/register", axum::routing::post(register))
-            .route("/auth/login", axum::routing::post(login))
-            .with_state(state)
     }
 }

@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use sqlx::PgPool;
 use std::sync::Arc;
 
@@ -13,6 +14,7 @@ impl PostgresUserRepository {
     }
 }
 
+#[async_trait]
 impl UserRepository for PostgresUserRepository {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError> {
         let result = sqlx::query_as::<_, (sqlx::types::Uuid, String, String)>(

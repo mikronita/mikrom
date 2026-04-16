@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use sqlx::types::Uuid;
 
 #[derive(Debug, Clone)]
@@ -34,25 +35,18 @@ impl From<sqlx::Error> for DbError {
     }
 }
 
+/// Object-safe async repository trait.  All implementations must derive
+/// `Send + Sync`; `#[async_trait]` boxes the returned futures automatically.
+#[async_trait]
 pub trait UserRepository: Send + Sync {
-    fn find_by_email<'a>(
-        &'a self,
-        email: &'a str,
-    ) -> impl std::future::Future<Output = Result<Option<User>, DbError>> + Send + 'a;
-    fn create(
-        &self,
-        user: NewUser,
-    ) -> impl std::future::Future<Output = Result<sqlx::types::Uuid, DbError>> + Send + '_;
-    fn count_by_email<'a>(
-        &'a self,
-        email: &'a str,
-    ) -> impl std::future::Future<Output = Result<i64, DbError>> + Send + 'a;
+    async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError>;
+    async fn create(&self, user: NewUser) -> Result<Uuid, DbError>;
+    async fn count_by_email(&self, email: &str) -> Result<i64, DbError>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::types::Uuid;
 
     // ── DbError ──────────────────────────────────────────────────────────────
 
@@ -110,7 +104,7 @@ mod tests {
         assert!(format!("{}", err).contains(msg));
     }
 
-    // ── Manual UserRepository mock ────────────────────────────────────────────
+    // ── Manual UserRepository mocks ───────────────────────────────────────────
 
     fn sample_user() -> User {
         User {
@@ -121,6 +115,7 @@ mod tests {
     }
 
     struct FoundUserRepo(User);
+    #[async_trait]
     impl UserRepository for FoundUserRepo {
         async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
             Ok(Some(self.0.clone()))
@@ -134,6 +129,7 @@ mod tests {
     }
 
     struct EmptyRepo;
+    #[async_trait]
     impl UserRepository for EmptyRepo {
         async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
             Ok(None)
@@ -147,6 +143,7 @@ mod tests {
     }
 
     struct ErrorRepo;
+    #[async_trait]
     impl UserRepository for ErrorRepo {
         async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
             Err(DbError {

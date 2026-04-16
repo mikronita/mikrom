@@ -1,4 +1,5 @@
 use axum::{Router, routing::get};
+use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 pub mod auth;
@@ -8,12 +9,13 @@ pub mod models;
 pub mod repositories;
 
 pub use deploy::deploy_app;
+pub use repositories::user_repository::UserRepository;
 
 use auth::{login, register};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: sqlx::PgPool,
+    pub user_repo: Arc<dyn UserRepository>,
     pub scheduler_client: Option<SchedulerClient>,
 }
 

@@ -23,6 +23,7 @@ pub struct DeployResponseBody {
 }
 
 pub async fn deploy_app(
+    _auth: crate::auth::AuthUser,
     State(_state): State<crate::AppState>,
     Json(payload): Json<DeployRequestBody>,
 ) -> impl IntoResponse {
@@ -315,24 +316,43 @@ mod tests {
     // Env-var-mutating tests are serialized with ENV_MUTEX to avoid data races
     // when cargo test runs them in parallel within the same process.
 
+    use crate::repositories::user_repository::{DbError, NewUser, User, UserRepository};
+    use async_trait::async_trait;
     use axum::{body::Body, http::Request};
+    use std::sync::Arc;
     use tower::ServiceExt;
+
+    struct NoopRepo;
+    #[async_trait]
+    impl UserRepository for NoopRepo {
+        async fn find_by_email(&self, _: &str) -> Result<Option<User>, DbError> {
+            Ok(None)
+        }
+        async fn create(&self, _: NewUser) -> Result<sqlx::types::Uuid, DbError> {
+            Ok(sqlx::types::Uuid::new_v4())
+        }
+        async fn count_by_email(&self, _: &str) -> Result<i64, DbError> {
+            Ok(0)
+        }
+    }
 
     // tokio::sync::Mutex is async-aware: safe to hold across await points.
     static ENV_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     fn make_deploy_app() -> axum::Router {
-        let pool = sqlx::PgPool::connect_lazy(
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api",
-        )
-        .expect("invalid pool URL");
         let state = crate::AppState {
-            db: pool,
+            user_repo: Arc::new(NoopRepo),
             scheduler_client: None,
         };
         axum::Router::new()
             .route("/deploy", axum::routing::post(deploy_app))
             .with_state(state)
+    }
+
+    const TEST_JWT_SECRET: &str = "deploy-test-secret";
+
+    fn valid_token() -> String {
+        crate::auth::jwt::create_token("uid-test", "test@example.com", TEST_JWT_SECRET).unwrap()
     }
 
     fn deploy_body() -> Body {
@@ -346,6 +366,7 @@ mod tests {
                     .method("POST")
                     .uri("/deploy")
                     .header("Content-Type", "application/json")
+                    .header("Authorization", format!("Bearer {}", valid_token()))
                     .body(deploy_body())
                     .unwrap(),
             )
@@ -361,43 +382,67 @@ mod tests {
     async fn test_deploy_app_response_always_200_ok() {
         let _guard = ENV_MUTEX.lock().await;
         // Point to a definitely-unreachable address so no real scheduler needed.
-        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59990") };
+        unsafe {
+            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59990");
+            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
+        }
         let json = post_deploy(make_deploy_app()).await;
         assert!(json.get("job_id").is_some());
         assert!(json.get("status").is_some());
         assert!(json.get("message").is_some());
-        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+        unsafe {
+            std::env::remove_var("SCHEDULER_ADDR");
+            std::env::remove_var("JWT_SECRET");
+        }
     }
 
     #[tokio::test]
     async fn test_deploy_app_response_job_id_is_non_empty_uuid() {
         let _guard = ENV_MUTEX.lock().await;
-        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59991") };
+        unsafe {
+            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59991");
+            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
+        }
         let json = post_deploy(make_deploy_app()).await;
         let job_id = json["job_id"].as_str().unwrap();
         assert_eq!(job_id.len(), 36, "job_id should be a UUID (36 chars)");
-        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+        unsafe {
+            std::env::remove_var("SCHEDULER_ADDR");
+            std::env::remove_var("JWT_SECRET");
+        }
     }
 
     #[tokio::test]
     async fn test_deploy_app_scheduler_unreachable_returns_error_status() {
         let _guard = ENV_MUTEX.lock().await;
-        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59992") };
+        unsafe {
+            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59992");
+            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
+        }
         let json = post_deploy(make_deploy_app()).await;
         assert_eq!(json["status"], "error");
         let msg = json["message"].as_str().unwrap();
         assert!(!msg.is_empty(), "error message should be set");
-        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+        unsafe {
+            std::env::remove_var("SCHEDULER_ADDR");
+            std::env::remove_var("JWT_SECRET");
+        }
     }
 
     #[tokio::test]
     async fn test_deploy_app_scheduler_unreachable_host_and_vm_are_null() {
         let _guard = ENV_MUTEX.lock().await;
-        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59993") };
+        unsafe {
+            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59993");
+            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
+        }
         let json = post_deploy(make_deploy_app()).await;
         assert!(json["host_id"].is_null());
         assert!(json["vm_id"].is_null());
-        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+        unsafe {
+            std::env::remove_var("SCHEDULER_ADDR");
+            std::env::remove_var("JWT_SECRET");
+        }
     }
 
     #[tokio::test]
@@ -407,6 +452,7 @@ mod tests {
             std::env::set_var("USE_TLS", "true");
             std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59994");
             std::env::set_var("CERTS_DIR", "/nonexistent-certs-dir-for-test");
+            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
         }
         let json = post_deploy(make_deploy_app()).await;
         assert_eq!(json["status"], "error");
@@ -420,6 +466,7 @@ mod tests {
             std::env::remove_var("USE_TLS");
             std::env::remove_var("SCHEDULER_ADDR");
             std::env::remove_var("CERTS_DIR");
+            std::env::remove_var("JWT_SECRET");
         }
     }
 
@@ -434,6 +481,7 @@ mod tests {
             std::env::set_var("USE_TLS", "true");
             std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59995");
             std::env::set_var("CERTS_DIR", "/nonexistent-dir");
+            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
         }
         let json = post_deploy(make_deploy_app()).await;
         // The error must come from TLS cert loading, not from an HTTP connection attempt,
@@ -449,26 +497,75 @@ mod tests {
             std::env::remove_var("USE_TLS");
             std::env::remove_var("SCHEDULER_ADDR");
             std::env::remove_var("CERTS_DIR");
+            std::env::remove_var("JWT_SECRET");
         }
     }
 
     #[tokio::test]
     async fn test_deploy_app_default_resource_values_accepted() {
         let _guard = ENV_MUTEX.lock().await;
-        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59996") };
+        unsafe {
+            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59996");
+            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
+        }
         // Payload with no vcpus/memory/disk — handler must apply defaults without panicking.
-        let pool = sqlx::PgPool::connect_lazy(
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api",
-        )
-        .unwrap();
-        let state = crate::AppState {
-            db: pool,
-            scheduler_client: None,
-        };
-        let app = axum::Router::new()
-            .route("/deploy", axum::routing::post(deploy_app))
-            .with_state(state);
-        let resp = app
+        let resp = make_deploy_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/deploy")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", format!("Bearer {}", valid_token()))
+                    .body(Body::from(r#"{"app_name":"app","image":"alpine:latest"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        unsafe {
+            std::env::remove_var("SCHEDULER_ADDR");
+            std::env::remove_var("JWT_SECRET");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_with_env_vars_in_payload() {
+        let _guard = ENV_MUTEX.lock().await;
+        unsafe {
+            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59997");
+            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
+        }
+        let resp = make_deploy_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/deploy")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", format!("Bearer {}", valid_token()))
+                    .body(Body::from(
+                        r#"{"app_name":"app","image":"alpine","env":{"PORT":"8080","ENV":"prod"}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        unsafe {
+            std::env::remove_var("SCHEDULER_ADDR");
+            std::env::remove_var("JWT_SECRET");
+        }
+    }
+
+    // ── auth guard on /deploy ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_deploy_without_token_returns_401() {
+        let _guard = ENV_MUTEX.lock().await;
+        unsafe {
+            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59998");
+            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
+        }
+        let resp = make_deploy_app()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -479,39 +576,36 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), axum::http::StatusCode::OK);
-        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+        assert_eq!(resp.status(), axum::http::StatusCode::UNAUTHORIZED);
+        unsafe {
+            std::env::remove_var("SCHEDULER_ADDR");
+            std::env::remove_var("JWT_SECRET");
+        }
     }
 
     #[tokio::test]
-    async fn test_deploy_app_with_env_vars_in_payload() {
+    async fn test_deploy_with_invalid_token_returns_401() {
         let _guard = ENV_MUTEX.lock().await;
-        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59997") };
-        let pool = sqlx::PgPool::connect_lazy(
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api",
-        )
-        .unwrap();
-        let state = crate::AppState {
-            db: pool,
-            scheduler_client: None,
-        };
-        let app = axum::Router::new()
-            .route("/deploy", axum::routing::post(deploy_app))
-            .with_state(state);
-        let resp = app
+        unsafe {
+            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59999");
+            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
+        }
+        let resp = make_deploy_app()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/deploy")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(
-                        r#"{"app_name":"app","image":"alpine","env":{"PORT":"8080","ENV":"prod"}}"#,
-                    ))
+                    .header("Authorization", "Bearer this.is.invalid")
+                    .body(Body::from(r#"{"app_name":"app","image":"alpine:latest"}"#))
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), axum::http::StatusCode::OK);
-        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+        assert_eq!(resp.status(), axum::http::StatusCode::UNAUTHORIZED);
+        unsafe {
+            std::env::remove_var("SCHEDULER_ADDR");
+            std::env::remove_var("JWT_SECRET");
+        }
     }
 }
