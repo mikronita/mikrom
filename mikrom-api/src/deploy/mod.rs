@@ -136,3 +136,178 @@ pub async fn deploy_app(
 
     Json(response)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_req() -> DeployRequestBody {
+        DeployRequestBody {
+            app_name: "my-app".to_string(),
+            image: "nginx:latest".to_string(),
+            vcpus: None,
+            memory_mib: None,
+            disk_mib: None,
+            env: None,
+        }
+    }
+
+    // ── DeployRequestBody deserialization ────────────────────────────────────
+
+    #[test]
+    fn test_deploy_request_full_deserialization() {
+        let json = r#"{
+            "app_name": "my-service",
+            "image": "nginx:1.25",
+            "vcpus": 4,
+            "memory_mib": 2048,
+            "disk_mib": 8192,
+            "env": {"PORT": "8080", "ENV": "prod"}
+        }"#;
+        let req: DeployRequestBody = serde_json::from_str(json).unwrap();
+        assert_eq!(req.app_name, "my-service");
+        assert_eq!(req.image, "nginx:1.25");
+        assert_eq!(req.vcpus, Some(4));
+        assert_eq!(req.memory_mib, Some(2048));
+        assert_eq!(req.disk_mib, Some(8192));
+        let env = req.env.unwrap();
+        assert_eq!(env.get("PORT").unwrap(), "8080");
+        assert_eq!(env.get("ENV").unwrap(), "prod");
+    }
+
+    #[test]
+    fn test_deploy_request_minimal_required_fields_only() {
+        let json = r#"{"app_name": "app", "image": "alpine:3"}"#;
+        let req: DeployRequestBody = serde_json::from_str(json).unwrap();
+        assert_eq!(req.app_name, "app");
+        assert_eq!(req.image, "alpine:3");
+        assert!(req.vcpus.is_none());
+        assert!(req.memory_mib.is_none());
+        assert!(req.disk_mib.is_none());
+        assert!(req.env.is_none());
+    }
+
+    #[test]
+    fn test_deploy_request_missing_app_name_fails() {
+        let json = r#"{"image": "nginx"}"#;
+        assert!(serde_json::from_str::<DeployRequestBody>(json).is_err());
+    }
+
+    #[test]
+    fn test_deploy_request_missing_image_fails() {
+        let json = r#"{"app_name": "app"}"#;
+        assert!(serde_json::from_str::<DeployRequestBody>(json).is_err());
+    }
+
+    #[test]
+    fn test_deploy_request_empty_env_map() {
+        let json = r#"{"app_name": "app", "image": "nginx", "env": {}}"#;
+        let req: DeployRequestBody = serde_json::from_str(json).unwrap();
+        assert!(req.env.unwrap().is_empty());
+    }
+
+    // ── Default values ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_vcpus_default_is_1() {
+        let req = minimal_req();
+        assert_eq!(req.vcpus.unwrap_or(1), 1);
+    }
+
+    #[test]
+    fn test_memory_mib_default_is_256() {
+        let req = minimal_req();
+        assert_eq!(req.memory_mib.unwrap_or(256), 256);
+    }
+
+    #[test]
+    fn test_disk_mib_default_is_1024() {
+        let req = minimal_req();
+        assert_eq!(req.disk_mib.unwrap_or(1024), 1024);
+    }
+
+    #[test]
+    fn test_provided_vcpus_overrides_default() {
+        let req = DeployRequestBody {
+            vcpus: Some(8),
+            ..minimal_req()
+        };
+        assert_eq!(req.vcpus.unwrap_or(1), 8);
+    }
+
+    #[test]
+    fn test_provided_memory_mib_overrides_default() {
+        let req = DeployRequestBody {
+            memory_mib: Some(4096),
+            ..minimal_req()
+        };
+        assert_eq!(req.memory_mib.unwrap_or(256), 4096);
+    }
+
+    #[test]
+    fn test_provided_disk_mib_overrides_default() {
+        let req = DeployRequestBody {
+            disk_mib: Some(10240),
+            ..minimal_req()
+        };
+        assert_eq!(req.disk_mib.unwrap_or(1024), 10240);
+    }
+
+    // ── DeployResponseBody serialization ─────────────────────────────────────
+
+    #[test]
+    fn test_deploy_response_serialization_all_fields() {
+        let resp = DeployResponseBody {
+            job_id: "job-abc".to_string(),
+            status: "1".to_string(),
+            host_id: Some("h1".to_string()),
+            vm_id: Some("vm-xyz".to_string()),
+            message: "Application scheduled".to_string(),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["job_id"], "job-abc");
+        assert_eq!(v["status"], "1");
+        assert_eq!(v["host_id"], "h1");
+        assert_eq!(v["vm_id"], "vm-xyz");
+        assert_eq!(v["message"], "Application scheduled");
+    }
+
+    #[test]
+    fn test_deploy_response_none_fields_serialize_as_null() {
+        let resp = DeployResponseBody {
+            job_id: "job-err".to_string(),
+            status: "error".to_string(),
+            host_id: None,
+            vm_id: None,
+            message: "Scheduler unavailable".to_string(),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["host_id"], serde_json::Value::Null);
+        assert_eq!(v["vm_id"], serde_json::Value::Null);
+        assert_eq!(v["message"], "Scheduler unavailable");
+    }
+
+    #[test]
+    fn test_deploy_response_is_debug_formattable() {
+        let resp = DeployResponseBody {
+            job_id: "j".to_string(),
+            status: "ok".to_string(),
+            host_id: None,
+            vm_id: None,
+            message: "ok".to_string(),
+        };
+        let s = format!("{:?}", resp);
+        assert!(s.contains("job_id"));
+        assert!(s.contains("status"));
+    }
+
+    #[test]
+    fn test_deploy_request_is_debug_formattable() {
+        let req = minimal_req();
+        let s = format!("{:?}", req);
+        assert!(s.contains("app_name"));
+        assert!(s.contains("image"));
+    }
+}

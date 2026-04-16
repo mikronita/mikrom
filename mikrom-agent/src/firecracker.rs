@@ -127,6 +127,15 @@ impl Default for FirecrackerManager {
 }
 
 #[cfg(test)]
+impl FirecrackerManager {
+    pub fn set_status_for_test(&self, vm_id: &str, status: VmStatus) {
+        if let Some(vm) = self.vms.write().get_mut(vm_id) {
+            vm.status = status;
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -242,5 +251,47 @@ mod tests {
         assert!(err2.to_string().contains("already exists"));
         let err3 = FirecrackerError::StopFailed("busy".to_string());
         assert!(err3.to_string().contains("busy"));
+    }
+
+    #[test]
+    fn test_set_status_for_test_to_running() {
+        let mgr = FirecrackerManager::new();
+        start(&mgr, "vm-1");
+        mgr.set_status_for_test("vm-1", VmStatus::Running);
+        assert_eq!(mgr.get_vm_status("vm-1").unwrap(), VmStatus::Running);
+    }
+
+    #[test]
+    fn test_set_status_for_test_to_stopped() {
+        let mgr = FirecrackerManager::new();
+        start(&mgr, "vm-1");
+        mgr.set_status_for_test("vm-1", VmStatus::Stopped);
+        assert_eq!(mgr.get_vm_status("vm-1").unwrap(), VmStatus::Stopped);
+    }
+
+    #[test]
+    fn test_set_status_for_test_to_failed() {
+        let mgr = FirecrackerManager::new();
+        start(&mgr, "vm-1");
+        mgr.set_status_for_test("vm-1", VmStatus::Failed);
+        assert_eq!(mgr.get_vm_status("vm-1").unwrap(), VmStatus::Failed);
+    }
+
+    #[test]
+    fn test_set_status_for_test_on_nonexistent_vm_is_noop() {
+        let mgr = FirecrackerManager::new();
+        // Must not panic
+        mgr.set_status_for_test("ghost", VmStatus::Running);
+    }
+
+    #[test]
+    fn test_manager_is_cloneable_and_shares_state() {
+        let mgr = FirecrackerManager::new();
+        start(&mgr, "vm-1");
+        let cloned = mgr.clone();
+        // Cloned manager sees the same VMs (Arc is shared)
+        assert_eq!(cloned.get_vm_status("vm-1").unwrap(), VmStatus::Starting);
+        cloned.set_status_for_test("vm-1", VmStatus::Running);
+        assert_eq!(mgr.get_vm_status("vm-1").unwrap(), VmStatus::Running);
     }
 }

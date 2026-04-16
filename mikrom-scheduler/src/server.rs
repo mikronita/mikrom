@@ -348,3 +348,411 @@ impl Clone for SchedulerServer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mikrom_proto::scheduler::{
+        AppConfig, AppStatusRequest, CancelRequest, DeployRequest,
+        ListAppsRequest, RegisterWorkerRequest, ReportMetricsRequest,
+    };
+    use tonic::Request;
+
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    fn make_server() -> SchedulerServer {
+        SchedulerServer::new(None).unwrap()
+    }
+
+    async fn register_worker(server: &SchedulerServer, host_id: &str) {
+        server
+            .register_worker(Request::new(RegisterWorkerRequest {
+                host_id: host_id.to_string(),
+                hostname: host_id.to_string(),
+                ip_address: "127.0.0.1".to_string(),
+                agent_port: 19999,
+            }))
+            .await
+            .unwrap();
+    }
+
+    async fn add_metrics(server: &SchedulerServer, host_id: &str) {
+        server
+            .report_metrics(Request::new(ReportMetricsRequest {
+                host_id: host_id.to_string(),
+                cpu_usage: 0.1,
+                ram_used_bytes: 512 * 1024 * 1024,
+                ram_total_bytes: 4 * GIB,
+                disk_used_bytes: 10 * GIB,
+                disk_total_bytes: 100 * GIB,
+                apps_count: 0,
+                timestamp: 0,
+            }))
+            .await
+            .unwrap();
+    }
+
+    fn deploy_req(user_id: &str) -> DeployRequest {
+        DeployRequest {
+            app_id: "app-1".to_string(),
+            app_name: "my-app".to_string(),
+            image: "nginx:latest".to_string(),
+            config: None,
+            user_id: user_id.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_register_worker_succeeds() {
+        let server = make_server();
+        let resp = server
+            .register_worker(Request::new(RegisterWorkerRequest {
+                host_id: "h1".to_string(),
+                hostname: "node-1".to_string(),
+                ip_address: "10.0.0.1".to_string(),
+                agent_port: 5003,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.success);
+        assert!(!resp.message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_register_worker_overwrites_existing() {
+        let server = make_server();
+        register_worker(&server, "h1").await;
+        // Re-registering same host_id should also succeed
+        let resp = server
+            .register_worker(Request::new(RegisterWorkerRequest {
+                host_id: "h1".to_string(),
+                hostname: "node-1-v2".to_string(),
+                ip_address: "127.0.0.2".to_string(),
+                agent_port: 5003,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn test_report_metrics_for_registered_worker_succeeds() {
+        let server = make_server();
+        register_worker(&server, "h1").await;
+        let resp = server
+            .report_metrics(Request::new(ReportMetricsRequest {
+                host_id: "h1".to_string(),
+                cpu_usage: 0.5,
+                ram_used_bytes: GIB,
+                ram_total_bytes: 4 * GIB,
+                disk_used_bytes: 20 * GIB,
+                disk_total_bytes: 100 * GIB,
+                apps_count: 2,
+                timestamp: 1_700_000_000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn test_report_metrics_for_unknown_worker_fails() {
+        let server = make_server();
+        let resp = server
+            .report_metrics(Request::new(ReportMetricsRequest {
+                host_id: "ghost".to_string(),
+                cpu_usage: 0.1,
+                ram_used_bytes: 0,
+                ram_total_bytes: 0,
+                disk_used_bytes: 0,
+                disk_total_bytes: 0,
+                apps_count: 0,
+                timestamp: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!resp.success);
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_with_no_workers_returns_failed_status() {
+        let server = make_server();
+        let resp = server
+            .deploy_app(Request::new(deploy_req("user-1")))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.status, crate::job::JobStatus::Failed as i32);
+        assert!(resp.host_id.is_empty());
+        assert!(resp.vm_id.is_empty());
+        assert!(!resp.message.is_empty());
+        assert!(!resp.job_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_with_available_worker_returns_scheduled_status() {
+        let server = make_server();
+        register_worker(&server, "h1").await;
+        add_metrics(&server, "h1").await;
+
+        let resp = server
+            .deploy_app(Request::new(DeployRequest {
+                app_id: "app-1".to_string(),
+                app_name: "my-app".to_string(),
+                image: "nginx:latest".to_string(),
+                config: Some(AppConfig {
+                    vcpus: 1,
+                    memory_mib: 256,
+                    disk_mib: 1024,
+                    env: Default::default(),
+                }),
+                user_id: "user-1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.status, crate::job::JobStatus::Scheduled as i32);
+        assert!(!resp.job_id.is_empty());
+        assert_eq!(resp.host_id, "h1");
+        assert!(!resp.vm_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_uses_default_config_when_none() {
+        let server = make_server();
+        register_worker(&server, "h1").await;
+        add_metrics(&server, "h1").await;
+
+        let resp = server
+            .deploy_app(Request::new(deploy_req("user-1")))
+            .await
+            .unwrap()
+            .into_inner();
+        // Default config (vcpus=1, memory_mib=256, disk_mib=1024) fits the worker
+        assert_eq!(resp.status, crate::job::JobStatus::Scheduled as i32);
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_job_is_persisted_and_queryable() {
+        let server = make_server();
+        // Failed deploy is still persisted
+        let deploy_resp = server
+            .deploy_app(Request::new(deploy_req("user-1")))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let status = server
+            .get_app_status(Request::new(AppStatusRequest {
+                job_id: deploy_resp.job_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(status.job_id, deploy_resp.job_id);
+        assert_eq!(status.status, crate::job::JobStatus::Failed as i32);
+    }
+
+    #[tokio::test]
+    async fn test_get_app_status_scheduled_job_has_host_and_vm() {
+        let server = make_server();
+        register_worker(&server, "h1").await;
+        add_metrics(&server, "h1").await;
+
+        let deploy_resp = server
+            .deploy_app(Request::new(deploy_req("user-1")))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let status = server
+            .get_app_status(Request::new(AppStatusRequest {
+                job_id: deploy_resp.job_id,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(status.host_id, "h1");
+        assert!(!status.vm_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_app_status_not_found_returns_not_found_error() {
+        let server = make_server();
+        let result = server
+            .get_app_status(Request::new(AppStatusRequest {
+                job_id: "nonexistent-job".to_string(),
+            }))
+            .await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_app_success_and_status_becomes_cancelled() {
+        let server = make_server();
+        register_worker(&server, "h1").await;
+        add_metrics(&server, "h1").await;
+
+        let job_id = server
+            .deploy_app(Request::new(deploy_req("user-1")))
+            .await
+            .unwrap()
+            .into_inner()
+            .job_id;
+
+        let cancel_resp = server
+            .cancel_app(Request::new(CancelRequest {
+                job_id: job_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(cancel_resp.success);
+
+        let status = server
+            .get_app_status(Request::new(AppStatusRequest { job_id }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(status.status, crate::job::JobStatus::Cancelled as i32);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_nonexistent_job_returns_failure() {
+        let server = make_server();
+        let resp = server
+            .cancel_app(Request::new(CancelRequest {
+                job_id: "no-such-job".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!resp.success);
+        assert!(!resp.message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_apps_returns_empty_initially() {
+        let server = make_server();
+        let resp = server
+            .list_apps(Request::new(ListAppsRequest { status: None, user_id: "user-1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.apps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_apps_filtered_by_user_id() {
+        let server = make_server();
+        server
+            .deploy_app(Request::new(DeployRequest {
+                app_id: "a1".to_string(),
+                app_name: "app-one".to_string(),
+                image: "nginx".to_string(),
+                config: None,
+                user_id: "user-1".to_string(),
+            }))
+            .await
+            .unwrap();
+        server
+            .deploy_app(Request::new(DeployRequest {
+                app_id: "a2".to_string(),
+                app_name: "app-two".to_string(),
+                image: "nginx".to_string(),
+                config: None,
+                user_id: "user-2".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let resp = server
+            .list_apps(Request::new(ListAppsRequest { status: None, user_id: "user-1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.apps.len(), 1);
+        assert_eq!(resp.apps[0].app_name, "app-one");
+    }
+
+    #[tokio::test]
+    async fn test_list_apps_info_fields_are_populated() {
+        let server = make_server();
+        server
+            .deploy_app(Request::new(DeployRequest {
+                app_id: "app-xyz".to_string(),
+                app_name: "my-service".to_string(),
+                image: "redis:7".to_string(),
+                config: None,
+                user_id: "user-1".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let resp = server
+            .list_apps(Request::new(ListAppsRequest { status: None, user_id: "user-1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.apps.len(), 1);
+        let app = &resp.apps[0];
+        assert_eq!(app.app_id, "app-xyz");
+        assert_eq!(app.app_name, "my-service");
+        assert_eq!(app.image, "redis:7");
+        assert!(!app.job_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_clone_shares_worker_registry() {
+        let original = make_server();
+        register_worker(&original, "h1").await;
+
+        let cloned = original.clone();
+        // Report metrics via clone — worker was registered on original
+        let resp = cloned
+            .report_metrics(Request::new(ReportMetricsRequest {
+                host_id: "h1".to_string(),
+                cpu_usage: 0.2,
+                ram_used_bytes: GIB,
+                ram_total_bytes: 4 * GIB,
+                disk_used_bytes: 0,
+                disk_total_bytes: 100 * GIB,
+                apps_count: 0,
+                timestamp: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        // success=true means worker was found → registry is shared
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn test_clone_does_not_share_jobs() {
+        let original = make_server();
+        // Deploy a failed job (no workers) — creates a job in original
+        let deploy_resp = original
+            .deploy_app(Request::new(deploy_req("user-1")))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let cloned = original.clone();
+        // Clone has a fresh jobs map — job from original is not visible
+        let result = cloned
+            .get_app_status(Request::new(AppStatusRequest {
+                job_id: deploy_resp.job_id,
+            }))
+            .await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::NotFound);
+    }
+}

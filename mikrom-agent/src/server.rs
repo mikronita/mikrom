@@ -334,3 +334,434 @@ impl Clone for AgentServer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mikrom_proto::agent::{
+        GetMetricsRequest, GetVmStatusRequest, MetricsRequest, RegisterRequest,
+        StartVmRequest, StopVmRequest, UnregisterRequest,
+    };
+    use tonic::Request;
+
+    fn make_server() -> AgentServer {
+        AgentServer::new(
+            "host-1".to_string(),
+            "node-1".to_string(),
+            "127.0.0.1".to_string(),
+        )
+    }
+
+    fn start_vm_req(vm_id: &str) -> StartVmRequest {
+        StartVmRequest {
+            vm_id: vm_id.to_string(),
+            app_id: "app-1".to_string(),
+            image: "nginx:latest".to_string(),
+            config: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_register_returns_success() {
+        let server = make_server();
+        let resp = server
+            .register(Request::new(RegisterRequest {
+                host_id: "host-1".to_string(),
+                hostname: "node-1".to_string(),
+                ip_address: "127.0.0.1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.success);
+        assert!(!resp.message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_unregister_returns_success_and_sets_shutdown_flag() {
+        let server = make_server();
+        assert!(!*server.shutdown_flag.read());
+        let resp = server
+            .unregister(Request::new(UnregisterRequest {
+                host_id: "host-1".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.success);
+        assert!(*server.shutdown_flag.read());
+    }
+
+    #[tokio::test]
+    async fn test_report_metrics_returns_success() {
+        let server = make_server();
+        let resp = server
+            .report_metrics(Request::new(MetricsRequest {
+                host_id: "host-1".to_string(),
+                cpu_usage: 0.42,
+                ram_used_bytes: 512 * 1024 * 1024,
+                ram_total_bytes: 4 * 1024 * 1024 * 1024,
+                disk_used_bytes: 10 * 1024 * 1024 * 1024,
+                disk_total_bytes: 100 * 1024 * 1024 * 1024,
+                apps_count: 3,
+                timestamp: 1_700_000_000,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn test_get_metrics_returns_correct_host_id() {
+        let server = make_server();
+        let resp = server
+            .get_metrics(Request::new(GetMetricsRequest {
+                host_id: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.host_id, "host-1");
+    }
+
+    #[tokio::test]
+    async fn test_get_metrics_real_system_data() {
+        let server = make_server();
+        let resp = server
+            .get_metrics(Request::new(GetMetricsRequest {
+                host_id: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.ram_total_bytes > 0);
+        assert!(resp.timestamp > 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_metrics_initial_apps_count_is_zero() {
+        let server = make_server();
+        let resp = server
+            .get_metrics(Request::new(GetMetricsRequest {
+                host_id: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.apps_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_start_vm_with_explicit_id() {
+        let server = make_server();
+        let resp = server
+            .start_vm(Request::new(StartVmRequest {
+                vm_id: "vm-explicit".to_string(),
+                app_id: "app-1".to_string(),
+                image: "nginx:latest".to_string(),
+                config: None,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.success);
+        assert_eq!(resp.vm_id, "vm-explicit");
+    }
+
+    #[tokio::test]
+    async fn test_start_vm_generates_uuid_when_id_is_empty() {
+        let server = make_server();
+        let resp = server
+            .start_vm(Request::new(StartVmRequest {
+                vm_id: String::new(),
+                app_id: "app-1".to_string(),
+                image: "alpine:3".to_string(),
+                config: None,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.success);
+        assert!(!resp.vm_id.is_empty());
+        // UUID has 36 chars
+        assert_eq!(resp.vm_id.len(), 36);
+    }
+
+    #[tokio::test]
+    async fn test_start_vm_uses_defaults_when_config_is_none() {
+        let server = make_server();
+        server
+            .start_vm(Request::new(start_vm_req("vm-def")))
+            .await
+            .unwrap();
+        let vm = server.firecracker.get_vm("vm-def").unwrap();
+        assert_eq!(vm.config.vcpus, 1);
+        assert_eq!(vm.config.memory_mib, 256);
+        assert_eq!(vm.config.disk_mib, 1024);
+        assert!(vm.config.env.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_start_vm_uses_provided_config() {
+        let mut env = std::collections::HashMap::new();
+        env.insert("PORT".to_string(), "8080".to_string());
+        let server = make_server();
+        server
+            .start_vm(Request::new(StartVmRequest {
+                vm_id: "vm-cfg".to_string(),
+                app_id: "app-1".to_string(),
+                image: "ubuntu:24.04".to_string(),
+                config: Some(mikrom_proto::agent::VmConfig {
+                    vcpus: 4,
+                    memory_mib: 2048,
+                    disk_mib: 8192,
+                    env: env.clone(),
+                }),
+            }))
+            .await
+            .unwrap();
+        let vm = server.firecracker.get_vm("vm-cfg").unwrap();
+        assert_eq!(vm.config.vcpus, 4);
+        assert_eq!(vm.config.memory_mib, 2048);
+        assert_eq!(vm.config.disk_mib, 8192);
+        assert_eq!(vm.config.env.get("PORT").unwrap(), "8080");
+    }
+
+    #[tokio::test]
+    async fn test_start_vm_duplicate_id_returns_failure() {
+        let server = make_server();
+        server
+            .start_vm(Request::new(start_vm_req("vm-dup")))
+            .await
+            .unwrap();
+        let resp = server
+            .start_vm(Request::new(start_vm_req("vm-dup")))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!resp.success);
+        assert!(resp.vm_id.is_empty());
+        assert!(!resp.message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_start_vm_increments_app_count() {
+        let server = make_server();
+        server
+            .start_vm(Request::new(start_vm_req("vm-cnt")))
+            .await
+            .unwrap();
+        let metrics = server
+            .get_metrics(Request::new(GetMetricsRequest { host_id: String::new() }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(metrics.apps_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_stop_vm_success() {
+        let server = make_server();
+        server
+            .start_vm(Request::new(start_vm_req("vm-stop")))
+            .await
+            .unwrap();
+        let resp = server
+            .stop_vm(Request::new(StopVmRequest {
+                vm_id: "vm-stop".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn test_stop_vm_decrements_app_count() {
+        let server = make_server();
+        server
+            .start_vm(Request::new(start_vm_req("vm-dec")))
+            .await
+            .unwrap();
+        server
+            .stop_vm(Request::new(StopVmRequest {
+                vm_id: "vm-dec".to_string(),
+            }))
+            .await
+            .unwrap();
+        let metrics = server
+            .get_metrics(Request::new(GetMetricsRequest { host_id: String::new() }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(metrics.apps_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_stop_vm_nonexistent_returns_failure() {
+        let server = make_server();
+        let resp = server
+            .stop_vm(Request::new(StopVmRequest {
+                vm_id: "ghost-vm".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!resp.success);
+        assert!(resp.message.contains("ghost-vm"));
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_status_starting() {
+        let server = make_server();
+        server
+            .start_vm(Request::new(start_vm_req("vm-st")))
+            .await
+            .unwrap();
+        let resp = server
+            .get_vm_status(Request::new(GetVmStatusRequest {
+                vm_id: "vm-st".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.status, 1); // Starting
+        assert_eq!(resp.vm_id, "vm-st");
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_status_stopping() {
+        let server = make_server();
+        server
+            .start_vm(Request::new(start_vm_req("vm-stp")))
+            .await
+            .unwrap();
+        server
+            .stop_vm(Request::new(StopVmRequest {
+                vm_id: "vm-stp".to_string(),
+            }))
+            .await
+            .unwrap();
+        let resp = server
+            .get_vm_status(Request::new(GetVmStatusRequest {
+                vm_id: "vm-stp".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.status, 3); // Stopping
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_status_running() {
+        let server = make_server();
+        server
+            .start_vm(Request::new(start_vm_req("vm-run")))
+            .await
+            .unwrap();
+        server
+            .firecracker
+            .set_status_for_test("vm-run", crate::firecracker::VmStatus::Running);
+        let resp = server
+            .get_vm_status(Request::new(GetVmStatusRequest {
+                vm_id: "vm-run".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.status, 2); // Running
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_status_stopped() {
+        let server = make_server();
+        server
+            .start_vm(Request::new(start_vm_req("vm-stpd")))
+            .await
+            .unwrap();
+        server
+            .firecracker
+            .set_status_for_test("vm-stpd", crate::firecracker::VmStatus::Stopped);
+        let resp = server
+            .get_vm_status(Request::new(GetVmStatusRequest {
+                vm_id: "vm-stpd".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.status, 4); // Stopped
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_status_failed() {
+        let server = make_server();
+        server
+            .start_vm(Request::new(start_vm_req("vm-fail")))
+            .await
+            .unwrap();
+        server
+            .firecracker
+            .set_status_for_test("vm-fail", crate::firecracker::VmStatus::Failed);
+        let resp = server
+            .get_vm_status(Request::new(GetVmStatusRequest {
+                vm_id: "vm-fail".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.status, 5); // Failed
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_status_nonexistent_returns_not_found() {
+        let server = make_server();
+        let result = server
+            .get_vm_status(Request::new(GetVmStatusRequest {
+                vm_id: "ghost".to_string(),
+            }))
+            .await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_clone_shares_firecracker_and_metrics_state() {
+        let original = make_server();
+        original
+            .start_vm(Request::new(start_vm_req("shared-vm")))
+            .await
+            .unwrap();
+        let cloned = original.clone();
+        // Clone sees VM started by original (Arc is shared)
+        let resp = cloned
+            .get_vm_status(Request::new(GetVmStatusRequest {
+                vm_id: "shared-vm".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(resp.status, 1); // Starting
+        // Metrics state (apps_count) is also shared
+        let metrics = cloned
+            .get_metrics(Request::new(GetMetricsRequest { host_id: String::new() }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(metrics.apps_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_clone_shares_shutdown_flag() {
+        let original = make_server();
+        let cloned = original.clone();
+        cloned
+            .unregister(Request::new(UnregisterRequest {
+                host_id: "host-1".to_string(),
+            }))
+            .await
+            .unwrap();
+        // Original sees the flag set by clone
+        assert!(*original.shutdown_flag.read());
+    }
+}
