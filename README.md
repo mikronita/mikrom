@@ -1,5 +1,7 @@
 # mikrom
 
+[![CI](https://github.com/antpard/mikrom/actions/workflows/ci.yml/badge.svg)](https://github.com/antpard/mikrom/actions/workflows/ci.yml)
+
 Mikrom is a microVM orchestration system that deploys containerized workloads into [Firecracker](https://firecracker-microvm.github.io/) microVMs across a fleet of worker nodes.
 
 ## Architecture
