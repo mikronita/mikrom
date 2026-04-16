@@ -15,9 +15,16 @@ async fn setup_test_pool() -> PgPool {
         "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
     });
 
-    PgPool::connect(&connection_string)
+    let pool = PgPool::connect(&connection_string)
         .await
-        .expect("Failed to connect to test db")
+        .expect("Failed to connect to test db");
+
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations");
+
+    pool
 }
 
 fn create_app(pool: PgPool) -> axum::Router {

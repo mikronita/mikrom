@@ -109,9 +109,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install system dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends protobuf-compiler postgresql-client
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends protobuf-compiler
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
@@ -122,16 +120,9 @@ jobs:
       - name: Unit tests
         run: cargo test --lib
 
-      # The integration tests expect the schema to already exist.
-      # We apply the single migration SQL directly via psql (already installed above).
-      - name: Run database migration
-        env:
-          PGPASSWORD: mikrom_password
-        run: |
-          psql -h localhost -U mikrom -d mikrom_api \
-            -f mikrom-api/migrations/001_create_users_table.sql
-
-      # Must run from mikrom-api/ so relative sqlx paths resolve correctly.
+      # setup_test_pool() calls sqlx::migrate!() before each test suite run,
+      # so the schema is created automatically on first connection.
+      # Must run from mikrom-api/ so the relative ./migrations path resolves correctly.
       - name: Integration tests
         working-directory: mikrom-api
         env:

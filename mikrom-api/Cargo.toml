@@ -16,7 +16,7 @@ bcrypt = "0.16"
 jsonwebtoken = "9"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "migrate"] }
 dotenvy = "0.15"
 thiserror = "2"
 mockall = "0.13"

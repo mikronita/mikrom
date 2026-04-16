@@ -14,35 +14,13 @@ pub async fn connect_to_url(database_url: &str) -> Result<PgPool, sqlx::Error> {
         .await
 }
 
-pub fn get_migration_sql() -> &'static str {
-    include_str!("../../migrations/001_create_users_table.sql")
-}
-
-pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
-    let migration_sql = get_migration_sql();
-    sqlx::query(migration_sql).execute(pool).await?;
-    Ok(())
+pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
+    sqlx::migrate!("./migrations").run(pool).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_get_migration_sql() {
-        let sql = get_migration_sql();
-        assert!(sql.contains("CREATE TABLE"));
-        assert!(sql.contains("users"));
-        assert!(sql.contains("id"));
-        assert!(sql.contains("email"));
-        assert!(sql.contains("password_hash"));
-    }
-
-    #[test]
-    fn test_migration_sql_has_primary_key() {
-        let sql = get_migration_sql();
-        assert!(sql.contains("PRIMARY KEY"));
-    }
 
     #[tokio::test]
     #[ignore]
