@@ -1,0 +1,236 @@
+name: CI
+
+# ── Triggers ───────────────────────────────────────────────────────────────────
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+# ── Global permissions (read-only baseline) ────────────────────────────────────
+# The docker job overrides this to add packages: write for ghcr.io.
+permissions:
+  contents: read
+
+# Cancel in-progress runs for the same ref on force-push / new commits
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/antpard/mikrom
+
+# ══════════════════════════════════════════════════════════════════════════════
+# JOB: lint
+# Checks Rust formatting + Clippy, and ESLint for the Next.js frontend.
+# ══════════════════════════════════════════════════════════════════════════════
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # protobuf-compiler must come before any cargo invocation because
+      # mikrom-proto/build.rs calls tonic_build::compile_protos at build time.
+      - name: Install protobuf compiler
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends protobuf-compiler
+
+      # Caches ~/.cargo/registry, ~/.cargo/git, and ./target keyed on
+      # Cargo.lock + OS + toolchain. cache-on-failure saves partial caches
+      # from failed builds so debugging iterations are faster.
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Rust fmt check
+        run: cargo fmt --all -- --check
+
+      # Clippy compiles the crate, so protobuf-compiler must already be
+      # installed. --all-targets covers lib, bins, tests, examples.
+      - name: Rust clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # pnpm-lock.yaml uses lockfileVersion 9.0, which requires pnpm ≥ 9.
+      # package.json has no "packageManager" field, so we pin the version here.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: mikrom-app/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: mikrom-app
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm lint
+        working-directory: mikrom-app
+        run: pnpm lint
+
+# ══════════════════════════════════════════════════════════════════════════════
+# JOB: test
+# Runs unit tests (no DB) and integration tests (against a real Postgres).
+# ══════════════════════════════════════════════════════════════════════════════
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    # The integration tests call PgPool::connect(TEST_DATABASE_URL) directly
+    # (no testcontainers). A service container is the correct approach here.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mikrom
+          POSTGRES_PASSWORD: mikrom_password
+          POSTGRES_DB: mikrom_api
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mikrom -d mikrom_api"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends protobuf-compiler postgresql-client
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      # Unit tests only — no database required, runs quickly.
+      - name: Unit tests
+        run: cargo test --lib
+
+      # The integration tests expect the schema to already exist.
+      # We apply the single migration SQL directly via psql (already installed above).
+      - name: Run database migration
+        env:
+          PGPASSWORD: mikrom_password
+        run: |
+          psql -h localhost -U mikrom -d mikrom_api \
+            -f mikrom-api/migrations/001_create_users_table.sql
+
+      # Must run from mikrom-api/ so relative sqlx paths resolve correctly.
+      - name: Integration tests
+        working-directory: mikrom-api
+        env:
+          TEST_DATABASE_URL: postgres://mikrom:mikrom_password@localhost:5432/mikrom_api
+          JWT_SECRET: ci-integration-test-secret
+        run: cargo test --test integration
+
+# ══════════════════════════════════════════════════════════════════════════════
+# JOB: docker
+# Builds and pushes all 5 service images to ghcr.io.
+# Runs only on push events (main branch or v* tags) — skipped on PRs.
+# Images are built in parallel via matrix strategy.
+# ══════════════════════════════════════════════════════════════════════════════
+  docker:
+    name: "Docker: ${{ matrix.image }}"
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+
+    # Skip on pull_request — only build and push on real pushes
+    if: github.event_name == 'push'
+
+    # Job-level permission override: add write access to push packages
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false   # let all images attempt build even if one fails
+      matrix:
+        include:
+          # Rust services: workspace root as context (Dockerfiles do COPY . .)
+          - image: mikrom-api
+            dockerfile: mikrom-api/Dockerfile
+            context: .
+
+          - image: mikrom-scheduler
+            dockerfile: mikrom-scheduler/Dockerfile
+            context: .
+
+          - image: mikrom-agent
+            dockerfile: mikrom-agent/Dockerfile
+            context: .
+
+          - image: mikrom-cert-gen
+            dockerfile: mikrom-proto/Dockerfile.cert-gen
+            context: .
+
+          # Next.js app: subdirectory as context (Dockerfile expects project root)
+          - image: mikrom-app
+            dockerfile: mikrom-app/Dockerfile
+            context: mikrom-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Tags generated:
+      #   push to main          → :latest  :main  :<sha>
+      #   push of v1.2.3 tag    → :latest  :v1.2.3  :1.2.3  :1.2  :1  :<sha>
+      #   push of v1.2.3-rc.1   → :v1.2.3-rc.1  :<sha>   (no :latest for pre-release)
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      # Uses GITHUB_TOKEN automatically — no extra secret needed for ghcr.io
+      # as long as permissions.packages: write is set above.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Required for --cache-from/--cache-to with type=gha
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # scope isolates the GHA layer cache per image so parallel matrix jobs
+      # don't overwrite each other's cache entries.
+      # provenance: false avoids multi-platform attestation manifests that
+      # older container runtimes cannot parse.
+      - name: Build and push ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+          provenance: false
