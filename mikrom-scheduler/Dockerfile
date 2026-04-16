@@ -14,6 +14,7 @@ COPY mikrom-proto/ mikrom-proto/
 COPY mikrom-agent/ mikrom-agent/
 COPY mikrom-api/ mikrom-api/
 COPY mikrom-scheduler/ mikrom-scheduler/
+COPY mikrom-cli/ mikrom-cli/
 
 RUN cargo build --release -p mikrom-scheduler
 
