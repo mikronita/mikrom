@@ -150,3 +150,179 @@ fn parse_env_vars(pairs: &[String]) -> anyhow::Result<HashMap<String, String>> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── parse_env_vars ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_env_vars_empty() {
+        assert!(parse_env_vars(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_parse_env_vars_single_pair() {
+        let result = parse_env_vars(&["KEY=VALUE".to_string()]).unwrap();
+        assert_eq!(result.get("KEY").map(String::as_str), Some("VALUE"));
+    }
+
+    #[test]
+    fn test_parse_env_vars_multiple_pairs() {
+        let result = parse_env_vars(&["PORT=8080".to_string(), "ENV=prod".to_string()]).unwrap();
+        assert_eq!(result.get("PORT").map(String::as_str), Some("8080"));
+        assert_eq!(result.get("ENV").map(String::as_str), Some("prod"));
+    }
+
+    #[test]
+    fn test_parse_env_vars_value_with_equals() {
+        // Only splits on the first '=' — the rest of the value is preserved.
+        let result = parse_env_vars(&["URL=http://host/path?a=1&b=2".to_string()]).unwrap();
+        assert_eq!(
+            result.get("URL").map(String::as_str),
+            Some("http://host/path?a=1&b=2")
+        );
+    }
+
+    #[test]
+    fn test_parse_env_vars_missing_equals_returns_err() {
+        assert!(parse_env_vars(&["NO_EQUALS".to_string()]).is_err());
+    }
+
+    // ── CLI parsing ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_health_command() {
+        let cli = Cli::try_parse_from(["mikrom", "health"]).unwrap();
+        assert!(matches!(cli.command, Commands::Health));
+    }
+
+    #[test]
+    fn test_cli_api_url_flag_before_subcommand() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "--api-url", "http://remote:5001", "health"]).unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some("http://remote:5001"));
+    }
+
+    #[test]
+    fn test_cli_auth_register_parses_email_and_password() {
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "auth",
+            "register",
+            "--email",
+            "user@example.com",
+            "--password",
+            "secret123",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Auth(AuthCommands::Register { email, password }) => {
+                assert_eq!(email, "user@example.com");
+                assert_eq!(password, "secret123");
+            }
+            _ => panic!("expected auth register"),
+        }
+    }
+
+    #[test]
+    fn test_cli_auth_login_parses_email_and_password() {
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "auth",
+            "login",
+            "--email",
+            "user@example.com",
+            "--password",
+            "pass",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Auth(AuthCommands::Login { email, password }) => {
+                assert_eq!(email, "user@example.com");
+                assert_eq!(password, "pass");
+            }
+            _ => panic!("expected auth login"),
+        }
+    }
+
+    #[test]
+    fn test_cli_deploy_minimal_flags() {
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "deploy",
+            "--app",
+            "my-service",
+            "--image",
+            "nginx:latest",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Deploy {
+                app,
+                image,
+                vcpus,
+                memory,
+                disk,
+                env,
+            } => {
+                assert_eq!(app, "my-service");
+                assert_eq!(image, "nginx:latest");
+                assert!(vcpus.is_none());
+                assert!(memory.is_none());
+                assert!(disk.is_none());
+                assert!(env.is_empty());
+            }
+            _ => panic!("expected deploy"),
+        }
+    }
+
+    #[test]
+    fn test_cli_deploy_all_options() {
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "deploy",
+            "--app",
+            "svc",
+            "--image",
+            "alpine:3",
+            "--vcpus",
+            "4",
+            "--memory",
+            "1024",
+            "--disk",
+            "2048",
+            "--env",
+            "PORT=8080",
+            "--env",
+            "X=y",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Deploy {
+                vcpus,
+                memory,
+                disk,
+                env,
+                ..
+            } => {
+                assert_eq!(vcpus, Some(4));
+                assert_eq!(memory, Some(1024));
+                assert_eq!(disk, Some(2048));
+                assert_eq!(env, vec!["PORT=8080", "X=y"]);
+            }
+            _ => panic!("expected deploy"),
+        }
+    }
+
+    #[test]
+    fn test_cli_deploy_missing_app_fails() {
+        assert!(Cli::try_parse_from(["mikrom", "deploy", "--image", "nginx"]).is_err());
+    }
+
+    #[test]
+    fn test_cli_deploy_missing_image_fails() {
+        assert!(Cli::try_parse_from(["mikrom", "deploy", "--app", "svc"]).is_err());
+    }
+}

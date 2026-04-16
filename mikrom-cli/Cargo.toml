@@ -16,3 +16,7 @@ tokio.workspace = true
 anyhow = "1"
 toml = "0.8"
 dirs = "5"
+
+[dev-dependencies]
+wiremock = "0.6"
+tempfile = "3"

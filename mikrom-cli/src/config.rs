@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Config {
@@ -16,6 +16,10 @@ impl Config {
         let Some(path) = Self::path() else {
             return Self::default();
         };
+        Self::load_from(&path)
+    }
+
+    pub fn load_from(path: &Path) -> Self {
         let Ok(content) = std::fs::read_to_string(path) else {
             return Self::default();
         };
@@ -25,6 +29,10 @@ impl Config {
     pub fn save(&self) -> anyhow::Result<()> {
         let path =
             Self::path().ok_or_else(|| anyhow::anyhow!("Cannot determine config directory"))?;
+        self.save_to(&path)
+    }
+
+    pub fn save_to(&self, path: &Path) -> anyhow::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -34,5 +42,116 @@ impl Config {
 
     pub fn api_url(&self) -> &str {
         self.api_url.as_deref().unwrap_or("http://localhost:5001")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn temp_path(dir: &TempDir) -> PathBuf {
+        dir.path().join("config.toml")
+    }
+
+    // ── api_url() ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_api_url_returns_default_when_none() {
+        assert_eq!(Config::default().api_url(), "http://localhost:5001");
+    }
+
+    #[test]
+    fn test_api_url_returns_custom_url() {
+        let cfg = Config {
+            api_url: Some("http://remote:9000".to_string()),
+            token: None,
+        };
+        assert_eq!(cfg.api_url(), "http://remote:9000");
+    }
+
+    // ── load_from ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_load_from_missing_file_returns_default() {
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::load_from(&dir.path().join("nonexistent.toml"));
+        assert!(cfg.api_url.is_none());
+        assert!(cfg.token.is_none());
+    }
+
+    #[test]
+    fn test_load_from_invalid_toml_returns_default() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        std::fs::write(&path, "not valid toml ][[[").unwrap();
+        let cfg = Config::load_from(&path);
+        assert!(cfg.api_url.is_none());
+        assert!(cfg.token.is_none());
+    }
+
+    #[test]
+    fn test_load_from_partial_only_api_url() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        std::fs::write(&path, r#"api_url = "http://myserver:5001""#).unwrap();
+        let cfg = Config::load_from(&path);
+        assert_eq!(cfg.api_url.as_deref(), Some("http://myserver:5001"));
+        assert!(cfg.token.is_none());
+    }
+
+    #[test]
+    fn test_load_from_partial_only_token() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        std::fs::write(&path, r#"token = "eyJhbGciOiJIUzI1NiJ9""#).unwrap();
+        let cfg = Config::load_from(&path);
+        assert!(cfg.api_url.is_none());
+        assert_eq!(cfg.token.as_deref(), Some("eyJhbGciOiJIUzI1NiJ9"));
+    }
+
+    // ── save_to / roundtrip ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_save_and_load_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        let original = Config {
+            api_url: Some("http://example.com:5001".to_string()),
+            token: Some("my-jwt-token".to_string()),
+        };
+        original.save_to(&path).unwrap();
+        let loaded = Config::load_from(&path);
+        assert_eq!(loaded.api_url, original.api_url);
+        assert_eq!(loaded.token, original.token);
+    }
+
+    #[test]
+    fn test_save_to_creates_parent_directories() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("nested").join("dirs").join("config.toml");
+        Config::default().save_to(&path).unwrap();
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn test_save_to_overwrites_existing_file() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        Config {
+            api_url: Some("http://old:5001".to_string()),
+            token: None,
+        }
+        .save_to(&path)
+        .unwrap();
+        Config {
+            api_url: Some("http://new:5001".to_string()),
+            token: Some("tok".to_string()),
+        }
+        .save_to(&path)
+        .unwrap();
+        let loaded = Config::load_from(&path);
+        assert_eq!(loaded.api_url.as_deref(), Some("http://new:5001"));
+        assert_eq!(loaded.token.as_deref(), Some("tok"));
     }
 }
