@@ -11,6 +11,6 @@ mod tests {
     fn test_app_state_clone() {
         // AppState contains PgPool which is Clone
         // This test verifies the Clone derive works
-        assert!(true);
+        // AppState derives Clone; this test simply verifies it compiles.
     }
 }

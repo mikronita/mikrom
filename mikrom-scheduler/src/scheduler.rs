@@ -54,10 +54,7 @@ impl AppScheduler {
     pub fn list_jobs(&self, user_id: Option<&str>, _status: Option<JobStatus>) -> Vec<Job> {
         let jobs = self.jobs.read();
         jobs.values()
-            .filter(|j| {
-                let user_match = user_id.map(|u| j.user_id == u).unwrap_or(true);
-                user_match
-            })
+            .filter(|j| user_id.map(|u| j.user_id == u).unwrap_or(true))
             .cloned()
             .collect()
     }

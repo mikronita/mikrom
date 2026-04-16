@@ -1,9 +1,9 @@
 use crate::firecracker::{FirecrackerManager, VmConfig};
-use crate::metrics::{MetricsCollector, SystemMetrics};
+use crate::metrics::MetricsCollector;
 use mikrom_proto::agent::{
     GetMetricsRequest, GetMetricsResponse, GetVmStatusRequest, GetVmStatusResponse, MetricsRequest,
     MetricsResponse, RegisterRequest, RegisterResponse, StartVmRequest, StartVmResponse,
-    StopVmRequest, StopVmResponse, UnregisterRequest, UnregisterResponse, VmStatus,
+    StopVmRequest, StopVmResponse, UnregisterRequest, UnregisterResponse,
     agent_service_server::{AgentService, AgentServiceServer},
 };
 use mikrom_proto::scheduler::{
@@ -11,7 +11,6 @@ use mikrom_proto::scheduler::{
 };
 use mikrom_proto::tls::ServiceCerts;
 use parking_lot::RwLock;
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tonic::{Response, Status, async_trait};
@@ -28,6 +27,7 @@ pub struct AgentServer {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct SchedulerClient {
     host_id: String,
     channel: tonic::transport::Channel,
@@ -169,7 +169,6 @@ impl AgentService for AgentServer {
                     crate::firecracker::VmStatus::Stopping => 3,
                     crate::firecracker::VmStatus::Stopped => 4,
                     crate::firecracker::VmStatus::Failed => 5,
-                    _ => 0,
                 };
                 Ok(Response::new(GetVmStatusResponse {
                     vm_id: req.vm_id,

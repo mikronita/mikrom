@@ -1,20 +1,16 @@
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum JobStatus {
+    #[default]
     Pending,
     Scheduled,
     Running,
     Failed,
     Cancelled,
-}
-
-impl Default for JobStatus {
-    fn default() -> Self {
-        Self::Pending
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -60,14 +60,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn get_local_ip() -> String {
-    if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
-        if socket.connect("8.8.8.8:80").is_ok() {
-            if let Ok(addr) = socket.local_addr() {
-                if let std::net::SocketAddr::V4(v4) = addr {
-                    return v4.ip().to_string();
-                }
-            }
-        }
+    if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0")
+        && socket.connect("8.8.8.8:80").is_ok()
+        && let Ok(addr) = socket.local_addr()
+        && let std::net::SocketAddr::V4(v4) = addr
+    {
+        return v4.ip().to_string();
     }
     "127.0.0.1".to_string()
 }

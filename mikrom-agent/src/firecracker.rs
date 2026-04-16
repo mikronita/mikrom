@@ -14,19 +14,14 @@ pub enum FirecrackerError {
     StopFailed(String),
 }
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum VmStatus {
     Starting,
     Running,
     Stopping,
+    #[default]
     Stopped,
     Failed,
-}
-
-impl Default for VmStatus {
-    fn default() -> Self {
-        Self::Stopped
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

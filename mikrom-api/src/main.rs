@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-use tracing_subscriber;
 
 use mikrom_api::AppState;
 use mikrom_api::create_app;

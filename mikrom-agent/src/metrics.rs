@@ -69,7 +69,7 @@ impl MetricsCollector {
     }
 
     fn get_disk_usage(&self) -> (u64, u64) {
-        let mut sys = sysinfo::Disks::new_with_refreshed_list();
+        let sys = sysinfo::Disks::new_with_refreshed_list();
 
         let mut total_space: u64 = 0;
         let mut available_space: u64 = 0;

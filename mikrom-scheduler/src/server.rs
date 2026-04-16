@@ -1,9 +1,7 @@
 use crate::metrics::HostMetrics;
 use crate::scheduler::AppScheduler;
 use crate::worker_registry::WorkerRegistry;
-use mikrom_proto::agent::{
-    StartVmRequest, StartVmResponse, agent_service_client::AgentServiceClient,
-};
+use mikrom_proto::agent::{StartVmRequest, agent_service_client::AgentServiceClient};
 use mikrom_proto::scheduler::{
     AppInfo, AppStatusRequest, AppStatusResponse, CancelRequest, CancelResponse, DeployRequest,
     DeployResponse, ListAppsRequest, ListAppsResponse, RegisterWorkerRequest,
@@ -25,6 +23,7 @@ pub struct SchedulerServer {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct AgentClient {
     host_id: String,
     channel: tonic::transport::Channel,
