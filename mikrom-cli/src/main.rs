@@ -372,4 +372,44 @@ mod tests {
     fn test_cli_deploy_missing_image_fails() {
         assert!(Cli::try_parse_from(["mikrom", "deploy", "--app", "svc"]).is_err());
     }
+
+    // ── vms / vm subcommands ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_vms_command_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "vms"]).unwrap();
+        assert!(matches!(cli.command, Commands::Vms));
+    }
+
+    #[test]
+    fn test_cli_vm_command_parses_job_id() {
+        let cli = Cli::try_parse_from(["mikrom", "vm", "job-abc-123"]).unwrap();
+        match cli.command {
+            Commands::Vm { job_id } => assert_eq!(job_id, "job-abc-123"),
+            _ => panic!("expected vm command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_vm_command_requires_job_id() {
+        assert!(Cli::try_parse_from(["mikrom", "vm"]).is_err());
+    }
+
+    #[test]
+    fn test_cli_vms_with_api_url_flag() {
+        let cli = Cli::try_parse_from(["mikrom", "--api-url", "http://api:5001", "vms"]).unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some("http://api:5001"));
+        assert!(matches!(cli.command, Commands::Vms));
+    }
+
+    #[test]
+    fn test_cli_vm_with_api_url_flag() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "--api-url", "http://api:5001", "vm", "job-1"]).unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some("http://api:5001"));
+        match cli.command {
+            Commands::Vm { job_id } => assert_eq!(job_id, "job-1"),
+            _ => panic!("expected vm command"),
+        }
+    }
 }

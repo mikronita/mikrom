@@ -131,6 +131,45 @@ pub async fn get_vm_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repositories::user_repository::{DbError, NewUser, User, UserRepository};
+    use async_trait::async_trait;
+    use axum::{body::Body, http::Request, routing::get};
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    struct NoopRepo;
+    #[async_trait]
+    impl UserRepository for NoopRepo {
+        async fn find_by_email(&self, _: &str) -> Result<Option<User>, DbError> {
+            Ok(None)
+        }
+        async fn create(&self, _: NewUser) -> Result<sqlx::types::Uuid, DbError> {
+            Ok(sqlx::types::Uuid::new_v4())
+        }
+        async fn count_by_email(&self, _: &str) -> Result<i64, DbError> {
+            Ok(0)
+        }
+    }
+
+    static ENV_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    const TEST_SECRET: &str = "vms-test-secret";
+
+    fn make_app() -> axum::Router {
+        let state = crate::AppState {
+            user_repo: Arc::new(NoopRepo),
+            scheduler_client: None,
+        };
+        axum::Router::new()
+            .route("/vms", get(list_vms))
+            .route("/vms/{job_id}", get(get_vm_status))
+            .with_state(state)
+    }
+
+    fn valid_token() -> String {
+        crate::auth::jwt::create_token("uid-vms", "vms@example.com", TEST_SECRET).unwrap()
+    }
+
+    // ── serialization ──────────────────────────────────────────────────────────
 
     #[test]
     fn test_vm_info_serialization() {
@@ -182,5 +221,205 @@ mod tests {
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["status"], "Failed");
         assert_eq!(json["error_message"], "no workers available");
+    }
+
+    // ── GET /vms auth guard ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_list_vms_without_token_returns_401() {
+        let _g = ENV_MUTEX.lock().await;
+        unsafe { std::env::set_var("JWT_SECRET", TEST_SECRET) };
+        let resp = make_app()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vms")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        unsafe { std::env::remove_var("JWT_SECRET") };
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_status_without_token_returns_401() {
+        let _g = ENV_MUTEX.lock().await;
+        unsafe { std::env::set_var("JWT_SECRET", TEST_SECRET) };
+        let resp = make_app()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vms/some-job-id")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        unsafe { std::env::remove_var("JWT_SECRET") };
+    }
+
+    // ── GET /vms scheduler unavailable ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_list_vms_scheduler_unavailable_returns_503() {
+        let _g = ENV_MUTEX.lock().await;
+        unsafe { std::env::set_var("JWT_SECRET", TEST_SECRET) };
+        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59950") };
+        let resp = make_app()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vms")
+                    .header("Authorization", format!("Bearer {}", valid_token()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        unsafe { std::env::remove_var("JWT_SECRET") };
+        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_status_scheduler_unavailable_returns_503() {
+        let _g = ENV_MUTEX.lock().await;
+        unsafe { std::env::set_var("JWT_SECRET", TEST_SECRET) };
+        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59951") };
+        let resp = make_app()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vms/any-job-id")
+                    .header("Authorization", format!("Bearer {}", valid_token()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        unsafe { std::env::remove_var("JWT_SECRET") };
+        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
+    }
+
+    // ── GET /vms with real in-process scheduler ────────────────────────────────
+
+    #[tokio::test]
+    async fn test_list_vms_returns_empty_array_when_no_jobs() {
+        use mikrom_scheduler::server::SchedulerServer;
+        use std::net::SocketAddr;
+
+        let _g = ENV_MUTEX.lock().await;
+
+        let port = {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        tokio::spawn(async move {
+            SchedulerServer::new(None)
+                .unwrap()
+                .serve(addr)
+                .await
+                .unwrap();
+        });
+        // Wait for the scheduler to be ready.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+                .await
+                .is_ok()
+            {
+                break;
+            }
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        unsafe {
+            std::env::set_var("JWT_SECRET", TEST_SECRET);
+            std::env::set_var("SCHEDULER_ADDR", format!("http://127.0.0.1:{port}"));
+        }
+
+        let resp = make_app()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vms")
+                    .header("Authorization", format!("Bearer {}", valid_token()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        unsafe {
+            std::env::remove_var("JWT_SECRET");
+            std::env::remove_var("SCHEDULER_ADDR");
+        }
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(json.as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_status_not_found_returns_404() {
+        use mikrom_scheduler::server::SchedulerServer;
+        use std::net::SocketAddr;
+
+        let _g = ENV_MUTEX.lock().await;
+
+        let port = {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        tokio::spawn(async move {
+            SchedulerServer::new(None)
+                .unwrap()
+                .serve(addr)
+                .await
+                .unwrap();
+        });
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+                .await
+                .is_ok()
+            {
+                break;
+            }
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        unsafe {
+            std::env::set_var("JWT_SECRET", TEST_SECRET);
+            std::env::set_var("SCHEDULER_ADDR", format!("http://127.0.0.1:{port}"));
+        }
+
+        let resp = make_app()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/vms/nonexistent-job-id")
+                    .header("Authorization", format!("Bearer {}", valid_token()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        unsafe {
+            std::env::remove_var("JWT_SECRET");
+            std::env::remove_var("SCHEDULER_ADDR");
+        }
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }

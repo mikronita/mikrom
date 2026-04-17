@@ -604,4 +604,193 @@ mod tests {
                 .is_ok()
         );
     }
+
+    // ── list_vms ──────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_list_vms_success_returns_vm_list() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vms"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "job_id": "job-1",
+                    "app_id": "app-1",
+                    "app_name": "my-app",
+                    "image": "nginx:latest",
+                    "status": "Scheduled",
+                    "host_id": "host-1",
+                    "vm_id": "vm-abc"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), Some("tok".to_string()));
+        let vms = client.list_vms().await.unwrap();
+        assert_eq!(vms.len(), 1);
+        assert_eq!(vms[0].job_id, "job-1");
+        assert_eq!(vms[0].status, "Scheduled");
+        assert_eq!(vms[0].vm_id, "vm-abc");
+    }
+
+    #[tokio::test]
+    async fn test_list_vms_empty_returns_empty_vec() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vms"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), Some("tok".to_string()));
+        let vms = client.list_vms().await.unwrap();
+        assert!(vms.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_vms_sends_bearer_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vms"))
+            .and(header("authorization", "Bearer mytoken"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), Some("mytoken".to_string()));
+        assert!(client.list_vms().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_list_vms_401_returns_error_with_message() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vms"))
+            .respond_with(
+                ResponseTemplate::new(401)
+                    .set_body_json(serde_json::json!({"error": "Invalid or expired token"})),
+            )
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        let err = client.list_vms().await.unwrap_err();
+        assert!(err.to_string().contains("Invalid or expired token"));
+        assert!(err.to_string().contains("401"));
+    }
+
+    #[tokio::test]
+    async fn test_list_vms_503_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vms"))
+            .respond_with(
+                ResponseTemplate::new(503)
+                    .set_body_json(serde_json::json!({"error": "Scheduler unavailable"})),
+            )
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        assert!(client.list_vms().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_list_vms_server_unreachable_returns_error() {
+        let client = MikromClient::new("http://127.0.0.1:59960".to_string(), None);
+        assert!(client.list_vms().await.is_err());
+    }
+
+    // ── get_vm ────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_get_vm_success_returns_status_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vms/job-abc"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "job_id": "job-abc",
+                "status": "Running",
+                "host_id": "host-1",
+                "vm_id": "vm-xyz",
+                "scheduled_at": 1_700_000_000_i64,
+                "started_at": 1_700_000_005_i64,
+                "stopped_at": 0_i64,
+                "error_message": ""
+            })))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), Some("tok".to_string()));
+        let vm = client.get_vm("job-abc").await.unwrap();
+        assert_eq!(vm.job_id, "job-abc");
+        assert_eq!(vm.status, "Running");
+        assert_eq!(vm.host_id, "host-1");
+        assert_eq!(vm.vm_id, "vm-xyz");
+        assert_eq!(vm.scheduled_at, 1_700_000_000);
+        assert_eq!(vm.stopped_at, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_sends_bearer_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vms/job-1"))
+            .and(header("authorization", "Bearer secret"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "job_id": "job-1", "status": "Scheduled",
+                "host_id": "h", "vm_id": "v",
+                "scheduled_at": 0_i64, "started_at": 0_i64,
+                "stopped_at": 0_i64, "error_message": ""
+            })))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), Some("secret".to_string()));
+        assert!(client.get_vm("job-1").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_404_returns_error_with_message() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vms/ghost"))
+            .respond_with(
+                ResponseTemplate::new(404)
+                    .set_body_json(serde_json::json!({"error": "Job not found"})),
+            )
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        let err = client.get_vm("ghost").await.unwrap_err();
+        assert!(err.to_string().contains("Job not found"));
+        assert!(err.to_string().contains("404"));
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_server_unreachable_returns_error() {
+        let client = MikromClient::new("http://127.0.0.1:59961".to_string(), None);
+        assert!(client.get_vm("job-1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_builds_correct_url_with_job_id() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vms/my-special-job-id"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "job_id": "my-special-job-id", "status": "Failed",
+                "host_id": "", "vm_id": "",
+                "scheduled_at": 0_i64, "started_at": 0_i64,
+                "stopped_at": 0_i64, "error_message": "spawn error"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        let vm = client.get_vm("my-special-job-id").await.unwrap();
+        assert_eq!(vm.error_message, "spawn error");
+    }
 }
