@@ -51,10 +51,17 @@ services:
       AGENT_HOSTNAME: mikrom-agent
       USE_TLS: "true"
       CERTS_DIR: /certs/agent
+      FC_KERNEL_PATH: ${FC_KERNEL_PATH:-/opt/firecracker/vmlinux-6.1.155}
+      FC_ROOTFS_PATH: ${FC_ROOTFS_PATH:-/opt/firecracker/ubuntu-24.04.ext4}
+      FC_BINARY: /usr/local/bin/firecracker
     ports:
       - "5003:5003"
+    devices:
+      - /dev/kvm:/dev/kvm
     volumes:
       - certs:/certs
+      - /opt/firecracker:/opt/firecracker:ro
+      - /usr/local/bin/firecracker:/usr/local/bin/firecracker:ro
     depends_on:
       cert-gen:
         condition: service_completed_successfully
