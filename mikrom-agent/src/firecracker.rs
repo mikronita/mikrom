@@ -224,11 +224,21 @@ impl FirecrackerManager {
         };
 
         let fc_binary = &self.fc_config.binary;
-        let rootfs_path = if std::path::Path::new(&image).exists() {
+        let base_rootfs = if std::path::Path::new(&image).exists() {
             image.clone()
         } else {
             self.fc_config.rootfs_path.clone()
         };
+
+        // Copy the base rootfs to a per-VM writable path so Firecracker can
+        // open it with write permissions even when the source is mounted :ro.
+        let rootfs_path = format!("/tmp/fc-{vm_id}-rootfs.ext4");
+        if let Err(e) = tokio::fs::copy(&base_rootfs, &rootfs_path).await {
+            self.set_failed(&vm_id, e.to_string()).await;
+            return Err(FirecrackerError::StartFailed(format!(
+                "failed to copy rootfs {base_rootfs} → {rootfs_path}: {e}"
+            )));
+        }
 
         let socket_path = format!("/tmp/fc-{vm_id}.sock");
 
@@ -336,6 +346,7 @@ impl FirecrackerManager {
             let _ = proc.child.kill().await;
             let _ = proc.child.wait().await;
             let _ = tokio::fs::remove_file(&proc.socket_path).await;
+            let _ = tokio::fs::remove_file(format!("/tmp/fc-{vm_id}-rootfs.ext4")).await;
 
             let mut vms = self.vms.write().await;
             if let Some(vm) = vms.get_mut(vm_id) {
