@@ -139,16 +139,34 @@ impl SchedulerService for SchedulerServer {
                 job.schedule(host_id.clone(), vm_id.clone());
                 self.scheduler.add_job(job);
 
-                let _ = self
+                match self
                     .forward_deploy_to_agent(&host_id, &app_id, &image, &vm_id, &config)
-                    .await;
+                    .await
+                {
+                    Ok(()) => {
+                        self.scheduler.start_job(&job_id);
+                    }
+                    Err(e) => {
+                        self.scheduler.fail_job(&job_id, e.message().to_string());
+                    }
+                }
+
+                let job = self.scheduler.get_job(&job_id);
+                let status = job
+                    .as_ref()
+                    .map(|j| j.status as i32)
+                    .unwrap_or(crate::job::JobStatus::Scheduled as i32);
+                let message = job
+                    .as_ref()
+                    .and_then(|j| j.error_message.clone())
+                    .unwrap_or_else(|| "Application scheduled".to_string());
 
                 DeployResponse {
                     job_id: job_id.clone(),
-                    status: crate::job::JobStatus::Scheduled as i32,
+                    status,
                     host_id,
                     vm_id,
-                    message: "Application scheduled".to_string(),
+                    message,
                 }
             }
             Err(e) => {
@@ -519,7 +537,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_deploy_app_with_available_worker_returns_scheduled_status() {
+    async fn test_deploy_app_with_available_worker_assigns_host_and_vm() {
+        // Worker is selected but the agent at port 19999 is unreachable in tests,
+        // so the job ends up Failed. The important thing is host and vm are assigned.
         let server = make_server();
         register_worker(&server, "h1").await;
         add_metrics(&server, "h1").await;
@@ -540,7 +560,8 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
-        assert_eq!(resp.status, crate::job::JobStatus::Scheduled as i32);
+        // Agent at port 19999 is unreachable → job transitions to Failed.
+        assert_eq!(resp.status, crate::job::JobStatus::Failed as i32);
         assert!(!resp.job_id.is_empty());
         assert_eq!(resp.host_id, "h1");
         assert!(!resp.vm_id.is_empty());
@@ -557,8 +578,8 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
-        // Default config (vcpus=1, memory_mib=256, disk_mib=1024) fits the worker
-        assert_eq!(resp.status, crate::job::JobStatus::Scheduled as i32);
+        // Default config fits the worker; agent unreachable → Failed.
+        assert_eq!(resp.status, crate::job::JobStatus::Failed as i32);
     }
 
     #[tokio::test]
@@ -826,9 +847,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_deploy_app_still_returns_scheduled_when_forward_to_agent_fails() {
-        // forward_deploy_to_agent result is intentionally ignored in deploy_app
-        // (the job is persisted with Scheduled status regardless).
+    async fn test_deploy_app_returns_failed_when_forward_to_agent_fails() {
         let server = make_server();
         // Worker registered but with unreachable port — forward will fail silently.
         server
@@ -860,8 +879,8 @@ mod tests {
             .unwrap()
             .into_inner();
 
-        // Job is Scheduled even though the agent forward will fail asynchronously.
-        assert_eq!(resp.status, crate::job::JobStatus::Scheduled as i32);
+        // Agent at port 59981 is unreachable → job transitions to Failed.
+        assert_eq!(resp.status, crate::job::JobStatus::Failed as i32);
         assert!(!resp.job_id.is_empty());
         assert_eq!(resp.host_id, "unreachable");
     }

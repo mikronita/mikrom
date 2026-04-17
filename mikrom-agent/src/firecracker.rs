@@ -920,17 +920,22 @@ mod tests {
 
     // ── start_vm real mode ────────────────────────────────────────────────────
 
-    fn real_config_bad_binary() -> FirecrackerConfig {
-        FirecrackerConfig {
+    async fn real_config_bad_binary() -> (FirecrackerConfig, String) {
+        // Create a real temp file to act as the rootfs so the copy step succeeds.
+        let rootfs = format!("/tmp/fc-test-rootfs-{}.ext4", uuid::Uuid::new_v4());
+        tokio::fs::write(&rootfs, b"fake").await.unwrap();
+        let cfg = FirecrackerConfig {
             kernel_path: Some("/fake/vmlinux".to_string()),
             binary: "/nonexistent/firecracker-binary-xyz".to_string(),
-            rootfs_path: "/fake/rootfs.ext4".to_string(),
-        }
+            rootfs_path: rootfs.clone(),
+        };
+        (cfg, rootfs)
     }
 
     #[tokio::test]
     async fn test_start_vm_real_mode_bad_binary_returns_process_error() {
-        let mgr = FirecrackerManager::with_config(real_config_bad_binary());
+        let (cfg, rootfs) = real_config_bad_binary().await;
+        let mgr = FirecrackerManager::with_config(cfg);
         let result = mgr
             .start_vm(
                 "vm-bad-bin".to_string(),
@@ -939,6 +944,7 @@ mod tests {
                 config(),
             )
             .await;
+        let _ = tokio::fs::remove_file(&rootfs).await;
 
         assert!(
             matches!(result, Err(FirecrackerError::ProcessError(_))),
@@ -952,7 +958,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_vm_real_mode_failed_vm_has_error_message() {
-        let mgr = FirecrackerManager::with_config(real_config_bad_binary());
+        let (cfg, rootfs) = real_config_bad_binary().await;
+        let mgr = FirecrackerManager::with_config(cfg);
         let _ = mgr
             .start_vm(
                 "vm-err-msg".to_string(),
@@ -961,6 +968,7 @@ mod tests {
                 config(),
             )
             .await;
+        let _ = tokio::fs::remove_file(&rootfs).await;
 
         let vm = mgr.get_vm("vm-err-msg").await.unwrap();
         assert!(vm.error_message.is_some());

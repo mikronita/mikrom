@@ -51,6 +51,18 @@ impl AppScheduler {
         }
     }
 
+    pub fn start_job(&self, job_id: &str) {
+        if let Some(job) = self.jobs.write().get_mut(job_id) {
+            job.start();
+        }
+    }
+
+    pub fn fail_job(&self, job_id: &str, msg: String) {
+        if let Some(job) = self.jobs.write().get_mut(job_id) {
+            job.fail(msg);
+        }
+    }
+
     pub fn list_jobs(&self, user_id: Option<&str>, _status: Option<JobStatus>) -> Vec<Job> {
         let jobs = self.jobs.read();
         jobs.values()
