@@ -4,13 +4,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
+#[repr(i32)]
 pub enum JobStatus {
     #[default]
-    Pending,
-    Scheduled,
-    Running,
-    Failed,
-    Cancelled,
+    Pending = 1,
+    Scheduled = 2,
+    Running = 3,
+    Failed = 4,
+    Cancelled = 5,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -230,10 +231,11 @@ mod tests {
 
     #[test]
     fn test_job_status_cast_to_i32() {
-        assert_eq!(JobStatus::Pending as i32, 0);
-        assert_eq!(JobStatus::Scheduled as i32, 1);
-        assert_eq!(JobStatus::Running as i32, 2);
-        assert_eq!(JobStatus::Failed as i32, 3);
-        assert_eq!(JobStatus::Cancelled as i32, 4);
+        // Values must match proto DeployStatus (0 = Unspecified, so ours start at 1).
+        assert_eq!(JobStatus::Pending as i32, 1);
+        assert_eq!(JobStatus::Scheduled as i32, 2);
+        assert_eq!(JobStatus::Running as i32, 3);
+        assert_eq!(JobStatus::Failed as i32, 4);
+        assert_eq!(JobStatus::Cancelled as i32, 5);
     }
 }
