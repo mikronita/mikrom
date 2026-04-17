@@ -68,7 +68,13 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    fetchVms();
+    const token = getToken();
+    if (!token) return;
+    listVms(token).then((result) => {
+      if (result.error) setLoadError(result.error);
+      else setVms(result.data ?? []);
+      setLoading(false);
+    });
   }, []);
 
   const handleLogout = () => logout();

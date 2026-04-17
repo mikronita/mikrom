@@ -59,7 +59,13 @@ export default function VmDetailPage() {
   };
 
   useEffect(() => {
-    fetchVm();
+    const token = getToken();
+    if (!token) return;
+    getVm(token, jobId).then((result) => {
+      if (result.error) setError(result.error);
+      else setVm(result.data ?? null);
+      setLoading(false);
+    });
   }, [jobId]);
 
   return (

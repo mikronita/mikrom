@@ -67,6 +67,16 @@ function authHeaders(token: string): Record<string, string> {
   };
 }
 
+async function parseJson<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text) throw new Error("Empty response from server");
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`API unavailable (${response.status})`);
+  }
+}
+
 export async function register(
   data: RegisterRequest
 ): Promise<{ data?: RegisterResponse; error?: string }> {
@@ -76,7 +86,7 @@ export async function register(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    const result = await response.json();
+    const result = await parseJson<RegisterResponse & ApiError>(response);
     if (!response.ok) return { error: result.error || "Registration failed" };
     return { data: result };
   } catch (err) {
@@ -93,7 +103,7 @@ export async function login(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    const result = await response.json();
+    const result = await parseJson<LoginResponse & ApiError>(response);
     if (!response.ok) return { error: result.error || "Login failed" };
     return { data: result };
   } catch (err) {
@@ -108,9 +118,9 @@ export async function listVms(
     const response = await fetch(`${API_BASE_URL}/vms`, {
       headers: authHeaders(token),
     });
-    const result = await response.json();
-    if (!response.ok) return { error: result.error || "Failed to fetch VMs" };
-    return { data: result };
+    const result = await parseJson<VmInfo[] & ApiError>(response);
+    if (!response.ok) return { error: (result as ApiError).error || "Failed to fetch VMs" };
+    return { data: result as VmInfo[] };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -124,7 +134,7 @@ export async function getVm(
     const response = await fetch(`${API_BASE_URL}/vms/${jobId}`, {
       headers: authHeaders(token),
     });
-    const result = await response.json();
+    const result = await parseJson<VmStatus & ApiError>(response);
     if (!response.ok) return { error: result.error || "VM not found" };
     return { data: result };
   } catch (err) {
@@ -142,7 +152,7 @@ export async function deployApp(
       headers: authHeaders(token),
       body: JSON.stringify(data),
     });
-    const result = await response.json();
+    const result = await parseJson<DeployResponse & ApiError>(response);
     if (!response.ok) return { error: result.error || "Deploy failed" };
     return { data: result };
   } catch (err) {
