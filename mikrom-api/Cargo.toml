@@ -31,8 +31,15 @@ axum-test = "15"
 testcontainers = "0.27"
 testcontainers-modules = { version = "0.15", features = ["postgres"] }
 hyper = "1"
+mikrom-scheduler = { path = "../mikrom-scheduler" }
+mikrom-agent = { path = "../mikrom-agent" }
 
 [[test]]
 name = "integration"
 path = "tests/integration_tests.rs"
+test = true
+
+[[test]]
+name = "deploy_e2e"
+path = "tests/deploy_e2e.rs"
 test = true

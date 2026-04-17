@@ -24,6 +24,7 @@ pub struct AgentServer {
     firecracker: FirecrackerManager,
     scheduler_client: Option<SchedulerClient>,
     shutdown_flag: Arc<RwLock<bool>>,
+    scheduler_addr: String,
 }
 
 #[derive(Clone)]
@@ -117,6 +118,7 @@ impl AgentService for AgentServer {
         match self
             .firecracker
             .start_vm(vm_id.clone(), req.app_id, req.image, config)
+            .await
         {
             Ok(()) => {
                 self.metrics_collector.increment_app_count();
@@ -140,7 +142,7 @@ impl AgentService for AgentServer {
     ) -> Result<Response<StopVmResponse>, Status> {
         let req = request.into_inner();
 
-        match self.firecracker.stop_vm(&req.vm_id) {
+        match self.firecracker.stop_vm(&req.vm_id).await {
             Ok(()) => {
                 self.metrics_collector.decrement_app_count();
                 Ok(Response::new(StopVmResponse {
@@ -161,7 +163,7 @@ impl AgentService for AgentServer {
     ) -> Result<Response<GetVmStatusResponse>, Status> {
         let req = request.into_inner();
 
-        match self.firecracker.get_vm_status(&req.vm_id) {
+        match self.firecracker.get_vm_status(&req.vm_id).await {
             Ok(status) => {
                 let proto_status = match status {
                     crate::firecracker::VmStatus::Starting => 1,
@@ -184,6 +186,19 @@ impl AgentService for AgentServer {
 
 impl AgentServer {
     pub fn new(host_id: String, hostname: String, ip_address: String) -> Self {
+        let scheduler_addr =
+            std::env::var("SCHEDULER_ADDR").unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
+        Self::with_scheduler_addr(host_id, hostname, ip_address, scheduler_addr)
+    }
+
+    /// Create an agent that connects to the given scheduler address.
+    /// Useful for integration tests where the scheduler runs on a random port.
+    pub fn with_scheduler_addr(
+        host_id: String,
+        hostname: String,
+        ip_address: String,
+        scheduler_addr: String,
+    ) -> Self {
         Self {
             host_id,
             hostname,
@@ -192,6 +207,7 @@ impl AgentServer {
             firecracker: FirecrackerManager::new(),
             scheduler_client: None,
             shutdown_flag: Arc::new(RwLock::new(false)),
+            scheduler_addr,
         }
     }
 
@@ -216,10 +232,10 @@ impl AgentServer {
         };
 
         let certs_for_task = certs.clone();
+        let scheduler_addr_for_task = self.scheduler_addr.clone();
 
         tokio::spawn(async move {
-            let mut scheduler_addr = std::env::var("SCHEDULER_ADDR")
-                .unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
+            let mut scheduler_addr = scheduler_addr_for_task;
 
             // With mTLS the H2 `:scheme` pseudo-header must be "https".
             // tonic derives the scheme from the URI, so switch to https:// here.
@@ -277,9 +293,9 @@ impl AgentServer {
             }
 
             // ── Metrics heartbeat ─────────────────────────────────────────────
+            // Report immediately after registration so the scheduler sees this
+            // worker as available without waiting for the first 5-second tick.
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
                 let metrics = metrics_collector.collect();
                 tracing::info!(
                     "Collected metrics: cpu={:.2} ram={}/{} disk={}/{}",
@@ -318,6 +334,8 @@ impl AgentServer {
                     },
                     Err(e) => tracing::error!("Failed to build scheduler endpoint: {}", e),
                 }
+
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
             }
         });
 
@@ -357,6 +375,7 @@ impl Clone for AgentServer {
             firecracker: self.firecracker.clone(),
             scheduler_client: self.scheduler_client.clone(),
             shutdown_flag: self.shutdown_flag.clone(),
+            scheduler_addr: self.scheduler_addr.clone(),
         }
     }
 }
@@ -521,7 +540,7 @@ mod tests {
             .start_vm(Request::new(start_vm_req("vm-def")))
             .await
             .unwrap();
-        let vm = server.firecracker.get_vm("vm-def").unwrap();
+        let vm = server.firecracker.get_vm("vm-def").await.unwrap();
         assert_eq!(vm.config.vcpus, 1);
         assert_eq!(vm.config.memory_mib, 256);
         assert_eq!(vm.config.disk_mib, 1024);
@@ -547,7 +566,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        let vm = server.firecracker.get_vm("vm-cfg").unwrap();
+        let vm = server.firecracker.get_vm("vm-cfg").await.unwrap();
         assert_eq!(vm.config.vcpus, 4);
         assert_eq!(vm.config.memory_mib, 2048);
         assert_eq!(vm.config.disk_mib, 8192);
@@ -692,7 +711,8 @@ mod tests {
             .unwrap();
         server
             .firecracker
-            .set_status_for_test("vm-run", crate::firecracker::VmStatus::Running);
+            .set_status_for_test("vm-run", crate::firecracker::VmStatus::Running)
+            .await;
         let resp = server
             .get_vm_status(Request::new(GetVmStatusRequest {
                 vm_id: "vm-run".to_string(),
@@ -712,7 +732,8 @@ mod tests {
             .unwrap();
         server
             .firecracker
-            .set_status_for_test("vm-stpd", crate::firecracker::VmStatus::Stopped);
+            .set_status_for_test("vm-stpd", crate::firecracker::VmStatus::Stopped)
+            .await;
         let resp = server
             .get_vm_status(Request::new(GetVmStatusRequest {
                 vm_id: "vm-stpd".to_string(),
@@ -732,7 +753,8 @@ mod tests {
             .unwrap();
         server
             .firecracker
-            .set_status_for_test("vm-fail", crate::firecracker::VmStatus::Failed);
+            .set_status_for_test("vm-fail", crate::firecracker::VmStatus::Failed)
+            .await;
         let resp = server
             .get_vm_status(Request::new(GetVmStatusRequest {
                 vm_id: "vm-fail".to_string(),
