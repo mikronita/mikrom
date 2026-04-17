@@ -34,6 +34,30 @@ pub struct DeployResponse {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct VmInfo {
+    pub job_id: String,
+    pub app_id: String,
+    pub app_name: String,
+    pub image: String,
+    pub status: String,
+    pub host_id: String,
+    pub vm_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VmStatusResponse {
+    pub job_id: String,
+    pub status: String,
+    pub host_id: String,
+    pub vm_id: String,
+    pub scheduled_at: i64,
+    pub started_at: i64,
+    pub stopped_at: i64,
+    pub error_message: String,
+}
+
 #[derive(Deserialize)]
 struct ErrorResponse {
     error: String,
@@ -130,6 +154,36 @@ impl MikromClient {
 
         let resp = req.send().await?.error_for_status()?;
         Ok(resp.json().await?)
+    }
+
+    pub async fn list_vms(&self) -> anyhow::Result<Vec<VmInfo>> {
+        let mut req = self.http.get(format!("{}/vms", self.base_url));
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        if resp.status().is_success() {
+            Ok(resp.json().await?)
+        } else {
+            let status = resp.status().as_u16();
+            let err: ErrorResponse = resp.json().await?;
+            bail!("{} (HTTP {})", err.error, status);
+        }
+    }
+
+    pub async fn get_vm(&self, job_id: &str) -> anyhow::Result<VmStatusResponse> {
+        let mut req = self.http.get(format!("{}/vms/{}", self.base_url, job_id));
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        if resp.status().is_success() {
+            Ok(resp.json().await?)
+        } else {
+            let status = resp.status().as_u16();
+            let err: ErrorResponse = resp.json().await?;
+            bail!("{} (HTTP {})", err.error, status);
+        }
     }
 }
 

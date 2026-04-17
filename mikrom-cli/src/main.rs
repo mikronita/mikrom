@@ -53,6 +53,15 @@ enum Commands {
         #[arg(long = "env", value_name = "KEY=VALUE")]
         env: Vec<String>,
     },
+
+    /// List all deployed VMs for the current user
+    Vms,
+
+    /// Show status of a specific VM by job ID
+    Vm {
+        /// Job ID returned by the deploy command
+        job_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -132,6 +141,44 @@ async fn main() -> anyhow::Result<()> {
             }
             if let Some(vm_id) = resp.vm_id {
                 println!("vm_id:   {}", vm_id);
+            }
+        }
+
+        Commands::Vms => {
+            let vms = client.list_vms().await.context("Failed to list VMs")?;
+            if vms.is_empty() {
+                println!("No VMs found.");
+            } else {
+                println!(
+                    "{:<38} {:<12} {:<20} {:<38} IMAGE",
+                    "JOB_ID", "STATUS", "APP_NAME", "VM_ID"
+                );
+                println!("{}", "-".repeat(120));
+                for vm in vms {
+                    println!(
+                        "{:<38} {:<12} {:<20} {:<38} {}",
+                        vm.job_id, vm.status, vm.app_name, vm.vm_id, vm.image
+                    );
+                }
+            }
+        }
+
+        Commands::Vm { job_id } => {
+            let vm = client
+                .get_vm(&job_id)
+                .await
+                .context("Failed to get VM status")?;
+            println!("job_id:       {}", vm.job_id);
+            println!("status:       {}", vm.status);
+            println!("host_id:      {}", vm.host_id);
+            println!("vm_id:        {}", vm.vm_id);
+            println!("scheduled_at: {}", vm.scheduled_at);
+            println!("started_at:   {}", vm.started_at);
+            if vm.stopped_at > 0 {
+                println!("stopped_at:   {}", vm.stopped_at);
+            }
+            if !vm.error_message.is_empty() {
+                println!("error:        {}", vm.error_message);
             }
         }
     }

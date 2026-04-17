@@ -7,9 +7,12 @@ pub mod db;
 pub mod deploy;
 pub mod models;
 pub mod repositories;
+pub mod scheduler;
+pub mod vms;
 
 pub use deploy::deploy_app;
 pub use repositories::user_repository::UserRepository;
+pub use vms::{get_vm_status, list_vms};
 
 use auth::{login, register};
 
@@ -35,6 +38,8 @@ pub fn create_app(state: AppState) -> Router {
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))
         .route("/deploy", axum::routing::post(deploy_app))
+        .route("/vms", get(list_vms))
+        .route("/vms/{job_id}", get(get_vm_status))
         .layer(cors)
         .with_state(state)
 }

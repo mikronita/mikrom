@@ -1,6 +1,5 @@
 use axum::{Json, extract::State, response::IntoResponse};
 use serde::{Deserialize, Serialize};
-use tonic::transport::Endpoint;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -23,7 +22,7 @@ pub struct DeployResponseBody {
 }
 
 pub async fn deploy_app(
-    _auth: crate::auth::AuthUser,
+    auth: crate::auth::AuthUser,
     State(_state): State<crate::AppState>,
     Json(payload): Json<DeployRequestBody>,
 ) -> impl IntoResponse {
@@ -36,50 +35,11 @@ pub async fn deploy_app(
         job_id
     );
 
-    let use_tls = std::env::var("USE_TLS")
-        .map(|v| v == "true")
-        .unwrap_or(false);
-
-    let mut scheduler_uri =
-        std::env::var("SCHEDULER_ADDR").unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
-
-    if use_tls && scheduler_uri.starts_with("http://") {
-        scheduler_uri = scheduler_uri.replacen("http://", "https://", 1);
-    }
-
     let vcpus = payload.vcpus.unwrap_or(1);
     let memory_mib = payload.memory_mib.unwrap_or(256);
     let disk_mib = payload.disk_mib.unwrap_or(1024);
 
-    let endpoint_result: Result<Endpoint, String> = (|| {
-        let ep =
-            Endpoint::new(scheduler_uri).map_err(|e| format!("Invalid scheduler URI: {}", e))?;
-
-        if use_tls {
-            let certs_dir = std::env::var("CERTS_DIR").unwrap_or_else(|_| "/certs/api".to_string());
-            let certs = mikrom_proto::tls::ServiceCerts::load(&certs_dir)
-                .map_err(|e| format!("Failed to load TLS certificates: {}", e))?;
-            ep.tls_config(certs.client_tls_config("mikrom-scheduler"))
-                .map_err(|e| format!("TLS config error: {}", e))
-        } else {
-            Ok(ep)
-        }
-    })();
-
-    let endpoint = match endpoint_result {
-        Ok(ep) => ep,
-        Err(msg) => {
-            return Json(DeployResponseBody {
-                job_id,
-                status: "error".to_string(),
-                host_id: None,
-                vm_id: None,
-                message: msg,
-            });
-        }
-    };
-
-    let response = match endpoint.connect().await {
+    let response = match crate::scheduler::connect().await {
         Ok(channel) => {
             let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
             let req = mikrom_proto::scheduler::DeployRequest {
@@ -92,7 +52,7 @@ pub async fn deploy_app(
                     disk_mib,
                     env: payload.env.clone().unwrap_or_default(),
                 }),
-                user_id: "default".to_string(),
+                user_id: auth.user_id,
             };
 
             match client.deploy_app(req).await {
@@ -100,7 +60,7 @@ pub async fn deploy_app(
                     let inner = response.into_inner();
                     DeployResponseBody {
                         job_id: inner.job_id,
-                        status: format!("{:?}", inner.status),
+                        status: crate::scheduler::status_name(inner.status).to_string(),
                         host_id: Some(inner.host_id).filter(|s| !s.is_empty()),
                         vm_id: Some(inner.vm_id).filter(|s| !s.is_empty()),
                         message: inner.message,
@@ -115,14 +75,14 @@ pub async fn deploy_app(
                 },
             }
         }
-        Err(e) => {
-            tracing::error!("Failed to connect to scheduler: {}", e);
+        Err(msg) => {
+            tracing::error!("Failed to connect to scheduler: {}", msg);
             DeployResponseBody {
                 job_id: job_id.clone(),
                 status: "error".to_string(),
                 host_id: None,
                 vm_id: None,
-                message: format!("Scheduler unavailable: {}", e),
+                message: msg,
             }
         }
     };
