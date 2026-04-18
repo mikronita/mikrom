@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # protobuf-compiler must come before any cargo invocation because
       # mikrom-proto/build.rs calls tonic_build::compile_protos at build time.
@@ -59,13 +59,13 @@ jobs:
       # pnpm-lock.yaml uses lockfileVersion 9.0, which requires pnpm ≥ 9.
       # package.json has no "packageManager" field, so we pin the version here.
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9
           run_install: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
@@ -91,7 +91,7 @@ jobs:
     # (no testcontainers). A service container is the correct approach here.
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_USER: mikrom
           POSTGRES_PASSWORD: mikrom_password
@@ -106,7 +106,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system dependencies
         run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends protobuf-compiler
@@ -181,7 +181,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Tags generated:
       #   push to main          → :latest  :main  :<sha>
@@ -189,7 +189,7 @@ jobs:
       #   push of v1.2.3-rc.1   → :v1.2.3-rc.1  :<sha>   (no :latest for pre-release)
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
           tags: |
@@ -204,7 +204,7 @@ jobs:
       # Uses GITHUB_TOKEN automatically — no extra secret needed for ghcr.io
       # as long as permissions.packages: write is set above.
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -212,14 +212,14 @@ jobs:
 
       # Required for --cache-from/--cache-to with type=gha
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # scope isolates the GHA layer cache per image so parallel matrix jobs
       # don't overwrite each other's cache entries.
       # provenance: false avoids multi-platform attestation manifests that
       # older container runtimes cannot parse.
       - name: Build and push ${{ matrix.image }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
