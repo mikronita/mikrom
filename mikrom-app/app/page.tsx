@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { 
   Box, 
@@ -13,7 +14,12 @@ import { isAuthenticated } from "@/lib/auth";
 import { Button } from "@/components/ui/Button";
 
 export default function Home() {
-  const authenticated = typeof window !== "undefined" ? isAuthenticated() : false;
+  const [authenticated, setAuthenticated] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAuthenticated(isAuthenticated());
+  }, []);
 
   return (
     <div className="flex flex-col min-h-screen bg-white dark:bg-zinc-950 selection:bg-zinc-900 selection:text-white dark:selection:bg-white dark:selection:text-black">
