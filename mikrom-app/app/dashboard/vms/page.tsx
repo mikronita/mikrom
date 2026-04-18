@@ -7,7 +7,6 @@ import {
   Server, 
   Search,
   ExternalLink,
-  Loader2,
   AlertCircle,
   Filter
 } from "lucide-react";
@@ -20,7 +19,7 @@ import { listVms, VmInfo } from "@/lib/api";
 
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
@@ -39,7 +38,7 @@ export default function VmsPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const fetchVms = async () => {
+  const fetchVms = React.useCallback(async () => {
     const token = getToken();
     if (!token) return;
     setLoading(true);
@@ -51,11 +50,14 @@ export default function VmsPage() {
       setVms(result.data ?? []);
     }
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
-    fetchVms();
-  }, []);
+    const init = async () => {
+      await fetchVms();
+    };
+    init();
+  }, [fetchVms]);
 
   const filteredVms = vms.filter(vm => 
     vm.app_name.toLowerCase().includes(searchQuery.toLowerCase()) ||

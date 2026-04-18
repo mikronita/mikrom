@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Box, ArrowLeft, Loader2, AlertCircle, UserPlus } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle, UserPlus } from "lucide-react";
 
 import { register } from "@/lib/api";
 import { Button } from "@/components/ui/Button";

@@ -7,7 +7,6 @@ import {
   Zap, 
   Shield, 
   Cpu, 
-  Cloud,
   CheckCircle2
 } from "lucide-react";
 import { isAuthenticated } from "@/lib/auth";

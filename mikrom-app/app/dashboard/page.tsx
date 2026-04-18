@@ -63,7 +63,7 @@ export default function DashboardPage() {
   const [deploying, setDeploying] = useState(false);
   const [deployError, setDeployError] = useState<string | null>(null);
 
-  const fetchVms = async () => {
+  const fetchVms = React.useCallback(async () => {
     const token = getToken();
     if (!token) return;
     setLoading(true);
@@ -75,11 +75,14 @@ export default function DashboardPage() {
       setVms(result.data ?? []);
     }
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
-    fetchVms();
-  }, []);
+    const init = async () => {
+      await fetchVms();
+    };
+    init();
+  }, [fetchVms]);
 
   const handleDeploySubmit = async (e: React.FormEvent) => {
     e.preventDefault();

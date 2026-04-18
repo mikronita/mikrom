@@ -9,13 +9,12 @@ import {
   Clock, 
   Server, 
   Hash, 
-  Activity, 
-  Calendar,
   AlertCircle,
   Loader2,
   Terminal,
   Cpu
 } from "lucide-react";
+import * as React from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -24,7 +23,7 @@ import { getVm, VmStatus } from "@/lib/api";
 
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
 
 function getStatusVariant(status: string): "success" | "warning" | "danger" | "secondary" {
@@ -79,7 +78,7 @@ export default function VmDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchVm = async () => {
+  const fetchVm = React.useCallback(async () => {
     const token = getToken();
     if (!token) return;
     setLoading(true);
@@ -91,11 +90,14 @@ export default function VmDetailPage() {
       setVm(result.data ?? null);
     }
     setLoading(false);
-  };
+  }, [jobId]);
 
   useEffect(() => {
-    fetchVm();
-  }, [jobId]);
+    const init = async () => {
+      await fetchVm();
+    };
+    init();
+  }, [fetchVm]);
 
   return (
     <AuthGuard>

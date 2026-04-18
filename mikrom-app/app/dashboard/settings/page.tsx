@@ -2,7 +2,6 @@
 
 import { 
   User, 
-  Shield, 
   Bell, 
   Key, 
   CreditCard,
