@@ -224,9 +224,8 @@ impl SchedulerService for SchedulerServer {
     ) -> Result<Response<CancelResponse>, Status> {
         let req = request.into_inner();
 
-        if let Some(mut job) = self.scheduler.get_job(&req.job_id) {
-            job.cancel();
-            self.scheduler.update_job_status(&req.job_id, job.status);
+        if let Some(job) = self.scheduler.get_job(&req.job_id) {
+            self.scheduler.cancel_job(&req.job_id);
 
             if let Some(vm_id) = &job.vm_id {
                 let _ = self

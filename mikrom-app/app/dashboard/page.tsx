@@ -28,6 +28,10 @@ import { Input } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 
+function normalizeStatus(status: string): string {
+  return status.toLowerCase() === "cancelled" ? "stopped" : status;
+}
+
 function getStatusVariant(status: string): "success" | "warning" | "danger" | "secondary" {
   const s = status.toLowerCase();
   if (s === "running") return "success";
@@ -251,7 +255,7 @@ export default function DashboardPage() {
                             <div className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
                               {vm.app_name}
                               <Badge variant={getStatusVariant(vm.status)} className="capitalize px-1.5 py-0 h-4 text-[10px]">
-                                {vm.status}
+                                {normalizeStatus(vm.status)}
                               </Badge>
                             </div>
                             <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-0.5 truncate max-w-[150px] sm:max-w-xs">

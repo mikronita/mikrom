@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ElementType, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ElementType, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { 
@@ -15,8 +15,6 @@ import {
   Cpu,
   Square
 } from "lucide-react";
-import * as React from "react";
-
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { getToken } from "@/lib/auth";
@@ -26,6 +24,10 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
+
+function normalizeStatus(status: string): string {
+  return status.toLowerCase() === "cancelled" ? "stopped" : status;
+}
 
 function getStatusVariant(status: string): "success" | "warning" | "danger" | "secondary" {
   const s = status.toLowerCase();
@@ -82,10 +84,13 @@ export default function VmDetailPage() {
   const [stopError, setStopError] = useState<string | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);
 
-  const fetchVm = useCallback(async () => {
+  const vmRef = useRef<VmStatus | null>(null);
+  useEffect(() => { vmRef.current = vm; }, [vm]);
+
+  const fetchVm = useCallback(async (silent = false) => {
     const token = getToken();
     if (!token) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     const result = await getVm(token, jobId);
     if (result.error) {
@@ -93,7 +98,7 @@ export default function VmDetailPage() {
     } else {
       setVm(result.data ?? null);
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, [jobId]);
 
   const isStoppable = (status: string) => {
@@ -117,10 +122,29 @@ export default function VmDetailPage() {
   };
 
   useEffect(() => {
+    let mounted = true;
+
     const init = async () => {
-      await fetchVm();
+      if (mounted) {
+        await fetchVm();
+      }
     };
+
     init();
+
+    const interval = setInterval(() => {
+      if (mounted) {
+        const current = vmRef.current;
+        if (!current || isStoppable(current.status)) {
+          fetchVm(true);
+        }
+      }
+    }, 5000);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
   }, [fetchVm]);
 
   return (
@@ -139,7 +163,7 @@ export default function VmDetailPage() {
                 VM Detail
                 {vm && (
                   <Badge variant={getStatusVariant(vm.status)} className="capitalize px-2 py-0.5 text-xs">
-                    {vm.status}
+                    {normalizeStatus(vm.status)}
                   </Badge>
                 )}
               </h1>
@@ -148,7 +172,7 @@ export default function VmDetailPage() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm" onClick={fetchVm} disabled={loading}>
+              <Button variant="outline" size="sm" onClick={() => fetchVm()} disabled={loading}>
                 <RefreshCw className={cn("w-4 h-4 mr-2", loading && "animate-spin")} />
                 Refresh
               </Button>
@@ -184,7 +208,7 @@ export default function VmDetailPage() {
             <div className="p-4 flex items-center gap-3 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/20 rounded-xl">
               <AlertCircle className="w-5 h-5" />
               <div className="flex-1 font-medium">{error}</div>
-              <Button size="sm" variant="outline" onClick={fetchVm} className="h-8">Try again</Button>
+              <Button size="sm" variant="outline" onClick={() => fetchVm()} className="h-8">Try again</Button>
             </div>
           )}
 
@@ -285,7 +309,7 @@ export default function VmDetailPage() {
                       <div className="relative flex items-center gap-4">
                         <div className={cn(
                           "w-4 h-4 rounded-full z-10",
-                          vm.stopped_at ? "bg-red-500" : "bg-zinc-200 dark:bg-zinc-800"
+                          (vm.stopped_at || !isStoppable(vm.status)) ? "bg-red-500" : "bg-zinc-200 dark:bg-zinc-800"
                         )} />
                         <div>
                           <p className="text-xs font-bold text-zinc-400 uppercase tracking-tighter">Stopped</p>
