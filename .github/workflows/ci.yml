@@ -72,7 +72,7 @@ jobs:
           cache-dependency-path: mikrom-app/pnpm-lock.yaml
 
       - name: Restore Next.js cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             mikrom-app/.next/cache
