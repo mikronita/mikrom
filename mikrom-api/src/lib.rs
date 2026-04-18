@@ -20,6 +20,8 @@ use auth::{login, register};
 pub struct AppState {
     pub user_repo: Arc<dyn UserRepository>,
     pub scheduler_client: Option<SchedulerClient>,
+    pub scheduler_config: scheduler::SchedulerConfig,
+    pub jwt_secret: String,
 }
 
 #[derive(Clone)]

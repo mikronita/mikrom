@@ -65,9 +65,6 @@ impl UserRepository for NoopRepo {
     }
 }
 
-// Serializes tests that mutate env vars (SCHEDULER_ADDR, JWT_SECRET).
-static ENV_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 const E2E_JWT_SECRET: &str = "e2e-test-secret-do-not-use-in-prod";
 
 // ── test 1: gRPC path only ────────────────────────────────────────────────────
@@ -158,10 +155,6 @@ async fn test_scheduler_agent_grpc_e2e() {
 /// Uses a `NoopRepo` for auth (no PostgreSQL required) and a fixed JWT secret.
 #[tokio::test]
 async fn test_http_api_deploy_e2e() {
-    // Serialize env-var mutation so this test does not race with other tests
-    // that also touch SCHEDULER_ADDR or JWT_SECRET.
-    let _guard = ENV_MUTEX.lock().await;
-
     let scheduler_port = free_port().await;
     let agent_port = free_port().await;
     let scheduler_url = format!("http://127.0.0.1:{scheduler_port}");
@@ -194,16 +187,15 @@ async fn test_http_api_deploy_e2e() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // ── build the API router ──────────────────────────────────────────────────
-    // Point the API at our in-process scheduler; use env var since the deploy
-    // handler reads SCHEDULER_ADDR at request time.
-    unsafe {
-        std::env::set_var("SCHEDULER_ADDR", &scheduler_url);
-        std::env::set_var("JWT_SECRET", E2E_JWT_SECRET);
-    }
-
     let state = AppState {
         user_repo: Arc::new(NoopRepo),
         scheduler_client: None,
+        scheduler_config: mikrom_api::scheduler::SchedulerConfig {
+            addr: scheduler_url.clone(),
+            use_tls: false,
+            certs_dir: None,
+        },
+        jwt_secret: E2E_JWT_SECRET.to_string(),
     };
     let app = create_app(state);
 
@@ -225,11 +217,6 @@ async fn test_http_api_deploy_e2e() {
         )
         .await
         .unwrap();
-
-    unsafe {
-        std::env::remove_var("SCHEDULER_ADDR");
-        std::env::remove_var("JWT_SECRET");
-    }
 
     assert_eq!(
         response.status(),

@@ -25,13 +25,13 @@ impl IntoResponse for AuthError {
     }
 }
 
-impl<S> FromRequestParts<S> for AuthUser
-where
-    S: Send + Sync,
-{
+impl FromRequestParts<crate::AppState> for AuthUser {
     type Rejection = Response;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &crate::AppState,
+    ) -> Result<Self, Self::Rejection> {
         let auth_header = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
@@ -50,10 +50,8 @@ where
             .into_response()
         })?;
 
-        let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string());
-
-        let Claims { sub, email, .. } =
-            crate::auth::jwt::verify_token(token, &secret).map_err(|_| {
+        let Claims { sub, email, .. } = crate::auth::jwt::verify_token(token, &state.jwt_secret)
+            .map_err(|_| {
                 AuthError {
                     error: "Invalid or expired token".to_string(),
                 }
@@ -70,16 +68,42 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use axum::{body::Body, http::Request, routing::get};
+    use std::sync::Arc;
     use tower::ServiceExt;
+
+    use crate::repositories::user_repository::{DbError, NewUser, User, UserRepository};
+
+    struct NoopRepo;
+    #[async_trait]
+    impl UserRepository for NoopRepo {
+        async fn find_by_email(&self, _: &str) -> Result<Option<User>, DbError> {
+            Ok(None)
+        }
+        async fn create(&self, _: NewUser) -> Result<sqlx::types::Uuid, DbError> {
+            Ok(sqlx::types::Uuid::new_v4())
+        }
+        async fn count_by_email(&self, _: &str) -> Result<i64, DbError> {
+            Ok(0)
+        }
+    }
 
     /// Minimal handler that uses AuthUser — returns 200 with the user id.
     async fn whoami(auth: AuthUser) -> axum::Json<serde_json::Value> {
         axum::Json(serde_json::json!({ "user_id": auth.user_id, "email": auth.email }))
     }
 
-    fn test_app() -> axum::Router {
-        axum::Router::new().route("/whoami", get(whoami))
+    fn make_app(jwt_secret: &str) -> axum::Router {
+        let state = crate::AppState {
+            user_repo: Arc::new(NoopRepo),
+            scheduler_client: None,
+            scheduler_config: crate::scheduler::SchedulerConfig::default(),
+            jwt_secret: jwt_secret.to_string(),
+        };
+        axum::Router::new()
+            .route("/whoami", get(whoami))
+            .with_state(state)
     }
 
     fn make_token(secret: &str) -> String {
@@ -90,7 +114,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_missing_auth_header_returns_401() {
-        let resp = test_app()
+        let resp = make_app("any-secret")
             .oneshot(
                 Request::builder()
                     .method("GET")
@@ -105,7 +129,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_wrong_scheme_returns_401() {
-        let resp = test_app()
+        let resp = make_app("any-secret")
             .oneshot(
                 Request::builder()
                     .method("GET")
@@ -121,7 +145,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_malformed_token_returns_401() {
-        let resp = test_app()
+        let resp = make_app("any-secret")
             .oneshot(
                 Request::builder()
                     .method("GET")
@@ -137,9 +161,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_wrong_secret_returns_401() {
-        unsafe { std::env::set_var("JWT_SECRET", "correct-secret") };
         let token = make_token("wrong-secret");
-        let resp = test_app()
+        let resp = make_app("correct-secret")
             .oneshot(
                 Request::builder()
                     .method("GET")
@@ -151,7 +174,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-        unsafe { std::env::remove_var("JWT_SECRET") };
     }
 
     // ── valid token ────────────────────────────────────────────────────────────
@@ -159,9 +181,8 @@ mod tests {
     #[tokio::test]
     async fn test_valid_token_returns_200_with_claims() {
         let secret = "test-secret-extractor";
-        unsafe { std::env::set_var("JWT_SECRET", secret) };
         let token = make_token(secret);
-        let resp = test_app()
+        let resp = make_app(secret)
             .oneshot(
                 Request::builder()
                     .method("GET")
@@ -177,14 +198,13 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(json["user_id"], "uid-1");
         assert_eq!(json["email"], "user@example.com");
-        unsafe { std::env::remove_var("JWT_SECRET") };
     }
 
     // ── error response JSON ────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_unauthorized_response_has_error_field() {
-        let resp = test_app()
+        let resp = make_app("any-secret")
             .oneshot(
                 Request::builder()
                     .method("GET")

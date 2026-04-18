@@ -23,7 +23,7 @@ pub struct DeployResponseBody {
 
 pub async fn deploy_app(
     auth: crate::auth::AuthUser,
-    State(_state): State<crate::AppState>,
+    State(state): State<crate::AppState>,
     Json(payload): Json<DeployRequestBody>,
 ) -> impl IntoResponse {
     let job_id = Uuid::new_v4().to_string();
@@ -39,7 +39,7 @@ pub async fn deploy_app(
     let memory_mib = payload.memory_mib.unwrap_or(256);
     let disk_mib = payload.disk_mib.unwrap_or(1024);
 
-    let response = match crate::scheduler::connect().await {
+    let response = match crate::scheduler::connect(&state.scheduler_config).await {
         Ok(channel) => {
             let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
             let req = mikrom_proto::scheduler::DeployRequest {
@@ -272,9 +272,6 @@ mod tests {
     }
 
     // ── deploy_app handler ───────────────────────────────────────────────────
-    //
-    // Env-var-mutating tests are serialized with ENV_MUTEX to avoid data races
-    // when cargo test runs them in parallel within the same process.
 
     use crate::repositories::user_repository::{DbError, NewUser, User, UserRepository};
     use async_trait::async_trait;
@@ -296,20 +293,39 @@ mod tests {
         }
     }
 
-    // tokio::sync::Mutex is async-aware: safe to hold across await points.
-    static ENV_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    const TEST_JWT_SECRET: &str = "deploy-test-secret";
 
-    fn make_deploy_app() -> axum::Router {
+    fn make_deploy_app(scheduler_addr: &str) -> axum::Router {
         let state = crate::AppState {
             user_repo: Arc::new(NoopRepo),
             scheduler_client: None,
+            scheduler_config: crate::scheduler::SchedulerConfig {
+                addr: scheduler_addr.to_string(),
+                use_tls: false,
+                certs_dir: None,
+            },
+            jwt_secret: TEST_JWT_SECRET.to_string(),
         };
         axum::Router::new()
             .route("/deploy", axum::routing::post(deploy_app))
             .with_state(state)
     }
 
-    const TEST_JWT_SECRET: &str = "deploy-test-secret";
+    fn make_deploy_app_tls(scheduler_addr: &str, certs_dir: &str) -> axum::Router {
+        let state = crate::AppState {
+            user_repo: Arc::new(NoopRepo),
+            scheduler_client: None,
+            scheduler_config: crate::scheduler::SchedulerConfig {
+                addr: scheduler_addr.to_string(),
+                use_tls: true,
+                certs_dir: Some(certs_dir.to_string()),
+            },
+            jwt_secret: TEST_JWT_SECRET.to_string(),
+        };
+        axum::Router::new()
+            .route("/deploy", axum::routing::post(deploy_app))
+            .with_state(state)
+    }
 
     fn valid_token() -> String {
         crate::auth::jwt::create_token("uid-test", "test@example.com", TEST_JWT_SECRET).unwrap()
@@ -340,81 +356,41 @@ mod tests {
 
     #[tokio::test]
     async fn test_deploy_app_response_always_200_ok() {
-        let _guard = ENV_MUTEX.lock().await;
-        // Point to a definitely-unreachable address so no real scheduler needed.
-        unsafe {
-            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59990");
-            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
-        }
-        let json = post_deploy(make_deploy_app()).await;
+        let json = post_deploy(make_deploy_app("http://127.0.0.1:59990")).await;
         assert!(json.get("job_id").is_some());
         assert!(json.get("status").is_some());
         assert!(json.get("message").is_some());
-        unsafe {
-            std::env::remove_var("SCHEDULER_ADDR");
-            std::env::remove_var("JWT_SECRET");
-        }
     }
 
     #[tokio::test]
     async fn test_deploy_app_response_job_id_is_non_empty_uuid() {
-        let _guard = ENV_MUTEX.lock().await;
-        unsafe {
-            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59991");
-            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
-        }
-        let json = post_deploy(make_deploy_app()).await;
+        let json = post_deploy(make_deploy_app("http://127.0.0.1:59991")).await;
         let job_id = json["job_id"].as_str().unwrap();
         assert_eq!(job_id.len(), 36, "job_id should be a UUID (36 chars)");
-        unsafe {
-            std::env::remove_var("SCHEDULER_ADDR");
-            std::env::remove_var("JWT_SECRET");
-        }
     }
 
     #[tokio::test]
     async fn test_deploy_app_scheduler_unreachable_returns_error_status() {
-        let _guard = ENV_MUTEX.lock().await;
-        unsafe {
-            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59992");
-            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
-        }
-        let json = post_deploy(make_deploy_app()).await;
+        let json = post_deploy(make_deploy_app("http://127.0.0.1:59992")).await;
         assert_eq!(json["status"], "error");
         let msg = json["message"].as_str().unwrap();
         assert!(!msg.is_empty(), "error message should be set");
-        unsafe {
-            std::env::remove_var("SCHEDULER_ADDR");
-            std::env::remove_var("JWT_SECRET");
-        }
     }
 
     #[tokio::test]
     async fn test_deploy_app_scheduler_unreachable_host_and_vm_are_null() {
-        let _guard = ENV_MUTEX.lock().await;
-        unsafe {
-            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59993");
-            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
-        }
-        let json = post_deploy(make_deploy_app()).await;
+        let json = post_deploy(make_deploy_app("http://127.0.0.1:59993")).await;
         assert!(json["host_id"].is_null());
         assert!(json["vm_id"].is_null());
-        unsafe {
-            std::env::remove_var("SCHEDULER_ADDR");
-            std::env::remove_var("JWT_SECRET");
-        }
     }
 
     #[tokio::test]
     async fn test_deploy_app_tls_cert_loading_failure_returns_error_message() {
-        let _guard = ENV_MUTEX.lock().await;
-        unsafe {
-            std::env::set_var("USE_TLS", "true");
-            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59994");
-            std::env::set_var("CERTS_DIR", "/nonexistent-certs-dir-for-test");
-            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
-        }
-        let json = post_deploy(make_deploy_app()).await;
+        let json = post_deploy(make_deploy_app_tls(
+            "http://127.0.0.1:59994",
+            "/nonexistent-certs-dir-for-test",
+        ))
+        .await;
         assert_eq!(json["status"], "error");
         let msg = json["message"].as_str().unwrap().to_lowercase();
         assert!(
@@ -422,30 +398,17 @@ mod tests {
             "expected TLS error in message, got: {}",
             msg
         );
-        unsafe {
-            std::env::remove_var("USE_TLS");
-            std::env::remove_var("SCHEDULER_ADDR");
-            std::env::remove_var("CERTS_DIR");
-            std::env::remove_var("JWT_SECRET");
-        }
     }
 
     #[tokio::test]
     async fn test_deploy_app_http_rewritten_to_https_when_use_tls_true() {
-        // When USE_TLS=true and SCHEDULER_ADDR starts with http://,
-        // the handler rewrites it to https:// before building the endpoint.
-        // TLS cert loading will fail (no certs dir), proving the rewrite happened
-        // because a plain HTTP endpoint would produce a different error.
-        let _guard = ENV_MUTEX.lock().await;
-        unsafe {
-            std::env::set_var("USE_TLS", "true");
-            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59995");
-            std::env::set_var("CERTS_DIR", "/nonexistent-dir");
-            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
-        }
-        let json = post_deploy(make_deploy_app()).await;
-        // The error must come from TLS cert loading, not from an HTTP connection attempt,
-        // which confirms the URI was rewritten to https://.
+        // With use_tls=true and addr starting with http://, the handler rewrites it to https://.
+        // TLS cert loading fails, confirming the rewrite happened.
+        let json = post_deploy(make_deploy_app_tls(
+            "http://127.0.0.1:59995",
+            "/nonexistent-dir",
+        ))
+        .await;
         assert_eq!(json["status"], "error");
         let msg = json["message"].as_str().unwrap();
         assert!(
@@ -453,23 +416,11 @@ mod tests {
             "expected TLS-related error; got: {}",
             msg
         );
-        unsafe {
-            std::env::remove_var("USE_TLS");
-            std::env::remove_var("SCHEDULER_ADDR");
-            std::env::remove_var("CERTS_DIR");
-            std::env::remove_var("JWT_SECRET");
-        }
     }
 
     #[tokio::test]
     async fn test_deploy_app_default_resource_values_accepted() {
-        let _guard = ENV_MUTEX.lock().await;
-        unsafe {
-            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59996");
-            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
-        }
-        // Payload with no vcpus/memory/disk — handler must apply defaults without panicking.
-        let resp = make_deploy_app()
+        let resp = make_deploy_app("http://127.0.0.1:59996")
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -482,20 +433,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), axum::http::StatusCode::OK);
-        unsafe {
-            std::env::remove_var("SCHEDULER_ADDR");
-            std::env::remove_var("JWT_SECRET");
-        }
     }
 
     #[tokio::test]
     async fn test_deploy_app_with_env_vars_in_payload() {
-        let _guard = ENV_MUTEX.lock().await;
-        unsafe {
-            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59997");
-            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
-        }
-        let resp = make_deploy_app()
+        let resp = make_deploy_app("http://127.0.0.1:59997")
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -510,22 +452,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), axum::http::StatusCode::OK);
-        unsafe {
-            std::env::remove_var("SCHEDULER_ADDR");
-            std::env::remove_var("JWT_SECRET");
-        }
     }
 
     // ── auth guard on /deploy ──────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_deploy_without_token_returns_401() {
-        let _guard = ENV_MUTEX.lock().await;
-        unsafe {
-            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59998");
-            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
-        }
-        let resp = make_deploy_app()
+        let resp = make_deploy_app("http://127.0.0.1:59998")
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -537,20 +470,60 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), axum::http::StatusCode::UNAUTHORIZED);
-        unsafe {
-            std::env::remove_var("SCHEDULER_ADDR");
-            std::env::remove_var("JWT_SECRET");
+    }
+
+    // ── deploy_app handler — real in-process scheduler ────────────────────────
+
+    async fn start_scheduler() -> u16 {
+        use mikrom_scheduler::server::SchedulerServer;
+        use std::net::SocketAddr;
+        let port = {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        tokio::spawn(async move {
+            SchedulerServer::new(None)
+                .unwrap()
+                .serve(addr)
+                .await
+                .unwrap();
+        });
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+                .await
+                .is_ok()
+            {
+                break;
+            }
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
+        port
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_with_real_scheduler_covers_grpc_ok_branch() {
+        let port = start_scheduler().await;
+        // No workers → scheduler responds Ok(Failed). Covers the gRPC Ok branch.
+        let json = post_deploy(make_deploy_app(&format!("http://127.0.0.1:{port}"))).await;
+        assert!(!json["job_id"].as_str().unwrap().is_empty());
+        // Status is scheduler-reported, not "error" (connection error).
+        assert_ne!(json["status"].as_str().unwrap(), "error");
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_with_real_scheduler_response_has_job_id_and_message() {
+        let port = start_scheduler().await;
+        let json = post_deploy(make_deploy_app(&format!("http://127.0.0.1:{port}"))).await;
+        assert!(!json["message"].as_str().unwrap().is_empty());
+        assert!(json["host_id"].is_null()); // no workers → empty host_id filtered to null
     }
 
     #[tokio::test]
     async fn test_deploy_with_invalid_token_returns_401() {
-        let _guard = ENV_MUTEX.lock().await;
-        unsafe {
-            std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59999");
-            std::env::set_var("JWT_SECRET", TEST_JWT_SECRET);
-        }
-        let resp = make_deploy_app()
+        let resp = make_deploy_app("http://127.0.0.1:59999")
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -563,9 +536,5 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), axum::http::StatusCode::UNAUTHORIZED);
-        unsafe {
-            std::env::remove_var("SCHEDULER_ADDR");
-            std::env::remove_var("JWT_SECRET");
-        }
     }
 }

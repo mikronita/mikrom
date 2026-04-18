@@ -1,24 +1,49 @@
 use tonic::transport::Channel;
 
-/// Build and connect a gRPC channel to the scheduler, respecting USE_TLS / CERTS_DIR.
-pub async fn connect() -> Result<Channel, String> {
-    let use_tls = std::env::var("USE_TLS")
-        .map(|v| v == "true")
-        .unwrap_or(false);
+#[derive(Clone, Debug)]
+pub struct SchedulerConfig {
+    pub addr: String,
+    pub use_tls: bool,
+    pub certs_dir: Option<String>,
+}
 
-    let mut uri =
-        std::env::var("SCHEDULER_ADDR").unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            addr: "http://127.0.0.1:5002".to_string(),
+            use_tls: false,
+            certs_dir: None,
+        }
+    }
+}
 
-    if use_tls && uri.starts_with("http://") {
+impl SchedulerConfig {
+    pub fn from_env() -> Self {
+        Self {
+            addr: std::env::var("SCHEDULER_ADDR")
+                .unwrap_or_else(|_| "http://127.0.0.1:5002".to_string()),
+            use_tls: std::env::var("USE_TLS")
+                .map(|v| v == "true")
+                .unwrap_or(false),
+            certs_dir: std::env::var("CERTS_DIR").ok(),
+        }
+    }
+}
+
+/// Build and connect a gRPC channel to the scheduler.
+pub async fn connect(config: &SchedulerConfig) -> Result<Channel, String> {
+    let mut uri = config.addr.clone();
+
+    if config.use_tls && uri.starts_with("http://") {
         uri = uri.replacen("http://", "https://", 1);
     }
 
     let ep =
         tonic::transport::Endpoint::new(uri).map_err(|e| format!("Invalid scheduler URI: {e}"))?;
 
-    let ep = if use_tls {
-        let certs_dir = std::env::var("CERTS_DIR").unwrap_or_else(|_| "/certs/api".to_string());
-        let certs = mikrom_proto::tls::ServiceCerts::load(&certs_dir)
+    let ep = if config.use_tls {
+        let certs_dir = config.certs_dir.as_deref().unwrap_or("/certs/api");
+        let certs = mikrom_proto::tls::ServiceCerts::load(certs_dir)
             .map_err(|e| format!("Failed to load TLS certificates: {e}"))?;
         ep.tls_config(certs.client_tls_config("mikrom-scheduler"))
             .map_err(|e| format!("TLS config error: {e}"))?
@@ -65,29 +90,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_returns_error_when_scheduler_unreachable() {
-        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59940") };
-        unsafe { std::env::remove_var("USE_TLS") };
-        let result = connect().await;
+        let config = SchedulerConfig {
+            addr: "http://127.0.0.1:59940".to_string(),
+            use_tls: false,
+            certs_dir: None,
+        };
+        let result = connect(&config).await;
         assert!(result.is_err());
         let msg = result.unwrap_err();
         assert!(
             msg.contains("Scheduler unavailable") || msg.contains("unavailable"),
             "unexpected error: {msg}"
         );
-        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
     }
 
     #[tokio::test]
     async fn test_connect_tls_returns_error() {
-        // With USE_TLS=true the endpoint is rewritten to https:// and a TLS
+        // With use_tls=true the endpoint is rewritten to https:// and a TLS
         // handshake is attempted. With nothing listening the connection must fail.
-        unsafe { std::env::set_var("USE_TLS", "true") };
-        unsafe { std::env::set_var("SCHEDULER_ADDR", "http://127.0.0.1:59941") };
-        unsafe { std::env::set_var("CERTS_DIR", "/nonexistent-scheduler-test-certs") };
-        let result = connect().await;
+        let config = SchedulerConfig {
+            addr: "http://127.0.0.1:59941".to_string(),
+            use_tls: true,
+            certs_dir: Some("/nonexistent-scheduler-test-certs".to_string()),
+        };
+        let result = connect(&config).await;
         assert!(result.is_err(), "expected error, got ok");
-        unsafe { std::env::remove_var("USE_TLS") };
-        unsafe { std::env::remove_var("SCHEDULER_ADDR") };
-        unsafe { std::env::remove_var("CERTS_DIR") };
     }
 }

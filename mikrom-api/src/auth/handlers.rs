@@ -161,8 +161,7 @@ pub async fn login(State(state): State<AppState>, Json(payload): Json<LoginReque
     };
 
     if verify(&payload.password, &user.password_hash).unwrap_or(false) {
-        let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string());
-        match crate::auth::jwt::create_token(&user.id.to_string(), &user.email, &jwt_secret) {
+        match crate::auth::jwt::create_token(&user.id.to_string(), &user.email, &state.jwt_secret) {
             Ok(token) => (StatusCode::OK, Json(LoginResponse { token })).into_response(),
             Err(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -242,6 +241,23 @@ mod tests {
         }
     }
 
+    /// Repository where count_by_email succeeds (email available) but create fails.
+    struct CreateFailsRepo;
+    #[async_trait]
+    impl UserRepository for CreateFailsRepo {
+        async fn find_by_email(&self, _: &str) -> Result<Option<User>, DbError> {
+            Ok(None)
+        }
+        async fn create(&self, _: NewUser) -> Result<Uuid, DbError> {
+            Err(DbError {
+                message: "insert error".to_string(),
+            })
+        }
+        async fn count_by_email(&self, _: &str) -> Result<i64, DbError> {
+            Ok(0)
+        }
+    }
+
     /// Repository that simulates a DB error on every call.
     struct ErrorRepo;
     #[async_trait]
@@ -282,6 +298,8 @@ mod tests {
         let state = crate::AppState {
             user_repo: Arc::new(repo),
             scheduler_client: None,
+            scheduler_config: crate::scheduler::SchedulerConfig::default(),
+            jwt_secret: "test-handlers-secret".to_string(),
         };
         axum::Router::new()
             .route("/auth/register", axum::routing::post(register))
@@ -405,6 +423,26 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
+    #[tokio::test]
+    async fn test_register_create_fails_returns_500_with_message() {
+        let resp = make_app(CreateFailsRepo)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/register")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"email":"new@example.com","password":"password123"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let json = body_json(resp).await;
+        assert_eq!(json["error"], "Failed to create user");
+    }
+
     // ── login — input validation ──────────────────────────────────────────────
 
     #[tokio::test]
@@ -492,7 +530,6 @@ mod tests {
             email: "user@example.com".to_string(),
             password_hash: hash,
         };
-        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
         let resp = make_app(StoredUserRepo(user))
             .oneshot(
                 Request::builder()

@@ -29,11 +29,13 @@ async fn setup_test_pool() -> PgPool {
     pool
 }
 
-fn create_app(pool: PgPool) -> axum::Router {
+fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
     let user_repo = PostgresUserRepository::new(Arc::new(pool));
     let state = AppState {
         user_repo: Arc::new(user_repo),
         scheduler_client: None,
+        scheduler_config: mikrom_api::scheduler::SchedulerConfig::default(),
+        jwt_secret: jwt_secret.to_string(),
     };
     axum::Router::new()
         .route("/auth/register", axum::routing::post(register))
@@ -43,12 +45,8 @@ fn create_app(pool: PgPool) -> axum::Router {
 
 #[tokio::test]
 async fn test_register_full_flow() {
-    unsafe {
-        env::set_var("JWT_SECRET", "integration-test-secret");
-    }
-
     let pool = setup_test_pool().await;
-    let app = create_app(pool);
+    let app = create_app(pool, "integration-test-secret");
     let email = format!("full_flow_{}@example.com", uuid::Uuid::new_v4());
 
     let response = app
@@ -82,12 +80,8 @@ async fn test_register_full_flow() {
 
 #[tokio::test]
 async fn test_login_full_flow() {
-    unsafe {
-        env::set_var("JWT_SECRET", "integration-test-secret");
-    }
-
     let pool = setup_test_pool().await;
-    let app = create_app(pool);
+    let app = create_app(pool, "integration-test-secret");
     let email = format!("login_full_{}@example.com", uuid::Uuid::new_v4());
 
     let _ = app
@@ -139,12 +133,8 @@ async fn test_login_full_flow() {
 
 #[tokio::test]
 async fn test_password_hash_long_password() {
-    unsafe {
-        env::set_var("JWT_SECRET", "integration-test-secret");
-    }
-
     let pool = setup_test_pool().await;
-    let app = create_app(pool);
+    let app = create_app(pool, "integration-test-secret");
     let email = format!("hash_long_{}@example.com", uuid::Uuid::new_v4());
 
     let response = app
@@ -170,12 +160,8 @@ async fn test_password_hash_long_password() {
 
 #[tokio::test]
 async fn test_multiple_registrations() {
-    unsafe {
-        env::set_var("JWT_SECRET", "integration-test-secret");
-    }
-
     let pool = setup_test_pool().await;
-    let app = create_app(pool);
+    let app = create_app(pool, "integration-test-secret");
     let email = format!("multi_{}@example.com", uuid::Uuid::new_v4());
 
     for i in 0..3 {
@@ -208,12 +194,8 @@ async fn test_multiple_registrations() {
 
 #[tokio::test]
 async fn test_register_and_login_workflow() {
-    unsafe {
-        env::set_var("JWT_SECRET", "workflow-test-secret");
-    }
-
     let pool = setup_test_pool().await;
-    let app = create_app(pool);
+    let app = create_app(pool, "integration-test-secret");
     let email = format!("workflow_{}@example.com", uuid::Uuid::new_v4());
     let password = "securePassword123";
 
@@ -270,12 +252,8 @@ async fn test_register_and_login_workflow() {
 
 #[tokio::test]
 async fn test_login_token_creation_with_valid_secret() {
-    unsafe {
-        env::set_var("JWT_SECRET", "valid-secret-for-testing");
-    }
-
     let pool = setup_test_pool().await;
-    let app = create_app(pool);
+    let app = create_app(pool, "integration-test-secret");
     let email = format!("token_valid_{}@example.com", uuid::Uuid::new_v4());
 
     let _ = app
