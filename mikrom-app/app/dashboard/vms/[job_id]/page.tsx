@@ -3,19 +3,36 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { 
+  ChevronLeft, 
+  RefreshCw, 
+  Clock, 
+  Server, 
+  Hash, 
+  Activity, 
+  Calendar,
+  AlertCircle,
+  Loader2,
+  Terminal,
+  Cpu
+} from "lucide-react";
+
 import { AuthGuard } from "@/components/AuthGuard";
-import { logout, getToken } from "@/lib/auth";
+import { DashboardLayout } from "@/components/DashboardLayout";
+import { getToken } from "@/lib/auth";
 import { getVm, VmStatus } from "@/lib/api";
 
-function statusBadge(status: string) {
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { cn } from "@/lib/utils";
+
+function getStatusVariant(status: string): "success" | "warning" | "danger" | "secondary" {
   const s = status.toLowerCase();
-  if (s === "running")
-    return "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400";
-  if (s === "scheduled" || s === "pending")
-    return "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400";
-  if (s === "failed" || s === "cancelled")
-    return "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400";
-  return "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400";
+  if (s === "running") return "success";
+  if (s === "scheduled" || s === "pending") return "warning";
+  if (s === "failed" || s === "cancelled") return "danger";
+  return "secondary";
 }
 
 function formatTimestamp(ts: number): string {
@@ -23,15 +40,33 @@ function formatTimestamp(ts: number): string {
   return new Date(ts * 1000).toLocaleString();
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function DetailRow({ 
+  icon: Icon, 
+  label, 
+  value, 
+  mono = false 
+}: { 
+  icon: React.ElementType; 
+  label: string; 
+  value: React.ReactNode;
+  mono?: boolean;
+}) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center py-3 border-b border-zinc-200 dark:border-zinc-800 last:border-0">
-      <dt className="text-sm font-medium text-zinc-500 dark:text-zinc-400 sm:w-40 shrink-0">
-        {label}
-      </dt>
-      <dd className="mt-1 sm:mt-0 text-sm text-zinc-900 dark:text-zinc-100 font-mono break-all">
-        {value}
-      </dd>
+    <div className="flex items-start gap-4 py-4">
+      <div className="mt-0.5 w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
+        <Icon className="w-4 h-4 text-zinc-500" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <dt className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
+          {label}
+        </dt>
+        <dd className={cn(
+          "text-sm text-zinc-900 dark:text-zinc-100 break-all",
+          mono && "font-mono bg-zinc-50 dark:bg-zinc-800/50 px-1.5 py-0.5 rounded"
+        )}>
+          {value}
+        </dd>
+      </div>
     </div>
   );
 }
@@ -59,119 +94,153 @@ export default function VmDetailPage() {
   };
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    getVm(token, jobId).then((result) => {
-      if (result.error) setError(result.error);
-      else setVm(result.data ?? null);
-      setLoading(false);
-    });
+    fetchVm();
   }, [jobId]);
 
   return (
     <AuthGuard>
-      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-        <header className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <div className="flex items-center gap-8">
-                <Link
-                  href="/dashboard"
-                  className="text-xl font-bold text-zinc-900 dark:text-zinc-50"
-                >
-                  Mikrom
-                </Link>
-                <nav className="hidden md:flex gap-6">
-                  <Link
-                    href="/dashboard"
-                    className="text-sm font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
-                  >
-                    Dashboard
-                  </Link>
-                  <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                    VM Detail
-                  </span>
-                </nav>
-              </div>
-              <button
-                onClick={logout}
-                className="text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </header>
-
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <Link
-                href="/dashboard"
-                className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 mb-2 inline-block"
-              >
-                ← Back to Dashboard
+      <DashboardLayout>
+        <div className="p-8 max-w-4xl mx-auto space-y-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <Link href="/dashboard">
+                <Button variant="ghost" size="sm" className="-ml-2 h-8 text-zinc-500 hover:text-zinc-900">
+                  <ChevronLeft className="w-4 h-4 mr-1" />
+                  Back to Dashboard
+                </Button>
               </Link>
-              <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
+              <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight flex items-center gap-3">
                 VM Detail
+                {vm && (
+                  <Badge variant={getStatusVariant(vm.status)} className="capitalize px-2 py-0.5 text-xs">
+                    {vm.status}
+                  </Badge>
+                )}
               </h1>
-              <p className="text-zinc-500 dark:text-zinc-400 text-sm font-mono mt-1">
-                {jobId}
+              <p className="text-zinc-500 dark:text-zinc-400 font-mono text-sm">
+                ID: {jobId}
               </p>
             </div>
-            <button
-              onClick={fetchVm}
-              disabled={loading}
-              className="px-3 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 disabled:opacity-50"
-            >
-              {loading ? "Loading…" : "Refresh"}
-            </button>
+            <div className="flex items-center gap-3">
+              <Button variant="outline" size="sm" onClick={fetchVm} disabled={loading}>
+                <RefreshCw className={cn("w-4 h-4 mr-2", loading && "animate-spin")} />
+                Refresh
+              </Button>
+            </div>
           </div>
 
           {error && (
-            <div className="mb-6 px-4 py-3 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-lg">
-              {error}
+            <div className="p-4 flex items-center gap-3 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/20 rounded-xl">
+              <AlertCircle className="w-5 h-5" />
+              <div className="flex-1 font-medium">{error}</div>
+              <Button size="sm" variant="outline" onClick={fetchVm} className="h-8">Try again</Button>
             </div>
           )}
 
           {loading && !vm ? (
-            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 px-6 py-12 text-center text-zinc-500 dark:text-zinc-400 text-sm">
-              Loading…
+            <div className="flex flex-col items-center justify-center py-32 text-zinc-500">
+              <Loader2 className="w-10 h-10 animate-spin mb-4 opacity-20" />
+              <p className="text-sm font-medium tracking-wide">Retrieving instance data...</p>
             </div>
           ) : vm ? (
-            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 px-6 py-2">
-              <dl>
-                <Row
-                  label="Status"
-                  value={
-                    <span
-                      className={`inline-flex text-xs font-medium px-2 py-1 rounded-full font-sans ${statusBadge(vm.status)}`}
-                    >
-                      {vm.status}
-                    </span>
-                  }
-                />
-                <Row label="Job ID" value={vm.job_id} />
-                <Row label="Host ID" value={vm.host_id || "—"} />
-                <Row label="VM ID" value={vm.vm_id || "—"} />
-                <Row label="Scheduled at" value={formatTimestamp(vm.scheduled_at)} />
-                <Row label="Started at" value={formatTimestamp(vm.started_at)} />
-                <Row label="Stopped at" value={formatTimestamp(vm.stopped_at)} />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <div className="md:col-span-2 space-y-8">
+                <Card>
+                  <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Terminal className="w-4 h-4 text-zinc-400" />
+                      Instance Configuration
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    <DetailRow 
+                      icon={Hash} 
+                      label="Job ID" 
+                      value={vm.job_id} 
+                      mono 
+                    />
+                    <DetailRow 
+                      icon={Server} 
+                      label="Host Identifier" 
+                      value={vm.host_id || "Not assigned yet"} 
+                      mono={!!vm.host_id}
+                    />
+                    <DetailRow 
+                      icon={Cpu} 
+                      label="VM Internal ID" 
+                      value={vm.vm_id || "Not created yet"} 
+                      mono={!!vm.vm_id}
+                    />
+                  </CardContent>
+                </Card>
+
                 {vm.error_message && (
-                  <Row
-                    label="Error"
-                    value={
-                      <span className="text-red-600 dark:text-red-400 font-sans">
+                  <Card className="border-red-200 dark:border-red-900/30 bg-red-50/30 dark:bg-red-900/5">
+                    <CardHeader>
+                      <CardTitle className="text-red-600 dark:text-red-400 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4" />
+                        Deployment Error
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="p-4 rounded-lg bg-white dark:bg-zinc-900 border border-red-100 dark:border-red-900/20 text-sm font-mono text-red-600 dark:text-red-400">
                         {vm.error_message}
-                      </span>
-                    }
-                  />
+                      </div>
+                    </CardContent>
+                  </Card>
                 )}
-              </dl>
+              </div>
+
+              <div className="space-y-8">
+                <Card>
+                  <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-zinc-400" />
+                      Lifecycle Events
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="px-6 py-4 space-y-6 relative">
+                      {/* Timeline Line */}
+                      <div className="absolute left-[31px] top-8 bottom-8 w-px bg-zinc-200 dark:bg-zinc-800" />
+                      
+                      <div className="relative flex items-center gap-4">
+                        <div className="w-4 h-4 rounded-full bg-zinc-200 dark:bg-zinc-800 z-10" />
+                        <div>
+                          <p className="text-xs font-bold text-zinc-400 uppercase tracking-tighter">Scheduled</p>
+                          <p className="text-xs text-zinc-600 dark:text-zinc-400">{formatTimestamp(vm.scheduled_at)}</p>
+                        </div>
+                      </div>
+
+                      <div className="relative flex items-center gap-4">
+                        <div className={cn(
+                          "w-4 h-4 rounded-full z-10",
+                          vm.started_at ? "bg-green-500" : "bg-zinc-200 dark:bg-zinc-800"
+                        )} />
+                        <div>
+                          <p className="text-xs font-bold text-zinc-400 uppercase tracking-tighter">Started</p>
+                          <p className="text-xs text-zinc-600 dark:text-zinc-400">{formatTimestamp(vm.started_at)}</p>
+                        </div>
+                      </div>
+
+                      <div className="relative flex items-center gap-4">
+                        <div className={cn(
+                          "w-4 h-4 rounded-full z-10",
+                          vm.stopped_at ? "bg-red-500" : "bg-zinc-200 dark:bg-zinc-800"
+                        )} />
+                        <div>
+                          <p className="text-xs font-bold text-zinc-400 uppercase tracking-tighter">Stopped</p>
+                          <p className="text-xs text-zinc-600 dark:text-zinc-400">{formatTimestamp(vm.stopped_at)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
           ) : null}
-        </main>
-      </div>
+        </div>
+      </DashboardLayout>
     </AuthGuard>
   );
 }

@@ -3,8 +3,13 @@
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { Box, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+
 import { login } from "@/lib/api";
 import { setToken } from "@/lib/auth";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/Card";
 
 function LoginForm() {
   const router = useRouter();
@@ -26,109 +31,121 @@ function LoginForm() {
     }
 
     setIsLoading(true);
-
     const result = await login({ email, password });
-
     setIsLoading(false);
 
-      if (result.error) {
-        setError(result.error);
-      } else if (result.data) {
-        setToken(result.data.token);
-        router.push("/dashboard");
-      }
+    if (result.error) {
+      setError(result.error);
+    } else if (result.data) {
+      setToken(result.data.token);
+      router.push("/dashboard");
+    }
   };
 
   return (
-    <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-xl p-8">
-      <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
-          Welcome Back
-        </h1>
-        <p className="text-zinc-600 dark:text-zinc-400 mt-2">
-          Sign in to your account
-        </p>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-5">
-        {showSuccess && (
-          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 px-4 py-3 rounded-lg text-sm">
-            Account created successfully! Please sign in.
+    <Card className="w-full max-w-md shadow-2xl border-zinc-200/50 dark:border-zinc-800/50">
+      <CardHeader className="space-y-1 text-center">
+        <div className="flex justify-center mb-4">
+          <div className="w-12 h-12 bg-zinc-900 dark:bg-zinc-50 rounded-2xl flex items-center justify-center shadow-lg">
+            <Box className="w-6 h-6 text-white dark:text-zinc-900" />
           </div>
-        )}
+        </div>
+        <CardTitle className="text-2xl font-bold tracking-tight">Welcome back</CardTitle>
+        <CardDescription>
+          Enter your credentials to access your dashboard
+        </CardDescription>
+      </CardHeader>
+      
+      <form onSubmit={handleSubmit}>
+        <CardContent className="space-y-4 pt-4">
+          {showSuccess && (
+            <div className="p-3 rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-900/20 text-green-700 dark:text-green-400 text-sm flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              Account created! You can now sign in.
+            </div>
+          )}
 
-        {error && (
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg text-sm">
-            {error}
+          {error && (
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/20 text-red-700 dark:text-red-400 text-sm flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" />
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+              Email address
+            </label>
+            <Input
+              type="email"
+              placeholder="name@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={isLoading}
+              required
+            />
           </div>
-        )}
 
-        <div>
-          <label
-            htmlFor="email"
-            className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2"
-          >
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-4 py-3 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-950 dark:focus:ring-zinc-400 focus:border-transparent transition"
-            placeholder="you@example.com"
-            disabled={isLoading}
-          />
-        </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                Password
+              </label>
+              <button type="button" className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 transition-colors">
+                Forgot password?
+              </button>
+            </div>
+            <Input
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={isLoading}
+              required
+            />
+          </div>
+        </CardContent>
 
-        <div>
-          <label
-            htmlFor="password"
-            className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2"
-          >
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-4 py-3 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-950 dark:focus:ring-zinc-400 focus:border-transparent transition"
-            placeholder="Your password"
-            disabled={isLoading}
-          />
-        </div>
-
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="w-full py-3 px-4 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-950 dark:focus:ring-zinc-400 focus:ring-offset-2 transition disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isLoading ? "Signing in..." : "Sign In"}
-        </button>
+        <CardFooter className="flex flex-col gap-4 pt-2">
+          <Button type="submit" className="w-full" disabled={isLoading}>
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Signing in...
+              </>
+            ) : (
+              "Sign In"
+            )}
+          </Button>
+          <div className="text-center text-sm text-zinc-500">
+            Don&apos;t have an account?{" "}
+            <Link href="/auth/register" className="font-semibold text-zinc-900 dark:text-zinc-100 hover:underline">
+              Create one for free
+            </Link>
+          </div>
+        </CardFooter>
       </form>
-
-      <p className="text-center text-sm text-zinc-600 dark:text-zinc-400 mt-6">
-        Don&apos;t have an account?{" "}
-        <Link
-          href="/auth/register"
-          className="font-medium text-zinc-900 dark:text-zinc-100 hover:underline"
-        >
-          Create one
-        </Link>
-      </p>
-    </div>
+    </Card>
   );
 }
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 px-4">
-      <Suspense
-        fallback={
-          <div className="text-zinc-600 dark:text-zinc-400">Loading...</div>
-        }
-      >
+    <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950 px-4 relative overflow-hidden">
+      {/* Background blobs */}
+      <div className="absolute top-0 left-0 w-full h-full -z-10 opacity-30 pointer-events-none">
+        <div className="absolute -top-24 -left-24 w-96 h-96 bg-zinc-200 dark:bg-zinc-800 rounded-full blur-[100px]" />
+        <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-zinc-200 dark:bg-zinc-800 rounded-full blur-[100px]" />
+      </div>
+
+      <Link href="/" className="absolute top-8 left-8">
+        <Button variant="ghost" size="sm" className="text-zinc-500">
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back to home
+        </Button>
+      </Link>
+
+      <Suspense fallback={<Loader2 className="w-8 h-8 animate-spin text-zinc-400" />}>
         <LoginForm />
       </Suspense>
     </div>

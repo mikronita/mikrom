@@ -3,27 +3,37 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { 
+  Plus, 
+  RefreshCw, 
+  Activity, 
+  Layers, 
+  Zap, 
+  Server,
+  ExternalLink,
+  Loader2,
+  AlertCircle,
+  ArrowRight
+} from "lucide-react";
+
 import { AuthGuard } from "@/components/AuthGuard";
-import { logout, getToken } from "@/lib/auth";
+import { DashboardLayout } from "@/components/DashboardLayout";
+import { getToken } from "@/lib/auth";
 import { listVms, deployApp, VmInfo, DeployRequest } from "@/lib/api";
 
-function statusDot(status: string) {
-  const s = status.toLowerCase();
-  if (s === "running") return "bg-green-500";
-  if (s === "scheduled" || s === "pending") return "bg-yellow-500";
-  if (s === "failed" || s === "cancelled") return "bg-red-500";
-  return "bg-zinc-400";
-}
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { cn } from "@/lib/utils";
 
-function statusBadge(status: string) {
+function getStatusVariant(status: string): "success" | "warning" | "danger" | "secondary" {
   const s = status.toLowerCase();
-  if (s === "running")
-    return "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400";
-  if (s === "scheduled" || s === "pending")
-    return "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400";
-  if (s === "failed" || s === "cancelled")
-    return "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400";
-  return "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400";
+  if (s === "running") return "success";
+  if (s === "scheduled" || s === "pending") return "warning";
+  if (s === "failed" || s === "cancelled") return "danger";
+  return "secondary";
 }
 
 interface DeployForm {
@@ -68,16 +78,8 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    listVms(token).then((result) => {
-      if (result.error) setLoadError(result.error);
-      else setVms(result.data ?? []);
-      setLoading(false);
-    });
+    fetchVms();
   }, []);
-
-  const handleLogout = () => logout();
 
   const handleDeploySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,283 +120,285 @@ export default function DashboardPage() {
       v.status.toLowerCase() === "pending"
   ).length;
 
+  const recentVms = vms.slice(0, 5);
+
   return (
     <AuthGuard>
-      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-        {/* Header */}
-        <header className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <div className="flex items-center gap-8">
-                <Link
-                  href="/dashboard"
-                  className="text-xl font-bold text-zinc-900 dark:text-zinc-50"
-                >
-                  Mikrom
+      <DashboardLayout>
+        <div className="p-8 space-y-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
+                Dashboard
+              </h1>
+              <p className="text-zinc-500 dark:text-zinc-400 mt-1">
+                Overview of your cloud resources and applications.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Button variant="outline" size="sm" onClick={fetchVms} disabled={loading}>
+                <RefreshCw className={cn("w-4 h-4 mr-2", loading && "animate-spin")} />
+                Refresh
+              </Button>
+              <Button size="sm" onClick={() => setShowDeploy(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                Deploy App
+              </Button>
+            </div>
+          </div>
+
+          {/* Stats Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Apps</CardTitle>
+                <Layers className="w-4 h-4 text-zinc-500" />
+              </CardHeader>
+              <CardContent>
+                {loading ? <Skeleton className="h-8 w-12" /> : <div className="text-2xl font-bold">{vms.length}</div>}
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Active deployments
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Running</CardTitle>
+                <Activity className="w-4 h-4 text-green-500" />
+              </CardHeader>
+              <CardContent>
+                {loading ? <Skeleton className="h-8 w-12" /> : <div className="text-2xl font-bold text-green-600 dark:text-green-400">{running}</div>}
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Currently serving
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Deploying</CardTitle>
+                <Zap className="w-4 h-4 text-yellow-500" />
+              </CardHeader>
+              <CardContent>
+                {loading ? <Skeleton className="h-8 w-12" /> : <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{scheduled}</div>}
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Pending tasks
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Recent Apps */}
+            <Card className="lg:col-span-2 overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Recent Applications</CardTitle>
+                  <CardDescription>Your most recently deployed instances.</CardDescription>
+                </div>
+                <Link href="/dashboard/vms">
+                  <Button variant="ghost" size="sm" className="text-zinc-500">
+                    View all
+                    <ArrowRight className="w-3 h-3 ml-2" />
+                  </Button>
                 </Link>
-                <nav className="hidden md:flex gap-6">
-                  <Link
-                    href="/dashboard"
-                    className="text-sm font-medium text-zinc-900 dark:text-zinc-100"
-                  >
-                    Dashboard
-                  </Link>
-                </nav>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </header>
-
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="mb-8">
-            <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
-              Dashboard
-            </h1>
-            <p className="text-zinc-600 dark:text-zinc-400 mt-1">
-              Manage your applications on Mikrom Cloud Platform
-            </p>
-          </div>
-
-          {/* Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div className="bg-white dark:bg-zinc-900 rounded-xl p-6 border border-zinc-200 dark:border-zinc-800">
-              <div className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">
-                {vms.length}
-              </div>
-              <div className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
-                Total Apps
-              </div>
-            </div>
-            <div className="bg-white dark:bg-zinc-900 rounded-xl p-6 border border-zinc-200 dark:border-zinc-800">
-              <div className="text-3xl font-bold text-green-600 dark:text-green-400">
-                {running}
-              </div>
-              <div className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
-                Running
-              </div>
-            </div>
-            <div className="bg-white dark:bg-zinc-900 rounded-xl p-6 border border-zinc-200 dark:border-zinc-800">
-              <div className="text-3xl font-bold text-yellow-500 dark:text-yellow-400">
-                {scheduled}
-              </div>
-              <div className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
-                Deploying
-              </div>
-            </div>
-          </div>
-
-          {/* Apps list */}
-          <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800">
-            <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
-              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                Your Applications
-              </h2>
-              <div className="flex gap-2">
-                <button
-                  onClick={fetchVms}
-                  disabled={loading}
-                  className="px-3 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 disabled:opacity-50"
-                >
-                  {loading ? "Loading…" : "Refresh"}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowDeploy(true);
-                    setDeployError(null);
-                  }}
-                  className="px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-200 transition"
-                >
-                  Deploy New App
-                </button>
-              </div>
-            </div>
-
-            {loadError && (
-              <div className="px-6 py-4 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-b border-red-100 dark:border-red-900/30">
-                {loadError}
-              </div>
-            )}
-
-            <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {loading && vms.length === 0 ? (
-                <div className="px-6 py-12 text-center text-zinc-500 dark:text-zinc-400 text-sm">
-                  Loading…
-                </div>
-              ) : vms.length === 0 ? (
-                <div className="px-6 py-12 text-center">
-                  <p className="text-zinc-600 dark:text-zinc-400">
-                    No applications yet. Deploy your first app!
-                  </p>
-                </div>
-              ) : (
-                vms.map((vm) => (
-                  <div
-                    key={vm.job_id}
-                    className="px-6 py-4 flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div
-                        className={`w-2 h-2 rounded-full ${statusDot(vm.status)}`}
-                      />
-                      <div>
-                        <div className="font-medium text-zinc-900 dark:text-zinc-100">
-                          {vm.app_name}
-                        </div>
-                        <div className="text-sm text-zinc-500 dark:text-zinc-400">
-                          {vm.image}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <span
-                        className={`text-xs font-medium px-2 py-1 rounded-full ${statusBadge(vm.status)}`}
-                      >
-                        {vm.status}
-                      </span>
-                      <Link
-                        href={`/dashboard/vms/${vm.job_id}`}
-                        className="text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
-                      >
-                        Details
-                      </Link>
-                    </div>
+              </CardHeader>
+              <CardContent className="p-0 border-t border-zinc-100 dark:border-zinc-800">
+                {loadError && (
+                  <div className="p-4 flex items-center gap-3 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10">
+                    <AlertCircle className="w-4 h-4" />
+                    {loadError}
                   </div>
-                ))
-              )}
-            </div>
-          </div>
-        </main>
-
-        {/* Deploy modal */}
-        {showDeploy && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 w-full max-w-md">
-              <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
-                <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                  Deploy New App
-                </h3>
-                <button
-                  onClick={() => setShowDeploy(false)}
-                  className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 text-xl leading-none"
-                >
-                  ×
-                </button>
-              </div>
-
-              <form onSubmit={handleDeploySubmit} className="px-6 py-4 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                    App name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={form.app_name}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, app_name: e.target.value }))
-                    }
-                    placeholder="my-app"
-                    className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                    Image <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={form.image}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, image: e.target.value }))
-                    }
-                    placeholder="nginx:latest or /opt/firecracker/rootfs.ext4"
-                    className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-500"
-                  />
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      vCPUs
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={form.vcpus}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, vcpus: e.target.value }))
-                      }
-                      placeholder="1"
-                      className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      RAM (MiB)
-                    </label>
-                    <input
-                      type="number"
-                      min="64"
-                      value={form.memory_mib}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, memory_mib: e.target.value }))
-                      }
-                      placeholder="256"
-                      className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      Disk (MiB)
-                    </label>
-                    <input
-                      type="number"
-                      min="128"
-                      value={form.disk_mib}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, disk_mib: e.target.value }))
-                      }
-                      placeholder="1024"
-                      className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-500"
-                    />
-                  </div>
-                </div>
-
-                {deployError && (
-                  <p className="text-sm text-red-600 dark:text-red-400">
-                    {deployError}
-                  </p>
                 )}
 
-                <div className="flex justify-end gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowDeploy(false)}
-                    className="px-4 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100"
-                  >
+                <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {loading && vms.length === 0 ? (
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="px-6 py-4 flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <Skeleton className="w-10 h-10 rounded-lg" />
+                          <div className="space-y-2">
+                            <Skeleton className="h-4 w-24" />
+                            <Skeleton className="h-3 w-32" />
+                          </div>
+                        </div>
+                        <Skeleton className="h-6 w-16 rounded-full" />
+                      </div>
+                    ))
+                  ) : recentVms.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                      <p className="text-zinc-500 dark:text-zinc-400 text-sm">No applications found.</p>
+                      <Button variant="outline" size="sm" className="mt-4" onClick={() => setShowDeploy(true)}>
+                        Deploy your first app
+                      </Button>
+                    </div>
+                  ) : (
+                    recentVms.map((vm) => (
+                      <div
+                        key={vm.job_id}
+                        className="group px-6 py-4 flex items-center justify-between hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className={cn(
+                            "w-10 h-10 rounded-lg flex items-center justify-center border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm transition-transform group-hover:scale-110",
+                            vm.status.toLowerCase() === "running" ? "text-green-600 dark:text-green-400" : "text-zinc-400"
+                          )}>
+                            <Server className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <div className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                              {vm.app_name}
+                              <Badge variant={getStatusVariant(vm.status)} className="capitalize px-1.5 py-0 h-4 text-[10px]">
+                                {vm.status}
+                              </Badge>
+                            </div>
+                            <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-0.5 truncate max-w-[150px] sm:max-w-xs">
+                              {vm.image}
+                            </div>
+                          </div>
+                        </div>
+                        <Link href={`/dashboard/vms/${vm.job_id}`}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <ExternalLink className="w-4 h-4" />
+                          </Button>
+                        </Link>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Quick Actions / Tips */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Quick Actions</CardTitle>
+                <CardDescription>Common tasks and shortcuts.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Button variant="outline" className="w-full justify-start gap-3" onClick={() => setShowDeploy(true)}>
+                  <Plus className="w-4 h-4" />
+                  Deploy New App
+                </Button>
+                <Button variant="outline" className="w-full justify-start gap-3" onClick={fetchVms}>
+                  <RefreshCw className="w-4 h-4" />
+                  Sync Resources
+                </Button>
+                <div className="pt-4 mt-4 border-t border-zinc-100 dark:border-zinc-800">
+                  <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3">Resources</h4>
+                  <ul className="space-y-2 text-sm text-zinc-500">
+                    <li><a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center justify-between">API Reference <ExternalLink className="w-3 h-3" /></a></li>
+                    <li><a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center justify-between">CLI Tool <ExternalLink className="w-3 h-3" /></a></li>
+                    <li><a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center justify-between">Firecracker Docs <ExternalLink className="w-3 h-3" /></a></li>
+                  </ul>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Deploy modal remains unchanged ... */}
+        {showDeploy && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+            <Card className="w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
+              <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
+                <div className="flex items-center justify-between">
+                  <CardTitle>Deploy New App</CardTitle>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowDeploy(false)}>
+                    <Plus className="w-4 h-4 rotate-45" />
+                  </Button>
+                </div>
+                <CardDescription>
+                  Configure and launch a new virtual instance.
+                </CardDescription>
+              </CardHeader>
+
+              <form onSubmit={handleDeploySubmit}>
+                <CardContent className="space-y-4 pt-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                      App Name
+                    </label>
+                    <Input
+                      required
+                      value={form.app_name}
+                      onChange={(e) => setForm((f) => ({ ...f, app_name: e.target.value }))}
+                      placeholder="my-micro-service"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                      Docker Image / RootFS
+                    </label>
+                    <Input
+                      required
+                      value={form.image}
+                      onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))}
+                      placeholder="e.g. nginx:alpine"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 pt-2">
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-bold uppercase text-zinc-500">vCPUs</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={form.vcpus}
+                        onChange={(e) => setForm((f) => ({ ...f, vcpus: e.target.value }))}
+                        placeholder="1"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-bold uppercase text-zinc-500">RAM (MiB)</label>
+                      <Input
+                        type="number"
+                        min="64"
+                        value={form.memory_mib}
+                        onChange={(e) => setForm((f) => ({ ...f, memory_mib: e.target.value }))}
+                        placeholder="512"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-bold uppercase text-zinc-500">Disk (MiB)</label>
+                      <Input
+                        type="number"
+                        min="128"
+                        value={form.disk_mib}
+                        onChange={(e) => setForm((f) => ({ ...f, disk_mib: e.target.value }))}
+                        placeholder="1024"
+                      />
+                    </div>
+                  </div>
+
+                  {deployError && (
+                    <div className="p-3 text-xs text-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4" />
+                      {deployError}
+                    </div>
+                  )}
+                </CardContent>
+
+                <div className="p-6 pt-0 flex justify-end gap-3">
+                  <Button type="button" variant="outline" onClick={() => setShowDeploy(false)}>
                     Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={deploying}
-                    className="px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-medium rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-200 transition disabled:opacity-50"
-                  >
-                    {deploying ? "Deploying…" : "Deploy"}
-                  </button>
+                  </Button>
+                  <Button type="submit" disabled={deploying}>
+                    {deploying ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Deploying...
+                      </>
+                    ) : (
+                      "Launch Instance"
+                    )}
+                  </Button>
                 </div>
               </form>
-            </div>
+            </Card>
           </div>
         )}
-      </div>
+      </DashboardLayout>
     </AuthGuard>
   );
 }
