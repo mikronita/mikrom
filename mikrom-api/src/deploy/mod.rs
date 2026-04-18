@@ -34,6 +34,12 @@ pub async fn deploy_app(
     State(state): State<crate::AppState>,
     Json(payload): Json<DeployRequestBody>,
 ) -> impl IntoResponse {
+    tracing::info!(
+        user_id = %auth.user_id,
+        app_name = %payload.app_name,
+        image = %payload.image,
+        "User requesting deployment"
+    );
     let job_id = Uuid::new_v4().to_string();
 
     tracing::info!(

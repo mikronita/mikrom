@@ -123,6 +123,12 @@ impl SchedulerService for SchedulerServer {
         request: tonic::Request<DeployRequest>,
     ) -> Result<Response<DeployResponse>, Status> {
         let req = request.into_inner();
+        tracing::info!(
+            app_id = %req.app_id,
+            user_id = %req.user_id,
+            image = %req.image,
+            "Handling deploy_app request"
+        );
 
         let job_id = Uuid::new_v4().to_string();
         let vm_id = Uuid::new_v4().to_string();
@@ -268,6 +274,7 @@ impl SchedulerService for SchedulerServer {
         request: tonic::Request<AppStatusRequest>,
     ) -> Result<Response<AppStatusResponse>, Status> {
         let req = request.into_inner();
+        tracing::debug!(job_id = %req.job_id, user_id = %req.user_id, "Checking app status");
 
         match self.scheduler.get_job(&req.job_id) {
             Some(job) if job.user_id == req.user_id => {
@@ -375,6 +382,7 @@ impl SchedulerService for SchedulerServer {
         request: tonic::Request<CancelRequest>,
     ) -> Result<Response<CancelResponse>, Status> {
         let req = request.into_inner();
+        tracing::info!(job_id = %req.job_id, user_id = %req.user_id, "Cancelling application");
 
         if let Some(job) = self.scheduler.get_job(&req.job_id) {
             if job.user_id != req.user_id {
@@ -406,6 +414,7 @@ impl SchedulerService for SchedulerServer {
         request: tonic::Request<DeleteAppRequest>,
     ) -> Result<Response<DeleteAppResponse>, Status> {
         let req = request.into_inner();
+        tracing::info!(job_id = %req.job_id, user_id = %req.user_id, "Deleting application");
 
         if let Some(job) = self.scheduler.get_job(&req.job_id) {
             if job.user_id != req.user_id {

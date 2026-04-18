@@ -41,7 +41,9 @@ pub struct ErrorResponse {
 pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
-) -> Response {
+) -> impl IntoResponse {
+    tracing::info!(email = %payload.email, "Registering new user");
+
     if payload.email.is_empty() || payload.password.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -128,6 +130,7 @@ pub async fn register(
 }
 
 pub async fn login(State(state): State<AppState>, Json(payload): Json<LoginRequest>) -> Response {
+    tracing::info!(email = %payload.email, "User login attempt");
     if payload.email.is_empty() || payload.password.is_empty() {
         return (
             StatusCode::BAD_REQUEST,

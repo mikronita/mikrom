@@ -1,6 +1,7 @@
 use axum::{Router, routing::get};
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::TraceLayer;
 
 pub mod auth;
 pub mod db;
@@ -45,6 +46,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/vms/{job_id}/logs", get(get_vm_logs))
         .route("/vms/{job_id}", axum::routing::delete(stop_vm))
         .route("/vms/{job_id}/delete", axum::routing::delete(delete_vm))
+        .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state)
 }

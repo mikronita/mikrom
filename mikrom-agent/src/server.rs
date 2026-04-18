@@ -182,6 +182,12 @@ impl AgentService for AgentServer {
         request: tonic::Request<StartVmRequest>,
     ) -> Result<Response<StartVmResponse>, Status> {
         let req = request.into_inner();
+        tracing::info!(
+            vm_id = %req.vm_id,
+            app_id = %req.app_id,
+            image = %req.image,
+            "Handling start_vm request"
+        );
 
         let vm_id = if req.vm_id.is_empty() {
             Uuid::new_v4().to_string()
@@ -274,6 +280,7 @@ impl AgentService for AgentServer {
         request: tonic::Request<StopVmRequest>,
     ) -> Result<Response<StopVmResponse>, Status> {
         let req = request.into_inner();
+        tracing::info!(vm_id = %req.vm_id, "Handling stop_vm request");
 
         match self.firecracker.stop_vm(&req.vm_id).await {
             Ok(()) => {
