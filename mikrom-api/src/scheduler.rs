@@ -65,6 +65,7 @@ pub fn status_name(code: i32) -> &'static str {
         DeployStatus::Running => "Running",
         DeployStatus::Failed => "Failed",
         DeployStatus::Cancelled => "Cancelled",
+        DeployStatus::Paused => "Paused",
     }
 }
 

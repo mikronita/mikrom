@@ -5,8 +5,9 @@ use mikrom_proto::agent::{StartVmRequest, agent_service_client::AgentServiceClie
 use mikrom_proto::scheduler::{
     AppInfo, AppStatusRequest, AppStatusResponse, CancelRequest, CancelResponse, DeleteAppRequest,
     DeleteAppResponse, DeployRequest, DeployResponse, GetLogsRequest, GetLogsResponse,
-    ListAppsRequest, ListAppsResponse, RegisterWorkerRequest, RegisterWorkerResponse,
-    ReportMetricsRequest, ReportMetricsResponse,
+    ListAppsRequest, ListAppsResponse, PauseRequest, PauseResponse, RegisterWorkerRequest,
+    RegisterWorkerResponse, ReportMetricsRequest, ReportMetricsResponse, ResumeRequest,
+    ResumeResponse,
     scheduler_service_server::{SchedulerService, SchedulerServiceServer},
 };
 
@@ -444,6 +445,144 @@ impl SchedulerService for SchedulerServer {
                 message: "Job not found".to_string(),
             }))
         }
+    }
+
+    async fn pause_app(
+        &self,
+        request: tonic::Request<PauseRequest>,
+    ) -> Result<Response<PauseResponse>, Status> {
+        let req = request.into_inner();
+        let job = self
+            .scheduler
+            .get_job(&req.job_id)
+            .ok_or_else(|| Status::not_found("Job not found"))?;
+
+        if job.user_id != req.user_id {
+            return Err(Status::permission_denied("Not your job"));
+        }
+
+        let host_id = job
+            .host_id
+            .ok_or_else(|| Status::failed_precondition("Job not scheduled"))?;
+        let vm_id = job
+            .vm_id
+            .ok_or_else(|| Status::failed_precondition("No VM ID assigned"))?;
+
+        let worker = self
+            .scheduler
+            .worker_registry()
+            .get_worker(&host_id)
+            .ok_or_else(|| Status::not_found("Worker not found"))?;
+
+        let (addr, domain) = match &self.certs {
+            Some(_) => (
+                format!("https://{}:{}", worker.hostname, worker.agent_port),
+                worker.hostname.clone(),
+            ),
+            None => (
+                format!("http://{}:{}", worker.ip_address, worker.agent_port),
+                String::new(),
+            ),
+        };
+
+        let mut endpoint = tonic::transport::Endpoint::new(addr)
+            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?;
+
+        if let Some(certs) = &self.certs {
+            endpoint = endpoint
+                .tls_config(certs.client_tls_config(&domain))
+                .map_err(|e| Status::internal(format!("TLS config error: {}", e)))?;
+        }
+
+        let channel = endpoint
+            .connect()
+            .await
+            .map_err(|e| Status::unavailable(format!("Failed to connect to agent: {}", e)))?;
+
+        let mut client =
+            mikrom_proto::agent::agent_service_client::AgentServiceClient::new(channel);
+        let agent_resp = client
+            .pause_vm(mikrom_proto::agent::PauseVmRequest { vm_id })
+            .await?;
+
+        if agent_resp.get_ref().success {
+            self.scheduler
+                .update_job_status(&req.job_id, crate::job::JobStatus::Paused);
+        }
+
+        Ok(Response::new(PauseResponse {
+            success: agent_resp.get_ref().success,
+            message: agent_resp.get_ref().message.clone(),
+        }))
+    }
+
+    async fn resume_app(
+        &self,
+        request: tonic::Request<ResumeRequest>,
+    ) -> Result<Response<ResumeResponse>, Status> {
+        let req = request.into_inner();
+        let job = self
+            .scheduler
+            .get_job(&req.job_id)
+            .ok_or_else(|| Status::not_found("Job not found"))?;
+
+        if job.user_id != req.user_id {
+            return Err(Status::permission_denied("Not your job"));
+        }
+
+        let host_id = job
+            .host_id
+            .ok_or_else(|| Status::failed_precondition("Job not scheduled"))?;
+        let vm_id = job
+            .vm_id
+            .ok_or_else(|| Status::failed_precondition("No VM ID assigned"))?;
+
+        let worker = self
+            .scheduler
+            .worker_registry()
+            .get_worker(&host_id)
+            .ok_or_else(|| Status::not_found("Worker not found"))?;
+
+        let (addr, domain) = match &self.certs {
+            Some(_) => (
+                format!("https://{}:{}", worker.hostname, worker.agent_port),
+                worker.hostname.clone(),
+            ),
+            None => (
+                format!("http://{}:{}", worker.ip_address, worker.agent_port),
+                String::new(),
+            ),
+        };
+
+        let mut endpoint = tonic::transport::Endpoint::new(addr)
+            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?;
+
+        if let Some(certs) = &self.certs {
+            endpoint = endpoint
+                .tls_config(certs.client_tls_config(&domain))
+                .map_err(|e| Status::internal(format!("TLS config error: {}", e)))?;
+        }
+
+        let channel = endpoint
+            .connect()
+            .await
+            .map_err(|e| Status::unavailable(format!("Failed to connect to agent: {}", e)))?;
+
+        let mut client =
+            mikrom_proto::agent::agent_service_client::AgentServiceClient::new(channel);
+        let agent_resp = client
+            .resume_vm(mikrom_proto::agent::ResumeVmRequest { vm_id })
+            .await?;
+
+        if agent_resp.get_ref().success {
+            self.scheduler
+                .update_job_status(&req.job_id, crate::job::JobStatus::Running);
+        }
+
+        Ok(Response::new(ResumeResponse {
+            success: agent_resp.get_ref().success,
+            message: agent_resp.get_ref().message.clone(),
+        }))
     }
 
     async fn list_apps(
@@ -1467,5 +1606,33 @@ mod tests {
         assert_eq!(job.config.volumes[0].volume_id, "data-vol");
         assert_eq!(job.config.volumes[0].size_mib, 500);
         assert!(job.config.volumes[0].read_only);
+    }
+
+    #[tokio::test]
+    async fn test_pause_app_returns_not_found_for_invalid_job() {
+        let server = make_server();
+        let resp = server
+            .pause_app(Request::new(PauseRequest {
+                job_id: "invalid".to_string(),
+                user_id: "user-1".to_string(),
+            }))
+            .await;
+
+        assert!(resp.is_err());
+        assert_eq!(resp.unwrap_err().code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_resume_app_returns_not_found_for_invalid_job() {
+        let server = make_server();
+        let resp = server
+            .resume_app(Request::new(ResumeRequest {
+                job_id: "invalid".to_string(),
+                user_id: "user-1".to_string(),
+            }))
+            .await;
+
+        assert!(resp.is_err());
+        assert_eq!(resp.unwrap_err().code(), tonic::Code::NotFound);
     }
 }

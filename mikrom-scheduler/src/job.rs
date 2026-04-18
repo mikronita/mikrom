@@ -12,6 +12,7 @@ pub enum JobStatus {
     Running = 3,
     Failed = 4,
     Cancelled = 5,
+    Paused = 6,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -293,6 +293,96 @@ pub async fn delete_vm(
     }
 }
 
+pub async fn pause_vm(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path(job_id): Path<String>,
+) -> impl IntoResponse {
+    match crate::scheduler::connect(&state.scheduler_config).await {
+        Ok(channel) => {
+            let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+            let req = mikrom_proto::scheduler::PauseRequest {
+                job_id,
+                user_id: auth.user_id,
+            };
+            match client.pause_app(req).await {
+                Ok(resp) => {
+                    let inner = resp.into_inner();
+                    (
+                        if inner.success {
+                            StatusCode::OK
+                        } else {
+                            StatusCode::BAD_REQUEST
+                        },
+                        Json(serde_json::json!({ "success": inner.success, "message": inner.message })),
+                    )
+                        .into_response()
+                }
+                Err(e) => (
+                    grpc_status_to_http(e.code()),
+                    Json(serde_json::json!({ "error": e.message() })),
+                )
+                    .into_response(),
+            }
+        }
+        Err(msg) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": msg })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn resume_vm(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path(job_id): Path<String>,
+) -> impl IntoResponse {
+    match crate::scheduler::connect(&state.scheduler_config).await {
+        Ok(channel) => {
+            let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+            let req = mikrom_proto::scheduler::ResumeRequest {
+                job_id,
+                user_id: auth.user_id,
+            };
+            match client.resume_app(req).await {
+                Ok(resp) => {
+                    let inner = resp.into_inner();
+                    (
+                        if inner.success {
+                            StatusCode::OK
+                        } else {
+                            StatusCode::BAD_REQUEST
+                        },
+                        Json(serde_json::json!({ "success": inner.success, "message": inner.message })),
+                    )
+                        .into_response()
+                }
+                Err(e) => (
+                    grpc_status_to_http(e.code()),
+                    Json(serde_json::json!({ "error": e.message() })),
+                )
+                    .into_response(),
+            }
+        }
+        Err(msg) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": msg })),
+        )
+            .into_response(),
+    }
+}
+
+fn grpc_status_to_http(code: tonic::Code) -> StatusCode {
+    match code {
+        tonic::Code::NotFound => StatusCode::NOT_FOUND,
+        tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
+        tonic::Code::FailedPrecondition | tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
+        tonic::Code::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,6 +425,8 @@ mod tests {
             .route("/vms/{job_id}/logs", get(get_vm_logs))
             .route("/vms/{job_id}", axum::routing::delete(stop_vm))
             .route("/vms/{job_id}/delete", axum::routing::delete(delete_vm))
+            .route("/vms/{job_id}/pause", axum::routing::post(pause_vm))
+            .route("/vms/{job_id}/resume", axum::routing::post(resume_vm))
             .with_state(state)
     }
 
@@ -856,5 +948,59 @@ mod tests {
         let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(json["success"], true);
+    }
+
+    #[tokio::test]
+    async fn test_pause_unscheduled_job_returns_400() {
+        // deploy_job deploys to a scheduler with no workers → job ends up Failed
+        // with no host_id. pause_app returns failed_precondition → API returns 400.
+        let port = start_scheduler().await;
+        let job_id = deploy_job(port, "uid-vms").await;
+        let resp = make_app(&format!("http://127.0.0.1:{port}"))
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/vms/{job_id}/pause"))
+                    .header("Authorization", format!("Bearer {}", valid_token()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_resume_unscheduled_job_returns_400() {
+        // Same as above — an unscheduled (failed) job can't be resumed.
+        let port = start_scheduler().await;
+        let job_id = deploy_job(port, "uid-vms").await;
+        let resp = make_app(&format!("http://127.0.0.1:{port}"))
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/vms/{job_id}/resume"))
+                    .header("Authorization", format!("Bearer {}", valid_token()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_pause_vm_without_token_returns_401() {
+        let resp = make_app("http://127.0.0.1:59995")
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/vms/any-job/pause")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 }

@@ -2,11 +2,12 @@ use crate::firecracker::{FirecrackerManager, VmConfig};
 use crate::metrics::MetricsCollector;
 use mikrom_proto::agent::{
     GetLogsRequest, GetLogsResponse, GetMetricsRequest, GetMetricsResponse, GetVmStatusRequest,
-    GetVmStatusResponse, MetricsRequest, MetricsResponse, RegisterRequest, RegisterResponse,
-    StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse, UnregisterRequest,
-    UnregisterResponse,
+    GetVmStatusResponse, MetricsRequest, MetricsResponse, PauseVmRequest, PauseVmResponse,
+    RegisterRequest, RegisterResponse, ResumeVmRequest, ResumeVmResponse, StartVmRequest,
+    StartVmResponse, StopVmRequest, StopVmResponse, UnregisterRequest, UnregisterResponse,
     agent_service_server::{AgentService, AgentServiceServer},
 };
+
 use mikrom_proto::scheduler::{
     RegisterWorkerRequest, ReportMetricsRequest, SchedulerServiceClient,
 };
@@ -297,6 +298,44 @@ impl AgentService for AgentServer {
         }
     }
 
+    async fn pause_vm(
+        &self,
+        request: tonic::Request<PauseVmRequest>,
+    ) -> Result<Response<PauseVmResponse>, Status> {
+        let req = request.into_inner();
+        tracing::info!(vm_id = %req.vm_id, "Handling pause_vm request");
+
+        match self.firecracker.pause_vm(&req.vm_id).await {
+            Ok(()) => Ok(Response::new(PauseVmResponse {
+                success: true,
+                message: "VM paused".to_string(),
+            })),
+            Err(e) => Ok(Response::new(PauseVmResponse {
+                success: false,
+                message: e.to_string(),
+            })),
+        }
+    }
+
+    async fn resume_vm(
+        &self,
+        request: tonic::Request<ResumeVmRequest>,
+    ) -> Result<Response<ResumeVmResponse>, Status> {
+        let req = request.into_inner();
+        tracing::info!(vm_id = %req.vm_id, "Handling resume_vm request");
+
+        match self.firecracker.resume_vm(&req.vm_id).await {
+            Ok(()) => Ok(Response::new(ResumeVmResponse {
+                success: true,
+                message: "VM resumed".to_string(),
+            })),
+            Err(e) => Ok(Response::new(ResumeVmResponse {
+                success: false,
+                message: e.to_string(),
+            })),
+        }
+    }
+
     async fn get_vm_status(
         &self,
         request: tonic::Request<GetVmStatusRequest>,
@@ -311,6 +350,7 @@ impl AgentService for AgentServer {
                     crate::firecracker::VmStatus::Stopping => 3,
                     crate::firecracker::VmStatus::Stopped => 4,
                     crate::firecracker::VmStatus::Failed => 5,
+                    crate::firecracker::VmStatus::Paused => 6,
                 };
                 Ok(Response::new(GetVmStatusResponse {
                     vm_id: req.vm_id,
@@ -372,6 +412,14 @@ impl AgentServer {
         } else {
             None
         };
+
+        // Initialize global networking (bridge, forwarding, NAT)
+        if let Err(e) = self.firecracker.init_network().await {
+            tracing::error!(
+                "Failed to initialize host networking: {}. VMs might not have internet access.",
+                e
+            );
+        }
 
         let certs_for_task = certs.clone();
         let scheduler_addr_for_task = self.scheduler_addr.clone();
