@@ -62,6 +62,12 @@ enum Commands {
         /// Job ID returned by the deploy command
         job_id: String,
     },
+
+    /// Stop a running VM by job ID
+    Stop {
+        /// Job ID of the VM to stop
+        job_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -179,6 +185,20 @@ async fn main() -> anyhow::Result<()> {
             }
             if !vm.error_message.is_empty() {
                 println!("error:        {}", vm.error_message);
+            }
+        }
+
+        Commands::Stop { job_id } => {
+            let resp = client
+                .stop_vm(&job_id)
+                .await
+                .context("Failed to stop VM")?;
+            if resp.success {
+                println!("Stopped job {}.", job_id);
+                println!("message: {}", resp.message);
+            } else {
+                eprintln!("Stop reported failure: {}", resp.message);
+                std::process::exit(1);
             }
         }
     }
@@ -410,6 +430,34 @@ mod tests {
         match cli.command {
             Commands::Vm { job_id } => assert_eq!(job_id, "job-1"),
             _ => panic!("expected vm command"),
+        }
+    }
+
+    // ── stop subcommand ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_stop_command_parses_job_id() {
+        let cli = Cli::try_parse_from(["mikrom", "stop", "job-xyz"]).unwrap();
+        match cli.command {
+            Commands::Stop { job_id } => assert_eq!(job_id, "job-xyz"),
+            _ => panic!("expected stop command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_stop_command_requires_job_id() {
+        assert!(Cli::try_parse_from(["mikrom", "stop"]).is_err());
+    }
+
+    #[test]
+    fn test_cli_stop_with_api_url_flag() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "--api-url", "http://api:5001", "stop", "job-1"])
+                .unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some("http://api:5001"));
+        match cli.command {
+            Commands::Stop { job_id } => assert_eq!(job_id, "job-1"),
+            _ => panic!("expected stop command"),
         }
     }
 }

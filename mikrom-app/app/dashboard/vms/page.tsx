@@ -8,14 +8,16 @@ import {
   Search,
   ExternalLink,
   AlertCircle,
-  Filter
+  Filter,
+  Square,
+  Loader2
 } from "lucide-react";
 import Link from "next/link";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { getToken } from "@/lib/auth";
-import { listVms, VmInfo } from "@/lib/api";
+import { listVms, stopVm, VmInfo } from "@/lib/api";
 
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -37,6 +39,29 @@ export default function VmsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [stoppingId, setStoppingId] = useState<string | null>(null);
+  const [confirmStopId, setConfirmStopId] = useState<string | null>(null);
+  const [stopError, setStopError] = useState<string | null>(null);
+
+  const isStoppable = (status: string) => {
+    const s = status.toLowerCase();
+    return s === "running" || s === "scheduled" || s === "pending";
+  };
+
+  const handleStop = async (jobId: string) => {
+    const token = getToken();
+    if (!token) return;
+    setStoppingId(jobId);
+    setConfirmStopId(null);
+    setStopError(null);
+    const result = await stopVm(token, jobId);
+    setStoppingId(null);
+    if (result.error) {
+      setStopError(result.error);
+    } else {
+      await fetchVms();
+    }
+  };
 
   const fetchVms = React.useCallback(async () => {
     const token = getToken();
@@ -120,6 +145,14 @@ export default function VmsPage() {
                 </div>
               )}
 
+              {stopError && (
+                <div className="p-4 flex items-center gap-3 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10 border-b border-red-100 dark:border-red-900/20">
+                  <AlertCircle className="w-4 h-4" />
+                  <span className="flex-1">Stop failed: {stopError}</span>
+                  <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setStopError(null)}>Dismiss</Button>
+                </div>
+              )}
+
               <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
                 {loading ? (
                   Array.from({ length: 5 }).map((_, i) => (
@@ -170,6 +203,36 @@ export default function VmsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
+                        {isStoppable(vm.status) && (
+                          confirmStopId === vm.job_id ? (
+                            <div className="flex items-center gap-1.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-2 py-1">
+                              <span className="text-[11px] font-medium text-red-700 dark:text-red-300">Stop?</span>
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                className="h-6 px-2 text-xs"
+                                onClick={() => handleStop(vm.job_id)}
+                                disabled={stoppingId === vm.job_id}
+                              >
+                                {stoppingId === vm.job_id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Yes"}
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirmStopId(null)}>
+                                No
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-red-600 border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-800 dark:hover:bg-red-900/20"
+                              onClick={() => setConfirmStopId(vm.job_id)}
+                              disabled={!!stoppingId}
+                            >
+                              <Square className="w-3 h-3 mr-1.5" />
+                              Stop
+                            </Button>
+                          )
+                        )}
                         <Link href={`/dashboard/vms/${vm.job_id}`}>
                           <Button variant="outline" size="sm">
                             View Details

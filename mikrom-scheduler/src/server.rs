@@ -377,7 +377,80 @@ impl SchedulerServer {
         }
     }
 
-    async fn stop_vm_on_agent(&self, _host_id: &str, _vm_id: &str) -> Result<(), Status> {
+    async fn stop_vm_on_agent(&self, host_id: &str, vm_id: &str) -> Result<(), Status> {
+        let worker = match self.scheduler.worker_registry().get_worker(host_id) {
+            Some(w) => w,
+            None => {
+                tracing::warn!("stop_vm_on_agent: worker {} not found, skipping", host_id);
+                return Ok(());
+            }
+        };
+
+        let (addr, domain) = match &self.certs {
+            Some(_) => (
+                format!("https://{}:{}", worker.hostname, worker.agent_port),
+                worker.hostname.clone(),
+            ),
+            None => (
+                format!("http://{}:{}", worker.ip_address, worker.agent_port),
+                String::new(),
+            ),
+        };
+
+        let mut endpoint = tonic::transport::Endpoint::new(addr)
+            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?;
+
+        if let Some(certs) = &self.certs {
+            endpoint = endpoint
+                .tls_config(certs.client_tls_config(&domain))
+                .map_err(|e| Status::internal(format!("TLS config error: {}", e)))?;
+        }
+
+        let channel = match endpoint.connect().await {
+            Ok(ch) => ch,
+            Err(e) => {
+                tracing::warn!(
+                    "stop_vm_on_agent: could not connect to agent {} for vm {}: {}",
+                    host_id,
+                    vm_id,
+                    e
+                );
+                return Ok(());
+            }
+        };
+
+        let mut client =
+            mikrom_proto::agent::agent_service_client::AgentServiceClient::new(channel);
+
+        match client
+            .stop_vm(mikrom_proto::agent::StopVmRequest {
+                vm_id: vm_id.to_string(),
+            })
+            .await
+        {
+            Ok(resp) => {
+                let inner = resp.into_inner();
+                if inner.success {
+                    tracing::info!("VM {} stopped on host {}", vm_id, host_id);
+                } else {
+                    tracing::warn!(
+                        "Agent reported failure stopping VM {} on host {}: {}",
+                        vm_id,
+                        host_id,
+                        inner.message
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "stop_vm_on_agent: RPC error for vm {} on host {}: {}",
+                    vm_id,
+                    host_id,
+                    e.message()
+                );
+            }
+        }
+
         Ok(())
     }
 }
@@ -886,10 +959,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stop_vm_on_agent_is_noop_and_returns_ok() {
+    async fn test_stop_vm_on_agent_worker_not_found_returns_ok() {
         let server = make_server();
-        // stop_vm_on_agent is currently a stub; it should not error.
-        let result = server.stop_vm_on_agent("any-host", "any-vm").await;
+        // When the host_id does not exist in the registry, stop_vm_on_agent
+        // logs a warning and returns Ok (best-effort, non-blocking).
+        let result = server.stop_vm_on_agent("unknown-host", "any-vm").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_stop_vm_on_agent_agent_unreachable_returns_ok() {
+        // Register a worker whose agent port is not listening.
+        // stop_vm_on_agent should log a warning and return Ok (best-effort).
+        let server = make_server();
+        register_worker(&server, "h-unreachable").await;
+        let result = server.stop_vm_on_agent("h-unreachable", "vm-xyz").await;
         assert!(result.is_ok());
     }
 

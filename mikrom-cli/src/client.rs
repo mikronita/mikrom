@@ -185,6 +185,29 @@ impl MikromClient {
             bail!("{} (HTTP {})", err.error, status);
         }
     }
+
+    pub async fn stop_vm(&self, job_id: &str) -> anyhow::Result<StopVmResponse> {
+        let mut req = self
+            .http
+            .delete(format!("{}/vms/{}", self.base_url, job_id));
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        if resp.status().is_success() {
+            Ok(resp.json().await?)
+        } else {
+            let status = resp.status().as_u16();
+            let err: ErrorResponse = resp.json().await?;
+            bail!("{} (HTTP {})", err.error, status);
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StopVmResponse {
+    pub success: bool,
+    pub message: String,
 }
 
 #[cfg(test)]
@@ -792,5 +815,66 @@ mod tests {
         let client = MikromClient::new(server.uri(), None);
         let vm = client.get_vm("my-special-job-id").await.unwrap();
         assert_eq!(vm.error_message, "spawn error");
+    }
+
+    // ── stop_vm ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_stop_vm_success_returns_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/vms/job-abc"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "success": true,
+                "message": "Application cancelled"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), Some("tok".to_string()));
+        let resp = client.stop_vm("job-abc").await.unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.message, "Application cancelled");
+    }
+
+    #[tokio::test]
+    async fn test_stop_vm_404_returns_error_with_message() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/vms/ghost"))
+            .respond_with(
+                ResponseTemplate::new(404)
+                    .set_body_json(serde_json::json!({"error": "Job not found"})),
+            )
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), None);
+        let err = client.stop_vm("ghost").await.unwrap_err();
+        assert!(err.to_string().contains("Job not found"));
+        assert!(err.to_string().contains("404"));
+    }
+
+    #[tokio::test]
+    async fn test_stop_vm_sends_bearer_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/vms/job-1"))
+            .and(header("authorization", "Bearer secret"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "success": true,
+                "message": "cancelled"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = MikromClient::new(server.uri(), Some("secret".to_string()));
+        assert!(client.stop_vm("job-1").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_stop_vm_server_unreachable_returns_error() {
+        let client = MikromClient::new("http://127.0.0.1:59962".to_string(), None);
+        assert!(client.stop_vm("job-1").await.is_err());
     }
 }

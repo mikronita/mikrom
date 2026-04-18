@@ -12,14 +12,15 @@ import {
   AlertCircle,
   Loader2,
   Terminal,
-  Cpu
+  Cpu,
+  Square
 } from "lucide-react";
 import * as React from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { getToken } from "@/lib/auth";
-import { getVm, VmStatus } from "@/lib/api";
+import { getVm, stopVm, VmStatus } from "@/lib/api";
 
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -77,6 +78,9 @@ export default function VmDetailPage() {
   const [vm, setVm] = useState<VmStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
 
   const fetchVm = React.useCallback(async () => {
     const token = getToken();
@@ -91,6 +95,26 @@ export default function VmDetailPage() {
     }
     setLoading(false);
   }, [jobId]);
+
+  const isStoppable = (status: string) => {
+    const s = status.toLowerCase();
+    return s === "running" || s === "scheduled" || s === "pending";
+  };
+
+  const handleStop = async () => {
+    const token = getToken();
+    if (!token) return;
+    setStopping(true);
+    setStopError(null);
+    setConfirmStop(false);
+    const result = await stopVm(token, jobId);
+    setStopping(false);
+    if (result.error) {
+      setStopError(result.error);
+    } else {
+      await fetchVm();
+    }
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -128,6 +152,31 @@ export default function VmDetailPage() {
                 <RefreshCw className={cn("w-4 h-4 mr-2", loading && "animate-spin")} />
                 Refresh
               </Button>
+              {vm && isStoppable(vm.status) && !confirmStop && (
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={() => setConfirmStop(true)}
+                  disabled={stopping}
+                >
+                  {stopping ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Stopping...</>
+                  ) : (
+                    <><Square className="w-4 h-4 mr-2" />Stop Instance</>
+                  )}
+                </Button>
+              )}
+              {confirmStop && (
+                <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-1.5">
+                  <span className="text-xs font-medium text-red-700 dark:text-red-300">Stop this instance?</span>
+                  <Button size="sm" variant="danger" className="h-6 px-2 text-xs" onClick={handleStop}>
+                    Confirm
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirmStop(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -136,6 +185,14 @@ export default function VmDetailPage() {
               <AlertCircle className="w-5 h-5" />
               <div className="flex-1 font-medium">{error}</div>
               <Button size="sm" variant="outline" onClick={fetchVm} className="h-8">Try again</Button>
+            </div>
+          )}
+
+          {stopError && (
+            <div className="p-4 flex items-center gap-3 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/20 rounded-xl">
+              <AlertCircle className="w-5 h-5" />
+              <div className="flex-1 font-medium">Stop failed: {stopError}</div>
+              <Button size="sm" variant="ghost" className="h-8" onClick={() => setStopError(null)}>Dismiss</Button>
             </div>
           )}
 

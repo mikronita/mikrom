@@ -60,6 +60,11 @@ export interface DeployResponse {
   message: string;
 }
 
+export interface StopVmResponse {
+  success: boolean;
+  message: string;
+}
+
 function authHeaders(token: string): Record<string, string> {
   return {
     "Content-Type": "application/json",
@@ -155,6 +160,23 @@ export async function deployApp(
     const result = await parseJson<DeployResponse & ApiError>(response);
     if (!response.ok) return { error: result.error || "Deploy failed" };
     return { data: result };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function stopVm(
+  token: string,
+  jobId: string
+): Promise<{ data?: StopVmResponse; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/vms/${jobId}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<StopVmResponse & ApiError>(response);
+    if (!response.ok) return { error: (result as ApiError).error || "Failed to stop VM" };
+    return { data: result as StopVmResponse };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
