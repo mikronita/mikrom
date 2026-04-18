@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+use std::collections::HashMap;
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct VmMetrics {
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct HostMetrics {
     pub cpu_usage: f32,
@@ -8,29 +16,36 @@ pub struct HostMetrics {
     pub disk_used_bytes: u64,
     pub disk_total_bytes: u64,
     pub apps_count: u32,
+    pub load_avg_1: f32,
+    pub load_avg_5: f32,
+    pub load_avg_15: f32,
+    pub vms: HashMap<String, VmMetrics>,
     pub timestamp: i64,
 }
 
 impl HostMetrics {
     pub fn calculate_score(&self, max_apps: u32) -> f32 {
-        let cpu_score = 1.0 - self.cpu_usage;
+        let cpu_score = (1.0 - self.cpu_usage).max(0.0);
         let ram_score = if self.ram_total_bytes > 0 {
-            1.0 - (self.ram_used_bytes as f32 / self.ram_total_bytes as f32)
+            let used_ratio = self.ram_used_bytes as f32 / self.ram_total_bytes as f32;
+            (1.0 - used_ratio).max(0.0)
         } else {
             0.0
         };
         let disk_score = if self.disk_total_bytes > 0 {
-            1.0 - (self.disk_used_bytes as f32 / self.disk_total_bytes as f32)
+            let used_ratio = self.disk_used_bytes as f32 / self.disk_total_bytes as f32;
+            (1.0 - used_ratio).max(0.0)
         } else {
             0.0
         };
         let apps_score = if max_apps > 0 {
-            1.0 - (self.apps_count as f32 / max_apps as f32)
+            (1.0 - (self.apps_count as f32 / max_apps as f32)).max(0.0)
         } else {
             1.0
         };
 
-        (cpu_score * 0.25) + (ram_score * 0.25) + (disk_score * 0.25) + (apps_score * 0.25)
+        // RAM is usually the bottleneck, give it more weight.
+        (cpu_score * 0.2) + (ram_score * 0.4) + (disk_score * 0.2) + (apps_score * 0.2)
     }
 
     pub fn can_fit_vm(&self, required_memory_mib: u64, required_disk_mib: u64) -> bool {
@@ -68,6 +83,10 @@ mod tests {
             disk_used_bytes: disk_used,
             disk_total_bytes: disk_total,
             apps_count: apps,
+            load_avg_1: 0.0,
+            load_avg_5: 0.0,
+            load_avg_15: 0.0,
+            vms: HashMap::new(),
             timestamp: 0,
         }
     }
@@ -102,10 +121,10 @@ mod tests {
     #[test]
     fn test_score_zero_total_ram_gives_zero_ram_component() {
         // ram_total = 0 → ram_score = 0; disk_total = 0 → disk_score = 0
-        // cpu_score = 1.0, apps_score = 1.0  → (0.25 + 0 + 0 + 0.25) = 0.5
+        // cpu_score = 1.0, apps_score = 1.0  → (1.0 * 0.2 + 0 * 0.4 + 0 * 0.2 + 1.0 * 0.2) = 0.4
         let m = metrics(0.0, 0, 0, 0, 0, 0);
         let score = m.calculate_score(10);
-        assert!((score - 0.5).abs() < 0.001);
+        assert!((score - 0.4).abs() < 0.001);
     }
 
     #[test]
@@ -118,13 +137,13 @@ mod tests {
 
     #[test]
     fn test_score_weights_sum_to_one() {
-        // Verify formula: all four weights are 0.25 each
+        // Verify formula: RAM=0.4, others=0.2
         // Set each component to a known fraction and check the arithmetic
         // cpu=0.8 → cpu_score=0.2; ram 3/4 used → 0.25; disk 70/100 used → 0.3; apps 6/10 → 0.4
         let m = metrics(0.8, 3 * GIB, 4 * GIB, 70 * GIB, 100 * GIB, 6);
-        let expected = (0.2 + 0.25 + 0.3 + 0.4) * 0.25;
+        let expected = (0.2 * 0.2) + (0.25 * 0.4) + (0.3 * 0.2) + (0.4 * 0.2);
         let score = m.calculate_score(10);
-        assert!((score - expected).abs() < 0.01);
+        assert!((score - expected).abs() < 0.001);
     }
 
     #[test]

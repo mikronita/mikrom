@@ -2,9 +2,13 @@ use axum::{
     Json,
     extract::{Path, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{
+        IntoResponse,
+        sse::{Event, Sse},
+    },
 };
 use serde::Serialize;
+use tokio_stream::StreamExt;
 
 #[derive(Debug, Serialize)]
 pub struct VmInfo {
@@ -27,6 +31,8 @@ pub struct VmStatusResponse {
     pub started_at: i64,
     pub stopped_at: i64,
     pub error_message: String,
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -81,14 +87,17 @@ pub async fn list_vms(
 }
 
 pub async fn get_vm_status(
-    _auth: crate::auth::AuthUser,
+    auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> impl IntoResponse {
     match crate::scheduler::connect(&state.scheduler_config).await {
         Ok(channel) => {
             let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
-            let req = mikrom_proto::scheduler::AppStatusRequest { job_id };
+            let req = mikrom_proto::scheduler::AppStatusRequest {
+                job_id,
+                user_id: auth.user_id,
+            };
             match client.get_app_status(req).await {
                 Ok(resp) => {
                     let inner = resp.into_inner();
@@ -101,6 +110,8 @@ pub async fn get_vm_status(
                         started_at: inner.started_at,
                         stopped_at: inner.stopped_at,
                         error_message: inner.error_message,
+                        cpu_usage: 0.0,    // Placeholder
+                        ram_used_bytes: 0, // Placeholder
                     };
                     (StatusCode::OK, Json(vm)).into_response()
                 }
@@ -128,8 +139,60 @@ pub async fn get_vm_status(
     }
 }
 
+pub async fn get_vm_logs(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path(job_id): Path<String>,
+) -> impl IntoResponse {
+    match crate::scheduler::connect(&state.scheduler_config).await {
+        Ok(channel) => {
+            let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+            let req = mikrom_proto::scheduler::GetLogsRequest {
+                job_id,
+                user_id: auth.user_id,
+                follow: true,
+            };
+            match client.get_app_logs(req).await {
+                Ok(resp) => {
+                    let stream = resp.into_inner().map(|res| match res {
+                        Ok(log) => {
+                            let data = serde_json::json!({
+                                "line": log.line,
+                                "timestamp": log.timestamp,
+                            })
+                            .to_string();
+                            Ok::<Event, std::convert::Infallible>(Event::default().data(data))
+                        }
+                        Err(e) => {
+                            let data = serde_json::json!({
+                                "line": format!("Error: {}", e),
+                                "timestamp": chrono::Utc::now().timestamp(),
+                            })
+                            .to_string();
+                            Ok::<Event, std::convert::Infallible>(Event::default().data(data))
+                        }
+                    });
+                    Sse::new(stream).into_response()
+                }
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorBody {
+                        error: e.message().to_string(),
+                    }),
+                )
+                    .into_response(),
+            }
+        }
+        Err(msg) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorBody { error: msg }),
+        )
+            .into_response(),
+    }
+}
+
 pub async fn stop_vm(
-    _auth: crate::auth::AuthUser,
+    auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> impl IntoResponse {
@@ -138,6 +201,7 @@ pub async fn stop_vm(
             let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
             let req = mikrom_proto::scheduler::CancelRequest {
                 job_id: job_id.clone(),
+                user_id: auth.user_id,
             };
             match client.cancel_app(req).await {
                 Ok(resp) => {
@@ -179,14 +243,17 @@ pub async fn stop_vm(
 }
 
 pub async fn delete_vm(
-    _auth: crate::auth::AuthUser,
+    auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> impl IntoResponse {
     match crate::scheduler::connect(&state.scheduler_config).await {
         Ok(channel) => {
             let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
-            let req = mikrom_proto::scheduler::DeleteAppRequest { job_id };
+            let req = mikrom_proto::scheduler::DeleteAppRequest {
+                job_id,
+                user_id: auth.user_id,
+            };
             match client.delete_app(req).await {
                 Ok(resp) => {
                     let inner = resp.into_inner();
@@ -265,9 +332,89 @@ mod tests {
         axum::Router::new()
             .route("/vms", get(list_vms))
             .route("/vms/{job_id}", get(get_vm_status))
+            .route("/vms/{job_id}/logs", get(get_vm_logs))
             .route("/vms/{job_id}", axum::routing::delete(stop_vm))
             .route("/vms/{job_id}/delete", axum::routing::delete(delete_vm))
             .with_state(state)
+    }
+
+    #[tokio::test]
+    async fn test_get_vm_logs_returns_sse_stream() {
+        let port = start_scheduler().await;
+
+        // Register a worker first so deployment succeeds and has a host
+        let channel = crate::scheduler::connect(&crate::scheduler::SchedulerConfig {
+            addr: format!("http://127.0.0.1:{port}"),
+            use_tls: false,
+            certs_dir: None,
+        })
+        .await
+        .unwrap();
+        let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+
+        client
+            .register_worker(mikrom_proto::scheduler::RegisterWorkerRequest {
+                host_id: "h1".to_string(),
+                hostname: "host1".to_string(),
+                ip_address: "127.0.0.1".to_string(),
+                agent_port: 5003,
+            })
+            .await
+            .unwrap();
+
+        client
+            .report_metrics(mikrom_proto::scheduler::ReportMetricsRequest {
+                host_id: "h1".to_string(),
+                cpu_usage: 0.1,
+                ram_used_bytes: 0,
+                ram_total_bytes: 4 * 1024 * 1024 * 1024,
+                disk_used_bytes: 0,
+                disk_total_bytes: 100 * 1024 * 1024 * 1024,
+                apps_count: 0,
+                timestamp: 0,
+                load_avg_1: 0.0,
+                load_avg_5: 0.0,
+                load_avg_15: 0.0,
+                vms: std::collections::HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        // Use the deploy_app RPC to actually create the job in the scheduler
+        let deploy_req = mikrom_proto::scheduler::DeployRequest {
+            app_id: "app-sse".to_string(),
+            app_name: "app-sse".to_string(),
+            image: "img".to_string(),
+            config: Some(mikrom_proto::scheduler::AppConfig {
+                vcpus: 1,
+                memory_mib: 128,
+                disk_mib: 512,
+                env: std::collections::HashMap::new(),
+                ip_address: String::new(),
+                gateway: String::new(),
+                mac_address: String::new(),
+                volumes: vec![],
+            }),
+            user_id: "uid-vms".to_string(),
+        };
+
+        let deploy_resp = client.deploy_app(deploy_req).await.unwrap().into_inner();
+        let job_id = deploy_resp.job_id;
+
+        let resp = make_app(&format!("http://127.0.0.1:{port}"))
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/vms/{job_id}/logs"))
+                    .header("Authorization", format!("Bearer {}", valid_token()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers()["content-type"], "text/event-stream");
     }
 
     fn valid_token() -> String {
@@ -304,11 +451,16 @@ mod tests {
             started_at: 1_700_000_005,
             stopped_at: 0,
             error_message: String::new(),
+            cpu_usage: 0.1,
+            ram_used_bytes: 1024,
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["status"], "Running");
         assert_eq!(json["scheduled_at"], 1_700_000_000_i64);
         assert_eq!(json["stopped_at"], 0);
+        let cpu = json["cpu_usage"].as_f64().unwrap();
+        assert!((cpu - 0.1).abs() < 0.0001);
+        assert_eq!(json["ram_used_bytes"], 1024);
     }
 
     #[test]
@@ -322,6 +474,8 @@ mod tests {
             started_at: 0,
             stopped_at: 0,
             error_message: "no workers available".to_string(),
+            cpu_usage: 0.0,
+            ram_used_bytes: 0,
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["status"], "Failed");
@@ -443,6 +597,10 @@ mod tests {
                     memory_mib: 256,
                     disk_mib: 1024,
                     env: Default::default(),
+                    ip_address: String::new(),
+                    gateway: String::new(),
+                    mac_address: String::new(),
+                    volumes: vec![],
                 }),
                 user_id: user_id.to_string(),
             })

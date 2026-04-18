@@ -151,6 +151,10 @@ mod tests {
             memory_mib: 256,
             disk_mib: 1024,
             env: Default::default(),
+            ip_address: None,
+            gateway: None,
+            mac_address: None,
+            volumes: vec![],
         }
     }
 
@@ -181,6 +185,10 @@ mod tests {
                 disk_used_bytes: 10 * GIB,
                 disk_total_bytes: 100 * GIB,
                 apps_count: 1,
+                load_avg_1: 0.0,
+                load_avg_5: 0.0,
+                load_avg_15: 0.0,
+                vms: HashMap::new(),
                 timestamp: 0,
             },
         );
@@ -275,6 +283,10 @@ mod tests {
             memory_mib: 100_000,
             disk_mib: 1024,
             env: Default::default(),
+            ip_address: None,
+            gateway: None,
+            mac_address: None,
+            volumes: vec![],
         };
         assert!(matches!(
             s.select_best_worker(&huge),

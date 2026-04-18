@@ -3,6 +3,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
+pub struct VolumeRequest {
+    pub volume_id: String,
+    pub size_mib: u64,
+    pub read_only: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct DeployRequestBody {
     pub app_name: String,
     pub image: String,
@@ -10,6 +17,7 @@ pub struct DeployRequestBody {
     pub memory_mib: Option<u64>,
     pub disk_mib: Option<u64>,
     pub env: Option<std::collections::HashMap<String, String>>,
+    pub volumes: Option<Vec<VolumeRequest>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -48,10 +56,25 @@ pub async fn deploy_app(
                 image: payload.image.clone(),
                 config: Some(mikrom_proto::scheduler::AppConfig {
                     vcpus,
-                    memory_mib,
-                    disk_mib,
+                    memory_mib: memory_mib as u32,
+                    disk_mib: disk_mib as u32,
                     env: payload.env.clone().unwrap_or_default(),
+                    ip_address: String::new(),
+                    gateway: String::new(),
+                    mac_address: String::new(),
+                    volumes: payload
+                        .volumes
+                        .as_ref()
+                        .unwrap_or(&vec![])
+                        .iter()
+                        .map(|v| mikrom_proto::scheduler::Volume {
+                            volume_id: v.volume_id.clone(),
+                            size_mib: v.size_mib,
+                            read_only: v.read_only.unwrap_or(false),
+                        })
+                        .collect(),
                 }),
+
                 user_id: auth.user_id,
             };
 
@@ -101,14 +124,15 @@ pub async fn deploy_app(
 mod tests {
     use super::*;
 
-    fn minimal_req() -> DeployRequestBody {
+    fn minimal_payload() -> DeployRequestBody {
         DeployRequestBody {
-            app_name: "my-app".to_string(),
-            image: "nginx:latest".to_string(),
+            app_name: "test-app".to_string(),
+            image: "alpine:latest".to_string(),
             vcpus: None,
             memory_mib: None,
             disk_mib: None,
             env: None,
+            volumes: None,
         }
     }
 
@@ -170,19 +194,19 @@ mod tests {
 
     #[test]
     fn test_vcpus_default_is_1() {
-        let req = minimal_req();
+        let req = minimal_payload();
         assert_eq!(req.vcpus.unwrap_or(1), 1);
     }
 
     #[test]
     fn test_memory_mib_default_is_256() {
-        let req = minimal_req();
+        let req = minimal_payload();
         assert_eq!(req.memory_mib.unwrap_or(256), 256);
     }
 
     #[test]
     fn test_disk_mib_default_is_1024() {
-        let req = minimal_req();
+        let req = minimal_payload();
         assert_eq!(req.disk_mib.unwrap_or(1024), 1024);
     }
 
@@ -190,7 +214,7 @@ mod tests {
     fn test_provided_vcpus_overrides_default() {
         let req = DeployRequestBody {
             vcpus: Some(8),
-            ..minimal_req()
+            ..minimal_payload()
         };
         assert_eq!(req.vcpus.unwrap_or(1), 8);
     }
@@ -199,7 +223,7 @@ mod tests {
     fn test_provided_memory_mib_overrides_default() {
         let req = DeployRequestBody {
             memory_mib: Some(4096),
-            ..minimal_req()
+            ..minimal_payload()
         };
         assert_eq!(req.memory_mib.unwrap_or(256), 4096);
     }
@@ -208,7 +232,7 @@ mod tests {
     fn test_provided_disk_mib_overrides_default() {
         let req = DeployRequestBody {
             disk_mib: Some(10240),
-            ..minimal_req()
+            ..minimal_payload()
         };
         assert_eq!(req.disk_mib.unwrap_or(1024), 10240);
     }
@@ -265,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_deploy_request_is_debug_formattable() {
-        let req = minimal_req();
+        let req = minimal_payload();
         let s = format!("{:?}", req);
         assert!(s.contains("app_name"));
         assert!(s.contains("image"));

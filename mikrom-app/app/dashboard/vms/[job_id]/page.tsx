@@ -19,7 +19,7 @@ import {
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { getToken } from "@/lib/auth";
-import { getVm, stopVm, deleteVm, VmStatus } from "@/lib/api";
+import { getVm, stopVm, deleteVm, VmStatus, getVmLogsSSE, LogLine } from "@/lib/api";
 
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -86,9 +86,19 @@ export default function VmDetailPage() {
   const [stopError, setStopError] = useState<string | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [logs, setLogs] = useState<LogLine[]>([]);
+  const logEndRef = useRef<HTMLDivElement>(null);
 
   const vmRef = useRef<VmStatus | null>(null);
   useEffect(() => { vmRef.current = vm; }, [vm]);
+
+  const scrollToBottom = useCallback(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [logs, scrollToBottom]);
 
   const fetchVm = useCallback(async (silent = false) => {
     const token = getToken();
@@ -141,10 +151,26 @@ export default function VmDetailPage() {
 
   useEffect(() => {
     let mounted = true;
+    let closeLogs: (() => void) | null = null;
 
     const init = async () => {
       if (mounted) {
         await fetchVm();
+        
+        // Start log streaming
+        const token = getToken();
+        if (token) {
+          closeLogs = getVmLogsSSE(
+            token,
+            jobId,
+            (log) => {
+              if (mounted) setLogs((prev) => [...prev.slice(-499), log]);
+            },
+            (err) => {
+              console.error(err);
+            }
+          );
+        }
       }
     };
 
@@ -162,8 +188,9 @@ export default function VmDetailPage() {
     return () => {
       mounted = false;
       clearInterval(interval);
+      if (closeLogs) closeLogs();
     };
-  }, [fetchVm]);
+  }, [fetchVm, jobId]);
 
   return (
     <AuthGuard>
@@ -271,6 +298,57 @@ export default function VmDetailPage() {
           ) : vm ? (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               <div className="md:col-span-2 space-y-8">
+                {/* Metrics */}
+                <div className="grid grid-cols-2 gap-4">
+                  <Card>
+                    <CardHeader className="py-4">
+                      <CardTitle className="text-xs font-medium text-zinc-500 flex items-center gap-2 uppercase tracking-wider">
+                        <Cpu className="w-4 h-4" /> CPU Usage
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{(vm.cpu_usage * 100).toFixed(1)}%</div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="py-4">
+                      <CardTitle className="text-xs font-medium text-zinc-500 flex items-center gap-2 uppercase tracking-wider">
+                        <Server className="w-4 h-4" /> RAM Used
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{(vm.ram_used_bytes / (1024 * 1024)).toFixed(1)} MB</div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Logs */}
+                <Card className="flex flex-col h-[400px]">
+                  <CardHeader className="border-b border-zinc-100 dark:border-zinc-800 shrink-0">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Terminal className="w-4 h-4 text-zinc-400" />
+                      Live Console Logs
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0 flex-1 min-h-0 bg-zinc-950 overflow-y-auto font-mono text-[10px] sm:text-xs text-zinc-300">
+                    <div className="p-4 space-y-1">
+                      {logs.length === 0 ? (
+                        <div className="text-zinc-600 italic">Waiting for console output...</div>
+                      ) : (
+                        logs.map((log, i) => (
+                          <div key={i} className="flex gap-4">
+                            <span className="text-zinc-600 shrink-0 select-none">
+                              {new Date(log.timestamp * 1000).toLocaleTimeString([], { hour12: false })}
+                            </span>
+                            <span className="whitespace-pre-wrap break-all">{log.line}</span>
+                          </div>
+                        ))
+                      )}
+                      <div ref={logEndRef} />
+                    </div>
+                  </CardContent>
+                </Card>
+
                 <Card>
                   <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
                     <CardTitle className="text-base flex items-center gap-2">

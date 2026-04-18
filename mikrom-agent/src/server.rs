@@ -1,9 +1,10 @@
 use crate::firecracker::{FirecrackerManager, VmConfig};
 use crate::metrics::MetricsCollector;
 use mikrom_proto::agent::{
-    GetMetricsRequest, GetMetricsResponse, GetVmStatusRequest, GetVmStatusResponse, MetricsRequest,
-    MetricsResponse, RegisterRequest, RegisterResponse, StartVmRequest, StartVmResponse,
-    StopVmRequest, StopVmResponse, UnregisterRequest, UnregisterResponse,
+    GetLogsRequest, GetLogsResponse, GetMetricsRequest, GetMetricsResponse, GetVmStatusRequest,
+    GetVmStatusResponse, MetricsRequest, MetricsResponse, RegisterRequest, RegisterResponse,
+    StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse, UnregisterRequest,
+    UnregisterResponse,
     agent_service_server::{AgentService, AgentServiceServer},
 };
 use mikrom_proto::scheduler::{
@@ -11,6 +12,7 @@ use mikrom_proto::scheduler::{
 };
 use mikrom_proto::tls::ServiceCerts;
 use parking_lot::RwLock;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tonic::{Response, Status, async_trait};
@@ -67,10 +69,13 @@ impl AgentService for AgentServer {
     ) -> Result<Response<MetricsResponse>, Status> {
         let req = request.into_inner();
         tracing::debug!(
-            "Reported metrics: cpu={:.2}, ram={}/{}",
+            "Reported metrics: cpu={:.2}, ram={}/{} load={:.2}/{:.2}/{:.2}",
             req.cpu_usage,
             req.ram_used_bytes,
-            req.ram_total_bytes
+            req.ram_total_bytes,
+            req.load_avg_1,
+            req.load_avg_5,
+            req.load_avg_15
         );
         Ok(Response::new(MetricsResponse { success: true }))
     }
@@ -79,7 +84,7 @@ impl AgentService for AgentServer {
         &self,
         _request: tonic::Request<GetMetricsRequest>,
     ) -> Result<Response<GetMetricsResponse>, Status> {
-        let metrics = self.metrics_collector.collect();
+        let metrics = self.metrics_collector.collect().await;
         Ok(Response::new(GetMetricsResponse {
             host_id: self.host_id.clone(),
             cpu_usage: metrics.cpu_usage,
@@ -89,8 +94,88 @@ impl AgentService for AgentServer {
             disk_total_bytes: metrics.disk_total_bytes,
             apps_count: metrics.apps_count,
             timestamp: metrics.timestamp,
+            load_avg_1: metrics.load_avg_1,
+            load_avg_5: metrics.load_avg_5,
+            load_avg_15: metrics.load_avg_15,
+            vms: metrics
+                .vms
+                .into_iter()
+                .map(|(id, m)| {
+                    (
+                        id,
+                        mikrom_proto::agent::VmMetrics {
+                            cpu_usage: m.cpu_usage,
+                            ram_used_bytes: m.ram_used_bytes,
+                        },
+                    )
+                })
+                .collect(),
         }))
     }
+
+    async fn get_logs(
+        &self,
+        request: tonic::Request<GetLogsRequest>,
+    ) -> Result<Response<Self::GetLogsStream>, Status> {
+        let req = request.into_inner();
+        let vm_id = req.vm_id;
+        let follow = req.follow;
+        tracing::info!(
+            "Log streaming requested for VM: {} (follow={})",
+            vm_id,
+            follow
+        );
+        let firecracker = self.firecracker.clone();
+
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+
+        tokio::spawn(async move {
+            // Send existing logs first
+            let initial_logs = firecracker.get_logs(&vm_id).await;
+            let count = initial_logs.len();
+            for line in &initial_logs {
+                if tx
+                    .send(Ok(GetLogsResponse {
+                        line: line.clone(),
+                        timestamp: chrono::Utc::now().timestamp(),
+                    }))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+
+            if follow {
+                let mut last_index = count;
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    let current_logs = firecracker.get_logs(&vm_id).await;
+                    if current_logs.len() > last_index {
+                        for line in &current_logs[last_index..] {
+                            if tx
+                                .send(Ok(GetLogsResponse {
+                                    line: line.clone(),
+                                    timestamp: chrono::Utc::now().timestamp(),
+                                }))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                        last_index = current_logs.len();
+                    }
+                }
+            }
+        });
+
+        let output_stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        Ok(Response::new(Box::pin(output_stream) as Self::GetLogsStream))
+    }
+
+    type GetLogsStream =
+        std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<GetLogsResponse, Status>> + Send>>;
 
     async fn start_vm(
         &self,
@@ -104,16 +189,64 @@ impl AgentService for AgentServer {
             req.vm_id.clone()
         };
 
+        let mut env = HashMap::new();
+        if let Some(config) = &req.config {
+            for (k, v) in &config.env {
+                env.insert(k.clone(), v.clone());
+            }
+        }
+
         let config = VmConfig {
             vcpus: req.config.as_ref().map(|c| c.vcpus).unwrap_or(1),
-            memory_mib: req.config.as_ref().map(|c| c.memory_mib).unwrap_or(256),
-            disk_mib: req.config.as_ref().map(|c| c.disk_mib).unwrap_or(1024),
-            env: req
+            memory_mib: req
                 .config
                 .as_ref()
-                .map(|c| c.env.clone())
+                .map(|c| c.memory_mib as u64)
+                .unwrap_or(256),
+            disk_mib: req
+                .config
+                .as_ref()
+                .map(|c| c.disk_mib as u64)
+                .unwrap_or(1024),
+            env,
+            ip_address: req.config.as_ref().and_then(|c| {
+                if c.ip_address.is_empty() {
+                    None
+                } else {
+                    Some(c.ip_address.clone())
+                }
+            }),
+            gateway: req.config.as_ref().and_then(|c| {
+                if c.gateway.is_empty() {
+                    None
+                } else {
+                    Some(c.gateway.clone())
+                }
+            }),
+            mac_address: req.config.as_ref().and_then(|c| {
+                if c.mac_address.is_empty() {
+                    None
+                } else {
+                    Some(c.mac_address.clone())
+                }
+            }),
+            volumes: req
+                .config
+                .as_ref()
+                .map(|c| {
+                    c.volumes
+                        .iter()
+                        .map(|v| crate::firecracker::Volume {
+                            volume_id: v.volume_id.clone(),
+                            size_mib: v.size_mib,
+                            read_only: v.read_only,
+                        })
+                        .collect()
+                })
                 .unwrap_or_default(),
         };
+
+        tracing::info!("Starting VM {} with config: {:?}", vm_id, config);
 
         match self
             .firecracker
@@ -199,12 +332,13 @@ impl AgentServer {
         ip_address: String,
         scheduler_addr: String,
     ) -> Self {
+        let firecracker = FirecrackerManager::new();
         Self {
             host_id,
             hostname,
             ip_address,
-            metrics_collector: MetricsCollector::new(),
-            firecracker: FirecrackerManager::new(),
+            metrics_collector: MetricsCollector::with_firecracker(firecracker.clone()),
+            firecracker,
             scheduler_client: None,
             shutdown_flag: Arc::new(RwLock::new(false)),
             scheduler_addr,
@@ -220,6 +354,7 @@ impl AgentServer {
         let hostname = self.hostname.clone();
         let ip_address = self.ip_address.clone();
         let metrics_collector = self.metrics_collector.clone();
+        let agent_port = addr.port();
 
         // Load certs once — they are moved into the background task and also
         // used to configure the gRPC server below.
@@ -264,7 +399,7 @@ impl AgentServer {
                 host_id: host_id.clone(),
                 hostname: hostname.clone(),
                 ip_address: ip_address.clone(),
-                agent_port: 5003,
+                agent_port: agent_port.into(),
             };
             let mut backoff_secs = 1u64;
             for attempt in 1_u32.. {
@@ -296,7 +431,7 @@ impl AgentServer {
             // Report immediately after registration so the scheduler sees this
             // worker as available without waiting for the first 5-second tick.
             loop {
-                let metrics = metrics_collector.collect();
+                let metrics = metrics_collector.collect().await;
                 tracing::info!(
                     "Collected metrics: cpu={:.2} ram={}/{} disk={}/{}",
                     metrics.cpu_usage,
@@ -319,6 +454,22 @@ impl AgentServer {
                                 disk_total_bytes: metrics.disk_total_bytes,
                                 apps_count: metrics.apps_count,
                                 timestamp: metrics.timestamp,
+                                load_avg_1: metrics.load_avg_1,
+                                load_avg_5: metrics.load_avg_5,
+                                load_avg_15: metrics.load_avg_15,
+                                vms: metrics
+                                    .vms
+                                    .into_iter()
+                                    .map(|(id, m)| {
+                                        (
+                                            id,
+                                            mikrom_proto::scheduler::VmMetrics {
+                                                cpu_usage: m.cpu_usage,
+                                                ram_used_bytes: m.ram_used_bytes,
+                                            },
+                                        )
+                                    })
+                                    .collect(),
                             };
                             match client.report_metrics(req).await {
                                 Ok(resp) => tracing::info!(
@@ -450,6 +601,10 @@ mod tests {
                 disk_total_bytes: 100 * 1024 * 1024 * 1024,
                 apps_count: 3,
                 timestamp: 1_700_000_000,
+                load_avg_1: 0.1,
+                load_avg_5: 0.2,
+                load_avg_15: 0.3,
+                vms: Default::default(),
             }))
             .await
             .unwrap()
@@ -558,19 +713,23 @@ mod tests {
                 app_id: "app-1".to_string(),
                 image: "ubuntu:24.04".to_string(),
                 config: Some(mikrom_proto::agent::VmConfig {
-                    vcpus: 4,
-                    memory_mib: 2048,
-                    disk_mib: 8192,
-                    env: env.clone(),
+                    vcpus: 1,
+                    memory_mib: 256,
+                    disk_mib: 1024,
+                    env,
+                    ip_address: String::new(),
+                    gateway: String::new(),
+                    mac_address: String::new(),
+                    volumes: vec![],
                 }),
             }))
             .await
             .unwrap();
         let vm = server.firecracker.get_vm("vm-cfg").await.unwrap();
-        assert_eq!(vm.config.vcpus, 4);
-        assert_eq!(vm.config.memory_mib, 2048);
-        assert_eq!(vm.config.disk_mib, 8192);
-        assert_eq!(vm.config.env.get("PORT").unwrap(), "8080");
+        assert_eq!(vm.config.vcpus, 1);
+        assert_eq!(vm.config.memory_mib, 256);
+        assert_eq!(vm.config.disk_mib, 1024);
+        assert_eq!(vm.config.env.get("PORT").map(|s| s.as_str()), Some("8080"));
     }
 
     #[tokio::test]

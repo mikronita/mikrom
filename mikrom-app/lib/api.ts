@@ -32,7 +32,6 @@ export interface VmInfo {
   host_id: string;
   vm_id: string;
 }
-
 export interface VmStatus {
   job_id: string;
   status: string;
@@ -42,6 +41,77 @@ export interface VmStatus {
   started_at: number;
   stopped_at: number;
   error_message: string;
+  cpu_usage: number;
+  ram_used_bytes: number;
+}
+
+export interface LogLine {
+  line: string;
+  timestamp: number;
+}
+
+// ... other exports ...
+
+export function getVmLogsSSE(
+  token: string,
+  jobId: string,
+  onMessage: (log: LogLine) => void,
+  onError: (err: string) => void
+): () => void {
+  const abortController = new AbortController();
+
+  (async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/vms/${jobId}/logs`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        signal: abortController.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to connect to log stream: ${response.statusText}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No response body");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              onMessage(data as LogLine);
+            } catch (err) {
+              console.error("Failed to parse log line", err);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
+      console.error("SSE Fetch Error", err);
+      onError(err instanceof Error ? err.message : "Connection lost to log stream");
+    }
+  })();
+
+  return () => {
+    abortController.abort();
+  };
 }
 
 export interface DeployRequest {

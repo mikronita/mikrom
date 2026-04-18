@@ -40,6 +40,11 @@ services:
     depends_on:
       cert-gen:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 5002"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
       - mikrom
 
@@ -48,7 +53,7 @@ services:
       context: .
       dockerfile: mikrom-agent/Dockerfile
     environment:
-      SCHEDULER_ADDR: http://mikrom-scheduler:5002
+      SCHEDULER_ADDR: https://mikrom-scheduler:5002
       AGENT_PORT: "5003"
       AGENT_HOSTNAME: mikrom-agent
       USE_TLS: "true"
@@ -78,7 +83,7 @@ services:
       dockerfile: mikrom-api/Dockerfile
     environment:
       DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_api
-      SCHEDULER_ADDR: http://mikrom-scheduler:5002
+      SCHEDULER_ADDR: https://mikrom-scheduler:5002
       JWT_SECRET: ${JWT_SECRET:-change_me_in_production}
       USE_TLS: "true"
       CERTS_DIR: /certs/api

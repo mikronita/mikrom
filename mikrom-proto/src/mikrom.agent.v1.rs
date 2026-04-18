@@ -27,6 +27,13 @@ pub struct UnregisterResponse {
     #[prost(string, tag = "2")]
     pub message: ::prost::alloc::string::String,
 }
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct VmMetrics {
+    #[prost(float, tag = "1")]
+    pub cpu_usage: f32,
+    #[prost(uint64, tag = "2")]
+    pub ram_used_bytes: u64,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MetricsRequest {
     #[prost(string, tag = "1")]
@@ -45,6 +52,14 @@ pub struct MetricsRequest {
     pub apps_count: u32,
     #[prost(int64, tag = "8")]
     pub timestamp: i64,
+    #[prost(float, tag = "9")]
+    pub load_avg_1: f32,
+    #[prost(float, tag = "10")]
+    pub load_avg_5: f32,
+    #[prost(float, tag = "11")]
+    pub load_avg_15: f32,
+    #[prost(map = "string, message", tag = "12")]
+    pub vms: ::std::collections::HashMap<::prost::alloc::string::String, VmMetrics>,
 }
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct MetricsResponse {
@@ -74,6 +89,28 @@ pub struct GetMetricsResponse {
     pub apps_count: u32,
     #[prost(int64, tag = "8")]
     pub timestamp: i64,
+    #[prost(float, tag = "9")]
+    pub load_avg_1: f32,
+    #[prost(float, tag = "10")]
+    pub load_avg_5: f32,
+    #[prost(float, tag = "11")]
+    pub load_avg_15: f32,
+    #[prost(map = "string, message", tag = "12")]
+    pub vms: ::std::collections::HashMap<::prost::alloc::string::String, VmMetrics>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetLogsRequest {
+    #[prost(string, tag = "1")]
+    pub vm_id: ::prost::alloc::string::String,
+    #[prost(bool, tag = "2")]
+    pub follow: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetLogsResponse {
+    #[prost(string, tag = "1")]
+    pub line: ::prost::alloc::string::String,
+    #[prost(int64, tag = "2")]
+    pub timestamp: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StartVmRequest {
@@ -87,18 +124,35 @@ pub struct StartVmRequest {
     pub config: ::core::option::Option<VmConfig>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Volume {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "2")]
+    pub size_mib: u64,
+    #[prost(bool, tag = "3")]
+    pub read_only: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct VmConfig {
     #[prost(uint32, tag = "1")]
     pub vcpus: u32,
-    #[prost(uint64, tag = "2")]
-    pub memory_mib: u64,
-    #[prost(uint64, tag = "3")]
-    pub disk_mib: u64,
+    #[prost(uint32, tag = "2")]
+    pub memory_mib: u32,
+    #[prost(uint32, tag = "3")]
+    pub disk_mib: u32,
     #[prost(map = "string, string", tag = "4")]
     pub env: ::std::collections::HashMap<
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
+    #[prost(string, tag = "5")]
+    pub ip_address: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub gateway: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub mac_address: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "8")]
+    pub volumes: ::prost::alloc::vec::Vec<Volume>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StartVmResponse {
@@ -364,6 +418,30 @@ pub mod agent_service_client {
                 .insert(GrpcMethod::new("mikrom.agent.v1.AgentService", "GetMetrics"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn get_logs(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetLogsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::GetLogsResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/mikrom.agent.v1.AgentService/GetLogs",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("mikrom.agent.v1.AgentService", "GetLogs"));
+            self.inner.server_streaming(req, path, codec).await
+        }
         pub async fn start_vm(
             &mut self,
             request: impl tonic::IntoRequest<super::StartVmRequest>,
@@ -473,6 +551,16 @@ pub mod agent_service_server {
             tonic::Response<super::GetMetricsResponse>,
             tonic::Status,
         >;
+        /// Server streaming response type for the GetLogs method.
+        type GetLogsStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::GetLogsResponse, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        async fn get_logs(
+            &self,
+            request: tonic::Request<super::GetLogsRequest>,
+        ) -> std::result::Result<tonic::Response<Self::GetLogsStream>, tonic::Status>;
         async fn start_vm(
             &self,
             request: tonic::Request<super::StartVmRequest>,
@@ -741,6 +829,52 @@ pub mod agent_service_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/mikrom.agent.v1.AgentService/GetLogs" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetLogsSvc<T: AgentService>(pub Arc<T>);
+                    impl<
+                        T: AgentService,
+                    > tonic::server::ServerStreamingService<super::GetLogsRequest>
+                    for GetLogsSvc<T> {
+                        type Response = super::GetLogsResponse;
+                        type ResponseStream = T::GetLogsStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetLogsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as AgentService>::get_logs(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetLogsSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)

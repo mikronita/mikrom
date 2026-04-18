@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { 
   Plus, 
   RefreshCw, 
@@ -99,11 +99,33 @@ export default function VmsPage() {
     setLoading(false);
   }, []);
 
+  const vmsRef = useRef(vms);
   useEffect(() => {
-    const init = async () => {
-      await fetchVms();
-    };
-    init();
+    vmsRef.current = vms;
+  }, [vms]);
+
+  useEffect(() => {
+    fetchVms();
+
+    // Auto-polling for transitional states
+    const intervalId = setInterval(async () => {
+      const hasTransitional = vmsRef.current.some(vm => {
+        const s = vm.status.toLowerCase();
+        return s === "pending" || s === "scheduled" || s === "starting" || s === "stopping";
+      });
+
+      if (hasTransitional) {
+        const token = getToken();
+        if (token) {
+          const result = await listVms(token);
+          if (!result.error && result.data) {
+            setVms(result.data);
+          }
+        }
+      }
+    }, 5000);
+
+    return () => clearInterval(intervalId);
   }, [fetchVms]);
 
   const filteredVms = vms.filter(vm => 

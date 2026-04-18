@@ -33,11 +33,22 @@ pub struct Job {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct Volume {
+    pub volume_id: String,
+    pub size_mib: u64,
+    pub read_only: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct VmConfig {
     pub vcpus: u32,
     pub memory_mib: u64,
     pub disk_mib: u64,
     pub env: std::collections::HashMap<String, String>,
+    pub ip_address: Option<String>,
+    pub gateway: Option<String>,
+    pub mac_address: Option<String>,
+    pub volumes: Vec<Volume>,
 }
 
 impl Job {
@@ -106,6 +117,10 @@ mod tests {
                 memory_mib: 256,
                 disk_mib: 1024,
                 env: Default::default(),
+                ip_address: None,
+                gateway: None,
+                mac_address: None,
+                volumes: vec![],
             },
             "user-1".to_string(),
         )
@@ -172,6 +187,10 @@ mod tests {
         assert_eq!(config.memory_mib, 0);
         assert_eq!(config.disk_mib, 0);
         assert!(config.env.is_empty());
+        assert!(config.ip_address.is_none());
+        assert!(config.gateway.is_none());
+        assert!(config.mac_address.is_none());
+        assert!(config.volumes.is_empty());
     }
 
     #[test]
@@ -225,6 +244,10 @@ mod tests {
             memory_mib: 512,
             disk_mib: 2048,
             env,
+            ip_address: None,
+            gateway: None,
+            mac_address: None,
+            volumes: vec![],
         };
         assert_eq!(config.env.get("PORT").unwrap(), "8080");
     }

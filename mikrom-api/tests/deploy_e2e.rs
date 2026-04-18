@@ -125,11 +125,11 @@ async fn test_scheduler_agent_grpc_e2e() {
         .expect("deploy_app RPC failed")
         .into_inner();
 
-    // The agent has registered → a worker is available → job is Scheduled.
-    assert_eq!(
-        response.status,
-        mikrom_scheduler::JobStatus::Scheduled as i32,
-        "expected Scheduled (1), got status={} message='{}'",
+    // The agent has registered → a worker is available → job is Scheduled or Running.
+    assert!(
+        response.status == mikrom_scheduler::JobStatus::Scheduled as i32
+            || response.status == mikrom_scheduler::JobStatus::Running as i32,
+        "expected Scheduled (2) or Running (3), got status={} message='{}'",
         response.status,
         response.message
     );

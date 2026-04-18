@@ -79,10 +79,13 @@ impl WorkerRegistry {
     }
 
     pub fn get_available_workers(&self) -> Vec<Worker> {
+        let now = chrono::Utc::now().timestamp();
         self.workers
             .read()
             .values()
-            .filter(|w| w.metrics.is_some())
+            .filter(|w| {
+                w.metrics.is_some() && (now - w.last_heartbeat) < 30 // 30 seconds staleness threshold
+            })
             .cloned()
             .collect()
     }
@@ -111,6 +114,10 @@ mod tests {
             disk_used_bytes: 10 * 1024 * 1024 * 1024,
             disk_total_bytes: 100 * 1024 * 1024 * 1024,
             apps_count: 1,
+            load_avg_1: 0.0,
+            load_avg_5: 0.0,
+            load_avg_15: 0.0,
+            vms: HashMap::new(),
             timestamp: 0,
         }
     }
@@ -353,6 +360,10 @@ mod tests {
                         disk_used_bytes: 0,
                         disk_total_bytes: 100 * 1024 * 1024 * 1024,
                         apps_count: i as u32,
+                        load_avg_1: 0.0,
+                        load_avg_5: 0.0,
+                        load_avg_15: 0.0,
+                        vms: HashMap::new(),
                         timestamp: 0,
                     },
                 );

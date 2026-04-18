@@ -1,7 +1,15 @@
+use crate::firecracker::FirecrackerManager;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use sysinfo::System;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VmMetrics {
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SystemMetrics {
@@ -11,6 +19,10 @@ pub struct SystemMetrics {
     pub disk_used_bytes: u64,
     pub disk_total_bytes: u64,
     pub apps_count: u32,
+    pub load_avg_1: f32,
+    pub load_avg_5: f32,
+    pub load_avg_15: f32,
+    pub vms: HashMap<String, VmMetrics>,
     pub timestamp: i64,
 }
 
@@ -23,6 +35,10 @@ impl Default for SystemMetrics {
             disk_used_bytes: 0,
             disk_total_bytes: 0,
             apps_count: 0,
+            load_avg_1: 0.0,
+            load_avg_5: 0.0,
+            load_avg_15: 0.0,
+            vms: HashMap::new(),
             timestamp: chrono::Utc::now().timestamp(),
         }
     }
@@ -32,6 +48,8 @@ impl Default for SystemMetrics {
 pub struct MetricsCollector {
     system: Arc<RwLock<System>>,
     apps_count: Arc<RwLock<u32>>,
+    cached_metrics: Arc<RwLock<Option<(SystemMetrics, i64)>>>,
+    firecracker: Option<FirecrackerManager>,
 }
 
 impl MetricsCollector {
@@ -42,10 +60,37 @@ impl MetricsCollector {
         Self {
             system: Arc::new(RwLock::new(system)),
             apps_count: Arc::new(RwLock::new(0)),
+            cached_metrics: Arc::new(RwLock::new(None)),
+            firecracker: None,
         }
     }
 
-    pub fn collect(&self) -> SystemMetrics {
+    pub fn with_firecracker(firecracker: FirecrackerManager) -> Self {
+        let mut collector = Self::new();
+        collector.firecracker = Some(firecracker);
+        collector
+    }
+
+    pub async fn collect(&self) -> SystemMetrics {
+        let now = chrono::Utc::now().timestamp();
+
+        // 1 second cache
+        if let Some((cached, timestamp)) = self.cached_metrics.read().as_ref() {
+            if (now - *timestamp) < 1 {
+                let mut metrics = cached.clone();
+                // apps_count might have changed, update it from its own lock
+                metrics.apps_count = *self.apps_count.read();
+                metrics.timestamp = now;
+                return metrics;
+            }
+        }
+
+        let pids = if let Some(mgr) = &self.firecracker {
+            mgr.get_pids().await
+        } else {
+            HashMap::new()
+        };
+
         let mut system = self.system.write();
         system.refresh_all();
 
@@ -57,15 +102,38 @@ impl MetricsCollector {
 
         let apps_count = *self.apps_count.read();
 
-        SystemMetrics {
+        let load_avg = System::load_average();
+
+        // Collect per-VM metrics
+        let mut vms = HashMap::new();
+        for (vm_id, pid) in pids {
+            if let Some(process) = system.process(sysinfo::Pid::from(pid as usize)) {
+                vms.insert(
+                    vm_id,
+                    VmMetrics {
+                        cpu_usage: process.cpu_usage() / 100.0,
+                        ram_used_bytes: process.memory(),
+                    },
+                );
+            }
+        }
+
+        let metrics = SystemMetrics {
             cpu_usage,
             ram_used_bytes,
             ram_total_bytes,
             disk_used_bytes,
             disk_total_bytes,
             apps_count,
-            timestamp: chrono::Utc::now().timestamp(),
-        }
+            load_avg_1: load_avg.one as f32,
+            load_avg_5: load_avg.five as f32,
+            load_avg_15: load_avg.fifteen as f32,
+            vms,
+            timestamp: now,
+        };
+
+        *self.cached_metrics.write() = Some((metrics.clone(), now));
+        metrics
     }
 
     fn get_disk_usage(&self) -> (u64, u64) {
@@ -117,58 +185,58 @@ mod tests {
         assert!(m.timestamp > 0);
     }
 
-    #[test]
-    fn test_collect_returns_real_system_data() {
+    #[tokio::test]
+    async fn test_collect_returns_real_system_data() {
         let collector = MetricsCollector::new();
-        let metrics = collector.collect();
+        let metrics = collector.collect().await;
         assert!(metrics.ram_total_bytes > 0, "total RAM must be > 0");
         assert!(metrics.timestamp > 0);
     }
 
-    #[test]
-    fn test_cpu_usage_within_valid_range() {
+    #[tokio::test]
+    async fn test_cpu_usage_within_valid_range() {
         let collector = MetricsCollector::new();
-        let metrics = collector.collect();
+        let metrics = collector.collect().await;
         assert!(metrics.cpu_usage >= 0.0);
         assert!(metrics.cpu_usage <= 1.0);
     }
 
-    #[test]
-    fn test_ram_used_does_not_exceed_total() {
+    #[tokio::test]
+    async fn test_ram_used_does_not_exceed_total() {
         let collector = MetricsCollector::new();
-        let metrics = collector.collect();
+        let metrics = collector.collect().await;
         assert!(metrics.ram_used_bytes <= metrics.ram_total_bytes);
     }
 
-    #[test]
-    fn test_increment_app_count() {
+    #[tokio::test]
+    async fn test_increment_app_count() {
         let collector = MetricsCollector::new();
         collector.increment_app_count();
         collector.increment_app_count();
-        assert_eq!(collector.collect().apps_count, 2);
+        assert_eq!(collector.collect().await.apps_count, 2);
     }
 
-    #[test]
-    fn test_decrement_app_count() {
+    #[tokio::test]
+    async fn test_decrement_app_count() {
         let collector = MetricsCollector::new();
         collector.increment_app_count();
         collector.increment_app_count();
         collector.decrement_app_count();
-        assert_eq!(collector.collect().apps_count, 1);
+        assert_eq!(collector.collect().await.apps_count, 1);
     }
 
-    #[test]
-    fn test_decrement_saturates_at_zero() {
+    #[tokio::test]
+    async fn test_decrement_saturates_at_zero() {
         let collector = MetricsCollector::new();
         collector.decrement_app_count();
         collector.decrement_app_count();
-        assert_eq!(collector.collect().apps_count, 0);
+        assert_eq!(collector.collect().await.apps_count, 0);
     }
 
-    #[test]
-    fn test_app_count_starts_at_zero() {
+    #[tokio::test]
+    async fn test_app_count_starts_at_zero() {
         let collector = MetricsCollector::new();
-        assert_eq!(collector.collect().apps_count, 0);
+        assert_eq!(collector.collect().await.apps_count, 0);
     }
 
     #[test]
@@ -180,21 +248,28 @@ mod tests {
             disk_used_bytes: 500,
             disk_total_bytes: 1000,
             apps_count: 7,
+            load_avg_1: 0.1,
+            load_avg_5: 0.2,
+            load_avg_15: 0.3,
+            vms: HashMap::new(),
             timestamp: 1_700_000_000,
         };
         let json = serde_json::to_string(&m).unwrap();
         let restored: SystemMetrics = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.apps_count, 7);
         assert!((restored.cpu_usage - 0.42).abs() < 0.001);
+        assert_eq!(restored.load_avg_1, 0.1);
+        assert_eq!(restored.load_avg_5, 0.2);
+        assert_eq!(restored.load_avg_15, 0.3);
         assert_eq!(restored.timestamp, 1_700_000_000);
     }
 
-    #[test]
-    fn test_collector_is_cloneable() {
+    #[tokio::test]
+    async fn test_collector_is_cloneable() {
         let collector = MetricsCollector::new();
         collector.increment_app_count();
         let clone = collector.clone();
         // Cloned collector shares the same Arc state
-        assert_eq!(clone.collect().apps_count, 1);
+        assert_eq!(clone.collect().await.apps_count, 1);
     }
 }

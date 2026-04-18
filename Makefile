@@ -47,8 +47,20 @@ test-integration: ## Run integration tests (starts PostgreSQL via Docker)
 	  cargo test --test integration; \
 	  docker compose stop postgres
 
+.PHONY: test-e2e
+test-e2e: ## Run end-to-end deployment tests
+	cargo test -p mikrom-api --test deploy_e2e
+
+.PHONY: test-all-crates
+test-all-crates: ## Run unit tests for all crates plus e2e
+	cargo test -p mikrom-proto && \
+	cargo test -p mikrom-scheduler && \
+	cargo test -p mikrom-agent && \
+	cargo test -p mikrom-api && \
+	make test-e2e
+
 .PHONY: test-all
-test-all: test test-integration ## Run unit + integration tests
+test-all: test-all-crates test-integration ## Run unit + integration + e2e tests
 
 # ── Run services ──────────────────────────────────────────────────────────────
 

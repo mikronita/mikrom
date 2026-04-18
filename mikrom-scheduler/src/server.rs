@@ -4,10 +4,12 @@ use crate::worker_registry::WorkerRegistry;
 use mikrom_proto::agent::{StartVmRequest, agent_service_client::AgentServiceClient};
 use mikrom_proto::scheduler::{
     AppInfo, AppStatusRequest, AppStatusResponse, CancelRequest, CancelResponse, DeleteAppRequest,
-    DeleteAppResponse, DeployRequest, DeployResponse, ListAppsRequest, ListAppsResponse,
-    RegisterWorkerRequest, RegisterWorkerResponse, ReportMetricsRequest, ReportMetricsResponse,
+    DeleteAppResponse, DeployRequest, DeployResponse, GetLogsRequest, GetLogsResponse,
+    ListAppsRequest, ListAppsResponse, RegisterWorkerRequest, RegisterWorkerResponse,
+    ReportMetricsRequest, ReportMetricsResponse,
     scheduler_service_server::{SchedulerService, SchedulerServiceServer},
 };
+
 use mikrom_proto::tls::ServiceCerts;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -76,6 +78,22 @@ impl SchedulerService for SchedulerServer {
             disk_total_bytes: req.disk_total_bytes,
             apps_count: req.apps_count,
             timestamp: req.timestamp,
+            load_avg_1: req.load_avg_1,
+            load_avg_5: req.load_avg_5,
+            load_avg_15: req.load_avg_15,
+            vms: req
+                .vms
+                .into_iter()
+                .map(|(id, m)| {
+                    (
+                        id,
+                        crate::metrics::VmMetrics {
+                            cpu_usage: m.cpu_usage,
+                            ram_used_bytes: m.ram_used_bytes,
+                        },
+                    )
+                })
+                .collect(),
         };
 
         let success = self
@@ -111,12 +129,37 @@ impl SchedulerService for SchedulerServer {
 
         let config = crate::job::VmConfig {
             vcpus: req.config.as_ref().map(|c| c.vcpus).unwrap_or(1),
-            memory_mib: req.config.as_ref().map(|c| c.memory_mib).unwrap_or(256),
-            disk_mib: req.config.as_ref().map(|c| c.disk_mib).unwrap_or(1024),
+            memory_mib: req
+                .config
+                .as_ref()
+                .map(|c| c.memory_mib as u64)
+                .unwrap_or(256),
+            disk_mib: req
+                .config
+                .as_ref()
+                .map(|c| c.disk_mib as u64)
+                .unwrap_or(1024),
             env: req
                 .config
                 .as_ref()
                 .map(|c| c.env.clone())
+                .unwrap_or_default(),
+            ip_address: None,
+            gateway: None,
+            mac_address: None,
+            volumes: req
+                .config
+                .as_ref()
+                .map(|c| {
+                    c.volumes
+                        .iter()
+                        .map(|v| crate::job::Volume {
+                            volume_id: v.volume_id.clone(),
+                            size_mib: v.size_mib,
+                            read_only: v.read_only,
+                        })
+                        .collect()
+                })
                 .unwrap_or_default(),
         };
 
@@ -128,19 +171,45 @@ impl SchedulerService for SchedulerServer {
                 let image = req.image.clone();
                 let host_id = worker.host_id.clone();
 
+                // Assign networking (Mock implementation: unique IP per job)
+                // In real world, use an IPAM (IP Address Management)
+                let last_byte = (chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) % 250) + 2;
+                let guest_ip = format!("172.16.1.{}", last_byte);
+                let gateway = "172.16.1.1".to_string();
+                let mac = format!("AA:BB:CC:01:01:{:02x}", last_byte);
+
+                let job_config = crate::job::VmConfig {
+                    vcpus: config.vcpus,
+                    memory_mib: config.memory_mib as u64,
+                    disk_mib: config.disk_mib as u64,
+                    env: config.env.clone(),
+                    ip_address: Some(guest_ip),
+                    gateway: Some(gateway),
+                    mac_address: Some(mac),
+                    volumes: config
+                        .volumes
+                        .iter()
+                        .map(|v| crate::job::Volume {
+                            volume_id: v.volume_id.clone(),
+                            size_mib: v.size_mib,
+                            read_only: v.read_only,
+                        })
+                        .collect(),
+                };
+
                 let mut job = crate::job::Job::new(
                     job_id.clone(),
                     req.app_id,
                     req.app_name,
                     req.image,
-                    config.clone(),
+                    job_config.clone(),
                     req.user_id,
                 );
                 job.schedule(host_id.clone(), vm_id.clone());
                 self.scheduler.add_job(job);
 
                 match self
-                    .forward_deploy_to_agent(&host_id, &app_id, &image, &vm_id, &config)
+                    .forward_deploy_to_agent(&host_id, &app_id, &image, &vm_id, &job_config)
                     .await
                 {
                     Ok(()) => {
@@ -201,7 +270,7 @@ impl SchedulerService for SchedulerServer {
         let req = request.into_inner();
 
         match self.scheduler.get_job(&req.job_id) {
-            Some(job) => {
+            Some(job) if job.user_id == req.user_id => {
                 let response = AppStatusResponse {
                     job_id: job.job_id,
                     status: job.status as i32,
@@ -214,9 +283,91 @@ impl SchedulerService for SchedulerServer {
                 };
                 Ok(Response::new(response))
             }
+            Some(_) => Err(Status::permission_denied("You do not own this job")),
             None => Err(Status::not_found("Job not found")),
         }
     }
+
+    async fn get_app_logs(
+        &self,
+        request: tonic::Request<GetLogsRequest>,
+    ) -> Result<Response<Self::GetAppLogsStream>, Status> {
+        let req = request.into_inner();
+        let job_id = req.job_id;
+        let user_id = req.user_id;
+
+        let job = self
+            .scheduler
+            .get_job(&job_id)
+            .ok_or_else(|| Status::not_found("Job not found"))?;
+
+        if job.user_id != user_id {
+            return Err(Status::permission_denied("You do not own this job"));
+        }
+
+        let host_id = job
+            .host_id
+            .ok_or_else(|| Status::failed_precondition("Job has no assigned host"))?;
+        let vm_id = job
+            .vm_id
+            .ok_or_else(|| Status::failed_precondition("Job has no assigned VM ID"))?;
+
+        // Connect to agent and proxy stream
+        let worker = self
+            .scheduler
+            .worker_registry()
+            .get_worker(&host_id)
+            .ok_or_else(|| Status::not_found("Worker not found"))?;
+
+        let (addr, domain) = match &self.certs {
+            Some(_) => (
+                format!("https://{}:{}", worker.hostname, worker.agent_port),
+                worker.hostname.clone(),
+            ),
+            None => (
+                format!("http://{}:{}", worker.ip_address, worker.agent_port),
+                String::new(),
+            ),
+        };
+
+        let mut endpoint = tonic::transport::Endpoint::new(addr)
+            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?;
+
+        if let Some(certs) = &self.certs {
+            endpoint = endpoint
+                .tls_config(certs.client_tls_config(&domain))
+                .map_err(|e| Status::internal(format!("TLS config error: {}", e)))?;
+        }
+
+        let channel = endpoint
+            .connect()
+            .await
+            .map_err(|e| Status::unavailable(format!("Failed to connect to agent: {}", e)))?;
+
+        let mut client =
+            mikrom_proto::agent::agent_service_client::AgentServiceClient::new(channel);
+
+        let agent_req = mikrom_proto::agent::GetLogsRequest {
+            vm_id,
+            follow: req.follow,
+        };
+
+        let stream = client.get_logs(agent_req).await?.into_inner();
+
+        let output_stream = tokio_stream::StreamExt::map(stream, |res| {
+            res.map(|msg| GetLogsResponse {
+                line: msg.line,
+                timestamp: msg.timestamp,
+            })
+        });
+
+        Ok(Response::new(
+            Box::pin(output_stream) as Self::GetAppLogsStream
+        ))
+    }
+
+    type GetAppLogsStream =
+        std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<GetLogsResponse, Status>> + Send>>;
 
     async fn cancel_app(
         &self,
@@ -225,6 +376,10 @@ impl SchedulerService for SchedulerServer {
         let req = request.into_inner();
 
         if let Some(job) = self.scheduler.get_job(&req.job_id) {
+            if job.user_id != req.user_id {
+                return Err(Status::permission_denied("You do not own this job"));
+            }
+
             self.scheduler.cancel_job(&req.job_id);
 
             if let Some(vm_id) = &job.vm_id {
@@ -252,6 +407,10 @@ impl SchedulerService for SchedulerServer {
         let req = request.into_inner();
 
         if let Some(job) = self.scheduler.get_job(&req.job_id) {
+            if job.user_id != req.user_id {
+                return Err(Status::permission_denied("You do not own this job"));
+            }
+
             // First stop it if it's running
             if let Some(vm_id) = &job.vm_id {
                 let _ = self
@@ -387,9 +546,21 @@ impl SchedulerServer {
             image: image.to_string(),
             config: Some(mikrom_proto::agent::VmConfig {
                 vcpus: config.vcpus,
-                memory_mib: config.memory_mib,
-                disk_mib: config.disk_mib,
+                memory_mib: config.memory_mib as u32,
+                disk_mib: config.disk_mib as u32,
                 env: config.env.clone(),
+                ip_address: config.ip_address.clone().unwrap_or_default(),
+                gateway: config.gateway.clone().unwrap_or_default(),
+                mac_address: config.mac_address.clone().unwrap_or_default(),
+                volumes: config
+                    .volumes
+                    .iter()
+                    .map(|v| mikrom_proto::agent::Volume {
+                        volume_id: v.volume_id.clone(),
+                        size_mib: v.size_mib,
+                        read_only: v.read_only,
+                    })
+                    .collect(),
             }),
         };
 
@@ -534,6 +705,10 @@ mod tests {
                 disk_total_bytes: 100 * GIB,
                 apps_count: 0,
                 timestamp: 0,
+                load_avg_1: 0.1,
+                load_avg_5: 0.2,
+                load_avg_15: 0.3,
+                vms: Default::default(),
             }))
             .await
             .unwrap();
@@ -598,6 +773,10 @@ mod tests {
                 disk_total_bytes: 100 * GIB,
                 apps_count: 2,
                 timestamp: 1_700_000_000,
+                load_avg_1: 0.5,
+                load_avg_5: 0.4,
+                load_avg_15: 0.3,
+                vms: Default::default(),
             }))
             .await
             .unwrap()
@@ -618,6 +797,10 @@ mod tests {
                 disk_total_bytes: 0,
                 apps_count: 0,
                 timestamp: 0,
+                load_avg_1: 0.0,
+                load_avg_5: 0.0,
+                load_avg_15: 0.0,
+                vms: HashMap::new(),
             }))
             .await
             .unwrap()
@@ -658,6 +841,10 @@ mod tests {
                     memory_mib: 256,
                     disk_mib: 1024,
                     env: Default::default(),
+                    ip_address: "".to_string(),
+                    gateway: "".to_string(),
+                    mac_address: "".to_string(),
+                    volumes: vec![],
                 }),
                 user_id: "user-1".to_string(),
             }))
@@ -699,6 +886,7 @@ mod tests {
         let status = server
             .get_app_status(Request::new(AppStatusRequest {
                 job_id: deploy_resp.job_id.clone(),
+                user_id: "user-1".to_string(),
             }))
             .await
             .unwrap()
@@ -722,6 +910,7 @@ mod tests {
         let status = server
             .get_app_status(Request::new(AppStatusRequest {
                 job_id: deploy_resp.job_id,
+                user_id: "user-1".to_string(),
             }))
             .await
             .unwrap()
@@ -736,10 +925,30 @@ mod tests {
         let result = server
             .get_app_status(Request::new(AppStatusRequest {
                 job_id: "nonexistent-job".to_string(),
+                user_id: "user-1".to_string(),
             }))
             .await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_get_app_status_wrong_user_returns_permission_denied() {
+        let server = make_server();
+        let deploy_resp = server
+            .deploy_app(Request::new(deploy_req("user-1")))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let result = server
+            .get_app_status(Request::new(AppStatusRequest {
+                job_id: deploy_resp.job_id,
+                user_id: "user-wrong".to_string(),
+            }))
+            .await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::PermissionDenied);
     }
 
     #[tokio::test]
@@ -758,6 +967,7 @@ mod tests {
         let cancel_resp = server
             .cancel_app(Request::new(CancelRequest {
                 job_id: job_id.clone(),
+                user_id: "user-1".to_string(),
             }))
             .await
             .unwrap()
@@ -765,7 +975,10 @@ mod tests {
         assert!(cancel_resp.success);
 
         let status = server
-            .get_app_status(Request::new(AppStatusRequest { job_id }))
+            .get_app_status(Request::new(AppStatusRequest {
+                job_id,
+                user_id: "user-1".to_string(),
+            }))
             .await
             .unwrap()
             .into_inner();
@@ -778,6 +991,7 @@ mod tests {
         let resp = server
             .cancel_app(Request::new(CancelRequest {
                 job_id: "no-such-job".to_string(),
+                user_id: "user-1".to_string(),
             }))
             .await
             .unwrap()
@@ -883,6 +1097,10 @@ mod tests {
                 disk_total_bytes: 100 * GIB,
                 apps_count: 0,
                 timestamp: 0,
+                load_avg_1: 0.1,
+                load_avg_5: 0.1,
+                load_avg_15: 0.1,
+                vms: HashMap::new(),
             }))
             .await
             .unwrap()
@@ -899,6 +1117,10 @@ mod tests {
             memory_mib: 256,
             disk_mib: 1024,
             env: Default::default(),
+            ip_address: None,
+            gateway: None,
+            mac_address: None,
+            volumes: vec![],
         }
     }
 
@@ -973,6 +1195,10 @@ mod tests {
                 disk_total_bytes: 100 * GIB,
                 apps_count: 0,
                 timestamp: 0,
+                load_avg_1: 0.1,
+                load_avg_5: 0.1,
+                load_avg_15: 0.1,
+                vms: HashMap::new(),
             }))
             .await
             .unwrap();
@@ -1023,7 +1249,10 @@ mod tests {
             .job_id;
 
         let resp = server
-            .cancel_app(Request::new(CancelRequest { job_id }))
+            .cancel_app(Request::new(CancelRequest {
+                job_id,
+                user_id: "user-1".to_string(),
+            }))
             .await
             .unwrap()
             .into_inner();
@@ -1046,6 +1275,7 @@ mod tests {
         let delete_resp = server
             .delete_app(Request::new(DeleteAppRequest {
                 job_id: job_id.clone(),
+                user_id: "user-1".to_string(),
             }))
             .await
             .unwrap()
@@ -1062,6 +1292,7 @@ mod tests {
         let resp = server
             .delete_app(Request::new(DeleteAppRequest {
                 job_id: "no-such-job".to_string(),
+                user_id: "user-1".to_string(),
             }))
             .await
             .unwrap()
@@ -1085,10 +1316,146 @@ mod tests {
         let status = cloned
             .get_app_status(Request::new(AppStatusRequest {
                 job_id: deploy_resp.job_id.clone(),
+                user_id: "user-1".to_string(),
             }))
             .await
             .unwrap()
             .into_inner();
         assert_eq!(status.job_id, deploy_resp.job_id);
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_assigns_networking_in_correct_range() {
+        let server = make_server();
+        // Register a worker first
+        server
+            .register_worker(Request::new(RegisterWorkerRequest {
+                host_id: "h1".to_string(),
+                hostname: "host1".to_string(),
+                ip_address: "127.0.0.1".to_string(),
+                agent_port: 5003,
+            }))
+            .await
+            .unwrap();
+
+        // Report metrics so it's available
+        server
+            .report_metrics(Request::new(ReportMetricsRequest {
+                host_id: "h1".to_string(),
+                cpu_usage: 0.1,
+                ram_used_bytes: 0,
+                ram_total_bytes: 4 * 1024 * 1024 * 1024,
+                disk_used_bytes: 0,
+                disk_total_bytes: 100 * 1024 * 1024 * 1024,
+                apps_count: 0,
+                timestamp: 0,
+                load_avg_1: 0.0,
+                load_avg_5: 0.0,
+                load_avg_15: 0.0,
+                vms: HashMap::new(),
+            }))
+            .await
+            .unwrap();
+
+        let resp = server
+            .deploy_app(Request::new(deploy_req("user-1")))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let job = server.scheduler.get_job(&resp.job_id).unwrap();
+
+        let ip = job
+            .config
+            .ip_address
+            .as_ref()
+            .expect("IP should be assigned");
+        let gw = job
+            .config
+            .gateway
+            .as_ref()
+            .expect("Gateway should be assigned");
+        let mac = job
+            .config
+            .mac_address
+            .as_ref()
+            .expect("MAC should be assigned");
+
+        assert!(
+            ip.starts_with("172.16.1."),
+            "IP {} should be in 172.16.1.x range",
+            ip
+        );
+        assert_eq!(gw, "172.16.1.1");
+        assert!(
+            mac.starts_with("AA:BB:CC:01:01:"),
+            "MAC {} should have correct prefix",
+            mac
+        );
+    }
+
+    #[tokio::test]
+    async fn test_deploy_app_maps_volumes_correctly() {
+        let server = make_server();
+        server
+            .register_worker(Request::new(RegisterWorkerRequest {
+                host_id: "h1".to_string(),
+                hostname: "host1".to_string(),
+                ip_address: "127.0.0.1".to_string(),
+                agent_port: 5003,
+            }))
+            .await
+            .unwrap();
+
+        server
+            .report_metrics(Request::new(ReportMetricsRequest {
+                host_id: "h1".to_string(),
+                cpu_usage: 0.1,
+                ram_used_bytes: 0,
+                ram_total_bytes: 4 * 1024 * 1024 * 1024,
+                disk_used_bytes: 0,
+                disk_total_bytes: 100 * 1024 * 1024 * 1024,
+                apps_count: 0,
+                timestamp: 0,
+                load_avg_1: 0.0,
+                load_avg_5: 0.0,
+                load_avg_15: 0.0,
+                vms: HashMap::new(),
+            }))
+            .await
+            .unwrap();
+
+        let req = DeployRequest {
+            app_id: "app-1".to_string(),
+            app_name: "test-app".to_string(),
+            image: "alpine".to_string(),
+            user_id: "user-1".to_string(),
+            config: Some(AppConfig {
+                vcpus: 1,
+                memory_mib: 128,
+                disk_mib: 512,
+                env: HashMap::new(),
+                ip_address: String::new(),
+                gateway: String::new(),
+                mac_address: String::new(),
+                volumes: vec![mikrom_proto::scheduler::Volume {
+                    volume_id: "data-vol".to_string(),
+                    size_mib: 500,
+                    read_only: true,
+                }],
+            }),
+        };
+
+        let resp = server
+            .deploy_app(Request::new(req))
+            .await
+            .unwrap()
+            .into_inner();
+        let job = server.scheduler.get_job(&resp.job_id).unwrap();
+
+        assert_eq!(job.config.volumes.len(), 1);
+        assert_eq!(job.config.volumes[0].volume_id, "data-vol");
+        assert_eq!(job.config.volumes[0].size_mib, 500);
+        assert!(job.config.volumes[0].read_only);
     }
 }
