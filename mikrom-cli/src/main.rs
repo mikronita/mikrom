@@ -189,10 +189,7 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Commands::Stop { job_id } => {
-            let resp = client
-                .stop_vm(&job_id)
-                .await
-                .context("Failed to stop VM")?;
+            let resp = client.stop_vm(&job_id).await.context("Failed to stop VM")?;
             if resp.success {
                 println!("Stopped job {}.", job_id);
                 println!("message: {}", resp.message);
@@ -451,9 +448,8 @@ mod tests {
 
     #[test]
     fn test_cli_stop_with_api_url_flag() {
-        let cli =
-            Cli::try_parse_from(["mikrom", "--api-url", "http://api:5001", "stop", "job-1"])
-                .unwrap();
+        let cli = Cli::try_parse_from(["mikrom", "--api-url", "http://api:5001", "stop", "job-1"])
+            .unwrap();
         assert_eq!(cli.api_url.as_deref(), Some("http://api:5001"));
         match cli.command {
             Commands::Stop { job_id } => assert_eq!(job_id, "job-1"),
