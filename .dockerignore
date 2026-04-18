@@ -1,0 +1,15 @@
+target/
+node_modules/
+.next/
+.git/
+*.log
+Dockerfile
+docker-compose.yml
+.env
+.env.local
+.claude/
+.vscode/
+.husky/
+.github/
+mikrom-app/node_modules/
+mikrom-app/.next/

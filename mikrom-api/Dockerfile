@@ -1,32 +1,26 @@
-# Build context: workspace root
-# docker build -f mikrom-api/Dockerfile .
-
-FROM rust:trixie AS builder
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends protobuf-compiler \
-    && rm -rf /var/lib/apt/lists/*
-
+# 1. Planner stage
+FROM lukemathwalker/cargo-chef:latest-rust-1.95-trixie AS chef
 WORKDIR /app
 
-COPY Cargo.toml Cargo.lock ./
-COPY mikrom-proto/ mikrom-proto/
-COPY mikrom-agent/ mikrom-agent/
-COPY mikrom-api/ mikrom-api/
-COPY mikrom-scheduler/ mikrom-scheduler/
-COPY mikrom-cli/ mikrom-cli/
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-RUN cargo build --release -p mikrom-api
+# 2. Builder stage
+FROM chef AS builder
+RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
+COPY --from=planner /app/recipe.json recipe.json
+# Build dependencies - this is the caching layer
+RUN cargo chef cook --release --recipe-path recipe.json
+# Build application
+COPY . .
+RUN cargo build --release -p mikrom-api && \
+    strip target/release/mikrom-api
 
-
-FROM debian:trixie-slim
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /app/target/release/mikrom-api /usr/local/bin/mikrom-api
-
+# 3. Runtime stage
+FROM debian:trixie-slim AS runner
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/mikrom-api /usr/local/bin/
 EXPOSE 5001
-
 CMD ["mikrom-api"]
