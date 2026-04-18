@@ -53,20 +53,29 @@ test-all: test test-integration ## Run unit + integration tests
 # ── Run services ──────────────────────────────────────────────────────────────
 
 .PHONY: run-api
-run-api: ## Run mikrom-api  (port 5001)
-	cargo run -p mikrom-api
+run-api: ## Run mikrom-api with watch (port 5001)
+	cd mikrom-api && cargo watch -x run
 
 .PHONY: run-scheduler
-run-scheduler: ## Run mikrom-scheduler  (port 5002)
-	cargo run -p mikrom-scheduler
+run-scheduler: ## Run mikrom-scheduler with watch (port 5002)
+	cd mikrom-scheduler && cargo watch -x run
 
 .PHONY: run-agent
-run-agent: ## Run mikrom-agent  (port 5003)
-	cargo run -p mikrom-agent
+run-agent: ## Run mikrom-agent with watch (port 5003)
+	cd mikrom-agent && cargo watch -x run
 
 .PHONY: run-app
 run-app: ## Run mikrom-app dev server  (port 3000)
 	cd mikrom-app && pnpm dev
+
+.PHONY: dev
+dev: ## Launch all services in tmux windows
+	@tmux new-session -d -s mikrom -n api 'make run-api'
+	@tmux new-window -t mikrom -n scheduler 'make run-scheduler'
+	@tmux new-window -t mikrom -n agent 'make run-agent'
+	@tmux new-window -t mikrom -n app 'make run-app'
+	@tmux select-window -t mikrom:api
+	@tmux attach-session -t mikrom
 
 .PHONY: run-cli
 run-cli: ## Run mikrom-cli  →  make run-cli ARGS="health"
