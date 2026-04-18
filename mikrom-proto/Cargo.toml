@@ -1,19 +1,19 @@
 [package]
 name = "mikrom-proto"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Shared proto definitions for mikrom services"
 
 [dependencies]
-tonic = { version = "0.12", features = ["transport", "tls"] }
-prost = "0.13"
+tonic = { workspace = true }
+prost = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 rcgen = { version = "0.13", features = ["crypto"] }
 
 [build-dependencies]
-tonic-build = "0.12"
+tonic-build = { workspace = true }
 
 [[bin]]
 name = "cert-gen"

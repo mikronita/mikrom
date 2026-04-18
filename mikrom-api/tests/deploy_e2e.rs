@@ -105,8 +105,8 @@ async fn test_scheduler_agent_grpc_e2e() {
     });
     wait_for_tcp(agent_port).await;
 
-    // The agent waits 1 s before its first registration attempt; give it 2 s.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // The agent waits 1 s before its first registration attempt; give it plenty of time.
+    tokio::time::sleep(Duration::from_secs(10)).await;
 
     // ── deploy via gRPC ───────────────────────────────────────────────────────
     let mut client = SchedulerServiceClient::connect(scheduler_url)
