@@ -42,8 +42,8 @@ test-cli: ## Run mikrom-cli unit tests
 
 .PHONY: test-integration
 test-integration: ## Run integration tests (starts PostgreSQL via Docker)
-	cd mikrom-api && docker compose up -d postgres && \
-	  sleep 2 && \
+	docker compose up -d postgres && \
+	  sleep 5 && \
 	  cargo test --test integration; \
 	  docker compose stop postgres
 
@@ -135,11 +135,13 @@ logs-agent: ## Follow mikrom-agent logs
 
 .PHONY: db-start
 db-start: ## Start only PostgreSQL (for local development)
-	cd mikrom-api && docker compose up -d postgres
+	docker compose up -d postgres
+	@echo "Waiting for PostgreSQL to be ready..."
+	@sleep 5
 
 .PHONY: db-stop
 db-stop: ## Stop PostgreSQL
-	cd mikrom-api && docker compose stop postgres
+	docker compose stop postgres
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 
