@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { 
   Plus, 
   RefreshCw, 
@@ -63,7 +63,7 @@ export default function VmsPage() {
     }
   };
 
-  const fetchVms = React.useCallback(async () => {
+  const fetchVms = useCallback(async () => {
     const token = getToken();
     if (!token) return;
     setLoading(true);

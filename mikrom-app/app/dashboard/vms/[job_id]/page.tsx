@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ElementType, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { 
@@ -46,9 +46,9 @@ function DetailRow({
   value, 
   mono = false 
 }: { 
-  icon: React.ElementType; 
+  icon: ElementType;
   label: string; 
-  value: React.ReactNode;
+  value: ReactNode;
   mono?: boolean;
 }) {
   return (
@@ -82,7 +82,7 @@ export default function VmDetailPage() {
   const [stopError, setStopError] = useState<string | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);
 
-  const fetchVm = React.useCallback(async () => {
+  const fetchVm = useCallback(async () => {
     const token = getToken();
     if (!token) return;
     setLoading(true);

@@ -1,9 +1,10 @@
 "use client";
 
-import { 
-  User, 
-  Bell, 
-  Key, 
+import { type ReactNode } from "react";
+import {
+  User,
+  Bell,
+  Key,
   CreditCard,
   Cloud,
   CheckCircle2,
@@ -20,8 +21,8 @@ import { Input } from "@/components/ui/Input";
 function SettingsSection({ title, description, children, footer }: { 
   title: string; 
   description: string; 
-  children: React.ReactNode;
-  footer?: React.ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
 }) {
   return (
     <Card className="overflow-hidden">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { 
@@ -63,7 +63,7 @@ export default function DashboardPage() {
   const [deploying, setDeploying] = useState(false);
   const [deployError, setDeployError] = useState<string | null>(null);
 
-  const fetchVms = React.useCallback(async () => {
+  const fetchVms = useCallback(async () => {
     const token = getToken();
     if (!token) return;
     setLoading(true);
@@ -84,7 +84,7 @@ export default function DashboardPage() {
     init();
   }, [fetchVms]);
 
-  const handleDeploySubmit = async (e: React.FormEvent) => {
+  const handleDeploySubmit = async (e: FormEvent) => {
     e.preventDefault();
     const token = getToken();
     if (!token) return;

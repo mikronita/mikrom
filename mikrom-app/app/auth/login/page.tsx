@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, Suspense, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Box, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
@@ -21,7 +21,7 @@ function LoginForm() {
 
   const showSuccess = searchParams.get("registered") === "true";
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
 
