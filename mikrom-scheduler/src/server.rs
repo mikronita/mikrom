@@ -180,8 +180,8 @@ impl SchedulerService for SchedulerServer {
 
                 let job_config = crate::job::VmConfig {
                     vcpus: config.vcpus,
-                    memory_mib: config.memory_mib as u64,
-                    disk_mib: config.disk_mib as u64,
+                    memory_mib: config.memory_mib,
+                    disk_mib: config.disk_mib,
                     env: config.env.clone(),
                     ip_address: Some(guest_ip),
                     gateway: Some(gateway),
@@ -288,6 +288,7 @@ impl SchedulerService for SchedulerServer {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     async fn get_app_logs(
         &self,
         request: tonic::Request<GetLogsRequest>,

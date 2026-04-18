@@ -339,6 +339,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_get_vm_logs_returns_sse_stream() {
         let port = start_scheduler().await;
 

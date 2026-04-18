@@ -75,14 +75,14 @@ impl MetricsCollector {
         let now = chrono::Utc::now().timestamp();
 
         // 1 second cache
-        if let Some((cached, timestamp)) = self.cached_metrics.read().as_ref() {
-            if (now - *timestamp) < 1 {
-                let mut metrics = cached.clone();
-                // apps_count might have changed, update it from its own lock
-                metrics.apps_count = *self.apps_count.read();
-                metrics.timestamp = now;
-                return metrics;
-            }
+        if let Some((cached, timestamp)) = self.cached_metrics.read().as_ref()
+            && (now - *timestamp) < 1
+        {
+            let mut metrics = cached.clone();
+            // apps_count might have changed, update it from its own lock
+            metrics.apps_count = *self.apps_count.read();
+            metrics.timestamp = now;
+            return metrics;
         }
 
         let pids = if let Some(mgr) = &self.firecracker {
