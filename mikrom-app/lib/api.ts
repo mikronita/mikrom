@@ -181,3 +181,20 @@ export async function stopVm(
     return { error: err instanceof Error ? err.message : "Network error" };
   }
 }
+
+export async function deleteVm(
+  token: string,
+  jobId: string
+): Promise<{ data?: StopVmResponse; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/vms/${jobId}/delete`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<StopVmResponse & ApiError>(response);
+    if (!response.ok) return { error: (result as ApiError).error || "Failed to delete VM" };
+    return { data: result as StopVmResponse };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}

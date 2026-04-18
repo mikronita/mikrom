@@ -10,14 +10,15 @@ import {
   AlertCircle,
   Filter,
   Square,
-  Loader2
+  Loader2,
+  Trash2
 } from "lucide-react";
 import Link from "next/link";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { getToken } from "@/lib/auth";
-import { listVms, stopVm, VmInfo } from "@/lib/api";
+import { listVms, stopVm, deleteVm, VmInfo } from "@/lib/api";
 
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -44,7 +45,9 @@ export default function VmsPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [stoppingId, setStoppingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmStopId, setConfirmStopId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [stopError, setStopError] = useState<string | null>(null);
 
   const isStoppable = (status: string) => {
@@ -60,6 +63,21 @@ export default function VmsPage() {
     setStopError(null);
     const result = await stopVm(token, jobId);
     setStoppingId(null);
+    if (result.error) {
+      setStopError(result.error);
+    } else {
+      await fetchVms();
+    }
+  };
+
+  const handleDelete = async (jobId: string) => {
+    const token = getToken();
+    if (!token) return;
+    setDeletingId(jobId);
+    setConfirmDeleteId(null);
+    setStopError(null);
+    const result = await deleteVm(token, jobId);
+    setDeletingId(null);
     if (result.error) {
       setStopError(result.error);
     } else {
@@ -234,6 +252,36 @@ export default function VmsPage() {
                             >
                               <Square className="w-3 h-3 mr-1.5" />
                               Stop
+                            </Button>
+                          )
+                        )}
+                        {!isStoppable(vm.status) && (
+                          confirmDeleteId === vm.job_id ? (
+                            <div className="flex items-center gap-1.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-2 py-1">
+                              <span className="text-[11px] font-medium text-red-700 dark:text-red-300">Delete?</span>
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                className="h-6 px-2 text-xs"
+                                onClick={() => handleDelete(vm.job_id)}
+                                disabled={deletingId === vm.job_id}
+                              >
+                                {deletingId === vm.job_id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Yes"}
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirmDeleteId(null)}>
+                                No
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-red-600 border-red-200 hover:bg-red-50 dark:text-red-400 dark:border-red-800 dark:hover:bg-red-900/20"
+                              onClick={() => setConfirmDeleteId(vm.job_id)}
+                              disabled={!!deletingId}
+                            >
+                              <Trash2 className="w-3 h-3 mr-1.5" />
+                              Delete
                             </Button>
                           )
                         )}

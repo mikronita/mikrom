@@ -3,9 +3,9 @@ use crate::scheduler::AppScheduler;
 use crate::worker_registry::WorkerRegistry;
 use mikrom_proto::agent::{StartVmRequest, agent_service_client::AgentServiceClient};
 use mikrom_proto::scheduler::{
-    AppInfo, AppStatusRequest, AppStatusResponse, CancelRequest, CancelResponse, DeployRequest,
-    DeployResponse, ListAppsRequest, ListAppsResponse, RegisterWorkerRequest,
-    RegisterWorkerResponse, ReportMetricsRequest, ReportMetricsResponse,
+    AppInfo, AppStatusRequest, AppStatusResponse, CancelRequest, CancelResponse, DeleteAppRequest,
+    DeleteAppResponse, DeployRequest, DeployResponse, ListAppsRequest, ListAppsResponse,
+    RegisterWorkerRequest, RegisterWorkerResponse, ReportMetricsRequest, ReportMetricsResponse,
     scheduler_service_server::{SchedulerService, SchedulerServiceServer},
 };
 use mikrom_proto::tls::ServiceCerts;
@@ -245,6 +245,38 @@ impl SchedulerService for SchedulerServer {
         }
     }
 
+    async fn delete_app(
+        &self,
+        request: tonic::Request<DeleteAppRequest>,
+    ) -> Result<Response<DeleteAppResponse>, Status> {
+        let req = request.into_inner();
+
+        if let Some(job) = self.scheduler.get_job(&req.job_id) {
+            // First stop it if it's running
+            if let Some(vm_id) = &job.vm_id {
+                let _ = self
+                    .stop_vm_on_agent(job.host_id.as_deref().unwrap_or(""), vm_id)
+                    .await;
+            }
+
+            let success = self.scheduler.remove_job(&req.job_id);
+
+            Ok(Response::new(DeleteAppResponse {
+                success,
+                message: if success {
+                    "Application deleted".to_string()
+                } else {
+                    "Failed to delete application".to_string()
+                },
+            }))
+        } else {
+            Ok(Response::new(DeleteAppResponse {
+                success: false,
+                message: "Job not found".to_string(),
+            }))
+        }
+    }
+
     async fn list_apps(
         &self,
         request: tonic::Request<ListAppsRequest>,
@@ -457,7 +489,7 @@ impl SchedulerServer {
 impl Clone for SchedulerServer {
     fn clone(&self) -> Self {
         Self {
-            scheduler: AppScheduler::new(self.scheduler.worker_registry().clone()),
+            scheduler: self.scheduler.clone(),
             agent_clients: self.agent_clients.clone(),
             certs: self.certs.clone(),
         }
@@ -468,8 +500,8 @@ impl Clone for SchedulerServer {
 mod tests {
     use super::*;
     use mikrom_proto::scheduler::{
-        AppConfig, AppStatusRequest, CancelRequest, DeployRequest, ListAppsRequest,
-        RegisterWorkerRequest, ReportMetricsRequest,
+        AppConfig, AppStatusRequest, CancelRequest, DeleteAppRequest, DeployRequest,
+        ListAppsRequest, RegisterWorkerRequest, ReportMetricsRequest,
     };
     use tonic::Request;
 
@@ -999,7 +1031,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_clone_does_not_share_jobs() {
+    async fn test_delete_app_success_removes_it_from_scheduler() {
+        let server = make_server();
+        let job_id = server
+            .deploy_app(Request::new(deploy_req("user-1")))
+            .await
+            .unwrap()
+            .into_inner()
+            .job_id;
+
+        // Verify it exists
+        assert!(server.scheduler.get_job(&job_id).is_some());
+
+        let delete_resp = server
+            .delete_app(Request::new(DeleteAppRequest {
+                job_id: job_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(delete_resp.success);
+
+        // Verify it's gone
+        assert!(server.scheduler.get_job(&job_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_job_returns_failure() {
+        let server = make_server();
+        let resp = server
+            .delete_app(Request::new(DeleteAppRequest {
+                job_id: "no-such-job".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!resp.success);
+        assert!(!resp.message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_clone_shares_jobs() {
         let original = make_server();
         // Deploy a failed job (no workers) — creates a job in original
         let deploy_resp = original
@@ -1009,13 +1081,14 @@ mod tests {
             .into_inner();
 
         let cloned = original.clone();
-        // Clone has a fresh jobs map — job from original is not visible
-        let result = cloned
+        // Clone shares the same jobs map — job from original MUST be visible
+        let status = cloned
             .get_app_status(Request::new(AppStatusRequest {
-                job_id: deploy_resp.job_id,
+                job_id: deploy_resp.job_id.clone(),
             }))
-            .await;
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().code(), tonic::Code::NotFound);
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(status.job_id, deploy_resp.job_id);
     }
 }

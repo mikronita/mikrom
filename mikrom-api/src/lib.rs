@@ -12,7 +12,7 @@ pub mod vms;
 
 pub use deploy::deploy_app;
 pub use repositories::user_repository::UserRepository;
-pub use vms::{get_vm_status, list_vms, stop_vm};
+pub use vms::{delete_vm, get_vm_status, list_vms, stop_vm};
 
 use auth::{login, register};
 
@@ -43,6 +43,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/vms", get(list_vms))
         .route("/vms/{job_id}", get(get_vm_status))
         .route("/vms/{job_id}", axum::routing::delete(stop_vm))
+        .route("/vms/{job_id}/delete", axum::routing::delete(delete_vm))
         .layer(cors)
         .with_state(state)
 }

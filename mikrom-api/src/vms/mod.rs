@@ -178,6 +178,54 @@ pub async fn stop_vm(
     }
 }
 
+pub async fn delete_vm(
+    _auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path(job_id): Path<String>,
+) -> impl IntoResponse {
+    match crate::scheduler::connect(&state.scheduler_config).await {
+        Ok(channel) => {
+            let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+            let req = mikrom_proto::scheduler::DeleteAppRequest { job_id };
+            match client.delete_app(req).await {
+                Ok(resp) => {
+                    let inner = resp.into_inner();
+                    if inner.success {
+                        (
+                            StatusCode::OK,
+                            Json(serde_json::json!({
+                                "success": true,
+                                "message": inner.message
+                            })),
+                        )
+                            .into_response()
+                    } else {
+                        (
+                            StatusCode::NOT_FOUND,
+                            Json(ErrorBody {
+                                error: inner.message,
+                            }),
+                        )
+                            .into_response()
+                    }
+                }
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorBody {
+                        error: e.message().to_string(),
+                    }),
+                )
+                    .into_response(),
+            }
+        }
+        Err(msg) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorBody { error: msg }),
+        )
+            .into_response(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,6 +266,7 @@ mod tests {
             .route("/vms", get(list_vms))
             .route("/vms/{job_id}", get(get_vm_status))
             .route("/vms/{job_id}", axum::routing::delete(stop_vm))
+            .route("/vms/{job_id}/delete", axum::routing::delete(delete_vm))
             .with_state(state)
     }
 
@@ -608,5 +657,45 @@ mod tests {
         let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert!(json.get("message").is_some());
+    }
+
+    // ── DELETE /vms/{job_id}/delete auth guard ────────────────────────────────
+
+    #[tokio::test]
+    async fn test_delete_vm_without_token_returns_401() {
+        let resp = make_app("http://127.0.0.1:59990")
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/vms/some-job-id/delete")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // ── DELETE /vms/{job_id}/delete happy path ───────────────────────────────
+
+    #[tokio::test]
+    async fn test_delete_vm_success_returns_200() {
+        let port = start_scheduler().await;
+        let job_id = deploy_job(port, "uid-vms").await;
+        let resp = make_app(&format!("http://127.0.0.1:{port}"))
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/vms/{job_id}/delete"))
+                    .header("Authorization", format!("Bearer {}", valid_token()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["success"], true);
     }
 }

@@ -10,7 +10,17 @@ service SchedulerService {
   rpc DeployApp(DeployRequest) returns (DeployResponse);
   rpc GetAppStatus(AppStatusRequest) returns (AppStatusResponse);
   rpc CancelApp(CancelRequest) returns (CancelResponse);
+  rpc DeleteApp(DeleteAppRequest) returns (DeleteAppResponse);
   rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
+}
+
+message DeleteAppRequest {
+  string job_id = 1;
+}
+
+message DeleteAppResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message RegisterWorkerRequest {

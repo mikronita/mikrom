@@ -13,12 +13,13 @@ import {
   Loader2,
   Terminal,
   Cpu,
-  Square
+  Square,
+  Trash2
 } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { getToken } from "@/lib/auth";
-import { getVm, stopVm, VmStatus } from "@/lib/api";
+import { getVm, stopVm, deleteVm, VmStatus } from "@/lib/api";
 
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -81,8 +82,10 @@ export default function VmDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const vmRef = useRef<VmStatus | null>(null);
   useEffect(() => { vmRef.current = vm; }, [vm]);
@@ -118,6 +121,21 @@ export default function VmDetailPage() {
       setStopError(result.error);
     } else {
       await fetchVm();
+    }
+  };
+
+  const handleDelete = async () => {
+    const token = getToken();
+    if (!token) return;
+    setDeleting(true);
+    setStopError(null);
+    setConfirmDelete(false);
+    const result = await deleteVm(token, jobId);
+    setDeleting(false);
+    if (result.error) {
+      setStopError(result.error);
+    } else {
+      window.location.href = "/dashboard/vms";
     }
   };
 
@@ -197,6 +215,31 @@ export default function VmDetailPage() {
                     Confirm
                   </Button>
                   <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirmStop(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              )}
+              {vm && !isStoppable(vm.status) && !confirmDelete && (
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={() => setConfirmDelete(true)}
+                  disabled={deleting}
+                >
+                  {deleting ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Deleting...</>
+                  ) : (
+                    <><Trash2 className="w-4 h-4 mr-2" />Delete Instance</>
+                  )}
+                </Button>
+              )}
+              {confirmDelete && (
+                <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-1.5">
+                  <span className="text-xs font-medium text-red-700 dark:text-red-300">Delete this instance?</span>
+                  <Button size="sm" variant="danger" className="h-6 px-2 text-xs" onClick={handleDelete}>
+                    Confirm
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirmDelete(false)}>
                     Cancel
                   </Button>
                 </div>

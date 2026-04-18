@@ -69,6 +69,10 @@ impl AppScheduler {
         }
     }
 
+    pub fn remove_job(&self, job_id: &str) -> bool {
+        self.jobs.write().remove(job_id).is_some()
+    }
+
     pub fn list_jobs(&self, user_id: Option<&str>, _status: Option<JobStatus>) -> Vec<Job> {
         let jobs = self.jobs.read();
         jobs.values()
