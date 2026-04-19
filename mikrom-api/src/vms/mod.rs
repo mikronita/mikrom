@@ -42,7 +42,7 @@ pub async fn list_vms(
 ) -> ApiResult<Json<Vec<VmInfo>>> {
     let channel = crate::scheduler::connect(&state.scheduler_config)
         .await
-        .map_err(|e| ApiError::Scheduler(e))?;
+        .map_err(ApiError::Scheduler)?;
 
     let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::ListAppsRequest {
@@ -81,7 +81,7 @@ pub async fn get_vm_status(
 ) -> ApiResult<Json<VmStatusResponse>> {
     let channel = crate::scheduler::connect(&state.scheduler_config)
         .await
-        .map_err(|e| ApiError::Scheduler(e))?;
+        .map_err(ApiError::Scheduler)?;
 
     let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::AppStatusRequest {
@@ -122,7 +122,7 @@ pub async fn get_vm_logs(
 ) -> ApiResult<impl IntoResponse> {
     let channel = crate::scheduler::connect(&state.scheduler_config)
         .await
-        .map_err(|e| ApiError::Scheduler(e))?;
+        .map_err(ApiError::Scheduler)?;
 
     let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::GetLogsRequest {
@@ -166,7 +166,7 @@ pub async fn stop_vm(
 ) -> ApiResult<Json<serde_json::Value>> {
     let channel = crate::scheduler::connect(&state.scheduler_config)
         .await
-        .map_err(|e| ApiError::Scheduler(e))?;
+        .map_err(ApiError::Scheduler)?;
 
     let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::CancelRequest {
@@ -198,7 +198,7 @@ pub async fn delete_vm(
 ) -> ApiResult<Json<serde_json::Value>> {
     let channel = crate::scheduler::connect(&state.scheduler_config)
         .await
-        .map_err(|e| ApiError::Scheduler(e))?;
+        .map_err(ApiError::Scheduler)?;
 
     let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::DeleteAppRequest {
@@ -230,7 +230,7 @@ pub async fn pause_vm(
 ) -> ApiResult<Json<serde_json::Value>> {
     let channel = crate::scheduler::connect(&state.scheduler_config)
         .await
-        .map_err(|e| ApiError::Scheduler(e))?;
+        .map_err(ApiError::Scheduler)?;
 
     let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::PauseRequest {
@@ -238,7 +238,7 @@ pub async fn pause_vm(
         user_id: auth.user_id,
     };
 
-    let resp = client.pause_app(req).await.map_err(|e| map_grpc_error(e))?;
+    let resp = client.pause_app(req).await.map_err(map_grpc_error)?;
 
     let inner = resp.into_inner();
     if inner.success {
@@ -258,7 +258,7 @@ pub async fn resume_vm(
 ) -> ApiResult<Json<serde_json::Value>> {
     let channel = crate::scheduler::connect(&state.scheduler_config)
         .await
-        .map_err(|e| ApiError::Scheduler(e))?;
+        .map_err(ApiError::Scheduler)?;
 
     let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::ResumeRequest {
@@ -266,10 +266,7 @@ pub async fn resume_vm(
         user_id: auth.user_id,
     };
 
-    let resp = client
-        .resume_app(req)
-        .await
-        .map_err(|e| map_grpc_error(e))?;
+    let resp = client.resume_app(req).await.map_err(map_grpc_error)?;
 
     let inner = resp.into_inner();
     if inner.success {

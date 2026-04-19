@@ -239,7 +239,7 @@ impl MikromClient {
         use futures_util::StreamExt;
         let byte_stream = resp
             .bytes_stream()
-            .map(|result| result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
+            .map(|result| result.map_err(std::io::Error::other));
 
         let reader = tokio_util::io::StreamReader::new(byte_stream);
         let lines =
@@ -254,8 +254,7 @@ impl MikromClient {
         Ok(lines.filter_map(|result| async move {
             match result {
                 Ok(line) => {
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
+                    if let Some(data) = line.strip_prefix("data: ") {
                         if let Ok(log_line) = serde_json::from_str::<LogLine>(data) {
                             if let Some(ts) = log_line.timestamp {
                                 Some(Ok(format!("[{}] {}", ts, log_line.line)))

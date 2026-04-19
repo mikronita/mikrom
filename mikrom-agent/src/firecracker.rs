@@ -663,14 +663,13 @@ impl FirecrackerManager {
         tracing::info!("Cleaning up stale Firecracker resources...");
         if let Ok(mut entries) = tokio::fs::read_dir("/tmp").await {
             while let Ok(Some(entry)) = entries.next_entry().await {
-                if let Ok(file_name) = entry.file_name().into_string() {
-                    if (file_name.starts_with("fc-") && file_name.ends_with(".sock"))
-                        || (file_name.starts_with("fc-") && file_name.ends_with("-rootfs.ext4"))
-                    {
-                        let path = entry.path();
-                        tracing::debug!("Removing stale file: {:?}", path);
-                        let _ = tokio::fs::remove_file(path).await;
-                    }
+                if let Ok(file_name) = entry.file_name().into_string()
+                    && ((file_name.starts_with("fc-") && file_name.ends_with(".sock"))
+                        || (file_name.starts_with("fc-") && file_name.ends_with("-rootfs.ext4")))
+                {
+                    let path = entry.path();
+                    tracing::debug!("Removing stale file: {:?}", path);
+                    let _ = tokio::fs::remove_file(path).await;
                 }
             }
         }
@@ -1268,6 +1267,8 @@ mod tests {
                 let _ = stream.read(&mut buf).await;
                 let _ = stream.write_all(response.as_bytes()).await;
             }
+            // Give a tiny bit of time for the client to finish reading before we delete the socket file
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             let _ = tokio::fs::remove_file(&path_clone).await;
         });
         // Yield so the spawned task enters accept() before we return.

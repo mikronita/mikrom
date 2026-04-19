@@ -193,7 +193,7 @@ impl SchedulerService for SchedulerServer {
                 // Extract last byte from IP for MAC address
                 let last_byte = guest_ip
                     .split('.')
-                    .last()
+                    .next_back()
                     .and_then(|s| s.parse::<u8>().ok())
                     .unwrap_or(2);
                 let mac = format!("AA:BB:CC:01:01:{:02x}", last_byte);

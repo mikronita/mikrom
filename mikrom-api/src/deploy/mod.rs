@@ -42,7 +42,7 @@ pub async fn deploy_app(
 
     let channel = crate::scheduler::connect(&state.scheduler_config)
         .await
-        .map_err(|e| ApiError::Scheduler(e))?;
+        .map_err(ApiError::Scheduler)?;
 
     let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
 

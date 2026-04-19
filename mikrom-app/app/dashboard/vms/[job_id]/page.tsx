@@ -150,7 +150,7 @@ export default function VmDetailPage() {
       await pauseVm(token, jobId);
       toast.success("Instance paused");
       refetch();
-    } catch (err) {
+    } catch {
       toast.error("Failed to pause instance");
     } finally {
       setPausing(false);
@@ -165,7 +165,7 @@ export default function VmDetailPage() {
       await resumeVm(token, jobId);
       toast.success("Instance resumed");
       refetch();
-    } catch (err) {
+    } catch {
       toast.error("Failed to resume instance");
     } finally {
       setResuming(false);
