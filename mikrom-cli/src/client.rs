@@ -56,6 +56,8 @@ pub struct VmStatusResponse {
     pub started_at: i64,
     pub stopped_at: i64,
     pub error_message: String,
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
 }
 
 #[derive(Deserialize)]
@@ -934,8 +936,10 @@ mod tests {
                 "vm_id": "vm-xyz",
                 "scheduled_at": 1_700_000_000_i64,
                 "started_at": 1_700_000_005_i64,
-                "stopped_at": 0_i64,
-                "error_message": ""
+                "stopped_at": 0,
+                "error_message": "",
+                "cpu_usage": 0.0,
+                "ram_used_bytes": 0
             })))
             .mount(&server)
             .await;
@@ -960,7 +964,8 @@ mod tests {
                 "job_id": "job-1", "status": "Scheduled",
                 "host_id": "h", "vm_id": "v",
                 "scheduled_at": 0_i64, "started_at": 0_i64,
-                "stopped_at": 0_i64, "error_message": ""
+                "stopped_at": 0_i64, "error_message": "",
+                "cpu_usage": 0.0, "ram_used_bytes": 0
             })))
             .mount(&server)
             .await;
@@ -1002,7 +1007,8 @@ mod tests {
                 "job_id": "my-special-job-id", "status": "Failed",
                 "host_id": "", "vm_id": "",
                 "scheduled_at": 0_i64, "started_at": 0_i64,
-                "stopped_at": 0_i64, "error_message": "spawn error"
+                "stopped_at": 0_i64, "error_message": "spawn error",
+                "cpu_usage": 0.0, "ram_used_bytes": 0
             })))
             .mount(&server)
             .await;

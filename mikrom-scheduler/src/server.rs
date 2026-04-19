@@ -177,7 +177,7 @@ impl SchedulerService for SchedulerServer {
                 .unwrap_or_default(),
         };
 
-        let result = self.scheduler.select_best_worker(&config);
+        let result = self.scheduler.select_best_worker(&config, &req.app_id);
 
         let response = match result {
             Ok(worker) => {
@@ -293,6 +293,20 @@ impl SchedulerService for SchedulerServer {
 
         match self.scheduler.get_job(&req.job_id) {
             Some(job) if job.user_id == req.user_id => {
+                // Try to get current metrics from worker registry
+                let mut cpu_usage = 0.0;
+                let mut ram_used_bytes = 0;
+
+                if let Some(host_id) = &job.host_id
+                    && let Some(vm_id) = &job.vm_id
+                    && let Some(worker) = self.scheduler.worker_registry().get_worker(host_id)
+                    && let Some(metrics) = worker.metrics
+                    && let Some(vm_metrics) = metrics.vms.get(vm_id)
+                {
+                    cpu_usage = vm_metrics.cpu_usage;
+                    ram_used_bytes = vm_metrics.ram_used_bytes;
+                }
+
                 let response = AppStatusResponse {
                     job_id: job.job_id,
                     status: job.status as i32,
@@ -302,6 +316,8 @@ impl SchedulerService for SchedulerServer {
                     started_at: job.started_at.unwrap_or(0),
                     stopped_at: job.stopped_at.unwrap_or(0),
                     error_message: job.error_message.unwrap_or_default(),
+                    cpu_usage,
+                    ram_used_bytes,
                 };
                 Ok(Response::new(response))
             }

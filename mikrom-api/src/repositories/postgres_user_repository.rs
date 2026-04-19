@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use std::sync::Arc;
 
-use super::user_repository::{DbError, NewUser, User, UserRepository};
+use super::user_repository::{DbError, NewUser, User, UserRepository, UserRole};
 
 pub struct PostgresUserRepository {
     pool: Arc<PgPool>,
@@ -17,19 +17,26 @@ impl PostgresUserRepository {
 #[async_trait]
 impl UserRepository for PostgresUserRepository {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError> {
-        let result = sqlx::query_as::<_, (sqlx::types::Uuid, String, String)>(
-            "SELECT id, email, password_hash FROM users WHERE email = $1",
+        let result = sqlx::query_as::<_, (sqlx::types::Uuid, String, String, String)>(
+            "SELECT id, email, password_hash, role FROM users WHERE email = $1",
         )
         .bind(email)
         .fetch_optional(&*self.pool)
         .await;
 
         match result {
-            Ok(Some((id, email, password_hash))) => Ok(Some(User {
-                id,
-                email,
-                password_hash,
-            })),
+            Ok(Some((id, email, password_hash, role_str))) => {
+                let role = match role_str.as_str() {
+                    "admin" => UserRole::Admin,
+                    _ => UserRole::User,
+                };
+                Ok(Some(User {
+                    id,
+                    email,
+                    password_hash,
+                    role,
+                }))
+            }
             Ok(None) => Ok(None),
             Err(e) => Err(DbError::from(e)),
         }
@@ -37,13 +44,19 @@ impl UserRepository for PostgresUserRepository {
 
     async fn create(&self, user: NewUser) -> Result<sqlx::types::Uuid, DbError> {
         let id = sqlx::types::Uuid::new_v4();
-        let result =
-            sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)")
-                .bind(id)
-                .bind(&user.email)
-                .bind(&user.password_hash)
-                .execute(&*self.pool)
-                .await;
+        let role_str = match user.role {
+            UserRole::Admin => "admin",
+            UserRole::User => "user",
+        };
+        let result = sqlx::query(
+            "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(id)
+        .bind(&user.email)
+        .bind(&user.password_hash)
+        .bind(role_str)
+        .execute(&*self.pool)
+        .await;
 
         match result {
             Ok(_) => Ok(id),
@@ -109,7 +122,8 @@ mod tests {
         let id = repo
             .create(NewUser {
                 email: email.clone(),
-                password_hash: "hashed".to_string(),
+                password_hash: "x".to_string(),
+                role: UserRole::User,
             })
             .await
             .expect("create failed");
@@ -153,6 +167,7 @@ mod tests {
         repo.create(NewUser {
             email: email.clone(),
             password_hash: "x".to_string(),
+            role: UserRole::User,
         })
         .await
         .expect("create failed");

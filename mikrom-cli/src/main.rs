@@ -22,6 +22,7 @@ fn yellow_label(s: &str) -> std::string::String {
 
 mod client;
 mod config;
+mod dashboard;
 
 use client::MikromClient;
 use config::Config;
@@ -131,6 +132,9 @@ enum Commands {
 
     /// Show config settings
     Config,
+
+    /// Interactive dashboard (TUI)
+    Dashboard,
 }
 
 #[derive(Subcommand)]
@@ -286,25 +290,41 @@ async fn main() -> anyhow::Result<()> {
         Commands::Logs { job_id, follow } => {
             if follow {
                 use futures_util::StreamExt;
-                let stream = client
-                    .stream_vm_logs(&job_id)
-                    .await
-                    .context("Failed to connect to log stream")?;
+                println!(
+                    "{}",
+                    Paint::new("--- Attaching to log stream (auto-reconnect enabled) ---").dim()
+                );
 
-                tokio::pin!(stream);
+                loop {
+                    let stream_result = client.stream_vm_logs(&job_id).await;
 
-                while let Some(result) = stream.next().await {
-                    match result {
-                        Ok(line) => {
-                            if !line.is_empty() {
-                                println!("{}", line);
+                    match stream_result {
+                        Ok(stream) => {
+                            tokio::pin!(stream);
+                            while let Some(result) = stream.next().await {
+                                match result {
+                                    Ok(line) => {
+                                        if !line.is_empty() {
+                                            println!("{}", line);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("{}: {}", Paint::new("Stream error").red(), e);
+                                        break; // Break inner loop to reconnect
+                                    }
+                                }
                             }
                         }
                         Err(e) => {
-                            eprintln!("Error in log stream: {}", e);
-                            break;
+                            eprintln!("{}: {}", Paint::new("Connection failed").red(), e);
                         }
                     }
+
+                    println!(
+                        "{}",
+                        Paint::new("--- Connection lost, retrying in 2s... ---").dim()
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 }
             } else {
                 match client.get_vm_logs(&job_id).await {
@@ -426,6 +446,10 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 println!("token:    [not configured]");
             }
+        }
+
+        Commands::Dashboard => {
+            dashboard::run(client).await?;
         }
     }
 

@@ -434,6 +434,9 @@ impl AgentServer {
         // Cleanup any stale resources from previous runs
         self.firecracker.cleanup_all_stale_resources().await;
 
+        // Start background tasks (GC)
+        self.firecracker.start_background_tasks();
+
         let certs_for_task = certs.clone();
         let scheduler_addr_for_task = self.scheduler_addr.clone();
 

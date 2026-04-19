@@ -4,6 +4,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 pub mod auth;
+pub mod crypto;
 pub mod db;
 pub mod deploy;
 pub mod error;
@@ -25,6 +26,7 @@ pub struct AppState {
     pub scheduler_client: Option<SchedulerClient>,
     pub scheduler_config: scheduler::SchedulerConfig,
     pub jwt_secret: String,
+    pub master_key: String,
 }
 
 #[derive(Clone)]

@@ -1,17 +1,27 @@
 use async_trait::async_trait;
 use sqlx::types::Uuid;
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, sqlx::Type, Default)]
+#[sqlx(rename_all = "lowercase")]
+pub enum UserRole {
+    Admin,
+    #[default]
+    User,
+}
+
 #[derive(Debug, Clone)]
 pub struct User {
     pub id: Uuid,
     pub email: String,
     pub password_hash: String,
+    pub role: UserRole,
 }
 
 #[derive(Debug)]
 pub struct NewUser {
     pub email: String,
     pub password_hash: String,
+    pub role: UserRole,
 }
 
 #[derive(Debug)]
@@ -37,6 +47,7 @@ impl From<sqlx::Error> for DbError {
 
 /// Object-safe async repository trait.  All implementations must derive
 /// `Send + Sync`; `#[async_trait]` boxes the returned futures automatically.
+#[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait UserRepository: Send + Sync {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError>;
@@ -110,7 +121,8 @@ mod tests {
         User {
             id: Uuid::new_v4(),
             email: "test@example.com".to_string(),
-            password_hash: "$2b$12$hashedpassword".to_string(),
+            password_hash: "hashed_password".to_string(),
+            role: UserRole::User,
         }
     }
 
@@ -193,6 +205,7 @@ mod tests {
             .create(NewUser {
                 email: "new@example.com".to_string(),
                 password_hash: "hash".to_string(),
+                role: UserRole::User,
             })
             .await
             .unwrap();
@@ -205,6 +218,7 @@ mod tests {
             .create(NewUser {
                 email: "new@example.com".to_string(),
                 password_hash: "hash".to_string(),
+                role: UserRole::User,
             })
             .await
             .unwrap();
@@ -217,6 +231,7 @@ mod tests {
             .create(NewUser {
                 email: "x@x.com".to_string(),
                 password_hash: "hash".to_string(),
+                role: UserRole::User,
             })
             .await;
         assert!(result.is_err());
@@ -261,6 +276,7 @@ mod tests {
         assert_eq!(cloned.id, user.id);
         assert_eq!(cloned.email, user.email);
         assert_eq!(cloned.password_hash, user.password_hash);
+        assert_eq!(cloned.role, user.role);
     }
 
     #[test]
@@ -276,6 +292,7 @@ mod tests {
         let new_user = NewUser {
             email: "a@b.com".to_string(),
             password_hash: "hashed".to_string(),
+            role: UserRole::User,
         };
         let s = format!("{:?}", new_user);
         assert!(s.contains("NewUser"));

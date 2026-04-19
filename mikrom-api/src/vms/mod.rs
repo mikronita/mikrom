@@ -107,8 +107,8 @@ pub async fn get_vm_status(
         started_at: inner.started_at,
         stopped_at: inner.stopped_at,
         error_message: inner.error_message,
-        cpu_usage: 0.0,
-        ram_used_bytes: 0,
+        cpu_usage: inner.cpu_usage,
+        ram_used_bytes: inner.ram_used_bytes,
     };
 
     Ok(Json(vm))

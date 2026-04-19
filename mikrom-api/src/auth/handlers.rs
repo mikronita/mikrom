@@ -64,6 +64,7 @@ pub async fn register(
         .create(NewUser {
             email: payload.email.clone(),
             password_hash,
+            role: crate::repositories::user_repository::UserRole::User,
         })
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to create user: {}", e.message)))?;
@@ -96,9 +97,13 @@ pub async fn login(
         .ok_or_else(|| ApiError::Auth("Invalid credentials".to_string()))?;
 
     if verify(&payload.password, &user.password_hash).unwrap_or(false) {
-        let token =
-            crate::auth::jwt::create_token(&user.id.to_string(), &user.email, &state.jwt_secret)
-                .map_err(|_| ApiError::Internal("Failed to create token".to_string()))?;
+        let token = crate::auth::jwt::create_token(
+            &user.id.to_string(),
+            &user.email,
+            &user.role,
+            &state.jwt_secret,
+        )
+        .map_err(|_| ApiError::Internal("Failed to create token".to_string()))?;
 
         Ok(Json(LoginResponse { token }))
     } else {
@@ -106,4 +111,71 @@ pub async fn login(
     }
 }
 
-// Tests ...
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repositories::user_repository::{MockUserRepository, User, UserRole};
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn test_register_assigns_default_user_role() {
+        let mut mock_repo = MockUserRepository::new();
+        let email = "test@user.com".to_string();
+
+        mock_repo.expect_count_by_email().returning(|_| Ok(0));
+        mock_repo
+            .expect_create()
+            .withf(|u| u.role == UserRole::User)
+            .returning(|_| Ok(Uuid::new_v4()));
+
+        let state = crate::AppState {
+            user_repo: Arc::new(mock_repo),
+            scheduler_client: None,
+            scheduler_config: crate::scheduler::SchedulerConfig::default(),
+            jwt_secret: "secret".into(),
+            master_key: "key".into(),
+        };
+
+        let payload = RegisterRequest {
+            email,
+            password: "password123".into(),
+        };
+        let result = register(State(state), Json(payload)).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_login_includes_role_in_token() {
+        let mut mock_repo = MockUserRepository::new();
+        let email = "admin@mikrom.io".to_string();
+        let password = "adminpassword".to_string();
+        let hashed = hash(&password, DEFAULT_COST).unwrap();
+
+        let user = User {
+            id: Uuid::new_v4(),
+            email: email.clone(),
+            password_hash: hashed,
+            role: UserRole::Admin,
+        };
+
+        mock_repo
+            .expect_find_by_email()
+            .returning(move |_| Ok(Some(user.clone())));
+
+        let secret = "test-jwt-secret".to_string();
+        let state = crate::AppState {
+            user_repo: Arc::new(mock_repo),
+            scheduler_client: None,
+            scheduler_config: crate::scheduler::SchedulerConfig::default(),
+            jwt_secret: secret.clone(),
+            master_key: "key".into(),
+        };
+
+        let payload = LoginRequest { email, password };
+        let result = login(State(state), Json(payload)).await.unwrap();
+
+        let claims = crate::auth::jwt::verify_token(&result.token, &secret).unwrap();
+        assert_eq!(claims.role, UserRole::Admin);
+    }
+}

@@ -12,6 +12,7 @@ use crate::auth::jwt::Claims;
 pub struct AuthUser {
     pub user_id: String,
     pub email: String,
+    pub role: crate::repositories::user_repository::UserRole,
 }
 
 #[derive(Debug, Serialize)]
@@ -50,17 +51,19 @@ impl FromRequestParts<crate::AppState> for AuthUser {
             .into_response()
         })?;
 
-        let Claims { sub, email, .. } = crate::auth::jwt::verify_token(token, &state.jwt_secret)
-            .map_err(|_| {
-                AuthError {
-                    error: "Invalid or expired token".to_string(),
-                }
-                .into_response()
-            })?;
+        let Claims {
+            sub, email, role, ..
+        } = crate::auth::jwt::verify_token(token, &state.jwt_secret).map_err(|_| {
+            AuthError {
+                error: "Invalid or expired token".to_string(),
+            }
+            .into_response()
+        })?;
 
         Ok(AuthUser {
             user_id: sub,
             email,
+            role,
         })
     }
 }
@@ -91,7 +94,9 @@ mod tests {
 
     /// Minimal handler that uses AuthUser — returns 200 with the user id.
     async fn whoami(auth: AuthUser) -> axum::Json<serde_json::Value> {
-        axum::Json(serde_json::json!({ "user_id": auth.user_id, "email": auth.email }))
+        axum::Json(
+            serde_json::json!({ "user_id": auth.user_id, "email": auth.email, "role": auth.role }),
+        )
     }
 
     fn make_app(jwt_secret: &str) -> axum::Router {
@@ -100,6 +105,7 @@ mod tests {
             scheduler_client: None,
             scheduler_config: crate::scheduler::SchedulerConfig::default(),
             jwt_secret: jwt_secret.to_string(),
+            master_key: "test-key".into(),
         };
         axum::Router::new()
             .route("/whoami", get(whoami))
@@ -107,7 +113,13 @@ mod tests {
     }
 
     fn make_token(secret: &str) -> String {
-        crate::auth::jwt::create_token("uid-1", "user@example.com", secret).unwrap()
+        crate::auth::jwt::create_token(
+            "uid-1",
+            "user@example.com",
+            &crate::repositories::user_repository::UserRole::User,
+            secret,
+        )
+        .unwrap()
     }
 
     // ── missing / malformed header ─────────────────────────────────────────────

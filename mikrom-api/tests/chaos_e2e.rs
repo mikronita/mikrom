@@ -100,9 +100,16 @@ async fn test_agent_failure_propagation_e2e() {
             certs_dir: None,
         },
         jwt_secret: CHAOS_JWT_SECRET.to_string(),
+        master_key: "chaos-key".into(),
     };
     let app = create_app(state);
-    let token = create_token("user-chaos", "chaos@example.com", CHAOS_JWT_SECRET).unwrap();
+    let token = create_token(
+        "user-chaos",
+        "chaos@example.com",
+        &mikrom_api::repositories::user_repository::UserRole::User,
+        CHAOS_JWT_SECRET,
+    )
+    .unwrap();
 
     // 4. Attempt Deployment
     let response = app

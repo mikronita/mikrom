@@ -36,6 +36,7 @@ fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         scheduler_client: None,
         scheduler_config: mikrom_api::scheduler::SchedulerConfig::default(),
         jwt_secret: jwt_secret.to_string(),
+        master_key: "integration-master-key".into(),
     };
     axum::Router::new()
         .route("/auth/register", axum::routing::post(register))

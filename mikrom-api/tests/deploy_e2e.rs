@@ -196,11 +196,18 @@ async fn test_http_api_deploy_e2e() {
             certs_dir: None,
         },
         jwt_secret: E2E_JWT_SECRET.to_string(),
+        master_key: "e2e-key".into(),
     };
     let app = create_app(state);
 
     // ── create a valid JWT for the request ────────────────────────────────────
-    let token = create_token("user-e2e", "e2e@example.com", E2E_JWT_SECRET).unwrap();
+    let token = create_token(
+        "user-e2e",
+        "e2e@example.com",
+        &mikrom_api::repositories::user_repository::UserRole::User,
+        E2E_JWT_SECRET,
+    )
+    .unwrap();
 
     // ── POST /deploy ──────────────────────────────────────────────────────────
     let response = app

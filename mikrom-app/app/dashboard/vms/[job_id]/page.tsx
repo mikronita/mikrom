@@ -16,8 +16,18 @@ import {
   Square,
   Pause,
   Play,
-  Trash2
+  Trash2,
+  Zap
 } from "lucide-react";
+import { 
+  AreaChart, 
+  Area, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer 
+} from "recharts";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { getToken } from "@/lib/auth";
@@ -112,6 +122,12 @@ function MetricCard({
   );
 }
 
+interface MetricPoint {
+  time: string;
+  cpu: number;
+  ram: number;
+}
+
 export default function VmDetailPage() {
   const params = useParams<{ job_id: string }>();
   const router = useRouter();
@@ -124,7 +140,21 @@ export default function VmDetailPage() {
   const [confirmStop, setConfirmStop] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([]);
+  const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (vm?.cpu_usage !== undefined) {
+      setMetricsHistory(prev => {
+        const newData: MetricPoint[] = [...prev, {
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          cpu: vm.cpu_usage * 100,
+          ram: vm.ram_used_bytes / (1024 * 1024) // MiB
+        }];
+        return newData.slice(-20); // Keep last 20 points
+      });
+    }
+  }, [vm]);
 
   const scrollToBottom = useCallback(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -320,14 +350,106 @@ export default function VmDetailPage() {
             </div>
           )}
 
-          {isLoading && !vm ? (
+          {vm && vm.status.toLowerCase() === "running" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <Card>
+                <CardHeader className="py-4 border-b border-zinc-100 dark:border-zinc-800">
+                  <CardTitle className="text-xs font-medium text-zinc-500 flex items-center gap-2 uppercase tracking-wider">
+                    <Cpu className="w-4 h-4 text-blue-500" /> CPU Usage (%)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <div className="h-[200px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={metricsHistory}>
+                        <defs>
+                          <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
+                        <XAxis dataKey="time" hide />
+                        <YAxis hide domain={[0, 100]} />
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#18181b', border: 'none', borderRadius: '8px', color: '#fff' }}
+                          itemStyle={{ color: '#60a5fa' }}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="cpu" 
+                          stroke="#3b82f6" 
+                          fillOpacity={1} 
+                          fill="url(#colorCpu)" 
+                          strokeWidth={2}
+                          isAnimationActive={false}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between">
+                    <span className="text-2xl font-bold">{(vm.cpu_usage * 100).toFixed(1)}%</span>
+                    <Badge variant="secondary" className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">
+                      Real-time
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="py-4 border-b border-zinc-100 dark:border-zinc-800">
+                  <CardTitle className="text-xs font-medium text-zinc-500 flex items-center gap-2 uppercase tracking-wider">
+                    <Zap className="w-4 h-4 text-amber-500" /> Memory Usage (MiB)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <div className="h-[200px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={metricsHistory}>
+                        <defs>
+                          <linearGradient id="colorRam" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
+                        <XAxis dataKey="time" hide />
+                        <YAxis hide />
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#18181b', border: 'none', borderRadius: '8px', color: '#fff' }}
+                          itemStyle={{ color: '#fbbf24' }}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="ram" 
+                          stroke="#f59e0b" 
+                          fillOpacity={1} 
+                          fill="url(#colorRam)" 
+                          strokeWidth={2}
+                          isAnimationActive={false}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between">
+                    <span className="text-2xl font-bold">{(vm.ram_used_bytes / (1024 * 1024)).toFixed(1)} MiB</span>
+                    <Badge variant="secondary" className="bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400">
+                      Live
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {isLoading ? (
             <div className="flex flex-col items-center justify-center py-32 text-zinc-500">
               <Loader2 className="w-10 h-10 animate-spin mb-4 opacity-20" />
               <p className="text-sm font-medium">Retrieving instance data...</p>
             </div>
           ) : vm ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="md:col-span-2 space-y-8">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 space-y-8">
                 {/* Visual Metrics */}
                 <div className="grid grid-cols-2 gap-4">
                   <MetricCard 
