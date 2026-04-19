@@ -68,6 +68,30 @@ enum Commands {
         /// Job ID of the VM to stop
         job_id: String,
     },
+
+    /// Stream logs from a VM in real-time (SSE)
+    Logs {
+        /// Job ID of the VM to get logs from
+        job_id: String,
+    },
+
+    /// Pause a running VM by job ID
+    Pause {
+        /// Job ID of the VM to pause
+        job_id: String,
+    },
+
+    /// Resume a paused VM by job ID
+    Resume {
+        /// Job ID of the VM to resume
+        job_id: String,
+    },
+
+    /// Delete a VM from the registry by job ID
+    Delete {
+        /// Job ID of the VM to delete
+        job_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -195,6 +219,56 @@ async fn main() -> anyhow::Result<()> {
                 println!("message: {}", resp.message);
             } else {
                 eprintln!("Stop reported failure: {}", resp.message);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Logs { job_id } => match client.get_vm_logs(&job_id).await {
+            Ok(logs) => println!("{}", logs),
+            Err(e) => {
+                eprintln!("Failed to get logs: {}", e);
+                std::process::exit(1);
+            }
+        },
+
+        Commands::Pause { job_id } => {
+            let resp = client
+                .pause_vm(&job_id)
+                .await
+                .context("Failed to pause VM")?;
+            if resp.success {
+                println!("Paused job {}.", job_id);
+                println!("message: {}", resp.message);
+            } else {
+                eprintln!("Pause reported failure: {}", resp.message);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Resume { job_id } => {
+            let resp = client
+                .resume_vm(&job_id)
+                .await
+                .context("Failed to resume VM")?;
+            if resp.success {
+                println!("Resumed job {}.", job_id);
+                println!("message: {}", resp.message);
+            } else {
+                eprintln!("Resume reported failure: {}", resp.message);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Delete { job_id } => {
+            let resp = client
+                .delete_vm(&job_id)
+                .await
+                .context("Failed to delete VM")?;
+            if resp.success {
+                println!("Deleted job {}.", job_id);
+                println!("message: {}", resp.message);
+            } else {
+                eprintln!("Delete reported failure: {}", resp.message);
                 std::process::exit(1);
             }
         }
@@ -454,6 +528,116 @@ mod tests {
         match cli.command {
             Commands::Stop { job_id } => assert_eq!(job_id, "job-1"),
             _ => panic!("expected stop command"),
+        }
+    }
+
+    // ── logs subcommand ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_logs_command_parses_job_id() {
+        let cli = Cli::try_parse_from(["mikrom", "logs", "job-xyz"]).unwrap();
+        match cli.command {
+            Commands::Logs { job_id } => assert_eq!(job_id, "job-xyz"),
+            _ => panic!("expected logs command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_logs_command_requires_job_id() {
+        assert!(Cli::try_parse_from(["mikrom", "logs"]).is_err());
+    }
+
+    #[test]
+    fn test_cli_logs_with_api_url_flag() {
+        let cli = Cli::try_parse_from(["mikrom", "--api-url", "http://api:5001", "logs", "job-1"])
+            .unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some("http://api:5001"));
+        match cli.command {
+            Commands::Logs { job_id } => assert_eq!(job_id, "job-1"),
+            _ => panic!("expected logs command"),
+        }
+    }
+
+    // ── pause subcommand ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_pause_command_parses_job_id() {
+        let cli = Cli::try_parse_from(["mikrom", "pause", "job-xyz"]).unwrap();
+        match cli.command {
+            Commands::Pause { job_id } => assert_eq!(job_id, "job-xyz"),
+            _ => panic!("expected pause command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_pause_command_requires_job_id() {
+        assert!(Cli::try_parse_from(["mikrom", "pause"]).is_err());
+    }
+
+    #[test]
+    fn test_cli_pause_with_api_url_flag() {
+        let cli = Cli::try_parse_from(["mikrom", "--api-url", "http://api:5001", "pause", "job-1"])
+            .unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some("http://api:5001"));
+        match cli.command {
+            Commands::Pause { job_id } => assert_eq!(job_id, "job-1"),
+            _ => panic!("expected pause command"),
+        }
+    }
+
+    // ── resume subcommand ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_resume_command_parses_job_id() {
+        let cli = Cli::try_parse_from(["mikrom", "resume", "job-xyz"]).unwrap();
+        match cli.command {
+            Commands::Resume { job_id } => assert_eq!(job_id, "job-xyz"),
+            _ => panic!("expected resume command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_resume_command_requires_job_id() {
+        assert!(Cli::try_parse_from(["mikrom", "resume"]).is_err());
+    }
+
+    #[test]
+    fn test_cli_resume_with_api_url_flag() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "--api-url", "http://api:5001", "resume", "job-1"])
+                .unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some("http://api:5001"));
+        match cli.command {
+            Commands::Resume { job_id } => assert_eq!(job_id, "job-1"),
+            _ => panic!("expected resume command"),
+        }
+    }
+
+    // ── delete subcommand ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_delete_command_parses_job_id() {
+        let cli = Cli::try_parse_from(["mikrom", "delete", "job-xyz"]).unwrap();
+        match cli.command {
+            Commands::Delete { job_id } => assert_eq!(job_id, "job-xyz"),
+            _ => panic!("expected delete command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_delete_command_requires_job_id() {
+        assert!(Cli::try_parse_from(["mikrom", "delete"]).is_err());
+    }
+
+    #[test]
+    fn test_cli_delete_with_api_url_flag() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "--api-url", "http://api:5001", "delete", "job-1"])
+                .unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some("http://api:5001"));
+        match cli.command {
+            Commands::Delete { job_id } => assert_eq!(job_id, "job-1"),
+            _ => panic!("expected delete command"),
         }
     }
 }
