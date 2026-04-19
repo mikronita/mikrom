@@ -1,0 +1,16 @@
+[Unit]
+Description=Mikrom Agent
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/mikrom/agent.env
+ExecStart=/usr/bin/mikrom-agent
+Restart=always
+RestartSec=5
+User=root
+# El agente necesita acceso a /dev/kvm para Firecracker
+Group=root
+
+[Install]
+WantedBy=multi-user.target

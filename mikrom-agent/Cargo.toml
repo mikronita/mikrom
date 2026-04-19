@@ -32,6 +32,24 @@ opentelemetry-otlp = "0.31.1"
 tracing-opentelemetry = "0.32.1"
 opentelemetry-semantic-conventions = "0.31.0"
 
+[package.metadata.deb]
+maintainer = "Mikrom Team <admin@mikrom.io>"
+copyright = "2024, Mikrom Team"
+license-file = ["../LICENSE", "0"]
+extended-description = """\
+Mikrom Agent is a daemon that runs on compute nodes to manage Firecracker microVMs.
+It communicates with the Mikrom Scheduler to deploy and manage workloads.
+"""
+depends = "libc6, libssl3"
+section = "admin"
+priority = "optional"
+assets = [
+    ["target/release/mikrom-agent", "/usr/bin/mikrom-agent", "755"],
+    ["debian/mikrom-agent.service", "/lib/systemd/system/mikrom-agent.service", "644"],
+    ["debian/agent.env", "/etc/mikrom/agent.env", "644"],
+]
+systemd-units = { unit-name = "mikrom-agent" }
+
 [build-dependencies]
 tonic-build.workspace = true
 
