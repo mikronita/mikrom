@@ -111,7 +111,10 @@ async fn test_agent_failure_propagation_e2e() {
     )
     .unwrap();
 
-    // 4. Attempt Deployment
+    // 4. Attempt Deployment - use an image name that looks like a local path to skip Docker build
+    let fake_rootfs = "/tmp/fake-rootfs-chaos.ext4";
+    std::fs::write(fake_rootfs, "dummy").unwrap();
+
     let response = app
         .oneshot(
             Request::builder()
@@ -119,9 +122,10 @@ async fn test_agent_failure_propagation_e2e() {
                 .uri("/deploy")
                 .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {token}"))
-                .body(Body::from(
-                    r#"{"app_name":"chaos-app","image":"nginx:latest"}"#,
-                ))
+                .body(Body::from(format!(
+                    r#"{{"app_name":"chaos-app","image":"{}"}}"#,
+                    fake_rootfs
+                )))
                 .unwrap(),
         )
         .await
@@ -151,7 +155,8 @@ async fn test_agent_failure_propagation_e2e() {
         status
     );
     assert!(
-        message.contains("No such file or directory") || message.contains("failed"),
+        message.to_lowercase().contains("no such file")
+            || message.to_lowercase().contains("failed"),
         "Expected error message about missing binary, got: {}",
         message
     );
