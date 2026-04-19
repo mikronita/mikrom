@@ -1,3 +1,5 @@
+import { logout } from "@/lib/auth";
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
 
 export interface RegisterRequest {
@@ -70,6 +72,7 @@ export function getVmLogsSSE(
       });
 
       if (!response.ok) {
+        if (response.status === 401) logout();
         throw new Error(`Failed to connect to log stream: ${response.statusText}`);
       }
 
@@ -143,6 +146,7 @@ function authHeaders(token: string): Record<string, string> {
 }
 
 async function parseJson<T>(response: Response): Promise<T> {
+  if (response.status === 401) logout();
   const text = await response.text();
   if (!text) throw new Error("Empty response from server");
   try {
