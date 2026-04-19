@@ -33,14 +33,14 @@ tracing-opentelemetry = "0.32.1"
 opentelemetry-semantic-conventions = "0.31.0"
 
 [package.metadata.deb]
-maintainer = "Mikrom Team <admin@mikrom.io>"
-copyright = "2024, Mikrom Team"
+maintainer = "Antonio Pardo <apardo@spluca.org>"
+copyright = "2026, Mikrom Team"
 license-file = ["../LICENSE", "0"]
 extended-description = """\
 Mikrom Agent is a daemon that runs on compute nodes to manage Firecracker microVMs.
 It communicates with the Mikrom Scheduler to deploy and manage workloads.
 """
-depends = "libc6, libssl3"
+depends = "libc6, libssl3, iptables"
 section = "admin"
 priority = "optional"
 assets = [
