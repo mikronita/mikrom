@@ -154,4 +154,127 @@ mod tests {
         assert_eq!(loaded.api_url.as_deref(), Some("http://new:5001"));
         assert_eq!(loaded.token.as_deref(), Some("tok"));
     }
+
+    #[test]
+    fn test_load_from_empty_file_returns_default() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        std::fs::write(&path, "").unwrap();
+        let cfg = Config::load_from(&path);
+        assert!(cfg.api_url.is_none());
+        assert!(cfg.token.is_none());
+    }
+
+    #[test]
+    fn test_load_from_comment_only_toml() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        std::fs::write(&path, "# this is a comment\n").unwrap();
+        let cfg = Config::load_from(&path);
+        assert!(cfg.api_url.is_none());
+        assert!(cfg.token.is_none());
+    }
+
+    #[test]
+    fn test_load_from_full_config() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        std::fs::write(
+            &path,
+            r#"
+api_url = "http://full:9000"
+token = "full-token-123"
+"#,
+        )
+        .unwrap();
+        let cfg = Config::load_from(&path);
+        assert_eq!(cfg.api_url.as_deref(), Some("http://full:9000"));
+        assert_eq!(cfg.token.as_deref(), Some("full-token-123"));
+    }
+
+    #[test]
+    fn test_save_to_with_only_api_url() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        Config {
+            api_url: Some("http://api-only:8000".to_string()),
+            token: None,
+        }
+        .save_to(&path)
+        .unwrap();
+        let loaded = Config::load_from(&path);
+        assert_eq!(loaded.api_url.as_deref(), Some("http://api-only:8000"));
+        assert!(loaded.token.is_none());
+    }
+
+    #[test]
+    fn test_save_to_with_only_token() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        Config {
+            api_url: None,
+            token: Some("token-only".to_string()),
+        }
+        .save_to(&path)
+        .unwrap();
+        let loaded = Config::load_from(&path);
+        assert!(loaded.api_url.is_none());
+        assert_eq!(loaded.token.as_deref(), Some("token-only"));
+    }
+
+    #[test]
+    fn test_save_with_empty_config() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config::default();
+        cfg.save_to(&path).unwrap();
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn test_api_url_with_trailing_slash() {
+        let cfg = Config {
+            api_url: Some("http://example.com:5001/".to_string()),
+            token: None,
+        };
+        assert_eq!(cfg.api_url(), "http://example.com:5001/");
+    }
+
+    #[test]
+    fn test_api_url_with_path() {
+        let cfg = Config {
+            api_url: Some("http://example.com:5001/api/v1".to_string()),
+            token: None,
+        };
+        assert_eq!(cfg.api_url(), "http://example.com:5001/api/v1");
+    }
+
+    #[test]
+    fn test_default_values_are_none() {
+        let cfg = Config::default();
+        assert!(cfg.api_url.is_none());
+        assert!(cfg.token.is_none());
+    }
+
+    #[test]
+    fn test_config_serialization() {
+        let cfg = Config {
+            api_url: Some("http://test:5001".to_string()),
+            token: Some("test-token".to_string()),
+        };
+        let serialized = toml::to_string(&cfg).unwrap();
+        assert!(serialized.contains("api_url"));
+        assert!(serialized.contains("token"));
+    }
+
+    #[test]
+    fn test_config_deserialization() {
+        let toml_str = r#"
+api_url = "http://deser:5001"
+token = "deser-token"
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.api_url.as_deref(), Some("http://deser:5001"));
+        assert_eq!(cfg.token.as_deref(), Some("deser-token"));
+    }
 }

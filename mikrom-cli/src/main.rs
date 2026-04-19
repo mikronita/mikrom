@@ -1,6 +1,24 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
+use yansi::Paint;
+
+fn bold_cyan(s: &str) -> std::string::String {
+    Paint::new(s).cyan().bold().to_string()
+}
+
+fn green_label(s: &str) -> std::string::String {
+    Paint::new(s).green().to_string()
+}
+
+fn red_label(s: &str) -> std::string::String {
+    Paint::new(s).red().to_string()
+}
+
+#[allow(dead_code)]
+fn yellow_label(s: &str) -> std::string::String {
+    Paint::new(s).yellow().to_string()
+}
 
 mod client;
 mod config;
@@ -92,6 +110,24 @@ enum Commands {
         /// Job ID of the VM to delete
         job_id: String,
     },
+
+    /// Restart a VM (stop then start)
+    Restart {
+        /// Job ID of the VM to restart
+        job_id: String,
+    },
+
+    /// Get host metrics for a specific VM
+    Metrics {
+        /// Job ID of the VM to get metrics for
+        job_id: Option<String>,
+    },
+
+    /// Show current user info
+    Whoami,
+
+    /// Show config settings
+    Config,
 }
 
 #[derive(Subcommand)]
@@ -163,31 +199,48 @@ async fn main() -> anyhow::Result<()> {
                 .deploy(&app, &image, vcpus, memory, disk, env_map)
                 .await
                 .context("Deploy failed")?;
-            println!("job_id:  {}", resp.job_id);
-            println!("status:  {}", resp.status);
-            println!("message: {}", resp.message);
+            println!("{} {}", green_label("job_id:"), resp.job_id);
+            println!(
+                "{} {}",
+                green_label("status:"),
+                Paint::new(&resp.status).cyan()
+            );
+            println!("{} {}", green_label("message:"), resp.message);
             if let Some(host_id) = resp.host_id {
-                println!("host_id: {}", host_id);
+                println!("{} {}", green_label("host_id:"), host_id);
             }
             if let Some(vm_id) = resp.vm_id {
-                println!("vm_id:   {}", vm_id);
+                println!("{} {}", green_label("vm_id:"), vm_id);
             }
         }
 
         Commands::Vms => {
             let vms = client.list_vms().await.context("Failed to list VMs")?;
             if vms.is_empty() {
-                println!("No VMs found.");
+                println!("{}", "No VMs found.".yellow());
             } else {
                 println!(
-                    "{:<38} {:<12} {:<20} {:<38} IMAGE",
-                    "JOB_ID", "STATUS", "APP_NAME", "VM_ID"
+                    "{} {} {} {} IMAGE",
+                    bold_cyan("JOB_ID"),
+                    bold_cyan("STATUS"),
+                    bold_cyan("APP_NAME"),
+                    bold_cyan("VM_ID")
                 );
                 println!("{}", "-".repeat(120));
                 for vm in vms {
+                    let status_painted = match vm.status.as_str() {
+                        "Running" => Paint::new(&vm.status).green(),
+                        "Scheduled" | "Pending" => Paint::new(&vm.status).yellow(),
+                        "Failed" | "Error" => Paint::new(&vm.status).red(),
+                        _ => Paint::new(&vm.status),
+                    };
                     println!(
                         "{:<38} {:<12} {:<20} {:<38} {}",
-                        vm.job_id, vm.status, vm.app_name, vm.vm_id, vm.image
+                        Paint::new(&vm.job_id).bold(),
+                        status_painted,
+                        Paint::new(&vm.app_name),
+                        Paint::new(&vm.vm_id),
+                        Paint::new(&vm.image)
                     );
                 }
             }
@@ -215,10 +268,14 @@ async fn main() -> anyhow::Result<()> {
         Commands::Stop { job_id } => {
             let resp = client.stop_vm(&job_id).await.context("Failed to stop VM")?;
             if resp.success {
-                println!("Stopped job {}.", job_id);
-                println!("message: {}", resp.message);
+                println!(
+                    "{} {}",
+                    "Stopped job".green(),
+                    Paint::new(&format!("[{}]", job_id)).cyan()
+                );
+                println!("{} {}", green_label("message:"), resp.message);
             } else {
-                eprintln!("Stop reported failure: {}", resp.message);
+                eprintln!("{} {}", red_label("Stop reported failure:"), resp.message);
                 std::process::exit(1);
             }
         }
@@ -237,10 +294,14 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .context("Failed to pause VM")?;
             if resp.success {
-                println!("Paused job {}.", job_id);
-                println!("message: {}", resp.message);
+                println!(
+                    "{} {}",
+                    "Paused job".green(),
+                    Paint::new(&format!("[{}]", job_id)).cyan()
+                );
+                println!("{} {}", green_label("message:"), resp.message);
             } else {
-                eprintln!("Pause reported failure: {}", resp.message);
+                eprintln!("{} {}", red_label("Pause reported failure:"), resp.message);
                 std::process::exit(1);
             }
         }
@@ -251,10 +312,14 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .context("Failed to resume VM")?;
             if resp.success {
-                println!("Resumed job {}.", job_id);
-                println!("message: {}", resp.message);
+                println!(
+                    "{} {}",
+                    "Resumed job".green(),
+                    Paint::new(&format!("[{}]", job_id)).cyan()
+                );
+                println!("{} {}", green_label("message:"), resp.message);
             } else {
-                eprintln!("Resume reported failure: {}", resp.message);
+                eprintln!("{} {}", red_label("Resume reported failure:"), resp.message);
                 std::process::exit(1);
             }
         }
@@ -265,11 +330,72 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .context("Failed to delete VM")?;
             if resp.success {
-                println!("Deleted job {}.", job_id);
-                println!("message: {}", resp.message);
+                println!(
+                    "{} {}",
+                    "Deleted job".green(),
+                    Paint::new(&format!("[{}]", job_id)).cyan()
+                );
+                println!("{} {}", green_label("message:"), resp.message);
             } else {
-                eprintln!("Delete reported failure: {}", resp.message);
+                eprintln!("{} {}", red_label("Delete reported failure:"), resp.message);
                 std::process::exit(1);
+            }
+        }
+
+        Commands::Restart { job_id } => {
+            let resp = client
+                .restart_vm(&job_id)
+                .await
+                .context("Failed to restart VM")?;
+            if resp.success {
+                println!(
+                    "{} {}",
+                    "Restarting job".green(),
+                    Paint::new(&format!("[{}]", job_id)).cyan()
+                );
+                println!("{} {}", green_label("message:"), resp.message);
+            } else {
+                eprintln!(
+                    "{} {}",
+                    red_label("Restart reported failure:"),
+                    resp.message
+                );
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Metrics { job_id } => match job_id {
+            Some(id) => {
+                let metrics = client
+                    .get_vm_metrics(&id)
+                    .await
+                    .context("Failed to get VM metrics")?;
+                println!("VM: {}", id);
+                println!("cpu_usage:    {:.2}%", metrics.cpu_usage);
+                println!("memory:     {:.2}%", metrics.memory_usage);
+                println!("disk:      {:.2}%", metrics.disk_usage);
+                println!("network_rx: {} bytes", metrics.network_rx);
+                println!("network_tx: {} bytes", metrics.network_tx);
+            }
+            None => {
+                eprintln!("Error: job_id required for metrics command");
+                std::process::exit(1);
+            }
+        },
+
+        Commands::Whoami => {
+            let user = client.whoami().await.context("Failed to get user info")?;
+            println!("user_id:   {}", user.user_id);
+            println!("email:     {}", user.email);
+            println!("created_at: {}", user.created_at);
+        }
+
+        Commands::Config => {
+            println!("api_url: {}", cfg.api_url());
+            if cfg.token.is_some() {
+                println!("token:    [configured]");
+            } else {
+                println!("token:    [not configured]");
             }
         }
     }
@@ -639,5 +765,271 @@ mod tests {
             Commands::Delete { job_id } => assert_eq!(job_id, "job-1"),
             _ => panic!("expected delete command"),
         }
+    }
+
+    // ── restart subcommand ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_restart_command_parses_job_id() {
+        let cli = Cli::try_parse_from(["mikrom", "restart", "job-xyz"]).unwrap();
+        match cli.command {
+            Commands::Restart { job_id } => assert_eq!(job_id, "job-xyz"),
+            _ => panic!("expected restart command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_restart_command_requires_job_id() {
+        assert!(Cli::try_parse_from(["mikrom", "restart"]).is_err());
+    }
+
+    #[test]
+    fn test_cli_restart_with_api_url_flag() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "--api-url", "http://api:5001", "restart", "job-1"])
+                .unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some("http://api:5001"));
+        match cli.command {
+            Commands::Restart { job_id } => assert_eq!(job_id, "job-1"),
+            _ => panic!("expected restart command"),
+        }
+    }
+
+    // ── metrics subcommand ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_metrics_command_parses_optional_job_id() {
+        let cli = Cli::try_parse_from(["mikrom", "metrics", "job-xyz"]).unwrap();
+        match cli.command {
+            Commands::Metrics { job_id } => assert_eq!(job_id.as_deref(), Some("job-xyz")),
+            _ => panic!("expected metrics command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_metrics_command_parses_no_job_id() {
+        let cli = Cli::try_parse_from(["mikrom", "metrics"]).unwrap();
+        match cli.command {
+            Commands::Metrics { job_id } => assert!(job_id.is_none()),
+            _ => panic!("expected metrics command"),
+        }
+    }
+
+    // ── whoami subcommand ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_whoami_command_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "whoami"]).unwrap();
+        assert!(matches!(cli.command, Commands::Whoami));
+    }
+
+    // ── config subcommand ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_config_command_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "config"]).unwrap();
+        assert!(matches!(cli.command, Commands::Config));
+    }
+
+    // ── deploy with all options ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_deploy_with_vcpus_only() {
+        let cli = Cli::try_parse_from([
+            "mikrom", "deploy", "--app", "a", "--image", "i", "--vcpus", "2",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Deploy { vcpus, .. } => assert_eq!(vcpus, Some(2)),
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn test_cli_deploy_with_memory_only() {
+        let cli = Cli::try_parse_from([
+            "mikrom", "deploy", "--app", "a", "--image", "i", "--memory", "512",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Deploy { memory, .. } => assert_eq!(memory, Some(512)),
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn test_cli_deploy_with_disk_only() {
+        let cli = Cli::try_parse_from([
+            "mikrom", "deploy", "--app", "a", "--image", "i", "--disk", "5000",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Deploy { disk, .. } => assert_eq!(disk, Some(5000)),
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn test_cli_deploy_with_multiple_env_vars() {
+        let cli = Cli::try_parse_from([
+            "mikrom", "deploy", "--app", "a", "--image", "i", "--env", "A=1", "--env", "B=2",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Deploy { env, .. } => {
+                assert_eq!(env.len(), 2);
+                assert!(env.contains(&"A=1".to_string()));
+                assert!(env.contains(&"B=2".to_string()));
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn test_cli_deploy_with_env_value_containing_equals() {
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "deploy",
+            "--app",
+            "a",
+            "--image",
+            "i",
+            "--env",
+            "URL=http://x?a=1&b=2",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Deploy { env, .. } => {
+                assert_eq!(env.len(), 1);
+                assert!(env[0].contains("="));
+            }
+            _ => panic!(),
+        }
+    }
+
+    // ── health command variants ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_health_is_case_sensitive() {
+        let cli = Cli::try_parse_from(["mikrom", "health"]).unwrap();
+        assert!(matches!(cli.command, Commands::Health));
+    }
+
+    #[test]
+    fn test_cli_health_with_api_url_flag_after_command() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "health", "--api-url", "http://late:5001"]).unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some("http://late:5001"));
+        assert!(matches!(cli.command, Commands::Health));
+    }
+
+    // ── vms command variants ───────���───────────────────────────────────
+
+    #[test]
+    fn test_cli_vms_command_no_other_args() {
+        let cli = Cli::try_parse_from(["mikrom", "vms"]).unwrap();
+        assert!(matches!(cli.command, Commands::Vms));
+    }
+
+    #[test]
+    fn test_cli_vms_with_api_url_but_no_flag() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "--api-url", "http://override:5001", "vms"]).unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some("http://override:5001"));
+    }
+
+    // ── vm command variants ──────────────────────────────────────────
+
+    #[test]
+    fn test_cli_vm_with_special_characters_in_job_id() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "vm", "job-with-dash_and_underscore.123"]).unwrap();
+        match cli.command {
+            Commands::Vm { job_id } => assert_eq!(job_id, "job-with-dash_and_underscore.123"),
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn test_cli_vm_with_uuid_format_job_id() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "vm", "550e8400-e29b-41d4-a716-446655440000"]).unwrap();
+        match cli.command {
+            Commands::Vm { job_id } => {
+                assert_eq!(job_id.len(), 36);
+            }
+            _ => panic!(),
+        }
+    }
+
+    // ── api_url flag interaction tests ────────────────────────────────────
+
+    #[test]
+    fn test_api_url_flag_works_for_all_commands() {
+        let url = "http://test:9999";
+        let test_cases: Vec<(&str, &str)> = vec![
+            ("health", "health"),
+            ("vms", "vms"),
+            ("vm", "vm j-1"),
+            ("stop", "stop j-1"),
+            ("logs", "logs j-1"),
+            ("pause", "pause j-1"),
+            ("resume", "resume j-1"),
+            ("delete", "delete j-1"),
+            ("restart", "restart j-1"),
+            ("metrics", "metrics j-1"),
+            ("whoami", "whoami"),
+            ("config", "config"),
+        ];
+        for (_, cmd_str) in test_cases {
+            let mut args = vec!["mikrom", "--api-url", url];
+            args.extend(cmd_str.split_whitespace());
+            let cli = Cli::try_parse_from(&args).unwrap();
+            assert_eq!(
+                cli.api_url.as_deref(),
+                Some(url),
+                "failed for cmd: {}",
+                cmd_str
+            );
+        }
+    }
+
+    // ── command ordering ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_command_order_does_not_matter() {
+        let cli1 = Cli::try_parse_from(["mikrom", "--api-url", "http://a:5001", "vms"]).unwrap();
+        let cli2 = Cli::try_parse_from(["mikrom", "vms", "--api-url", "http://a:5001"]).unwrap();
+        assert_eq!(cli1.api_url, cli2.api_url);
+    }
+
+    // ── error cases for missing args ─────────────────────────────────────────
+
+    #[test]
+    fn test_cli_deploy_missing_both_required_fails() {
+        let result = Cli::try_parse_from(["mikrom", "deploy"]);
+        assert!(result.is_err());
+    }
+
+    // ── edge cases ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cli_with_empty_string_api_url() {
+        let cli = Cli::try_parse_from(["mikrom", "--api-url", "", "vms"]).unwrap();
+        assert_eq!(cli.api_url.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn test_cli_with_localhost_api_url() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "--api-url", "http://localhost:5001", "vms"]).unwrap();
+        assert!(cli.api_url.as_deref().unwrap().contains("localhost"));
+    }
+
+    #[test]
+    fn test_cli_with_https_api_url() {
+        let cli =
+            Cli::try_parse_from(["mikrom", "--api-url", "https://secure:5001", "vms"]).unwrap();
+        assert!(cli.api_url.as_deref().unwrap().starts_with("https"));
     }
 }

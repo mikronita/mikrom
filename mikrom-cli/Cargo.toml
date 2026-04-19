@@ -16,6 +16,8 @@ tokio.workspace = true
 anyhow = "1"
 toml = "0.8"
 dirs = "5"
+yansi = "1"
+indicatif = "0.17"
 
 [dev-dependencies]
 wiremock = "0.6"
