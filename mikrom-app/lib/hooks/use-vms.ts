@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listVms, deployApp, getVm, stopVm, DeployRequest } from "@/lib/api";
+import { listVms, deployApp, getVm, stopVm, deleteVm, DeployRequest } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 
 export const vmsKeys = {

@@ -7,9 +7,7 @@ import { Box, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from "lucide-react
 
 import { login } from "@/lib/api";
 import { setToken } from "@/lib/auth";
-import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/Card";
+import { Button, Card, Label, TextInput, Alert } from "flowbite-react";
 
 function LoginForm() {
   const router = useRouter();
@@ -38,76 +36,72 @@ function LoginForm() {
       setError(result.error);
     } else if (result.data) {
       setToken(result.data.token);
-      router.push("/dashboard");
+      router.push("/");
     }
   };
 
   return (
-    <Card className="w-full max-w-md shadow-2xl border-zinc-200/50 dark:border-zinc-800/50">
-      <CardHeader className="space-y-1 text-center">
+    <Card className="w-full max-w-md shadow-2xl dark:bg-zinc-900 border-zinc-200/50 dark:border-zinc-800/50">
+      <div className="space-y-1 text-center">
         <div className="flex justify-center mb-4">
           <div className="w-12 h-12 bg-zinc-900 dark:bg-zinc-50 rounded-2xl flex items-center justify-center shadow-lg">
             <Box className="w-6 h-6 text-white dark:text-zinc-900" />
           </div>
         </div>
-        <CardTitle className="text-2xl font-bold tracking-tight">Welcome back</CardTitle>
-        <CardDescription>
+        <h2 className="text-2xl font-bold tracking-tight dark:text-white">Welcome back</h2>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
           Enter your credentials to access your dashboard
-        </CardDescription>
-      </CardHeader>
+        </p>
+      </div>
       
-      <form onSubmit={handleSubmit}>
-        <CardContent className="space-y-4 pt-4">
-          {showSuccess && (
-            <div className="p-3 rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-900/20 text-green-700 dark:text-green-400 text-sm flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" />
-              Account created! You can now sign in.
-            </div>
-          )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {showSuccess && (
+          <Alert color="success" icon={() => <CheckCircle2 className="w-4 h-4 mr-2" />}>
+            Account created! You can now sign in.
+          </Alert>
+        )}
 
-          {error && (
-            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/20 text-red-700 dark:text-red-400 text-sm flex items-center gap-2">
-              <AlertCircle className="w-4 h-4" />
-              {error}
-            </div>
-          )}
+        {error && (
+          <Alert color="failure" icon={() => <AlertCircle className="w-4 h-4 mr-2" />}>
+            {error}
+          </Alert>
+        )}
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-              Email address
-            </label>
-            <Input
-              type="email"
-              placeholder="name@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={isLoading}
-              required
-            />
+        <div>
+          <div className="mb-2 block">
+            <Label htmlFor="email">Email address</Label>
           </div>
+          <TextInput
+            id="email"
+            type="email"
+            placeholder="name@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={isLoading}
+            required
+          />
+        </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                Password
-              </label>
-              <button type="button" className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 transition-colors">
-                Forgot password?
-              </button>
-            </div>
-            <Input
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={isLoading}
-              required
-            />
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <Label htmlFor="password">Password</Label>
+            <button type="button" className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 transition-colors">
+              Forgot password?
+            </button>
           </div>
-        </CardContent>
+          <TextInput
+            id="password"
+            type="password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={isLoading}
+            required
+          />
+        </div>
 
-        <CardFooter className="flex flex-col gap-4 pt-2">
-          <Button type="submit" className="w-full" disabled={isLoading}>
+        <div className="flex flex-col gap-4">
+          <Button type="submit" color="dark" disabled={isLoading} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -123,7 +117,7 @@ function LoginForm() {
               Create one for free
             </Link>
           </div>
-        </CardFooter>
+        </div>
       </form>
     </Card>
   );
@@ -138,12 +132,12 @@ export default function LoginPage() {
         <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-zinc-200 dark:bg-zinc-800 rounded-full blur-[100px]" />
       </div>
 
-      <Link href="/" className="absolute top-8 left-8">
-        <Button variant="ghost" size="sm" className="text-zinc-500">
+      <div className="absolute top-8 left-8">
+        <Button as={Link} href="/" color="gray" size="sm">
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to home
         </Button>
-      </Link>
+      </div>
 
       <Suspense fallback={<Loader2 className="w-8 h-8 animate-spin text-zinc-400" />}>
         <LoginForm />

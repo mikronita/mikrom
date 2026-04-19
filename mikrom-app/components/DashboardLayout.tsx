@@ -4,102 +4,101 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
-  LayoutDashboard, 
-  Server, 
-  Settings, 
-  LogOut, 
-  Box,
-  ChevronRight
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/Button";
+  HiChartPie, 
+  HiServer, 
+  HiCog, 
+  HiLogout, 
+  HiCube
+} from "react-icons/hi";
+import { 
+  Sidebar, 
+  SidebarItems, 
+  SidebarItemGroup, 
+  SidebarItem, 
+  Navbar, 
+  NavbarBrand, 
+  NavbarToggle, 
+  NavbarCollapse,
+  NavbarLink,
+  Button, 
+  DarkThemeToggle 
+} from "flowbite-react";
 import { logout } from "@/lib/auth";
-
-interface SidebarItemProps {
-  href: string;
-  icon: React.ElementType;
-  label: string;
-  active?: boolean;
-}
-
-function SidebarItem({ href, icon: Icon, label, active }: SidebarItemProps) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-        active 
-          ? "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-50" 
-          : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:text-zinc-50 dark:hover:bg-zinc-800/50"
-      )}
-    >
-      <Icon className="w-4 h-4" />
-      {label}
-      {active && <ChevronRight className="ml-auto w-4 h-4 opacity-50" />}
-    </Link>
-  );
-}
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="flex min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      {/* Sidebar */}
-      <aside className="w-64 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hidden md:flex flex-col">
-        <div className="p-6">
-          <Link href="/dashboard" className="flex items-center gap-2 font-bold text-xl tracking-tight">
-            <Box className="w-6 h-6 text-zinc-900 dark:text-zinc-50" />
-            <span>Mikrom</span>
-          </Link>
-        </div>
-        
-        <nav className="flex-1 px-4 space-y-1">
-          <SidebarItem 
-            href="/dashboard" 
-            icon={LayoutDashboard} 
-            label="Dashboard" 
-            active={pathname === "/dashboard"}
-          />
-          <SidebarItem 
-            href="/dashboard/vms" 
-            icon={Server} 
-            label="Virtual Machines" 
-            active={pathname.startsWith("/dashboard/vms")}
-          />
-          <SidebarItem 
-            href="/dashboard/settings" 
-            icon={Settings} 
-            label="Settings" 
-            active={pathname === "/dashboard/settings"}
-          />
-        </nav>
-
-        <div className="p-4 border-t border-zinc-200 dark:border-zinc-800">
-          <Button 
-            variant="ghost" 
-            className="w-full justify-start gap-3 text-zinc-500 hover:text-red-600 dark:hover:text-red-400"
-            onClick={() => logout()}
-          >
-            <LogOut className="w-4 h-4" />
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      {/* Top Navbar */}
+      <Navbar fluid rounded className="border-b border-zinc-200 dark:border-zinc-800 dark:bg-zinc-900 sticky top-0 z-40">
+        <NavbarBrand as={Link} href="/">
+          <HiCube className="mr-3 h-6 w-6 text-zinc-900 dark:text-white" />
+          <span className="self-center whitespace-nowrap text-xl font-bold dark:text-white">
+            Mikrom
+          </span>
+        </NavbarBrand>
+        <div className="flex md:order-2 gap-2">
+          <DarkThemeToggle />
+          <Button color="gray" size="sm" onClick={() => logout()} className="hidden md:flex">
+            <HiLogout className="w-4 h-4 mr-2" />
             Logout
           </Button>
+          <NavbarToggle />
         </div>
-      </aside>
+        
+        {/* Mobile menu items */}
+        <NavbarCollapse>
+          <NavbarLink as={Link} href="/" active={pathname === "/"}>
+            Dashboard
+          </NavbarLink>
+          <NavbarLink as={Link} href="/vms" active={pathname.startsWith("/vms")}>
+            Virtual Machines
+          </NavbarLink>
+          <NavbarLink as={Link} href="/settings" active={pathname === "/settings"}>
+            Settings
+          </NavbarLink>
+          <NavbarLink href="#" onClick={() => logout()} className="md:hidden text-red-600">
+            Logout
+          </NavbarLink>
+        </NavbarCollapse>
+      </Navbar>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col">
-        <header className="h-16 border-b border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm md:hidden px-4 flex items-center justify-between">
-          <Link href="/dashboard" className="font-bold text-lg tracking-tight flex items-center gap-2">
-            <Box className="w-5 h-5" />
-            Mikrom
-          </Link>
-          <Button variant="ghost" size="icon" onClick={() => logout()}>
-            <LogOut className="w-4 h-4" />
-          </Button>
-        </header>
+      <div className="flex">
+        {/* Desktop Sidebar */}
+        <Sidebar className="hidden md:block fixed left-0 top-16 h-[calc(100vh-64px)] w-64 border-r border-zinc-200 dark:border-zinc-800">
+          <SidebarItems>
+            <SidebarItemGroup>
+              <SidebarItem 
+                as={Link}
+                href="/" 
+                icon={HiChartPie}
+                active={pathname === "/"}
+              >
+                Dashboard
+              </SidebarItem>
+              <SidebarItem 
+                as={Link}
+                href="/vms" 
+                icon={HiServer}
+                active={pathname.startsWith("/vms")}
+              >
+                Virtual Machines
+              </SidebarItem>
+              <SidebarItem 
+                as={Link}
+                href="/settings" 
+                icon={HiCog}
+                active={pathname === "/settings"}
+              >
+                Settings
+              </SidebarItem>
+            </SidebarItemGroup>
+          </SidebarItems>
+        </Sidebar>
 
-        <main className="flex-1 overflow-y-auto">
+        {/* Main Content */}
+        <main className="flex-1 md:ml-64 p-6 min-h-[calc(100vh-64px)]">
           {children}
         </main>
       </div>
