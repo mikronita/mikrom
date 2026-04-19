@@ -1738,8 +1738,8 @@ mod tests {
         mgr.insert_process_for_test(vm_id, child, socket.clone())
             .await;
 
-        // Wait a bit for the process to actually exit
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        // Wait longer for the process to actually exit and OS to update status
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         // Run GC
         mgr.run_gc().await;
