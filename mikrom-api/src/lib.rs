@@ -6,12 +6,14 @@ use tower_http::trace::TraceLayer;
 pub mod auth;
 pub mod db;
 pub mod deploy;
+pub mod error;
 pub mod models;
 pub mod repositories;
 pub mod scheduler;
 pub mod vms;
 
 pub use deploy::deploy_app;
+pub use error::{ApiError, ApiResult};
 pub use repositories::user_repository::UserRepository;
 pub use vms::{delete_vm, get_vm_logs, get_vm_status, list_vms, pause_vm, resume_vm, stop_vm};
 

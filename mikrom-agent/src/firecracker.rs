@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -76,15 +76,21 @@ pub struct FirecrackerManager {
     vms: Arc<RwLock<HashMap<String, VmInfo>>>,
     processes: Arc<Mutex<HashMap<String, VmProcess>>>,
     fc_config: FirecrackerConfig,
-    logs: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    logs: Arc<RwLock<HashMap<String, VecDeque<String>>>>,
     builder: Arc<crate::builder::ImageBuilder>,
     executor: Arc<dyn CommandExecutor>,
 }
 
 // ── HTTP-over-Unix-socket helper ──────────────────────────────────────────────
 
-/// Send a PUT request to the Firecracker API socket and return Ok on 2xx.
-async fn fc_put(socket_path: &str, api_path: &str, body: &str) -> Result<(), FirecrackerError> {
+/// Send a request to the Firecracker API socket and return Ok on 2xx.
+#[tracing::instrument(skip_all, fields(method = %method, api_path = %api_path))]
+async fn fc_request(
+    method: &str,
+    socket_path: &str,
+    api_path: &str,
+    body: &str,
+) -> Result<(), FirecrackerError> {
     let stream = tokio::net::UnixStream::connect(socket_path)
         .await
         .map_err(|e| FirecrackerError::ApiError {
@@ -95,7 +101,7 @@ async fn fc_put(socket_path: &str, api_path: &str, body: &str) -> Result<(), Fir
     let (reader, mut writer) = tokio::io::split(stream);
 
     let request = format!(
-        "PUT {api_path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "{method} {api_path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     writer
@@ -136,54 +142,15 @@ async fn fc_put(socket_path: &str, api_path: &str, body: &str) -> Result<(), Fir
     }
 }
 
+/// Send a PUT request to the Firecracker API socket and return Ok on 2xx.
+#[tracing::instrument(skip_all, fields(api_path = %api_path))]
+async fn fc_put(socket_path: &str, api_path: &str, body: &str) -> Result<(), FirecrackerError> {
+    fc_request("PUT", socket_path, api_path, body).await
+}
+
+#[tracing::instrument(skip_all, fields(api_path = %api_path))]
 async fn fc_patch(socket_path: &str, api_path: &str, body: &str) -> Result<(), FirecrackerError> {
-    let stream = tokio::net::UnixStream::connect(socket_path)
-        .await
-        .map_err(|e| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: format!("connect: {e}"),
-        })?;
-
-    let (reader, mut writer) = tokio::io::split(stream);
-
-    let request = format!(
-        "PATCH {api_path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    writer
-        .write_all(request.as_bytes())
-        .await
-        .map_err(|e| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: format!("write: {e}"),
-        })?;
-
-    writer
-        .flush()
-        .await
-        .map_err(|e| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: format!("flush: {e}"),
-        })?;
-
-    let mut buf_reader = BufReader::new(reader);
-    let mut status_line = String::new();
-    buf_reader
-        .read_line(&mut status_line)
-        .await
-        .map_err(|e| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: format!("read: {e}"),
-        })?;
-
-    if status_line.contains(" 2") {
-        Ok(())
-    } else {
-        Err(FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: status_line.trim().to_string(),
-        })
-    }
+    fc_request("PATCH", socket_path, api_path, body).await
 }
 
 /// Poll until the Unix socket file appears (Firecracker is ready to accept API calls).
@@ -287,6 +254,17 @@ impl FirecrackerManager {
         image: String,
         config: VmConfig,
     ) -> Result<(), FirecrackerError> {
+        self.start_vm_internal(vm_id, app_id, image, config).await
+    }
+
+    #[tracing::instrument(skip(self, config), fields(vm_id = %vm_id, app_id = %app_id))]
+    async fn start_vm_internal(
+        &self,
+        vm_id: String,
+        app_id: String,
+        image: String,
+        config: VmConfig,
+    ) -> Result<(), FirecrackerError> {
         // Reject duplicate vm_id.
         {
             let vms = self.vms.read().await;
@@ -313,7 +291,7 @@ impl FirecrackerManager {
             let mut l = self.logs.write().await;
             l.entry(vm_id.clone())
                 .or_default()
-                .push(format!("[agent] Initializing VM {}...", vm_id));
+                .push_back(format!("[agent] Initializing VM {}...", vm_id));
         }
 
         // ── Real mode: kernel_path is configured ──────────────────────────────
@@ -401,11 +379,11 @@ impl FirecrackerManager {
                     let mut logs = logs_clone.write().await;
                     let vm_logs = logs
                         .entry(vm_id_clone.clone())
-                        .or_insert_with(|| Vec::with_capacity(1000));
+                        .or_insert_with(|| VecDeque::with_capacity(1000));
                     if vm_logs.len() >= 1000 {
-                        vm_logs.remove(0);
+                        vm_logs.pop_front();
                     }
-                    vm_logs.push(l);
+                    vm_logs.push_back(l);
                 } else {
                     break;
                 }
@@ -527,6 +505,7 @@ impl FirecrackerManager {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), fields(vm_id = %vm_id))]
     pub async fn stop_vm(&self, vm_id: &str) -> Result<(), FirecrackerError> {
         {
             let mut vms = self.vms.write().await;
@@ -630,7 +609,7 @@ impl FirecrackerManager {
             .read()
             .await
             .get(vm_id)
-            .cloned()
+            .map(|logs| logs.iter().cloned().collect())
             .unwrap_or_default()
     }
 
