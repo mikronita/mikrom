@@ -558,6 +558,8 @@ impl FirecrackerManager {
             let _ = proc.child.wait().await;
             let _ = tokio::fs::remove_file(&proc.socket_path).await;
             let _ = tokio::fs::remove_file(format!("/tmp/fc-{vm_id}-rootfs.ext4")).await;
+            let _ = tokio::fs::remove_file(format!("/tmp/mikrom-snapshots/{vm_id}.snapshot")).await;
+            let _ = tokio::fs::remove_file(format!("/tmp/mikrom-snapshots/{vm_id}.mem")).await;
 
             if let Some(tap) = &proc.tap_name {
                 self.cleanup_tap(tap).await;
