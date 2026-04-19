@@ -1,6 +1,5 @@
 use mikrom_agent::server::AgentServer;
 use std::net::SocketAddr;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
 #[tokio::main]
