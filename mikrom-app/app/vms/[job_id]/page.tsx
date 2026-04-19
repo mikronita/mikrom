@@ -248,10 +248,12 @@ export default function VmDetailPage() {
         <div className="space-y-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1">
-              <Button as={Link} href="/" color="gray" size="xs" className="w-fit mb-2">
-                <HiChevronLeft className="w-4 h-4 mr-1" />
-                Back to Dashboard
-              </Button>
+              <Link href="/">
+                <Button color="gray" size="xs" className="w-fit mb-2">
+                  <HiChevronLeft className="w-4 h-4 mr-1" />
+                  Back to Dashboard
+                </Button>
+              </Link>
               <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight flex items-center gap-3">
                 VM Detail
                 {vm && (

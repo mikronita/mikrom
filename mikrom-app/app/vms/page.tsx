@@ -152,10 +152,12 @@ export default function VmsPage() {
                 <HiRefresh className={cn("w-4 h-4 mr-2", loading && "animate-spin")} />
                 Refresh
               </Button>
-              <Button as={Link} href="/" size="sm" color="dark">
-                <HiPlus className="w-4 h-4 mr-2" />
-                New Instance
-              </Button>
+              <Link href="/">
+                <Button size="sm" color="dark">
+                  <HiPlus className="w-4 h-4 mr-2" />
+                  New Instance
+                </Button>
+              </Link>
             </div>
           </div>
 
@@ -277,10 +279,12 @@ export default function VmsPage() {
                                 {confirmDeleteId === vm.job_id ? "Confirm?" : "Delete"}
                               </Button>
                             )}
-                            <Button as={Link} href={`/vms/${vm.job_id}`} color="gray" size="xs">
-                              Details
-                              <HiExternalLink className="w-3 h-3 ml-1" />
-                            </Button>
+                            <Link href={`/vms/${vm.job_id}`}>
+                              <Button color="gray" size="xs">
+                                Details
+                                <HiExternalLink className="w-3 h-3 ml-1" />
+                              </Button>
+                            </Link>
                           </div>
                         </TableCell>
                       </TableRow>

@@ -18,7 +18,9 @@ import { Loader2 } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useVms, useStopVm } from "@/lib/hooks/use-vms";
-import { Button, Badge, Card, Alert } from "flowbite-react";
+import { Badge, Alert } from "flowbite-react";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
 import { DeployModal } from "@/components/DeployModal";
 import { toast } from "sonner";
@@ -136,16 +138,18 @@ export default function Page() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Recent Apps */}
-            <Card className="lg:col-span-2 p-0">
+            <Card className="lg:col-span-2" noPadding>
               <div className="flex items-center justify-between p-6 pb-0">
                 <div>
                   <h5 className="text-xl font-bold dark:text-white">Recent Applications</h5>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Your most recently deployed instances.</p>
                 </div>
-                <Button as={Link} href="/vms" color="gray" size="sm">
-                  View all
-                  <HiArrowRight className="w-3 h-3 ml-2" />
-                </Button>
+                <Link href="/vms">
+                  <Button color="gray" size="sm">
+                    View all
+                    <HiArrowRight className="w-3 h-3 ml-2" />
+                  </Button>
+                </Link>
               </div>
               <div className="mt-6 border-t border-gray-100 dark:border-gray-800">
                 {error && (
@@ -212,9 +216,11 @@ export default function Page() {
                               {stopVmMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <HiStop className="w-4 h-4" />}
                             </Button>
                           )}
-                          <Button as={Link} href={`/vms/${vm.job_id}`} color="gray" size="xs" className="opacity-0 group-hover:opacity-100 transition-opacity">
-                            <HiExternalLink className="w-4 h-4" />
-                          </Button>
+                          <Link href={`/vms/${vm.job_id}`}>
+                            <Button color="gray" size="xs" className="opacity-0 group-hover:opacity-100 transition-opacity">
+                              <HiExternalLink className="w-4 h-4" />
+                            </Button>
+                          </Link>
                         </div>
                       </div>
                     ))

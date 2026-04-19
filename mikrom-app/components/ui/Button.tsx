@@ -8,7 +8,7 @@ export interface ButtonProps extends FlowbiteButtonProps {
   variant?: "default" | "outline" | "ghost" | "secondary" | "danger" | "link";
 }
 
-export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+export const Button = React.forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonProps>(
   ({ className, variant = "default", color, ...props }, ref) => {
     // Map existing variants to Flowbite colors/styles
     let flowbiteColor = color;
@@ -37,7 +37,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 
     return (
       <FlowbiteButton
-        ref={ref}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ref={ref as any}
         color={flowbiteColor}
         outline={variant === "outline"}
         className={cn(

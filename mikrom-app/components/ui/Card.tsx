@@ -4,9 +4,10 @@ import { Card as FlowbiteCard } from "flowbite-react";
 import { cn } from "@/lib/utils";
 import React from "react";
 
-interface CardProps extends React.ComponentProps<typeof FlowbiteCard> {
+export type CardProps = React.ComponentProps<typeof FlowbiteCard> & {
   noPadding?: boolean;
-}
+  children?: React.ReactNode;
+};
 
 export const Card = ({ className, children, noPadding = false, ...props }: CardProps) => (
   <FlowbiteCard 
