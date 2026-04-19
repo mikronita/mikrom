@@ -464,100 +464,129 @@ impl AgentServer {
                 }
             };
 
-            // ── Registration with retry/backoff ───────────────────────────────
-            // The scheduler may not be ready yet when this task first runs.
-            let register_req = RegisterWorkerRequest {
-                host_id: host_id.clone(),
-                hostname: hostname.clone(),
-                ip_address: ip_address.clone(),
-                agent_port: agent_port.into(),
-            };
-            let mut backoff_secs = 1u64;
-            for attempt in 1_u32.. {
-                tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs)).await;
-
-                let result: Result<_, Box<dyn std::error::Error + Send + Sync>> = (async {
-                    let ep = make_endpoint(&scheduler_addr, &certs_for_task)?;
-                    let channel = ep.connect().await?;
-                    let mut client = SchedulerServiceClient::new(channel);
-                    Ok(client.register_worker(register_req.clone()).await?)
-                })
-                .await;
-
-                match result {
-                    Ok(resp) => {
-                        tracing::info!("Registered with scheduler: {}", resp.into_inner().success);
-                        break;
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Registration attempt {attempt} failed: {e:?}. Retrying in {backoff_secs}s..."
-                        );
-                        backoff_secs = std::cmp::min(backoff_secs * 2, 30);
-                    }
-                }
-            }
-
-            // ── Metrics heartbeat ─────────────────────────────────────────────
-            // Report immediately after registration so the scheduler sees this
-            // worker as available without waiting for the first 5-second tick.
+            // ── Main Loop (Registration + Heartbeat) ──────────────────────────
             loop {
-                let metrics = metrics_collector.collect().await;
-                tracing::info!(
-                    "Collected metrics: cpu={:.2} ram={}/{} disk={}/{}",
-                    metrics.cpu_usage,
-                    metrics.ram_used_bytes,
-                    metrics.ram_total_bytes,
-                    metrics.disk_used_bytes,
-                    metrics.disk_total_bytes,
-                );
+                // ── Registration with retry/backoff ───────────────────────────
+                // The scheduler may not be ready yet when this task first runs or after a restart.
+                let register_req = RegisterWorkerRequest {
+                    host_id: host_id.clone(),
+                    hostname: hostname.clone(),
+                    ip_address: ip_address.clone(),
+                    agent_port: agent_port.into(),
+                };
+                let mut backoff_secs = 1u64;
+                for attempt in 1_u32.. {
+                    let result: Result<_, Box<dyn std::error::Error + Send + Sync>> = (async {
+                        let ep = make_endpoint(&scheduler_addr, &certs_for_task)?;
+                        let channel = ep.connect().await?;
+                        let mut client = SchedulerServiceClient::new(channel);
+                        Ok(client.register_worker(register_req.clone()).await?)
+                    })
+                    .await;
 
-                match make_endpoint(&scheduler_addr, &certs_for_task) {
-                    Ok(ep) => match ep.connect().await {
-                        Ok(channel) => {
-                            let mut client = SchedulerServiceClient::new(channel);
-                            let req = ReportMetricsRequest {
-                                host_id: host_id.clone(),
-                                cpu_usage: metrics.cpu_usage,
-                                ram_used_bytes: metrics.ram_used_bytes,
-                                ram_total_bytes: metrics.ram_total_bytes,
-                                disk_used_bytes: metrics.disk_used_bytes,
-                                disk_total_bytes: metrics.disk_total_bytes,
-                                apps_count: metrics.apps_count,
-                                timestamp: metrics.timestamp,
-                                load_avg_1: metrics.load_avg_1,
-                                load_avg_5: metrics.load_avg_5,
-                                load_avg_15: metrics.load_avg_15,
-                                vms: metrics
-                                    .vms
-                                    .into_iter()
-                                    .map(|(id, m)| {
-                                        (
-                                            id,
-                                            mikrom_proto::scheduler::VmMetrics {
-                                                cpu_usage: m.cpu_usage,
-                                                ram_used_bytes: m.ram_used_bytes,
-                                            },
-                                        )
-                                    })
-                                    .collect(),
-                            };
-                            match client.report_metrics(req).await {
-                                Ok(resp) => tracing::info!(
-                                    "Metrics reported: {}",
-                                    resp.into_inner().success
-                                ),
-                                Err(e) => tracing::error!("Failed to report metrics: {}", e),
-                            }
+                    match result {
+                        Ok(resp) => {
+                            tracing::info!(
+                                "Registered with scheduler: {}",
+                                resp.into_inner().success
+                            );
+                            break;
                         }
                         Err(e) => {
-                            tracing::error!("Failed to connect to scheduler for metrics: {}", e)
+                            tracing::warn!(
+                                "Registration attempt {attempt} failed: {e:?}. Retrying in {backoff_secs}s..."
+                            );
+                            tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs))
+                                .await;
+                            backoff_secs = std::cmp::min(backoff_secs * 2, 30);
                         }
-                    },
-                    Err(e) => tracing::error!("Failed to build scheduler endpoint: {}", e),
+                    }
                 }
 
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                // ── Metrics heartbeat ─────────────────────────────────────────
+                // Report immediately after registration so the scheduler sees this
+                // worker as available without waiting for the first 5-second tick.
+                loop {
+                    let metrics = metrics_collector.collect().await;
+                    tracing::info!(
+                        "Collected metrics: cpu={:.2} ram={}/{} disk={}/{}",
+                        metrics.cpu_usage,
+                        metrics.ram_used_bytes,
+                        metrics.ram_total_bytes,
+                        metrics.disk_used_bytes,
+                        metrics.disk_total_bytes,
+                    );
+
+                    let mut should_re_register = false;
+
+                    match make_endpoint(&scheduler_addr, &certs_for_task) {
+                        Ok(ep) => match ep.connect().await {
+                            Ok(channel) => {
+                                let mut client = SchedulerServiceClient::new(channel);
+                                let req = ReportMetricsRequest {
+                                    host_id: host_id.clone(),
+                                    cpu_usage: metrics.cpu_usage,
+                                    ram_used_bytes: metrics.ram_used_bytes,
+                                    ram_total_bytes: metrics.ram_total_bytes,
+                                    disk_used_bytes: metrics.disk_used_bytes,
+                                    disk_total_bytes: metrics.disk_total_bytes,
+                                    apps_count: metrics.apps_count,
+                                    timestamp: metrics.timestamp,
+                                    load_avg_1: metrics.load_avg_1,
+                                    load_avg_5: metrics.load_avg_5,
+                                    load_avg_15: metrics.load_avg_15,
+                                    vms: metrics
+                                        .vms
+                                        .into_iter()
+                                        .map(|(id, m)| {
+                                            (
+                                                id,
+                                                mikrom_proto::scheduler::VmMetrics {
+                                                    cpu_usage: m.cpu_usage,
+                                                    ram_used_bytes: m.ram_used_bytes,
+                                                },
+                                            )
+                                        })
+                                        .collect(),
+                                };
+                                match client.report_metrics(req).await {
+                                    Ok(resp) => {
+                                        let success = resp.into_inner().success;
+                                        tracing::info!("Metrics reported: {}", success);
+                                        if !success {
+                                            tracing::warn!(
+                                                "Scheduler rejected metrics. Worker might be unknown. Re-registering..."
+                                            );
+                                            should_re_register = true;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Failed to report metrics: {}", e);
+                                        // If the scheduler is unavailable, it might have been restarted.
+                                        // We'll try to re-register to be safe.
+                                        if e.code() == tonic::Code::Unavailable {
+                                            should_re_register = true;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "Failed to connect to scheduler for metrics: {}",
+                                    e
+                                );
+                                should_re_register = true;
+                            }
+                        },
+                        Err(e) => tracing::error!("Failed to build scheduler endpoint: {}", e),
+                    }
+
+                    if should_re_register {
+                        break; // Exit metrics loop to re-register
+                    }
+
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                }
             }
         });
 
