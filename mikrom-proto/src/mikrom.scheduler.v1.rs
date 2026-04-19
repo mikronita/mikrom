@@ -75,12 +75,16 @@ pub struct RegisterWorkerResponse {
     #[prost(string, tag = "2")]
     pub message: ::prost::alloc::string::String,
 }
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct VmMetrics {
     #[prost(float, tag = "1")]
     pub cpu_usage: f32,
     #[prost(uint64, tag = "2")]
     pub ram_used_bytes: u64,
+    #[prost(enumeration = "VmStatus", tag = "3")]
+    pub status: i32,
+    #[prost(string, tag = "4")]
+    pub error_message: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReportMetricsRequest {
@@ -243,6 +247,47 @@ pub struct AppInfo {
     pub host_id: ::prost::alloc::string::String,
     #[prost(string, tag = "7")]
     pub vm_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum VmStatus {
+    Unspecified = 0,
+    Starting = 1,
+    Running = 2,
+    Stopping = 3,
+    Stopped = 4,
+    Failed = 5,
+    Paused = 6,
+}
+impl VmStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "VM_STATUS_UNSPECIFIED",
+            Self::Starting => "VM_STATUS_STARTING",
+            Self::Running => "VM_STATUS_RUNNING",
+            Self::Stopping => "VM_STATUS_STOPPING",
+            Self::Stopped => "VM_STATUS_STOPPED",
+            Self::Failed => "VM_STATUS_FAILED",
+            Self::Paused => "VM_STATUS_PAUSED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "VM_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "VM_STATUS_STARTING" => Some(Self::Starting),
+            "VM_STATUS_RUNNING" => Some(Self::Running),
+            "VM_STATUS_STOPPING" => Some(Self::Stopping),
+            "VM_STATUS_STOPPED" => Some(Self::Stopped),
+            "VM_STATUS_FAILED" => Some(Self::Failed),
+            "VM_STATUS_PAUSED" => Some(Self::Paused),
+            _ => None,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

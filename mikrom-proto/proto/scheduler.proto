@@ -75,6 +75,18 @@ message RegisterWorkerResponse {
 message VmMetrics {
   float cpu_usage = 1;
   uint64 ram_used_bytes = 2;
+  VmStatus status = 3;
+  string error_message = 4;
+}
+
+enum VmStatus {
+  VM_STATUS_UNSPECIFIED = 0;
+  VM_STATUS_STARTING = 1;
+  VM_STATUS_RUNNING = 2;
+  VM_STATUS_STOPPING = 3;
+  VM_STATUS_STOPPED = 4;
+  VM_STATUS_FAILED = 5;
+  VM_STATUS_PAUSED = 6;
 }
 
 message ReportMetricsRequest {

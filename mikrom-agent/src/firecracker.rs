@@ -223,9 +223,32 @@ impl CommandExecutor for RealCommandExecutor {
     }
 }
 
+pub struct VmDetailedInfo {
+    pub vm_id: String,
+    pub status: VmStatus,
+    pub error_message: Option<String>,
+    pub pid: Option<u32>,
+}
+
 // ── FirecrackerManager ────────────────────────────────────────────────────────
 
 impl FirecrackerManager {
+    pub async fn get_all_vms(&self) -> Vec<VmDetailedInfo> {
+        let vms = self.vms.read().await;
+        let processes = self.processes.lock().await;
+
+        vms.values()
+            .map(|vm| {
+                let pid = processes.get(&vm.vm_id).map(|p| p.child.id().unwrap_or(0));
+                VmDetailedInfo {
+                    vm_id: vm.vm_id.clone(),
+                    status: vm.status,
+                    error_message: vm.error_message.clone(),
+                    pid,
+                }
+            })
+            .collect()
+    }
     /// Create a manager whose configuration is read from environment variables.
     pub fn new() -> Self {
         Self::with_config(FirecrackerConfig::from_env())
@@ -311,51 +334,73 @@ impl FirecrackerManager {
         image: String,
         config: VmConfig,
     ) -> Result<(), FirecrackerError> {
-        self.start_vm_internal(vm_id, app_id, image, config).await
+        // 1. Pre-check and initial state registration
+        {
+            let mut vms = self.vms.write().await;
+            if vms.contains_key(&vm_id) {
+                return Err(FirecrackerError::StartFailed(
+                    "VM already exists".to_string(),
+                ));
+            }
+
+            vms.insert(
+                vm_id.clone(),
+                VmInfo {
+                    vm_id: vm_id.clone(),
+                    app_id: app_id.clone(),
+                    image: image.clone(),
+                    config: config.clone(),
+                    status: VmStatus::Starting,
+                    started_at: None,
+                    error_message: None,
+                },
+            );
+        }
+
+        // 2. Add initial log entry
+        {
+            let mut l = self.logs.write().await;
+            l.entry(vm_id.clone())
+                .or_default()
+                .push_back(format!("[agent] Deployment initiated for VM {}...", vm_id));
+        }
+
+        // 3. Spawn the heavy work in background
+        let self_clone = self.clone();
+        let vm_id_clone = vm_id.clone();
+        let app_id_clone = app_id.clone();
+        let image_clone = image.clone();
+        let config_clone = config.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = self_clone
+                .start_vm_background(vm_id_clone, app_id_clone, image_clone, config_clone)
+                .await
+            {
+                tracing::error!(vm_id = %vm_id, error = %e, "Failed to start VM in background");
+            }
+        });
+
+        Ok(())
     }
 
     #[tracing::instrument(skip(self, config), fields(vm_id = %vm_id, app_id = %app_id))]
-    async fn start_vm_internal(
+    async fn start_vm_background(
         &self,
         vm_id: String,
         app_id: String,
         image: String,
         config: VmConfig,
     ) -> Result<(), FirecrackerError> {
-        // Reject duplicate vm_id.
-        {
-            let vms = self.vms.read().await;
-            if vms.contains_key(&vm_id) {
-                return Err(FirecrackerError::StartFailed(
-                    "VM already exists".to_string(),
-                ));
-            }
-        }
-
-        let vm_info = VmInfo {
-            vm_id: vm_id.clone(),
-            app_id,
-            image: image.clone(),
-            config: config.clone(),
-            status: VmStatus::Starting,
-            started_at: None,
-            error_message: None,
-        };
-        self.vms.write().await.insert(vm_id.clone(), vm_info);
-
-        // Add initial log entry
-        {
-            let mut l = self.logs.write().await;
-            l.entry(vm_id.clone())
-                .or_default()
-                .push_back(format!("[agent] Initializing VM {}...", vm_id));
-        }
-
-        // ── Real mode: kernel_path is configured ──────────────────────────────
         let kernel_path = match self.fc_config.kernel_path.clone() {
             Some(p) => p,
             None => {
-                // Stub mode: state-machine only, no process spawned.
+                // Stub mode
+                let mut vms = self.vms.write().await;
+                if let Some(vm) = vms.get_mut(&vm_id) {
+                    vm.status = VmStatus::Running;
+                    vm.started_at = Some(chrono::Utc::now().timestamp());
+                }
                 return Ok(());
             }
         };
@@ -410,8 +455,13 @@ impl FirecrackerManager {
         {
             Ok(c) => c,
             Err(e) => {
-                self.set_failed(&vm_id, e.to_string()).await;
-                return Err(FirecrackerError::ProcessError(e.to_string()));
+                let err_msg = format!(
+                    "Failed to spawn firecracker process (binary: {}): {}",
+                    fc_binary, e
+                );
+                tracing::error!("{}", err_msg);
+                self.set_failed(&vm_id, err_msg.clone()).await;
+                return Err(FirecrackerError::ProcessError(err_msg));
             }
         };
 

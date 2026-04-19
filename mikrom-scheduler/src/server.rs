@@ -118,6 +118,48 @@ impl SchedulerService for SchedulerServer {
                 metrics.disk_used_bytes,
                 metrics.disk_total_bytes
             );
+
+            // Sync job statuses based on reported VM statuses
+            for (vm_id, vm_metrics) in req.vms {
+                // Find the job associated with this VM ID
+                // Note: This is an O(N) operation on jobs, which is fine for small clusters.
+                // In production, we'd have a vm_id -> job_id index.
+                let job_id = self
+                    .scheduler
+                    .list_jobs(None, None)
+                    .into_iter()
+                    .find(|j| j.vm_id.as_deref() == Some(&vm_id))
+                    .map(|j| j.job_id);
+
+                if let Some(id) = job_id {
+                    let proto_status =
+                        mikrom_proto::scheduler::VmStatus::try_from(vm_metrics.status)
+                            .unwrap_or(mikrom_proto::scheduler::VmStatus::VmStatusUnspecified);
+
+                    match proto_status {
+                        mikrom_proto::scheduler::VmStatus::VmStatusRunning => {
+                            self.scheduler
+                                .update_job_status(&id, crate::job::JobStatus::Running);
+                        }
+                        mikrom_proto::scheduler::VmStatus::VmStatusFailed => {
+                            self.scheduler.fail_job(&id, vm_metrics.error_message);
+                        }
+                        mikrom_proto::scheduler::VmStatus::VmStatusStopped => {
+                            // Only update if it wasn't already cancelled
+                            let current_status = self.scheduler.get_job(&id).map(|j| j.status);
+                            if current_status != Some(crate::job::JobStatus::Cancelled) {
+                                self.scheduler
+                                    .update_job_status(&id, crate::job::JobStatus::Failed);
+                            }
+                        }
+                        mikrom_proto::scheduler::VmStatus::VmStatusPaused => {
+                            self.scheduler
+                                .update_job_status(&id, crate::job::JobStatus::Paused);
+                        }
+                        _ => {}
+                    }
+                }
+            }
         } else {
             tracing::warn!("Failed to update metrics for worker {}", req.host_id);
         }
@@ -227,6 +269,12 @@ impl SchedulerService for SchedulerServer {
                 );
                 job.schedule(host_id.clone(), vm_id.clone());
                 self.scheduler.add_job(job);
+
+                tracing::info!(
+                    job_id = %job_id,
+                    host_id = %host_id,
+                    "Scheduling job on host"
+                );
 
                 match self
                     .forward_deploy_to_agent(&host_id, &app_id, &image, &vm_id, &job_config)
@@ -649,7 +697,7 @@ impl SchedulerServer {
 
         let (addr, domain) = match &self.certs {
             Some(_) => (
-                format!("https://{}:{}", worker.hostname, worker.agent_port),
+                format!("https://{}:{}", worker.ip_address, worker.agent_port),
                 worker.hostname.clone(),
             ),
             None => (
@@ -684,6 +732,12 @@ impl SchedulerServer {
         config: &crate::job::VmConfig,
     ) -> Result<(), Status> {
         let mut client = self.get_agent_client(host_id).await?;
+
+        tracing::info!(
+            vm_id = %vm_id,
+            host_id = %host_id,
+            "Forwarding deploy request to agent"
+        );
 
         let req = StartVmRequest {
             vm_id: vm_id.to_string(),

@@ -60,6 +60,8 @@ message UnregisterResponse {
 message VmMetrics {
   float cpu_usage = 1;
   uint64 ram_used_bytes = 2;
+  VmStatus status = 3;
+  string error_message = 4;
 }
 
 message MetricsRequest {

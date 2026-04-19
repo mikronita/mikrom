@@ -476,6 +476,13 @@ impl AgentServer {
                 };
                 let mut backoff_secs = 1u64;
                 for attempt in 1_u32.. {
+                    tracing::info!(
+                        host_id = %host_id,
+                        hostname = %hostname,
+                        ip_address = %ip_address,
+                        agent_port = %agent_port,
+                        "Attempting to register with scheduler"
+                    );
                     let result: Result<_, Box<dyn std::error::Error + Send + Sync>> = (async {
                         let ep = make_endpoint(&scheduler_addr, &certs_for_task)?;
                         let channel = ep.connect().await?;
@@ -539,11 +546,21 @@ impl AgentServer {
                                         .vms
                                         .into_iter()
                                         .map(|(id, m)| {
+                                            let proto_status = match m.status {
+                                                crate::firecracker::VmStatus::Starting => mikrom_proto::scheduler::VmStatus::VmStatusStarting,
+                                                crate::firecracker::VmStatus::Running => mikrom_proto::scheduler::VmStatus::VmStatusRunning,
+                                                crate::firecracker::VmStatus::Stopping => mikrom_proto::scheduler::VmStatus::VmStatusStopping,
+                                                crate::firecracker::VmStatus::Stopped => mikrom_proto::scheduler::VmStatus::VmStatusStopped,
+                                                crate::firecracker::VmStatus::Failed => mikrom_proto::scheduler::VmStatus::VmStatusFailed,
+                                                crate::firecracker::VmStatus::Paused => mikrom_proto::scheduler::VmStatus::VmStatusPaused,
+                                            };
                                             (
                                                 id,
                                                 mikrom_proto::scheduler::VmMetrics {
                                                     cpu_usage: m.cpu_usage,
                                                     ram_used_bytes: m.ram_used_bytes,
+                                                    status: proto_status as i32,
+                                                    error_message: m.error_message.unwrap_or_default(),
                                                 },
                                             )
                                         })

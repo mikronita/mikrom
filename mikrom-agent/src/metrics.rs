@@ -9,6 +9,8 @@ use sysinfo::System;
 pub struct VmMetrics {
     pub cpu_usage: f32,
     pub ram_used_bytes: u64,
+    pub status: crate::firecracker::VmStatus,
+    pub error_message: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -85,10 +87,10 @@ impl MetricsCollector {
             return metrics;
         }
 
-        let pids = if let Some(mgr) = &self.firecracker {
-            mgr.get_pids().await
+        let vms_info = if let Some(mgr) = &self.firecracker {
+            mgr.get_all_vms().await
         } else {
-            HashMap::new()
+            Vec::new()
         };
 
         let mut system = self.system.write();
@@ -106,16 +108,26 @@ impl MetricsCollector {
 
         // Collect per-VM metrics
         let mut vms = HashMap::new();
-        for (vm_id, pid) in pids {
-            if let Some(process) = system.process(sysinfo::Pid::from(pid as usize)) {
-                vms.insert(
-                    vm_id,
-                    VmMetrics {
-                        cpu_usage: process.cpu_usage() / 100.0,
-                        ram_used_bytes: process.memory(),
-                    },
-                );
+        for vm in vms_info {
+            let mut cpu = 0.0;
+            let mut ram = 0;
+
+            if let Some(pid) = vm.pid {
+                if let Some(process) = system.process(sysinfo::Pid::from(pid as usize)) {
+                    cpu = process.cpu_usage() / 100.0;
+                    ram = process.memory();
+                }
             }
+
+            vms.insert(
+                vm.vm_id,
+                VmMetrics {
+                    cpu_usage: cpu,
+                    ram_used_bytes: ram,
+                    status: vm.status,
+                    error_message: vm.error_message,
+                },
+            );
         }
 
         let metrics = SystemMetrics {

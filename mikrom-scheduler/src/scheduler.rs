@@ -120,6 +120,11 @@ impl AppScheduler {
     ) -> Result<Worker, SchedulerError> {
         let workers = self.worker_registry.get_available_workers();
 
+        tracing::info!(
+            available_workers = %workers.len(),
+            "Selecting best worker from pool"
+        );
+
         if workers.is_empty() {
             return Err(SchedulerError::NoWorkers);
         }

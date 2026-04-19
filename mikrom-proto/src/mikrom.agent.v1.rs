@@ -51,12 +51,16 @@ pub struct UnregisterResponse {
     #[prost(string, tag = "2")]
     pub message: ::prost::alloc::string::String,
 }
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct VmMetrics {
     #[prost(float, tag = "1")]
     pub cpu_usage: f32,
     #[prost(uint64, tag = "2")]
     pub ram_used_bytes: u64,
+    #[prost(enumeration = "VmStatus", tag = "3")]
+    pub status: i32,
+    #[prost(string, tag = "4")]
+    pub error_message: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MetricsRequest {
