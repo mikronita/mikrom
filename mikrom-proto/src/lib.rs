@@ -10,4 +10,5 @@ pub mod agent {
     pub use agent_service_server::{AgentService, AgentServiceServer};
 }
 
+pub mod telemetry;
 pub mod tls;

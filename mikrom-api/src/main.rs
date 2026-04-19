@@ -11,17 +11,7 @@ use mikrom_api::scheduler::SchedulerConfig;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-
-    if std::env::var("LOG_FORMAT").unwrap_or_default() == "json" {
-        tracing_subscriber::fmt()
-            .json()
-            .with_env_filter(filter)
-            .init();
-    } else {
-        tracing_subscriber::fmt().with_env_filter(filter).init();
-    }
+    mikrom_proto::telemetry::init_telemetry("mikrom-api", env!("CARGO_PKG_VERSION"))?;
 
     let db_pool = db::connect().await?;
     db::run_migrations(&db_pool).await?;
@@ -32,6 +22,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scheduler_client: None,
         scheduler_config: SchedulerConfig::from_env(),
         jwt_secret: std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string()),
+        master_key: std::env::var("MASTER_KEY")
+            .unwrap_or_else(|_| "default-master-key-change-me-in-production".to_string()),
     };
     let app = create_app(state);
 

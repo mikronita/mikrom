@@ -34,6 +34,7 @@ struct AgentClient {
 
 #[async_trait]
 impl SchedulerService for SchedulerServer {
+    #[tracing::instrument(skip(self, request), fields(host_id = %request.get_ref().host_id))]
     async fn register_worker(
         &self,
         request: tonic::Request<RegisterWorkerRequest>,
@@ -49,11 +50,15 @@ impl SchedulerService for SchedulerServer {
         );
 
         let success = self.scheduler.worker_registry().register(
-            req.host_id,
+            req.host_id.clone(),
             req.hostname,
             req.ip_address,
             req.agent_port as u16,
         );
+
+        if !success {
+            tracing::error!("Failed to register worker: {}", req.host_id);
+        }
 
         Ok(Response::new(RegisterWorkerResponse {
             success,
@@ -65,6 +70,7 @@ impl SchedulerService for SchedulerServer {
         }))
     }
 
+    #[tracing::instrument(skip(self, request), fields(host_id = %request.get_ref().host_id))]
     async fn report_metrics(
         &self,
         request: tonic::Request<ReportMetricsRequest>,
@@ -119,6 +125,7 @@ impl SchedulerService for SchedulerServer {
         Ok(Response::new(ReportMetricsResponse { success }))
     }
 
+    #[tracing::instrument(skip(self, request), fields(app_id = %request.get_ref().app_id, user_id = %request.get_ref().user_id))]
     async fn deploy_app(
         &self,
         request: tonic::Request<DeployRequest>,
@@ -170,7 +177,7 @@ impl SchedulerService for SchedulerServer {
                 .unwrap_or_default(),
         };
 
-        let result = self.scheduler.select_best_worker(&config);
+        let result = self.scheduler.select_best_worker(&config, &req.app_id);
 
         let response = match result {
             Ok(worker) => {
@@ -178,11 +185,17 @@ impl SchedulerService for SchedulerServer {
                 let image = req.image.clone();
                 let host_id = worker.host_id.clone();
 
-                // Assign networking (Mock implementation: unique IP per job)
-                // In real world, use an IPAM (IP Address Management)
-                let last_byte = (chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) % 250) + 2;
-                let guest_ip = format!("172.16.1.{}", last_byte);
+                // Assign networking via IPAM
+                let guest_ip = self.scheduler.ipam().allocate().ok_or_else(|| {
+                    Status::resource_exhausted("No available IP addresses in pool")
+                })?;
                 let gateway = "172.16.1.1".to_string();
+                // Extract last byte from IP for MAC address
+                let last_byte = guest_ip
+                    .split('.')
+                    .next_back()
+                    .and_then(|s| s.parse::<u8>().ok())
+                    .unwrap_or(2);
                 let mac = format!("AA:BB:CC:01:01:{:02x}", last_byte);
 
                 let job_config = crate::job::VmConfig {
@@ -270,15 +283,30 @@ impl SchedulerService for SchedulerServer {
         Ok(Response::new(response))
     }
 
+    #[tracing::instrument(skip(self, request), fields(job_id = %request.get_ref().job_id))]
     async fn get_app_status(
         &self,
         request: tonic::Request<AppStatusRequest>,
     ) -> Result<Response<AppStatusResponse>, Status> {
         let req = request.into_inner();
-        tracing::debug!(job_id = %req.job_id, user_id = %req.user_id, "Checking app status");
+        tracing::debug!("Checking app status");
 
         match self.scheduler.get_job(&req.job_id) {
             Some(job) if job.user_id == req.user_id => {
+                // Try to get current metrics from worker registry
+                let mut cpu_usage = 0.0;
+                let mut ram_used_bytes = 0;
+
+                if let Some(host_id) = &job.host_id
+                    && let Some(vm_id) = &job.vm_id
+                    && let Some(worker) = self.scheduler.worker_registry().get_worker(host_id)
+                    && let Some(metrics) = worker.metrics
+                    && let Some(vm_metrics) = metrics.vms.get(vm_id)
+                {
+                    cpu_usage = vm_metrics.cpu_usage;
+                    ram_used_bytes = vm_metrics.ram_used_bytes;
+                }
+
                 let response = AppStatusResponse {
                     job_id: job.job_id,
                     status: job.status as i32,
@@ -288,15 +316,24 @@ impl SchedulerService for SchedulerServer {
                     started_at: job.started_at.unwrap_or(0),
                     stopped_at: job.stopped_at.unwrap_or(0),
                     error_message: job.error_message.unwrap_or_default(),
+                    cpu_usage,
+                    ram_used_bytes,
                 };
                 Ok(Response::new(response))
             }
-            Some(_) => Err(Status::permission_denied("You do not own this job")),
-            None => Err(Status::not_found("Job not found")),
+            Some(_) => {
+                tracing::warn!("User {} unauthorized for job {}", req.user_id, req.job_id);
+                Err(Status::permission_denied("You do not own this job"))
+            }
+            None => {
+                tracing::warn!("Job {} not found", req.job_id);
+                Err(Status::not_found("Job not found"))
+            }
         }
     }
 
     #[allow(clippy::result_large_err)]
+    #[tracing::instrument(skip(self, request), fields(job_id = %request.get_ref().job_id))]
     async fn get_app_logs(
         &self,
         request: tonic::Request<GetLogsRequest>,
@@ -305,63 +342,40 @@ impl SchedulerService for SchedulerServer {
         let job_id = req.job_id;
         let user_id = req.user_id;
 
-        let job = self
-            .scheduler
-            .get_job(&job_id)
-            .ok_or_else(|| Status::not_found("Job not found"))?;
+        let job = self.scheduler.get_job(&job_id).ok_or_else(|| {
+            tracing::warn!("Job {} not found", job_id);
+            Status::not_found("Job not found")
+        })?;
 
         if job.user_id != user_id {
+            tracing::warn!("User {} unauthorized for job {}", user_id, job_id);
             return Err(Status::permission_denied("You do not own this job"));
         }
 
-        let host_id = job
-            .host_id
-            .ok_or_else(|| Status::failed_precondition("Job has no assigned host"))?;
-        let vm_id = job
-            .vm_id
-            .ok_or_else(|| Status::failed_precondition("Job has no assigned VM ID"))?;
+        let host_id = job.host_id.ok_or_else(|| {
+            tracing::error!("Job {} has no assigned host", job_id);
+            Status::failed_precondition("Job has no assigned host")
+        })?;
+        let vm_id = job.vm_id.ok_or_else(|| {
+            tracing::error!("Job {} has no assigned VM ID", job_id);
+            Status::failed_precondition("Job has no assigned VM ID")
+        })?;
 
-        // Connect to agent and proxy stream
-        let worker = self
-            .scheduler
-            .worker_registry()
-            .get_worker(&host_id)
-            .ok_or_else(|| Status::not_found("Worker not found"))?;
-
-        let (addr, domain) = match &self.certs {
-            Some(_) => (
-                format!("https://{}:{}", worker.hostname, worker.agent_port),
-                worker.hostname.clone(),
-            ),
-            None => (
-                format!("http://{}:{}", worker.ip_address, worker.agent_port),
-                String::new(),
-            ),
-        };
-
-        let mut endpoint = tonic::transport::Endpoint::new(addr)
-            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?;
-
-        if let Some(certs) = &self.certs {
-            endpoint = endpoint
-                .tls_config(certs.client_tls_config(&domain))
-                .map_err(|e| Status::internal(format!("TLS config error: {}", e)))?;
-        }
-
-        let channel = endpoint
-            .connect()
-            .await
-            .map_err(|e| Status::unavailable(format!("Failed to connect to agent: {}", e)))?;
-
-        let mut client =
-            mikrom_proto::agent::agent_service_client::AgentServiceClient::new(channel);
+        let mut client = self.get_agent_client(&host_id).await?;
 
         let agent_req = mikrom_proto::agent::GetLogsRequest {
             vm_id,
             follow: req.follow,
         };
 
-        let stream = client.get_logs(agent_req).await?.into_inner();
+        let stream = client
+            .get_logs(agent_req)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to get logs from agent {}: {}", host_id, e);
+                e
+            })?
+            .into_inner();
 
         let output_stream = tokio_stream::StreamExt::map(stream, |res| {
             res.map(|msg| GetLogsResponse {
@@ -378,15 +392,17 @@ impl SchedulerService for SchedulerServer {
     type GetAppLogsStream =
         std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<GetLogsResponse, Status>> + Send>>;
 
+    #[tracing::instrument(skip(self, request), fields(job_id = %request.get_ref().job_id))]
     async fn cancel_app(
         &self,
         request: tonic::Request<CancelRequest>,
     ) -> Result<Response<CancelResponse>, Status> {
         let req = request.into_inner();
-        tracing::info!(job_id = %req.job_id, user_id = %req.user_id, "Cancelling application");
+        tracing::info!("Cancelling application");
 
         if let Some(job) = self.scheduler.get_job(&req.job_id) {
             if job.user_id != req.user_id {
+                tracing::warn!("User {} unauthorized for job {}", req.user_id, req.job_id);
                 return Err(Status::permission_denied("You do not own this job"));
             }
 
@@ -403,6 +419,7 @@ impl SchedulerService for SchedulerServer {
                 message: "Application cancelled".to_string(),
             }))
         } else {
+            tracing::warn!("Job {} not found", req.job_id);
             Ok(Response::new(CancelResponse {
                 success: false,
                 message: "Job not found".to_string(),
@@ -410,15 +427,17 @@ impl SchedulerService for SchedulerServer {
         }
     }
 
+    #[tracing::instrument(skip(self, request), fields(job_id = %request.get_ref().job_id))]
     async fn delete_app(
         &self,
         request: tonic::Request<DeleteAppRequest>,
     ) -> Result<Response<DeleteAppResponse>, Status> {
         let req = request.into_inner();
-        tracing::info!(job_id = %req.job_id, user_id = %req.user_id, "Deleting application");
+        tracing::info!("Deleting application");
 
         if let Some(job) = self.scheduler.get_job(&req.job_id) {
             if job.user_id != req.user_id {
+                tracing::warn!("User {} unauthorized for job {}", req.user_id, req.job_id);
                 return Err(Status::permission_denied("You do not own this job"));
             }
 
@@ -431,6 +450,10 @@ impl SchedulerService for SchedulerServer {
 
             let success = self.scheduler.remove_job(&req.job_id);
 
+            if !success {
+                tracing::error!("Failed to delete application {}", req.job_id);
+            }
+
             Ok(Response::new(DeleteAppResponse {
                 success,
                 message: if success {
@@ -440,6 +463,7 @@ impl SchedulerService for SchedulerServer {
                 },
             }))
         } else {
+            tracing::warn!("Job {} not found", req.job_id);
             Ok(Response::new(DeleteAppResponse {
                 success: false,
                 message: "Job not found".to_string(),
@@ -447,63 +471,44 @@ impl SchedulerService for SchedulerServer {
         }
     }
 
+    #[tracing::instrument(skip(self, request), fields(job_id = %request.get_ref().job_id))]
     async fn pause_app(
         &self,
         request: tonic::Request<PauseRequest>,
     ) -> Result<Response<PauseResponse>, Status> {
         let req = request.into_inner();
-        let job = self
-            .scheduler
-            .get_job(&req.job_id)
-            .ok_or_else(|| Status::not_found("Job not found"))?;
+        let job = self.scheduler.get_job(&req.job_id).ok_or_else(|| {
+            tracing::warn!("Job {} not found", req.job_id);
+            Status::not_found("Job not found")
+        })?;
 
         if job.user_id != req.user_id {
+            tracing::warn!("User {} unauthorized for job {}", req.user_id, req.job_id);
             return Err(Status::permission_denied("Not your job"));
         }
 
-        let host_id = job
-            .host_id
-            .ok_or_else(|| Status::failed_precondition("Job not scheduled"))?;
-        let vm_id = job
-            .vm_id
-            .ok_or_else(|| Status::failed_precondition("No VM ID assigned"))?;
+        let host_id = job.host_id.ok_or_else(|| {
+            tracing::error!("Job {} not scheduled", req.job_id);
+            Status::failed_precondition("Job not scheduled")
+        })?;
+        let vm_id = job.vm_id.ok_or_else(|| {
+            tracing::error!("Job {} has no VM ID assigned", req.job_id);
+            Status::failed_precondition("No VM ID assigned")
+        })?;
 
-        let worker = self
-            .scheduler
-            .worker_registry()
-            .get_worker(&host_id)
-            .ok_or_else(|| Status::not_found("Worker not found"))?;
-
-        let (addr, domain) = match &self.certs {
-            Some(_) => (
-                format!("https://{}:{}", worker.hostname, worker.agent_port),
-                worker.hostname.clone(),
-            ),
-            None => (
-                format!("http://{}:{}", worker.ip_address, worker.agent_port),
-                String::new(),
-            ),
-        };
-
-        let mut endpoint = tonic::transport::Endpoint::new(addr)
-            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?;
-
-        if let Some(certs) = &self.certs {
-            endpoint = endpoint
-                .tls_config(certs.client_tls_config(&domain))
-                .map_err(|e| Status::internal(format!("TLS config error: {}", e)))?;
-        }
-
-        let channel = endpoint
-            .connect()
-            .await
-            .map_err(|e| Status::unavailable(format!("Failed to connect to agent: {}", e)))?;
-
-        let mut client =
-            mikrom_proto::agent::agent_service_client::AgentServiceClient::new(channel);
+        let mut client = self.get_agent_client(&host_id).await?;
         let agent_resp = client
             .pause_vm(mikrom_proto::agent::PauseVmRequest { vm_id })
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    "Failed to pause VM {} on host {}: {}",
+                    req.job_id,
+                    host_id,
+                    e
+                );
+                e
+            })?;
 
         if agent_resp.get_ref().success {
             self.scheduler
@@ -516,63 +521,44 @@ impl SchedulerService for SchedulerServer {
         }))
     }
 
+    #[tracing::instrument(skip(self, request), fields(job_id = %request.get_ref().job_id))]
     async fn resume_app(
         &self,
         request: tonic::Request<ResumeRequest>,
     ) -> Result<Response<ResumeResponse>, Status> {
         let req = request.into_inner();
-        let job = self
-            .scheduler
-            .get_job(&req.job_id)
-            .ok_or_else(|| Status::not_found("Job not found"))?;
+        let job = self.scheduler.get_job(&req.job_id).ok_or_else(|| {
+            tracing::warn!("Job {} not found", req.job_id);
+            Status::not_found("Job not found")
+        })?;
 
         if job.user_id != req.user_id {
+            tracing::warn!("User {} unauthorized for job {}", req.user_id, req.job_id);
             return Err(Status::permission_denied("Not your job"));
         }
 
-        let host_id = job
-            .host_id
-            .ok_or_else(|| Status::failed_precondition("Job not scheduled"))?;
-        let vm_id = job
-            .vm_id
-            .ok_or_else(|| Status::failed_precondition("No VM ID assigned"))?;
+        let host_id = job.host_id.ok_or_else(|| {
+            tracing::error!("Job {} not scheduled", req.job_id);
+            Status::failed_precondition("Job not scheduled")
+        })?;
+        let vm_id = job.vm_id.ok_or_else(|| {
+            tracing::error!("Job {} has no VM ID assigned", req.job_id);
+            Status::failed_precondition("No VM ID assigned")
+        })?;
 
-        let worker = self
-            .scheduler
-            .worker_registry()
-            .get_worker(&host_id)
-            .ok_or_else(|| Status::not_found("Worker not found"))?;
-
-        let (addr, domain) = match &self.certs {
-            Some(_) => (
-                format!("https://{}:{}", worker.hostname, worker.agent_port),
-                worker.hostname.clone(),
-            ),
-            None => (
-                format!("http://{}:{}", worker.ip_address, worker.agent_port),
-                String::new(),
-            ),
-        };
-
-        let mut endpoint = tonic::transport::Endpoint::new(addr)
-            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?;
-
-        if let Some(certs) = &self.certs {
-            endpoint = endpoint
-                .tls_config(certs.client_tls_config(&domain))
-                .map_err(|e| Status::internal(format!("TLS config error: {}", e)))?;
-        }
-
-        let channel = endpoint
-            .connect()
-            .await
-            .map_err(|e| Status::unavailable(format!("Failed to connect to agent: {}", e)))?;
-
-        let mut client =
-            mikrom_proto::agent::agent_service_client::AgentServiceClient::new(channel);
+        let mut client = self.get_agent_client(&host_id).await?;
         let agent_resp = client
             .resume_vm(mikrom_proto::agent::ResumeVmRequest { vm_id })
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    "Failed to resume VM {} on host {}: {}",
+                    req.job_id,
+                    host_id,
+                    e
+                );
+                e
+            })?;
 
         if agent_resp.get_ref().success {
             self.scheduler
@@ -585,6 +571,7 @@ impl SchedulerService for SchedulerServer {
         }))
     }
 
+    #[tracing::instrument(skip(self, request), fields(user_id = %request.get_ref().user_id))]
     async fn list_apps(
         &self,
         request: tonic::Request<ListAppsRequest>,
@@ -647,22 +634,19 @@ impl SchedulerServer {
         Ok(())
     }
 
-    async fn forward_deploy_to_agent(
+    async fn get_agent_client(
         &self,
         host_id: &str,
-        app_id: &str,
-        image: &str,
-        vm_id: &str,
-        config: &crate::job::VmConfig,
-    ) -> Result<(), Status> {
+    ) -> Result<AgentServiceClient<tonic::transport::Channel>, Status> {
         let worker = self
             .scheduler
             .worker_registry()
             .get_worker(host_id)
-            .ok_or_else(|| Status::not_found("Worker not found"))?;
+            .ok_or_else(|| {
+                tracing::warn!("Worker {} not found", host_id);
+                Status::not_found(format!("Worker {} not found", host_id))
+            })?;
 
-        // With mTLS: connect by hostname (must match the SAN in the agent's cert).
-        // Without TLS: connect by IP as before.
         let (addr, domain) = match &self.certs {
             Some(_) => (
                 format!("https://{}:{}", worker.hostname, worker.agent_port),
@@ -683,11 +667,23 @@ impl SchedulerServer {
                 .map_err(|e| Status::internal(format!("TLS config error: {}", e)))?;
         }
 
-        let channel = endpoint
-            .connect()
-            .await
-            .map_err(|e| Status::unavailable(format!("Failed to connect to agent: {}", e)))?;
-        let mut client = AgentServiceClient::new(channel);
+        let channel = endpoint.connect().await.map_err(|e| {
+            tracing::error!("Failed to connect to agent {}: {}", host_id, e);
+            Status::unavailable(format!("Failed to connect to agent: {}", e))
+        })?;
+
+        Ok(AgentServiceClient::new(channel))
+    }
+
+    async fn forward_deploy_to_agent(
+        &self,
+        host_id: &str,
+        app_id: &str,
+        image: &str,
+        vm_id: &str,
+        config: &crate::job::VmConfig,
+    ) -> Result<(), Status> {
+        let mut client = self.get_agent_client(host_id).await?;
 
         let req = StartVmRequest {
             vm_id: vm_id.to_string(),
@@ -716,49 +712,32 @@ impl SchedulerServer {
         let resp = client
             .start_vm(req)
             .await
-            .map_err(|e| Status::internal(format!("Failed to start VM: {}", e)))?
+            .map_err(|e| {
+                tracing::error!("Failed to start VM {} on agent {}: {}", vm_id, host_id, e);
+                Status::internal(format!("Failed to start VM: {}", e))
+            })?
             .into_inner();
 
         if resp.success {
             tracing::info!("VM {} started on host {}", vm_id, host_id);
             Ok(())
         } else {
-            tracing::error!("Failed to start VM: {}", resp.message);
+            tracing::error!(
+                "Agent reported failure starting VM {}: {}",
+                vm_id,
+                resp.message
+            );
             Err(Status::internal(resp.message))
         }
     }
 
     async fn stop_vm_on_agent(&self, host_id: &str, vm_id: &str) -> Result<(), Status> {
-        let worker = match self.scheduler.worker_registry().get_worker(host_id) {
-            Some(w) => w,
-            None => {
-                tracing::warn!("stop_vm_on_agent: worker {} not found, skipping", host_id);
-                return Ok(());
-            }
-        };
-
-        let (addr, domain) = match &self.certs {
-            Some(_) => (
-                format!("https://{}:{}", worker.hostname, worker.agent_port),
-                worker.hostname.clone(),
-            ),
-            None => (
-                format!("http://{}:{}", worker.ip_address, worker.agent_port),
-                String::new(),
-            ),
-        };
-
-        let mut endpoint = tonic::transport::Endpoint::new(addr)
-            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?;
-
-        if let Some(certs) = &self.certs {
-            endpoint = endpoint
-                .tls_config(certs.client_tls_config(&domain))
-                .map_err(|e| Status::internal(format!("TLS config error: {}", e)))?;
+        if host_id.is_empty() {
+            return Ok(());
         }
 
-        let channel = match endpoint.connect().await {
-            Ok(ch) => ch,
+        let mut client = match self.get_agent_client(host_id).await {
+            Ok(c) => c,
             Err(e) => {
                 tracing::warn!(
                     "stop_vm_on_agent: could not connect to agent {} for vm {}: {}",
@@ -769,9 +748,6 @@ impl SchedulerServer {
                 return Ok(());
             }
         };
-
-        let mut client =
-            mikrom_proto::agent::agent_service_client::AgentServiceClient::new(channel);
 
         match client
             .stop_vm(mikrom_proto::agent::StopVmRequest {

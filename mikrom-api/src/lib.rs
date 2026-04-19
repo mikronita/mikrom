@@ -4,14 +4,17 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 pub mod auth;
+pub mod crypto;
 pub mod db;
 pub mod deploy;
+pub mod error;
 pub mod models;
 pub mod repositories;
 pub mod scheduler;
 pub mod vms;
 
 pub use deploy::deploy_app;
+pub use error::{ApiError, ApiResult};
 pub use repositories::user_repository::UserRepository;
 pub use vms::{delete_vm, get_vm_logs, get_vm_status, list_vms, pause_vm, resume_vm, stop_vm};
 
@@ -23,6 +26,7 @@ pub struct AppState {
     pub scheduler_client: Option<SchedulerClient>,
     pub scheduler_config: scheduler::SchedulerConfig,
     pub jwt_secret: String,
+    pub master_key: String,
 }
 
 #[derive(Clone)]

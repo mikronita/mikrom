@@ -22,6 +22,7 @@ fn yellow_label(s: &str) -> std::string::String {
 
 mod client;
 mod config;
+mod dashboard;
 
 use client::MikromClient;
 use config::Config;
@@ -91,6 +92,9 @@ enum Commands {
     Logs {
         /// Job ID of the VM to get logs from
         job_id: String,
+        /// Follow log output
+        #[arg(short, long)]
+        follow: bool,
     },
 
     /// Pause a running VM by job ID
@@ -128,6 +132,9 @@ enum Commands {
 
     /// Show config settings
     Config,
+
+    /// Interactive dashboard (TUI)
+    Dashboard,
 }
 
 #[derive(Subcommand)]
@@ -280,13 +287,55 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Logs { job_id } => match client.get_vm_logs(&job_id).await {
-            Ok(logs) => println!("{}", logs),
-            Err(e) => {
-                eprintln!("Failed to get logs: {}", e);
-                std::process::exit(1);
+        Commands::Logs { job_id, follow } => {
+            if follow {
+                use futures_util::StreamExt;
+                println!(
+                    "{}",
+                    Paint::new("--- Attaching to log stream (auto-reconnect enabled) ---").dim()
+                );
+
+                loop {
+                    let stream_result = client.stream_vm_logs(&job_id).await;
+
+                    match stream_result {
+                        Ok(stream) => {
+                            tokio::pin!(stream);
+                            while let Some(result) = stream.next().await {
+                                match result {
+                                    Ok(line) => {
+                                        if !line.is_empty() {
+                                            println!("{}", line);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("{}: {}", Paint::new("Stream error").red(), e);
+                                        break; // Break inner loop to reconnect
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("{}: {}", Paint::new("Connection failed").red(), e);
+                        }
+                    }
+
+                    println!(
+                        "{}",
+                        Paint::new("--- Connection lost, retrying in 2s... ---").dim()
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                }
+            } else {
+                match client.get_vm_logs(&job_id).await {
+                    Ok(logs) => println!("{}", logs),
+                    Err(e) => {
+                        eprintln!("Failed to get logs: {}", e);
+                        std::process::exit(1);
+                    }
+                }
             }
-        },
+        }
 
         Commands::Pause { job_id } => {
             let resp = client
@@ -397,6 +446,10 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 println!("token:    [not configured]");
             }
+        }
+
+        Commands::Dashboard => {
+            dashboard::run(client).await?;
         }
     }
 
@@ -663,7 +716,22 @@ mod tests {
     fn test_cli_logs_command_parses_job_id() {
         let cli = Cli::try_parse_from(["mikrom", "logs", "job-xyz"]).unwrap();
         match cli.command {
-            Commands::Logs { job_id } => assert_eq!(job_id, "job-xyz"),
+            Commands::Logs { job_id, follow } => {
+                assert_eq!(job_id, "job-xyz");
+                assert!(!follow);
+            }
+            _ => panic!("expected logs command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_logs_command_parses_follow() {
+        let cli = Cli::try_parse_from(["mikrom", "logs", "job-xyz", "--follow"]).unwrap();
+        match cli.command {
+            Commands::Logs { job_id, follow } => {
+                assert_eq!(job_id, "job-xyz");
+                assert!(follow);
+            }
             _ => panic!("expected logs command"),
         }
     }
@@ -679,7 +747,7 @@ mod tests {
             .unwrap();
         assert_eq!(cli.api_url.as_deref(), Some("http://api:5001"));
         match cli.command {
-            Commands::Logs { job_id } => assert_eq!(job_id, "job-1"),
+            Commands::Logs { job_id, .. } => assert_eq!(job_id, "job-1"),
             _ => panic!("expected logs command"),
         }
     }

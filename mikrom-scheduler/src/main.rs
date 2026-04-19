@@ -5,21 +5,13 @@ use std::net::SocketAddr;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    mikrom_proto::telemetry::init_telemetry("mikrom-scheduler", env!("CARGO_PKG_VERSION"))?;
 
-    if std::env::var("LOG_FORMAT").unwrap_or_default() == "json" {
-        tracing_subscriber::fmt()
-            .json()
-            .with_env_filter(filter)
-            .init();
-    } else {
-        tracing_subscriber::fmt().with_env_filter(filter).init();
-    }
+    let use_tls = std::env::var("USE_TLS").unwrap_or_default() == "true";
 
-    let use_tls = std::env::var("USE_TLS")
-        .map(|v| v == "true")
-        .unwrap_or(false);
+    let _scheduler_port: u16 = std::env::var("SCHEDULER_PORT")
+        .unwrap_or_else(|_| "5002".to_string())
+        .parse()?;
 
     let certs = if use_tls {
         let certs_dir =

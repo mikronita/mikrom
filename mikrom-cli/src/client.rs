@@ -56,6 +56,8 @@ pub struct VmStatusResponse {
     pub started_at: i64,
     pub stopped_at: i64,
     pub error_message: String,
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
 }
 
 #[derive(Deserialize)]
@@ -222,6 +224,55 @@ impl MikromClient {
             let err: ErrorResponse = resp.json().await?;
             bail!("{} (HTTP {})", err.error, status);
         }
+    }
+
+    pub async fn stream_vm_logs(
+        &self,
+        job_id: &str,
+    ) -> anyhow::Result<impl futures_util::Stream<Item = anyhow::Result<String>>> {
+        let url = format!("{}/vms/{}/logs", self.base_url, job_id);
+        let mut req = self.http.get(&url);
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+
+        let resp = req.send().await?.error_for_status()?;
+
+        use futures_util::StreamExt;
+        let byte_stream = resp
+            .bytes_stream()
+            .map(|result| result.map_err(std::io::Error::other));
+
+        let reader = tokio_util::io::StreamReader::new(byte_stream);
+        let lines =
+            tokio_util::codec::FramedRead::new(reader, tokio_util::codec::LinesCodec::new());
+
+        #[derive(Deserialize)]
+        struct LogLine {
+            line: String,
+            timestamp: Option<i64>,
+        }
+
+        Ok(lines.filter_map(|result| async move {
+            match result {
+                Ok(line) => {
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if let Ok(log_line) = serde_json::from_str::<LogLine>(data) {
+                            if let Some(ts) = log_line.timestamp {
+                                Some(Ok(format!("[{}] {}", ts, log_line.line)))
+                            } else {
+                                Some(Ok(log_line.line))
+                            }
+                        } else {
+                            Some(Ok(data.to_string()))
+                        }
+                    } else {
+                        None
+                    }
+                }
+                Err(e) => Some(Err(anyhow::anyhow!("Stream error: {}", e))),
+            }
+        }))
     }
 
     pub async fn pause_vm(&self, job_id: &str) -> anyhow::Result<ActionResponse> {
@@ -885,8 +936,10 @@ mod tests {
                 "vm_id": "vm-xyz",
                 "scheduled_at": 1_700_000_000_i64,
                 "started_at": 1_700_000_005_i64,
-                "stopped_at": 0_i64,
-                "error_message": ""
+                "stopped_at": 0,
+                "error_message": "",
+                "cpu_usage": 0.0,
+                "ram_used_bytes": 0
             })))
             .mount(&server)
             .await;
@@ -911,7 +964,8 @@ mod tests {
                 "job_id": "job-1", "status": "Scheduled",
                 "host_id": "h", "vm_id": "v",
                 "scheduled_at": 0_i64, "started_at": 0_i64,
-                "stopped_at": 0_i64, "error_message": ""
+                "stopped_at": 0_i64, "error_message": "",
+                "cpu_usage": 0.0, "ram_used_bytes": 0
             })))
             .mount(&server)
             .await;
@@ -953,7 +1007,8 @@ mod tests {
                 "job_id": "my-special-job-id", "status": "Failed",
                 "host_id": "", "vm_id": "",
                 "scheduled_at": 0_i64, "started_at": 0_i64,
-                "stopped_at": 0_i64, "error_message": "spawn error"
+                "stopped_at": 0_i64, "error_message": "spawn error",
+                "cpu_usage": 0.0, "ram_used_bytes": 0
             })))
             .mount(&server)
             .await;

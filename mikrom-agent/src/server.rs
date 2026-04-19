@@ -380,6 +380,16 @@ impl AgentServer {
         scheduler_addr: String,
     ) -> Self {
         let firecracker = FirecrackerManager::new();
+        Self::with_manager(host_id, hostname, ip_address, scheduler_addr, firecracker)
+    }
+
+    pub fn with_manager(
+        host_id: String,
+        hostname: String,
+        ip_address: String,
+        scheduler_addr: String,
+        firecracker: FirecrackerManager,
+    ) -> Self {
         Self {
             host_id,
             hostname,
@@ -420,6 +430,12 @@ impl AgentServer {
                 e
             );
         }
+
+        // Cleanup any stale resources from previous runs
+        self.firecracker.cleanup_all_stale_resources().await;
+
+        // Start background tasks (GC)
+        self.firecracker.start_background_tasks();
 
         let certs_for_task = certs.clone();
         let scheduler_addr_for_task = self.scheduler_addr.clone();

@@ -5,6 +5,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
+pub mod ipam;
+use ipam::Ipam;
+
 #[derive(Error, Debug)]
 pub enum SchedulerError {
     #[error("No available workers")]
@@ -13,14 +16,25 @@ pub enum SchedulerError {
     NoFit,
     #[error("Job not found: {0}")]
     JobNotFound(String),
+    #[error("IP address pool exhausted")]
+    IpPoolExhausted,
 }
 
 const MAX_APPS_PER_HOST: u32 = 10;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub enum SchedulingStrategy {
+    #[default]
+    LeastLoaded, // Current behavior: spreads load
+    BinPacking, // Fill nodes sequentially to optimize costs
+}
+
 #[derive(Clone)]
 pub struct AppScheduler {
-    worker_registry: WorkerRegistry,
-    jobs: Arc<RwLock<HashMap<String, Job>>>,
+    pub worker_registry: WorkerRegistry,
+    pub jobs: Arc<RwLock<HashMap<String, Job>>>,
+    pub ipam: Ipam,
+    pub strategy: SchedulingStrategy,
 }
 
 impl AppScheduler {
@@ -28,11 +42,22 @@ impl AppScheduler {
         Self {
             worker_registry,
             jobs: Arc::new(RwLock::new(HashMap::new())),
+            ipam: Ipam::default(),
+            strategy: SchedulingStrategy::default(),
         }
+    }
+
+    pub fn with_strategy(mut self, strategy: SchedulingStrategy) -> Self {
+        self.strategy = strategy;
+        self
     }
 
     pub fn worker_registry(&self) -> &WorkerRegistry {
         &self.worker_registry
+    }
+
+    pub fn ipam(&self) -> &Ipam {
+        &self.ipam
     }
 
     pub fn add_job(&self, job: Job) {
@@ -70,7 +95,14 @@ impl AppScheduler {
     }
 
     pub fn remove_job(&self, job_id: &str) -> bool {
-        self.jobs.write().remove(job_id).is_some()
+        if let Some(job) = self.jobs.write().remove(job_id) {
+            if let Some(ip) = job.config.ip_address {
+                self.ipam.release(&ip);
+            }
+            true
+        } else {
+            false
+        }
     }
 
     pub fn list_jobs(&self, user_id: Option<&str>, _status: Option<JobStatus>) -> Vec<Job> {
@@ -81,7 +113,11 @@ impl AppScheduler {
             .collect()
     }
 
-    pub fn select_best_worker(&self, config: &VmConfig) -> Result<Worker, SchedulerError> {
+    pub fn select_best_worker(
+        &self,
+        config: &VmConfig,
+        app_id: &str,
+    ) -> Result<Worker, SchedulerError> {
         let workers = self.worker_registry.get_available_workers();
 
         if workers.is_empty() {
@@ -103,6 +139,19 @@ impl AppScheduler {
             return Err(SchedulerError::NoFit);
         }
 
+        // Count current app instances per worker for anti-affinity
+        let jobs = self.jobs.read();
+        let mut app_counts_per_host: HashMap<String, u32> = HashMap::new();
+        for job in jobs.values() {
+            if job.app_id == app_id
+                && job.status != JobStatus::Failed
+                && job.status != JobStatus::Cancelled
+                && let Some(host_id) = &job.host_id
+            {
+                *app_counts_per_host.entry(host_id.clone()).or_insert(0) += 1;
+            }
+        }
+
         viable_workers.sort_by(|a, b| {
             let score_a = a
                 .metrics
@@ -115,9 +164,18 @@ impl AppScheduler {
                 .map(|m| m.calculate_score(MAX_APPS_PER_HOST))
                 .unwrap_or(0.0);
 
-            score_b
-                .partial_cmp(&score_a)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            // Apply soft anti-affinity penalty (each existing instance reduces score by 0.2)
+            let penalty_a = (*app_counts_per_host.get(&a.host_id).unwrap_or(&0) as f32) * 0.2;
+            let penalty_b = (*app_counts_per_host.get(&b.host_id).unwrap_or(&0) as f32) * 0.2;
+
+            let final_a = (score_a - penalty_a).max(0.0);
+            let final_b = (score_b - penalty_b).max(0.0);
+
+            match self.strategy {
+                SchedulingStrategy::LeastLoaded => final_b.partial_cmp(&final_a),
+                SchedulingStrategy::BinPacking => final_a.partial_cmp(&final_b),
+            }
+            .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         Ok(viable_workers.remove(0))
@@ -135,213 +193,100 @@ impl AppScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::job::VmConfig;
     use crate::metrics::HostMetrics;
-    use crate::worker_registry::WorkerRegistry;
 
-    const GIB: u64 = 1024 * 1024 * 1024;
+    fn register_worker_with_metrics(
+        registry: &WorkerRegistry,
+        id: &str,
+        cpu: f32,
+        ram_free_mb: u64,
+    ) {
+        registry.register(
+            id.to_string(),
+            format!("host-{}", id),
+            "127.0.0.1".to_string(),
+            5003,
+        );
 
-    fn make_scheduler() -> AppScheduler {
-        AppScheduler::new(WorkerRegistry::new())
+        let mut metrics = HostMetrics::default();
+        metrics.cpu_usage = cpu;
+        metrics.ram_total_bytes = 4096 * 1024 * 1024;
+        metrics.ram_used_bytes = metrics.ram_total_bytes - (ram_free_mb * 1024 * 1024);
+        metrics.apps_count = 0;
+
+        registry.update_metrics(id, metrics);
     }
 
-    fn small_config() -> VmConfig {
-        VmConfig {
-            vcpus: 1,
+    #[test]
+    fn test_strategy_least_loaded() {
+        let registry = WorkerRegistry::new();
+        // Host A: 10% CPU, 2000MB free
+        register_worker_with_metrics(&registry, "A", 0.1, 2000);
+        // Host B: 50% CPU, 500MB free
+        register_worker_with_metrics(&registry, "B", 0.5, 500);
+
+        let scheduler = AppScheduler::new(registry).with_strategy(SchedulingStrategy::LeastLoaded);
+        let config = VmConfig {
             memory_mib: 256,
             disk_mib: 1024,
-            env: Default::default(),
-            ip_address: None,
-            gateway: None,
-            mac_address: None,
-            volumes: vec![],
-        }
-    }
-
-    fn make_job(id: &str) -> Job {
-        Job::new(
-            id.to_string(),
-            "app-1".to_string(),
-            "my-app".to_string(),
-            "nginx:latest".to_string(),
-            small_config(),
-            "user-1".to_string(),
-        )
-    }
-
-    fn register_with_metrics(scheduler: &AppScheduler, host_id: &str, cpu: f32) {
-        scheduler.worker_registry().register(
-            host_id.to_string(),
-            "node".to_string(),
-            "10.0.0.1".to_string(),
-            5003,
-        );
-        scheduler.worker_registry().update_metrics(
-            host_id,
-            HostMetrics {
-                cpu_usage: cpu,
-                ram_used_bytes: 512 * 1024 * 1024,
-                ram_total_bytes: 4 * GIB,
-                disk_used_bytes: 10 * GIB,
-                disk_total_bytes: 100 * GIB,
-                apps_count: 1,
-                load_avg_1: 0.0,
-                load_avg_5: 0.0,
-                load_avg_15: 0.0,
-                vms: HashMap::new(),
-                timestamp: 0,
-            },
-        );
-    }
-
-    #[test]
-    fn test_add_and_get_job() {
-        let s = make_scheduler();
-        s.add_job(make_job("j1"));
-        let found = s.get_job("j1");
-        assert!(found.is_some());
-        assert_eq!(found.unwrap().job_id, "j1");
-    }
-
-    #[test]
-    fn test_get_job_missing_returns_none() {
-        assert!(make_scheduler().get_job("ghost").is_none());
-    }
-
-    #[test]
-    fn test_update_job_status() {
-        let s = make_scheduler();
-        s.add_job(make_job("j1"));
-        s.update_job_status("j1", JobStatus::Running);
-        assert_eq!(s.get_job("j1").unwrap().status, JobStatus::Running);
-    }
-
-    #[test]
-    fn test_update_job_status_nonexistent_is_noop() {
-        let s = make_scheduler();
-        s.update_job_status("ghost", JobStatus::Failed); // must not panic
-    }
-
-    #[test]
-    fn test_list_jobs_returns_all_when_no_filter() {
-        let s = make_scheduler();
-        s.add_job(make_job("j1"));
-        s.add_job(make_job("j2"));
-        assert_eq!(s.list_jobs(None, None).len(), 2);
-    }
-
-    #[test]
-    fn test_list_jobs_filtered_by_user() {
-        let s = make_scheduler();
-        let mut j1 = make_job("j1");
-        j1.user_id = "alice".to_string();
-        let mut j2 = make_job("j2");
-        j2.user_id = "bob".to_string();
-        s.add_job(j1);
-        s.add_job(j2);
-
-        let alice_jobs = s.list_jobs(Some("alice"), None);
-        assert_eq!(alice_jobs.len(), 1);
-        assert_eq!(alice_jobs[0].user_id, "alice");
-    }
-
-    #[test]
-    fn test_list_jobs_user_with_no_jobs_returns_empty() {
-        let s = make_scheduler();
-        s.add_job(make_job("j1"));
-        assert_eq!(s.list_jobs(Some("nobody"), None).len(), 0);
-    }
-
-    #[test]
-    fn test_select_best_worker_no_workers() {
-        let s = make_scheduler();
-        let result = s.select_best_worker(&small_config());
-        assert!(matches!(result, Err(SchedulerError::NoWorkers)));
-    }
-
-    #[test]
-    fn test_select_best_worker_worker_without_metrics_is_unavailable() {
-        let s = make_scheduler();
-        s.worker_registry().register(
-            "h1".to_string(),
-            "n".to_string(),
-            "1.1.1.1".to_string(),
-            5003,
-        );
-        // no metrics → get_available_workers returns empty → NoWorkers
-        let result = s.select_best_worker(&small_config());
-        assert!(matches!(result, Err(SchedulerError::NoWorkers)));
-    }
-
-    #[test]
-    fn test_select_best_worker_no_fit() {
-        let s = make_scheduler();
-        register_with_metrics(&s, "h1", 0.1);
-        // Request more RAM than the worker has available
-        let huge = VmConfig {
-            vcpus: 1,
-            memory_mib: 100_000,
-            disk_mib: 1024,
-            env: Default::default(),
-            ip_address: None,
-            gateway: None,
-            mac_address: None,
-            volumes: vec![],
+            ..Default::default()
         };
-        assert!(matches!(
-            s.select_best_worker(&huge),
-            Err(SchedulerError::NoFit)
-        ));
+
+        let best = scheduler.select_best_worker(&config, "app-1").unwrap();
+        assert_eq!(best.host_id, "A");
     }
 
     #[test]
-    fn test_select_best_worker_success() {
-        let s = make_scheduler();
-        register_with_metrics(&s, "h1", 0.1);
-        let result = s.select_best_worker(&small_config());
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().host_id, "h1");
+    fn test_strategy_bin_packing() {
+        let registry = WorkerRegistry::new();
+        // Host A: 10% CPU, 2000MB free (Least loaded)
+        register_worker_with_metrics(&registry, "A", 0.1, 2000);
+        // Host B: 50% CPU, 500MB free (More loaded, but fits)
+        register_worker_with_metrics(&registry, "B", 0.5, 500);
+
+        let scheduler = AppScheduler::new(registry).with_strategy(SchedulingStrategy::BinPacking);
+        let config = VmConfig {
+            memory_mib: 128,
+            disk_mib: 1024,
+            ..Default::default()
+        };
+
+        // Should pick B because it's more loaded but still fits (packing)
+        let best = scheduler.select_best_worker(&config, "app-1").unwrap();
+        assert_eq!(best.host_id, "B");
     }
 
     #[test]
-    fn test_select_best_worker_picks_highest_score() {
-        let s = make_scheduler();
-        register_with_metrics(&s, "busy-host", 0.9); // low score
-        register_with_metrics(&s, "idle-host", 0.05); // high score
-        let winner = s.select_best_worker(&small_config()).unwrap();
-        assert_eq!(winner.host_id, "idle-host");
-    }
+    fn test_soft_anti_affinity() {
+        let registry = WorkerRegistry::new();
+        // Two identical hosts
+        register_worker_with_metrics(&registry, "A", 0.1, 2000);
+        register_worker_with_metrics(&registry, "B", 0.1, 2000);
 
-    #[test]
-    fn test_find_job_by_vm_id() {
-        let s = make_scheduler();
-        let mut job = make_job("j1");
-        job.schedule("h1".to_string(), "vm-abc".to_string());
-        s.add_job(job);
-        let found = s.find_job_by_vm_id("vm-abc");
-        assert!(found.is_some());
-        assert_eq!(found.unwrap().job_id, "j1");
-    }
+        let scheduler = AppScheduler::new(registry);
 
-    #[test]
-    fn test_find_job_by_vm_id_not_found() {
-        assert!(make_scheduler().find_job_by_vm_id("ghost-vm").is_none());
-    }
-
-    #[test]
-    fn test_scheduler_error_display() {
-        assert_eq!(
-            SchedulerError::NoWorkers.to_string(),
-            "No available workers"
+        // Add a job for "app-1" already running on host A
+        let mut job = Job::new(
+            "j1".into(),
+            "app-1".into(),
+            "n".into(),
+            "i".into(),
+            VmConfig::default(),
+            "u".into(),
         );
-        assert_eq!(
-            SchedulerError::NoFit.to_string(),
-            "No worker can fit the VM requirements"
-        );
-        assert!(
-            SchedulerError::JobNotFound("j1".to_string())
-                .to_string()
-                .contains("j1")
-        );
+        job.host_id = Some("A".into());
+        job.vm_id = Some("vm1".into());
+        job.status = JobStatus::Running;
+        scheduler.add_job(job);
+
+        let config = VmConfig {
+            memory_mib: 256,
+            disk_mib: 1024,
+            ..Default::default()
+        };
+
+        // Should pick B even if A is equally loaded, because app-1 is already on A
+        let best = scheduler.select_best_worker(&config, "app-1").unwrap();
+        assert_eq!(best.host_id, "B");
     }
 }

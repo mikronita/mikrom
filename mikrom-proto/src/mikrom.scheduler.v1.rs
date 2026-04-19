@@ -196,6 +196,10 @@ pub struct AppStatusResponse {
     pub stopped_at: i64,
     #[prost(string, tag = "8")]
     pub error_message: ::prost::alloc::string::String,
+    #[prost(float, tag = "9")]
+    pub cpu_usage: f32,
+    #[prost(uint64, tag = "10")]
+    pub ram_used_bytes: u64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CancelRequest {

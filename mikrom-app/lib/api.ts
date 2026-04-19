@@ -61,58 +61,70 @@ export function getVmLogsSSE(
   onError: (err: string) => void
 ): () => void {
   const abortController = new AbortController();
+  let isAborted = false;
 
-  (async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/vms/${jobId}/logs`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        signal: abortController.signal,
-      });
+  const connect = async () => {
+    while (!isAborted) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/vms/${jobId}/logs?follow=true`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          signal: abortController.signal,
+        });
 
-      if (!response.ok) {
-        if (response.status === 401) logout();
-        throw new Error(`Failed to connect to log stream: ${response.statusText}`);
-      }
+        if (!response.ok) {
+          if (response.status === 401) logout();
+          throw new Error(`Failed to connect to log stream: ${response.statusText}`);
+        }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("No response body");
-      }
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error("No response body");
+        }
 
-      const decoder = new TextDecoder();
-      let buffer = "";
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        while (!isAborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop() || "";
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() || "";
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              onMessage(data as LogLine);
-            } catch (err) {
-              console.error("Failed to parse log line", err);
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                onMessage(data as LogLine);
+              } catch (err) {
+                console.error("Failed to parse log line", err);
+              }
             }
           }
         }
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          isAborted = true;
+          return;
+        }
+        console.error("SSE Fetch Error", err);
+        onError(err instanceof Error ? err.message : "Connection lost to log stream");
+        
+        // Wait before reconnecting
+        if (!isAborted) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
       }
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        return;
-      }
-      console.error("SSE Fetch Error", err);
-      onError(err instanceof Error ? err.message : "Connection lost to log stream");
     }
-  })();
+  };
+
+  connect();
 
   return () => {
+    isAborted = true;
     abortController.abort();
   };
 }

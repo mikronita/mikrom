@@ -6,17 +6,7 @@ use uuid::Uuid;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-
-    if std::env::var("LOG_FORMAT").unwrap_or_default() == "json" {
-        tracing_subscriber::fmt()
-            .json()
-            .with_env_filter(filter)
-            .init();
-    } else {
-        tracing_subscriber::fmt().with_env_filter(filter).init();
-    }
+    mikrom_proto::telemetry::init_telemetry("mikrom-agent", env!("CARGO_PKG_VERSION"))?;
 
     let host_id = std::env::var("HOST_ID").unwrap_or_else(|_| Uuid::new_v4().to_string());
 

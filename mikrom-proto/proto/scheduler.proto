@@ -154,6 +154,8 @@ message AppStatusResponse {
   int64 started_at = 6;
   int64 stopped_at = 7;
   string error_message = 8;
+  float cpu_usage = 9;
+  uint64 ram_used_bytes = 10;
 }
 
 message CancelRequest {
