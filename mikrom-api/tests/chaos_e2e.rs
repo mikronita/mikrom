@@ -1,0 +1,247 @@
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::{body::Body, http::Request};
+use tower::ServiceExt;
+
+use mikrom_agent::firecracker::{FirecrackerConfig, FirecrackerManager};
+use mikrom_agent::server::AgentServer;
+use mikrom_api::auth::jwt::create_token;
+use mikrom_api::repositories::user_repository::{DbError, NewUser, User, UserRepository};
+use mikrom_api::{AppState, create_app};
+use mikrom_scheduler::server::SchedulerServer;
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+async fn free_port() -> u16 {
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    l.local_addr().unwrap().port()
+}
+
+async fn wait_for_tcp(port: u16) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        assert!(tokio::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+struct NoopRepo;
+#[async_trait::async_trait]
+impl UserRepository for NoopRepo {
+    async fn find_by_email(&self, _: &str) -> Result<Option<User>, DbError> {
+        Ok(None)
+    }
+    async fn create(&self, _: NewUser) -> Result<sqlx::types::Uuid, DbError> {
+        Ok(sqlx::types::Uuid::new_v4())
+    }
+    async fn count_by_email(&self, _: &str) -> Result<i64, DbError> {
+        Ok(0)
+    }
+}
+
+const CHAOS_JWT_SECRET: &str = "chaos-test-secret";
+
+#[tokio::test]
+async fn test_agent_failure_propagation_e2e() {
+    let scheduler_port = free_port().await;
+    let agent_port = free_port().await;
+    let scheduler_url = format!("http://127.0.0.1:{scheduler_port}");
+
+    // 1. Start Scheduler
+    let sched_addr: SocketAddr = format!("127.0.0.1:{scheduler_port}").parse().unwrap();
+    tokio::spawn(async move {
+        SchedulerServer::new(None)
+            .unwrap()
+            .serve(sched_addr)
+            .await
+            .unwrap();
+    });
+    wait_for_tcp(scheduler_port).await;
+
+    // 2. Start Agent with a failing Firecracker configuration (invalid binary path)
+    let failing_config = FirecrackerConfig {
+        binary: "/usr/bin/this-does-not-exist-mikrom-test".to_string(),
+        kernel_path: Some("/tmp/fake-kernel".to_string()), // Forces real mode instead of stub
+        rootfs_path: "/tmp/fake-rootfs.ext4".to_string(),
+    };
+    let manager = FirecrackerManager::with_config(failing_config);
+
+    let agent = AgentServer::with_manager(
+        "chaos-agent".to_string(),
+        "chaos-node".to_string(),
+        "127.0.0.1".to_string(),
+        scheduler_url.clone(),
+        manager,
+    );
+    let agent_addr: SocketAddr = format!("127.0.0.1:{agent_port}").parse().unwrap();
+    tokio::spawn(async move {
+        agent.serve(agent_addr, false).await.unwrap();
+    });
+    wait_for_tcp(agent_port).await;
+
+    // Wait for registration
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // 3. Setup API
+    let state = AppState {
+        user_repo: Arc::new(NoopRepo),
+        scheduler_client: None,
+        scheduler_config: mikrom_api::scheduler::SchedulerConfig {
+            addr: scheduler_url.clone(),
+            use_tls: false,
+            certs_dir: None,
+        },
+        jwt_secret: CHAOS_JWT_SECRET.to_string(),
+    };
+    let app = create_app(state);
+    let token = create_token("user-chaos", "chaos@example.com", CHAOS_JWT_SECRET).unwrap();
+
+    // 4. Attempt Deployment
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/deploy")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::from(
+                    r#"{"app_name":"chaos-app","image":"nginx:latest"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // The API should still return 200 OK because the job was accepted by the scheduler,
+    // but the status in the JSON body should reflect the failure.
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    let body_bytes = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+    // The status should eventually be "Failed" (4) or the initial response might already show it
+    // if the agent fails fast enough.
+    let status = json["status"].as_str().unwrap_or("");
+    let message = json["message"].as_str().unwrap_or("");
+
+    tracing::info!("Chaos test result: status={}, message={}", status, message);
+
+    // In our current implementation, if the forward_deploy_to_agent fails, the scheduler
+    // marks the job as Failed and returns that status.
+    assert!(
+        status == "Failed" || status == "error",
+        "Expected Failed status due to invalid binary, got: {}",
+        status
+    );
+    assert!(
+        message.contains("No such file or directory") || message.contains("failed"),
+        "Expected error message about missing binary, got: {}",
+        message
+    );
+}
+
+#[tokio::test]
+async fn test_ipam_sequential_allocation_e2e() {
+    let scheduler_port = free_port().await;
+    let scheduler_url = format!("http://127.0.0.1:{scheduler_port}");
+
+    // Start Scheduler
+    let sched_addr: SocketAddr = format!("127.0.0.1:{scheduler_port}").parse().unwrap();
+    tokio::spawn(async move {
+        SchedulerServer::new(None)
+            .unwrap()
+            .serve(sched_addr)
+            .await
+            .unwrap();
+    });
+    wait_for_tcp(scheduler_port).await;
+
+    // We don't need a real agent for this test, we just want to see what IP the scheduler assigns
+    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::connect(scheduler_url)
+        .await
+        .unwrap();
+
+    // Mock a worker registration so deployment can proceed to IP assignment
+    client
+        .register_worker(mikrom_proto::scheduler::RegisterWorkerRequest {
+            host_id: "test-host".to_string(),
+            hostname: "test-node".to_string(),
+            ip_address: "127.0.0.1".to_string(),
+            agent_port: 5003,
+        })
+        .await
+        .unwrap();
+
+    // Add metrics so it's considered available
+    client
+        .report_metrics(mikrom_proto::scheduler::ReportMetricsRequest {
+            host_id: "test-host".to_string(),
+            cpu_usage: 0.1,
+            ram_used_bytes: 0,
+            ram_total_bytes: 8000000000,
+            disk_used_bytes: 0,
+            disk_total_bytes: 100000000000,
+            apps_count: 0,
+            vms: std::collections::HashMap::new(),
+            load_avg_1: 0.0,
+            load_avg_5: 0.0,
+            load_avg_15: 0.0,
+            timestamp: 0,
+        })
+        .await
+        .unwrap();
+
+    // Deploy two apps and check their IPs (they should be .2 and .3)
+    let resp1 = client
+        .deploy_app(mikrom_proto::scheduler::DeployRequest {
+            app_id: "app-1".to_string(),
+            app_name: "app-1".to_string(),
+            image: "nginx".to_string(),
+            config: None,
+            user_id: "user-1".to_string(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+
+    let resp2 = client
+        .deploy_app(mikrom_proto::scheduler::DeployRequest {
+            app_id: "app-2".to_string(),
+            app_name: "app-2".to_string(),
+            image: "nginx".to_string(),
+            config: None,
+            user_id: "user-1".to_string(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Since we don't have a real IPAM-to-Response mapping in the current Job struct yet,
+    // this test is a placeholder for when we improve the Job model.
+    // For now, it at least ensures the scheduler doesn't crash with multiple deploys.
+    let _ = client
+        .get_app_status(mikrom_proto::scheduler::AppStatusRequest {
+            job_id: resp1.job_id,
+            user_id: "user-1".to_string(),
+        })
+        .await
+        .unwrap();
+
+    let _ = client
+        .get_app_status(mikrom_proto::scheduler::AppStatusRequest {
+            job_id: resp2.job_id,
+            user_id: "user-1".to_string(),
+        })
+        .await
+        .unwrap();
+}

@@ -185,11 +185,17 @@ impl SchedulerService for SchedulerServer {
                 let image = req.image.clone();
                 let host_id = worker.host_id.clone();
 
-                // Assign networking (Mock implementation: unique IP per job)
-                // In real world, use an IPAM (IP Address Management)
-                let last_byte = (chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) % 250) + 2;
-                let guest_ip = format!("172.16.1.{}", last_byte);
+                // Assign networking via IPAM
+                let guest_ip = self.scheduler.ipam().allocate().ok_or_else(|| {
+                    Status::resource_exhausted("No available IP addresses in pool")
+                })?;
                 let gateway = "172.16.1.1".to_string();
+                // Extract last byte from IP for MAC address
+                let last_byte = guest_ip
+                    .split('.')
+                    .last()
+                    .and_then(|s| s.parse::<u8>().ok())
+                    .unwrap_or(2);
                 let mac = format!("AA:BB:CC:01:01:{:02x}", last_byte);
 
                 let job_config = crate::job::VmConfig {

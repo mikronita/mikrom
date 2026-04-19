@@ -515,7 +515,10 @@ impl FirecrackerManager {
             }
         }
 
-        // If there is a real process, kill it and clean up.
+        // Always clean up logs from memory when stopping
+        self.logs.write().await.remove(vm_id);
+
+        // If there is a real process, kill it and clean up resources.
         if let Some(mut proc) = self.processes.lock().await.remove(vm_id) {
             proc.log_task.abort();
             let _ = proc.child.kill().await;
@@ -656,6 +659,23 @@ impl FirecrackerManager {
         }
     }
 
+    pub async fn cleanup_all_stale_resources(&self) {
+        tracing::info!("Cleaning up stale Firecracker resources...");
+        if let Ok(mut entries) = tokio::fs::read_dir("/tmp").await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                if let Ok(file_name) = entry.file_name().into_string() {
+                    if (file_name.starts_with("fc-") && file_name.ends_with(".sock"))
+                        || (file_name.starts_with("fc-") && file_name.ends_with("-rootfs.ext4"))
+                    {
+                        let path = entry.path();
+                        tracing::debug!("Removing stale file: {:?}", path);
+                        let _ = tokio::fs::remove_file(path).await;
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn init_network(&self) -> Result<(), FirecrackerError> {
         let bridge_name = "mikrom-br0";
         let bridge_ip = "172.16.1.1/24";
@@ -763,8 +783,15 @@ impl FirecrackerManager {
     }
 
     async fn cleanup_tap(&self, tap_name: &str) {
+        // 1. Remove from bridge
         let _ = tokio::process::Command::new("ip")
-            .args(["link", "del", tap_name])
+            .args(["link", "set", tap_name, "nomaster"])
+            .output()
+            .await;
+
+        // 2. Delete interface
+        let _ = tokio::process::Command::new("ip")
+            .args(["link", "delete", tap_name])
             .output()
             .await;
     }
@@ -1603,5 +1630,62 @@ mod tests {
         let status = VmStatus::Paused;
         let json = serde_json::to_string(&status).unwrap();
         assert_eq!(json, "\"paused\"");
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_stale_resources() {
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+
+        // Create some fake stale files
+        let socket = "/tmp/fc-stale-test.sock";
+        let rootfs = "/tmp/fc-stale-test-rootfs.ext4";
+        tokio::fs::write(socket, b"").await.unwrap();
+        tokio::fs::write(rootfs, b"").await.unwrap();
+
+        assert!(std::path::Path::new(socket).exists());
+        assert!(std::path::Path::new(rootfs).exists());
+
+        mgr.cleanup_all_stale_resources().await;
+
+        assert!(!std::path::Path::new(socket).exists());
+        assert!(!std::path::Path::new(rootfs).exists());
+    }
+
+    #[tokio::test]
+    async fn test_stop_vm_removes_logs_from_memory() {
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let vm_id = "vm-log-test";
+
+        // Setup initial state so stop_vm doesn't fail with VmNotFound
+        let config = VmConfig {
+            vcpus: 1,
+            memory_mib: 128,
+            disk_mib: 1024,
+            ..Default::default()
+        };
+        let _ = mgr
+            .start_vm(
+                vm_id.to_string(),
+                "app-1".to_string(),
+                "image".to_string(),
+                config,
+            )
+            .await
+            .unwrap();
+
+        // Add some logs
+        {
+            let mut l = mgr.logs.write().await;
+            l.entry(vm_id.to_string())
+                .or_default()
+                .push_back("test log".to_string());
+        }
+
+        assert!(mgr.logs.read().await.contains_key(vm_id));
+
+        // Stop (even in stub mode it should clean memory)
+        mgr.stop_vm(vm_id).await.unwrap();
+
+        assert!(!mgr.logs.read().await.contains_key(vm_id));
     }
 }

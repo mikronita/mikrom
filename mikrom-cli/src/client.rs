@@ -224,6 +224,56 @@ impl MikromClient {
         }
     }
 
+    pub async fn stream_vm_logs(
+        &self,
+        job_id: &str,
+    ) -> anyhow::Result<impl futures_util::Stream<Item = anyhow::Result<String>>> {
+        let url = format!("{}/vms/{}/logs", self.base_url, job_id);
+        let mut req = self.http.get(&url);
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+
+        let resp = req.send().await?.error_for_status()?;
+
+        use futures_util::StreamExt;
+        let byte_stream = resp
+            .bytes_stream()
+            .map(|result| result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
+
+        let reader = tokio_util::io::StreamReader::new(byte_stream);
+        let lines =
+            tokio_util::codec::FramedRead::new(reader, tokio_util::codec::LinesCodec::new());
+
+        #[derive(Deserialize)]
+        struct LogLine {
+            line: String,
+            timestamp: Option<i64>,
+        }
+
+        Ok(lines.filter_map(|result| async move {
+            match result {
+                Ok(line) => {
+                    if line.starts_with("data: ") {
+                        let data = &line[6..];
+                        if let Ok(log_line) = serde_json::from_str::<LogLine>(data) {
+                            if let Some(ts) = log_line.timestamp {
+                                Some(Ok(format!("[{}] {}", ts, log_line.line)))
+                            } else {
+                                Some(Ok(log_line.line))
+                            }
+                        } else {
+                            Some(Ok(data.to_string()))
+                        }
+                    } else {
+                        None
+                    }
+                }
+                Err(e) => Some(Err(anyhow::anyhow!("Stream error: {}", e))),
+            }
+        }))
+    }
+
     pub async fn pause_vm(&self, job_id: &str) -> anyhow::Result<ActionResponse> {
         let mut req = self
             .http
