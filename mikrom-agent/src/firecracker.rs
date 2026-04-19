@@ -136,6 +136,56 @@ async fn fc_put(socket_path: &str, api_path: &str, body: &str) -> Result<(), Fir
     }
 }
 
+async fn fc_patch(socket_path: &str, api_path: &str, body: &str) -> Result<(), FirecrackerError> {
+    let stream = tokio::net::UnixStream::connect(socket_path)
+        .await
+        .map_err(|e| FirecrackerError::ApiError {
+            path: api_path.to_string(),
+            msg: format!("connect: {e}"),
+        })?;
+
+    let (reader, mut writer) = tokio::io::split(stream);
+
+    let request = format!(
+        "PATCH {api_path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    writer
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|e| FirecrackerError::ApiError {
+            path: api_path.to_string(),
+            msg: format!("write: {e}"),
+        })?;
+
+    writer
+        .flush()
+        .await
+        .map_err(|e| FirecrackerError::ApiError {
+            path: api_path.to_string(),
+            msg: format!("flush: {e}"),
+        })?;
+
+    let mut buf_reader = BufReader::new(reader);
+    let mut status_line = String::new();
+    buf_reader
+        .read_line(&mut status_line)
+        .await
+        .map_err(|e| FirecrackerError::ApiError {
+            path: api_path.to_string(),
+            msg: format!("read: {e}"),
+        })?;
+
+    if status_line.contains(" 2") {
+        Ok(())
+    } else {
+        Err(FirecrackerError::ApiError {
+            path: api_path.to_string(),
+            msg: status_line.trim().to_string(),
+        })
+    }
+}
+
 /// Poll until the Unix socket file appears (Firecracker is ready to accept API calls).
 async fn wait_for_socket(path: &str, timeout: Duration) -> Result<(), FirecrackerError> {
     let deadline = tokio::time::Instant::now() + timeout;
@@ -528,9 +578,9 @@ impl FirecrackerManager {
             .get(vm_id)
             .ok_or_else(|| FirecrackerError::VmNotFound(vm_id.to_string()))?;
 
-        // 1. Pause the VM
+        // 1. Pause the VM via PATCH /vm (Firecracker API)
         let pause_body = serde_json::json!({ "state": "Paused" }).to_string();
-        fc_put(&proc.socket_path, "/vm/pause", &pause_body).await?;
+        fc_patch(&proc.socket_path, "/vm", &pause_body).await?;
 
         // 2. Create snapshot (memory + state)
         let snapshot_dir = "/tmp/mikrom-snapshots";
@@ -562,7 +612,7 @@ impl FirecrackerManager {
             .ok_or_else(|| FirecrackerError::VmNotFound(vm_id.to_string()))?;
 
         let resume_body = serde_json::json!({ "state": "Resumed" }).to_string();
-        fc_put(&proc.socket_path, "/vm/resume", &resume_body).await?;
+        fc_patch(&proc.socket_path, "/vm", &resume_body).await?;
 
         let mut vms = self.vms.write().await;
         if let Some(vm) = vms.get_mut(vm_id) {
