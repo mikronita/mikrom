@@ -73,6 +73,7 @@ struct VmProcess {
 
 #[derive(Clone)]
 pub struct FirecrackerManager {
+    agent_id: String,
     vms: Arc<RwLock<HashMap<String, VmInfo>>>,
     processes: Arc<Mutex<HashMap<String, VmProcess>>>,
     fc_config: FirecrackerConfig,
@@ -233,6 +234,7 @@ impl FirecrackerManager {
         let builder =
             crate::builder::ImageBuilder::new().expect("Failed to initialize Docker builder");
         Self {
+            agent_id: uuid::Uuid::new_v4().to_string(),
             vms: Arc::new(RwLock::new(HashMap::new())),
             processes: Arc::new(Mutex::new(HashMap::new())),
             fc_config,
@@ -303,7 +305,7 @@ impl FirecrackerManager {
             }
         };
 
-        let rootfs_path = format!("/tmp/fc-{vm_id}-rootfs.ext4");
+        let rootfs_path = format!("/tmp/fc-{}-{}-rootfs.ext4", self.agent_id, vm_id);
 
         // ── Image management ──────────────────────────────────────────────────
         let is_local_path = image.contains('/') || image.ends_with(".ext4");
@@ -338,7 +340,7 @@ impl FirecrackerManager {
 
         let fc_binary = &self.fc_config.binary;
 
-        let socket_path = format!("/tmp/fc-{vm_id}.sock");
+        let socket_path = format!("/tmp/fc-{}-{}.sock", self.agent_id, vm_id);
 
         // Remove any stale socket from a previous run.
         let _ = tokio::fs::remove_file(&socket_path).await;
@@ -524,7 +526,9 @@ impl FirecrackerManager {
             let _ = proc.child.kill().await;
             let _ = proc.child.wait().await;
             let _ = tokio::fs::remove_file(&proc.socket_path).await;
-            let _ = tokio::fs::remove_file(format!("/tmp/fc-{vm_id}-rootfs.ext4")).await;
+            let _ =
+                tokio::fs::remove_file(format!("/tmp/fc-{}-{}-rootfs.ext4", self.agent_id, vm_id))
+                    .await;
             let _ = tokio::fs::remove_file(format!("/tmp/mikrom-snapshots/{vm_id}.snapshot")).await;
             let _ = tokio::fs::remove_file(format!("/tmp/mikrom-snapshots/{vm_id}.mem")).await;
 
@@ -660,16 +664,21 @@ impl FirecrackerManager {
     }
 
     pub async fn cleanup_all_stale_resources(&self) {
-        tracing::info!("Cleaning up stale Firecracker resources...");
+        tracing::info!(
+            agent_id = %self.agent_id,
+            "Cleaning up stale Firecracker resources for this agent..."
+        );
+        let prefix = format!("fc-{}-", self.agent_id);
         if let Ok(mut entries) = tokio::fs::read_dir("/tmp").await {
             while let Ok(Some(entry)) = entries.next_entry().await {
-                if let Ok(file_name) = entry.file_name().into_string()
-                    && ((file_name.starts_with("fc-") && file_name.ends_with(".sock"))
-                        || (file_name.starts_with("fc-") && file_name.ends_with("-rootfs.ext4")))
-                {
-                    let path = entry.path();
-                    tracing::debug!("Removing stale file: {:?}", path);
-                    let _ = tokio::fs::remove_file(path).await;
+                if let Ok(file_name) = entry.file_name().into_string() {
+                    if file_name.starts_with(&prefix)
+                        && (file_name.ends_with(".sock") || file_name.ends_with("-rootfs.ext4"))
+                    {
+                        let path = entry.path();
+                        tracing::debug!("Removing stale file: {:?}", path);
+                        let _ = tokio::fs::remove_file(path).await;
+                    }
                 }
             }
         }
@@ -1637,19 +1646,44 @@ mod tests {
     async fn test_cleanup_stale_resources() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
 
-        // Create some fake stale files
-        let socket = "/tmp/fc-stale-test.sock";
-        let rootfs = "/tmp/fc-stale-test-rootfs.ext4";
-        tokio::fs::write(socket, b"").await.unwrap();
-        tokio::fs::write(rootfs, b"").await.unwrap();
+        // Create some fake stale files with the agent's ID
+        let socket = format!("/tmp/fc-{}-stale-test.sock", mgr.agent_id);
+        let rootfs = format!("/tmp/fc-{}-stale-test-rootfs.ext4", mgr.agent_id);
+        tokio::fs::write(&socket, b"").await.unwrap();
+        tokio::fs::write(&rootfs, b"").await.unwrap();
 
-        assert!(std::path::Path::new(socket).exists());
-        assert!(std::path::Path::new(rootfs).exists());
+        assert!(std::path::Path::new(&socket).exists());
+        assert!(std::path::Path::new(&rootfs).exists());
 
         mgr.cleanup_all_stale_resources().await;
 
-        assert!(!std::path::Path::new(socket).exists());
-        assert!(!std::path::Path::new(rootfs).exists());
+        assert!(
+            !std::path::Path::new(&socket).exists(),
+            "Socket should have been removed"
+        );
+        assert!(
+            !std::path::Path::new(&rootfs).exists(),
+            "Rootfs should have been removed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_does_not_touch_other_agents() {
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+
+        // Create a file belonging to a "different agent"
+        let other_socket = "/tmp/fc-other-agent-vm1.sock";
+        tokio::fs::write(other_socket, b"").await.unwrap();
+
+        mgr.cleanup_all_stale_resources().await;
+
+        assert!(
+            std::path::Path::new(other_socket).exists(),
+            "File from other agent should NOT have been removed"
+        );
+
+        // Cleanup
+        let _ = tokio::fs::remove_file(other_socket).await;
     }
 
     #[tokio::test]
