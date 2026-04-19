@@ -11,7 +11,15 @@ HTTP REST API for the mikrom orchestration system. Built with [Axum](https://git
 | `GET` | `/health` | — | Service health and version |
 | `POST` | `/auth/register` | — | Create a new user account |
 | `POST` | `/auth/login` | — | Authenticate and receive a JWT |
+| `GET` | `/auth/whoami` | JWT | Get current user info |
 | `POST` | `/deploy` | JWT | Deploy an application to a Firecracker VM |
+| `GET` | `/vms` | JWT | List all VMs for current user |
+| `GET` | `/vms/{job_id}` | JWT | Get VM status |
+| `DELETE` | `/vms/{job_id}` | JWT | Stop a VM |
+| `DELETE` | `/vms/{job_id}/delete` | JWT | Delete a VM |
+| `POST` | `/vms/{job_id}/pause` | JWT | Pause a running VM |
+| `POST` | `/vms/{job_id}/resume` | JWT | Resume a paused VM |
+| `GET` | `/vms/{job_id}/logs` | JWT | Get VM logs (SSE) |
 
 ### `POST /deploy`
 
@@ -29,6 +37,44 @@ HTTP REST API for the mikrom orchestration system. Built with [Axum](https://git
 `vcpus`, `memory_mib`, `disk_mib`, and `env` are optional (defaults: 1 vCPU, 256 MiB RAM, 1024 MiB disk).
 
 On each request the handler opens a new gRPC connection to `mikrom-scheduler` (`SCHEDULER_ADDR`) and calls `DeployApp`.
+
+### Response Examples
+
+**`POST /deploy` response:**
+```json
+{
+  "job_id": "job-abc-123",
+  "status": "Scheduled",
+  "host_id": "host-1",
+  "vm_id": "vm-xyz",
+  "message": "Application scheduled"
+}
+```
+
+**`GET /vms` response:**
+```json
+[
+  {
+    "job_id": "job-1",
+    "app_id": "app-1",
+    "app_name": "my-app",
+    "image": "nginx:latest",
+    "status": "Running",
+    "host_id": "host-1",
+    "vm_id": "vm-abc"
+  }
+]
+```
+
+## Authentication
+
+All endpoints (except `/health`, `/auth/register`, `/auth/login`) require a valid JWT token in the `Authorization` header:
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+To obtain a token, call `/auth/login` with email and password. The token expires after 24 hours (configurable in `auth/jwt.rs`).
 
 ## Configuration
 

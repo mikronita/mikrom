@@ -4,6 +4,24 @@ gRPC scheduler service for the mikrom orchestration system. Built with [Tonic](h
 
 **Port:** `5002`
 
+## Architecture
+
+```
+mikrom-api (REST)
+    │
+    │ DeployApp RPC
+    ▼
+mikrom-scheduler
+    │
+    ├─ WorkerRegistry: tracks registered agents
+    ├─ AppScheduler: manages job lifecycle
+    └─ HostMetrics: scores workers by available resources
+         │
+         │ StartVm RPC
+         ▼
+    mikrom-agent
+```
+
 ## Responsibilities
 
 - Maintains an in-memory registry of worker nodes (`WorkerRegistry`).
@@ -15,29 +33,49 @@ gRPC scheduler service for the mikrom orchestration system. Built with [Tonic](h
 
 When a deploy request arrives the scheduler:
 
-1. Filters workers to those that have reported metrics and can fit the requested VM (`memory_mib` + `disk_mib`).
-2. Scores each candidate with `HostMetrics::calculate_score` (higher score = more headroom).
-3. Workers that already host `MAX_APPS_PER_HOST` (10) applications are excluded.
-4. The highest-scoring worker is selected.
+1. **Filter**: Workers must have reported metrics within 30 seconds (configurable via `METRICS_TTL_SECS`).
+2. **Capacity check**: Workers must have enough `memory_mib` + `disk_mib` for the requested VM.
+3. **Slot check**: Workers can host at most `MAX_APPS_PER_HOST` (10) applications.
+4. **Score**: Each candidate is scored with `HostMetrics::calculate_score`:
+   - `score = (available_memory_mib / total_memory_mib) + (available_disk_mib / total_disk_mib)`
+   - Higher score = more headroom.
+5. **Select**: The highest-scoring worker is chosen.
 
-If no workers are registered the scheduler returns `NoWorkers`. If workers exist but none can fit the VM requirements it returns `NoFit`.
+If no workers are registered the scheduler returns `NoWorkersAvailable`. If workers exist but none can fit the VM requirements it returns `NoFit`.
 
 ## gRPC API
 
 Defined in `mikrom-proto/proto/scheduler.proto`.
 
-| RPC | Called by | Description |
+| RPC | Direction | Description |
 |---|---|---|
-| `DeployApp` | mikrom-api | Schedule and launch a new VM |
-| `RegisterWorker` | mikrom-agent | Register an agent node |
-| `ReportMetrics` | mikrom-agent | Update resource metrics for a node |
+| `DeployApp` | mikrom-api → scheduler | Schedule and launch a new VM |
+| `RegisterWorker` | agent → scheduler | Register an agent node |
+| `ReportMetrics` | agent → scheduler | Update resource metrics |
+| `StopVm` | mikrom-api → scheduler | Stop a running VM |
+| `GetVmStatus` | mikrom-api → scheduler | Get VM status |
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
+| `METRICS_TTL_SECS` | `30` | Seconds before metrics are considered stale |
+| `MAX_APPS_PER_HOST` | `10` | Maximum VMs per worker node |
 | `USE_TLS` | `false` | Enable mutual TLS for gRPC |
 | `CERTS_DIR` | — | Directory containing TLS certificates (required when `USE_TLS=true`) |
+
+## Deployment flow
+
+```
+1. API receives POST /deploy
+2. API calls DeployApp RPC → Scheduler
+3. Scheduler selects best worker (highest score)
+4. Scheduler calls StartVm RPC → Agent
+5. Agent starts Firecracker VM (stubbed)
+6. Agent returns VM details to Scheduler
+7. Scheduler returns job details to API
+8. API returns job_id to client
+```
 
 ## Development
 
