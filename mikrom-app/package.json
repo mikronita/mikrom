@@ -10,16 +10,19 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.99.2",
     "ansi-to-react": "^6.2.6",
     "clsx": "^2.1.1",
     "lucide-react": "^1.8.0",
     "next": "16.2.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@tanstack/react-query-devtools": "^5.99.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
