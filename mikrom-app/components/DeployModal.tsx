@@ -1,10 +1,8 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Plus, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/Button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
-import { Input } from "@/components/ui/Input";
+import { Loader2 } from "lucide-react";
+import { Button, Modal, ModalHeader, ModalBody, ModalFooter, Label, TextInput } from "flowbite-react";
 import { useDeployApp } from "@/lib/hooks/use-vms";
 import { useRouter } from "next/navigation";
 import { DeployRequest } from "@/lib/api";
@@ -51,7 +49,7 @@ export function DeployModal({ onClose }: DeployModalProps) {
         toast.success(`App ${form.app_name} deployment initiated`);
         onClose();
         if (data?.job_id) {
-          router.push(`/dashboard/vms/${data.job_id}`);
+          router.push(`/vms/${data.job_id}`);
         }
       },
       onError: (error) => {
@@ -61,27 +59,17 @@ export function DeployModal({ onClose }: DeployModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-      <Card className="w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
-        <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
-          <div className="flex items-center justify-between">
-            <CardTitle>Deploy New App</CardTitle>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
-              <Plus className="w-4 h-4 rotate-45" />
-            </Button>
-          </div>
-          <CardDescription>
-            Configure and launch a new virtual instance.
-          </CardDescription>
-        </CardHeader>
-
-        <form onSubmit={handleDeploySubmit}>
-          <CardContent className="space-y-4 pt-6">
-            <div className="space-y-2">
-              <label className="text-sm font-medium leading-none">
-                App Name
-              </label>
-              <Input
+    <Modal show={true} onClose={onClose} size="md">
+      <ModalHeader>Deploy New App</ModalHeader>
+      <form onSubmit={handleDeploySubmit}>
+        <ModalBody>
+          <div className="space-y-6">
+            <div>
+              <div className="mb-2 block">
+                <Label htmlFor="app_name">App Name</Label>
+              </div>
+              <TextInput
+                id="app_name"
                 required
                 value={form.app_name}
                 onChange={(e) => setForm((f) => ({ ...f, app_name: e.target.value }))}
@@ -89,11 +77,12 @@ export function DeployModal({ onClose }: DeployModalProps) {
               />
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium leading-none">
-                Docker Image / RootFS
-              </label>
-              <Input
+            <div>
+              <div className="mb-2 block">
+                <Label htmlFor="image">Docker Image / RootFS</Label>
+              </div>
+              <TextInput
+                id="image"
                 required
                 value={form.image}
                 onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))}
@@ -101,10 +90,13 @@ export function DeployModal({ onClose }: DeployModalProps) {
               />
             </div>
 
-            <div className="grid grid-cols-3 gap-4 pt-2">
-              <div className="space-y-2">
-                <label className="text-[11px] font-bold uppercase text-zinc-500">vCPUs</label>
-                <Input
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <div className="mb-2 block">
+                  <Label htmlFor="vcpus" className="text-[10px] uppercase">vCPUs</Label>
+                </div>
+                <TextInput
+                  id="vcpus"
                   type="number"
                   min="1"
                   value={form.vcpus}
@@ -112,9 +104,12 @@ export function DeployModal({ onClose }: DeployModalProps) {
                   placeholder="1"
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-[11px] font-bold uppercase text-zinc-500">RAM (MiB)</label>
-                <Input
+              <div>
+                <div className="mb-2 block">
+                  <Label htmlFor="memory" className="text-[10px] uppercase">RAM (MiB)</Label>
+                </div>
+                <TextInput
+                  id="memory"
                   type="number"
                   min="64"
                   value={form.memory_mib}
@@ -122,9 +117,12 @@ export function DeployModal({ onClose }: DeployModalProps) {
                   placeholder="512"
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-[11px] font-bold uppercase text-zinc-500">Disk (MiB)</label>
-                <Input
+              <div>
+                <div className="mb-2 block">
+                  <Label htmlFor="disk" className="text-[10px] uppercase">Disk (MiB)</Label>
+                </div>
+                <TextInput
+                  id="disk"
                   type="number"
                   min="128"
                   value={form.disk_mib}
@@ -133,25 +131,24 @@ export function DeployModal({ onClose }: DeployModalProps) {
                 />
               </div>
             </div>
-          </CardContent>
-
-          <div className="p-6 pt-0 flex justify-end gap-3">
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={deployMutation.isPending}>
-              {deployMutation.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Deploying...
-                </>
-              ) : (
-                "Launch Instance"
-              )}
-            </Button>
           </div>
-        </form>
-      </Card>
-    </div>
+        </ModalBody>
+        <ModalFooter className="justify-end">
+          <Button color="gray" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" color="dark" disabled={deployMutation.isPending}>
+            {deployMutation.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Deploying...
+              </>
+            ) : (
+              "Launch Instance"
+            )}
+          </Button>
+        </ModalFooter>
+      </form>
+    </Modal>
   );
 }

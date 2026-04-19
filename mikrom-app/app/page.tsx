@@ -1,184 +1,262 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { 
-  Box, 
-  ArrowRight, 
-  Zap, 
-  Shield, 
-  Cpu, 
-  CheckCircle2
-} from "lucide-react";
-import { isAuthenticated } from "@/lib/auth";
+  HiPlus, 
+  HiRefresh, 
+  HiChartBar, 
+  HiCollection, 
+  HiLightningBolt, 
+  HiServer,
+  HiExternalLink,
+  HiExclamationCircle,
+  HiArrowRight,
+  HiStop
+} from "react-icons/hi";
+import { Loader2 } from "lucide-react";
+import { AuthGuard } from "@/components/AuthGuard";
+import { DashboardLayout } from "@/components/DashboardLayout";
+import { useVms, useStopVm } from "@/lib/hooks/use-vms";
+import { Badge, Alert } from "flowbite-react";
 import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { cn } from "@/lib/utils";
+import { DeployModal } from "@/components/DeployModal";
+import { toast } from "sonner";
 
-export default function Home() {
-  const [authenticated, setAuthenticated] = useState(false);
+function normalizeStatus(status: string): string {
+  return status.toLowerCase() === "cancelled" ? "stopped" : status;
+}
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAuthenticated(isAuthenticated());
-  }, []);
+function getStatusColor(status: string): string {
+  const s = status.toLowerCase();
+  if (s === "running") return "success";
+  if (s === "scheduled" || s === "pending") return "warning";
+  if (s === "failed" || s === "cancelled") return "failure";
+  return "gray";
+}
+
+export default function Page() {
+  const { data: vms = [], isLoading, error, refetch, isFetching } = useVms();
+  const stopVmMutation = useStopVm();
+  const [showDeploy, setShowDeploy] = useState(false);
+
+  const handleStopVm = (jobId: string, appName: string) => {
+    toast.promise(stopVmMutation.mutateAsync(jobId), {
+      loading: `Stopping ${appName}...`,
+      success: `App ${appName} stopped successfully`,
+      error: (err) => `Failed to stop ${appName}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    });
+  };
+
+  const running = vms.filter((v) => v.status.toLowerCase() === "running").length;
+  const scheduled = vms.filter(
+    (v) =>
+      v.status.toLowerCase() === "scheduled" ||
+      v.status.toLowerCase() === "pending"
+  ).length;
+
+  const recentVms = vms.slice(0, 5);
 
   return (
-    <div className="flex flex-col min-h-screen bg-white dark:bg-zinc-950 selection:bg-zinc-900 selection:text-white dark:selection:bg-white dark:selection:text-black">
-      {/* Navbar */}
-      <nav className="border-b border-zinc-100 dark:border-zinc-900 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
-            <Box className="w-6 h-6" />
-            <span>Mikrom</span>
-          </div>
-          <div className="flex items-center gap-4">
-            {authenticated ? (
-              <Link href="/dashboard">
-                <Button size="sm">Go to Dashboard</Button>
-              </Link>
-            ) : (
-              <>
-                <Link href="/auth/login">
-                  <Button variant="ghost" size="sm">Login</Button>
-                </Link>
-                <Link href="/auth/register">
-                  <Button size="sm">Get Started</Button>
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-      </nav>
-
-      <main className="flex-1">
-        {/* Hero Section */}
-        <section className="py-24 px-6 overflow-hidden relative">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-full -z-10 opacity-10 dark:opacity-20 pointer-events-none">
-            <div className="absolute top-0 left-1/4 w-96 h-96 bg-zinc-400 rounded-full blur-[128px]" />
-            <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-zinc-600 rounded-full blur-[128px]" />
-          </div>
-
-          <div className="max-w-4xl mx-auto text-center space-y-8">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-medium animate-in fade-in slide-in-from-bottom-2 duration-500">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-              </span>
-              Now in Private Beta
+    <AuthGuard>
+      <DashboardLayout>
+        <div className="space-y-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
+                Dashboard
+              </h1>
+              <p className="text-zinc-500 dark:text-zinc-400 mt-1">
+                Overview of your cloud resources and applications.
+              </p>
             </div>
-            
-            <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 animate-in fade-in slide-in-from-bottom-4 duration-700">
-              Compute at the <span className="text-zinc-500">Speed of Light.</span>
-            </h1>
-            
-            <p className="text-xl text-zinc-600 dark:text-zinc-400 max-w-2xl mx-auto leading-relaxed animate-in fade-in slide-in-from-bottom-6 duration-1000">
-              Deploy Firecracker micro-VMs in milliseconds. Mikrom provides the infrastructure 
-              you need for high-performance, secure serverless workloads.
-            </p>
-
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4 animate-in fade-in slide-in-from-bottom-8 duration-1000">
-              <Link href={authenticated ? "/dashboard" : "/auth/register"}>
-                <Button size="lg" className="rounded-full px-8">
-                  {authenticated ? "Open Dashboard" : "Deploy your first app"}
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
-              </Link>
-              <Button variant="outline" size="lg" className="rounded-full px-8">
-                Read Documentation
+            <div className="flex items-center gap-3">
+              <Button color="gray" size="sm" onClick={() => refetch()} disabled={isFetching}>
+                <HiRefresh className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
+                Refresh
+              </Button>
+              <Button size="sm" color="dark" onClick={() => setShowDeploy(true)}>
+                <HiPlus className="w-4 h-4 mr-2" />
+                Deploy App
               </Button>
             </div>
           </div>
-        </section>
 
-        {/* Features Section */}
-        <section className="py-24 bg-zinc-50 dark:bg-zinc-900/50 border-y border-zinc-100 dark:border-zinc-900">
-          <div className="max-w-7xl mx-auto px-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-              <div className="space-y-4">
-                <div className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center shadow-sm">
-                  <Zap className="w-6 h-6 text-zinc-900 dark:text-zinc-50" />
-                </div>
-                <h3 className="text-xl font-bold">Lightning Fast</h3>
-                <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                  Start VMs in less than 125ms. Our optimized Firecracker stack ensures 
-                  your applications are ready exactly when you need them.
+          {/* Stats Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <Card>
+              <div className="flex items-center justify-between">
+                <h5 className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Apps</h5>
+                <HiCollection className="w-4 h-4 text-zinc-500" />
+              </div>
+              <div className="mt-2">
+                {isLoading ? (
+                  <div className="h-8 w-12 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
+                ) : (
+                  <div className="text-3xl font-bold dark:text-white">{vms.length}</div>
+                )}
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Active deployments
                 </p>
               </div>
-
-              <div className="space-y-4">
-                <div className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center shadow-sm">
-                  <Shield className="w-6 h-6 text-zinc-900 dark:text-zinc-50" />
-                </div>
-                <h3 className="text-xl font-bold">Secure by Default</h3>
-                <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                  Hardware-level isolation for every workload. Multi-tenant security 
-                  without the performance overhead of traditional virtualization.
+            </Card>
+            <Card>
+              <div className="flex items-center justify-between">
+                <h5 className="text-sm font-medium text-gray-500 dark:text-gray-400">Running</h5>
+                <HiChartBar className="w-4 h-4 text-green-500" />
+              </div>
+              <div className="mt-2">
+                {isLoading ? (
+                  <div className="h-8 w-12 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
+                ) : (
+                  <div className="text-3xl font-bold text-green-600 dark:text-green-400">{running}</div>
+                )}
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Currently serving
                 </p>
               </div>
-
-              <div className="space-y-4">
-                <div className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center shadow-sm">
-                  <Cpu className="w-6 h-6 text-zinc-900 dark:text-zinc-50" />
-                </div>
-                <h3 className="text-xl font-bold">Resource Efficient</h3>
-                <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                  Minimal memory footprint. Run thousands of micro-VMs on a single 
-                  host with extreme density and optimal resource allocation.
+            </Card>
+            <Card>
+              <div className="flex items-center justify-between">
+                <h5 className="text-sm font-medium text-gray-500 dark:text-gray-400">Deploying</h5>
+                <HiLightningBolt className="w-4 h-4 text-yellow-500" />
+              </div>
+              <div className="mt-2">
+                {isLoading ? (
+                  <div className="h-8 w-12 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
+                ) : (
+                  <div className="text-3xl font-bold text-yellow-600 dark:text-yellow-400">{scheduled}</div>
+                )}
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Pending tasks
                 </p>
               </div>
-            </div>
+            </Card>
           </div>
-        </section>
 
-        {/* Trust Section */}
-        <section className="py-24 px-6">
-          <div className="max-w-7xl mx-auto bg-zinc-900 dark:bg-white rounded-3xl p-12 flex flex-col md:flex-row items-center justify-between gap-8 text-white dark:text-zinc-950 overflow-hidden relative">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 dark:bg-black/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
-            
-            <div className="space-y-4 max-w-xl">
-              <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Ready to scale your infrastructure?</h2>
-              <p className="text-zinc-400 dark:text-zinc-500 text-lg">
-                Join hundreds of developers building the next generation of 
-                real-time applications on Mikrom.
-              </p>
-            </div>
-            
-            <div className="flex flex-col gap-3 min-w-[200px]">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <CheckCircle2 className="w-4 h-4 text-green-400 dark:text-green-600" />
-                No credit card required
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Recent Apps */}
+            <Card className="lg:col-span-2" noPadding>
+              <div className="flex items-center justify-between p-6 pb-0">
+                <div>
+                  <h5 className="text-xl font-bold dark:text-white">Recent Applications</h5>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Your most recently deployed instances.</p>
+                </div>
+                <Link href="/vms">
+                  <Button color="gray" size="sm">
+                    View all
+                    <HiArrowRight className="w-3 h-3 ml-2" />
+                  </Button>
+                </Link>
               </div>
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <CheckCircle2 className="w-4 h-4 text-green-400 dark:text-green-600" />
-                Free tier available
+              <div className="mt-6 border-t border-gray-100 dark:border-gray-800">
+                {error && (
+                  <Alert color="failure" className="rounded-none" icon={() => <HiExclamationCircle className="w-4 h-4 mr-2" />}>
+                    {error instanceof Error ? error.message : "Failed to load applications"}
+                  </Alert>
+                )}
+
+                <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {isLoading && vms.length === 0 ? (
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="px-6 py-4 flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-lg bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                          <div className="space-y-2">
+                            <div className="h-4 w-24 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
+                            <div className="h-3 w-32 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
+                          </div>
+                        </div>
+                        <div className="h-6 w-16 bg-gray-200 dark:bg-gray-700 animate-pulse rounded-full" />
+                      </div>
+                    ))
+                  ) : vms.length === 0 && !isLoading ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                      <p className="text-gray-500 dark:text-gray-400 text-sm">No applications found.</p>
+                      <Button color="gray" size="sm" className="mt-4" onClick={() => setShowDeploy(true)}>
+                        Deploy your first app
+                      </Button>
+                    </div>
+                  ) : (
+                    recentVms.map((vm) => (
+                      <div
+                        key={vm.job_id}
+                        className="group px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className={cn(
+                            "w-10 h-10 rounded-lg flex items-center justify-center border border-gray-200 dark:border-gray-800 bg-white dark:bg-zinc-900 shadow-sm transition-transform group-hover:scale-110",
+                            vm.status.toLowerCase() === "running" ? "text-green-600 dark:text-green-400" : "text-gray-400"
+                          )}>
+                            <HiServer className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <div className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                              {vm.app_name}
+                              <Badge color={getStatusColor(vm.status)} className="capitalize px-1.5 py-0 h-4 text-[10px]">
+                                {normalizeStatus(vm.status)}
+                              </Badge>
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5 truncate max-w-[150px] sm:max-w-xs">
+                              {vm.image}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {vm.status.toLowerCase() === "running" && (
+                            <Button 
+                              color="gray" 
+                              size="xs"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => handleStopVm(vm.job_id, vm.app_name)}
+                              disabled={stopVmMutation.isPending}
+                            >
+                              {stopVmMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <HiStop className="w-4 h-4" />}
+                            </Button>
+                          )}
+                          <Link href={`/vms/${vm.job_id}`}>
+                            <Button color="gray" size="xs" className="opacity-0 group-hover:opacity-100 transition-opacity">
+                              <HiExternalLink className="w-4 h-4" />
+                            </Button>
+                          </Link>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-              <Link href="/auth/register" className="mt-2">
-                <Button variant="secondary" size="lg" className="w-full rounded-full dark:bg-zinc-900 dark:text-white">
-                  Create Free Account
+            </Card>
+
+            {/* Quick Actions / Tips */}
+            <Card>
+              <h5 className="text-xl font-bold dark:text-white">Quick Actions</h5>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Common tasks and shortcuts.</p>
+              <div className="space-y-3">
+                <Button color="gray" outline className="w-full justify-start" onClick={() => setShowDeploy(true)}>
+                  <HiPlus className="w-4 h-4 mr-2" />
+                  Deploy New App
                 </Button>
-              </Link>
-            </div>
+                <Button color="gray" outline className="w-full justify-start" onClick={() => refetch()} disabled={isFetching}>
+                  <HiRefresh className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
+                  Sync Resources
+                </Button>
+                <div className="pt-4 mt-4 border-t border-gray-100 dark:border-gray-800">
+                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Resources</h4>
+                  <ul className="space-y-2 text-sm text-gray-500">
+                    <li><a href="#" className="hover:text-gray-900 dark:hover:text-white flex items-center justify-between">API Reference <HiExternalLink className="w-3 h-3" /></a></li>
+                    <li><a href="#" className="hover:text-gray-900 dark:hover:text-white flex items-center justify-between">CLI Tool <HiExternalLink className="w-3 h-3" /></a></li>
+                    <li><a href="#" className="hover:text-gray-900 dark:hover:text-white flex items-center justify-between">Firecracker Docs <HiExternalLink className="w-3 h-3" /></a></li>
+                  </ul>
+                </div>
+              </div>
+            </Card>
           </div>
-        </section>
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t border-zinc-100 dark:border-zinc-900 py-12 px-6">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
-          <div className="flex items-center gap-2 font-bold opacity-50">
-            <Box className="w-5 h-5" />
-            <span>Mikrom</span>
-          </div>
-          <div className="flex items-center gap-8 text-sm text-zinc-500">
-            <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-50">Twitter</a>
-            <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-50">GitHub</a>
-            <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-50">Discord</a>
-            <a href="#" className="hover:text-zinc-900 dark:hover:text-zinc-50">Terms</a>
-          </div>
-          <p className="text-sm text-zinc-400">
-            © 2026 Mikrom Compute. All rights reserved.
-          </p>
         </div>
-      </footer>
-    </div>
+
+        {showDeploy && <DeployModal onClose={() => setShowDeploy(false)} />}
+      </DashboardLayout>
+    </AuthGuard>
   );
 }
