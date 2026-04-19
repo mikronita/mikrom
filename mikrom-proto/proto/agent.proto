@@ -12,7 +12,29 @@ service AgentService {
   rpc GetLogs(GetLogsRequest) returns (stream GetLogsResponse);
   rpc StartVm(StartVmRequest) returns (StartVmResponse);
   rpc StopVm(StopVmRequest) returns (StopVmResponse);
+  rpc PauseVm(PauseVmRequest) returns (PauseVmResponse);
+  rpc ResumeVm(ResumeVmRequest) returns (ResumeVmResponse);
   rpc GetVmStatus(GetVmStatusRequest) returns (GetVmStatusResponse);
+}
+
+// ... other messages ...
+
+message PauseVmRequest {
+  string vm_id = 1;
+}
+
+message PauseVmResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ResumeVmRequest {
+  string vm_id = 1;
+}
+
+message ResumeVmResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message RegisterRequest {
@@ -146,4 +168,5 @@ enum VmStatus {
   VM_STATUS_STOPPING = 3;
   VM_STATUS_STOPPED = 4;
   VM_STATUS_FAILED = 5;
+  VM_STATUS_PAUSED = 6;
 }

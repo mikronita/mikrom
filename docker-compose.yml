@@ -52,6 +52,10 @@ services:
     build:
       context: .
       dockerfile: mikrom-agent/Dockerfile
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     environment:
       SCHEDULER_ADDR: https://mikrom-scheduler:5002
       AGENT_PORT: "5003"
@@ -69,6 +73,8 @@ services:
       - certs:/certs
       - /opt/firecracker:/opt/firecracker:ro
       - /usr/local/bin/firecracker:/usr/local/bin/firecracker:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp:/tmp
     depends_on:
       cert-gen:
         condition: service_completed_successfully

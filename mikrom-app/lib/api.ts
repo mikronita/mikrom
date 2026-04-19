@@ -252,6 +252,40 @@ export async function stopVm(
   }
 }
 
+export async function pauseVm(
+  token: string,
+  jobId: string
+): Promise<{ data?: StopVmResponse; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/vms/${jobId}/pause`, {
+      method: "POST",
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<StopVmResponse & ApiError>(response);
+    if (!response.ok) return { error: (result as ApiError).error || "Failed to pause VM" };
+    return { data: result as StopVmResponse };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function resumeVm(
+  token: string,
+  jobId: string
+): Promise<{ data?: StopVmResponse; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/vms/${jobId}/resume`, {
+      method: "POST",
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<StopVmResponse & ApiError>(response);
+    if (!response.ok) return { error: (result as ApiError).error || "Failed to resume VM" };
+    return { data: result as StopVmResponse };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
 export async function deleteVm(
   token: string,
   jobId: string

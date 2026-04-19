@@ -23,6 +23,9 @@ hostname = "0.4"
 
 mikrom-proto = { path = "../mikrom-proto" }
 dotenvy = "0.15"
+tokio-util = { version = "0.7.18", features = ["io", "codec"] }
+anyhow = "1.0.102"
+futures = "0.3.32"
 
 [build-dependencies]
 tonic-build.workspace = true

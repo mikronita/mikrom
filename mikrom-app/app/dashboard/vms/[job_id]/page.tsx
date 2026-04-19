@@ -14,12 +14,15 @@ import {
   Terminal,
   Cpu,
   Square,
+  Pause,
+  Play,
   Trash2
 } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { getToken } from "@/lib/auth";
-import { getVm, stopVm, deleteVm, VmStatus, getVmLogsSSE, LogLine } from "@/lib/api";
+import { getVm, stopVm, deleteVm, VmStatus, getVmLogsSSE, LogLine, pauseVm, resumeVm } from "@/lib/api";
+import Ansi from "ansi-to-react";
 
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -117,6 +120,35 @@ export default function VmDetailPage() {
   const isStoppable = (status: string) => {
     const s = status.toLowerCase();
     return s === "running" || s === "scheduled" || s === "pending";
+  };
+
+  const [pausing, setPausing] = useState(false);
+  const [resuming, setResuming] = useState(false);
+
+  const handlePause = async () => {
+    const token = getToken();
+    if (!token) return;
+    setPausing(true);
+    const result = await pauseVm(token, jobId);
+    if (result.error) {
+      setStopError(result.error);
+    } else {
+      await fetchVm(true);
+    }
+    setPausing(false);
+  };
+
+  const handleResume = async () => {
+    const token = getToken();
+    if (!token) return;
+    setResuming(true);
+    const result = await resumeVm(token, jobId);
+    if (result.error) {
+      setStopError(result.error);
+    } else {
+      await fetchVm(true);
+    }
+    setResuming(false);
   };
 
   const handleStop = async () => {
@@ -221,6 +253,34 @@ export default function VmDetailPage() {
                 <RefreshCw className={cn("w-4 h-4 mr-2", loading && "animate-spin")} />
                 Refresh
               </Button>
+              {vm && vm.status.toLowerCase() === "running" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handlePause}
+                  disabled={pausing}
+                >
+                  {pausing ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Pausing...</>
+                  ) : (
+                    <><Pause className="w-4 h-4 mr-2" />Pause</>
+                  )}
+                </Button>
+              )}
+              {vm && vm.status.toLowerCase() === "paused" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleResume}
+                  disabled={resuming}
+                >
+                  {resuming ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Resuming...</>
+                  ) : (
+                    <><Play className="w-4 h-4 mr-2" />Resume</>
+                  )}
+                </Button>
+              )}
               {vm && isStoppable(vm.status) && !confirmStop && (
                 <Button
                   size="sm"
@@ -340,7 +400,9 @@ export default function VmDetailPage() {
                             <span className="text-zinc-600 shrink-0 select-none">
                               {new Date(log.timestamp * 1000).toLocaleTimeString([], { hour12: false })}
                             </span>
-                            <span className="whitespace-pre-wrap break-all">{log.line}</span>
+                            <span className="whitespace-pre-wrap break-all">
+                              <Ansi useClasses>{log.line}</Ansi>
+                            </span>
                           </div>
                         ))
                       )}

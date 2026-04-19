@@ -11,8 +11,32 @@ service SchedulerService {
   rpc GetAppStatus(AppStatusRequest) returns (AppStatusResponse);
   rpc GetAppLogs(GetLogsRequest) returns (stream GetLogsResponse);
   rpc CancelApp(CancelRequest) returns (CancelResponse);
+  rpc PauseApp(PauseRequest) returns (PauseResponse);
+  rpc ResumeApp(ResumeRequest) returns (ResumeResponse);
   rpc DeleteApp(DeleteAppRequest) returns (DeleteAppResponse);
   rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
+}
+
+// ... other messages ...
+
+message PauseRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message PauseResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ResumeRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message ResumeResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message GetLogsRequest {
@@ -113,6 +137,7 @@ enum DeployStatus {
   DEPLOY_STATUS_RUNNING = 3;
   DEPLOY_STATUS_FAILED = 4;
   DEPLOY_STATUS_CANCELLED = 5;
+  DEPLOY_STATUS_PAUSED = 6;
 }
 
 message AppStatusRequest {

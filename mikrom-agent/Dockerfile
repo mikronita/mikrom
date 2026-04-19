@@ -24,6 +24,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     iproute2 \
+    e2fsprogs \
+    kmod \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/mikrom-agent /usr/local/bin/
 EXPOSE 5003
