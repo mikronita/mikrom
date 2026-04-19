@@ -812,9 +812,19 @@ impl FirecrackerManager {
         }
     }
 
-    pub async fn init_network(&self) -> Result<(), FirecrackerError> {
+    fn get_bridge_config(&self) -> (String, String) {
+        let env_ip = std::env::var("BRIDGE_IP").ok();
+        Self::resolve_bridge_config(env_ip)
+    }
+
+    fn resolve_bridge_config(env_ip: Option<String>) -> (String, String) {
         let bridge_name = "mikrom-br0";
-        let bridge_ip = "172.16.1.1/24";
+        let bridge_ip = env_ip.unwrap_or_else(|| "10.0.0.1/8".to_string());
+        (bridge_name.to_string(), bridge_ip)
+    }
+
+    pub async fn init_network(&self) -> Result<(), FirecrackerError> {
+        let (bridge_name, bridge_ip) = self.get_bridge_config();
 
         tracing::info!(
             "Initializing network bridge {} with IP {}",
@@ -824,19 +834,19 @@ impl FirecrackerManager {
 
         // 1. Create bridge if it doesn't exist
         let _ = tokio::process::Command::new("ip")
-            .args(["link", "add", "name", bridge_name, "type", "bridge"])
+            .args(["link", "add", "name", &bridge_name, "type", "bridge"])
             .output()
             .await;
 
         // 2. Set bridge IP
         let _ = tokio::process::Command::new("ip")
-            .args(["addr", "add", bridge_ip, "dev", bridge_name])
+            .args(["addr", "add", &bridge_ip, "dev", &bridge_name])
             .output()
             .await;
 
         // 3. Bring bridge up
         tokio::process::Command::new("ip")
-            .args(["link", "set", "dev", bridge_name, "up"])
+            .args(["link", "set", "dev", &bridge_name, "up"])
             .output()
             .await
             .map_err(|e| {
@@ -861,10 +871,10 @@ impl FirecrackerManager {
                 "-A",
                 "POSTROUTING",
                 "-s",
-                "172.16.1.0/24",
+                "10.0.0.0/8",
                 "!",
                 "-o",
-                bridge_name,
+                &bridge_name,
                 "-j",
                 "MASQUERADE",
             ])
@@ -1921,5 +1931,18 @@ mod tests {
         mgr.stop_vm(vm_id).await.unwrap();
 
         assert!(!mgr.logs.read().await.contains_key(vm_id));
+    }
+
+    #[test]
+    fn test_bridge_config_logic() {
+        // Test default
+        let (name, ip) = FirecrackerManager::resolve_bridge_config(None);
+        assert_eq!(name, "mikrom-br0");
+        assert_eq!(ip, "10.0.0.1/8");
+
+        // Test override
+        let (_, ip_override) =
+            FirecrackerManager::resolve_bridge_config(Some("10.0.1.1/24".to_string()));
+        assert_eq!(ip_override, "10.0.1.1/24");
     }
 }

@@ -189,7 +189,7 @@ impl SchedulerService for SchedulerServer {
                 let guest_ip = self.scheduler.ipam().allocate().ok_or_else(|| {
                     Status::resource_exhausted("No available IP addresses in pool")
                 })?;
-                let gateway = "172.16.1.1".to_string();
+                let gateway = "10.0.0.1".to_string();
                 // Extract last byte from IP for MAC address
                 let last_byte = guest_ip
                     .split('.')
@@ -1507,11 +1507,11 @@ mod tests {
             .expect("MAC should be assigned");
 
         assert!(
-            ip.starts_with("172.16.1."),
-            "IP {} should be in 172.16.1.x range",
+            ip.starts_with("10."),
+            "IP {} should be in 10.x.x.x range",
             ip
         );
-        assert_eq!(gw, "172.16.1.1");
+        assert_eq!(gw, "10.0.0.1");
         assert!(
             mac.starts_with("AA:BB:CC:01:01:"),
             "MAC {} should have correct prefix",
