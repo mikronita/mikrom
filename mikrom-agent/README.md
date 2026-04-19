@@ -4,32 +4,67 @@ gRPC agent service for the mikrom orchestration system. Runs on every worker nod
 
 **Port:** `5003` (configurable via `AGENT_PORT`)
 
+## Architecture
+
+```
+                    ┌────────────────────────────────────┐
+                    │    mikrom-scheduler              │
+                    │  (gRPC client)             │
+                    └──────────┬──────────────┘
+                               │
+                    RegisterWorker + ReportMetrics
+                    (every 5s heartbeat)
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────┐
+│              mikrom-agent                      │
+│                                              │
+│  ┌─────────────┐     ┌─────────────────┐    │
+│  │  Metrics  │────▶│  Firecracker │    │
+│  │ Collector │     │ Manager     │    │
+│  └─────────────┘     └─────────────┘    │
+│                                              │
+│  - Host resources (CPU, memory, disk)     │
+│  - VM lifecycle (start/stop/status)      │
+└──────────────────────────────────────────────────────┘
+```
+
 ## Responsibilities
 
-- On startup, registers itself with `mikrom-scheduler` via `RegisterWorker`.
-- Sends a `ReportMetrics` heartbeat to the scheduler every 5 seconds.
-- Implements the `AgentService` gRPC interface: start, stop, and query VM status.
-- Delegates VM lifecycle operations to `FirecrackerManager`.
+- **Registration**: On startup, connects to `mikrom-scheduler` via `RegisterWorker`.
+- **Heartbeat**: Sends `ReportMetrics` every 5 seconds with host resources.
+- **VM Management**: Implements `AgentService` gRPC interface for VM lifecycle.
+- **Delegation**: Delegates VM operations to `FirecrackerManager`.
 
-> **Note:** `FirecrackerManager` is currently an in-memory state machine. It does not yet invoke the Firecracker binary.
+> **Note:** `FirecrackerManager` is currently an in-memory state machine. Real Firecracker integration is pending.
 
 ## gRPC API
 
 Defined in `mikrom-proto/proto/agent.proto`.
 
-| RPC | Called by | Description |
+| RPC | Direction | Description |
 |---|---|---|
-| `StartVm` | mikrom-scheduler | Launch a new microVM |
-| `StopVm` | mikrom-scheduler | Terminate a running VM |
-| `GetVmStatus` | mikrom-scheduler | Query the status of a VM |
-| `GetMetrics` | mikrom-scheduler | Return current host resource metrics |
+| `StartVm` | scheduler → agent | Launch a new microVM |
+| `StopVm` | scheduler → agent | Terminate a running VM |
+| `PauseVm` | scheduler → agent | Pause a running VM |
+| `ResumeVm` | scheduler → agent | Resume a paused VM |
+| `GetVmStatus` | scheduler → agent | Query VM status |
+| `GetHostMetrics` | scheduler → agent | Return host resource metrics |
 
 ## VM states
 
 ```
-Stopped → Starting → Running
-                   → Stopping → Stopped
-         → Failed
+┌────────┐     ┌───────────┐     ┌────────┐
+│Stopped │────▶│Starting │────▶│Running │
+└────────┘     └─────────┘     └────────┘
+                   │            │
+                   │            ▼
+                   │        ┌───────────┐
+                   │        │Stopping  │
+                   │        └──┬──────┘
+                   │           │
+                   │           ▼
+                   └──────▶  Failed
 ```
 
 ## Configuration
