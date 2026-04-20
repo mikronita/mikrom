@@ -112,11 +112,11 @@ impl MetricsCollector {
             let mut cpu = 0.0;
             let mut ram = 0;
 
-            if let Some(pid) = vm.pid {
-                if let Some(process) = system.process(sysinfo::Pid::from(pid as usize)) {
-                    cpu = process.cpu_usage() / 100.0;
-                    ram = process.memory();
-                }
+            if let Some(pid) = vm.pid
+                && let Some(process) = system.process(sysinfo::Pid::from(pid as usize))
+            {
+                cpu = process.cpu_usage() / 100.0;
+                ram = process.memory();
             }
 
             vms.insert(

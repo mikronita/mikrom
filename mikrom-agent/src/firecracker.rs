@@ -395,7 +395,7 @@ impl FirecrackerManager {
         }
 
         // 3. In real mode, validate the binary exists before going async.
-        if self.fc_config.kernel_path.is_some() {
+        if let Some(_kernel) = &self.fc_config.kernel_path {
             let binary = &self.fc_config.binary;
             if !std::path::Path::new(binary).exists() {
                 let err_msg = format!("Firecracker binary not found: {}", binary);
@@ -1991,7 +1991,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_initial_log_capture() {
-        let mgr = FirecrackerManager::new();
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         let vm_id = "log-test-vm";
 
         // Our current start_vm adds an initial log entry even before spawning.
@@ -2011,6 +2011,10 @@ mod tests {
         )
         .await
         .unwrap();
+
+        // Wait a bit for the background task to start
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
         let logs = mgr.get_logs(vm_id).await;
         assert!(
             !logs.is_empty(),

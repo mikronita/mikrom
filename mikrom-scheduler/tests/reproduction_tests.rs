@@ -68,17 +68,18 @@ mod tests {
 
         // Note: forward_deploy_to_agent will fail in tests because there is no real agent
         // but we want to see if it even gets there and what host it picks.
-        let resp = server
-            .deploy_app(Request::new(deploy_req))
-            .await
-            .unwrap()
-            .into_inner();
+        let result = server.deploy_app(Request::new(deploy_req)).await;
 
-        println!("Deployed to host: {}", resp.host_id);
-        assert!(!resp.host_id.is_empty());
+        assert!(result.is_err());
+        let status = result.err().unwrap();
+        assert_eq!(status.code(), tonic::Code::Unavailable);
 
         // Check job state in scheduler
-        let job = server.scheduler().get_job(&resp.job_id).unwrap();
+        let jobs = server.scheduler().list_jobs(Some("user-1"), None);
+        assert_eq!(jobs.len(), 1);
+        let job = &jobs[0];
         assert!(job.host_id.is_some());
+        let host_id = job.host_id.as_ref().unwrap();
+        assert!(host_id == "host-1" || host_id == "host-2");
     }
 }

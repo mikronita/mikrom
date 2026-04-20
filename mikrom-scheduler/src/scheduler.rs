@@ -89,12 +89,11 @@ impl AppScheduler {
 
     pub fn remove_job(&self, job_id: &str) -> bool {
         if let Some(job) = self.jobs.write().remove(job_id) {
-            if let Some(ip) = job.config.ip_address {
-                if let Some(host_id) = job.host_id {
-                    if let Some(worker) = self.worker_registry.get_worker(&host_id) {
-                        worker.ipam.release(&ip);
-                    }
-                }
+            if let Some(ip) = job.config.ip_address
+                && let Some(host_id) = job.host_id
+                && let Some(worker) = self.worker_registry.get_worker(&host_id)
+            {
+                worker.ipam.release(&ip);
             }
             true
         } else {

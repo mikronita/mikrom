@@ -14,6 +14,7 @@ use std::time::Duration;
 use axum::{body::Body, http::Request};
 use tower::ServiceExt;
 
+use mikrom_agent::firecracker::{FirecrackerConfig, FirecrackerManager, VmConfig};
 use mikrom_agent::server::AgentServer;
 use mikrom_api::auth::jwt::create_token;
 use mikrom_api::repositories::user_repository::{DbError, NewUser, User, UserRepository};
@@ -92,13 +93,14 @@ async fn test_scheduler_agent_grpc_e2e() {
     wait_for_tcp(scheduler_port).await;
 
     // ── start agent ───────────────────────────────────────────────────────────
-    // `with_scheduler_addr` avoids touching process-global env vars.
-    let agent = AgentServer::with_scheduler_addr(
+    // `with_manager` avoids touching process-global env vars and uses stub mode.
+    let agent = AgentServer::with_manager(
         "e2e-agent-1".to_string(),
         "e2e-node".to_string(),
         "127.0.0.1".to_string(),
         "10.0.0.1/8".to_string(),
         scheduler_url.clone(),
+        FirecrackerManager::with_config(FirecrackerConfig::stub()),
     );
     let agent_addr: SocketAddr = format!("127.0.0.1:{agent_port}").parse().unwrap();
     tokio::spawn(async move {
@@ -170,14 +172,14 @@ async fn test_http_api_deploy_e2e() {
             .unwrap();
     });
     wait_for_tcp(scheduler_port).await;
-
     // ── start agent ───────────────────────────────────────────────────────────
-    let agent = AgentServer::with_scheduler_addr(
+    let agent = AgentServer::with_manager(
         "e2e-agent-http".to_string(),
         "e2e-http-node".to_string(),
         "127.0.0.1".to_string(),
         "10.0.0.1/8".to_string(),
         scheduler_url.clone(),
+        FirecrackerManager::with_config(FirecrackerConfig::stub()),
     );
     let agent_addr: SocketAddr = format!("127.0.0.1:{agent_port}").parse().unwrap();
     tokio::spawn(async move {

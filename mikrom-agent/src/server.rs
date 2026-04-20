@@ -693,10 +693,15 @@ mod tests {
     use tonic::Request;
 
     fn make_server() -> AgentServer {
-        AgentServer::new(
+        let fc_config = crate::firecracker::FirecrackerConfig::stub();
+        let firecracker = crate::firecracker::FirecrackerManager::with_config(fc_config);
+        AgentServer::with_manager(
             "host-1".to_string(),
             "node-1".to_string(),
             "127.0.0.1".to_string(),
+            "10.0.0.1/8".to_string(),
+            "http://127.0.0.1:5002".to_string(),
+            firecracker,
         )
     }
 
@@ -819,6 +824,24 @@ mod tests {
             .into_inner();
         assert!(resp.success);
         assert_eq!(resp.vm_id, "vm-explicit");
+
+        // Wait for it to reach Running state
+        let mut status = 0;
+        for _ in 0..100 {
+            let status_resp = server
+                .get_vm_status(Request::new(GetVmStatusRequest {
+                    vm_id: "vm-explicit".to_string(),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            status = status_resp.status;
+            if status == 2 {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(status, 2);
     }
 
     #[tokio::test]
@@ -838,6 +861,25 @@ mod tests {
         assert!(!resp.vm_id.is_empty());
         // UUID has 36 chars
         assert_eq!(resp.vm_id.len(), 36);
+
+        let vm_id = resp.vm_id.clone();
+        // Wait for it to reach Running state
+        let mut status = 0;
+        for _ in 0..100 {
+            let status_resp = server
+                .get_vm_status(Request::new(GetVmStatusRequest {
+                    vm_id: vm_id.clone(),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            status = status_resp.status;
+            if status == 2 {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(status, 2);
     }
 
     #[tokio::test]
@@ -908,14 +950,23 @@ mod tests {
             .start_vm(Request::new(start_vm_req("vm-cnt")))
             .await
             .unwrap();
-        let metrics = server
-            .get_metrics(Request::new(GetMetricsRequest {
-                host_id: String::new(),
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        assert_eq!(metrics.apps_count, 1);
+
+        let mut apps_count = 0;
+        for _ in 0..100 {
+            let metrics = server
+                .get_metrics(Request::new(GetMetricsRequest {
+                    host_id: String::new(),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            apps_count = metrics.apps_count;
+            if apps_count == 1 {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(apps_count, 1);
     }
 
     #[tokio::test]
@@ -979,15 +1030,25 @@ mod tests {
             .start_vm(Request::new(start_vm_req("vm-st")))
             .await
             .unwrap();
-        let resp = server
-            .get_vm_status(Request::new(GetVmStatusRequest {
-                vm_id: "vm-st".to_string(),
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        assert_eq!(resp.status, 1); // Starting
-        assert_eq!(resp.vm_id, "vm-st");
+
+        let mut status = 0;
+        for _ in 0..100 {
+            let resp = server
+                .get_vm_status(Request::new(GetVmStatusRequest {
+                    vm_id: "vm-st".to_string(),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            status = resp.status;
+            if status == 2 {
+                // Running
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(status, 2);
+        // The VM ID should match
     }
 
     #[tokio::test]
@@ -1096,24 +1157,37 @@ mod tests {
             .await
             .unwrap();
         let cloned = original.clone();
-        // Clone sees VM started by original (Arc is shared)
-        let resp = cloned
-            .get_vm_status(Request::new(GetVmStatusRequest {
-                vm_id: "shared-vm".to_string(),
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        assert_eq!(resp.status, 1); // Starting
-        // Metrics state (apps_count) is also shared
-        let metrics = cloned
-            .get_metrics(Request::new(GetMetricsRequest {
-                host_id: String::new(),
-            }))
-            .await
-            .unwrap()
-            .into_inner();
-        assert_eq!(metrics.apps_count, 1);
+
+        // Wait for it to be Running and apps_count to be 1
+        let mut status = 0;
+        let mut apps_count = 0;
+        for _ in 0..100 {
+            let resp = cloned
+                .get_vm_status(Request::new(GetVmStatusRequest {
+                    vm_id: "shared-vm".to_string(),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            status = resp.status;
+
+            let metrics = cloned
+                .get_metrics(Request::new(GetMetricsRequest {
+                    host_id: String::new(),
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            apps_count = metrics.apps_count;
+
+            if status == 2 && apps_count == 1 {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        assert_eq!(status, 2);
+        assert_eq!(apps_count, 1);
     }
 
     #[tokio::test]

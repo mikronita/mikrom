@@ -64,10 +64,7 @@ impl IntoResponse for ApiError {
             }
             Self::Internal(msg) => {
                 tracing::error!("Internal error: {}", msg);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "An internal error occurred".to_string(),
-                )
+                (StatusCode::INTERNAL_SERVER_ERROR, msg)
             }
         };
 

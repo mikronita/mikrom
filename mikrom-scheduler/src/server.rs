@@ -222,7 +222,7 @@ impl SchedulerService for SchedulerServer {
 
         let result = self.scheduler.select_best_worker(&config, &req.app_id);
 
-        let response = match result {
+        match result {
             Ok(worker) => {
                 let app_id = req.app_id.clone();
                 let image = req.image.clone();
@@ -276,7 +276,7 @@ impl SchedulerService for SchedulerServer {
                     .forward_deploy_to_agent(&host_id, &app_id, &image, &vm_id, &job_config)
                     .await
                 {
-                    Ok(()) => {
+                    Ok(_) => {
                         self.scheduler.start_job(&job_id);
 
                         let job = self.scheduler.get_job(&job_id);
@@ -320,9 +320,7 @@ impl SchedulerService for SchedulerServer {
                     message: e.to_string(),
                 }))
             }
-        };
-
-        response
+        }
     }
 
     #[tracing::instrument(skip(self, request), fields(job_id = %request.get_ref().job_id))]
@@ -792,8 +790,9 @@ impl SchedulerServer {
             .start_vm(req)
             .await
             .map_err(|e| {
-                tracing::error!("Failed to start VM {} on agent {}: {}", vm_id, host_id, e);
-                Status::internal(format!("Failed to start VM: {}", e))
+                let msg = e.message();
+                tracing::error!("Failed to start VM {} on agent {}: {}", vm_id, host_id, msg);
+                Status::internal(format!("Failed to start VM on agent: {}", msg))
             })?
             .into_inner();
 
@@ -1033,12 +1032,13 @@ mod tests {
     #[tokio::test]
     async fn test_deploy_app_with_available_worker_assigns_host_and_vm() {
         // Worker is selected but the agent at port 19999 is unreachable in tests,
-        // so the job ends up Failed. The important thing is host and vm are assigned.
+        // so the deploy_app call returns Err. The important thing is the job is
+        // persisted with host and vm assigned.
         let server = make_server();
         register_worker(&server, "h1").await;
         add_metrics(&server, "h1").await;
 
-        let resp = server
+        let result = server
             .deploy_app(Request::new(DeployRequest {
                 app_id: "app-1".to_string(),
                 app_name: "my-app".to_string(),
@@ -1055,14 +1055,22 @@ mod tests {
                 }),
                 user_id: "user-1".to_string(),
             }))
-            .await
-            .unwrap()
-            .into_inner();
-        // Agent at port 19999 is unreachable → job transitions to Failed.
-        assert_eq!(resp.status, crate::job::JobStatus::Failed as i32);
-        assert!(!resp.job_id.is_empty());
-        assert_eq!(resp.host_id, "h1");
-        assert!(!resp.vm_id.is_empty());
+            .await;
+
+        // Agent at port 19999 is unreachable → returns Err.
+        assert!(result.is_err());
+
+        // Verify job is persisted with Failed status and assignments
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
+
+        assert_eq!(job.status, crate::job::JobStatus::Failed);
+        assert!(!job.job_id.is_empty());
+        assert_eq!(job.host_id.as_deref(), Some("h1"));
+        assert!(job.vm_id.is_some());
     }
 
     #[tokio::test]
@@ -1071,13 +1079,18 @@ mod tests {
         register_worker(&server, "h1").await;
         add_metrics(&server, "h1").await;
 
-        let resp = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner();
-        // Default config fits the worker; agent unreachable → Failed.
-        assert_eq!(resp.status, crate::job::JobStatus::Failed as i32);
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
+
+        // Agent unreachable → returns Err.
+        assert!(result.is_err());
+
+        // Verify it failed but is in scheduler
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
+        assert_eq!(job.status, crate::job::JobStatus::Failed);
     }
 
     #[tokio::test]
@@ -1108,15 +1121,19 @@ mod tests {
         register_worker(&server, "h1").await;
         add_metrics(&server, "h1").await;
 
-        let deploy_resp = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner();
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
+        assert!(result.is_err());
+
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
+        let job_id = job.job_id;
 
         let status = server
             .get_app_status(Request::new(AppStatusRequest {
-                job_id: deploy_resp.job_id,
+                job_id,
                 user_id: "user-1".to_string(),
             }))
             .await
@@ -1124,6 +1141,7 @@ mod tests {
             .into_inner();
         assert_eq!(status.host_id, "h1");
         assert!(!status.vm_id.is_empty());
+        assert_eq!(status.status, crate::job::JobStatus::Failed as i32);
     }
 
     #[tokio::test]
@@ -1164,11 +1182,14 @@ mod tests {
         register_worker(&server, "h1").await;
         add_metrics(&server, "h1").await;
 
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
+        assert!(result.is_err());
+
         let job_id = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner()
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted")
             .job_id;
 
         let cancel_resp = server
@@ -1383,7 +1404,7 @@ mod tests {
     #[tokio::test]
     async fn test_deploy_app_returns_failed_when_forward_to_agent_fails() {
         let server = make_server();
-        // Worker registered but with unreachable port — forward will fail silently.
+        // Worker registered but with unreachable port — forward will fail.
         server
             .register_worker(Request::new(RegisterWorkerRequest {
                 host_id: "unreachable".to_string(),
@@ -1412,16 +1433,20 @@ mod tests {
             .await
             .unwrap();
 
-        let resp = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner();
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
 
-        // Agent at port 59981 is unreachable → job transitions to Failed.
-        assert_eq!(resp.status, crate::job::JobStatus::Failed as i32);
-        assert!(!resp.job_id.is_empty());
-        assert_eq!(resp.host_id, "unreachable");
+        // Agent at port 59981 is unreachable → returns Err.
+        assert!(result.is_err());
+
+        // Verify job is persisted with Failed status
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
+        assert_eq!(job.status, crate::job::JobStatus::Failed);
+        assert!(!job.job_id.is_empty());
+        assert_eq!(job.host_id.as_deref(), Some("unreachable"));
     }
 
     #[tokio::test]
@@ -1450,11 +1475,14 @@ mod tests {
         let server = make_server();
         register_worker(&server, "h1").await;
         add_metrics(&server, "h1").await;
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
+        assert!(result.is_err());
+
         let job_id = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner()
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted")
             .job_id;
 
         let resp = server
@@ -1567,13 +1595,14 @@ mod tests {
             .await
             .unwrap();
 
-        let resp = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner();
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
+        assert!(result.is_err());
 
-        let job = server.scheduler.get_job(&resp.job_id).unwrap();
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
 
         // Networking is pre-assigned by the scheduler from worker's IPAM.
         assert!(
@@ -1637,12 +1666,14 @@ mod tests {
             }),
         };
 
-        let resp = server
-            .deploy_app(Request::new(req))
-            .await
-            .unwrap()
-            .into_inner();
-        let job = server.scheduler.get_job(&resp.job_id).unwrap();
+        let result = server.deploy_app(Request::new(req)).await;
+        assert!(result.is_err());
+
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
 
         assert_eq!(job.config.volumes.len(), 1);
         assert_eq!(job.config.volumes[0].volume_id, "data-vol");
