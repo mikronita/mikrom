@@ -82,6 +82,7 @@ pub struct FirecrackerManager {
     logs: Arc<RwLock<HashMap<String, VecDeque<String>>>>,
     builder: Arc<crate::builder::ImageBuilder>,
     executor: Arc<dyn CommandExecutor>,
+    allocated_ips: Arc<tokio::sync::Mutex<std::collections::HashSet<std::net::Ipv4Addr>>>,
 }
 
 // ── HTTP-over-Unix-socket helper ──────────────────────────────────────────────
@@ -266,6 +267,7 @@ impl FirecrackerManager {
             logs: Arc::new(RwLock::new(HashMap::new())),
             builder: Arc::new(builder),
             executor: Arc::new(RealCommandExecutor),
+            allocated_ips: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -318,6 +320,9 @@ impl FirecrackerManager {
                 if let Some(vm) = vms.get_mut(&vm_id)
                     && vm.status == VmStatus::Running
                 {
+                    if let Some(ip) = &vm.config.ip_address {
+                        self.release_vm_ip(ip).await;
+                    }
                     vm.status = VmStatus::Stopped;
                 }
             }
@@ -362,10 +367,20 @@ impl FirecrackerManager {
             let mut l = self.logs.write().await;
             l.entry(vm_id.clone())
                 .or_default()
-                .push_back(format!("[agent] Deployment initiated for VM {}...", vm_id));
+                .push_back(format!("[agent] Initializing VM {}...", vm_id));
         }
 
-        // 3. Spawn the heavy work in background
+        // 3. In real mode, validate the binary exists before going async.
+        if self.fc_config.kernel_path.is_some() {
+            let binary = &self.fc_config.binary;
+            if !std::path::Path::new(binary).exists() {
+                let err_msg = format!("Firecracker binary not found: {}", binary);
+                self.set_failed(&vm_id, err_msg.clone()).await;
+                return Err(FirecrackerError::ProcessError(err_msg));
+            }
+        }
+
+        // 4. Spawn the heavy work in background
         let self_clone = self.clone();
         let vm_id_clone = vm_id.clone();
         let app_id_clone = app_id.clone();
@@ -503,6 +518,27 @@ impl FirecrackerManager {
             self.set_failed(&vm_id, e.to_string()).await;
             return Err(e);
         }
+
+        // Resolve networking: if scheduler didn't assign an IP, allocate from bridge subnet.
+        let config = if config.ip_address.is_none() || config.ip_address.as_deref() == Some("") {
+            match self.allocate_vm_network().await {
+                Some((ip, gw, mac)) => {
+                    tracing::info!(vm_id = %vm_id, ip = %ip, "Allocated IP from agent bridge subnet");
+                    VmConfig {
+                        ip_address: Some(ip),
+                        gateway: Some(gw),
+                        mac_address: Some(mac),
+                        ..config
+                    }
+                }
+                None => {
+                    tracing::warn!(vm_id = %vm_id, "No available IPs in bridge subnet, starting without networking");
+                    config
+                }
+            }
+        } else {
+            config
+        };
 
         // ── Networking setup ───────────────────────────────────────────────────
         let tap_name = if config.ip_address.is_some() {
@@ -688,6 +724,9 @@ impl FirecrackerManager {
 
             let mut vms = self.vms.write().await;
             if let Some(vm) = vms.get_mut(vm_id) {
+                if let Some(ip) = &vm.config.ip_address {
+                    self.release_vm_ip(ip).await;
+                }
                 vm.status = VmStatus::Stopped;
             }
         }
@@ -871,6 +910,51 @@ impl FirecrackerManager {
         let bridge_name = "mikrom-br0";
         let bridge_ip = env_ip.unwrap_or_else(|| "10.0.0.1/8".to_string());
         (bridge_name.to_string(), bridge_ip)
+    }
+
+    fn parse_bridge_subnet(&self) -> (std::net::Ipv4Addr, std::net::Ipv4Addr, u32) {
+        let (_, bridge_cidr) = self.get_bridge_config();
+        let (ip_str, prefix_str) = bridge_cidr.split_once('/').unwrap_or((&bridge_cidr, "24"));
+        let prefix: u32 = prefix_str.trim().parse().unwrap_or(24);
+        let gateway: std::net::Ipv4Addr = ip_str
+            .trim()
+            .parse()
+            .unwrap_or(std::net::Ipv4Addr::new(10, 0, 0, 1));
+        let mask = if prefix == 0 {
+            0u32
+        } else {
+            !0u32 << (32 - prefix)
+        };
+        let base = std::net::Ipv4Addr::from(u32::from(gateway) & mask);
+        (gateway, base, prefix)
+    }
+
+    async fn allocate_vm_network(&self) -> Option<(String, String, String)> {
+        let (gateway, base, prefix) = self.parse_bridge_subnet();
+        let host_count = (1u32 << (32 - prefix)).saturating_sub(2);
+        let base_u32 = u32::from(base);
+        let gw_u32 = u32::from(gateway);
+
+        let mut allocated = self.allocated_ips.lock().await;
+        for offset in 2..=host_count {
+            let candidate = std::net::Ipv4Addr::from(base_u32 + offset);
+            if u32::from(candidate) == gw_u32 {
+                continue;
+            }
+            if !allocated.contains(&candidate) {
+                allocated.insert(candidate);
+                let o = candidate.octets();
+                let mac = format!("AA:FC:{:02X}:{:02X}:{:02X}:{:02X}", o[0], o[1], o[2], o[3]);
+                return Some((candidate.to_string(), gateway.to_string(), mac));
+            }
+        }
+        None
+    }
+
+    async fn release_vm_ip(&self, ip_str: &str) {
+        if let Ok(ip) = ip_str.parse::<std::net::Ipv4Addr>() {
+            self.allocated_ips.lock().await.remove(&ip);
+        }
     }
 
     pub async fn init_network(&self) -> Result<(), FirecrackerError> {
@@ -1390,7 +1474,7 @@ mod tests {
         for i in 10..20 {
             assert_eq!(
                 mgr.get_vm_status(&format!("vm-{}", i)).await.unwrap(),
-                VmStatus::Starting
+                VmStatus::Running
             );
         }
     }

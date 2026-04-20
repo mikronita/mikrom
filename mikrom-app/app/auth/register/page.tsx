@@ -54,13 +54,6 @@ export default function RegisterPage() {
         <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-zinc-200 dark:bg-zinc-800 rounded-full blur-[100px]" />
       </div>
 
-      <div className="absolute top-8 left-8">
-        <Button as={Link} href="/" color="gray" size="sm">
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to home
-        </Button>
-      </div>
-
       <Card className="w-full max-w-md shadow-2xl dark:bg-zinc-900 border-zinc-200/50 dark:border-zinc-800/50">
         <div className="space-y-1 text-center">
           <div className="flex justify-center mb-4">

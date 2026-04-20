@@ -90,10 +90,10 @@ impl SchedulerService for SchedulerServer {
             load_avg_15: req.load_avg_15,
             vms: req
                 .vms
-                .into_iter()
+                .iter()
                 .map(|(id, m)| {
                     (
-                        id,
+                        id.clone(),
                         crate::metrics::VmMetrics {
                             cpu_usage: m.cpu_usage,
                             ram_used_bytes: m.ram_used_bytes,
@@ -134,17 +134,17 @@ impl SchedulerService for SchedulerServer {
                 if let Some(id) = job_id {
                     let proto_status =
                         mikrom_proto::scheduler::VmStatus::try_from(vm_metrics.status)
-                            .unwrap_or(mikrom_proto::scheduler::VmStatus::VmStatusUnspecified);
+                            .unwrap_or(mikrom_proto::scheduler::VmStatus::Unspecified);
 
                     match proto_status {
-                        mikrom_proto::scheduler::VmStatus::VmStatusRunning => {
+                        mikrom_proto::scheduler::VmStatus::Running => {
                             self.scheduler
                                 .update_job_status(&id, crate::job::JobStatus::Running);
                         }
-                        mikrom_proto::scheduler::VmStatus::VmStatusFailed => {
+                        mikrom_proto::scheduler::VmStatus::Failed => {
                             self.scheduler.fail_job(&id, vm_metrics.error_message);
                         }
-                        mikrom_proto::scheduler::VmStatus::VmStatusStopped => {
+                        mikrom_proto::scheduler::VmStatus::Stopped => {
                             // Only update if it wasn't already cancelled
                             let current_status = self.scheduler.get_job(&id).map(|j| j.status);
                             if current_status != Some(crate::job::JobStatus::Cancelled) {
@@ -152,7 +152,7 @@ impl SchedulerService for SchedulerServer {
                                     .update_job_status(&id, crate::job::JobStatus::Failed);
                             }
                         }
-                        mikrom_proto::scheduler::VmStatus::VmStatusPaused => {
+                        mikrom_proto::scheduler::VmStatus::Paused => {
                             self.scheduler
                                 .update_job_status(&id, crate::job::JobStatus::Paused);
                         }
@@ -227,27 +227,14 @@ impl SchedulerService for SchedulerServer {
                 let image = req.image.clone();
                 let host_id = worker.host_id.clone();
 
-                // Assign networking via IPAM
-                let guest_ip = self.scheduler.ipam().allocate().ok_or_else(|| {
-                    Status::resource_exhausted("No available IP addresses in pool")
-                })?;
-                let gateway = "10.0.0.1".to_string();
-                // Extract last byte from IP for MAC address
-                let last_byte = guest_ip
-                    .split('.')
-                    .next_back()
-                    .and_then(|s| s.parse::<u8>().ok())
-                    .unwrap_or(2);
-                let mac = format!("AA:BB:CC:01:01:{:02x}", last_byte);
-
                 let job_config = crate::job::VmConfig {
                     vcpus: config.vcpus,
                     memory_mib: config.memory_mib,
                     disk_mib: config.disk_mib,
                     env: config.env.clone(),
-                    ip_address: Some(guest_ip),
-                    gateway: Some(gateway),
-                    mac_address: Some(mac),
+                    ip_address: None,
+                    gateway: None,
+                    mac_address: None,
                     volumes: config
                         .volumes
                         .iter()
@@ -1544,33 +1531,15 @@ mod tests {
 
         let job = server.scheduler.get_job(&resp.job_id).unwrap();
 
-        let ip = job
-            .config
-            .ip_address
-            .as_ref()
-            .expect("IP should be assigned");
-        let gw = job
-            .config
-            .gateway
-            .as_ref()
-            .expect("Gateway should be assigned");
-        let mac = job
-            .config
-            .mac_address
-            .as_ref()
-            .expect("MAC should be assigned");
-
+        // Networking is now assigned by the agent after it receives the StartVm request.
+        // The scheduler stores None for networking fields; the agent fills them in based
+        // on its local bridge subnet (BRIDGE_IP env var).
         assert!(
-            ip.starts_with("10."),
-            "IP {} should be in 10.x.x.x range",
-            ip
+            job.config.ip_address.is_none(),
+            "Scheduler should not pre-assign IP; agent manages its own IPAM"
         );
-        assert_eq!(gw, "10.0.0.1");
-        assert!(
-            mac.starts_with("AA:BB:CC:01:01:"),
-            "MAC {} should have correct prefix",
-            mac
-        );
+        assert!(job.config.gateway.is_none());
+        assert!(job.config.mac_address.is_none());
     }
 
     #[tokio::test]
