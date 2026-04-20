@@ -54,6 +54,7 @@ impl SchedulerService for SchedulerServer {
             req.hostname,
             req.ip_address,
             req.agent_port as u16,
+            req.bridge_ip,
         );
 
         if !success {
@@ -227,14 +228,22 @@ impl SchedulerService for SchedulerServer {
                 let image = req.image.clone();
                 let host_id = worker.host_id.clone();
 
+                // Allocate IP from worker's IPAM
+                let allocation = worker.ipam.allocate();
+                let (ip_address, gateway, mac_address) = if let Some(a) = allocation {
+                    (Some(a.ip), Some(a.gateway), Some(a.mac))
+                } else {
+                    (None, None, None)
+                };
+
                 let job_config = crate::job::VmConfig {
                     vcpus: config.vcpus,
                     memory_mib: config.memory_mib,
                     disk_mib: config.disk_mib,
                     env: config.env.clone(),
-                    ip_address: None,
-                    gateway: None,
-                    mac_address: None,
+                    ip_address,
+                    gateway,
+                    mac_address,
                     volumes: config
                         .volumes
                         .iter()
@@ -269,28 +278,26 @@ impl SchedulerService for SchedulerServer {
                 {
                     Ok(()) => {
                         self.scheduler.start_job(&job_id);
+
+                        let job = self.scheduler.get_job(&job_id);
+                        let status = job
+                            .as_ref()
+                            .map(|j| j.status as i32)
+                            .unwrap_or(crate::job::JobStatus::Running as i32);
+                        let message = "Application started".to_string();
+
+                        Ok(Response::new(DeployResponse {
+                            job_id,
+                            status,
+                            host_id,
+                            vm_id,
+                            message,
+                        }))
                     }
                     Err(e) => {
                         self.scheduler.fail_job(&job_id, e.message().to_string());
+                        Err(e)
                     }
-                }
-
-                let job = self.scheduler.get_job(&job_id);
-                let status = job
-                    .as_ref()
-                    .map(|j| j.status as i32)
-                    .unwrap_or(crate::job::JobStatus::Scheduled as i32);
-                let message = job
-                    .as_ref()
-                    .and_then(|j| j.error_message.clone())
-                    .unwrap_or_else(|| "Application scheduled".to_string());
-
-                DeployResponse {
-                    job_id: job_id.clone(),
-                    status,
-                    host_id,
-                    vm_id,
-                    message,
                 }
             }
             Err(e) => {
@@ -305,17 +312,17 @@ impl SchedulerService for SchedulerServer {
                 job.fail(e.to_string());
                 self.scheduler.add_job(job);
 
-                DeployResponse {
+                Ok(Response::new(DeployResponse {
                     job_id: job_id.clone(),
                     status: crate::job::JobStatus::Failed as i32,
                     host_id: String::new(),
                     vm_id: String::new(),
                     message: e.to_string(),
-                }
+                }))
             }
         };
 
-        Ok(Response::new(response))
+        response
     }
 
     #[tracing::instrument(skip(self, request), fields(job_id = %request.get_ref().job_id))]
@@ -388,11 +395,11 @@ impl SchedulerService for SchedulerServer {
         }
 
         let host_id = job.host_id.ok_or_else(|| {
-            tracing::error!("Job {} has no assigned host", job_id);
+            tracing::warn!("Job {} has no assigned host yet", job_id);
             Status::failed_precondition("Job has no assigned host")
         })?;
         let vm_id = job.vm_id.ok_or_else(|| {
-            tracing::error!("Job {} has no assigned VM ID", job_id);
+            tracing::warn!("Job {} has no assigned VM ID yet", job_id);
             Status::failed_precondition("Job has no assigned VM ID")
         })?;
 
@@ -630,6 +637,30 @@ impl SchedulerService for SchedulerServer {
 
         Ok(Response::new(ListAppsResponse { apps }))
     }
+
+    async fn list_workers(
+        &self,
+        _request: tonic::Request<mikrom_proto::scheduler::ListWorkersRequest>,
+    ) -> Result<Response<mikrom_proto::scheduler::ListWorkersResponse>, Status> {
+        let workers = self.scheduler.worker_registry().list_workers();
+        let workers_info = workers
+            .into_iter()
+            .map(|w| mikrom_proto::scheduler::WorkerInfo {
+                host_id: w.host_id,
+                hostname: w.hostname,
+                ip_address: w.ip_address,
+                agent_port: w.agent_port as u32,
+                bridge_ip: w.bridge_ip,
+                last_heartbeat: w.last_heartbeat,
+            })
+            .collect();
+
+        Ok(Response::new(
+            mikrom_proto::scheduler::ListWorkersResponse {
+                workers: workers_info,
+            },
+        ))
+    }
 }
 
 impl SchedulerServer {
@@ -642,6 +673,10 @@ impl SchedulerServer {
             agent_clients: Arc::new(RwLock::new(HashMap::new())),
             certs,
         })
+    }
+
+    pub fn scheduler(&self) -> &AppScheduler {
+        &self.scheduler
     }
 
     pub async fn serve(&self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
@@ -693,8 +728,11 @@ impl SchedulerServer {
             ),
         };
 
+        tracing::info!(host_id = %host_id, addr = %addr, "Connecting to agent");
+
         let mut endpoint = tonic::transport::Endpoint::new(addr)
-            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?;
+            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?
+            .connect_timeout(std::time::Duration::from_secs(2));
 
         if let Some(certs) = &self.certs {
             endpoint = endpoint
@@ -855,6 +893,7 @@ mod tests {
                 hostname: host_id.to_string(),
                 ip_address: "127.0.0.1".to_string(),
                 agent_port: 19999,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap();
@@ -899,6 +938,7 @@ mod tests {
                 hostname: "node-1".to_string(),
                 ip_address: "10.0.0.1".to_string(),
                 agent_port: 5003,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap()
@@ -918,6 +958,7 @@ mod tests {
                 hostname: "node-1-v2".to_string(),
                 ip_address: "127.0.0.2".to_string(),
                 agent_port: 5003,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap()
@@ -1316,6 +1357,7 @@ mod tests {
                 hostname: "dead-node".to_string(),
                 ip_address: "127.0.0.1".to_string(),
                 agent_port: 59980,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap();
@@ -1348,6 +1390,7 @@ mod tests {
                 hostname: "unreachable-node".to_string(),
                 ip_address: "127.0.0.1".to_string(),
                 agent_port: 59981,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap();
@@ -1500,6 +1543,7 @@ mod tests {
                 hostname: "host1".to_string(),
                 ip_address: "127.0.0.1".to_string(),
                 agent_port: 5003,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap();
@@ -1531,15 +1575,13 @@ mod tests {
 
         let job = server.scheduler.get_job(&resp.job_id).unwrap();
 
-        // Networking is now assigned by the agent after it receives the StartVm request.
-        // The scheduler stores None for networking fields; the agent fills them in based
-        // on its local bridge subnet (BRIDGE_IP env var).
+        // Networking is pre-assigned by the scheduler from worker's IPAM.
         assert!(
-            job.config.ip_address.is_none(),
-            "Scheduler should not pre-assign IP; agent manages its own IPAM"
+            job.config.ip_address.is_some(),
+            "Scheduler should pre-assign IP from worker's IPAM"
         );
-        assert!(job.config.gateway.is_none());
-        assert!(job.config.mac_address.is_none());
+        assert!(job.config.gateway.is_some());
+        assert!(job.config.mac_address.is_some());
     }
 
     #[tokio::test]
@@ -1551,6 +1593,7 @@ mod tests {
                 hostname: "host1".to_string(),
                 ip_address: "127.0.0.1".to_string(),
                 agent_port: 5003,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap();

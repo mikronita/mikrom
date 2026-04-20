@@ -6,7 +6,6 @@ use std::sync::Arc;
 use thiserror::Error;
 
 pub mod ipam;
-use ipam::Ipam;
 
 #[derive(Error, Debug)]
 pub enum SchedulerError {
@@ -33,7 +32,6 @@ pub enum SchedulingStrategy {
 pub struct AppScheduler {
     pub worker_registry: WorkerRegistry,
     pub jobs: Arc<RwLock<HashMap<String, Job>>>,
-    pub ipam: Ipam,
     pub strategy: SchedulingStrategy,
 }
 
@@ -42,7 +40,6 @@ impl AppScheduler {
         Self {
             worker_registry,
             jobs: Arc::new(RwLock::new(HashMap::new())),
-            ipam: Ipam::default(),
             strategy: SchedulingStrategy::default(),
         }
     }
@@ -54,10 +51,6 @@ impl AppScheduler {
 
     pub fn worker_registry(&self) -> &WorkerRegistry {
         &self.worker_registry
-    }
-
-    pub fn ipam(&self) -> &Ipam {
-        &self.ipam
     }
 
     pub fn add_job(&self, job: Job) {
@@ -97,7 +90,11 @@ impl AppScheduler {
     pub fn remove_job(&self, job_id: &str) -> bool {
         if let Some(job) = self.jobs.write().remove(job_id) {
             if let Some(ip) = job.config.ip_address {
-                self.ipam.release(&ip);
+                if let Some(host_id) = job.host_id {
+                    if let Some(worker) = self.worker_registry.get_worker(&host_id) {
+                        worker.ipam.release(&ip);
+                    }
+                }
             }
             true
         } else {
@@ -211,6 +208,7 @@ mod tests {
             format!("host-{}", id),
             "127.0.0.1".to_string(),
             5003,
+            "10.0.0.1/8".to_string(),
         );
 
         let mut metrics = HostMetrics::default();

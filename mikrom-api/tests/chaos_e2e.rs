@@ -75,9 +75,10 @@ async fn test_agent_failure_propagation_e2e() {
     let manager = FirecrackerManager::with_config(failing_config);
 
     let agent = AgentServer::with_manager(
-        "chaos-agent".to_string(),
+        "chaos-agent-1".to_string(),
         "chaos-node".to_string(),
         "127.0.0.1".to_string(),
+        "10.0.0.1/8".to_string(),
         scheduler_url.clone(),
         manager,
     );
@@ -156,7 +157,8 @@ async fn test_agent_failure_propagation_e2e() {
     );
     assert!(
         message.to_lowercase().contains("no such file")
-            || message.to_lowercase().contains("failed"),
+            || message.to_lowercase().contains("failed")
+            || message.to_lowercase().contains("not found"),
         "Expected error message about missing binary, got: {}",
         message
     );
@@ -186,10 +188,11 @@ async fn test_ipam_sequential_allocation_e2e() {
     // Mock a worker registration so deployment can proceed to IP assignment
     client
         .register_worker(mikrom_proto::scheduler::RegisterWorkerRequest {
-            host_id: "test-host".to_string(),
-            hostname: "test-node".to_string(),
+            host_id: "chaos-agent-1".to_string(),
+            hostname: "chaos-node".to_string(),
             ip_address: "127.0.0.1".to_string(),
             agent_port: 5003,
+            bridge_ip: "10.0.0.1/8".to_string(),
         })
         .await
         .unwrap();

@@ -15,6 +15,22 @@ service SchedulerService {
   rpc ResumeApp(ResumeRequest) returns (ResumeResponse);
   rpc DeleteApp(DeleteAppRequest) returns (DeleteAppResponse);
   rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
+  rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse);
+}
+
+message ListWorkersRequest {}
+
+message ListWorkersResponse {
+  repeated WorkerInfo workers = 1;
+}
+
+message WorkerInfo {
+  string host_id = 1;
+  string hostname = 2;
+  string ip_address = 3;
+  uint32 agent_port = 4;
+  string bridge_ip = 5;
+  int64 last_heartbeat = 6;
 }
 
 // ... other messages ...
@@ -65,6 +81,7 @@ message RegisterWorkerRequest {
   string hostname = 2;
   string ip_address = 3;
   uint32 agent_port = 4;
+  string bridge_ip = 5;
 }
 
 message RegisterWorkerResponse {

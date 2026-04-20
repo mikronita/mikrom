@@ -23,6 +23,7 @@ pub struct AgentServer {
     host_id: String,
     hostname: String,
     ip_address: String,
+    bridge_ip: String,
     metrics_collector: MetricsCollector,
     firecracker: FirecrackerManager,
     scheduler_client: Option<SchedulerClient>,
@@ -270,11 +271,14 @@ impl AgentService for AgentServer {
                     message: "VM started".to_string(),
                 }))
             }
-            Err(e) => Ok(Response::new(StartVmResponse {
-                success: false,
-                vm_id: String::new(),
-                message: e.to_string(),
-            })),
+            Err(e) => {
+                tracing::error!("Failed to start VM {}: {}", vm_id, e);
+                Ok(Response::new(StartVmResponse {
+                    success: false,
+                    vm_id: String::new(),
+                    message: e.to_string(),
+                }))
+            }
         }
     }
 
@@ -370,7 +374,8 @@ impl AgentServer {
     pub fn new(host_id: String, hostname: String, ip_address: String) -> Self {
         let scheduler_addr =
             std::env::var("SCHEDULER_ADDR").unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
-        Self::with_scheduler_addr(host_id, hostname, ip_address, scheduler_addr)
+        let bridge_ip = std::env::var("BRIDGE_IP").unwrap_or_else(|_| "10.0.0.1/8".to_string());
+        Self::with_scheduler_addr(host_id, hostname, ip_address, bridge_ip, scheduler_addr)
     }
 
     /// Create an agent that connects to the given scheduler address.
@@ -379,16 +384,25 @@ impl AgentServer {
         host_id: String,
         hostname: String,
         ip_address: String,
+        bridge_ip: String,
         scheduler_addr: String,
     ) -> Self {
         let firecracker = FirecrackerManager::new();
-        Self::with_manager(host_id, hostname, ip_address, scheduler_addr, firecracker)
+        Self::with_manager(
+            host_id,
+            hostname,
+            ip_address,
+            bridge_ip,
+            scheduler_addr,
+            firecracker,
+        )
     }
 
     pub fn with_manager(
         host_id: String,
         hostname: String,
         ip_address: String,
+        bridge_ip: String,
         scheduler_addr: String,
         firecracker: FirecrackerManager,
     ) -> Self {
@@ -396,6 +410,7 @@ impl AgentServer {
             host_id,
             hostname,
             ip_address,
+            bridge_ip,
             metrics_collector: MetricsCollector::with_firecracker(firecracker.clone()),
             firecracker,
             scheduler_client: None,
@@ -469,12 +484,14 @@ impl AgentServer {
             // ── Main Loop (Registration + Heartbeat) ──────────────────────────
             loop {
                 // ── Registration with retry/backoff ───────────────────────────
-                // The scheduler may not be ready yet when this task first runs or after a restart.
+                let bridge_ip =
+                    std::env::var("BRIDGE_IP").unwrap_or_else(|_| "10.0.0.1/8".to_string());
                 let register_req = RegisterWorkerRequest {
                     host_id: host_id.clone(),
                     hostname: hostname.clone(),
                     ip_address: ip_address.clone(),
                     agent_port: agent_port.into(),
+                    bridge_ip: bridge_ip.clone(),
                 };
                 let mut backoff_secs = 1u64;
                 for attempt in 1_u32.. {
@@ -483,6 +500,7 @@ impl AgentServer {
                         hostname = %hostname,
                         ip_address = %ip_address,
                         agent_port = %agent_port,
+                        bridge_ip = %bridge_ip,
                         "Attempting to register with scheduler"
                     );
                     let result: Result<_, Box<dyn std::error::Error + Send + Sync>> = (async {
@@ -513,9 +531,10 @@ impl AgentServer {
                 }
 
                 // ── Metrics heartbeat ─────────────────────────────────────────
-                // Report immediately after registration so the scheduler sees this
-                // worker as available without waiting for the first 5-second tick.
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
                 loop {
+                    interval.tick().await;
+
                     let metrics = metrics_collector.collect().await;
                     tracing::info!(
                         "Collected metrics: cpu={:.2} ram={}/{} disk={}/{}",
@@ -582,6 +601,7 @@ impl AgentServer {
                                         })
                                         .collect(),
                                 };
+                                tracing::info!("Sending metrics to scheduler...");
                                 match client.report_metrics(req).await {
                                     Ok(resp) => {
                                         let success = resp.into_inner().success;
@@ -617,8 +637,6 @@ impl AgentServer {
                     if should_re_register {
                         break; // Exit metrics loop to re-register
                     }
-
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                 }
             }
         });
@@ -655,6 +673,7 @@ impl Clone for AgentServer {
             host_id: self.host_id.clone(),
             hostname: self.hostname.clone(),
             ip_address: self.ip_address.clone(),
+            bridge_ip: self.bridge_ip.clone(),
             metrics_collector: self.metrics_collector.clone(),
             firecracker: self.firecracker.clone(),
             scheduler_client: self.scheduler_client.clone(),

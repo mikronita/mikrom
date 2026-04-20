@@ -1,3 +1,4 @@
+use crate::scheduler::ipam::Ipam;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,6 +11,8 @@ pub struct Worker {
     pub hostname: String,
     pub ip_address: String,
     pub agent_port: u16,
+    pub bridge_ip: String,
+    pub ipam: Ipam,
     pub channel: Option<Channel>,
     pub metrics: Option<HostMetrics>,
     pub registered_at: i64,
@@ -36,13 +39,17 @@ impl WorkerRegistry {
         hostname: String,
         ip_address: String,
         agent_port: u16,
+        bridge_ip: String,
     ) -> bool {
         let now = chrono::Utc::now().timestamp();
+        let ipam = Ipam::new(&bridge_ip);
         let worker = Worker {
             host_id: host_id.clone(),
-            hostname,
-            ip_address,
+            hostname: hostname.clone(),
+            ip_address: ip_address.clone(),
             agent_port,
+            bridge_ip,
+            ipam,
             channel: None,
             metrics: None,
             registered_at: now,
@@ -50,6 +57,23 @@ impl WorkerRegistry {
         };
 
         let mut workers = self.workers.write();
+
+        // Remove any stale worker with the same hostname but different host_id
+        let stale_ids: Vec<String> = workers
+            .values()
+            .filter(|w| w.hostname == hostname && w.host_id != host_id)
+            .map(|w| w.host_id.clone())
+            .collect();
+
+        for id in stale_ids {
+            tracing::info!(
+                "Removing stale worker registration for hostname {}: {}",
+                hostname,
+                id
+            );
+            workers.remove(&id);
+        }
+
         workers.insert(host_id, worker);
         true
     }
@@ -130,9 +154,12 @@ mod tests {
             "node1".to_string(),
             "10.0.0.1".to_string(),
             5003,
+            "10.0.1.1/24".to_string(),
         );
         assert!(ok);
         assert!(registry.is_registered("h1"));
+        let w = registry.get_worker("h1").unwrap();
+        assert_eq!(w.bridge_ip, "10.0.1.1/24");
     }
 
     #[test]
@@ -143,15 +170,18 @@ mod tests {
             "node1".to_string(),
             "10.0.0.1".to_string(),
             5003,
+            "10.0.1.1/24".to_string(),
         );
         registry.register(
             "h1".to_string(),
             "node1-v2".to_string(),
             "10.0.0.9".to_string(),
             5003,
+            "10.0.2.1/24".to_string(),
         );
         let w = registry.get_worker("h1").unwrap();
         assert_eq!(w.ip_address, "10.0.0.9");
+        assert_eq!(w.bridge_ip, "10.0.2.1/24");
     }
 
     #[test]
@@ -162,6 +192,7 @@ mod tests {
             "node1".to_string(),
             "10.0.0.1".to_string(),
             5003,
+            "10.0.1.1/24".to_string(),
         );
         assert!(registry.unregister("h1"));
         assert!(!registry.is_registered("h1"));
@@ -181,12 +212,14 @@ mod tests {
             "mynode".to_string(),
             "192.168.1.1".to_string(),
             6000,
+            "172.16.0.1/16".to_string(),
         );
         let w = registry.get_worker("h1").unwrap();
         assert_eq!(w.host_id, "h1");
         assert_eq!(w.hostname, "mynode");
         assert_eq!(w.ip_address, "192.168.1.1");
         assert_eq!(w.agent_port, 6000);
+        assert_eq!(w.bridge_ip, "172.16.0.1/16");
         assert!(w.metrics.is_none());
     }
 
@@ -204,6 +237,7 @@ mod tests {
             "n".to_string(),
             "1.2.3.4".to_string(),
             5003,
+            "10.0.0.1/8".to_string(),
         );
         assert!(registry.update_metrics("h1", sample_metrics()));
         let w = registry.get_worker("h1").unwrap();
@@ -225,12 +259,14 @@ mod tests {
             "n1".to_string(),
             "1.1.1.1".to_string(),
             5003,
+            "10.0.1.1/24".to_string(),
         );
         registry.register(
             "h2".to_string(),
             "n2".to_string(),
             "1.1.1.2".to_string(),
             5003,
+            "10.0.2.1/24".to_string(),
         );
         assert_eq!(registry.list_workers().len(), 2);
     }
@@ -249,12 +285,14 @@ mod tests {
             "n1".to_string(),
             "1.1.1.1".to_string(),
             5003,
+            "10.0.1.1/24".to_string(),
         );
         registry.register(
             "h2".to_string(),
             "n2".to_string(),
             "1.1.1.2".to_string(),
             5003,
+            "10.0.2.1/24".to_string(),
         );
         registry.update_metrics("h1", sample_metrics());
 
@@ -271,6 +309,7 @@ mod tests {
             "n1".to_string(),
             "1.1.1.1".to_string(),
             5003,
+            "10.0.1.1/24".to_string(),
         );
         assert!(registry.get_available_workers().is_empty());
     }
@@ -283,6 +322,7 @@ mod tests {
             "n".to_string(),
             "1.1.1.1".to_string(),
             5003,
+            "10.0.1.1/24".to_string(),
         );
         registry.unregister("h1");
         assert!(!registry.is_registered("h1"));
@@ -296,6 +336,7 @@ mod tests {
             "n".to_string(),
             "1.1.1.1".to_string(),
             5003,
+            "10.0.1.1/24".to_string(),
         );
         let before = registry.get_worker("h1").unwrap().last_heartbeat;
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -320,6 +361,7 @@ mod tests {
                     format!("node-{}", i),
                     "127.0.0.1".to_string(),
                     5000 + i,
+                    format!("10.0.{}.1/24", i),
                 );
             }));
         }
@@ -344,6 +386,7 @@ mod tests {
                 format!("n{}", i),
                 "127.0.0.1".to_string(),
                 5000 + i,
+                format!("10.0.{}.1/24", i),
             );
         }
 
@@ -389,6 +432,7 @@ mod tests {
                 format!("n{}", i),
                 "127.0.0.1".to_string(),
                 5000 + i,
+                format!("10.0.{}.1/24", i),
             );
         }
 
@@ -402,6 +446,7 @@ mod tests {
                     format!("n{}", i),
                     "127.0.0.1".to_string(),
                     5000 + i,
+                    format!("10.0.{}.1/24", i),
                 );
             }));
         }
@@ -431,6 +476,7 @@ mod tests {
                 format!("n{}", i),
                 "127.0.0.1".to_string(),
                 5000 + i,
+                format!("10.0.{}.1/24", i),
             );
         }
 

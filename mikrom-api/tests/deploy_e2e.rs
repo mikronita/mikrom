@@ -97,6 +97,7 @@ async fn test_scheduler_agent_grpc_e2e() {
         "e2e-agent-1".to_string(),
         "e2e-node".to_string(),
         "127.0.0.1".to_string(),
+        "10.0.0.1/8".to_string(),
         scheduler_url.clone(),
     );
     let agent_addr: SocketAddr = format!("127.0.0.1:{agent_port}").parse().unwrap();
@@ -175,6 +176,7 @@ async fn test_http_api_deploy_e2e() {
         "e2e-agent-http".to_string(),
         "e2e-http-node".to_string(),
         "127.0.0.1".to_string(),
+        "10.0.0.1/8".to_string(),
         scheduler_url.clone(),
     );
     let agent_addr: SocketAddr = format!("127.0.0.1:{agent_port}").parse().unwrap();
