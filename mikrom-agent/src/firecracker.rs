@@ -961,16 +961,17 @@ impl FirecrackerManager {
                     && file_name.starts_with(&prefix)
                     && (file_name.ends_with(".sock") || file_name.ends_with("-rootfs.ext4"))
                 {
-                    // Extract VM ID from filename: fc-<agent_id>-<vm_id>.sock
-                    // or fc-<agent_id>-<vm_id>-rootfs.ext4
-                    let parts: Vec<&str> = file_name.split('-').collect();
-                    if parts.len() >= 3 {
-                        let vm_id = parts[2]
-                            .trim_end_matches(".sock")
-                            .trim_end_matches("-rootfs.ext4");
-                        if active_vm_ids.contains(vm_id) {
-                            continue;
+                    // Check if any active VM ID is part of the filename
+                    let mut is_active = false;
+                    for vm_id in &active_vm_ids {
+                        if file_name.contains(vm_id) {
+                            is_active = true;
+                            break;
                         }
+                    }
+
+                    if is_active {
+                        continue;
                     }
 
                     let path = entry.path();
