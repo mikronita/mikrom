@@ -89,7 +89,6 @@ run-app: ## Run mikrom-app dev server  (port 3000)
 dev: ## Launch all services in tmux windows
 	@tmux new-session -d -s mikrom -n api 'make run-api'
 	@tmux new-window -t mikrom -n scheduler 'make run-scheduler'
-	@tmux new-window -t mikrom -n agent 'make run-agent'
 	@tmux new-window -t mikrom -n app 'make run-app'
 	@tmux select-window -t mikrom:api
 	@tmux attach-session -t mikrom
