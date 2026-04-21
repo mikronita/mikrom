@@ -131,17 +131,20 @@ async fn test_agent_re_registers_when_scheduler_rejects_metrics() {
 
     // 2. Iniciar Agente
     let agent_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let agent = AgentServer::with_scheduler_addr(
-        "test-host".to_string(),
-        "test-node".to_string(),
-        "127.0.0.1".to_string(),
-        "10.0.0.1/8".to_string(),
-        format!("http://{}", actual_addr),
-    );
+    let agent_config = mikrom_agent::config::AgentConfig {
+        host_id: "test-host".to_string(),
+        scheduler_addr: format!("http://{actual_addr}"),
+        use_tls: false,
+        agent_port: 0,
+        bridge_ip: "10.0.0.1/8".to_string(),
+        certs_dir: "/certs/agent".to_string(),
+        agent_hostname: Some("test-node".to_string()),
+    };
+    let agent = AgentServer::new(agent_config, "127.0.0.1".to_string());
 
     // Ejecutamos el agente en background
     let agent_handle = tokio::spawn(async move {
-        agent.serve(agent_addr, false).await.unwrap();
+        agent.serve(agent_addr).await.unwrap();
     });
 
     // 3. Verificar secuencia de eventos

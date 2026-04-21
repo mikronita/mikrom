@@ -3,6 +3,9 @@ name = "mikrom-cli"
 version = "0.1.1"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "mikrom"
 path = "src/main.rs"

@@ -24,6 +24,7 @@ pub struct Allocation {
 }
 
 impl Ipam {
+    #[must_use]
     pub fn new(cidr: &str) -> Self {
         let (ip_str, prefix_str) = cidr.split_once('/').unwrap_or((cidr, "24"));
         let prefix: u32 = prefix_str.trim().parse().unwrap_or(24);
@@ -47,6 +48,7 @@ impl Ipam {
         }
     }
 
+    #[must_use]
     pub fn allocate(&self) -> Option<Allocation> {
         let mut inner = self.inner.lock();
         let base_u32 = u32::from(inner.base);
@@ -87,6 +89,7 @@ impl Ipam {
         None
     }
 
+    #[must_use]
     pub fn netmask(&self) -> String {
         let inner = self.inner.lock();
         let mask = if inner.prefix == 0 {

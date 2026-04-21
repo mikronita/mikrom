@@ -1097,6 +1097,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "envy"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f47e0157f2cb54f5ae1bd371b30a2ae4311e1c028f575cd4e81de7353215965"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2207,6 +2216,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "dotenvy",
+ "envy",
  "futures",
  "hostname",
  "mikrom-proto",
@@ -2237,6 +2247,7 @@ name = "mikrom-api"
 version = "0.1.1"
 dependencies = [
  "aes-gcm",
+ "anyhow",
  "async-trait",
  "axum 0.8.9",
  "axum-test",
@@ -2244,6 +2255,7 @@ dependencies = [
  "bcrypt",
  "chrono",
  "dotenvy",
+ "envy",
  "hyper",
  "jsonwebtoken",
  "mikrom-agent",
@@ -2320,9 +2332,11 @@ dependencies = [
 name = "mikrom-scheduler"
 version = "0.1.1"
 dependencies = [
+ "anyhow",
  "async-trait",
  "chrono",
  "dotenvy",
+ "envy",
  "mikrom-proto",
  "opentelemetry",
  "opentelemetry-otlp",

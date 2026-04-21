@@ -75,17 +75,20 @@ async fn test_agent_failure_propagation_e2e() {
     };
     let manager = FirecrackerManager::with_config(failing_config);
 
-    let agent = AgentServer::with_manager(
-        "chaos-agent-1".to_string(),
-        "chaos-node".to_string(),
-        "127.0.0.1".to_string(),
-        "10.0.0.1/8".to_string(),
-        scheduler_url.clone(),
-        manager,
-    );
+    let agent_config = mikrom_agent::config::AgentConfig {
+        host_id: "chaos-agent-1".to_string(),
+        scheduler_addr: scheduler_url.clone(),
+        use_tls: false,
+        agent_port: agent_port as u16,
+        bridge_ip: "10.0.0.1/8".to_string(),
+        certs_dir: "/certs/agent".to_string(),
+        agent_hostname: Some("chaos-node".to_string()),
+    };
+
+    let agent = AgentServer::with_manager(agent_config, "127.0.0.1".to_string(), manager);
     let agent_addr: SocketAddr = format!("127.0.0.1:{agent_port}").parse().unwrap();
     tokio::spawn(async move {
-        agent.serve(agent_addr, false).await.unwrap();
+        agent.serve(agent_addr).await.unwrap();
     });
     wait_for_tcp(agent_port).await;
 

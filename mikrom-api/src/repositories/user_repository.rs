@@ -24,25 +24,19 @@ pub struct NewUser {
     pub role: UserRole,
 }
 
-#[derive(Debug)]
-pub struct DbError {
-    pub message: String,
-}
+#[derive(Debug, thiserror::Error)]
+pub enum DbError {
+    #[error("Database error: {0}")]
+    Sqlx(#[from] sqlx::Error),
 
-impl std::fmt::Display for DbError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
+    #[error("Not found")]
+    NotFound,
 
-impl std::error::Error for DbError {}
+    #[error("Conflict: {0}")]
+    Conflict(String),
 
-impl From<sqlx::Error> for DbError {
-    fn from(err: sqlx::Error) -> Self {
-        DbError {
-            message: err.to_string(),
-        }
-    }
+    #[error("Internal repository error: {0}")]
+    Internal(String),
 }
 
 /// Object-safe async repository trait.  All implementations must derive
@@ -58,64 +52,6 @@ pub trait UserRepository: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── DbError ──────────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_db_error_display() {
-        let err = DbError {
-            message: "connection refused".to_string(),
-        };
-        assert_eq!(format!("{}", err), "connection refused");
-    }
-
-    #[test]
-    fn test_db_error_debug_format() {
-        let err = DbError {
-            message: "oops".to_string(),
-        };
-        let s = format!("{:?}", err);
-        assert!(s.contains("oops"));
-    }
-
-    #[test]
-    fn test_db_error_implements_error_trait() {
-        let err = DbError {
-            message: "test error".to_string(),
-        };
-        let _: &dyn std::error::Error = &err;
-    }
-
-    #[test]
-    fn test_db_error_from_sqlx_row_not_found() {
-        let sqlx_err = sqlx::Error::RowNotFound;
-        let expected_msg = sqlx_err.to_string();
-        let err = DbError::from(sqlx_err);
-        assert_eq!(err.message, expected_msg);
-    }
-
-    #[test]
-    fn test_db_error_from_sqlx_pool_timed_out() {
-        let err = DbError::from(sqlx::Error::PoolTimedOut);
-        assert!(!err.message.is_empty());
-    }
-
-    #[test]
-    fn test_db_error_from_sqlx_pool_closed() {
-        let err = DbError::from(sqlx::Error::PoolClosed);
-        assert!(!err.message.is_empty());
-    }
-
-    #[test]
-    fn test_db_error_message_preserved_in_display() {
-        let msg = "unique constraint violated on column email";
-        let err = DbError {
-            message: msg.to_string(),
-        };
-        assert!(format!("{}", err).contains(msg));
-    }
-
-    // ── Manual UserRepository mocks ───────────────────────────────────────────
 
     fn sample_user() -> User {
         User {
@@ -158,19 +94,13 @@ mod tests {
     #[async_trait]
     impl UserRepository for ErrorRepo {
         async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
-            Err(DbError {
-                message: "simulated find error".to_string(),
-            })
+            Err(DbError::Internal("simulated find error".to_string()))
         }
         async fn create(&self, _user: NewUser) -> Result<Uuid, DbError> {
-            Err(DbError {
-                message: "simulated insert error".to_string(),
-            })
+            Err(DbError::Internal("simulated insert error".to_string()))
         }
         async fn count_by_email(&self, _email: &str) -> Result<i64, DbError> {
-            Err(DbError {
-                message: "simulated count error".to_string(),
-            })
+            Err(DbError::Internal("simulated count error".to_string()))
         }
     }
 
@@ -195,7 +125,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_find_by_email_propagates_db_error() {
         let err: DbError = ErrorRepo.find_by_email("x@x.com").await.unwrap_err();
-        assert!(err.message.contains("simulated find error"));
+        assert!(err.to_string().contains("simulated find error"));
     }
 
     #[tokio::test]
@@ -238,7 +168,7 @@ mod tests {
         assert!(
             result
                 .unwrap_err()
-                .message
+                .to_string()
                 .contains("simulated insert error")
         );
     }
@@ -266,8 +196,6 @@ mod tests {
         let result: Result<i64, DbError> = ErrorRepo.count_by_email("x@x.com").await;
         assert!(result.is_err());
     }
-
-    // ── User / NewUser struct tests ───────────────────────────────────────────
 
     #[test]
     fn test_user_clone_preserves_all_fields() {

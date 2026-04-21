@@ -270,7 +270,7 @@ impl MikromClient {
                         None
                     }
                 }
-                Err(e) => Some(Err(anyhow::anyhow!("Stream error: {}", e))),
+                Err(e) => Some(Err(anyhow::anyhow!("Stream error: {e}"))),
             }
         }))
     }

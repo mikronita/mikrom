@@ -9,6 +9,7 @@ pub struct PostgresUserRepository {
 }
 
 impl PostgresUserRepository {
+    #[must_use]
     pub fn new(pool: Arc<PgPool>) -> Self {
         Self { pool }
     }
@@ -22,23 +23,21 @@ impl UserRepository for PostgresUserRepository {
         )
         .bind(email)
         .fetch_optional(&*self.pool)
-        .await;
+        .await?;
 
-        match result {
-            Ok(Some((id, email, password_hash, role_str))) => {
-                let role = match role_str.as_str() {
-                    "admin" => UserRole::Admin,
-                    _ => UserRole::User,
-                };
-                Ok(Some(User {
-                    id,
-                    email,
-                    password_hash,
-                    role,
-                }))
-            }
-            Ok(None) => Ok(None),
-            Err(e) => Err(DbError::from(e)),
+        if let Some((id, email, password_hash, role_str)) = result {
+            let role = match role_str.as_str() {
+                "admin" => UserRole::Admin,
+                _ => UserRole::User,
+            };
+            Ok(Some(User {
+                id,
+                email,
+                password_hash,
+                role,
+            }))
+        } else {
+            Ok(None)
         }
     }
 
@@ -48,32 +47,24 @@ impl UserRepository for PostgresUserRepository {
             UserRole::Admin => "admin",
             UserRole::User => "user",
         };
-        let result = sqlx::query(
-            "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, $3, $4)",
-        )
-        .bind(id)
-        .bind(&user.email)
-        .bind(&user.password_hash)
-        .bind(role_str)
-        .execute(&*self.pool)
-        .await;
+        sqlx::query("INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, $3, $4)")
+            .bind(id)
+            .bind(&user.email)
+            .bind(&user.password_hash)
+            .bind(role_str)
+            .execute(&*self.pool)
+            .await?;
 
-        match result {
-            Ok(_) => Ok(id),
-            Err(e) => Err(DbError::from(e)),
-        }
+        Ok(id)
     }
 
     async fn count_by_email(&self, email: &str) -> Result<i64, DbError> {
-        let result = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM users WHERE email = $1")
+        let (count,) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM users WHERE email = $1")
             .bind(email)
             .fetch_one(&*self.pool)
-            .await;
+            .await?;
 
-        match result {
-            Ok((count,)) => Ok(count),
-            Err(e) => Err(DbError::from(e)),
-        }
+        Ok(count)
     }
 }
 

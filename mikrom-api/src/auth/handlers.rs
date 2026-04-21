@@ -29,6 +29,11 @@ pub struct LoginResponse {
     pub token: String,
 }
 
+/// Registers a new user.
+///
+/// # Errors
+///
+/// Returns an error if the email is already registered or if validation fails.
 #[tracing::instrument(skip(state, payload), fields(email = %payload.email))]
 pub async fn register(
     State(state): State<AppState>,
@@ -50,7 +55,7 @@ pub async fn register(
         .user_repo
         .count_by_email(&payload.email)
         .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e.message)))?;
+        .map_err(ApiError::from)?;
 
     if count > 0 {
         return Err(ApiError::Conflict("Email already registered".to_string()));
@@ -67,7 +72,7 @@ pub async fn register(
             role: crate::repositories::user_repository::UserRole::User,
         })
         .await
-        .map_err(|e| ApiError::Internal(format!("Failed to create user: {}", e.message)))?;
+        .map_err(ApiError::from)?;
 
     Ok((
         axum::http::StatusCode::CREATED,
@@ -78,6 +83,11 @@ pub async fn register(
     ))
 }
 
+/// Logs in an existing user and returns a JWT token.
+///
+/// # Errors
+///
+/// Returns an error if credentials are invalid or token creation fails.
 #[tracing::instrument(skip(state, payload), fields(email = %payload.email))]
 pub async fn login(
     State(state): State<AppState>,
@@ -93,7 +103,7 @@ pub async fn login(
         .user_repo
         .find_by_email(&payload.email)
         .await
-        .map_err(|e| ApiError::Internal(format!("Database error: {}", e.message)))?
+        .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::Auth("Invalid credentials".to_string()))?;
 
     if verify(&payload.password, &user.password_hash).unwrap_or(false) {

@@ -46,6 +46,7 @@ impl Config {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::get_unwrap)]
 mod tests {
     use super::*;
     use tempfile::TempDir;

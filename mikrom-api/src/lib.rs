@@ -5,6 +5,7 @@ use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, Tr
 use tracing::Level;
 
 pub mod auth;
+pub mod config;
 pub mod crypto;
 pub mod db;
 pub mod deploy;

@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::get_unwrap)]
 #[cfg(test)]
 mod tests {
     use mikrom_scheduler::scheduler::ipam::Ipam;

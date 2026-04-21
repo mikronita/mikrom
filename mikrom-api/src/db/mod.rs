@@ -1,10 +1,8 @@
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
-pub async fn connect() -> Result<PgPool, sqlx::Error> {
-    let database_url =
-        std::env::var("DATABASE_URL").map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
-    connect_to_url(&database_url).await
+pub async fn connect(database_url: &str) -> Result<PgPool, sqlx::Error> {
+    connect_to_url(database_url).await
 }
 
 pub async fn connect_to_url(database_url: &str) -> Result<PgPool, sqlx::Error> {
