@@ -94,17 +94,23 @@ async fn test_scheduler_agent_grpc_e2e() {
 
     // ── start agent ───────────────────────────────────────────────────────────
     // `with_manager` avoids touching process-global env vars and uses stub mode.
+    let agent_config = mikrom_agent::config::AgentConfig {
+        host_id: "e2e-agent-1".to_string(),
+        scheduler_addr: scheduler_url.clone(),
+        use_tls: false,
+        agent_port: agent_port as u16,
+        bridge_ip: "10.0.0.1/8".to_string(),
+        certs_dir: "/certs/agent".to_string(),
+        agent_hostname: Some("e2e-node".to_string()),
+    };
     let agent = AgentServer::with_manager(
-        "e2e-agent-1".to_string(),
-        "e2e-node".to_string(),
+        agent_config,
         "127.0.0.1".to_string(),
-        "10.0.0.1/8".to_string(),
-        scheduler_url.clone(),
         FirecrackerManager::with_config(FirecrackerConfig::stub()),
     );
     let agent_addr: SocketAddr = format!("127.0.0.1:{agent_port}").parse().unwrap();
     tokio::spawn(async move {
-        agent.serve(agent_addr, false).await.unwrap();
+        agent.serve(agent_addr).await.unwrap();
     });
     wait_for_tcp(agent_port).await;
 
@@ -173,17 +179,23 @@ async fn test_http_api_deploy_e2e() {
     });
     wait_for_tcp(scheduler_port).await;
     // ── start agent ───────────────────────────────────────────────────────────
+    let agent_config = mikrom_agent::config::AgentConfig {
+        host_id: "e2e-agent-http".to_string(),
+        scheduler_addr: scheduler_url.clone(),
+        use_tls: false,
+        agent_port: agent_port as u16,
+        bridge_ip: "10.0.0.1/8".to_string(),
+        certs_dir: "/certs/agent".to_string(),
+        agent_hostname: Some("e2e-http-node".to_string()),
+    };
     let agent = AgentServer::with_manager(
-        "e2e-agent-http".to_string(),
-        "e2e-http-node".to_string(),
+        agent_config,
         "127.0.0.1".to_string(),
-        "10.0.0.1/8".to_string(),
-        scheduler_url.clone(),
         FirecrackerManager::with_config(FirecrackerConfig::stub()),
     );
     let agent_addr: SocketAddr = format!("127.0.0.1:{agent_port}").parse().unwrap();
     tokio::spawn(async move {
-        agent.serve(agent_addr, false).await.unwrap();
+        agent.serve(agent_addr).await.unwrap();
     });
     wait_for_tcp(agent_port).await;
 

@@ -22,7 +22,7 @@ impl ImageBuilder {
             // 1. Pull image
             let status = Command::new("docker").args(["pull", &image]).status()?;
             if !status.success() {
-                anyhow::bail!("Failed to pull docker image {}", image);
+                anyhow::bail!("Failed to pull docker image {image}");
             }
 
             // 2. Create temporary container to export filesystem
@@ -50,7 +50,7 @@ impl ImageBuilder {
             }
 
             // 4. Mount and copy files
-            let mount_dir = format!("/tmp/mnt-{}", container_name);
+            let mount_dir = format!("/tmp/mnt-{container_name}");
             std::fs::create_dir_all(&mount_dir)?;
 
             let status = Command::new("mount")
@@ -71,7 +71,10 @@ impl ImageBuilder {
                 .stdout(Stdio::piped())
                 .spawn()?;
 
-            let export_stdout = export_child.stdout.take().unwrap();
+            let export_stdout = export_child
+                .stdout
+                .take()
+                .expect("Failed to capture Docker export stdout");
 
             let tar_status = Command::new("tar")
                 .args(["-C", &mount_dir, "-xf", "-"])

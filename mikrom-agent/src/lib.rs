@@ -1,4 +1,5 @@
 pub mod builder;
+pub mod config;
 pub mod firecracker;
 pub mod metrics;
 pub mod server;

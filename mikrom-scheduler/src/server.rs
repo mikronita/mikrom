@@ -185,17 +185,9 @@ impl SchedulerService for SchedulerServer {
         let vm_id = Uuid::new_v4().to_string();
 
         let config = crate::job::VmConfig {
-            vcpus: req.config.as_ref().map(|c| c.vcpus).unwrap_or(1),
-            memory_mib: req
-                .config
-                .as_ref()
-                .map(|c| c.memory_mib as u64)
-                .unwrap_or(256),
-            disk_mib: req
-                .config
-                .as_ref()
-                .map(|c| c.disk_mib as u64)
-                .unwrap_or(1024),
+            vcpus: req.config.as_ref().map_or(1, |c| c.vcpus),
+            memory_mib: req.config.as_ref().map_or(256, |c| u64::from(c.memory_mib)),
+            disk_mib: req.config.as_ref().map_or(1024, |c| u64::from(c.disk_mib)),
             env: req
                 .config
                 .as_ref()
@@ -279,14 +271,13 @@ impl SchedulerService for SchedulerServer {
                     .forward_deploy_to_agent(&host_id, &app_id, &image, &vm_id, &job_config)
                     .await
                 {
-                    Ok(_) => {
+                    Ok(()) => {
                         self.scheduler.start_job(&job_id);
 
                         let job = self.scheduler.get_job(&job_id);
                         let status = job
                             .as_ref()
-                            .map(|j| j.status as i32)
-                            .unwrap_or(crate::job::JobStatus::Running as i32);
+                            .map_or(crate::job::JobStatus::Running as i32, |j| j.status as i32);
                         let message = "Application started".to_string();
 
                         Ok(Response::new(DeployResponse {
@@ -650,7 +641,7 @@ impl SchedulerService for SchedulerServer {
                 host_id: w.host_id,
                 hostname: w.hostname,
                 ip_address: w.ip_address,
-                agent_port: w.agent_port as u32,
+                agent_port: u32::from(w.agent_port),
                 bridge_ip: w.bridge_ip,
                 last_heartbeat: w.last_heartbeat,
             })
@@ -665,7 +656,7 @@ impl SchedulerService for SchedulerServer {
 }
 
 impl SchedulerServer {
-    pub fn new(certs: Option<ServiceCerts>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(certs: Option<ServiceCerts>) -> anyhow::Result<Self> {
         let worker_registry = WorkerRegistry::new();
         let scheduler = AppScheduler::new(worker_registry);
 
@@ -676,30 +667,28 @@ impl SchedulerServer {
         })
     }
 
+    #[must_use]
     pub fn scheduler(&self) -> &AppScheduler {
         &self.scheduler
     }
 
-    pub async fn serve(&self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn serve(&self, addr: SocketAddr) -> anyhow::Result<()> {
         let service = SchedulerServiceServer::new(self.clone());
 
-        match &self.certs {
-            Some(certs) => {
-                let tls = certs.server_tls_config()?;
-                tracing::info!("Scheduler mTLS enabled");
-                tonic::transport::Server::builder()
-                    .tls_config(tls)?
-                    .add_service(service)
-                    .serve(addr)
-                    .await?;
-            }
-            None => {
-                tracing::info!("Scheduler running without TLS");
-                tonic::transport::Server::builder()
-                    .add_service(service)
-                    .serve(addr)
-                    .await?;
-            }
+        if let Some(certs) = &self.certs {
+            let tls = certs.server_tls_config()?;
+            tracing::info!("Scheduler mTLS enabled");
+            tonic::transport::Server::builder()
+                .tls_config(tls)?
+                .add_service(service)
+                .serve(addr)
+                .await?;
+        } else {
+            tracing::info!("Scheduler running without TLS");
+            tonic::transport::Server::builder()
+                .add_service(service)
+                .serve(addr)
+                .await?;
         }
 
         Ok(())
@@ -715,7 +704,7 @@ impl SchedulerServer {
             .get_worker(host_id)
             .ok_or_else(|| {
                 tracing::warn!("Worker {} not found", host_id);
-                Status::not_found(format!("Worker {} not found", host_id))
+                Status::not_found(format!("Worker {host_id} not found"))
             })?;
 
         let (addr, domain) = match &self.certs {
@@ -732,18 +721,18 @@ impl SchedulerServer {
         tracing::info!(host_id = %host_id, addr = %addr, "Connecting to agent");
 
         let mut endpoint = tonic::transport::Endpoint::new(addr)
-            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?
+            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {e}")))?
             .connect_timeout(std::time::Duration::from_secs(2));
 
         if let Some(certs) = &self.certs {
             endpoint = endpoint
                 .tls_config(certs.client_tls_config(&domain))
-                .map_err(|e| Status::internal(format!("TLS config error: {}", e)))?;
+                .map_err(|e| Status::internal(format!("TLS config error: {e}")))?;
         }
 
         let channel = endpoint.connect().await.map_err(|e| {
             tracing::error!("Failed to connect to agent {}: {}", host_id, e);
-            Status::unavailable(format!("Failed to connect to agent: {}", e))
+            Status::unavailable(format!("Failed to connect to agent: {e}"))
         })?;
 
         Ok(AgentServiceClient::new(channel))
@@ -796,7 +785,7 @@ impl SchedulerServer {
             .map_err(|e| {
                 let msg = e.message();
                 tracing::error!("Failed to start VM {} on agent {}: {}", vm_id, host_id, msg);
-                Status::internal(format!("Failed to start VM on agent: {}", msg))
+                Status::internal(format!("Failed to start VM on agent: {msg}"))
             })?
             .into_inner();
 
@@ -875,6 +864,7 @@ impl Clone for SchedulerServer {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::get_unwrap)]
 mod tests {
     use super::*;
     use mikrom_proto::scheduler::{
@@ -1052,9 +1042,9 @@ mod tests {
                     memory_mib: 256,
                     disk_mib: 1024,
                     env: Default::default(),
-                    ip_address: "".to_string(),
-                    gateway: "".to_string(),
-                    mac_address: "".to_string(),
+                    ip_address: String::new(),
+                    gateway: String::new(),
+                    mac_address: String::new(),
                     volumes: vec![],
                 }),
                 user_id: "user-1".to_string(),
@@ -1401,8 +1391,7 @@ mod tests {
         let code = result.unwrap_err().code();
         assert!(
             code == tonic::Code::Unavailable || code == tonic::Code::Internal,
-            "expected Unavailable or Internal, got {:?}",
-            code
+            "expected Unavailable or Internal, got {code:?}"
         );
     }
 

@@ -38,7 +38,7 @@ pub async fn run(client: MikromClient) -> anyhow::Result<()> {
     terminal.show_cursor()?;
 
     if let Err(err) = res {
-        eprintln!("{:?}", err);
+        eprintln!("{err:?}");
     }
 
     Ok(())
@@ -137,7 +137,7 @@ where
     loop {
         terminal
             .draw(|f| ui(f, app))
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
         let timeout = tick_rate
             .checked_sub(app.last_tick.elapsed())
@@ -161,7 +161,7 @@ where
     }
 }
 
-fn ui(f: &mut ratatui::Frame, app: &mut App) {
+fn ui(f: &mut ratatui::Frame<'_>, app: &mut App) {
     let rects = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(0)].as_ref())
@@ -186,7 +186,8 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
         };
 
         let cpu = format!("{:.1}%", item.cpu_usage * 100.0);
-        let ram = format!("{:.1} MiB", item.ram_used_bytes as f32 / (1024.0 * 1024.0));
+        let ram_mib = (item.ram_used_bytes as f64) / (1024.0 * 1024.0);
+        let ram = format!("{ram_mib:.1} MiB");
 
         let cells = vec![
             Cell::from(item.job_id.clone()),

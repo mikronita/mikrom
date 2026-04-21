@@ -20,15 +20,12 @@ use tonic::{Response, Status, async_trait};
 use uuid::Uuid;
 
 pub struct AgentServer {
-    host_id: String,
-    hostname: String,
+    config: crate::config::AgentConfig,
     ip_address: String,
-    bridge_ip: String,
     metrics_collector: MetricsCollector,
     firecracker: FirecrackerManager,
     scheduler_client: Option<SchedulerClient>,
     shutdown_flag: Arc<RwLock<bool>>,
-    scheduler_addr: String,
 }
 
 #[derive(Clone)]
@@ -88,7 +85,7 @@ impl AgentService for AgentServer {
     ) -> Result<Response<GetMetricsResponse>, Status> {
         let metrics = self.metrics_collector.collect().await;
         Ok(Response::new(GetMetricsResponse {
-            host_id: self.host_id.clone(),
+            host_id: self.config.host_id.clone(),
             cpu_usage: metrics.cpu_usage,
             ram_used_bytes: metrics.ram_used_bytes,
             ram_total_bytes: metrics.ram_total_bytes,
@@ -207,17 +204,9 @@ impl AgentService for AgentServer {
         }
 
         let config = VmConfig {
-            vcpus: req.config.as_ref().map(|c| c.vcpus).unwrap_or(1),
-            memory_mib: req
-                .config
-                .as_ref()
-                .map(|c| c.memory_mib as u64)
-                .unwrap_or(256),
-            disk_mib: req
-                .config
-                .as_ref()
-                .map(|c| c.disk_mib as u64)
-                .unwrap_or(1024),
+            vcpus: req.config.as_ref().map_or(1, |c| c.vcpus),
+            memory_mib: req.config.as_ref().map_or(256, |c| u64::from(c.memory_mib)),
+            disk_mib: req.config.as_ref().map_or(1024, |c| u64::from(c.disk_mib)),
             env,
             ip_address: req.config.as_ref().and_then(|c| {
                 if c.ip_address.is_empty() {
@@ -378,71 +367,40 @@ impl AgentService for AgentServer {
 }
 
 impl AgentServer {
-    pub fn new(host_id: String, hostname: String, ip_address: String) -> Self {
-        let scheduler_addr =
-            std::env::var("SCHEDULER_ADDR").unwrap_or_else(|_| "http://127.0.0.1:5002".to_string());
-        let bridge_ip = std::env::var("BRIDGE_IP").unwrap_or_else(|_| "10.0.0.1/8".to_string());
-        Self::with_scheduler_addr(host_id, hostname, ip_address, bridge_ip, scheduler_addr)
-    }
-
-    /// Create an agent that connects to the given scheduler address.
-    /// Useful for integration tests where the scheduler runs on a random port.
-    pub fn with_scheduler_addr(
-        host_id: String,
-        hostname: String,
-        ip_address: String,
-        bridge_ip: String,
-        scheduler_addr: String,
-    ) -> Self {
+    #[must_use]
+    pub fn new(config: crate::config::AgentConfig, ip_address: String) -> Self {
         let firecracker = FirecrackerManager::new();
-        Self::with_manager(
-            host_id,
-            hostname,
-            ip_address,
-            bridge_ip,
-            scheduler_addr,
-            firecracker,
-        )
+        Self::with_manager(config, ip_address, firecracker)
     }
 
+    #[must_use]
     pub fn with_manager(
-        host_id: String,
-        hostname: String,
+        config: crate::config::AgentConfig,
         ip_address: String,
-        bridge_ip: String,
-        scheduler_addr: String,
         firecracker: FirecrackerManager,
     ) -> Self {
         Self {
-            host_id,
-            hostname,
+            config: config.clone(),
             ip_address,
-            bridge_ip,
             metrics_collector: MetricsCollector::with_firecracker(firecracker.clone()),
             firecracker,
             scheduler_client: None,
             shutdown_flag: Arc::new(RwLock::new(false)),
-            scheduler_addr,
         }
     }
 
-    pub async fn serve(
-        &self,
-        addr: SocketAddr,
-        use_tls: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let host_id = self.host_id.clone();
-        let hostname = self.hostname.clone();
+    pub async fn serve(&self, addr: SocketAddr) -> anyhow::Result<()> {
+        let host_id = self.config.host_id.clone();
+        let hostname = self.config.hostname();
         let ip_address = self.ip_address.clone();
         let metrics_collector = self.metrics_collector.clone();
         let agent_port = addr.port();
+        let use_tls = self.config.use_tls;
 
         // Load certs once — they are moved into the background task and also
         // used to configure the gRPC server below.
         let certs: Option<ServiceCerts> = if use_tls {
-            let certs_dir =
-                std::env::var("CERTS_DIR").unwrap_or_else(|_| "/certs/agent".to_string());
-            Some(ServiceCerts::load(&certs_dir)?)
+            Some(ServiceCerts::load(&self.config.certs_dir)?)
         } else {
             None
         };
@@ -462,10 +420,12 @@ impl AgentServer {
         self.firecracker.start_background_tasks();
 
         let certs_for_task = certs.clone();
-        let scheduler_addr_for_task = self.scheduler_addr.clone();
+        let scheduler_addr_for_task = self.config.scheduler_addr.clone();
+        let bridge_ip_for_task = self.config.bridge_ip.clone();
 
         tokio::spawn(async move {
             let mut scheduler_addr = scheduler_addr_for_task;
+            let bridge_ip = bridge_ip_for_task;
 
             // With mTLS the H2 `:scheme` pseudo-header must be "https".
             // tonic derives the scheme from the URI, so switch to https:// here.
@@ -491,8 +451,6 @@ impl AgentServer {
             // ── Main Loop (Registration + Heartbeat) ──────────────────────────
             loop {
                 // ── Registration with retry/backoff ───────────────────────────
-                let bridge_ip =
-                    std::env::var("BRIDGE_IP").unwrap_or_else(|_| "10.0.0.1/8".to_string());
                 let register_req = RegisterWorkerRequest {
                     host_id: host_id.clone(),
                     hostname: hostname.clone(),
@@ -651,23 +609,20 @@ impl AgentServer {
         // ── gRPC server ───────────────────────────────────────────────────────
         let service = AgentServiceServer::new(self.clone());
 
-        match certs {
-            Some(c) => {
-                let tls = c.server_tls_config()?;
-                tracing::info!("Agent mTLS enabled");
-                tonic::transport::Server::builder()
-                    .tls_config(tls)?
-                    .add_service(service)
-                    .serve(addr)
-                    .await?;
-            }
-            None => {
-                tracing::info!("Agent running without TLS");
-                tonic::transport::Server::builder()
-                    .add_service(service)
-                    .serve(addr)
-                    .await?;
-            }
+        if let Some(c) = certs {
+            let tls = c.server_tls_config()?;
+            tracing::info!("Agent mTLS enabled");
+            tonic::transport::Server::builder()
+                .tls_config(tls)?
+                .add_service(service)
+                .serve(addr)
+                .await?;
+        } else {
+            tracing::info!("Agent running without TLS");
+            tonic::transport::Server::builder()
+                .add_service(service)
+                .serve(addr)
+                .await?;
         }
 
         Ok(())
@@ -677,20 +632,18 @@ impl AgentServer {
 impl Clone for AgentServer {
     fn clone(&self) -> Self {
         Self {
-            host_id: self.host_id.clone(),
-            hostname: self.hostname.clone(),
+            config: self.config.clone(),
             ip_address: self.ip_address.clone(),
-            bridge_ip: self.bridge_ip.clone(),
             metrics_collector: self.metrics_collector.clone(),
             firecracker: self.firecracker.clone(),
             scheduler_client: self.scheduler_client.clone(),
             shutdown_flag: self.shutdown_flag.clone(),
-            scheduler_addr: self.scheduler_addr.clone(),
         }
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::get_unwrap)]
 mod tests {
     use super::*;
     use mikrom_proto::agent::{
@@ -702,14 +655,16 @@ mod tests {
     fn make_server() -> AgentServer {
         let fc_config = crate::firecracker::FirecrackerConfig::stub();
         let firecracker = crate::firecracker::FirecrackerManager::with_config(fc_config);
-        AgentServer::with_manager(
-            "host-1".to_string(),
-            "node-1".to_string(),
-            "127.0.0.1".to_string(),
-            "10.0.0.1/8".to_string(),
-            "http://127.0.0.1:5002".to_string(),
-            firecracker,
-        )
+        let config = crate::config::AgentConfig {
+            host_id: "host-1".to_string(),
+            scheduler_addr: "http://127.0.0.1:5002".to_string(),
+            use_tls: false,
+            agent_port: 5003,
+            bridge_ip: "10.0.0.1/8".to_string(),
+            certs_dir: "/certs/agent".to_string(),
+            agent_hostname: Some("node-1".to_string()),
+        };
+        AgentServer::with_manager(config, "127.0.0.1".to_string(), firecracker)
     }
 
     fn start_vm_req(vm_id: &str) -> StartVmRequest {
@@ -931,7 +886,10 @@ mod tests {
         assert_eq!(vm.config.vcpus, 1);
         assert_eq!(vm.config.memory_mib, 256);
         assert_eq!(vm.config.disk_mib, 1024);
-        assert_eq!(vm.config.env.get("PORT").map(|s| s.as_str()), Some("8080"));
+        assert_eq!(
+            vm.config.env.get("PORT").map(std::string::String::as_str),
+            Some("8080")
+        );
     }
 
     #[tokio::test]

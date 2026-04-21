@@ -11,6 +11,9 @@ pub enum ApiError {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
 
+    #[error("Repository error: {0}")]
+    Repo(#[from] crate::repositories::user_repository::DbError),
+
     #[error("Authentication failed: {0}")]
     Auth(String),
 
@@ -46,6 +49,25 @@ impl IntoResponse for ApiError {
                     "Database failure".to_string(),
                 )
             }
+            Self::Repo(err) => match err {
+                crate::repositories::user_repository::DbError::NotFound => {
+                    (StatusCode::NOT_FOUND, "Entity not found".to_string())
+                }
+                crate::repositories::user_repository::DbError::Conflict(msg) => {
+                    (StatusCode::CONFLICT, msg)
+                }
+                crate::repositories::user_repository::DbError::Sqlx(e) => {
+                    tracing::error!("Repository SQL error: {:?}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Database failure".to_string(),
+                    )
+                }
+                crate::repositories::user_repository::DbError::Internal(msg) => {
+                    tracing::error!("Repository internal error: {}", msg);
+                    (StatusCode::INTERNAL_SERVER_ERROR, msg)
+                }
+            },
             Self::Auth(msg) => (StatusCode::UNAUTHORIZED, msg),
             Self::InvalidToken => (
                 StatusCode::UNAUTHORIZED,

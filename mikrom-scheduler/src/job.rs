@@ -54,6 +54,7 @@ pub struct VmConfig {
 }
 
 impl Job {
+    #[must_use]
     pub fn new(
         job_id: String,
         app_id: String,
@@ -105,6 +106,7 @@ impl Job {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::get_unwrap)]
 mod tests {
     use super::*;
 
@@ -253,7 +255,7 @@ mod tests {
             netmask: None,
             volumes: vec![],
         };
-        assert_eq!(config.env.get("PORT").unwrap(), "8080");
+        assert_eq!(&config.env["PORT"], "8080");
     }
 
     #[test]

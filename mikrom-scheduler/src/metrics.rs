@@ -24,6 +24,7 @@ pub struct HostMetrics {
 }
 
 impl HostMetrics {
+    #[must_use]
     pub fn calculate_score(&self, max_apps: u32) -> f32 {
         let cpu_score = (1.0 - self.cpu_usage).max(0.0);
         let ram_score = if self.ram_total_bytes > 0 {
@@ -48,6 +49,7 @@ impl HostMetrics {
         (cpu_score * 0.2) + (ram_score * 0.4) + (disk_score * 0.2) + (apps_score * 0.2)
     }
 
+    #[must_use]
     pub fn can_fit_vm(&self, required_memory_mib: u64, required_disk_mib: u64) -> bool {
         let available_ram_mib =
             self.ram_total_bytes.saturating_sub(self.ram_used_bytes) / (1024 * 1024);

@@ -27,6 +27,7 @@ pub struct WorkerRegistry {
 }
 
 impl WorkerRegistry {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             workers: Arc::new(RwLock::new(HashMap::new())),
@@ -92,11 +93,13 @@ impl WorkerRegistry {
         true
     }
 
+    #[must_use]
     pub fn unregister(&self, host_id: &str) -> bool {
         let mut workers = self.workers.write();
         workers.remove(host_id).is_some()
     }
 
+    #[must_use]
     pub fn update_metrics(&self, host_id: &str, metrics: HostMetrics) -> bool {
         let mut workers = self.workers.write();
         if let Some(worker) = workers.get_mut(host_id) {
@@ -108,14 +111,17 @@ impl WorkerRegistry {
         }
     }
 
+    #[must_use]
     pub fn get_worker(&self, host_id: &str) -> Option<Worker> {
         self.workers.read().get(host_id).cloned()
     }
 
+    #[must_use]
     pub fn list_workers(&self) -> Vec<Worker> {
         self.workers.read().values().cloned().collect()
     }
 
+    #[must_use]
     pub fn get_available_workers(&self) -> Vec<Worker> {
         let now = chrono::Utc::now().timestamp();
         self.workers
@@ -128,6 +134,7 @@ impl WorkerRegistry {
             .collect()
     }
 
+    #[must_use]
     pub fn is_registered(&self, host_id: &str) -> bool {
         self.workers.read().contains_key(host_id)
     }
@@ -308,7 +315,7 @@ mod tests {
             5003,
             "10.0.2.1/24".to_string(),
         );
-        registry.update_metrics("h1", sample_metrics());
+        let _ = registry.update_metrics("h1", sample_metrics());
 
         let available = registry.get_available_workers();
         assert_eq!(available.len(), 1);
@@ -338,7 +345,7 @@ mod tests {
             5003,
             "10.0.1.1/24".to_string(),
         );
-        registry.unregister("h1");
+        let _ = registry.unregister("h1");
         assert!(!registry.is_registered("h1"));
     }
 
@@ -354,7 +361,7 @@ mod tests {
         );
         let before = registry.get_worker("h1").unwrap().last_heartbeat;
         std::thread::sleep(std::time::Duration::from_millis(10));
-        registry.update_metrics("h1", sample_metrics());
+        let _ = registry.update_metrics("h1", sample_metrics());
         let after = registry.get_worker("h1").unwrap().last_heartbeat;
         assert!(after >= before);
     }
@@ -371,11 +378,11 @@ mod tests {
             let reg = registry.clone();
             handles.push(std::thread::spawn(move || {
                 reg.register(
-                    format!("host-{}", i),
-                    format!("node-{}", i),
+                    format!("host-{i}"),
+                    format!("node-{i}"),
                     "127.0.0.1".to_string(),
                     5000 + i,
-                    format!("10.0.{}.1/24", i),
+                    format!("10.0.{i}.1/24"),
                 );
             }));
         }
@@ -385,7 +392,7 @@ mod tests {
 
         assert_eq!(registry.list_workers().len(), 20);
         for i in 0..20 {
-            assert!(registry.is_registered(&format!("host-{}", i)));
+            assert!(registry.is_registered(&format!("host-{i}")));
         }
     }
 
@@ -396,11 +403,11 @@ mod tests {
         // Pre-register 10 workers.
         for i in 0..10u16 {
             registry.register(
-                format!("h{}", i),
-                format!("n{}", i),
+                format!("h{i}"),
+                format!("n{i}"),
                 "127.0.0.1".to_string(),
                 5000 + i,
-                format!("10.0.{}.1/24", i),
+                format!("10.0.{i}.1/24"),
             );
         }
 
@@ -409,14 +416,14 @@ mod tests {
             let reg = registry.clone();
             handles.push(std::thread::spawn(move || {
                 let ok = reg.update_metrics(
-                    &format!("h{}", i),
+                    &format!("h{i}"),
                     HostMetrics {
-                        cpu_usage: i as f32 * 0.1,
-                        ram_used_bytes: (i as u64 + 1) * 100_000_000,
+                        cpu_usage: f32::from(i) * 0.1,
+                        ram_used_bytes: (u64::from(i) + 1) * 100_000_000,
                         ram_total_bytes: 8 * 1024 * 1024 * 1024,
                         disk_used_bytes: 0,
                         disk_total_bytes: 100 * 1024 * 1024 * 1024,
-                        apps_count: i as u32,
+                        apps_count: u32::from(i),
                         load_avg_1: 0.0,
                         load_avg_5: 0.0,
                         load_avg_15: 0.0,
@@ -442,11 +449,11 @@ mod tests {
         // Register 10 workers first.
         for i in 0..10u16 {
             registry.register(
-                format!("h{}", i),
-                format!("n{}", i),
+                format!("h{i}"),
+                format!("n{i}"),
                 "127.0.0.1".to_string(),
                 5000 + i,
-                format!("10.0.{}.1/24", i),
+                format!("10.0.{i}.1/24"),
             );
         }
 
@@ -456,11 +463,11 @@ mod tests {
             let reg = registry.clone();
             handles.push(std::thread::spawn(move || {
                 reg.register(
-                    format!("h{}", i),
-                    format!("n{}", i),
+                    format!("h{i}"),
+                    format!("n{i}"),
                     "127.0.0.1".to_string(),
                     5000 + i,
-                    format!("10.0.{}.1/24", i),
+                    format!("10.0.{i}.1/24"),
                 );
             }));
         }
@@ -468,7 +475,7 @@ mod tests {
         for i in 0..5u16 {
             let reg = registry.clone();
             handles.push(std::thread::spawn(move || {
-                reg.unregister(&format!("h{}", i));
+                let _ = reg.unregister(&format!("h{i}"));
             }));
         }
         for h in handles {
@@ -486,11 +493,11 @@ mod tests {
         let registry = Arc::new(WorkerRegistry::new());
         for i in 0..5u16 {
             registry.register(
-                format!("h{}", i),
-                format!("n{}", i),
+                format!("h{i}"),
+                format!("n{i}"),
                 "127.0.0.1".to_string(),
                 5000 + i,
-                format!("10.0.{}.1/24", i),
+                format!("10.0.{i}.1/24"),
             );
         }
 
@@ -499,7 +506,7 @@ mod tests {
         for i in 0..5u16 {
             let reg = registry.clone();
             handles.push(std::thread::spawn(move || {
-                reg.update_metrics(&format!("h{}", i), sample_metrics());
+                let _ = reg.update_metrics(&format!("h{i}"), sample_metrics());
             }));
         }
         // Readers: list workers concurrently.

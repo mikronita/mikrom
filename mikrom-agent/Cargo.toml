@@ -3,6 +3,9 @@ name = "mikrom-agent"
 version = "0.1.1"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 tokio.workspace = true
 tonic.workspace = true
@@ -20,11 +23,12 @@ parking_lot = "0.12"
 tokio-stream = "0.1"
 sysinfo = "0.32"
 hostname = "0.4"
+envy.workspace = true
 
 mikrom-proto = { path = "../mikrom-proto" }
 dotenvy = "0.15"
+anyhow.workspace = true
 tokio-util = { version = "0.7.18", features = ["io", "codec"] }
-anyhow = "1.0.102"
 futures = "0.3.32"
 opentelemetry = "0.31.0"
 opentelemetry_sdk = "0.31.0"

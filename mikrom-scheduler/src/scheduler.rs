@@ -7,35 +7,51 @@ use thiserror::Error;
 
 pub mod ipam;
 
+/// Errors that can occur during the scheduling process.
 #[derive(Error, Debug)]
 pub enum SchedulerError {
+    /// No workers are currently registered in the cluster.
     #[error("No available workers")]
     NoWorkers,
+    /// No registered worker has enough resources to satisfy the VM requirements.
     #[error("No worker can fit the VM requirements")]
     NoFit,
+    /// The requested job ID was not found in the scheduler state.
     #[error("Job not found: {0}")]
     JobNotFound(String),
+    /// The IP address pool for the target worker is exhausted.
     #[error("IP address pool exhausted")]
     IpPoolExhausted,
 }
 
 const MAX_APPS_PER_HOST: u32 = 10;
 
+/// Strategies for selecting a worker to host a new VM.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum SchedulingStrategy {
+    /// Spreads the load across all available workers (default).
     #[default]
-    LeastLoaded, // Current behavior: spreads load
-    BinPacking, // Fill nodes sequentially to optimize costs
+    LeastLoaded,
+    /// Fills workers sequentially to minimize the number of active nodes.
+    BinPacking,
 }
 
+/// The core component responsible for matching VM requests to available workers.
+///
+/// It maintains the state of all active jobs and orchestrates the worker registry.
 #[derive(Clone)]
 pub struct AppScheduler {
+    /// Registry of all active workers and their resource availability.
     pub worker_registry: WorkerRegistry,
+    /// In-memory store of all jobs managed by this scheduler.
     pub jobs: Arc<RwLock<HashMap<String, Job>>>,
+    /// The strategy used for placing new workloads.
     pub strategy: SchedulingStrategy,
 }
 
 impl AppScheduler {
+    /// Creates a new scheduler with the provided worker registry.
+    #[must_use]
     pub fn new(worker_registry: WorkerRegistry) -> Self {
         Self {
             worker_registry,
@@ -44,11 +60,13 @@ impl AppScheduler {
         }
     }
 
+    #[must_use]
     pub fn with_strategy(mut self, strategy: SchedulingStrategy) -> Self {
         self.strategy = strategy;
         self
     }
 
+    #[must_use]
     pub fn worker_registry(&self) -> &WorkerRegistry {
         &self.worker_registry
     }
@@ -59,6 +77,7 @@ impl AppScheduler {
         self.jobs.write().insert(job_id, job_clone);
     }
 
+    #[must_use]
     pub fn get_job(&self, job_id: &str) -> Option<Job> {
         self.jobs.read().get(job_id).cloned()
     }
@@ -87,6 +106,7 @@ impl AppScheduler {
         }
     }
 
+    #[must_use]
     pub fn remove_job(&self, job_id: &str) -> bool {
         if let Some(job) = self.jobs.write().remove(job_id) {
             if let Some(ip) = job.config.ip_address
@@ -101,10 +121,11 @@ impl AppScheduler {
         }
     }
 
+    #[must_use]
     pub fn list_jobs(&self, user_id: Option<&str>, _status: Option<JobStatus>) -> Vec<Job> {
         let jobs = self.jobs.read();
         jobs.values()
-            .filter(|j| user_id.map(|u| j.user_id == u).unwrap_or(true))
+            .filter(|j| user_id.is_none_or(|u| j.user_id == u))
             .cloned()
             .collect()
     }
@@ -157,13 +178,11 @@ impl AppScheduler {
             let score_a = a
                 .metrics
                 .as_ref()
-                .map(|m| m.calculate_score(MAX_APPS_PER_HOST))
-                .unwrap_or(0.0);
+                .map_or(0.0, |m| m.calculate_score(MAX_APPS_PER_HOST));
             let score_b = b
                 .metrics
                 .as_ref()
-                .map(|m| m.calculate_score(MAX_APPS_PER_HOST))
-                .unwrap_or(0.0);
+                .map_or(0.0, |m| m.calculate_score(MAX_APPS_PER_HOST));
 
             // Apply soft anti-affinity penalty (each existing instance reduces score by 0.2)
             let penalty_a = (*app_counts_per_host.get(&a.host_id).unwrap_or(&0) as f32) * 0.2;
@@ -182,6 +201,7 @@ impl AppScheduler {
         Ok(viable_workers.remove(0))
     }
 
+    #[must_use]
     pub fn find_job_by_vm_id(&self, vm_id: &str) -> Option<Job> {
         self.jobs
             .read()
@@ -204,7 +224,7 @@ mod tests {
     ) {
         registry.register(
             id.to_string(),
-            format!("host-{}", id),
+            format!("host-{id}"),
             "127.0.0.1".to_string(),
             5003,
             "10.0.0.1/8".to_string(),
@@ -216,7 +236,7 @@ mod tests {
         metrics.ram_used_bytes = metrics.ram_total_bytes - (ram_free_mb * 1024 * 1024);
         metrics.apps_count = 0;
 
-        registry.update_metrics(id, metrics);
+        let _ = registry.update_metrics(id, metrics);
     }
 
     #[test]

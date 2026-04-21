@@ -6,25 +6,31 @@ pub struct Claims {
     pub sub: String,
     pub email: String,
     pub role: UserRole,
-    pub exp: usize,
-    pub iat: usize,
+    pub exp: u64,
+    pub iat: u64,
 }
 
+/// Creates a new JWT token for a user.
+///
+/// # Errors
+///
+/// Returns an error if token encoding fails.
 pub fn create_token(
     user_id: &str,
     email: &str,
     role: &UserRole,
     secret: &str,
 ) -> Result<String, jsonwebtoken::errors::Error> {
-    let now = chrono::Utc::now().timestamp() as usize;
-    let expiration = now + 3600 * 24;
+    let now = chrono::Utc::now().timestamp();
+    let now_u64 = u64::try_from(now).unwrap_or(0);
+    let expiration = now_u64 + 3600 * 24;
 
     let claims = Claims {
         sub: user_id.to_string(),
         email: email.to_string(),
         role: role.clone(),
         exp: expiration,
-        iat: now,
+        iat: now_u64,
     };
 
     jsonwebtoken::encode(
@@ -34,6 +40,11 @@ pub fn create_token(
     )
 }
 
+/// Verifies a JWT token and returns its claims.
+///
+/// # Errors
+///
+/// Returns an error if the token is invalid or expired.
 pub fn verify_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
     let token_data = jsonwebtoken::decode::<Claims>(
         token,

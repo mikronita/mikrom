@@ -55,6 +55,7 @@ pub struct MetricsCollector {
 }
 
 impl MetricsCollector {
+    #[must_use]
     pub fn new() -> Self {
         let mut system = System::new_all();
         system.refresh_all();
@@ -67,6 +68,7 @@ impl MetricsCollector {
         }
     }
 
+    #[must_use]
     pub fn with_firecracker(firecracker: FirecrackerManager) -> Self {
         let mut collector = Self::new();
         collector.firecracker = Some(firecracker);
@@ -182,6 +184,7 @@ impl Default for MetricsCollector {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::get_unwrap)]
 mod tests {
     use super::*;
 

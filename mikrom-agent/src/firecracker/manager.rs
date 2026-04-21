@@ -1,292 +1,41 @@
-use serde::{Deserialize, Serialize};
+use crate::firecracker::api::{fc_patch, fc_put, wait_for_socket};
+use crate::firecracker::config::{FirecrackerConfig, FirecrackerError, VmConfig, VmInfo, VmStatus};
+use crate::firecracker::process::{
+    CommandExecutor, RealCommandExecutor, VmDetailedInfo, VmProcess,
+};
+
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
-use thiserror::Error;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{Mutex, RwLock};
 
-#[derive(Error, Debug)]
-pub enum FirecrackerError {
-    #[error("VM not found: {0}")]
-    VmNotFound(String),
-    #[error("Failed to start VM: {0}")]
-    StartFailed(String),
-    #[error("Failed to stop VM: {0}")]
-    StopFailed(String),
-    #[error("Firecracker process error: {0}")]
-    ProcessError(String),
-    #[error("Firecracker API error on {path}: {msg}")]
-    ApiError { path: String, msg: String },
-    #[error("Timed out waiting for socket: {0}")]
-    SocketTimeout(String),
-}
-
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum VmStatus {
-    Starting,
-    Running,
-    Paused,
-    Stopping,
-    #[default]
-    Stopped,
-    Failed,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct VmInfo {
-    pub vm_id: String,
-    pub app_id: String,
-    pub image: String,
-    pub config: VmConfig,
-    pub status: VmStatus,
-    pub started_at: Option<i64>,
-    pub error_message: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct Volume {
-    pub volume_id: String,
-    pub size_mib: u64,
-    pub read_only: bool,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct VmConfig {
-    pub vcpus: u32,
-    pub memory_mib: u64,
-    pub disk_mib: u64,
-    pub env: std::collections::HashMap<String, String>,
-    pub ip_address: Option<String>,
-    pub gateway: Option<String>,
-    pub mac_address: Option<String>,
-    pub netmask: Option<String>,
-    pub volumes: Vec<Volume>,
-}
-
-struct VmProcess {
-    #[allow(dead_code)]
-    vm_id: String,
-    child: tokio::process::Child,
-    socket_path: String,
-    tap_name: Option<String>,
-    log_task: tokio::task::JoinHandle<()>,
-    chroot_dir: Option<String>,
-}
-
+/// Orchestrator for managing the lifecycle of Firecracker microVMs on a single host.
+///
+/// It handles networking, image conversion, jailer setup, and API communication
+/// with the Firecracker process.
 #[derive(Clone)]
 pub struct FirecrackerManager {
-    agent_id: String,
-    vms: Arc<RwLock<HashMap<String, VmInfo>>>,
-    processes: Arc<Mutex<HashMap<String, VmProcess>>>,
-    fc_config: FirecrackerConfig,
-    logs: Arc<RwLock<HashMap<String, VecDeque<String>>>>,
-    builder: Arc<crate::builder::ImageBuilder>,
-    executor: Arc<dyn CommandExecutor>,
-    allocated_ips: Arc<tokio::sync::Mutex<std::collections::HashSet<std::net::Ipv4Addr>>>,
+    /// Unique identifier for this agent.
+    pub agent_id: String,
+    /// Thread-safe map of active microVM information.
+    pub vms: Arc<RwLock<HashMap<String, VmInfo>>>,
+    /// Thread-safe map of active Firecracker processes.
+    pub processes: Arc<Mutex<HashMap<String, VmProcess>>>,
+    /// Configuration for Firecracker and Jailer.
+    pub fc_config: FirecrackerConfig,
+    /// In-memory ring buffer of logs for each VM.
+    pub logs: Arc<RwLock<HashMap<String, VecDeque<String>>>>,
+    /// Image builder for converting OCI images to Firecracker-compatible rootfs.
+    pub builder: Arc<crate::builder::ImageBuilder>,
+    /// Interface for executing system commands.
+    pub executor: Arc<dyn CommandExecutor>,
+    /// Tracks allocated IP addresses on the host bridge.
+    pub allocated_ips: Arc<tokio::sync::Mutex<std::collections::HashSet<std::net::Ipv4Addr>>>,
 }
-
-// ── HTTP-over-Unix-socket helper ──────────────────────────────────────────────
-
-/// Send a request to the Firecracker API socket and return Ok on 2xx.
-#[tracing::instrument(skip_all, fields(method = %method, api_path = %api_path))]
-async fn fc_request(
-    method: &str,
-    socket_path: &str,
-    api_path: &str,
-    body: &str,
-) -> Result<(), FirecrackerError> {
-    let stream_fut = tokio::net::UnixStream::connect(socket_path);
-    let stream = tokio::time::timeout(Duration::from_secs(2), stream_fut)
-        .await
-        .map_err(|_| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: "connect timeout".to_string(),
-        })?
-        .map_err(|e| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: format!("connect: {e}"),
-        })?;
-
-    let (reader, mut writer) = tokio::io::split(stream);
-
-    let request = format!(
-        "{method} {api_path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    let write_fut = writer.write_all(request.as_bytes());
-    tokio::time::timeout(Duration::from_secs(2), write_fut)
-        .await
-        .map_err(|_| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: "write timeout".to_string(),
-        })?
-        .map_err(|e| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: format!("write: {e}"),
-        })?;
-
-    // Flush writer half before reading the response.
-    let flush_fut = writer.flush();
-    tokio::time::timeout(Duration::from_secs(2), flush_fut)
-        .await
-        .map_err(|_| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: "flush timeout".to_string(),
-        })?
-        .map_err(|e| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: format!("flush: {e}"),
-        })?;
-
-    // Read only the status line — Firecracker responds with 204 No Content.
-    let mut buf_reader = BufReader::new(reader);
-    let mut status_line = String::new();
-    let read_fut = buf_reader.read_line(&mut status_line);
-    tokio::time::timeout(Duration::from_secs(2), read_fut)
-        .await
-        .map_err(|_| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: "read timeout".to_string(),
-        })?
-        .map_err(|e| FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: format!("read: {e}"),
-        })?;
-
-    if status_line.contains(" 2") {
-        Ok(())
-    } else {
-        Err(FirecrackerError::ApiError {
-            path: api_path.to_string(),
-            msg: status_line.trim().to_string(),
-        })
-    }
-}
-
-/// Send a PUT request to the Firecracker API socket and return Ok on 2xx.
-#[tracing::instrument(skip_all, fields(api_path = %api_path))]
-async fn fc_put(socket_path: &str, api_path: &str, body: &str) -> Result<(), FirecrackerError> {
-    fc_request("PUT", socket_path, api_path, body).await
-}
-
-#[tracing::instrument(skip_all, fields(api_path = %api_path))]
-async fn fc_patch(socket_path: &str, api_path: &str, body: &str) -> Result<(), FirecrackerError> {
-    fc_request("PATCH", socket_path, api_path, body).await
-}
-
-/// Poll until the Unix socket file appears (Firecracker is ready to accept API calls).
-async fn wait_for_socket(path: &str, timeout: Duration) -> Result<(), FirecrackerError> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        if std::path::Path::new(path).exists() {
-            return Ok(());
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(FirecrackerError::SocketTimeout(path.to_string()));
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-}
-
-// ── FirecrackerConfig ─────────────────────────────────────────────────────────
-
-/// Runtime configuration for `FirecrackerManager`.  `new()` reads from
-/// environment variables; `with_config()` accepts an explicit instance so
-/// tests can inject values without touching process-global env vars.
-#[derive(Clone, Debug)]
-pub struct FirecrackerConfig {
-    /// Path to an uncompressed Linux kernel (`vmlinux`).
-    /// When `None` the manager runs in stub mode (no process is spawned).
-    pub kernel_path: Option<String>,
-    /// Path to the Firecracker binary (default: `"firecracker"`).
-    pub binary: String,
-    /// Default rootfs ext4 image.  Used when the `image` field of a
-    /// `StartVmRequest` is not a valid path on the host filesystem.
-    pub rootfs_path: String,
-    /// Whether to use jailer for sandboxing (default: `false`).
-    pub use_jailer: bool,
-    /// Path to the jailer binary (default: `"jailer"`).
-    pub jailer_binary: String,
-    /// UID for the jailed process (default: `1000`).
-    pub jailer_uid: u32,
-    /// GID for the jailed process (default: `1000`).
-    pub jailer_gid: u32,
-    /// Base directory for jailer chroot (default: `"/srv/jailer"`).
-    pub chroot_base: String,
-}
-
-impl FirecrackerConfig {
-    pub fn from_env() -> Self {
-        Self {
-            kernel_path: Some(
-                std::env::var("FC_KERNEL_PATH")
-                    .unwrap_or_else(|_| "/opt/firecracker/vmlinux.bin".to_string()),
-            ),
-            binary: std::env::var("FC_BINARY")
-                .unwrap_or_else(|_| "/usr/bin/firecracker".to_string()),
-            rootfs_path: std::env::var("FC_ROOTFS_PATH")
-                .unwrap_or_else(|_| "/opt/firecracker/rootfs.ext4".to_string()),
-            use_jailer: std::env::var("USE_JAILER")
-                .map(|v| v == "true")
-                .unwrap_or(false),
-            jailer_binary: std::env::var("JAILER_BINARY")
-                .unwrap_or_else(|_| "/usr/bin/jailer".to_string()),
-            jailer_uid: std::env::var("JAILER_UID")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(1000),
-            jailer_gid: std::env::var("JAILER_GID")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(1000),
-            chroot_base: std::env::var("JAILER_CHROOT_BASE")
-                .unwrap_or_else(|_| "/srv/jailer".to_string()),
-        }
-    }
-
-    /// Convenience: stub mode — no kernel path set, so no process is ever spawned.
-    pub fn stub() -> Self {
-        Self {
-            kernel_path: None,
-            binary: "firecracker".to_string(),
-            rootfs_path: "/opt/firecracker/rootfs.ext4".to_string(),
-            use_jailer: false,
-            jailer_binary: "jailer".to_string(),
-            jailer_uid: 1000,
-            jailer_gid: 1000,
-            chroot_base: "/srv/jailer".to_string(),
-        }
-    }
-}
-
-// ── CommandExecutor ───────────────────────────────────────────────────────────
-
-/// Abstraction over shell command execution, allowing tests to inject a mock
-/// instead of running real system commands (ip, mkfs, mount, etc.).
-pub trait CommandExecutor: Send + Sync {
-    fn name(&self) -> &'static str;
-}
-
-pub struct RealCommandExecutor;
-
-impl CommandExecutor for RealCommandExecutor {
-    fn name(&self) -> &'static str {
-        "real"
-    }
-}
-
-pub struct VmDetailedInfo {
-    pub vm_id: String,
-    pub status: VmStatus,
-    pub error_message: Option<String>,
-    pub pid: Option<u32>,
-}
-
-// ── FirecrackerManager ────────────────────────────────────────────────────────
 
 impl FirecrackerManager {
+    /// Returns a list of all VMs with detailed status and PID information.
     pub async fn get_all_vms(&self) -> Vec<VmDetailedInfo> {
         let vms = self.vms.read().await;
         let processes = self.processes.lock().await;
@@ -304,11 +53,13 @@ impl FirecrackerManager {
             .collect()
     }
     /// Create a manager whose configuration is read from environment variables.
+    #[must_use]
     pub fn new() -> Self {
         Self::with_config(FirecrackerConfig::from_env())
     }
 
     /// Create a manager with an explicit configuration (useful for tests).
+    #[must_use]
     pub fn with_config(fc_config: FirecrackerConfig) -> Self {
         let builder =
             crate::builder::ImageBuilder::new().expect("Failed to initialize Docker builder");
@@ -423,14 +174,14 @@ impl FirecrackerManager {
             let mut l = self.logs.write().await;
             l.entry(vm_id.clone())
                 .or_default()
-                .push_back(format!("[agent] Initializing VM {}...", vm_id));
+                .push_back(format!("[agent] Initializing VM {vm_id}..."));
         }
 
         // 3. In real mode, validate the binary exists before going async.
         if let Some(_kernel) = &self.fc_config.kernel_path {
             let binary = &self.fc_config.binary;
             if !std::path::Path::new(binary).exists() {
-                let err_msg = format!("Firecracker binary not found: {}", binary);
+                let err_msg = format!("Firecracker binary not found: {binary}");
                 self.set_failed(&vm_id, err_msg.clone()).await;
                 return Err(FirecrackerError::ProcessError(err_msg));
             }
@@ -467,18 +218,17 @@ impl FirecrackerManager {
         config: VmConfig,
     ) -> Result<(), FirecrackerError> {
         tracing::info!(vm_id = %vm_id, "Background VM startup initiated");
-        let kernel_path = match self.fc_config.kernel_path.clone() {
-            Some(p) => p,
-            None => {
-                tracing::info!(vm_id = %vm_id, "Stub mode: marking as running");
-                // Stub mode
-                let mut vms = self.vms.write().await;
-                if let Some(vm) = vms.get_mut(&vm_id) {
-                    vm.status = VmStatus::Running;
-                    vm.started_at = Some(chrono::Utc::now().timestamp());
-                }
-                return Ok(());
+        let kernel_path = if let Some(p) = self.fc_config.kernel_path.clone() {
+            p
+        } else {
+            tracing::info!(vm_id = %vm_id, "Stub mode: marking as running");
+            // Stub mode
+            let mut vms = self.vms.write().await;
+            if let Some(vm) = vms.get_mut(&vm_id) {
+                vm.status = VmStatus::Running;
+                vm.started_at = Some(chrono::Utc::now().timestamp());
             }
+            return Ok(());
         };
 
         let rootfs_path = format!("/tmp/fc-{}-{}-rootfs.ext4", self.agent_id, vm_id);
@@ -490,7 +240,7 @@ impl FirecrackerManager {
 
         if is_absolute {
             if !image_path.exists() {
-                let err = format!("Local image rootfs not found at absolute path: {}", image);
+                let err = format!("Local image rootfs not found at absolute path: {image}");
                 tracing::error!(vm_id = %vm_id, error = %err);
                 self.set_failed(&vm_id, err.clone()).await;
                 return Err(FirecrackerError::ProcessError(err));
@@ -506,7 +256,10 @@ impl FirecrackerManager {
             tracing::info!(vm_id = %vm_id, "Rootfs setup complete");
         } else {
             // It's a docker tag or a relative path (unsupported for now, treated as docker tag)
-            if !image_path.exists() {
+            if image_path.exists() {
+                // Relative path that exists (rare but possible)
+                self.ensure_file_at(&image, &rootfs_path).await?;
+            } else {
                 tracing::info!(
                     "Image {} not found as local file, attempting docker pull/convert",
                     image
@@ -515,11 +268,8 @@ impl FirecrackerManager {
                     .docker_to_ext4(&image, std::path::Path::new(&rootfs_path))
                     .await
                     .map_err(|e| {
-                        FirecrackerError::ProcessError(format!("Image builder failed: {}", e))
+                        FirecrackerError::ProcessError(format!("Image builder failed: {e}"))
                     })?;
-            } else {
-                // Relative path that exists (rare but possible)
-                self.ensure_file_at(&image, &rootfs_path).await?;
             }
         }
 
@@ -527,20 +277,17 @@ impl FirecrackerManager {
 
         // Resolve networking: if scheduler didn't assign an IP, allocate from bridge subnet.
         let config = if config.ip_address.is_none() || config.ip_address.as_deref() == Some("") {
-            match self.allocate_vm_network().await {
-                Some((ip, gw, mac)) => {
-                    tracing::info!(vm_id = %vm_id, ip = %ip, "Allocated IP from agent bridge subnet");
-                    VmConfig {
-                        ip_address: Some(ip),
-                        gateway: Some(gw),
-                        mac_address: Some(mac),
-                        ..config
-                    }
+            if let Some((ip, gw, mac)) = self.allocate_vm_network().await {
+                tracing::info!(vm_id = %vm_id, ip = %ip, "Allocated IP from agent bridge subnet");
+                VmConfig {
+                    ip_address: Some(ip),
+                    gateway: Some(gw),
+                    mac_address: Some(mac),
+                    ..config
                 }
-                None => {
-                    tracing::warn!(vm_id = %vm_id, "No available IPs in bridge subnet, starting without networking");
-                    config
-                }
+            } else {
+                tracing::warn!(vm_id = %vm_id, "No available IPs in bridge subnet, starting without networking");
+                config
             }
         } else {
             config
@@ -579,10 +326,8 @@ impl FirecrackerManager {
         {
             Ok(c) => c,
             Err(e) => {
-                let err_msg = format!(
-                    "Failed to spawn firecracker process (binary: {}): {}",
-                    exec_binary, e
-                );
+                let err_msg =
+                    format!("Failed to spawn firecracker process (binary: {exec_binary}): {e}");
                 tracing::error!("{}", err_msg);
                 if let Some(tap) = &tap_name {
                     self.cleanup_tap(tap).await;
@@ -608,7 +353,7 @@ impl FirecrackerManager {
             loop {
                 let line = tokio::select! {
                     Ok(Some(line)) = stdout_lines.next_line() => Some(line),
-                    Ok(Some(line)) = stderr_lines.next_line() => Some(format!("[stderr] {}", line)),
+                    Ok(Some(line)) = stderr_lines.next_line() => Some(format!("[stderr] {line}")),
                     else => None,
                 };
 
@@ -648,8 +393,8 @@ impl FirecrackerManager {
 
         // Check if we have a snapshot to restore from
         let snapshot_dir = "/tmp/mikrom-snapshots";
-        let snapshot_path = format!("{}/{}.snapshot", snapshot_dir, vm_id);
-        let mem_path = format!("{}/{}.mem", snapshot_dir, vm_id);
+        let snapshot_path = format!("{snapshot_dir}/{vm_id}.snapshot");
+        let mem_path = format!("{snapshot_dir}/{vm_id}.mem");
         let has_snapshot = std::path::Path::new(&snapshot_path).exists()
             && std::path::Path::new(&mem_path).exists();
 
@@ -658,8 +403,8 @@ impl FirecrackerManager {
 
             // 1. Prepare snapshot paths for API
             let (load_snapshot_path, load_mem_path) = if let Some(chroot) = &chroot_dir {
-                let chroot_snap_path = format!("{}/root/vm.snapshot", chroot);
-                let chroot_mem_path = format!("{}/root/vm.mem", chroot);
+                let chroot_snap_path = format!("{chroot}/root/vm.snapshot");
+                let chroot_mem_path = format!("{chroot}/root/vm.mem");
 
                 self.ensure_file_at(&snapshot_path, &chroot_snap_path)
                     .await?;
@@ -720,7 +465,6 @@ impl FirecrackerManager {
                 return Ok(());
             }
         }
-
         // ── Normal Boot Sequence (if no snapshot or restoration failed) ────────
         // Configure machine resources.
         let machine_config = serde_json::json!({
@@ -735,9 +479,7 @@ impl FirecrackerManager {
             "console=ttyS0 reboot=k panic=1 pci=off nomodules rw root=/dev/vda".to_string();
         if let (Some(ip), Some(gw)) = (&config.ip_address, &config.gateway) {
             let mask = config.netmask.as_deref().unwrap_or("255.255.255.0");
-            // Standard kernel ip= parameter: ip=ip::gw:mask:hostname:iface:autoconf
-            // We leave hostname empty: ip=ip::gw:mask::eth0:off
-            boot_args.push_str(&format!(" ip={}::{}:{}::eth0:off", ip, gw, mask));
+            boot_args.push_str(&format!(" ip={ip}::{gw}:{mask}::eth0:off"));
         }
 
         let kernel_api_path = if chroot_dir.is_some() {
@@ -801,7 +543,7 @@ impl FirecrackerManager {
 
                 let vol_api_path = if let Some(chroot) = &chroot_dir_clone {
                     let vol_filename = format!("{}.ext4", vol.volume_id);
-                    let chroot_vol_path = format!("{}/root/{}", chroot, vol_filename);
+                    let chroot_vol_path = format!("{chroot}/root/{vol_filename}");
                     self.ensure_file_at(&vol_path, &chroot_vol_path).await?;
                     self.recursive_chown(
                         &chroot_vol_path,
@@ -809,7 +551,7 @@ impl FirecrackerManager {
                         self.fc_config.jailer_gid,
                     )
                     .await?;
-                    format!("/{}", vol_filename)
+                    format!("/{vol_filename}")
                 } else {
                     vol_path
                 };
@@ -855,8 +597,7 @@ impl FirecrackerManager {
                 vm.started_at = Some(
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs() as i64)
-                        .unwrap_or(0),
+                        .map_or(0, |d| d.as_secs() as i64),
                 );
             }
         }
@@ -886,10 +627,8 @@ impl FirecrackerManager {
             }
         }
 
-        // Always clean up logs from memory when stopping
         self.logs.write().await.remove(vm_id);
 
-        // If there is a real process, kill it and clean up resources.
         if let Some(mut proc) = self.processes.lock().await.remove(vm_id) {
             proc.log_task.abort();
             let _ = proc.child.kill().await;
@@ -931,18 +670,16 @@ impl FirecrackerManager {
 
         tracing::info!(vm_id = %vm_id, "Pausing VM and creating snapshot...");
 
-        // 1. Pause the VM via PATCH /vm (Firecracker API)
         let pause_body = serde_json::json!({ "state": "Paused" }).to_string();
         fc_patch(&proc.socket_path, "/vm", &pause_body).await?;
 
-        // 2. Create snapshot (memory + state)
         let snapshot_dir = "/tmp/mikrom-snapshots";
         tokio::fs::create_dir_all(snapshot_dir).await.map_err(|e| {
-            FirecrackerError::ProcessError(format!("Failed to create snapshots dir: {}", e))
+            FirecrackerError::ProcessError(format!("Failed to create snapshots dir: {e}"))
         })?;
 
-        let snapshot_path = format!("{}/{}.snapshot", snapshot_dir, vm_id);
-        let mem_path = format!("{}/{}.mem", snapshot_dir, vm_id);
+        let snapshot_path = format!("{snapshot_dir}/{vm_id}.snapshot");
+        let mem_path = format!("{snapshot_dir}/{vm_id}.mem");
 
         let snapshot_body = serde_json::json!({
             "snapshot_type": "Full",
@@ -966,7 +703,6 @@ impl FirecrackerManager {
     pub async fn resume_vm(&self, vm_id: &str) -> Result<(), FirecrackerError> {
         let processes = self.processes.lock().await;
         if let Some(proc) = processes.get(vm_id) {
-            // Process exists, just resume it
             let resume_body = serde_json::json!({ "state": "Resumed" }).to_string();
             fc_patch(&proc.socket_path, "/vm", &resume_body).await?;
 
@@ -977,16 +713,14 @@ impl FirecrackerManager {
             return Ok(());
         }
 
-        // Process is missing, try to restart from snapshot if available
         tracing::info!(vm_id = %vm_id, "Process missing for resume, attempting restart from snapshot...");
-        drop(processes); // Release lock before calling start_vm
+        drop(processes);
 
         let vm_info = self
             .get_vm(vm_id)
             .await
             .ok_or_else(|| FirecrackerError::VmNotFound(vm_id.to_string()))?;
 
-        // Reconstruct VmConfig from VmInfo
         let config = VmConfig {
             ..Default::default()
         };
@@ -1042,19 +776,18 @@ impl FirecrackerManager {
         volume_id: &str,
         size_mib: u64,
     ) -> Result<String, FirecrackerError> {
-        let vol_dir = "/tmp/mikrom-volumes"; // Using /tmp for now for dev permissions
+        let vol_dir = "/tmp/mikrom-volumes";
         tokio::fs::create_dir_all(vol_dir).await.map_err(|e| {
-            FirecrackerError::ProcessError(format!("Failed to create volumes dir: {}", e))
+            FirecrackerError::ProcessError(format!("Failed to create volumes dir: {e}"))
         })?;
 
-        let vol_path = format!("{}/{}.ext4", vol_dir, volume_id);
+        let vol_path = format!("{vol_dir}/{volume_id}.ext4");
         if !std::path::Path::new(&vol_path).exists() {
-            // Create a sparse file
             let file = tokio::fs::File::create(&vol_path).await.map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to create volume file: {}", e))
+                FirecrackerError::ProcessError(format!("Failed to create volume file: {e}"))
             })?;
             file.set_len(size_mib * 1024 * 1024).await.map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to set volume size: {}", e))
+                FirecrackerError::ProcessError(format!("Failed to set volume size: {e}"))
             })?;
         }
 
@@ -1076,7 +809,6 @@ impl FirecrackerManager {
         );
         let prefix = format!("fc-{}-", self.agent_id);
 
-        // Get currently active VM IDs to avoid deleting their files
         let active_vm_ids: std::collections::HashSet<String> = {
             let processes = self.processes.lock().await;
             processes.keys().cloned().collect()
@@ -1088,7 +820,6 @@ impl FirecrackerManager {
                     && file_name.starts_with(&prefix)
                     && (file_name.ends_with(".sock") || file_name.ends_with("-rootfs.ext4"))
                 {
-                    // Check if any active VM ID is part of the filename
                     let mut is_active = false;
                     for vm_id in &active_vm_ids {
                         if file_name.contains(vm_id) {
@@ -1174,38 +905,32 @@ impl FirecrackerManager {
             bridge_ip
         );
 
-        // 1. Create bridge if it doesn't exist
         let _ = tokio::process::Command::new("ip")
             .args(["link", "add", "name", &bridge_name, "type", "bridge"])
             .output()
             .await;
 
-        // 2. Set bridge IP
         let _ = tokio::process::Command::new("ip")
             .args(["addr", "add", &bridge_ip, "dev", &bridge_name])
             .output()
             .await;
 
-        // 3. Bring bridge up
         tokio::process::Command::new("ip")
             .args(["link", "set", "dev", &bridge_name, "up"])
             .output()
             .await
             .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to bring bridge up: {}", e))
+                FirecrackerError::ProcessError(format!("Failed to bring bridge up: {e}"))
             })?;
 
-        // 4. Enable IP forwarding
         tokio::process::Command::new("sysctl")
             .args(["-w", "net.ipv4.ip_forward=1"])
             .output()
             .await
             .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to enable IP forwarding: {}", e))
+                FirecrackerError::ProcessError(format!("Failed to enable IP forwarding: {e}"))
             })?;
 
-        // 5. Setup NAT (Masquerade)
-        // We'll use iptables. Note: In some systems nftables is preferred, but iptables is standard for compatibility.
         let _ = tokio::process::Command::new("iptables")
             .args([
                 "-t",
@@ -1229,7 +954,6 @@ impl FirecrackerManager {
     async fn setup_tap(&self, vm_id: &str) -> Result<String, FirecrackerError> {
         let tap_name = format!("m-tap-{}", &vm_id[..8]);
 
-        // Clean up if it exists
         let _ = tokio::process::Command::new("ip")
             .args(["link", "del", &tap_name])
             .output()
@@ -1248,7 +972,7 @@ impl FirecrackerManager {
             ])
             .output()
             .await
-            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to create TAP: {}", e)))?;
+            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to create TAP: {e}")))?;
 
         if !output.status.success() {
             return Err(FirecrackerError::ProcessError(format!(
@@ -1261,7 +985,7 @@ impl FirecrackerManager {
             .args(["link", "set", &tap_name, "up"])
             .output()
             .await
-            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to set TAP up: {}", e)))?;
+            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to set TAP up: {e}")))?;
 
         if !output.status.success() {
             return Err(FirecrackerError::ProcessError(format!(
@@ -1270,7 +994,6 @@ impl FirecrackerManager {
             )));
         }
 
-        // Connect TAP to bridge
         let _ = tokio::process::Command::new("ip")
             .args(["link", "set", &tap_name, "master", "mikrom-br0"])
             .output()
@@ -1280,13 +1003,11 @@ impl FirecrackerManager {
     }
 
     async fn cleanup_tap(&self, tap_name: &str) {
-        // 1. Remove from bridge
         let _ = tokio::process::Command::new("ip")
             .args(["link", "set", tap_name, "nomaster"])
             .output()
             .await;
 
-        // 2. Delete interface
         let _ = tokio::process::Command::new("ip")
             .args(["link", "delete", tap_name])
             .output()
@@ -1305,25 +1026,20 @@ impl FirecrackerManager {
             .unwrap_or("firecracker");
 
         let chroot_dir = format!("{}/{}/{}", self.fc_config.chroot_base, exec_name, vm_id);
-        let root_dir = format!("{}/root", chroot_dir);
-        let run_dir = format!("{}/run", root_dir);
+        let root_dir = format!("{chroot_dir}/root");
+        let run_dir = format!("{root_dir}/run");
 
-        tracing::info!(vm_id = %vm_id, chroot_dir = %chroot_dir, "Setting up jailer environment");
-
-        // 1. Create directories
         tokio::fs::create_dir_all(&run_dir).await.map_err(|e| {
             FirecrackerError::ProcessError(format!(
-                "Failed to create jailer directory {}: {}",
-                run_dir, e
+                "Failed to create jailer directory {run_dir}: {e}"
             ))
         })?;
 
-        // 2. Copy files to root_dir
         let kernel_filename = "vmlinux.bin";
         let rootfs_filename = "rootfs.ext4";
 
-        let chroot_kernel_path = format!("{}/{}", root_dir, kernel_filename);
-        let chroot_rootfs_path = format!("{}/{}", root_dir, rootfs_filename);
+        let chroot_kernel_path = format!("{root_dir}/{kernel_filename}");
+        let chroot_rootfs_path = format!("{root_dir}/{rootfs_filename}");
 
         self.ensure_file_at(kernel_host_path, &chroot_kernel_path)
             .await?;
@@ -1331,13 +1047,11 @@ impl FirecrackerManager {
         self.ensure_file_at(rootfs_host_path, &chroot_rootfs_path)
             .await?;
 
-        // 3. Set ownership
         let uid = self.fc_config.jailer_uid;
         let gid = self.fc_config.jailer_gid;
 
         self.recursive_chown(&chroot_dir, uid, gid).await?;
 
-        // 4. Prepare jailer arguments
         let args = vec![
             "--id".to_string(),
             vm_id.to_string(),
@@ -1354,7 +1068,7 @@ impl FirecrackerManager {
             "/run/firecracker.socket".to_string(),
         ];
 
-        let host_socket_path = format!("{}/run/firecracker.socket", root_dir);
+        let host_socket_path = format!("{root_dir}/run/firecracker.socket");
 
         Ok((
             self.fc_config.jailer_binary.clone(),
@@ -1365,12 +1079,10 @@ impl FirecrackerManager {
     }
 
     async fn ensure_file_at(&self, src: &str, dst: &str) -> Result<(), FirecrackerError> {
-        if let Err(e) = tokio::fs::hard_link(src, dst).await {
-            tracing::debug!(src = %src, dst = %dst, error = %e, "Hard link failed, falling back to copy");
+        if let Err(_e) = tokio::fs::hard_link(src, dst).await {
             tokio::fs::copy(src, dst).await.map_err(|e| {
                 FirecrackerError::ProcessError(format!(
-                    "Failed to copy file from {} to {}: {}",
-                    src, dst, e
+                    "Failed to copy file from {src} to {dst}: {e}"
                 ))
             })?;
         }
@@ -1388,21 +1100,19 @@ impl FirecrackerManager {
 
         while let Some(current_path) = stack.pop() {
             unix_fs::chown(&current_path, Some(uid), Some(gid)).map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to chown {:?}: {}", current_path, e))
+                FirecrackerError::ProcessError(format!("Failed to chown {current_path:?}: {e}"))
             })?;
 
             if current_path.is_dir() {
                 let mut entries = tokio::fs::read_dir(&current_path).await.map_err(|e| {
                     FirecrackerError::ProcessError(format!(
-                        "Failed to read directory {:?}: {}",
-                        current_path, e
+                        "Failed to read directory {current_path:?}: {e}"
                     ))
                 })?;
 
                 while let Some(entry) = entries.next_entry().await.map_err(|e| {
                     FirecrackerError::ProcessError(format!(
-                        "Failed to get next entry in {:?}: {}",
-                        current_path, e
+                        "Failed to get next entry in {current_path:?}: {e}"
                     ))
                 })? {
                     stack.push(entry.path());
@@ -1427,8 +1137,6 @@ impl FirecrackerManager {
         }
     }
 
-    /// Insert a real child process into the process map so `stop_vm` real-mode
-    /// path can be exercised without going through the full `start_vm` flow.
     async fn insert_process_for_test(
         &self,
         vm_id: &str,
@@ -1462,13 +1170,12 @@ impl FirecrackerManager {
         );
     }
 
-    /// Returns true if there is a live process handle stored for this vm_id.
     async fn has_process(&self, vm_id: &str) -> bool {
         self.processes.lock().await.contains_key(vm_id)
     }
 }
-
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::get_unwrap)]
 mod tests {
     use super::*;
 
@@ -1539,7 +1246,6 @@ mod tests {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         start(&mgr, "vm-1").await;
         assert!(mgr.stop_vm("vm-1").await.is_ok());
-        // In stub mode (no FC_KERNEL_PATH) there is no process, so status stays Stopping.
         assert_eq!(mgr.get_vm_status("vm-1").await.unwrap(), VmStatus::Stopping);
     }
 
@@ -1640,7 +1346,7 @@ mod tests {
             netmask: None,
             volumes: vec![],
         };
-        assert_eq!(cfg.env.get("PORT").unwrap(), "3000");
+        assert_eq!(&cfg.env["PORT"], "3000");
         assert_eq!(cfg.vcpus, 2);
     }
 
@@ -1681,7 +1387,6 @@ mod tests {
     #[tokio::test]
     async fn test_set_status_for_test_on_nonexistent_vm_is_noop() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        // Must not panic
         mgr.set_status_for_test("ghost", VmStatus::Running).await;
     }
 
@@ -1690,7 +1395,6 @@ mod tests {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         start(&mgr, "vm-1").await;
         let cloned = mgr.clone();
-        // Cloned manager sees the same VMs (Arc is shared).
         assert_eq!(
             cloned.get_vm_status("vm-1").await.unwrap(),
             VmStatus::Starting
@@ -1698,8 +1402,6 @@ mod tests {
         cloned.set_status_for_test("vm-1", VmStatus::Running).await;
         assert_eq!(mgr.get_vm_status("vm-1").await.unwrap(), VmStatus::Running);
     }
-
-    // ── Concurrency ──────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_concurrent_start_different_vms() {
@@ -1712,13 +1414,13 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 let result = m
                     .start_vm(
-                        format!("vm-{}", i),
-                        format!("app-{}", i),
+                        format!("vm-{i}"),
+                        format!("app-{i}"),
                         "nginx:latest".to_string(),
                         config(),
                     )
                     .await;
-                assert!(result.is_ok(), "start_vm failed for vm-{}: {:?}", i, result);
+                assert!(result.is_ok(), "start_vm failed for vm-{i}: {result:?}");
             }));
         }
         for h in handles {
@@ -1772,18 +1474,16 @@ mod tests {
         use std::sync::Arc;
         let mgr = Arc::new(FirecrackerManager::with_config(FirecrackerConfig::stub()));
 
-        // Pre-start 10 VMs.
         for i in 0..10 {
-            start(&mgr, &format!("vm-pre-{}", i)).await;
+            start(&mgr, &format!("vm-pre-{i}")).await;
         }
 
         let mut handles = vec![];
-        // 10 tasks start new VMs.
         for i in 10..20 {
             let m = mgr.clone();
             handles.push(tokio::spawn(async move {
                 m.start_vm(
-                    format!("vm-{}", i),
+                    format!("vm-{i}"),
                     "app".to_string(),
                     "img.ext4".to_string(),
                     config(),
@@ -1792,11 +1492,10 @@ mod tests {
                 .unwrap();
             }));
         }
-        // 10 tasks stop the pre-started VMs.
         for i in 0..10 {
             let m = mgr.clone();
             handles.push(tokio::spawn(async move {
-                m.stop_vm(&format!("vm-pre-{}", i)).await.unwrap();
+                m.stop_vm(&format!("vm-pre-{i}")).await.unwrap();
             }));
         }
         for h in handles {
@@ -1806,13 +1505,13 @@ mod tests {
         assert_eq!(mgr.list_vms().await.len(), 20);
         for i in 0..10 {
             assert_eq!(
-                mgr.get_vm_status(&format!("vm-pre-{}", i)).await.unwrap(),
+                mgr.get_vm_status(&format!("vm-pre-{i}")).await.unwrap(),
                 VmStatus::Stopping
             );
         }
         for i in 10..20 {
             assert_eq!(
-                mgr.get_vm_status(&format!("vm-{}", i)).await.unwrap(),
+                mgr.get_vm_status(&format!("vm-{i}")).await.unwrap(),
                 VmStatus::Running
             );
         }
@@ -1823,7 +1522,7 @@ mod tests {
         use std::sync::Arc;
         let mgr = Arc::new(FirecrackerManager::with_config(FirecrackerConfig::stub()));
         for i in 0..5 {
-            start(&mgr, &format!("vm-{}", i)).await;
+            start(&mgr, &format!("vm-{i}")).await;
         }
 
         let mut handles = vec![];
@@ -1839,8 +1538,6 @@ mod tests {
             h.await.unwrap();
         }
     }
-
-    // ── wait_for_socket ───────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_wait_for_socket_times_out_when_file_never_appears() {
@@ -1886,10 +1583,6 @@ mod tests {
         assert!(err.to_string().contains(path));
     }
 
-    // ── fc_put ────────────────────────────────────────────────────────────────
-
-    /// Bind a Unix socket, spawn an echo task that returns `response`, and
-    /// return the socket path. The socket file exists before this returns.
     async fn spawn_mock_api(response: &'static str) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let path = format!("/tmp/fc-mock-{}.sock", uuid::Uuid::new_v4());
@@ -1901,11 +1594,9 @@ mod tests {
                 let _ = stream.read(&mut buf).await;
                 let _ = stream.write_all(response.as_bytes()).await;
             }
-            // Give a tiny bit of time for the client to finish reading before we delete the socket file
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             let _ = tokio::fs::remove_file(&path_clone).await;
         });
-        // Yield so the spawned task enters accept() before we return.
         tokio::task::yield_now().await;
         path
     }
@@ -1927,7 +1618,7 @@ mod tests {
     #[tokio::test]
     async fn test_fc_put_returns_api_error_on_400() {
         let sock = spawn_mock_api("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n").await;
-        let result = fc_put(&sock, "/boot-source", r#"{}"#).await;
+        let result = fc_put(&sock, "/boot-source", r"{}").await;
         assert!(
             matches!(result, Err(FirecrackerError::ApiError { .. })),
             "expected ApiError, got {result:?}"
@@ -1958,8 +1649,6 @@ mod tests {
         assert!(err.to_string().contains("/drives/rootfs"), "{err}");
     }
 
-    // ── new error variant display ─────────────────────────────────────────────
-
     #[tokio::test]
     async fn test_process_error_display_contains_message() {
         let err = FirecrackerError::ProcessError("no such binary".to_string());
@@ -1983,10 +1672,7 @@ mod tests {
         assert!(err.to_string().contains("/tmp/fc-vm-42.sock"));
     }
 
-    // ── start_vm real mode ────────────────────────────────────────────────────
-
     async fn real_config_bad_binary() -> (FirecrackerConfig, String) {
-        // Create a real temp file to act as the rootfs so the copy step succeeds.
         let rootfs = format!("/tmp/fc-test-rootfs-{}.ext4", uuid::Uuid::new_v4());
         tokio::fs::write(&rootfs, b"fake").await.unwrap();
         let cfg = FirecrackerConfig {
@@ -2058,18 +1744,14 @@ mod tests {
             mgr.get_vm_status("vm-stub").await.unwrap(),
             VmStatus::Starting
         );
-        // No process handle should have been stored.
         assert!(!mgr.has_process("vm-stub").await);
     }
-
-    // ── stop_vm real mode ─────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_stop_vm_real_mode_kills_process_and_sets_stopped() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         let vm_id = "vm-kill-test";
 
-        // Insert VM state directly (mimics what start_vm does).
         {
             let mut vms = mgr.vms.write().await;
             vms.insert(
@@ -2086,11 +1768,9 @@ mod tests {
             );
         }
 
-        // Create a socket file so cleanup can be verified.
         let socket_path = format!("/tmp/fc-test-kill-{}.sock", uuid::Uuid::new_v4());
         tokio::fs::write(&socket_path, b"").await.unwrap();
 
-        // Spawn a real long-lived process as stand-in.
         let child = tokio::process::Command::new("sleep")
             .arg("60")
             .spawn()
@@ -2099,22 +1779,14 @@ mod tests {
         mgr.insert_process_for_test(vm_id, child, socket_path.clone())
             .await;
 
-        // Stop the VM.
         mgr.stop_vm(vm_id).await.unwrap();
-
-        // Status must be Stopped (real mode: process was found and killed).
         assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
-
-        // Process handle should have been removed from the map.
         assert!(!mgr.has_process(vm_id).await);
-
-        // Socket file should have been deleted.
         assert!(
             !std::path::Path::new(&socket_path).exists(),
             "socket file should be cleaned up"
         );
 
-        // Give the OS a moment, then confirm the process is gone.
         tokio::time::sleep(Duration::from_millis(50)).await;
         let proc_alive = std::path::Path::new(&format!("/proc/{pid}")).exists();
         assert!(!proc_alive, "process {pid} should have been killed");
@@ -2122,7 +1794,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_vm_stub_mode_leaves_stopping_status() {
-        // No process in map → stub behaviour: status stays Stopping.
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         start(&mgr, "vm-stub-stop").await;
         mgr.stop_vm("vm-stub-stop").await.unwrap();
@@ -2151,7 +1822,6 @@ mod tests {
                 },
             );
         }
-        // Socket path that does not exist — remove_file should be a no-op.
         let nonexistent_sock = "/tmp/fc-already-gone.sock".to_string();
         let child = tokio::process::Command::new("sleep")
             .arg("60")
@@ -2160,7 +1830,6 @@ mod tests {
         mgr.insert_process_for_test(vm_id, child, nonexistent_sock)
             .await;
 
-        // Must not panic even though the socket file is absent.
         mgr.stop_vm(vm_id).await.unwrap();
         assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
     }
@@ -2169,51 +1838,26 @@ mod tests {
     async fn test_setup_tap_name_generation() {
         let mgr = FirecrackerManager::new();
         let vm_id = "test-vm-id-123456789";
-
-        // We just test the setup_tap logic internally by calling it.
-        // It might fail because of lack of permissions, but we want to see if it tries the right name.
         let result = mgr.setup_tap(vm_id).await;
 
         if let Err(FirecrackerError::ProcessError(msg)) = result {
-            // Check if it failed because of permissions (ioctl) OR it tried the right name
             let is_permission_denied =
                 msg.contains("Operation not permitted") || msg.contains("ioctl");
             let contains_tap_name = msg.contains("m-tap-test-vm-");
 
             assert!(
                 is_permission_denied || contains_tap_name,
-                "Error should be permissions related or mention tap name: {}",
-                msg
+                "Error should be permissions related or mention tap name: {msg}"
             );
         }
-    }
-
-    #[tokio::test]
-    async fn test_snapshot_lifecycle_stub() {
-        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        let vm_id = "snap-test";
-
-        // 1. Setup running VM in stub mode
-        mgr.start_vm(
-            vm_id.to_string(),
-            "app".into(),
-            "img".into(),
-            VmConfig::default(),
-        )
-        .await
-        .unwrap();
-
-        // 2. Pause VM (will create snapshot files in stub mode, but we can't easily mock the HTTP call here without a server)
-        // Since we are in stub mode, fc_patch/fc_put will fail if no server is running.
-        // We will just verify the agent_id isolation instead, which we already have tests for.
     }
 
     #[tokio::test]
     async fn test_ensure_file_at_links_or_copies() {
         let temp_dir = format!("/tmp/ensure-file-test-{}", uuid::Uuid::new_v4());
         tokio::fs::create_dir_all(&temp_dir).await.unwrap();
-        let src = format!("{}/src", temp_dir);
-        let dst = format!("{}/dst", temp_dir);
+        let src = format!("{temp_dir}/src");
+        let dst = format!("{temp_dir}/dst");
         tokio::fs::write(&src, b"data").await.unwrap();
 
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
@@ -2221,11 +1865,9 @@ mod tests {
             .await
             .expect("ensure_file_at failed");
 
-        // Verify data
         let content = tokio::fs::read_to_string(&dst).await.unwrap();
         assert_eq!(content, "data");
 
-        // Verify it's a hard link (if possible on the filesystem)
         let src_meta = tokio::fs::metadata(&src).await.unwrap();
         let dst_meta = tokio::fs::metadata(&dst).await.unwrap();
 
@@ -2245,20 +1887,18 @@ mod tests {
     #[tokio::test]
     async fn test_recursive_chown_traversal() {
         let temp_dir = format!("/tmp/chown-test-{}", uuid::Uuid::new_v4());
-        tokio::fs::create_dir_all(format!("{}/sub/dir", temp_dir))
+        tokio::fs::create_dir_all(format!("{temp_dir}/sub/dir"))
             .await
             .unwrap();
-        tokio::fs::write(format!("{}/file1", temp_dir), b"")
+        tokio::fs::write(format!("{temp_dir}/file1"), b"")
             .await
             .unwrap();
-        tokio::fs::write(format!("{}/sub/file2", temp_dir), b"")
+        tokio::fs::write(format!("{temp_dir}/sub/file2"), b"")
             .await
             .unwrap();
 
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
 
-        // We probably aren't root in the test runner, so we use current UID/GID
-        // to verify the traversal logic without hitting permission errors.
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
@@ -2269,8 +1909,6 @@ mod tests {
             mgr.recursive_chown(&temp_dir, uid, gid)
                 .await
                 .expect("recursive_chown failed");
-
-            // If it didn't error, the traversal worked.
         }
 
         tokio::fs::remove_dir_all(&temp_dir).await.unwrap();
@@ -2282,23 +1920,19 @@ mod tests {
         cfg.use_jailer = true;
         cfg.chroot_base = format!("/tmp/jailer-test-{}", uuid::Uuid::new_v4());
 
-        // We need real-ish paths for kernel and rootfs to satisfy copy step
         let temp_dir = format!("/tmp/fc-test-{}", uuid::Uuid::new_v4());
         tokio::fs::create_dir_all(&temp_dir).await.unwrap();
-        let kernel_path = format!("{}/vmlinux", temp_dir);
-        let rootfs_path = format!("{}/rootfs", temp_dir);
+        let kernel_path = format!("{temp_dir}/vmlinux");
+        let rootfs_path = format!("{temp_dir}/rootfs");
         tokio::fs::write(&kernel_path, b"kernel").await.unwrap();
         tokio::fs::write(&rootfs_path, b"rootfs").await.unwrap();
 
         let mgr = FirecrackerManager::with_config(cfg.clone());
 
-        // We can't easily run the full start_vm because it will try to spawn jailer and run chown
-        // but we can test setup_jailer directly.
         let result = mgr
             .setup_jailer("vm-jail-1", &kernel_path, &rootfs_path)
             .await;
 
-        // Cleanup temp files
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 
         match result {
@@ -2312,25 +1946,18 @@ mod tests {
                 let chroot_val = chroot.unwrap();
                 assert!(chroot_val.contains(&cfg.chroot_base));
 
-                // Verify directories were created
-                assert!(std::path::Path::new(&format!("{}/root/run", chroot_val)).exists());
-                assert!(std::path::Path::new(&format!("{}/root/vmlinux.bin", chroot_val)).exists());
-                assert!(std::path::Path::new(&format!("{}/root/rootfs.ext4", chroot_val)).exists());
+                assert!(std::path::Path::new(&format!("{chroot_val}/root/run")).exists());
+                assert!(std::path::Path::new(&format!("{chroot_val}/root/vmlinux.bin")).exists());
+                assert!(std::path::Path::new(&format!("{chroot_val}/root/rootfs.ext4")).exists());
 
-                // Cleanup jailer test dir
                 let _ = tokio::fs::remove_dir_all(&cfg.chroot_base).await;
             }
             Err(e) => {
-                // If it failed because of chown, that's expected if not root,
-                // but at least we know it got there.
                 let err_msg = e.to_string();
                 if err_msg.contains("chown failed") || err_msg.contains("Operation not permitted") {
-                    println!(
-                        "setup_jailer failed as expected (no root for chown): {}",
-                        err_msg
-                    );
+                    println!("setup_jailer failed as expected (no root for chown): {err_msg}");
                 } else {
-                    panic!("setup_jailer failed unexpectedly: {}", err_msg);
+                    panic!("setup_jailer failed unexpectedly: {err_msg}");
                 }
                 let _ = tokio::fs::remove_dir_all(&cfg.chroot_base).await;
             }
@@ -2342,7 +1969,6 @@ mod tests {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         let vm_id = "gc-test";
 
-        // Create a process that finishes immediately
         let child = tokio::process::Command::new("true").spawn().unwrap();
 
         let socket = format!("/tmp/fc-{}-gc.sock", mgr.agent_id);
@@ -2351,13 +1977,10 @@ mod tests {
         mgr.insert_process_for_test(vm_id, child, socket.clone())
             .await;
 
-        // Wait longer for the process to actually exit and OS to update status
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-        // Run GC
         mgr.run_gc().await;
 
-        // Process should be removed and status should be Stopped
         assert!(!mgr.processes.lock().await.contains_key(vm_id));
         assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
         assert!(
@@ -2382,7 +2005,6 @@ mod tests {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         let vm_id = "log-test-vm";
 
-        // Our current start_vm adds an initial log entry even before spawning.
         let config = VmConfig {
             vcpus: 1,
             memory_mib: 128,
@@ -2390,7 +2012,6 @@ mod tests {
             env: HashMap::new(),
             ..Default::default()
         };
-        // This will return Ok in stub mode (no kernel path) but should still add logs
         mgr.start_vm(
             vm_id.to_string(),
             "app-1".to_string(),
@@ -2400,7 +2021,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Wait a bit for the background task to start
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         let logs = mgr.get_logs(vm_id).await;
@@ -2426,44 +2046,13 @@ mod tests {
         let metadata = std::fs::metadata(&path).unwrap();
         assert_eq!(metadata.len(), size_mib * 1024 * 1024);
 
-        // Clean up
         let _ = std::fs::remove_file(path);
-    }
-
-    #[tokio::test]
-    async fn test_vm_status_paused_transition() {
-        let mgr = FirecrackerManager::new();
-        let vm_id = "pause-test";
-
-        // Setup initial state
-        let config = VmConfig {
-            vcpus: 1,
-            memory_mib: 128,
-            disk_mib: 1024,
-            ..Default::default()
-        };
-        let _ = mgr
-            .start_vm(
-                vm_id.to_string(),
-                "app-1".to_string(),
-                "image".to_string(),
-                config,
-            )
-            .await;
-
-        // We can't actually call pause_vm without a real Firecracker process,
-        // but we can test the status logic if we had a mock.
-        // For now, let's verify the enum serialization.
-        let status = VmStatus::Paused;
-        let json = serde_json::to_string(&status).unwrap();
-        assert_eq!(json, "\"paused\"");
     }
 
     #[tokio::test]
     async fn test_cleanup_stale_resources() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
 
-        // Create some fake stale files with the agent's ID
         let socket = format!("/tmp/fc-{}-stale-test.sock", mgr.agent_id);
         let rootfs = format!("/tmp/fc-{}-stale-test-rootfs.ext4", mgr.agent_id);
         tokio::fs::write(&socket, b"").await.unwrap();
@@ -2488,7 +2077,6 @@ mod tests {
     async fn test_cleanup_does_not_touch_other_agents() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
 
-        // Create a file belonging to a "different agent"
         let other_socket = "/tmp/fc-other-agent-vm1.sock";
         tokio::fs::write(other_socket, b"").await.unwrap();
 
@@ -2499,7 +2087,6 @@ mod tests {
             "File from other agent should NOT have been removed"
         );
 
-        // Cleanup
         let _ = tokio::fs::remove_file(other_socket).await;
     }
 
@@ -2508,7 +2095,6 @@ mod tests {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         let vm_id = "vm-log-test";
 
-        // Setup initial state so stop_vm doesn't fail with VmNotFound
         let config = VmConfig {
             vcpus: 1,
             memory_mib: 128,
@@ -2524,7 +2110,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Add some logs
         {
             let mut l = mgr.logs.write().await;
             l.entry(vm_id.to_string())
@@ -2534,7 +2119,6 @@ mod tests {
 
         assert!(mgr.logs.read().await.contains_key(vm_id));
 
-        // Stop (even in stub mode it should clean memory)
         mgr.stop_vm(vm_id).await.unwrap();
 
         assert!(!mgr.logs.read().await.contains_key(vm_id));
@@ -2542,12 +2126,10 @@ mod tests {
 
     #[test]
     fn test_bridge_config_logic() {
-        // Test default
         let (name, ip) = FirecrackerManager::resolve_bridge_config(None);
         assert_eq!(name, "mikrom-br0");
         assert_eq!(ip, "10.0.0.1/8");
 
-        // Test override
         let (_, ip_override) =
             FirecrackerManager::resolve_bridge_config(Some("10.0.1.1/24".to_string()));
         assert_eq!(ip_override, "10.0.1.1/24");

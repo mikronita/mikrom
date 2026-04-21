@@ -18,13 +18,12 @@ impl Default for SchedulerConfig {
 }
 
 impl SchedulerConfig {
+    #[must_use]
     pub fn from_env() -> Self {
         Self {
             addr: std::env::var("SCHEDULER_ADDR")
                 .unwrap_or_else(|_| "http://127.0.0.1:5002".to_string()),
-            use_tls: std::env::var("USE_TLS")
-                .map(|v| v == "true")
-                .unwrap_or(false),
+            use_tls: std::env::var("USE_TLS").is_ok_and(|v| v == "true"),
             certs_dir: std::env::var("CERTS_DIR").ok(),
         }
     }
@@ -56,6 +55,7 @@ pub async fn connect(config: &SchedulerConfig) -> Result<Channel, String> {
         .map_err(|e| format!("Scheduler unavailable: {e}"))
 }
 
+#[must_use]
 pub fn status_name(code: i32) -> &'static str {
     use mikrom_proto::scheduler::DeployStatus;
     match DeployStatus::try_from(code).unwrap_or(DeployStatus::Unspecified) {
