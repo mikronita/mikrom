@@ -496,12 +496,14 @@ impl FirecrackerManager {
                 return Err(FirecrackerError::ProcessError(err));
             }
             // Copy local file to our temp work area
-            tracing::info!(vm_id = %vm_id, src = %image, dst = %rootfs_path, "Copying local rootfs...");
-            tokio::fs::copy(&image, &rootfs_path).await.map_err(|e| {
-                tracing::error!(vm_id = %vm_id, error = %e, "Failed to copy rootfs");
-                FirecrackerError::ProcessError(format!("Failed to copy rootfs: {}", e))
-            })?;
-            tracing::info!(vm_id = %vm_id, "Rootfs copy complete");
+            tracing::info!(vm_id = %vm_id, src = %image, dst = %rootfs_path, "Linking local rootfs...");
+            self.ensure_file_at(&image, &rootfs_path)
+                .await
+                .map_err(|e| {
+                    tracing::error!(vm_id = %vm_id, error = %e, "Failed to setup rootfs");
+                    e
+                })?;
+            tracing::info!(vm_id = %vm_id, "Rootfs setup complete");
         } else {
             // It's a docker tag or a relative path (unsupported for now, treated as docker tag)
             if !image_path.exists() {
@@ -517,9 +519,7 @@ impl FirecrackerManager {
                     })?;
             } else {
                 // Relative path that exists (rare but possible)
-                tokio::fs::copy(&image, &rootfs_path).await.map_err(|e| {
-                    FirecrackerError::ProcessError(format!("Failed to copy rootfs: {}", e))
-                })?;
+                self.ensure_file_at(&image, &rootfs_path).await?;
             }
         }
 
@@ -661,22 +661,9 @@ impl FirecrackerManager {
                 let chroot_snap_path = format!("{}/root/vm.snapshot", chroot);
                 let chroot_mem_path = format!("{}/root/vm.mem", chroot);
 
-                tokio::fs::copy(&snapshot_path, &chroot_snap_path)
-                    .await
-                    .map_err(|e| {
-                        FirecrackerError::ProcessError(format!(
-                            "Failed to copy snapshot to chroot: {}",
-                            e
-                        ))
-                    })?;
-                tokio::fs::copy(&mem_path, &chroot_mem_path)
-                    .await
-                    .map_err(|e| {
-                        FirecrackerError::ProcessError(format!(
-                            "Failed to copy mem file to chroot: {}",
-                            e
-                        ))
-                    })?;
+                self.ensure_file_at(&snapshot_path, &chroot_snap_path)
+                    .await?;
+                self.ensure_file_at(&mem_path, &chroot_mem_path).await?;
 
                 self.recursive_chown(
                     &chroot_snap_path,
@@ -815,14 +802,7 @@ impl FirecrackerManager {
                 let vol_api_path = if let Some(chroot) = &chroot_dir_clone {
                     let vol_filename = format!("{}.ext4", vol.volume_id);
                     let chroot_vol_path = format!("{}/root/{}", chroot, vol_filename);
-                    tokio::fs::copy(&vol_path, &chroot_vol_path)
-                        .await
-                        .map_err(|e| {
-                            FirecrackerError::ProcessError(format!(
-                                "Failed to copy volume to chroot: {}",
-                                e
-                            ))
-                        })?;
+                    self.ensure_file_at(&vol_path, &chroot_vol_path).await?;
                     self.recursive_chown(
                         &chroot_vol_path,
                         self.fc_config.jailer_uid,
@@ -1345,17 +1325,11 @@ impl FirecrackerManager {
         let chroot_kernel_path = format!("{}/{}", root_dir, kernel_filename);
         let chroot_rootfs_path = format!("{}/{}", root_dir, rootfs_filename);
 
-        tokio::fs::copy(kernel_host_path, &chroot_kernel_path)
-            .await
-            .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to copy kernel to chroot: {}", e))
-            })?;
+        self.ensure_file_at(kernel_host_path, &chroot_kernel_path)
+            .await?;
 
-        tokio::fs::copy(rootfs_host_path, &chroot_rootfs_path)
-            .await
-            .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to copy rootfs to chroot: {}", e))
-            })?;
+        self.ensure_file_at(rootfs_host_path, &chroot_rootfs_path)
+            .await?;
 
         // 3. Set ownership
         let uid = self.fc_config.jailer_uid;
@@ -1390,23 +1364,50 @@ impl FirecrackerManager {
         ))
     }
 
+    async fn ensure_file_at(&self, src: &str, dst: &str) -> Result<(), FirecrackerError> {
+        if let Err(e) = tokio::fs::hard_link(src, dst).await {
+            tracing::debug!(src = %src, dst = %dst, error = %e, "Hard link failed, falling back to copy");
+            tokio::fs::copy(src, dst).await.map_err(|e| {
+                FirecrackerError::ProcessError(format!(
+                    "Failed to copy file from {} to {}: {}",
+                    src, dst, e
+                ))
+            })?;
+        }
+        Ok(())
+    }
+
     async fn recursive_chown(
         &self,
         path: &str,
         uid: u32,
         gid: u32,
     ) -> Result<(), FirecrackerError> {
-        let output = tokio::process::Command::new("chown")
-            .args(["-R", &format!("{}:{}", uid, gid), path])
-            .output()
-            .await
-            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to run chown: {}", e)))?;
+        use std::os::unix::fs as unix_fs;
+        let mut stack = vec![std::path::PathBuf::from(path)];
 
-        if !output.status.success() {
-            return Err(FirecrackerError::ProcessError(format!(
-                "chown failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
+        while let Some(current_path) = stack.pop() {
+            unix_fs::chown(&current_path, Some(uid), Some(gid)).map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to chown {:?}: {}", current_path, e))
+            })?;
+
+            if current_path.is_dir() {
+                let mut entries = tokio::fs::read_dir(&current_path).await.map_err(|e| {
+                    FirecrackerError::ProcessError(format!(
+                        "Failed to read directory {:?}: {}",
+                        current_path, e
+                    ))
+                })?;
+
+                while let Some(entry) = entries.next_entry().await.map_err(|e| {
+                    FirecrackerError::ProcessError(format!(
+                        "Failed to get next entry in {:?}: {}",
+                        current_path, e
+                    ))
+                })? {
+                    stack.push(entry.path());
+                }
+            }
         }
         Ok(())
     }
@@ -2205,6 +2206,74 @@ mod tests {
         // 2. Pause VM (will create snapshot files in stub mode, but we can't easily mock the HTTP call here without a server)
         // Since we are in stub mode, fc_patch/fc_put will fail if no server is running.
         // We will just verify the agent_id isolation instead, which we already have tests for.
+    }
+
+    #[tokio::test]
+    async fn test_ensure_file_at_links_or_copies() {
+        let temp_dir = format!("/tmp/ensure-file-test-{}", uuid::Uuid::new_v4());
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+        let src = format!("{}/src", temp_dir);
+        let dst = format!("{}/dst", temp_dir);
+        tokio::fs::write(&src, b"data").await.unwrap();
+
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        mgr.ensure_file_at(&src, &dst)
+            .await
+            .expect("ensure_file_at failed");
+
+        // Verify data
+        let content = tokio::fs::read_to_string(&dst).await.unwrap();
+        assert_eq!(content, "data");
+
+        // Verify it's a hard link (if possible on the filesystem)
+        let src_meta = tokio::fs::metadata(&src).await.unwrap();
+        let dst_meta = tokio::fs::metadata(&dst).await.unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(
+                src_meta.ino(),
+                dst_meta.ino(),
+                "Files should be hard linked (same inode)"
+            );
+        }
+
+        tokio::fs::remove_dir_all(&temp_dir).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_recursive_chown_traversal() {
+        let temp_dir = format!("/tmp/chown-test-{}", uuid::Uuid::new_v4());
+        tokio::fs::create_dir_all(format!("{}/sub/dir", temp_dir))
+            .await
+            .unwrap();
+        tokio::fs::write(format!("{}/file1", temp_dir), b"")
+            .await
+            .unwrap();
+        tokio::fs::write(format!("{}/sub/file2", temp_dir), b"")
+            .await
+            .unwrap();
+
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+
+        // We probably aren't root in the test runner, so we use current UID/GID
+        // to verify the traversal logic without hitting permission errors.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let meta = tokio::fs::metadata(&temp_dir).await.unwrap();
+            let uid = meta.uid();
+            let gid = meta.gid();
+
+            mgr.recursive_chown(&temp_dir, uid, gid)
+                .await
+                .expect("recursive_chown failed");
+
+            // If it didn't error, the traversal worked.
+        }
+
+        tokio::fs::remove_dir_all(&temp_dir).await.unwrap();
     }
 
     #[tokio::test]
