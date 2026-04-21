@@ -57,7 +57,7 @@ pub trait UserRepository: Send + Sync {
         id: Uuid,
         first_name: Option<String>,
         last_name: Option<String>,
-    ) -> Result<(), DbError>;
+    ) -> Result<User, DbError>;
 }
 
 #[cfg(test)]
@@ -95,8 +95,8 @@ mod tests {
             _id: Uuid,
             _first_name: Option<String>,
             _last_name: Option<String>,
-        ) -> Result<(), DbError> {
-            Ok(())
+        ) -> Result<User, DbError> {
+            Ok(self.0.clone())
         }
     }
 
@@ -120,7 +120,7 @@ mod tests {
             _id: Uuid,
             _first_name: Option<String>,
             _last_name: Option<String>,
-        ) -> Result<(), DbError> {
+        ) -> Result<User, DbError> {
             Err(DbError::NotFound)
         }
     }
@@ -145,7 +145,7 @@ mod tests {
             _id: Uuid,
             _first_name: Option<String>,
             _last_name: Option<String>,
-        ) -> Result<(), DbError> {
+        ) -> Result<User, DbError> {
             Err(DbError::Internal("simulated update error".to_string()))
         }
     }

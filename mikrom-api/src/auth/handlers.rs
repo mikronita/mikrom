@@ -173,18 +173,11 @@ pub async fn update_profile(
     let user_id = uuid::Uuid::parse_str(&auth.user_id)
         .map_err(|_| ApiError::Auth("Invalid user ID in token".to_string()))?;
 
-    state
+    let user = state
         .user_repo
         .update_profile(user_id, payload.first_name, payload.last_name)
         .await
         .map_err(ApiError::from)?;
-
-    let user = state
-        .user_repo
-        .find_by_id(user_id)
-        .await
-        .map_err(ApiError::from)?
-        .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
     Ok(Json(ProfileResponse {
         id: user.id.to_string(),
@@ -311,15 +304,6 @@ mod tests {
         let user_id = Uuid::new_v4();
         let email = "update@test.com".to_string();
 
-        mock_repo
-            .expect_update_profile()
-            .with(
-                mockall::predicate::eq(user_id),
-                mockall::predicate::eq(Some("New".into())),
-                mockall::predicate::eq(Some("Name".into())),
-            )
-            .returning(|_, _, _| Ok(()));
-
         let updated_user = User {
             id: user_id,
             email: email.clone(),
@@ -329,9 +313,15 @@ mod tests {
             last_name: Some("Name".into()),
         };
 
+        let u_clone = updated_user.clone();
         mock_repo
-            .expect_find_by_id()
-            .returning(move |_| Ok(Some(updated_user.clone())));
+            .expect_update_profile()
+            .with(
+                mockall::predicate::eq(user_id),
+                mockall::predicate::eq(Some("New".into())),
+                mockall::predicate::eq(Some("Name".into())),
+            )
+            .returning(move |_, _, _| Ok(u_clone.clone()));
 
         let state = crate::AppState {
             user_repo: Arc::new(mock_repo),
