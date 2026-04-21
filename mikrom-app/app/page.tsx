@@ -18,9 +18,7 @@ import { Loader2 } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useVms, useStopVm } from "@/lib/hooks/use-vms";
-import { Badge, Alert } from "flowbite-react";
-import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
+import { Badge, Alert, Button, Card } from "flowbite-react";
 import { cn } from "@/lib/utils";
 import { DeployModal } from "@/components/DeployModal";
 import { toast } from "sonner";
@@ -138,7 +136,7 @@ export default function Page() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Recent Apps */}
-            <Card className="lg:col-span-2" noPadding>
+            <Card className="lg:col-span-2">
               <div className="flex items-center justify-between p-6 pb-0">
                 <div>
                   <h5 className="text-xl font-bold dark:text-white">Recent Applications</h5>

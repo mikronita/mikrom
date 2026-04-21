@@ -20,9 +20,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { getToken } from "@/lib/auth";
 import { listVms, stopVm, deleteVm, VmInfo } from "@/lib/api";
 
-import { Badge, Table, TableBody, TableCell, TableHead, TableHeadCell, TableRow, TextInput, Alert } from "flowbite-react";
-import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
+import { Badge, Table, TableBody, TableCell, TableHead, TableHeadCell, TableRow, TextInput, Alert, Button, Card } from "flowbite-react";
 import { cn } from "@/lib/utils";
 
 function normalizeStatus(status: string): string {
@@ -188,7 +186,7 @@ export default function VmsPage() {
             </Button>
           </div>
 
-          <Card noPadding>
+          <Card>
             <div className="overflow-x-auto">
               <Table hoverable>
                 <TableHead>

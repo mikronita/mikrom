@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2, AlertCircle, UserPlus } from "lucide-react";
+import { Loader2, AlertCircle, UserPlus } from "lucide-react";
 
 import { register } from "@/lib/api";
 import { Button, Card, Label, TextInput, Alert } from "flowbite-react";
