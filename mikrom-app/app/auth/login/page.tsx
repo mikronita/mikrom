@@ -3,7 +3,7 @@
 import { useState, Suspense, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Box, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Box, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 
 import { login } from "@/lib/api";
 import { setToken } from "@/lib/auth";

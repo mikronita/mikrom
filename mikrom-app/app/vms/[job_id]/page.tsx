@@ -36,9 +36,7 @@ import { useVm, useStopVm, useDeleteVm } from "@/lib/hooks/use-vms";
 import Ansi from "ansi-to-react";
 import { toast } from "sonner";
 
-import { Badge, Alert, Progress } from "flowbite-react";
-import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
+import { Badge, Alert, Progress, Button, Card } from "flowbite-react";
 import { cn } from "@/lib/utils";
 
 function normalizeStatus(status: string): string {
@@ -284,7 +282,7 @@ export default function VmDetailPage() {
                 </Button>
               )}
               {vm && isStoppable(vm.status) && !confirmStop && (
-                <Button variant="danger" size="sm" onClick={() => setConfirmStop(true)} disabled={stopVmMutation.isPending}>
+                <Button color="failure" size="sm" onClick={() => setConfirmStop(true)} disabled={stopVmMutation.isPending}>
                   <HiStop className="w-4 h-4 mr-2" />
                   Stop
                 </Button>
@@ -292,12 +290,12 @@ export default function VmDetailPage() {
               {confirmStop && (
                 <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-1.5">
                   <span className="text-xs font-medium text-red-700 dark:text-red-300">Stop?</span>
-                  <Button variant="danger" size="xs" onClick={handleStop}>Confirm</Button>
-                  <Button variant="ghost" size="xs" onClick={() => setConfirmStop(false)}>Cancel</Button>
+                  <Button color="failure" size="xs" onClick={handleStop}>Confirm</Button>
+                  <Button color="gray" outline size="xs" onClick={() => setConfirmStop(false)}>Cancel</Button>
                 </div>
               )}
               {vm && !isStoppable(vm.status) && !confirmDelete && (
-                <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)} disabled={deleteVmMutation.isPending}>
+                <Button color="failure" size="sm" onClick={() => setConfirmDelete(true)} disabled={deleteVmMutation.isPending}>
                   <HiTrash className="w-4 h-4 mr-2" />
                   Delete
                 </Button>
@@ -305,8 +303,8 @@ export default function VmDetailPage() {
               {confirmDelete && (
                 <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-1.5">
                   <span className="text-xs font-medium text-red-700 dark:text-red-300">Delete?</span>
-                  <Button variant="danger" size="xs" onClick={handleDelete}>Confirm</Button>
-                  <Button variant="ghost" size="xs" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+                  <Button color="failure" size="xs" onClick={handleDelete}>Confirm</Button>
+                  <Button color="gray" outline size="xs" onClick={() => setConfirmDelete(false)}>Cancel</Button>
                 </div>
               )}
             </div>
@@ -316,7 +314,7 @@ export default function VmDetailPage() {
             <Alert color="failure" icon={() => <HiExclamationCircle className="w-5 h-5 mr-2" />}>
               <div className="flex items-center justify-between w-full">
                 <span>{error instanceof Error ? error.message : "Failed to load"}</span>
-                <Button variant="outline" size="xs" onClick={() => refetch()}>Try again</Button>
+                <Button color="gray" outline size="xs" onClick={() => refetch()}>Try again</Button>
               </div>
             </Alert>
           )}
@@ -428,7 +426,7 @@ export default function VmDetailPage() {
                 </div>
 
                 {/* Logs */}
-                <Card noPadding>
+                <Card>
                   <div className="p-4 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-800 rounded-t-xl">
                     <h5 className="text-sm font-bold flex items-center gap-2 dark:text-white">
                       <HiTerminal className="w-4 h-4 text-gray-400" />
