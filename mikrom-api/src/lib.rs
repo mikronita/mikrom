@@ -1,7 +1,8 @@
 use axum::{Router, routing::get};
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::trace::TraceLayer;
+use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 pub mod auth;
 pub mod crypto;
@@ -52,7 +53,12 @@ pub fn create_app(state: AppState) -> Router {
         .route("/vms/{job_id}/resume", axum::routing::post(resume_vm))
         .route("/vms/{job_id}", axum::routing::delete(stop_vm))
         .route("/vms/{job_id}/delete", axum::routing::delete(delete_vm))
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+                .on_request(DefaultOnRequest::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .layer(cors)
         .with_state(state)
 }
@@ -81,7 +87,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_endpoint() {
-        let app = Router::new().route("/health", get(health));
+        let mock_repo = repositories::user_repository::MockUserRepository::new();
+        // The health endpoint doesn't actually use the repo, but we need it for AppState
+        let state = AppState {
+            user_repo: Arc::new(mock_repo),
+            scheduler_client: None,
+            scheduler_config: scheduler::SchedulerConfig::default(),
+            jwt_secret: "test".to_string(),
+            master_key: "test".to_string(),
+        };
+        let app = create_app(state);
 
         let response = app
             .oneshot(
