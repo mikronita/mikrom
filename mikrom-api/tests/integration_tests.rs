@@ -9,7 +9,7 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 
 use mikrom_api::AppState;
-use mikrom_api::auth::{login, register};
+use mikrom_api::auth::{get_profile, login, register, update_profile};
 use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 
 static TEST_POOL: OnceLock<PgPool> = OnceLock::new();
@@ -58,7 +58,137 @@ fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
     axum::Router::new()
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))
+        .route("/auth/me", axum::routing::get(get_profile))
+        .route("/auth/me", axum::routing::put(update_profile))
         .with_state(state)
+}
+
+#[tokio::test]
+async fn test_profile_flow() {
+    let pool = get_test_pool().await;
+    let jwt_secret = "profile-integration-test-secret";
+    let app = create_app(pool, jwt_secret);
+    let email = format!("profile_flow_{}@example.com", uuid::Uuid::new_v4());
+    let password = "password123";
+
+    // 1. Register
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/register")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "email": email,
+                        "password": password
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // 2. Login to get token
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "email": email,
+                        "password": password
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let body = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let token = json["token"].as_str().unwrap();
+
+    // 3. Get profile (should have null names)
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/me")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["email"], email);
+    assert!(json["first_name"].is_null());
+    assert!(json["last_name"].is_null());
+
+    // 4. Update profile
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/auth/me")
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "first_name": "Antonio",
+                        "last_name": "Pardo"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["first_name"], "Antonio");
+    assert_eq!(json["last_name"], "Pardo");
+
+    // 5. Get profile again to verify persistence
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/me")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["first_name"], "Antonio");
+    assert_eq!(json["last_name"], "Pardo");
 }
 
 #[tokio::test]

@@ -264,4 +264,98 @@ mod tests {
         let claims = crate::auth::jwt::verify_token(&result.token, &secret).unwrap();
         assert_eq!(claims.role, UserRole::Admin);
     }
+
+    #[tokio::test]
+    async fn test_get_profile_success() {
+        let mut mock_repo = MockUserRepository::new();
+        let user_id = Uuid::new_v4();
+        let email = "profile@test.com".to_string();
+
+        let user = User {
+            id: user_id,
+            email: email.clone(),
+            password_hash: "hash".into(),
+            role: UserRole::User,
+            first_name: Some("Antonio".into()),
+            last_name: Some("Pardo".into()),
+        };
+
+        mock_repo
+            .expect_find_by_id()
+            .with(mockall::predicate::eq(user_id))
+            .returning(move |_| Ok(Some(user.clone())));
+
+        let state = crate::AppState {
+            user_repo: Arc::new(mock_repo),
+            scheduler_client: None,
+            scheduler_config: crate::scheduler::SchedulerConfig::default(),
+            jwt_secret: "secret".into(),
+            master_key: "key".into(),
+        };
+
+        let auth = crate::auth::extractor::AuthUser {
+            user_id: user_id.to_string(),
+            email,
+            role: UserRole::User,
+        };
+
+        let result = get_profile(State(state), auth).await.unwrap();
+        assert_eq!(result.id, user_id.to_string());
+        assert_eq!(result.first_name, Some("Antonio".into()));
+        assert_eq!(result.last_name, Some("Pardo".into()));
+    }
+
+    #[tokio::test]
+    async fn test_update_profile_success() {
+        let mut mock_repo = MockUserRepository::new();
+        let user_id = Uuid::new_v4();
+        let email = "update@test.com".to_string();
+
+        mock_repo
+            .expect_update_profile()
+            .with(
+                mockall::predicate::eq(user_id),
+                mockall::predicate::eq(Some("New".into())),
+                mockall::predicate::eq(Some("Name".into())),
+            )
+            .returning(|_, _, _| Ok(()));
+
+        let updated_user = User {
+            id: user_id,
+            email: email.clone(),
+            password_hash: "hash".into(),
+            role: UserRole::User,
+            first_name: Some("New".into()),
+            last_name: Some("Name".into()),
+        };
+
+        mock_repo
+            .expect_find_by_id()
+            .returning(move |_| Ok(Some(updated_user.clone())));
+
+        let state = crate::AppState {
+            user_repo: Arc::new(mock_repo),
+            scheduler_client: None,
+            scheduler_config: crate::scheduler::SchedulerConfig::default(),
+            jwt_secret: "secret".into(),
+            master_key: "key".into(),
+        };
+
+        let auth = crate::auth::extractor::AuthUser {
+            user_id: user_id.to_string(),
+            email,
+            role: UserRole::User,
+        };
+
+        let payload = UpdateProfileRequest {
+            first_name: Some("New".into()),
+            last_name: Some("Name".into()),
+        };
+
+        let result = update_profile(State(state), auth, Json(payload))
+            .await
+            .unwrap();
+        assert_eq!(result.first_name, Some("New".into()));
+        assert_eq!(result.last_name, Some("Name".into()));
+    }
 }
