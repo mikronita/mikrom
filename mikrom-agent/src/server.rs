@@ -240,6 +240,13 @@ impl AgentService for AgentServer {
                     Some(c.mac_address.clone())
                 }
             }),
+            netmask: req.config.as_ref().and_then(|c| {
+                if c.netmask.is_empty() {
+                    None
+                } else {
+                    Some(c.netmask.clone())
+                }
+            }),
             volumes: req
                 .config
                 .as_ref()

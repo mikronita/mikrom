@@ -61,6 +61,7 @@ pub struct VmConfig {
     pub ip_address: Option<String>,
     pub gateway: Option<String>,
     pub mac_address: Option<String>,
+    pub netmask: Option<String>,
     pub volumes: Vec<Volume>,
 }
 
@@ -646,9 +647,9 @@ impl FirecrackerManager {
 
         let mut boot_args = "console=ttyS0 reboot=k panic=1 pci=off nomodules rw".to_string();
         if let (Some(ip), Some(gw)) = (&config.ip_address, &config.gateway) {
+            let mask = config.netmask.as_deref().unwrap_or("255.255.255.0");
             // Standard kernel ip= parameter: ip=ip::gw:mask:hostname:iface:autoconf
-            // We use 255.255.255.0 as it's the common mask for our /24 bridges
-            boot_args.push_str(&format!(" ip={}::{}:255.255.255.0::eth0:off", ip, gw));
+            boot_args.push_str(&format!(" ip={}::{}:{}:eth0:off", ip, gw, mask));
         }
 
         let boot_source = serde_json::json!({

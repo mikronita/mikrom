@@ -49,6 +49,7 @@ pub struct VmConfig {
     pub ip_address: Option<String>,
     pub gateway: Option<String>,
     pub mac_address: Option<String>,
+    pub netmask: Option<String>,
     pub volumes: Vec<Volume>,
 }
 

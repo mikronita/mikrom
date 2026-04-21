@@ -230,6 +230,7 @@ impl SchedulerService for SchedulerServer {
 
                 // Allocate IP from worker's IPAM
                 let allocation = worker.ipam.allocate();
+                let netmask = worker.ipam.netmask();
                 let (ip_address, gateway, mac_address) = if let Some(a) = allocation {
                     (Some(a.ip), Some(a.gateway), Some(a.mac))
                 } else {
@@ -244,6 +245,7 @@ impl SchedulerService for SchedulerServer {
                     ip_address,
                     gateway,
                     mac_address,
+                    netmask: Some(netmask),
                     volumes: config
                         .volumes
                         .iter()

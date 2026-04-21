@@ -51,14 +51,22 @@ impl Ipam {
         let mut inner = self.inner.lock();
         let base_u32 = u32::from(inner.base);
         let gw_u32 = u32::from(inner.gateway);
-        let host_count = if inner.prefix >= 32 {
+
+        // Calculate max hosts based on prefix, safely handling prefix 0
+        let max_hosts = if inner.prefix == 0 {
+            u32::MAX - 1
+        } else if inner.prefix >= 32 {
             1
         } else {
             (1u32 << (32 - inner.prefix)).saturating_sub(2)
         };
 
-        // We start from .2 to avoid network and gateway (usually .1)
-        for offset in 2..=host_count {
+        // Safety: Limit the search range to avoid huge loops on large networks (e.g. /8)
+        // We only scan up to 1024 candidates. In a real world scenario with large
+        // pools, we would use a more efficient data structure than a linear scan.
+        let scan_limit = std::cmp::min(max_hosts, 1024);
+
+        for offset in 2..=scan_limit {
             let candidate = Ipv4Addr::from(base_u32 + offset);
             if u32::from(candidate) == gw_u32 {
                 continue;
@@ -67,7 +75,6 @@ impl Ipam {
                 inner.allocated.insert(candidate);
 
                 let o = candidate.octets();
-                // Determinist mac generation
                 let mac = format!("AA:FC:{:02X}:{:02X}:{:02X}:{:02X}", o[0], o[1], o[2], o[3]);
 
                 return Some(Allocation {
@@ -78,6 +85,16 @@ impl Ipam {
             }
         }
         None
+    }
+
+    pub fn netmask(&self) -> String {
+        let inner = self.inner.lock();
+        let mask = if inner.prefix == 0 {
+            0u32
+        } else {
+            !0u32 << (32 - inner.prefix)
+        };
+        Ipv4Addr::from(mask).to_string()
     }
 
     pub fn release(&self, ip_str: &str) {

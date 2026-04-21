@@ -42,7 +42,23 @@ impl WorkerRegistry {
         bridge_ip: String,
     ) -> bool {
         let now = chrono::Utc::now().timestamp();
-        let ipam = Ipam::new(&bridge_ip);
+
+        let mut workers = self.workers.write();
+
+        // Find if we already have this worker (by hostname or IP) to preserve IPAM state
+        let existing_ipam = workers
+            .values()
+            .find(|w| w.hostname == hostname || w.ip_address == ip_address)
+            .and_then(|w| {
+                if w.bridge_ip == bridge_ip {
+                    Some(w.ipam.clone())
+                } else {
+                    None
+                }
+            });
+
+        let ipam = existing_ipam.unwrap_or_else(|| Ipam::new(&bridge_ip));
+
         let worker = Worker {
             host_id: host_id.clone(),
             hostname: hostname.clone(),
@@ -55,8 +71,6 @@ impl WorkerRegistry {
             registered_at: now,
             last_heartbeat: now,
         };
-
-        let mut workers = self.workers.write();
 
         // Remove any stale worker with the same hostname but different host_id
         let stale_ids: Vec<String> = workers
