@@ -1,5 +1,5 @@
 use std::env;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use axum::{
     body::Body,
@@ -12,20 +12,37 @@ use mikrom_api::AppState;
 use mikrom_api::auth::{login, register};
 use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 
-async fn setup_test_pool() -> PgPool {
+static TEST_POOL: OnceLock<PgPool> = OnceLock::new();
+
+async fn get_test_pool() -> PgPool {
+    if let Some(pool) = TEST_POOL.get() {
+        return pool.clone();
+    }
+
     let connection_string = env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
         "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
     });
 
-    let pool = PgPool::connect(&connection_string)
-        .await
-        .expect("Failed to connect to test db");
+    // Retry a few times if the DB is starting up
+    let mut pool = None;
+    for _ in 0..10 {
+        match PgPool::connect(&connection_string).await {
+            Ok(p) => {
+                pool = Some(p);
+                break;
+            }
+            Err(_) => tokio::time::sleep(std::time::Duration::from_secs(1)).await,
+        }
+    }
+
+    let pool = pool.expect("Failed to connect to test db after retries");
 
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
         .expect("Failed to run migrations");
 
+    let _ = TEST_POOL.set(pool.clone());
     pool
 }
 
@@ -46,7 +63,7 @@ fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
 
 #[tokio::test]
 async fn test_register_full_flow() {
-    let pool = setup_test_pool().await;
+    let pool = get_test_pool().await;
     let app = create_app(pool, "integration-test-secret");
     let email = format!("full_flow_{}@example.com", uuid::Uuid::new_v4());
 
@@ -81,7 +98,7 @@ async fn test_register_full_flow() {
 
 #[tokio::test]
 async fn test_login_full_flow() {
-    let pool = setup_test_pool().await;
+    let pool = get_test_pool().await;
     let app = create_app(pool, "integration-test-secret");
     let email = format!("login_full_{}@example.com", uuid::Uuid::new_v4());
 
@@ -134,7 +151,7 @@ async fn test_login_full_flow() {
 
 #[tokio::test]
 async fn test_password_hash_long_password() {
-    let pool = setup_test_pool().await;
+    let pool = get_test_pool().await;
     let app = create_app(pool, "integration-test-secret");
     let email = format!("hash_long_{}@example.com", uuid::Uuid::new_v4());
 
@@ -161,7 +178,7 @@ async fn test_password_hash_long_password() {
 
 #[tokio::test]
 async fn test_multiple_registrations() {
-    let pool = setup_test_pool().await;
+    let pool = get_test_pool().await;
     let app = create_app(pool, "integration-test-secret");
     let email = format!("multi_{}@example.com", uuid::Uuid::new_v4());
 
@@ -195,7 +212,7 @@ async fn test_multiple_registrations() {
 
 #[tokio::test]
 async fn test_register_and_login_workflow() {
-    let pool = setup_test_pool().await;
+    let pool = get_test_pool().await;
     let app = create_app(pool, "integration-test-secret");
     let email = format!("workflow_{}@example.com", uuid::Uuid::new_v4());
     let password = "securePassword123";
@@ -253,7 +270,7 @@ async fn test_register_and_login_workflow() {
 
 #[tokio::test]
 async fn test_login_token_creation_with_valid_secret() {
-    let pool = setup_test_pool().await;
+    let pool = get_test_pool().await;
     let app = create_app(pool, "integration-test-secret");
     let email = format!("token_valid_{}@example.com", uuid::Uuid::new_v4());
 
