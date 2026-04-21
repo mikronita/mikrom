@@ -20,7 +20,4 @@ anyhow = "1.0"
 rust_2018_idioms = "warn"
 
 [workspace.lints.clippy]
-unwrap_used = "allow"
-get_unwrap = "allow"
-todo = "warn"
-uninlined_format_args = "allow"
+all = "warn"
