@@ -39,11 +39,22 @@ impl UserRepository for NoopRepo {
     async fn find_by_email(&self, _: &str) -> Result<Option<User>, DbError> {
         Ok(None)
     }
+    async fn find_by_id(&self, _: sqlx::types::Uuid) -> Result<Option<User>, DbError> {
+        Ok(None)
+    }
     async fn create(&self, _: NewUser) -> Result<sqlx::types::Uuid, DbError> {
         Ok(sqlx::types::Uuid::new_v4())
     }
     async fn count_by_email(&self, _: &str) -> Result<i64, DbError> {
         Ok(0)
+    }
+    async fn update_profile(
+        &self,
+        _: sqlx::types::Uuid,
+        _: Option<String>,
+        _: Option<String>,
+    ) -> Result<(), DbError> {
+        Ok(())
     }
 }
 

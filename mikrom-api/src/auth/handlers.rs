@@ -29,6 +29,21 @@ pub struct LoginResponse {
     pub token: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateProfileRequest {
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProfileResponse {
+    pub id: String,
+    pub email: String,
+    pub role: crate::repositories::user_repository::UserRole,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+}
+
 /// Registers a new user.
 ///
 /// # Errors
@@ -70,6 +85,8 @@ pub async fn register(
             email: payload.email.clone(),
             password_hash,
             role: crate::repositories::user_repository::UserRole::User,
+            first_name: None,
+            last_name: None,
         })
         .await
         .map_err(ApiError::from)?;
@@ -121,6 +138,63 @@ pub async fn login(
     }
 }
 
+/// Gets the profile of the currently authenticated user.
+#[tracing::instrument(skip(state, auth))]
+pub async fn get_profile(
+    State(state): State<AppState>,
+    auth: crate::auth::extractor::AuthUser,
+) -> ApiResult<Json<ProfileResponse>> {
+    let user_id = uuid::Uuid::parse_str(&auth.user_id)
+        .map_err(|_| ApiError::Auth("Invalid user ID in token".to_string()))?;
+
+    let user = state
+        .user_repo
+        .find_by_id(user_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+    Ok(Json(ProfileResponse {
+        id: user.id.to_string(),
+        email: user.email,
+        role: user.role,
+        first_name: user.first_name,
+        last_name: user.last_name,
+    }))
+}
+
+/// Updates the profile of the currently authenticated user.
+#[tracing::instrument(skip(state, auth, payload))]
+pub async fn update_profile(
+    State(state): State<AppState>,
+    auth: crate::auth::extractor::AuthUser,
+    Json(payload): Json<UpdateProfileRequest>,
+) -> ApiResult<Json<ProfileResponse>> {
+    let user_id = uuid::Uuid::parse_str(&auth.user_id)
+        .map_err(|_| ApiError::Auth("Invalid user ID in token".to_string()))?;
+
+    state
+        .user_repo
+        .update_profile(user_id, payload.first_name, payload.last_name)
+        .await
+        .map_err(ApiError::from)?;
+
+    let user = state
+        .user_repo
+        .find_by_id(user_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+    Ok(Json(ProfileResponse {
+        id: user.id.to_string(),
+        email: user.email,
+        role: user.role,
+        first_name: user.first_name,
+        last_name: user.last_name,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,6 +241,8 @@ mod tests {
             email: email.clone(),
             password_hash: hashed,
             role: UserRole::Admin,
+            first_name: None,
+            last_name: None,
         };
 
         mock_repo
