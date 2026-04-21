@@ -52,9 +52,6 @@ export default function SettingsPage() {
     enabled: !!token,
   });
 
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-
   const updateMutation = useMutation({
     mutationFn: (data: { first_name: string; last_name: string }) => 
       updateUserProfile(token!, data).then(res => {
