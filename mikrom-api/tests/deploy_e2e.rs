@@ -14,7 +14,7 @@ use std::time::Duration;
 use axum::{body::Body, http::Request};
 use tower::ServiceExt;
 
-use mikrom_agent::firecracker::{FirecrackerConfig, FirecrackerManager, VmConfig};
+use mikrom_agent::firecracker::{FirecrackerConfig, FirecrackerManager};
 use mikrom_agent::server::AgentServer;
 use mikrom_api::auth::jwt::create_token;
 use mikrom_api::repositories::user_repository::{DbError, NewUser, User, UserRepository};

@@ -122,6 +122,7 @@ mod tests {
                 ip_address: None,
                 gateway: None,
                 mac_address: None,
+                netmask: None,
                 volumes: vec![],
             },
             "user-1".to_string(),
@@ -249,6 +250,7 @@ mod tests {
             ip_address: None,
             gateway: None,
             mac_address: None,
+            netmask: None,
             volumes: vec![],
         };
         assert_eq!(config.env.get("PORT").unwrap(), "8080");

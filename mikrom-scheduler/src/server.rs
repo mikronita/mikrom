@@ -204,6 +204,7 @@ impl SchedulerService for SchedulerServer {
             ip_address: None,
             gateway: None,
             mac_address: None,
+            netmask: None,
             volumes: req
                 .config
                 .as_ref()
@@ -776,6 +777,7 @@ impl SchedulerServer {
                 ip_address: config.ip_address.clone().unwrap_or_default(),
                 gateway: config.gateway.clone().unwrap_or_default(),
                 mac_address: config.mac_address.clone().unwrap_or_default(),
+                netmask: config.netmask.clone().unwrap_or_default(),
                 volumes: config
                     .volumes
                     .iter()
@@ -1350,6 +1352,7 @@ mod tests {
             ip_address: None,
             gateway: None,
             mac_address: None,
+            netmask: None,
             volumes: vec![],
         }
     }

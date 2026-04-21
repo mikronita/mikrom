@@ -179,7 +179,9 @@ pub struct VmConfig {
     pub gateway: ::prost::alloc::string::String,
     #[prost(string, tag = "7")]
     pub mac_address: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag = "8")]
+    #[prost(string, tag = "8")]
+    pub netmask: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "9")]
     pub volumes: ::prost::alloc::vec::Vec<Volume>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]

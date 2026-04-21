@@ -1226,6 +1226,7 @@ mod tests {
             ip_address: None,
             gateway: None,
             mac_address: None,
+            netmask: None,
             volumes: vec![],
         }
     }
@@ -1381,6 +1382,7 @@ mod tests {
             ip_address: None,
             gateway: None,
             mac_address: None,
+            netmask: None,
             volumes: vec![],
         };
         assert_eq!(cfg.env.get("PORT").unwrap(), "3000");

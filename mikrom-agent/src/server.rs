@@ -921,6 +921,7 @@ mod tests {
                     ip_address: String::new(),
                     gateway: String::new(),
                     mac_address: String::new(),
+                    netmask: String::new(),
                     volumes: vec![],
                 }),
             }))
