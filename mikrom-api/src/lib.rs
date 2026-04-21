@@ -20,7 +20,7 @@ pub use error::{ApiError, ApiResult};
 pub use repositories::user_repository::UserRepository;
 pub use vms::{delete_vm, get_vm_logs, get_vm_status, list_vms, pause_vm, resume_vm, stop_vm};
 
-use auth::{login, register};
+use auth::{get_profile, login, register, update_profile};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -46,6 +46,8 @@ pub fn create_app(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))
+        .route("/auth/me", get(get_profile))
+        .route("/auth/me", axum::routing::put(update_profile))
         .route("/deploy", axum::routing::post(deploy_app))
         .route("/vms", get(list_vms))
         .route("/vms/{job_id}", get(get_vm_status))

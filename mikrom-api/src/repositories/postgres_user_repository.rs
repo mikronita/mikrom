@@ -18,14 +18,14 @@ impl PostgresUserRepository {
 #[async_trait]
 impl UserRepository for PostgresUserRepository {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError> {
-        let result = sqlx::query_as::<_, (sqlx::types::Uuid, String, String, String)>(
-            "SELECT id, email, password_hash, role FROM users WHERE email = $1",
+        let result = sqlx::query_as::<_, (sqlx::types::Uuid, String, String, String, Option<String>, Option<String>)>(
+            "SELECT id, email, password_hash, role, first_name, last_name FROM users WHERE email = $1",
         )
         .bind(email)
         .fetch_optional(&*self.pool)
         .await?;
 
-        if let Some((id, email, password_hash, role_str)) = result {
+        if let Some((id, email, password_hash, role_str, first_name, last_name)) = result {
             let role = match role_str.as_str() {
                 "admin" => UserRole::Admin,
                 _ => UserRole::User,
@@ -35,6 +35,44 @@ impl UserRepository for PostgresUserRepository {
                 email,
                 password_hash,
                 role,
+                first_name,
+                last_name,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn find_by_id(&self, id: sqlx::types::Uuid) -> Result<Option<User>, DbError> {
+        let result = sqlx::query_as::<
+            _,
+            (
+                sqlx::types::Uuid,
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
+            "SELECT id, email, password_hash, role, first_name, last_name FROM users WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        if let Some((id, email, password_hash, role_str, first_name, last_name)) = result {
+            let role = match role_str.as_str() {
+                "admin" => UserRole::Admin,
+                _ => UserRole::User,
+            };
+            Ok(Some(User {
+                id,
+                email,
+                password_hash,
+                role,
+                first_name,
+                last_name,
             }))
         } else {
             Ok(None)
@@ -47,11 +85,13 @@ impl UserRepository for PostgresUserRepository {
             UserRole::Admin => "admin",
             UserRole::User => "user",
         };
-        sqlx::query("INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, $3, $4)")
+        sqlx::query("INSERT INTO users (id, email, password_hash, role, first_name, last_name) VALUES ($1, $2, $3, $4, $5, $6)")
             .bind(id)
             .bind(&user.email)
             .bind(&user.password_hash)
             .bind(role_str)
+            .bind(&user.first_name)
+            .bind(&user.last_name)
             .execute(&*self.pool)
             .await?;
 
@@ -65,6 +105,22 @@ impl UserRepository for PostgresUserRepository {
             .await?;
 
         Ok(count)
+    }
+
+    async fn update_profile(
+        &self,
+        id: sqlx::types::Uuid,
+        first_name: Option<String>,
+        last_name: Option<String>,
+    ) -> Result<(), DbError> {
+        sqlx::query("UPDATE users SET first_name = $1, last_name = $2 WHERE id = $3")
+            .bind(first_name)
+            .bind(last_name)
+            .bind(id)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
     }
 }
 
@@ -115,6 +171,8 @@ mod tests {
                 email: email.clone(),
                 password_hash: "x".to_string(),
                 role: UserRole::User,
+                first_name: None,
+                last_name: None,
             })
             .await
             .expect("create failed");
@@ -159,6 +217,8 @@ mod tests {
             email: email.clone(),
             password_hash: "x".to_string(),
             role: UserRole::User,
+            first_name: None,
+            last_name: None,
         })
         .await
         .expect("create failed");

@@ -25,6 +25,19 @@ export interface ApiError {
   error: string;
 }
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  role: string;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+export interface UpdateProfileRequest {
+  first_name: string | null;
+  last_name: string | null;
+}
+
 export interface VmInfo {
   job_id: string;
   app_id: string;
@@ -196,6 +209,39 @@ export async function login(
     });
     const result = await parseJson<LoginResponse & ApiError>(response);
     if (!response.ok) return { error: result.error || "Login failed" };
+    return { data: result };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function getUserProfile(
+  token: string
+): Promise<{ data?: UserProfile; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/me`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<UserProfile & ApiError>(response);
+    if (!response.ok) return { error: result.error || "Failed to fetch profile" };
+    return { data: result };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function updateUserProfile(
+  token: string,
+  data: UpdateProfileRequest
+): Promise<{ data?: UserProfile; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/me`, {
+      method: "PUT",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<UserProfile & ApiError>(response);
+    if (!response.ok) return { error: result.error || "Failed to update profile" };
     return { data: result };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };

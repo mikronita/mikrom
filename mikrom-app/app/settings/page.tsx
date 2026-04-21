@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   HiUser,
   HiBell,
@@ -25,12 +25,62 @@ import {
   Tabs, 
   TabItem,
   Avatar,
-  ToggleSwitch
+  ToggleSwitch,
+  Spinner,
+  HelperText
 } from "flowbite-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getUserProfile, updateUserProfile } from "@/lib/api";
+import { getToken } from "@/lib/auth";
+import { toast } from "sonner";
 
 export default function SettingsPage() {
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [marketingEmails, setMarketingNotifications] = useState(false);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  
+  const queryClient = useQueryClient();
+  const token = getToken();
+
+  const { data: profile, isLoading } = useQuery({
+    queryKey: ["profile"],
+    queryFn: () => getUserProfile(token!).then(res => {
+      if (res.error) throw new Error(res.error);
+      return res.data;
+    }),
+    enabled: !!token,
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (data: { first_name: string; last_name: string }) => 
+      updateUserProfile(token!, data).then(res => {
+        if (res.error) throw new Error(res.error);
+        return res.data;
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      toast.success("Profile updated successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Failed to update profile");
+    }
+  });
+
+  useEffect(() => {
+    if (profile) {
+      if (profile.first_name !== null && firstName === "") {
+        setTimeout(() => setFirstName(profile.first_name!), 0);
+      }
+      if (profile.last_name !== null && lastName === "") {
+        setTimeout(() => setLastName(profile.last_name!), 0);
+      }
+    }
+  }, [profile, firstName, lastName]);
+
+  const handleSave = () => {
+    updateMutation.mutate({ first_name: firstName, last_name: lastName });
+  };
 
   return (
     <AuthGuard>
@@ -49,49 +99,88 @@ export default function SettingsPage() {
             <Tabs aria-label="Settings tabs" variant="underline">
               {/* Profile Section */}
               <TabItem active title="Profile" icon={HiUser}>
-                <div className="p-6 space-y-8">
-                  <div className="flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-zinc-100 dark:border-zinc-800">
-                    <Avatar 
-                      placeholderInitials="JD" 
-                      size="xl" 
-                      rounded 
-                      className="ring-4 ring-zinc-50 dark:ring-zinc-800"
-                    />
-                    <div className="text-center sm:text-left space-y-2">
-                      <h3 className="text-lg font-bold dark:text-white">Profile Picture</h3>
-                      <p className="text-sm text-zinc-500">JPG, GIF or PNG. Max size of 800K</p>
-                      <div className="flex gap-2 justify-center sm:justify-start">
-                        <Button color="dark" size="xs">Upload New</Button>
-                        <Button color="gray" size="xs" outline>Delete</Button>
+                {isLoading ? (
+                  <div className="p-12 flex justify-center items-center">
+                    <Spinner size="xl" />
+                  </div>
+                ) : (
+                  <div className="p-6 space-y-8">
+                    <div className="flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-zinc-100 dark:border-zinc-800">
+                      <Avatar 
+                        placeholderInitials={`${firstName?.[0] || ""}${lastName?.[0] || ""}` || "U"} 
+                        size="xl" 
+                        rounded 
+                        className="ring-4 ring-zinc-50 dark:ring-zinc-800"
+                      />
+                      <div className="text-center sm:text-left space-y-2">
+                        <h3 className="text-lg font-bold dark:text-white">Profile Picture</h3>
+                        <p className="text-sm text-zinc-500">JPG, GIF or PNG. Max size of 800K</p>
+                        <div className="flex gap-2 justify-center sm:justify-start">
+                          <Button color="dark" size="xs">Upload New</Button>
+                          <Button color="gray" size="xs" outline>Delete</Button>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <div className="mb-2 block">
-                        <Label htmlFor="firstName">First Name</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <div className="mb-2 block">
+                          <Label htmlFor="firstName">First Name</Label>
+                        </div>
+                        <TextInput 
+                          id="firstName" 
+                          placeholder="John" 
+                          value={firstName} 
+                          onChange={(e) => setFirstName(e.target.value)} 
+                        />
                       </div>
-                      <TextInput id="firstName" placeholder="John" />
-                    </div>
-                    <div>
-                      <div className="mb-2 block">
-                        <Label htmlFor="lastName">Last Name</Label>
+                      <div>
+                        <div className="mb-2 block">
+                          <Label htmlFor="lastName">Last Name</Label>
+                        </div>
+                        <TextInput 
+                          id="lastName" 
+                          placeholder="Doe" 
+                          value={lastName} 
+                          onChange={(e) => setLastName(e.target.value)} 
+                        />
                       </div>
-                      <TextInput id="lastName" placeholder="Doe" />
-                    </div>
-                    <div className="md:col-span-2">
-                      <div className="mb-2 block">
-                        <Label htmlFor="email">Email Address</Label>
+                      <div className="md:col-span-2">
+                        <div className="mb-2 block">
+                          <Label htmlFor="email">Email Address</Label>
+                        </div>
+                        <TextInput 
+                          id="email" 
+                          type="email" 
+                          icon={HiMail} 
+                          placeholder="john@example.com" 
+                          value={profile?.email || ""} 
+                          disabled 
+                        />
+                        <HelperText className="mt-2 text-zinc-500">
+                          Email cannot be changed yet.
+                        </HelperText>
                       </div>
-                      <TextInput id="email" type="email" icon={HiMail} placeholder="john@example.com" />
                     </div>
-                  </div>
 
-                  <div className="flex justify-end">
-                    <Button color="dark">Save Changes</Button>
+                    <div className="flex justify-end">
+                      <Button 
+                        color="primary" 
+                        onClick={handleSave} 
+                        disabled={updateMutation.isPending}
+                      >
+                        {updateMutation.isPending ? (
+                          <>
+                            <Spinner size="sm" className="mr-2" />
+                            Saving...
+                          </>
+                        ) : (
+                          "Save Changes"
+                        )}
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                )}
               </TabItem>
 
               {/* Security Section */}

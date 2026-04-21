@@ -15,13 +15,17 @@ pub struct User {
     pub email: String,
     pub password_hash: String,
     pub role: UserRole,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NewUser {
     pub email: String,
     pub password_hash: String,
     pub role: UserRole,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -45,8 +49,15 @@ pub enum DbError {
 #[async_trait]
 pub trait UserRepository: Send + Sync {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError>;
+    async fn find_by_id(&self, id: Uuid) -> Result<Option<User>, DbError>;
     async fn create(&self, user: NewUser) -> Result<Uuid, DbError>;
     async fn count_by_email(&self, email: &str) -> Result<i64, DbError>;
+    async fn update_profile(
+        &self,
+        id: Uuid,
+        first_name: Option<String>,
+        last_name: Option<String>,
+    ) -> Result<(), DbError>;
 }
 
 #[cfg(test)]
@@ -59,6 +70,8 @@ mod tests {
             email: "test@example.com".to_string(),
             password_hash: "hashed_password".to_string(),
             role: UserRole::User,
+            first_name: None,
+            last_name: None,
         }
     }
 
@@ -68,11 +81,22 @@ mod tests {
         async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
             Ok(Some(self.0.clone()))
         }
+        async fn find_by_id(&self, _id: Uuid) -> Result<Option<User>, DbError> {
+            Ok(Some(self.0.clone()))
+        }
         async fn create(&self, _user: NewUser) -> Result<Uuid, DbError> {
             Ok(self.0.id)
         }
         async fn count_by_email(&self, _email: &str) -> Result<i64, DbError> {
             Ok(1)
+        }
+        async fn update_profile(
+            &self,
+            _id: Uuid,
+            _first_name: Option<String>,
+            _last_name: Option<String>,
+        ) -> Result<(), DbError> {
+            Ok(())
         }
     }
 
@@ -82,11 +106,22 @@ mod tests {
         async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
             Ok(None)
         }
+        async fn find_by_id(&self, _id: Uuid) -> Result<Option<User>, DbError> {
+            Ok(None)
+        }
         async fn create(&self, _user: NewUser) -> Result<Uuid, DbError> {
             Ok(Uuid::new_v4())
         }
         async fn count_by_email(&self, _email: &str) -> Result<i64, DbError> {
             Ok(0)
+        }
+        async fn update_profile(
+            &self,
+            _id: Uuid,
+            _first_name: Option<String>,
+            _last_name: Option<String>,
+        ) -> Result<(), DbError> {
+            Err(DbError::NotFound)
         }
     }
 
@@ -96,11 +131,22 @@ mod tests {
         async fn find_by_email(&self, _email: &str) -> Result<Option<User>, DbError> {
             Err(DbError::Internal("simulated find error".to_string()))
         }
+        async fn find_by_id(&self, _id: Uuid) -> Result<Option<User>, DbError> {
+            Err(DbError::Internal("simulated find_id error".to_string()))
+        }
         async fn create(&self, _user: NewUser) -> Result<Uuid, DbError> {
             Err(DbError::Internal("simulated insert error".to_string()))
         }
         async fn count_by_email(&self, _email: &str) -> Result<i64, DbError> {
             Err(DbError::Internal("simulated count error".to_string()))
+        }
+        async fn update_profile(
+            &self,
+            _id: Uuid,
+            _first_name: Option<String>,
+            _last_name: Option<String>,
+        ) -> Result<(), DbError> {
+            Err(DbError::Internal("simulated update error".to_string()))
         }
     }
 
@@ -136,6 +182,8 @@ mod tests {
                 email: "new@example.com".to_string(),
                 password_hash: "hash".to_string(),
                 role: UserRole::User,
+                first_name: None,
+                last_name: None,
             })
             .await
             .unwrap();
@@ -149,6 +197,8 @@ mod tests {
                 email: "new@example.com".to_string(),
                 password_hash: "hash".to_string(),
                 role: UserRole::User,
+                first_name: None,
+                last_name: None,
             })
             .await
             .unwrap();
@@ -162,6 +212,8 @@ mod tests {
                 email: "x@x.com".to_string(),
                 password_hash: "hash".to_string(),
                 role: UserRole::User,
+                first_name: None,
+                last_name: None,
             })
             .await;
         assert!(result.is_err());
@@ -221,6 +273,8 @@ mod tests {
             email: "a@b.com".to_string(),
             password_hash: "hashed".to_string(),
             role: UserRole::User,
+            first_name: None,
+            last_name: None,
         };
         let s = format!("{:?}", new_user);
         assert!(s.contains("NewUser"));

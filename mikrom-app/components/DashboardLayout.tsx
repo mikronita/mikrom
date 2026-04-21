@@ -20,7 +20,6 @@ import {
   SidebarItemGroup, 
   SidebarItem, 
   Navbar, 
-  NavbarBrand, 
   DarkThemeToggle,
   Avatar,
   Dropdown,
@@ -29,11 +28,31 @@ import {
   DropdownDivider,
   TextInput
 } from "flowbite-react";
-import { logout } from "@/lib/auth";
+import { logout, getToken } from "@/lib/auth";
+import { useQuery } from "@tanstack/react-query";
+import { getUserProfile } from "@/lib/api";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const token = getToken();
+
+  const { data: profile } = useQuery({
+    queryKey: ["profile"],
+    queryFn: () => getUserProfile(token!).then(res => {
+      if (res.error) throw new Error(res.error);
+      return res.data;
+    }),
+    enabled: !!token,
+  });
+
+  const initials = profile 
+    ? `${profile.first_name?.[0] || ""}${profile.last_name?.[0] || ""}` || profile.email[0].toUpperCase()
+    : "U";
+
+  const fullName = profile?.first_name && profile?.last_name 
+    ? `${profile.first_name} ${profile.last_name}`
+    : profile?.email.split("@")[0] || "User";
 
   return (
     <div className="antialiased bg-gray-50 dark:bg-gray-900">
@@ -76,12 +95,12 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               arrowIcon={false}
               inline
               label={
-                <Avatar alt="User settings" img="" rounded placeholderInitials="JD" />
+                <Avatar alt="User settings" img="" rounded placeholderInitials={initials} />
               }
             >
               <DropdownHeader>
-                <span className="block text-sm font-bold">John Doe</span>
-                <span className="block truncate text-sm font-medium">john.doe@example.com</span>
+                <span className="block text-sm font-bold">{fullName}</span>
+                <span className="block truncate text-sm font-medium">{profile?.email}</span>
               </DropdownHeader>
               <DropdownItem as={Link} href="/settings">Settings</DropdownItem>
               <DropdownDivider />
