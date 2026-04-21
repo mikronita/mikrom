@@ -49,6 +49,7 @@ pub struct VmConfig {
     pub ip_address: Option<String>,
     pub gateway: Option<String>,
     pub mac_address: Option<String>,
+    pub netmask: Option<String>,
     pub volumes: Vec<Volume>,
 }
 
@@ -121,6 +122,7 @@ mod tests {
                 ip_address: None,
                 gateway: None,
                 mac_address: None,
+                netmask: None,
                 volumes: vec![],
             },
             "user-1".to_string(),
@@ -248,6 +250,7 @@ mod tests {
             ip_address: None,
             gateway: None,
             mac_address: None,
+            netmask: None,
             volumes: vec![],
         };
         assert_eq!(config.env.get("PORT").unwrap(), "8080");

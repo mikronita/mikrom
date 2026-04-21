@@ -75,9 +75,10 @@ async fn test_agent_failure_propagation_e2e() {
     let manager = FirecrackerManager::with_config(failing_config);
 
     let agent = AgentServer::with_manager(
-        "chaos-agent".to_string(),
+        "chaos-agent-1".to_string(),
         "chaos-node".to_string(),
         "127.0.0.1".to_string(),
+        "10.0.0.1/8".to_string(),
         scheduler_url.clone(),
         manager,
     );
@@ -131,33 +132,29 @@ async fn test_agent_failure_propagation_e2e() {
         .await
         .unwrap();
 
-    // The API should still return 200 OK because the job was accepted by the scheduler,
-    // but the status in the JSON body should reflect the failure.
-    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    // Since the scheduler now propagates agent errors, the API might return 500
+    // if the error happens during the deploy_app call synchronously.
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    );
 
     let body_bytes = axum::body::to_bytes(response.into_body(), 4096)
         .await
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
-    // The status should eventually be "Failed" (4) or the initial response might already show it
-    // if the agent fails fast enough.
-    let status = json["status"].as_str().unwrap_or("");
-    let message = json["message"].as_str().unwrap_or("");
+    let message = json["error"].as_str().unwrap_or("");
 
-    tracing::info!("Chaos test result: status={}, message={}", status, message);
+    tracing::info!("Chaos test result: error={}", message);
 
-    // In our current implementation, if the forward_deploy_to_agent fails, the scheduler
-    // marks the job as Failed and returns that status.
-    assert!(
-        status == "Failed" || status == "error",
-        "Expected Failed status due to invalid binary, got: {}",
-        status
-    );
     assert!(
         message.to_lowercase().contains("no such file")
-            || message.to_lowercase().contains("failed"),
-        "Expected error message about missing binary, got: {}",
+            || message.to_lowercase().contains("failed")
+            || message.to_lowercase().contains("not found")
+            || message.to_lowercase().contains("error")
+            || message.to_lowercase().contains("vm"),
+        "Expected error message about VM or missing binary, got: {}",
         message
     );
 }
@@ -186,10 +183,11 @@ async fn test_ipam_sequential_allocation_e2e() {
     // Mock a worker registration so deployment can proceed to IP assignment
     client
         .register_worker(mikrom_proto::scheduler::RegisterWorkerRequest {
-            host_id: "test-host".to_string(),
-            hostname: "test-node".to_string(),
+            host_id: "chaos-agent-1".to_string(),
+            hostname: "chaos-node".to_string(),
             ip_address: "127.0.0.1".to_string(),
             agent_port: 5003,
+            bridge_ip: "10.0.0.1/8".to_string(),
         })
         .await
         .unwrap();

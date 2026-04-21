@@ -133,7 +133,8 @@ message VmConfig {
   string ip_address = 5;
   string gateway = 6;
   string mac_address = 7;
-  repeated Volume volumes = 8;
+  string netmask = 8;
+  repeated Volume volumes = 9;
 }
 
 

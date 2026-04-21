@@ -54,6 +54,7 @@ impl SchedulerService for SchedulerServer {
             req.hostname,
             req.ip_address,
             req.agent_port as u16,
+            req.bridge_ip,
         );
 
         if !success {
@@ -203,6 +204,7 @@ impl SchedulerService for SchedulerServer {
             ip_address: None,
             gateway: None,
             mac_address: None,
+            netmask: None,
             volumes: req
                 .config
                 .as_ref()
@@ -221,20 +223,30 @@ impl SchedulerService for SchedulerServer {
 
         let result = self.scheduler.select_best_worker(&config, &req.app_id);
 
-        let response = match result {
+        match result {
             Ok(worker) => {
                 let app_id = req.app_id.clone();
                 let image = req.image.clone();
                 let host_id = worker.host_id.clone();
+
+                // Allocate IP from worker's IPAM
+                let allocation = worker.ipam.allocate();
+                let netmask = worker.ipam.netmask();
+                let (ip_address, gateway, mac_address) = if let Some(a) = allocation {
+                    (Some(a.ip), Some(a.gateway), Some(a.mac))
+                } else {
+                    (None, None, None)
+                };
 
                 let job_config = crate::job::VmConfig {
                     vcpus: config.vcpus,
                     memory_mib: config.memory_mib,
                     disk_mib: config.disk_mib,
                     env: config.env.clone(),
-                    ip_address: None,
-                    gateway: None,
-                    mac_address: None,
+                    ip_address,
+                    gateway,
+                    mac_address,
+                    netmask: Some(netmask),
                     volumes: config
                         .volumes
                         .iter()
@@ -267,30 +279,28 @@ impl SchedulerService for SchedulerServer {
                     .forward_deploy_to_agent(&host_id, &app_id, &image, &vm_id, &job_config)
                     .await
                 {
-                    Ok(()) => {
+                    Ok(_) => {
                         self.scheduler.start_job(&job_id);
+
+                        let job = self.scheduler.get_job(&job_id);
+                        let status = job
+                            .as_ref()
+                            .map(|j| j.status as i32)
+                            .unwrap_or(crate::job::JobStatus::Running as i32);
+                        let message = "Application started".to_string();
+
+                        Ok(Response::new(DeployResponse {
+                            job_id,
+                            status,
+                            host_id,
+                            vm_id,
+                            message,
+                        }))
                     }
                     Err(e) => {
                         self.scheduler.fail_job(&job_id, e.message().to_string());
+                        Err(e)
                     }
-                }
-
-                let job = self.scheduler.get_job(&job_id);
-                let status = job
-                    .as_ref()
-                    .map(|j| j.status as i32)
-                    .unwrap_or(crate::job::JobStatus::Scheduled as i32);
-                let message = job
-                    .as_ref()
-                    .and_then(|j| j.error_message.clone())
-                    .unwrap_or_else(|| "Application scheduled".to_string());
-
-                DeployResponse {
-                    job_id: job_id.clone(),
-                    status,
-                    host_id,
-                    vm_id,
-                    message,
                 }
             }
             Err(e) => {
@@ -305,17 +315,15 @@ impl SchedulerService for SchedulerServer {
                 job.fail(e.to_string());
                 self.scheduler.add_job(job);
 
-                DeployResponse {
+                Ok(Response::new(DeployResponse {
                     job_id: job_id.clone(),
                     status: crate::job::JobStatus::Failed as i32,
                     host_id: String::new(),
                     vm_id: String::new(),
                     message: e.to_string(),
-                }
+                }))
             }
-        };
-
-        Ok(Response::new(response))
+        }
     }
 
     #[tracing::instrument(skip(self, request), fields(job_id = %request.get_ref().job_id))]
@@ -388,11 +396,11 @@ impl SchedulerService for SchedulerServer {
         }
 
         let host_id = job.host_id.ok_or_else(|| {
-            tracing::error!("Job {} has no assigned host", job_id);
+            tracing::warn!("Job {} has no assigned host yet", job_id);
             Status::failed_precondition("Job has no assigned host")
         })?;
         let vm_id = job.vm_id.ok_or_else(|| {
-            tracing::error!("Job {} has no assigned VM ID", job_id);
+            tracing::warn!("Job {} has no assigned VM ID yet", job_id);
             Status::failed_precondition("Job has no assigned VM ID")
         })?;
 
@@ -630,6 +638,30 @@ impl SchedulerService for SchedulerServer {
 
         Ok(Response::new(ListAppsResponse { apps }))
     }
+
+    async fn list_workers(
+        &self,
+        _request: tonic::Request<mikrom_proto::scheduler::ListWorkersRequest>,
+    ) -> Result<Response<mikrom_proto::scheduler::ListWorkersResponse>, Status> {
+        let workers = self.scheduler.worker_registry().list_workers();
+        let workers_info = workers
+            .into_iter()
+            .map(|w| mikrom_proto::scheduler::WorkerInfo {
+                host_id: w.host_id,
+                hostname: w.hostname,
+                ip_address: w.ip_address,
+                agent_port: w.agent_port as u32,
+                bridge_ip: w.bridge_ip,
+                last_heartbeat: w.last_heartbeat,
+            })
+            .collect();
+
+        Ok(Response::new(
+            mikrom_proto::scheduler::ListWorkersResponse {
+                workers: workers_info,
+            },
+        ))
+    }
 }
 
 impl SchedulerServer {
@@ -642,6 +674,10 @@ impl SchedulerServer {
             agent_clients: Arc::new(RwLock::new(HashMap::new())),
             certs,
         })
+    }
+
+    pub fn scheduler(&self) -> &AppScheduler {
+        &self.scheduler
     }
 
     pub async fn serve(&self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
@@ -693,8 +729,11 @@ impl SchedulerServer {
             ),
         };
 
+        tracing::info!(host_id = %host_id, addr = %addr, "Connecting to agent");
+
         let mut endpoint = tonic::transport::Endpoint::new(addr)
-            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?;
+            .map_err(|e| Status::unavailable(format!("Invalid agent endpoint: {}", e)))?
+            .connect_timeout(std::time::Duration::from_secs(2));
 
         if let Some(certs) = &self.certs {
             endpoint = endpoint
@@ -738,6 +777,7 @@ impl SchedulerServer {
                 ip_address: config.ip_address.clone().unwrap_or_default(),
                 gateway: config.gateway.clone().unwrap_or_default(),
                 mac_address: config.mac_address.clone().unwrap_or_default(),
+                netmask: config.netmask.clone().unwrap_or_default(),
                 volumes: config
                     .volumes
                     .iter()
@@ -754,8 +794,9 @@ impl SchedulerServer {
             .start_vm(req)
             .await
             .map_err(|e| {
-                tracing::error!("Failed to start VM {} on agent {}: {}", vm_id, host_id, e);
-                Status::internal(format!("Failed to start VM: {}", e))
+                let msg = e.message();
+                tracing::error!("Failed to start VM {} on agent {}: {}", vm_id, host_id, msg);
+                Status::internal(format!("Failed to start VM on agent: {}", msg))
             })?
             .into_inner();
 
@@ -855,6 +896,7 @@ mod tests {
                 hostname: host_id.to_string(),
                 ip_address: "127.0.0.1".to_string(),
                 agent_port: 19999,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap();
@@ -899,6 +941,7 @@ mod tests {
                 hostname: "node-1".to_string(),
                 ip_address: "10.0.0.1".to_string(),
                 agent_port: 5003,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap()
@@ -918,6 +961,7 @@ mod tests {
                 hostname: "node-1-v2".to_string(),
                 ip_address: "127.0.0.2".to_string(),
                 agent_port: 5003,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap()
@@ -992,12 +1036,13 @@ mod tests {
     #[tokio::test]
     async fn test_deploy_app_with_available_worker_assigns_host_and_vm() {
         // Worker is selected but the agent at port 19999 is unreachable in tests,
-        // so the job ends up Failed. The important thing is host and vm are assigned.
+        // so the deploy_app call returns Err. The important thing is the job is
+        // persisted with host and vm assigned.
         let server = make_server();
         register_worker(&server, "h1").await;
         add_metrics(&server, "h1").await;
 
-        let resp = server
+        let result = server
             .deploy_app(Request::new(DeployRequest {
                 app_id: "app-1".to_string(),
                 app_name: "my-app".to_string(),
@@ -1014,14 +1059,22 @@ mod tests {
                 }),
                 user_id: "user-1".to_string(),
             }))
-            .await
-            .unwrap()
-            .into_inner();
-        // Agent at port 19999 is unreachable → job transitions to Failed.
-        assert_eq!(resp.status, crate::job::JobStatus::Failed as i32);
-        assert!(!resp.job_id.is_empty());
-        assert_eq!(resp.host_id, "h1");
-        assert!(!resp.vm_id.is_empty());
+            .await;
+
+        // Agent at port 19999 is unreachable → returns Err.
+        assert!(result.is_err());
+
+        // Verify job is persisted with Failed status and assignments
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
+
+        assert_eq!(job.status, crate::job::JobStatus::Failed);
+        assert!(!job.job_id.is_empty());
+        assert_eq!(job.host_id.as_deref(), Some("h1"));
+        assert!(job.vm_id.is_some());
     }
 
     #[tokio::test]
@@ -1030,13 +1083,18 @@ mod tests {
         register_worker(&server, "h1").await;
         add_metrics(&server, "h1").await;
 
-        let resp = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner();
-        // Default config fits the worker; agent unreachable → Failed.
-        assert_eq!(resp.status, crate::job::JobStatus::Failed as i32);
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
+
+        // Agent unreachable → returns Err.
+        assert!(result.is_err());
+
+        // Verify it failed but is in scheduler
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
+        assert_eq!(job.status, crate::job::JobStatus::Failed);
     }
 
     #[tokio::test]
@@ -1067,15 +1125,19 @@ mod tests {
         register_worker(&server, "h1").await;
         add_metrics(&server, "h1").await;
 
-        let deploy_resp = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner();
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
+        assert!(result.is_err());
+
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
+        let job_id = job.job_id;
 
         let status = server
             .get_app_status(Request::new(AppStatusRequest {
-                job_id: deploy_resp.job_id,
+                job_id,
                 user_id: "user-1".to_string(),
             }))
             .await
@@ -1083,6 +1145,7 @@ mod tests {
             .into_inner();
         assert_eq!(status.host_id, "h1");
         assert!(!status.vm_id.is_empty());
+        assert_eq!(status.status, crate::job::JobStatus::Failed as i32);
     }
 
     #[tokio::test]
@@ -1123,11 +1186,14 @@ mod tests {
         register_worker(&server, "h1").await;
         add_metrics(&server, "h1").await;
 
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
+        assert!(result.is_err());
+
         let job_id = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner()
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted")
             .job_id;
 
         let cancel_resp = server
@@ -1286,6 +1352,7 @@ mod tests {
             ip_address: None,
             gateway: None,
             mac_address: None,
+            netmask: None,
             volumes: vec![],
         }
     }
@@ -1316,6 +1383,7 @@ mod tests {
                 hostname: "dead-node".to_string(),
                 ip_address: "127.0.0.1".to_string(),
                 agent_port: 59980,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap();
@@ -1341,13 +1409,14 @@ mod tests {
     #[tokio::test]
     async fn test_deploy_app_returns_failed_when_forward_to_agent_fails() {
         let server = make_server();
-        // Worker registered but with unreachable port — forward will fail silently.
+        // Worker registered but with unreachable port — forward will fail.
         server
             .register_worker(Request::new(RegisterWorkerRequest {
                 host_id: "unreachable".to_string(),
                 hostname: "unreachable-node".to_string(),
                 ip_address: "127.0.0.1".to_string(),
                 agent_port: 59981,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap();
@@ -1369,16 +1438,20 @@ mod tests {
             .await
             .unwrap();
 
-        let resp = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner();
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
 
-        // Agent at port 59981 is unreachable → job transitions to Failed.
-        assert_eq!(resp.status, crate::job::JobStatus::Failed as i32);
-        assert!(!resp.job_id.is_empty());
-        assert_eq!(resp.host_id, "unreachable");
+        // Agent at port 59981 is unreachable → returns Err.
+        assert!(result.is_err());
+
+        // Verify job is persisted with Failed status
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
+        assert_eq!(job.status, crate::job::JobStatus::Failed);
+        assert!(!job.job_id.is_empty());
+        assert_eq!(job.host_id.as_deref(), Some("unreachable"));
     }
 
     #[tokio::test]
@@ -1407,11 +1480,14 @@ mod tests {
         let server = make_server();
         register_worker(&server, "h1").await;
         add_metrics(&server, "h1").await;
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
+        assert!(result.is_err());
+
         let job_id = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner()
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted")
             .job_id;
 
         let resp = server
@@ -1500,6 +1576,7 @@ mod tests {
                 hostname: "host1".to_string(),
                 ip_address: "127.0.0.1".to_string(),
                 agent_port: 5003,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap();
@@ -1523,23 +1600,22 @@ mod tests {
             .await
             .unwrap();
 
-        let resp = server
-            .deploy_app(Request::new(deploy_req("user-1")))
-            .await
-            .unwrap()
-            .into_inner();
+        let result = server.deploy_app(Request::new(deploy_req("user-1"))).await;
+        assert!(result.is_err());
 
-        let job = server.scheduler.get_job(&resp.job_id).unwrap();
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
 
-        // Networking is now assigned by the agent after it receives the StartVm request.
-        // The scheduler stores None for networking fields; the agent fills them in based
-        // on its local bridge subnet (BRIDGE_IP env var).
+        // Networking is pre-assigned by the scheduler from worker's IPAM.
         assert!(
-            job.config.ip_address.is_none(),
-            "Scheduler should not pre-assign IP; agent manages its own IPAM"
+            job.config.ip_address.is_some(),
+            "Scheduler should pre-assign IP from worker's IPAM"
         );
-        assert!(job.config.gateway.is_none());
-        assert!(job.config.mac_address.is_none());
+        assert!(job.config.gateway.is_some());
+        assert!(job.config.mac_address.is_some());
     }
 
     #[tokio::test]
@@ -1551,6 +1627,7 @@ mod tests {
                 hostname: "host1".to_string(),
                 ip_address: "127.0.0.1".to_string(),
                 agent_port: 5003,
+                bridge_ip: "10.0.0.1/8".to_string(),
             }))
             .await
             .unwrap();
@@ -1594,12 +1671,14 @@ mod tests {
             }),
         };
 
-        let resp = server
-            .deploy_app(Request::new(req))
-            .await
-            .unwrap()
-            .into_inner();
-        let job = server.scheduler.get_job(&resp.job_id).unwrap();
+        let result = server.deploy_app(Request::new(req)).await;
+        assert!(result.is_err());
+
+        let job = server
+            .scheduler()
+            .list_jobs(Some("user-1"), None)
+            .pop()
+            .expect("Job should be persisted");
 
         assert_eq!(job.config.volumes.len(), 1);
         assert_eq!(job.config.volumes[0].volume_id, "data-vol");

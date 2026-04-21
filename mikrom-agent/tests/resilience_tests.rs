@@ -61,6 +61,13 @@ impl SchedulerService for MockScheduler {
     ) -> Result<Response<ListAppsResponse>, Status> {
         unimplemented!()
     }
+
+    async fn list_workers(
+        &self,
+        _: Request<mikrom_proto::scheduler::ListWorkersRequest>,
+    ) -> Result<Response<mikrom_proto::scheduler::ListWorkersResponse>, Status> {
+        unimplemented!()
+    }
     async fn get_app_status(
         &self,
         _: Request<AppStatusRequest>,
@@ -128,6 +135,7 @@ async fn test_agent_re_registers_when_scheduler_rejects_metrics() {
         "test-host".to_string(),
         "test-node".to_string(),
         "127.0.0.1".to_string(),
+        "10.0.0.1/8".to_string(),
         format!("http://{}", actual_addr),
     );
 

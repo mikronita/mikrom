@@ -20,6 +20,7 @@ dirs = "5"
 yansi = "1"
 indicatif = "0.17"
 futures-util = "0.3.32"
+mikrom-proto = { path = "../mikrom-proto" }
 ratatui = "0.30.0"
 crossterm = "0.29.0"
 

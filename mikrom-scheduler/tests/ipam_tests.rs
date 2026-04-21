@@ -4,33 +4,33 @@ mod tests {
 
     #[test]
     fn test_large_network_10_8() {
-        // Test con la red 10.0.0.0/8 empezando en un offset alto
-        let ipam = Ipam::new("10.0.0.0/8", 65536, 16777214); // Empieza en 10.1.0.0
+        // Test with 10.0.0.0/8
+        let ipam = Ipam::new("10.0.0.1/8");
 
-        let ip = ipam.allocate().expect("Should allocate IP");
-        assert_eq!(ip, "10.1.0.0");
+        let a1 = ipam.allocate().expect("Should allocate IP");
+        assert_eq!(a1.ip, "10.0.0.2");
 
-        let ip2 = ipam.allocate().expect("Should allocate IP");
-        assert_eq!(ip2, "10.1.0.1");
+        let a2 = ipam.allocate().expect("Should allocate IP");
+        assert_eq!(a2.ip, "10.0.0.3");
     }
 
     #[test]
     fn test_ipam_boundary_conditions() {
-        let ipam = Ipam::new("10.0.0.0/8", 16777214, 16777214);
+        let ipam = Ipam::new("10.0.0.1/30"); // .0 net, .1 gw, .2 host, .3 bcast. Available: .2
 
-        assert_eq!(ipam.allocate(), Some("10.255.255.254".to_string()));
-        assert_eq!(ipam.allocate(), None); // Agotado
+        assert_eq!(ipam.allocate().map(|a| a.ip), Some("10.0.0.2".to_string()));
+        assert_eq!(ipam.allocate(), None); // Exhausted
     }
 
     #[test]
     fn test_ipam_release_logic() {
-        let ipam = Ipam::new("10.0.0.0/8", 100, 101);
+        let ipam = Ipam::new("10.0.0.1/30");
 
-        let ip1 = ipam.allocate().unwrap();
-        let _ip2 = ipam.allocate().unwrap();
+        let a1 = ipam.allocate().unwrap();
         assert_eq!(ipam.allocate(), None);
 
-        ipam.release(&ip1);
-        assert_eq!(ipam.allocate(), Some(ip1));
+        ipam.release(&a1.ip);
+        let a_new = ipam.allocate().unwrap();
+        assert_eq!(a_new.ip, a1.ip);
     }
 }
