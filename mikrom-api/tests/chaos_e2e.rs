@@ -71,6 +71,7 @@ async fn test_agent_failure_propagation_e2e() {
         binary: "/usr/bin/this-does-not-exist-mikrom-test".to_string(),
         kernel_path: Some("/tmp/fake-kernel".to_string()), // Forces real mode instead of stub
         rootfs_path: "/tmp/fake-rootfs.ext4".to_string(),
+        ..FirecrackerConfig::stub()
     };
     let manager = FirecrackerManager::with_config(failing_config);
 

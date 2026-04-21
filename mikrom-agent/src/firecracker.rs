@@ -72,6 +72,7 @@ struct VmProcess {
     socket_path: String,
     tap_name: Option<String>,
     log_task: tokio::task::JoinHandle<()>,
+    chroot_dir: Option<String>,
 }
 
 #[derive(Clone)]
@@ -204,6 +205,16 @@ pub struct FirecrackerConfig {
     /// Default rootfs ext4 image.  Used when the `image` field of a
     /// `StartVmRequest` is not a valid path on the host filesystem.
     pub rootfs_path: String,
+    /// Whether to use jailer for sandboxing (default: `false`).
+    pub use_jailer: bool,
+    /// Path to the jailer binary (default: `"jailer"`).
+    pub jailer_binary: String,
+    /// UID for the jailed process (default: `1000`).
+    pub jailer_uid: u32,
+    /// GID for the jailed process (default: `1000`).
+    pub jailer_gid: u32,
+    /// Base directory for jailer chroot (default: `"/srv/jailer"`).
+    pub chroot_base: String,
 }
 
 impl FirecrackerConfig {
@@ -217,6 +228,21 @@ impl FirecrackerConfig {
                 .unwrap_or_else(|_| "/usr/bin/firecracker".to_string()),
             rootfs_path: std::env::var("FC_ROOTFS_PATH")
                 .unwrap_or_else(|_| "/opt/firecracker/rootfs.ext4".to_string()),
+            use_jailer: std::env::var("USE_JAILER")
+                .map(|v| v == "true")
+                .unwrap_or(false),
+            jailer_binary: std::env::var("JAILER_BINARY")
+                .unwrap_or_else(|_| "/usr/bin/jailer".to_string()),
+            jailer_uid: std::env::var("JAILER_UID")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1000),
+            jailer_gid: std::env::var("JAILER_GID")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1000),
+            chroot_base: std::env::var("JAILER_CHROOT_BASE")
+                .unwrap_or_else(|_| "/srv/jailer".to_string()),
         }
     }
 
@@ -226,6 +252,11 @@ impl FirecrackerConfig {
             kernel_path: None,
             binary: "firecracker".to_string(),
             rootfs_path: "/opt/firecracker/rootfs.ext4".to_string(),
+            use_jailer: false,
+            jailer_binary: "jailer".to_string(),
+            jailer_uid: 1000,
+            jailer_gid: 1000,
+            chroot_base: "/srv/jailer".to_string(),
         }
     }
 }
@@ -494,11 +525,6 @@ impl FirecrackerManager {
 
         let fc_binary = &self.fc_config.binary;
 
-        let socket_path = format!("/tmp/fc-{}-{}.sock", self.agent_id, vm_id);
-
-        // Remove any stale socket from a previous run.
-        let _ = tokio::fs::remove_file(&socket_path).await;
-
         // Resolve networking: if scheduler didn't assign an IP, allocate from bridge subnet.
         let config = if config.ip_address.is_none() || config.ip_address.as_deref() == Some("") {
             match self.allocate_vm_network().await {
@@ -527,10 +553,26 @@ impl FirecrackerManager {
             None
         };
 
+        // ── Jailer setup (if enabled) ──────────────────────────────────────────
+        let (exec_binary, exec_args, socket_path, chroot_dir) = if self.fc_config.use_jailer {
+            self.setup_jailer(&vm_id, &kernel_path, &rootfs_path)
+                .await?
+        } else {
+            let socket_path = format!("/tmp/fc-{}-{}.sock", self.agent_id, vm_id);
+            // Remove any stale socket from a previous run.
+            let _ = tokio::fs::remove_file(&socket_path).await;
+
+            (
+                fc_binary.clone(),
+                vec!["--api-sock".to_string(), socket_path.clone()],
+                socket_path,
+                None,
+            )
+        };
+
         // Spawn the Firecracker process.
-        let mut child = match tokio::process::Command::new(fc_binary)
-            .arg("--api-sock")
-            .arg(&socket_path)
+        let mut child = match tokio::process::Command::new(&exec_binary)
+            .args(&exec_args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
@@ -539,11 +581,14 @@ impl FirecrackerManager {
             Err(e) => {
                 let err_msg = format!(
                     "Failed to spawn firecracker process (binary: {}): {}",
-                    fc_binary, e
+                    exec_binary, e
                 );
                 tracing::error!("{}", err_msg);
                 if let Some(tap) = &tap_name {
                     self.cleanup_tap(tap).await;
+                }
+                if let Some(chroot) = chroot_dir {
+                    let _ = tokio::fs::remove_dir_all(chroot).await;
                 }
                 self.set_failed(&vm_id, err_msg.clone()).await;
                 return Err(FirecrackerError::ProcessError(err_msg));
@@ -582,11 +627,20 @@ impl FirecrackerManager {
             }
         });
 
-        // Wait for the API socket to appear (up to 5 s).
-        if let Err(e) = wait_for_socket(&socket_path, Duration::from_secs(5)).await {
+        // Wait for the API socket to appear (up to 10 s if using jailer as it takes longer).
+        let wait_timeout = if chroot_dir.is_some() {
+            Duration::from_secs(10)
+        } else {
+            Duration::from_secs(5)
+        };
+
+        if let Err(e) = wait_for_socket(&socket_path, wait_timeout).await {
             let _ = child.kill().await;
             if let Some(tap) = &tap_name {
                 self.cleanup_tap(tap).await;
+            }
+            if let Some(chroot) = chroot_dir {
+                let _ = tokio::fs::remove_dir_all(chroot).await;
             }
             self.set_failed(&vm_id, e.to_string()).await;
             return Err(e);
@@ -602,10 +656,50 @@ impl FirecrackerManager {
         if has_snapshot {
             tracing::info!(vm_id = %vm_id, "Found snapshot, restoring VM...");
 
-            // 1. Load snapshot
+            // 1. Prepare snapshot paths for API
+            let (load_snapshot_path, load_mem_path) = if let Some(chroot) = &chroot_dir {
+                let chroot_snap_path = format!("{}/root/vm.snapshot", chroot);
+                let chroot_mem_path = format!("{}/root/vm.mem", chroot);
+
+                tokio::fs::copy(&snapshot_path, &chroot_snap_path)
+                    .await
+                    .map_err(|e| {
+                        FirecrackerError::ProcessError(format!(
+                            "Failed to copy snapshot to chroot: {}",
+                            e
+                        ))
+                    })?;
+                tokio::fs::copy(&mem_path, &chroot_mem_path)
+                    .await
+                    .map_err(|e| {
+                        FirecrackerError::ProcessError(format!(
+                            "Failed to copy mem file to chroot: {}",
+                            e
+                        ))
+                    })?;
+
+                self.recursive_chown(
+                    &chroot_snap_path,
+                    self.fc_config.jailer_uid,
+                    self.fc_config.jailer_gid,
+                )
+                .await?;
+                self.recursive_chown(
+                    &chroot_mem_path,
+                    self.fc_config.jailer_uid,
+                    self.fc_config.jailer_gid,
+                )
+                .await?;
+
+                ("/vm.snapshot".to_string(), "/vm.mem".to_string())
+            } else {
+                (snapshot_path, mem_path)
+            };
+
+            // 2. Load snapshot
             let load_body = serde_json::json!({
-                "snapshot_path": snapshot_path,
-                "mem_file_path": mem_path,
+                "snapshot_path": load_snapshot_path,
+                "mem_file_path": load_mem_path,
                 "resume": true
             })
             .to_string();
@@ -613,7 +707,11 @@ impl FirecrackerManager {
             // Note: Networking and drives must be configured similarly or via snapshot.
             // For now, we assume simple restoration.
             if let Err(e) = fc_put(&socket_path, "/snapshot/load", &load_body).await {
-                tracing::error!(vm_id = %vm_id, "Failed to load snapshot: {}. Falling back to normal boot.", e);
+                tracing::error!(
+                    vm_id = %vm_id,
+                    "Failed to load snapshot: {}. Falling back to normal boot.",
+                    e
+                );
             } else {
                 let mut processes = self.processes.lock().await;
                 processes.insert(
@@ -624,6 +722,7 @@ impl FirecrackerManager {
                         socket_path,
                         tap_name,
                         log_task,
+                        chroot_dir,
                     },
                 );
 
@@ -645,22 +744,36 @@ impl FirecrackerManager {
         })
         .to_string();
 
-        let mut boot_args = "console=ttyS0 reboot=k panic=1 pci=off nomodules rw".to_string();
+        let mut boot_args =
+            "console=ttyS0 reboot=k panic=1 pci=off nomodules rw root=/dev/vda".to_string();
         if let (Some(ip), Some(gw)) = (&config.ip_address, &config.gateway) {
             let mask = config.netmask.as_deref().unwrap_or("255.255.255.0");
             // Standard kernel ip= parameter: ip=ip::gw:mask:hostname:iface:autoconf
-            boot_args.push_str(&format!(" ip={}::{}:{}:eth0:off", ip, gw, mask));
+            // We leave hostname empty: ip=ip::gw:mask::eth0:off
+            boot_args.push_str(&format!(" ip={}::{}:{}::eth0:off", ip, gw, mask));
         }
 
+        let kernel_api_path = if chroot_dir.is_some() {
+            "/vmlinux.bin".to_string()
+        } else {
+            kernel_path.clone()
+        };
+
         let boot_source = serde_json::json!({
-            "kernel_image_path": kernel_path,
+            "kernel_image_path": kernel_api_path,
             "boot_args": boot_args
         })
         .to_string();
 
+        let rootfs_api_path = if chroot_dir.is_some() {
+            "/rootfs.ext4".to_string()
+        } else {
+            rootfs_path.clone()
+        };
+
         let drives = serde_json::json!({
             "drive_id": "rootfs",
-            "path_on_host": rootfs_path,
+            "path_on_host": rootfs_api_path,
             "is_root_device": true,
             "is_read_only": false
         })
@@ -685,6 +798,7 @@ impl FirecrackerManager {
         .to_string();
 
         // ── API calls ──────────────────────────────────────────────────────────
+        let chroot_dir_clone = chroot_dir.clone();
         let res = (async {
             fc_put(&socket_path, "/machine-config", &machine_config).await?;
             fc_put(&socket_path, "/boot-source", &boot_source).await?;
@@ -697,9 +811,32 @@ impl FirecrackerManager {
             // ── Attach additional volumes ──────────────────────────────────────────
             for vol in &config.volumes {
                 let vol_path = self.ensure_volume(&vol.volume_id, vol.size_mib).await?;
+
+                let vol_api_path = if let Some(chroot) = &chroot_dir_clone {
+                    let vol_filename = format!("{}.ext4", vol.volume_id);
+                    let chroot_vol_path = format!("{}/root/{}", chroot, vol_filename);
+                    tokio::fs::copy(&vol_path, &chroot_vol_path)
+                        .await
+                        .map_err(|e| {
+                            FirecrackerError::ProcessError(format!(
+                                "Failed to copy volume to chroot: {}",
+                                e
+                            ))
+                        })?;
+                    self.recursive_chown(
+                        &chroot_vol_path,
+                        self.fc_config.jailer_uid,
+                        self.fc_config.jailer_gid,
+                    )
+                    .await?;
+                    format!("/{}", vol_filename)
+                } else {
+                    vol_path
+                };
+
                 let drive_json = serde_json::json!({
                     "drive_id": vol.volume_id,
-                    "path_on_host": vol_path,
+                    "path_on_host": vol_api_path,
                     "is_root_device": false,
                     "is_read_only": vol.read_only
                 })
@@ -722,6 +859,9 @@ impl FirecrackerManager {
             let _ = child.kill().await;
             if let Some(tap) = &tap_name {
                 self.cleanup_tap(tap).await;
+            }
+            if let Some(chroot) = chroot_dir {
+                let _ = tokio::fs::remove_dir_all(chroot).await;
             }
             self.set_failed(&vm_id, e.to_string()).await;
             return Err(e);
@@ -748,6 +888,7 @@ impl FirecrackerManager {
                 socket_path,
                 tap_name,
                 log_task,
+                chroot_dir,
             },
         );
 
@@ -779,6 +920,11 @@ impl FirecrackerManager {
                     .await;
             let _ = tokio::fs::remove_file(format!("/tmp/mikrom-snapshots/{vm_id}.snapshot")).await;
             let _ = tokio::fs::remove_file(format!("/tmp/mikrom-snapshots/{vm_id}.mem")).await;
+
+            if let Some(chroot) = proc.chroot_dir {
+                tracing::info!(vm_id = %vm_id, chroot_dir = %chroot, "Cleaning up jailer chroot");
+                let _ = tokio::fs::remove_dir_all(chroot).await;
+            }
 
             if let Some(tap) = &proc.tap_name {
                 self.cleanup_tap(tap).await;
@@ -1110,7 +1256,16 @@ impl FirecrackerManager {
             .await;
 
         let output = tokio::process::Command::new("ip")
-            .args(["tuntap", "add", "dev", &tap_name, "mode", "tap"])
+            .args([
+                "tuntap",
+                "add",
+                "dev",
+                &tap_name,
+                "mode",
+                "tap",
+                "user",
+                &self.fc_config.jailer_uid.to_string(),
+            ])
             .output()
             .await
             .map_err(|e| FirecrackerError::ProcessError(format!("Failed to create TAP: {}", e)))?;
@@ -1157,6 +1312,104 @@ impl FirecrackerManager {
             .output()
             .await;
     }
+
+    async fn setup_jailer(
+        &self,
+        vm_id: &str,
+        kernel_host_path: &str,
+        rootfs_host_path: &str,
+    ) -> Result<(String, Vec<String>, String, Option<String>), FirecrackerError> {
+        let exec_name = std::path::Path::new(&self.fc_config.binary)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("firecracker");
+
+        let chroot_dir = format!("{}/{}/{}", self.fc_config.chroot_base, exec_name, vm_id);
+        let root_dir = format!("{}/root", chroot_dir);
+        let run_dir = format!("{}/run", root_dir);
+
+        tracing::info!(vm_id = %vm_id, chroot_dir = %chroot_dir, "Setting up jailer environment");
+
+        // 1. Create directories
+        tokio::fs::create_dir_all(&run_dir).await.map_err(|e| {
+            FirecrackerError::ProcessError(format!(
+                "Failed to create jailer directory {}: {}",
+                run_dir, e
+            ))
+        })?;
+
+        // 2. Copy files to root_dir
+        let kernel_filename = "vmlinux.bin";
+        let rootfs_filename = "rootfs.ext4";
+
+        let chroot_kernel_path = format!("{}/{}", root_dir, kernel_filename);
+        let chroot_rootfs_path = format!("{}/{}", root_dir, rootfs_filename);
+
+        tokio::fs::copy(kernel_host_path, &chroot_kernel_path)
+            .await
+            .map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to copy kernel to chroot: {}", e))
+            })?;
+
+        tokio::fs::copy(rootfs_host_path, &chroot_rootfs_path)
+            .await
+            .map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to copy rootfs to chroot: {}", e))
+            })?;
+
+        // 3. Set ownership
+        let uid = self.fc_config.jailer_uid;
+        let gid = self.fc_config.jailer_gid;
+
+        self.recursive_chown(&chroot_dir, uid, gid).await?;
+
+        // 4. Prepare jailer arguments
+        let args = vec![
+            "--id".to_string(),
+            vm_id.to_string(),
+            "--exec-file".to_string(),
+            self.fc_config.binary.clone(),
+            "--uid".to_string(),
+            uid.to_string(),
+            "--gid".to_string(),
+            gid.to_string(),
+            "--chroot-base-dir".to_string(),
+            self.fc_config.chroot_base.clone(),
+            "--".to_string(),
+            "--api-sock".to_string(),
+            "/run/firecracker.socket".to_string(),
+        ];
+
+        let host_socket_path = format!("{}/run/firecracker.socket", root_dir);
+
+        Ok((
+            self.fc_config.jailer_binary.clone(),
+            args,
+            host_socket_path,
+            Some(chroot_dir),
+        ))
+    }
+
+    async fn recursive_chown(
+        &self,
+        path: &str,
+        uid: u32,
+        gid: u32,
+    ) -> Result<(), FirecrackerError> {
+        let output = tokio::process::Command::new("chown")
+            .args(["-R", &format!("{}:{}", uid, gid), path])
+            .output()
+            .await
+            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to run chown: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(FirecrackerError::ProcessError(format!(
+                "chown failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
+        Ok(())
+    }
 }
 
 impl Default for FirecrackerManager {
@@ -1190,6 +1443,7 @@ impl FirecrackerManager {
                 socket_path,
                 tap_name: None,
                 log_task,
+                chroot_dir: None,
             },
         );
         let mut vms = self.vms.write().await;
@@ -1738,6 +1992,7 @@ mod tests {
             kernel_path: Some("/fake/vmlinux".to_string()),
             binary: "/nonexistent/firecracker-binary-xyz".to_string(),
             rootfs_path: rootfs.clone(),
+            ..FirecrackerConfig::stub()
         };
         (cfg, rootfs)
     }
@@ -1950,6 +2205,67 @@ mod tests {
         // 2. Pause VM (will create snapshot files in stub mode, but we can't easily mock the HTTP call here without a server)
         // Since we are in stub mode, fc_patch/fc_put will fail if no server is running.
         // We will just verify the agent_id isolation instead, which we already have tests for.
+    }
+
+    #[tokio::test]
+    async fn test_jailer_setup_logic() {
+        let mut cfg = FirecrackerConfig::stub();
+        cfg.use_jailer = true;
+        cfg.chroot_base = format!("/tmp/jailer-test-{}", uuid::Uuid::new_v4());
+
+        // We need real-ish paths for kernel and rootfs to satisfy copy step
+        let temp_dir = format!("/tmp/fc-test-{}", uuid::Uuid::new_v4());
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+        let kernel_path = format!("{}/vmlinux", temp_dir);
+        let rootfs_path = format!("{}/rootfs", temp_dir);
+        tokio::fs::write(&kernel_path, b"kernel").await.unwrap();
+        tokio::fs::write(&rootfs_path, b"rootfs").await.unwrap();
+
+        let mgr = FirecrackerManager::with_config(cfg.clone());
+
+        // We can't easily run the full start_vm because it will try to spawn jailer and run chown
+        // but we can test setup_jailer directly.
+        let result = mgr
+            .setup_jailer("vm-jail-1", &kernel_path, &rootfs_path)
+            .await;
+
+        // Cleanup temp files
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+
+        match result {
+            Ok((bin, args, socket, chroot)) => {
+                assert_eq!(bin, cfg.jailer_binary);
+                assert!(args.contains(&"vm-jail-1".to_string()));
+                assert!(args.contains(&cfg.chroot_base));
+                assert!(socket.contains("vm-jail-1"));
+                assert!(chroot.is_some());
+
+                let chroot_val = chroot.unwrap();
+                assert!(chroot_val.contains(&cfg.chroot_base));
+
+                // Verify directories were created
+                assert!(std::path::Path::new(&format!("{}/root/run", chroot_val)).exists());
+                assert!(std::path::Path::new(&format!("{}/root/vmlinux.bin", chroot_val)).exists());
+                assert!(std::path::Path::new(&format!("{}/root/rootfs.ext4", chroot_val)).exists());
+
+                // Cleanup jailer test dir
+                let _ = tokio::fs::remove_dir_all(&cfg.chroot_base).await;
+            }
+            Err(e) => {
+                // If it failed because of chown, that's expected if not root,
+                // but at least we know it got there.
+                let err_msg = e.to_string();
+                if err_msg.contains("chown failed") || err_msg.contains("Operation not permitted") {
+                    println!(
+                        "setup_jailer failed as expected (no root for chown): {}",
+                        err_msg
+                    );
+                } else {
+                    panic!("setup_jailer failed unexpectedly: {}", err_msg);
+                }
+                let _ = tokio::fs::remove_dir_all(&cfg.chroot_base).await;
+            }
+        }
     }
 
     #[tokio::test]
