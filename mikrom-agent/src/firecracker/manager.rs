@@ -1079,10 +1079,14 @@ impl FirecrackerManager {
     }
 
     async fn ensure_file_at(&self, src: &str, dst: &str) -> Result<(), FirecrackerError> {
-        if let Err(_e) = tokio::fs::hard_link(src, dst).await {
-            tokio::fs::copy(src, dst).await.map_err(|e| {
+        let canonical_src = tokio::fs::canonicalize(src).await.map_err(|e| {
+            FirecrackerError::ProcessError(format!("Failed to resolve path {src}: {e}"))
+        })?;
+
+        if let Err(_e) = tokio::fs::hard_link(&canonical_src, dst).await {
+            tokio::fs::copy(&canonical_src, dst).await.map_err(|e| {
                 FirecrackerError::ProcessError(format!(
-                    "Failed to copy file from {src} to {dst}: {e}"
+                    "Failed to copy file from {canonical_src:?} to {dst}: {e}"
                 ))
             })?;
         }
@@ -1099,7 +1103,8 @@ impl FirecrackerManager {
         let mut stack = vec![std::path::PathBuf::from(path)];
 
         while let Some(current_path) = stack.pop() {
-            unix_fs::chown(&current_path, Some(uid), Some(gid)).map_err(|e| {
+            // Use lchown to avoid following symlinks
+            unix_fs::lchown(&current_path, Some(uid), Some(gid)).map_err(|e| {
                 FirecrackerError::ProcessError(format!("Failed to chown {current_path:?}: {e}"))
             })?;
 
