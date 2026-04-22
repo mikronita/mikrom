@@ -1,5 +1,11 @@
+pub mod app_repository;
+pub mod postgres_app_repository;
 pub mod postgres_user_repository;
 pub mod user_repository;
 
+pub use app_repository::AppRepository;
+pub use app_repository::MockAppRepository;
+pub use postgres_app_repository::PostgresAppRepository;
 pub use postgres_user_repository::PostgresUserRepository;
-pub use user_repository::{DbError, NewUser, User, UserRepository};
+pub use user_repository::MockUserRepository;
+pub use user_repository::UserRepository;

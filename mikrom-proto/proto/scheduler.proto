@@ -94,6 +94,7 @@ message VmMetrics {
   uint64 ram_used_bytes = 2;
   VmStatus status = 3;
   string error_message = 4;
+  string ip_address = 5;
 }
 
 enum VmStatus {
@@ -185,6 +186,7 @@ message AppStatusResponse {
   string error_message = 8;
   float cpu_usage = 9;
   uint64 ram_used_bytes = 10;
+  string ip_address = 11;
 }
 
 message CancelRequest {

@@ -16,11 +16,16 @@ async fn main() -> anyhow::Result<()> {
     let db_pool = db::connect(&config.database_url).await?;
     db::run_migrations(&db_pool).await?;
 
-    let user_repo = PostgresUserRepository::new(Arc::new(db_pool));
+    let db_pool = Arc::new(db_pool);
+    let user_repo = PostgresUserRepository::new(db_pool.clone());
+    let app_repo = mikrom_api::repositories::PostgresAppRepository::new(db_pool.clone());
+
     let state = AppState {
         user_repo: Arc::new(user_repo),
+        app_repo: Arc::new(app_repo),
         scheduler_client: None,
         scheduler_config: config.scheduler_config(),
+        builder_addr: config.builder_addr,
         jwt_secret: config.jwt_secret,
         master_key: config.master_key,
     };

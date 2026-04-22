@@ -8,54 +8,64 @@ import {
   HiChartBar, 
   HiCollection, 
   HiLightningBolt, 
-  HiServer,
   HiExternalLink,
   HiExclamationCircle,
   HiArrowRight,
-  HiStop
+  HiTrash
 } from "react-icons/hi";
 import { Loader2 } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { useVms, useStopVm } from "@/lib/hooks/use-vms";
-import { Badge, Alert, Button, Card } from "flowbite-react";
+import { useVms } from "@/lib/hooks/use-vms";
+import { useApps, useDeployAppVersion, useDeleteApp } from "@/lib/hooks/use-apps";
+import { Alert, Button, Card } from "flowbite-react";
 import { cn } from "@/lib/utils";
-import { DeployModal } from "@/components/DeployModal";
+import { CreateAppModal } from "@/components/CreateAppModal";
 import { toast } from "sonner";
 
 function normalizeStatus(status: string): string {
   return status.toLowerCase() === "cancelled" ? "stopped" : status;
 }
 
-function getStatusColor(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "running") return "success";
-  if (s === "scheduled" || s === "pending") return "warning";
-  if (s === "failed" || s === "cancelled") return "failure";
-  return "gray";
-}
-
 export default function Page() {
-  const { data: vms = [], isLoading, error, refetch, isFetching } = useVms();
-  const stopVmMutation = useStopVm();
-  const [showDeploy, setShowDeploy] = useState(false);
+  const { data: vms = [], error: vmsError, refetch: refetchVms, isFetching: isFetchingVms } = useVms();
+  const { data: apps = [], isLoading: isLoadingApps, error: appsError, refetch: refetchApps, isFetching: isFetchingApps } = useApps();
+  const deleteAppMutation = useDeleteApp();
+  const [showCreateApp, setShowCreateApp] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const handleStopVm = (jobId: string, appName: string) => {
-    toast.promise(stopVmMutation.mutateAsync(jobId), {
-      loading: `Stopping ${appName}...`,
-      success: `App ${appName} stopped successfully`,
-      error: (err) => `Failed to stop ${appName}: ${err instanceof Error ? err.message : "Unknown error"}`,
+  const deployAppVersionMutation = useDeployAppVersion();
+
+  const handleDeployApp = (appId: string, appName: string) => {
+    toast.promise(deployAppVersionMutation.mutateAsync({ appId }), {
+      loading: `Building and deploying ${appName}...`,
+      success: `Deployment for ${appName} initiated`,
+      error: (err) => `Failed to deploy ${appName}: ${err instanceof Error ? err.message : "Unknown error"}`,
     });
   };
 
-  const running = vms.filter((v) => v.status.toLowerCase() === "running").length;
-  const scheduled = vms.filter(
+  const handleDeleteApp = (appId: string, appName: string) => {
+    setConfirmDeleteId(null);
+    toast.promise(deleteAppMutation.mutateAsync(appId), {
+      loading: `Deleting application ${appName}...`,
+      success: `App ${appName} deleted`,
+      error: (err) => `Failed to delete ${appName}: ${err instanceof Error ? err.message : "Unknown error"}`,
+    });
+  };
+
+  const isFetching = isFetchingVms || isFetchingApps;
+  const refetch = () => { 
+    refetchVms(); 
+    refetchApps(); 
+  };
+
+  const runningCount = vms.filter((v) => v.status.toLowerCase() === "running").length;
+  const pendingCount = vms.filter(
     (v) =>
       v.status.toLowerCase() === "scheduled" ||
-      v.status.toLowerCase() === "pending"
+      v.status.toLowerCase() === "pending" ||
+      v.status.toLowerCase() === "building"
   ).length;
-
-  const recentVms = vms.slice(0, 5);
 
   return (
     <AuthGuard>
@@ -75,9 +85,9 @@ export default function Page() {
                 <HiRefresh className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
                 Refresh
               </Button>
-              <Button size="sm" color="dark" onClick={() => setShowDeploy(true)}>
+              <Button size="sm" color="dark" onClick={() => setShowCreateApp(true)}>
                 <HiPlus className="w-4 h-4 mr-2" />
-                Deploy App
+                New Application
               </Button>
             </div>
           </div>
@@ -86,17 +96,17 @@ export default function Page() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             <Card>
               <div className="flex items-center justify-between">
-                <h5 className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Apps</h5>
+                <h5 className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Applications</h5>
                 <HiCollection className="w-4 h-4 text-zinc-500" />
               </div>
               <div className="mt-2">
-                {isLoading ? (
+                {isLoadingApps ? (
                   <div className="h-8 w-12 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
                 ) : (
-                  <div className="text-3xl font-bold dark:text-white">{vms.length}</div>
+                  <div className="text-3xl font-bold dark:text-white">{apps.length}</div>
                 )}
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                  Active deployments
+                  Projects in Git
                 </p>
               </div>
             </Card>
@@ -106,10 +116,10 @@ export default function Page() {
                 <HiChartBar className="w-4 h-4 text-green-500" />
               </div>
               <div className="mt-2">
-                {isLoading ? (
+                {isFetchingVms && vms.length === 0 ? (
                   <div className="h-8 w-12 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
                 ) : (
-                  <div className="text-3xl font-bold text-green-600 dark:text-green-400">{running}</div>
+                  <div className="text-3xl font-bold text-green-600 dark:text-green-400">{runningCount}</div>
                 )}
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                   Currently serving
@@ -122,10 +132,10 @@ export default function Page() {
                 <HiLightningBolt className="w-4 h-4 text-yellow-500" />
               </div>
               <div className="mt-2">
-                {isLoading ? (
+                {isFetchingVms && vms.length === 0 ? (
                   <div className="h-8 w-12 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
                 ) : (
-                  <div className="text-3xl font-bold text-yellow-600 dark:text-yellow-400">{scheduled}</div>
+                  <div className="text-3xl font-bold text-yellow-600 dark:text-yellow-400">{pendingCount}</div>
                 )}
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                   Pending tasks
@@ -135,29 +145,27 @@ export default function Page() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Recent Apps */}
+            {/* My Apps */}
             <Card className="lg:col-span-2">
               <div className="flex items-center justify-between p-6 pb-0">
                 <div>
-                  <h5 className="text-xl font-bold dark:text-white">Recent Applications</h5>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Your most recently deployed instances.</p>
+                  <h5 className="text-xl font-bold dark:text-white">My Applications</h5>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Manage your Git-based projects.</p>
                 </div>
-                <Link href="/vms">
-                  <Button color="gray" size="sm">
-                    View all
-                    <HiArrowRight className="w-3 h-3 ml-2" />
-                  </Button>
-                </Link>
+                <Button color="gray" size="sm" onClick={() => setShowCreateApp(true)}>
+                  <HiPlus className="w-3 h-3 mr-2" />
+                  Add App
+                </Button>
               </div>
               <div className="mt-6 border-t border-gray-100 dark:border-gray-800">
-                {error && (
+                {(appsError || vmsError) && (
                   <Alert color="failure" className="rounded-none" icon={() => <HiExclamationCircle className="w-4 h-4 mr-2" />}>
-                    {error instanceof Error ? error.message : "Failed to load applications"}
+                    {"Failed to load dashboard"}
                   </Alert>
                 )}
 
                 <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {isLoading && vms.length === 0 ? (
+                  {isLoadingApps && apps.length === 0 ? (
                     Array.from({ length: 3 }).map((_, i) => (
                       <div key={i} className="px-6 py-4 flex items-center justify-between">
                         <div className="flex items-center gap-4">
@@ -167,58 +175,54 @@ export default function Page() {
                             <div className="h-3 w-32 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
                           </div>
                         </div>
-                        <div className="h-6 w-16 bg-gray-200 dark:bg-gray-700 animate-pulse rounded-full" />
                       </div>
                     ))
-                  ) : vms.length === 0 && !isLoading ? (
+                  ) : apps.length === 0 && !isLoadingApps ? (
                     <div className="flex flex-col items-center justify-center py-16 text-center">
                       <p className="text-gray-500 dark:text-gray-400 text-sm">No applications found.</p>
-                      <Button color="gray" size="sm" className="mt-4" onClick={() => setShowDeploy(true)}>
-                        Deploy your first app
+                      <Button color="gray" size="sm" className="mt-4" onClick={() => setShowCreateApp(true)}>
+                        Connect your first repository
                       </Button>
                     </div>
                   ) : (
-                    recentVms.map((vm) => (
+                    apps.map((app) => (
                       <div
-                        key={vm.job_id}
+                        key={app.id}
                         className="group px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
                       >
                         <div className="flex items-center gap-4">
                           <div className={cn(
-                            "w-10 h-10 rounded-lg flex items-center justify-center border border-gray-200 dark:border-gray-800 bg-white dark:bg-zinc-900 shadow-sm transition-transform group-hover:scale-110",
-                            vm.status.toLowerCase() === "running" ? "text-green-600 dark:text-green-400" : "text-gray-400"
+                            "w-10 h-10 rounded-lg flex items-center justify-center border border-gray-200 dark:border-gray-800 bg-white dark:bg-zinc-900 shadow-sm transition-transform group-hover:scale-110 text-indigo-500"
                           )}>
-                            <HiServer className="w-5 h-5" />
+                            <HiCollection className="w-5 h-5" />
                           </div>
                           <div>
                             <div className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                              {vm.app_name}
-                              <Badge color={getStatusColor(vm.status)} className="capitalize px-1.5 py-0 h-4 text-[10px]">
-                                {normalizeStatus(vm.status)}
-                              </Badge>
+                              {app.name}
                             </div>
                             <div className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5 truncate max-w-[150px] sm:max-w-xs">
-                              {vm.image}
+                              {app.git_url}
                             </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          {vm.status.toLowerCase() === "running" && (
-                            <Button 
-                              color="gray" 
-                              size="xs"
-                              className="opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={() => handleStopVm(vm.job_id, vm.app_name)}
-                              disabled={stopVmMutation.isPending}
-                            >
-                              {stopVmMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <HiStop className="w-4 h-4" />}
-                            </Button>
-                          )}
-                          <Link href={`/vms/${vm.job_id}`}>
-                            <Button color="gray" size="xs" className="opacity-0 group-hover:opacity-100 transition-opacity">
-                              <HiExternalLink className="w-4 h-4" />
-                            </Button>
-                          </Link>
+                          <Button 
+                            color="dark" 
+                            size="xs" 
+                            onClick={() => handleDeployApp(app.id, app.name)}
+                            disabled={deployAppVersionMutation.isPending}
+                          >
+                            {deployAppVersionMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Deploy"}
+                          </Button>
+                          <Button 
+                            color={confirmDeleteId === app.id ? "failure" : "gray"} 
+                            size="xs"
+                            onClick={() => confirmDeleteId === app.id ? handleDeleteApp(app.id, app.name) : setConfirmDeleteId(app.id)}
+                            disabled={deleteAppMutation.isPending}
+                          >
+                            {deleteAppMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <HiTrash className="w-3 h-3" />}
+                            {confirmDeleteId === app.id && <span className="ml-1 text-[10px]">Sure?</span>}
+                          </Button>
                         </div>
                       </div>
                     ))
@@ -227,33 +231,44 @@ export default function Page() {
               </div>
             </Card>
 
-            {/* Quick Actions / Tips */}
+            {/* Active Deployments */}
             <Card>
-              <h5 className="text-xl font-bold dark:text-white">Quick Actions</h5>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Common tasks and shortcuts.</p>
-              <div className="space-y-3">
-                <Button color="gray" outline className="w-full justify-start" onClick={() => setShowDeploy(true)}>
-                  <HiPlus className="w-4 h-4 mr-2" />
-                  Deploy New App
-                </Button>
-                <Button color="gray" outline className="w-full justify-start" onClick={() => refetch()} disabled={isFetching}>
-                  <HiRefresh className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
-                  Sync Resources
-                </Button>
-                <div className="pt-4 mt-4 border-t border-gray-100 dark:border-gray-800">
-                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Resources</h4>
-                  <ul className="space-y-2 text-sm text-gray-500">
-                    <li><a href="#" className="hover:text-gray-900 dark:hover:text-white flex items-center justify-between">API Reference <HiExternalLink className="w-3 h-3" /></a></li>
-                    <li><a href="#" className="hover:text-gray-900 dark:hover:text-white flex items-center justify-between">CLI Tool <HiExternalLink className="w-3 h-3" /></a></li>
-                    <li><a href="#" className="hover:text-gray-900 dark:hover:text-white flex items-center justify-between">Firecracker Docs <HiExternalLink className="w-3 h-3" /></a></li>
-                  </ul>
-                </div>
+              <div className="flex items-center justify-between">
+                <h5 className="text-lg font-bold dark:text-white">Active Deployments</h5>
+                <Link href="/deployments">
+                  <HiArrowRight className="w-4 h-4 text-gray-400 hover:text-gray-900 dark:hover:text-white" />
+                </Link>
+              </div>
+              <div className="mt-4 space-y-4">
+                {isFetchingVms && vms.length === 0 ? (
+                  Array.from({ length: 2 }).map((_, i) => (
+                    <div key={i} className="h-12 bg-gray-100 dark:bg-gray-800 animate-pulse rounded-lg" />
+                  ))
+                ) : vms.length === 0 ? (
+                  <p className="text-xs text-zinc-500 text-center py-4">No active deployments.</p>
+                ) : (
+                  vms.slice(0, 5).map((vm) => (
+                    <Link key={vm.job_id} href={`/deployments/${vm.job_id}`} className="block group">
+                      <div className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                        <div className={cn(
+                          "w-2 h-2 rounded-full",
+                          vm.status.toLowerCase() === "running" ? "bg-green-500" : "bg-yellow-500"
+                        )} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-zinc-900 dark:text-white truncate">{vm.app_name}</p>
+                          <p className="text-[10px] text-zinc-500 truncate uppercase">{normalizeStatus(vm.status)}</p>
+                        </div>
+                        <HiExternalLink className="w-3 h-3 text-zinc-300 group-hover:text-zinc-500" />
+                      </div>
+                    </Link>
+                  ))
+                )}
               </div>
             </Card>
           </div>
         </div>
 
-        {showDeploy && <DeployModal onClose={() => setShowDeploy(false)} />}
+        {showCreateApp && <CreateAppModal onClose={() => setShowCreateApp(false)} />}
       </DashboardLayout>
     </AuthGuard>
   );

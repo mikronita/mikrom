@@ -169,7 +169,7 @@ fn ui(f: &mut ratatui::Frame<'_>, app: &mut App) {
 
     let selected_style = Style::default().add_modifier(Modifier::REVERSED);
     let normal_style = Style::default().bg(Color::Blue);
-    let header_cells = ["Job ID", "Status", "VM ID", "CPU (%)", "RAM (MiB)"]
+    let header_cells = ["Job ID", "Status", "Instance ID", "CPU (%)", "RAM (MiB)"]
         .iter()
         .map(|h| Cell::from(*h).style(Style::default().fg(Color::Yellow)));
     let header = Row::new(header_cells)

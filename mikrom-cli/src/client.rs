@@ -31,7 +31,18 @@ pub struct DeployResponse {
     pub status: String,
     pub host_id: Option<String>,
     pub vm_id: Option<String>,
+    pub image_tag: Option<String>,
     pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AppInfo {
+    pub id: String,
+    pub name: String,
+    pub git_url: String,
+    pub port: i32,
+    pub hostname: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -330,6 +341,76 @@ impl MikromClient {
         let mut req = self
             .http
             .post(format!("{}/vms/{}/restart", self.base_url, job_id));
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        if resp.status().is_success() {
+            Ok(resp.json().await?)
+        } else {
+            let status = resp.status().as_u16();
+            let err: ErrorResponse = resp.json().await?;
+            bail!("{} (HTTP {})", err.error, status);
+        }
+    }
+
+    // ── Apps ──────────────────────────────────────────────────────────────────
+
+    pub async fn create_app(&self, name: &str, git_url: &str) -> anyhow::Result<AppInfo> {
+        let mut req = self
+            .http
+            .post(format!("{}/apps", self.base_url))
+            .json(&serde_json::json!({ "name": name, "git_url": git_url }));
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        if resp.status().is_success() {
+            Ok(resp.json().await?)
+        } else {
+            let status = resp.status().as_u16();
+            let err: ErrorResponse = resp.json().await?;
+            bail!("{} (HTTP {})", err.error, status);
+        }
+    }
+
+    pub async fn list_apps(&self) -> anyhow::Result<Vec<AppInfo>> {
+        let mut req = self.http.get(format!("{}/apps", self.base_url));
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        if resp.status().is_success() {
+            Ok(resp.json().await?)
+        } else {
+            let status = resp.status().as_u16();
+            let err: ErrorResponse = resp.json().await?;
+            bail!("{} (HTTP {})", err.error, status);
+        }
+    }
+
+    pub async fn delete_app(&self, app_id: &str) -> anyhow::Result<()> {
+        let mut req = self
+            .http
+            .delete(format!("{}/apps/{}", self.base_url, app_id));
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status().as_u16();
+            let err: ErrorResponse = resp.json().await?;
+            bail!("{} (HTTP {})", err.error, status);
+        }
+    }
+
+    pub async fn deploy_app_version(&self, app_id: &str) -> anyhow::Result<DeployResponse> {
+        let mut req = self
+            .http
+            .post(format!("{}/apps/{}/deploy", self.base_url, app_id))
+            .json(&serde_json::json!({}));
         if let Some(token) = &self.token {
             req = req.bearer_auth(token);
         }

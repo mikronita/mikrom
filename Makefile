@@ -81,6 +81,14 @@ run-scheduler: ## Run mikrom-scheduler with watch (port 5002)
 run-agent: ## Run mikrom-agent with watch (port 5003)
 	cd mikrom-agent && cargo watch -x run
 
+.PHONY: run-builder
+run-builder: ## Run mikrom-builder with watch (port 5004)
+	cd mikrom-builder && cargo watch -x run
+
+.PHONY: run-router
+run-router: ## Run mikrom-router (configurable via .env)
+	cd mikrom-router && cargo watch -x run
+
 .PHONY: run-app
 run-app: ## Run mikrom-app dev server  (port 3000)
 	cd mikrom-app && pnpm dev
@@ -89,6 +97,8 @@ run-app: ## Run mikrom-app dev server  (port 3000)
 dev: ## Launch all services in tmux windows
 	@tmux new-session -d -s mikrom -n api 'make run-api'
 	@tmux new-window -t mikrom -n scheduler 'make run-scheduler'
+	@tmux new-window -t mikrom -n builder 'make run-builder'
+	@tmux new-window -t mikrom -n router 'make run-router'
 	@tmux new-window -t mikrom -n app 'make run-app'
 	@tmux select-window -t mikrom:api
 	@tmux attach-session -t mikrom

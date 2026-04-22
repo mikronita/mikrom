@@ -163,6 +163,29 @@ export interface StopVmResponse {
   message: string;
 }
 
+export interface AppInfo {
+  id: string;
+  name: string;
+  git_url: string;
+  created_at: string;
+}
+
+export interface CreateAppRequest {
+  name: string;
+  git_url: string;
+}
+
+export interface DeploymentInfo {
+  id: string;
+  app_id: string;
+  build_id: string | null;
+  image_tag: string | null;
+  job_id: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
 function authHeaders(token: string): Record<string, string> {
   return {
     "Content-Type": "application/json",
@@ -360,6 +383,93 @@ export async function deleteVm(
     const result = await parseJson<StopVmResponse & ApiError>(response);
     if (!response.ok) return { error: (result as ApiError).error || "Failed to delete VM" };
     return { data: result as StopVmResponse };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function createApp(
+  token: string,
+  data: CreateAppRequest
+): Promise<{ data?: AppInfo; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apps`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<AppInfo & ApiError>(response);
+    if (!response.ok) return { error: result.error || "Failed to create app" };
+    return { data: result };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function listApps(
+  token: string
+): Promise<{ data?: AppInfo[]; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apps`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<AppInfo[] & ApiError>(response);
+    if (!response.ok) return { error: (result as ApiError).error || "Failed to fetch apps" };
+    return { data: result as AppInfo[] };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function deleteApp(
+  token: string,
+  appId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apps/${appId}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (!response.ok) {
+      const result = await parseJson<ApiError>(response);
+      return { success: false, error: result.error || "Failed to delete app" };
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function deployAppVersion(
+  token: string,
+  appId: string,
+  data: Partial<DeployRequest> = {}
+): Promise<{ data?: DeployResponse; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apps/${appId}/deploy`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<DeployResponse & ApiError>(response);
+    if (!response.ok) return { error: result.error || "Failed to start deployment" };
+    return { data: result };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function listDeployments(
+  token: string,
+  appId: string
+): Promise<{ data?: DeploymentInfo[]; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apps/${appId}/deployments`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<DeploymentInfo[] & ApiError>(response);
+    if (!response.ok) return { error: (result as ApiError).error || "Failed to fetch deployments" };
+    return { data: result as DeploymentInfo[] };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }

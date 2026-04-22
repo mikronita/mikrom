@@ -5,6 +5,7 @@ use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, Tr
 use tracing::Level;
 
 pub mod auth;
+pub mod builder;
 pub mod config;
 pub mod crypto;
 pub mod db;
@@ -13,10 +14,12 @@ pub mod error;
 pub mod models;
 pub mod repositories;
 pub mod scheduler;
+pub mod sync;
 pub mod vms;
 
 pub use deploy::deploy_app;
 pub use error::{ApiError, ApiResult};
+pub use repositories::app_repository::AppRepository;
 pub use repositories::user_repository::UserRepository;
 pub use vms::{delete_vm, get_vm_logs, get_vm_status, list_vms, pause_vm, resume_vm, stop_vm};
 
@@ -25,8 +28,10 @@ use auth::{get_profile, login, register, update_profile};
 #[derive(Clone)]
 pub struct AppState {
     pub user_repo: Arc<dyn UserRepository>,
+    pub app_repo: Arc<dyn AppRepository>,
     pub scheduler_client: Option<SchedulerClient>,
     pub scheduler_config: scheduler::SchedulerConfig,
+    pub builder_addr: String,
     pub jwt_secret: String,
     pub master_key: String,
 }
@@ -42,13 +47,30 @@ pub fn create_app(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    Router::new()
+    let router = Router::new()
         .route("/health", get(health))
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))
         .route("/auth/me", get(get_profile))
         .route("/auth/me", axum::routing::put(update_profile))
         .route("/deploy", axum::routing::post(deploy_app))
+        .route(
+            "/apps",
+            axum::routing::post(crate::deploy::create_app_handler),
+        )
+        .route("/apps", get(crate::deploy::list_apps_handler))
+        .route(
+            "/apps/{app_id}",
+            axum::routing::delete(crate::deploy::delete_app_handler),
+        )
+        .route(
+            "/apps/{app_id}/deploy",
+            axum::routing::post(crate::deploy::deploy_app_version_handler),
+        )
+        .route(
+            "/apps/{app_id}/deployments",
+            get(crate::deploy::list_deployments_handler),
+        )
         .route("/vms", get(list_vms))
         .route("/vms/{job_id}", get(get_vm_status))
         .route("/vms/{job_id}/logs", get(get_vm_logs))
@@ -63,7 +85,12 @@ pub fn create_app(state: AppState) -> Router {
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .layer(cors)
-        .with_state(state)
+        .with_state(state.clone());
+
+    // Start background sync task for VM IPs
+    tokio::spawn(crate::sync::start_ip_sync_task(state));
+
+    router
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -91,11 +118,15 @@ mod tests {
     #[tokio::test]
     async fn test_health_endpoint() {
         let mock_repo = repositories::user_repository::MockUserRepository::new();
-        // The health endpoint doesn't actually use the repo, but we need it for AppState
+        let db_pool = Arc::new(sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap());
+        let app_repo = Arc::new(repositories::PostgresAppRepository::new(db_pool));
+
         let state = AppState {
             user_repo: Arc::new(mock_repo),
+            app_repo,
             scheduler_client: None,
             scheduler_config: scheduler::SchedulerConfig::default(),
+            builder_addr: "http://localhost:5004".to_string(),
             jwt_secret: "test".to_string(),
             master_key: "test".to_string(),
         };

@@ -61,6 +61,8 @@ pub struct VmMetrics {
     pub status: i32,
     #[prost(string, tag = "4")]
     pub error_message: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub ip_address: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MetricsRequest {

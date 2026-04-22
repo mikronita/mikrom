@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { 
-  HiPlus, 
   HiRefresh, 
   HiServer, 
   HiSearch,
@@ -35,10 +34,9 @@ function getStatusColor(status: string): string {
   return "gray";
 }
 
-export default function VmsPage() {
-  const [vms, setVms] = useState<VmInfo[]>([]);
+export default function DeploymentsPage() {
+  const [deployments, setDeployments] = useState<VmInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [stoppingId, setStoppingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -46,18 +44,15 @@ export default function VmsPage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [stopError, setStopError] = useState<string | null>(null);
 
-  const fetchVms = useCallback(async () => {
+  const fetchDeployments = useCallback(async (isInitial = true) => {
     const token = getToken();
     if (!token) return;
-    setLoading(true);
-    setError(null);
+    if (isInitial) setLoading(true);
     const result = await listVms(token);
-    if (result.error) {
-      setError(result.error);
-    } else {
-      setVms(result.data ?? []);
+    if (!result.error) {
+      setDeployments(result.data ?? []);
     }
-    setLoading(false);
+    if (isInitial) setLoading(false);
   }, []);
 
   const handleStop = async (jobId: string) => {
@@ -71,7 +66,7 @@ export default function VmsPage() {
     if (result.error) {
       setStopError(result.error);
     } else {
-      await fetchVms();
+      await fetchDeployments(false);
     }
   };
 
@@ -86,7 +81,7 @@ export default function VmsPage() {
     if (result.error) {
       setStopError(result.error);
     } else {
-      await fetchVms();
+      await fetchDeployments(false);
     }
   };
 
@@ -95,41 +90,52 @@ export default function VmsPage() {
     return s === "running" || s === "scheduled" || s === "pending";
   };
 
-  const vmsRef = useRef(vms);
+  const deploymentsRef = useRef(deployments);
   useEffect(() => {
-    vmsRef.current = vms;
-  }, [vms]);
+    deploymentsRef.current = deployments;
+  }, [deployments]);
 
   useEffect(() => {
+    let isMounted = true;
+    
     const init = async () => {
-      await fetchVms();
+      const token = getToken();
+      if (!token) return;
+      const result = await listVms(token);
+      if (isMounted && !result.error) {
+        setDeployments(result.data ?? []);
+        setLoading(false);
+      }
     };
+    
     init();
 
     const intervalId = setInterval(async () => {
-      const hasTransitional = vmsRef.current.some(vm => {
+      const hasTransitional = deploymentsRef.current.some(vm => {
         const s = vm.status.toLowerCase();
-        return s === "pending" || s === "scheduled" || s === "starting" || s === "stopping";
+        return s === "pending" || s === "scheduled" || s === "stopping";
       });
 
       if (hasTransitional) {
         const token = getToken();
         if (token) {
           const result = await listVms(token);
-          if (!result.error && result.data) {
-            setVms(result.data);
+          if (isMounted && !result.error) {
+            setDeployments(result.data ?? []);
           }
         }
       }
-    }, 5000);
+    }, 3000);
 
-    return () => clearInterval(intervalId);
-  }, [fetchVms]);
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, []);
 
-  const filteredVms = vms.filter(vm => 
+  const filteredDeployments = deployments.filter(vm =>
     vm.app_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    vm.image.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    vm.job_id.toLowerCase().includes(searchQuery.toLowerCase())
+    vm.image.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -138,55 +144,49 @@ export default function VmsPage() {
         <div className="space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
-                Virtual Machines
+              <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
+                Active Deployments
               </h1>
-              <p className="text-zinc-500 dark:text-zinc-400 mt-1">
-                Manage and monitor all your running instances.
+              <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
+                Monitor and manage your running application instances.
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <Button color="gray" size="sm" onClick={fetchVms} disabled={loading}>
+              <Button color="gray" size="sm" onClick={() => fetchDeployments(true)} disabled={loading}>
                 <HiRefresh className={cn("w-4 h-4 mr-2", loading && "animate-spin")} />
                 Refresh
               </Button>
-              <Link href="/">
-                <Button size="sm" color="dark">
-                  <HiPlus className="w-4 h-4 mr-2" />
-                  New Instance
+            </div>
+          </div>
+
+          <Card className="overflow-hidden border-none shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
+            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="relative w-full sm:max-w-xs">
+                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                  <HiSearch className="w-4 h-4 text-zinc-400" />
+                </div>
+                <TextInput
+                  placeholder="Search deployments..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                  sizing="sm"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Button color="gray" size="xs">
+                  <HiFilter className="w-3 h-3 mr-2" />
+                  Filter
                 </Button>
-              </Link>
+              </div>
             </div>
-          </div>
 
-          {error && (
-            <Alert color="failure" icon={() => <HiExclamationCircle className="w-4 h-4 mr-2" />}>
-              {error}
-            </Alert>
-          )}
+            {stopError && (
+              <Alert color="failure" className="rounded-none" icon={() => <HiExclamationCircle className="w-4 h-4 mr-2" />}>
+                {stopError}
+              </Alert>
+            )}
 
-          {stopError && (
-            <Alert color="failure" onDismiss={() => setStopError(null)} icon={() => <HiExclamationCircle className="w-4 h-4 mr-2" />}>
-              Action failed: {stopError}
-            </Alert>
-          )}
-
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="w-full md:w-96">
-              <TextInput 
-                icon={HiSearch}
-                placeholder="Filter by name, image or ID..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <Button color="gray" size="sm">
-              <HiFilter className="w-4 h-4 mr-2" />
-              Filters
-            </Button>
-          </div>
-
-          <Card>
             <div className="overflow-x-auto">
               <Table hoverable>
                 <TableHead>
@@ -194,62 +194,54 @@ export default function VmsPage() {
                     <TableHeadCell>Application</TableHeadCell>
                     <TableHeadCell>Status</TableHeadCell>
                     <TableHeadCell>Image</TableHeadCell>
-                    <TableHeadCell>Job ID</TableHeadCell>
-                    <TableHeadCell>
-                      <span className="sr-only">Actions</span>
-                    </TableHeadCell>
+                    <TableHeadCell>Resources</TableHeadCell>
+                    <TableHeadCell className="text-right">Actions</TableHeadCell>
                   </TableRow>
                 </TableHead>
                 <TableBody className="divide-y">
-                  {loading && vms.length === 0 ? (
+                  {loading && deployments.length === 0 ? (
                     Array.from({ length: 5 }).map((_, i) => (
-                      <TableRow key={i} className="bg-white dark:border-gray-700 dark:bg-gray-800">
-                        <TableCell className="whitespace-nowrap font-medium text-gray-900 dark:text-white">
-                          <div className="h-4 w-32 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
-                        </TableCell>
-                        <TableCell>
-                          <div className="h-4 w-16 bg-gray-200 dark:bg-gray-700 animate-pulse rounded-full" />
-                        </TableCell>
-                        <TableCell>
-                          <div className="h-4 w-40 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
-                        </TableCell>
-                        <TableCell>
-                          <div className="h-4 w-24 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
-                        </TableCell>
-                        <TableCell>
-                          <div className="h-8 w-20 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
+                      <TableRow key={i} className="animate-pulse">
+                        <TableCell colSpan={5} className="py-6">
+                          <div className="h-4 bg-zinc-100 dark:bg-zinc-800 rounded w-full" />
                         </TableCell>
                       </TableRow>
                     ))
-                  ) : filteredVms.length === 0 ? (
-                    <TableRow className="bg-white dark:border-gray-700 dark:bg-gray-800">
-                      <TableCell colSpan={5} className="text-center py-20">
-                        <HiServer className="w-10 h-10 mx-auto text-gray-400 mb-4" />
-                        <p className="text-gray-500">No instances found</p>
+                  ) : filteredDeployments.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center py-12 text-zinc-500">
+                        No deployments found.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredVms.map((vm) => (
-                      <TableRow key={vm.job_id} className="bg-white dark:border-gray-700 dark:bg-gray-800">
-                        <TableCell className="whitespace-nowrap font-bold text-gray-900 dark:text-white">
-                          {vm.app_name}
+                    filteredDeployments.map((vm) => (
+                      <TableRow key={vm.job_id} className="bg-white dark:border-zinc-700 dark:bg-zinc-900">
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
+                              <HiServer className="w-4 h-4 text-zinc-400" />
+                            </div>
+                            <div className="font-medium text-zinc-900 dark:text-white">
+                              {vm.app_name}
+                            </div>
+                          </div>
                         </TableCell>
                         <TableCell>
-                          <Badge color={getStatusColor(vm.status)} className="w-fit">
+                          <Badge color={getStatusColor(vm.status)} className="capitalize w-fit">
                             {normalizeStatus(vm.status)}
                           </Badge>
                         </TableCell>
-                        <TableCell className="font-mono text-xs">
+                        <TableCell className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
                           {vm.image}
                         </TableCell>
-                        <TableCell className="text-xs text-gray-500">
-                          {vm.job_id.slice(0, 8)}...
+                        <TableCell className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {vm.vcpus} vCPU • {vm.memory_mib} MiB
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2 px-4 py-2">
-                             {isStoppable(vm.status) && (
+                          <div className="flex items-center justify-end gap-2">
+                            {isStoppable(vm.status) && (
                               <Button
-                                color={confirmStopId === vm.job_id ? "failure" : "gray"}
+                                color={confirmStopId === vm.job_id ? "warning" : "gray"}
                                 size="xs"
                                 onClick={() => confirmStopId === vm.job_id ? handleStop(vm.job_id) : setConfirmStopId(vm.job_id)}
                                 disabled={!!stoppingId}
@@ -277,7 +269,7 @@ export default function VmsPage() {
                                 {confirmDeleteId === vm.job_id ? "Confirm?" : "Delete"}
                               </Button>
                             )}
-                            <Link href={`/vms/${vm.job_id}`}>
+                            <Link href={`/deployments/${vm.job_id}`}>
                               <Button color="gray" size="xs">
                                 Details
                                 <HiExternalLink className="w-3 h-3 ml-1" />

@@ -118,10 +118,14 @@ mod tests {
     }
 
     fn make_app(jwt_secret: &str) -> axum::Router {
+        let db_pool = Arc::new(sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap());
+        let app_repo = Arc::new(crate::repositories::PostgresAppRepository::new(db_pool));
         let state = crate::AppState {
             user_repo: Arc::new(NoopRepo),
+            app_repo,
             scheduler_client: None,
             scheduler_config: crate::scheduler::SchedulerConfig::default(),
+            builder_addr: "http://localhost:5004".to_string(),
             jwt_secret: jwt_secret.to_string(),
             master_key: "test-key".into(),
         };

@@ -54,30 +54,33 @@ enum Commands {
         #[arg(long)]
         env: Vec<String>,
     },
-    /// List all running VMs
-    Vms,
-    /// Get status of a specific VM
-    Vm { job_id: String },
-    /// Stop a running VM
+    /// List all active deployments
+    Deployments,
+    /// Get status of a specific instance
+    Status { job_id: String },
+    /// Stop a running instance
     Stop { job_id: String },
-    /// Get logs for a VM
+    /// Get logs for an instance
     Logs {
         job_id: String,
         #[arg(long, short)]
         follow: bool,
     },
-    /// Pause a running VM
+    /// Pause a running instance
     Pause { job_id: String },
-    /// Resume a paused VM
+    /// Resume a paused instance
     Resume { job_id: String },
-    /// Delete a VM and its resources
+    /// Delete an instance and its resources
     Delete { job_id: String },
-    /// Restart a VM
+    /// Restart an instance
     Restart { job_id: String },
-    /// Get metrics for a VM or the entire host
+    /// Get metrics for an instance or the entire cluster
     Metrics { job_id: Option<String> },
     /// Show information about the current user
     Whoami,
+    /// Manage applications
+    #[command(subcommand)]
+    Apps(AppCommands),
     /// Show current CLI configuration
     Config,
     /// Launch the interactive dashboard
@@ -102,6 +105,23 @@ enum AuthCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum AppCommands {
+    /// List all applications
+    List,
+    /// Create a new application
+    Create {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        git_url: String,
+    },
+    /// Delete an application
+    Delete { app_id: String },
+    /// Deploy an application
+    Deploy { app_id: String },
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -124,16 +144,17 @@ async fn main() -> anyhow::Result<()> {
             disk,
             env,
         } => handle_deploy(&client, app, image, vcpus, memory, disk, env).await?,
-        Commands::Vms => handle_list_vms(&client).await?,
-        Commands::Vm { job_id } => handle_get_vm(&client, job_id).await?,
-        Commands::Stop { job_id } => handle_stop_vm(&client, job_id).await?,
+        Commands::Deployments => handle_list_deployments(&client).await?,
+        Commands::Status { job_id } => handle_get_status(&client, job_id).await?,
+        Commands::Stop { job_id } => handle_stop_instance(&client, job_id).await?,
         Commands::Logs { job_id, follow } => handle_logs(&client, job_id, follow).await?,
-        Commands::Pause { job_id } => handle_pause_vm(&client, job_id).await?,
-        Commands::Resume { job_id } => handle_resume_vm(&client, job_id).await?,
-        Commands::Delete { job_id } => handle_delete_vm(&client, job_id).await?,
-        Commands::Restart { job_id } => handle_restart_vm(&client, job_id).await?,
+        Commands::Pause { job_id } => handle_pause_instance(&client, job_id).await?,
+        Commands::Resume { job_id } => handle_resume_instance(&client, job_id).await?,
+        Commands::Delete { job_id } => handle_delete_instance(&client, job_id).await?,
+        Commands::Restart { job_id } => handle_restart_instance(&client, job_id).await?,
         Commands::Metrics { job_id } => handle_metrics(&client, job_id).await?,
         Commands::Whoami => handle_whoami(&client).await?,
+        Commands::Apps(app_cmd) => handle_apps(&client, app_cmd).await?,
         Commands::Config => {
             println!("api_url: {}", cfg.api_url());
             if cfg.token.is_some() {
@@ -205,26 +226,32 @@ async fn handle_deploy(
         Paint::new(&resp.status).cyan()
     );
     println!("{} {}", green_label("message:"), resp.message);
+    if let Some(image) = resp.image_tag {
+        println!("{} {}", green_label("image:"), image);
+    }
     if let Some(host_id) = resp.host_id {
         println!("{} {}", green_label("host_id:"), host_id);
     }
     if let Some(vm_id) = resp.vm_id {
-        println!("{} {}", green_label("vm_id:"), vm_id);
+        println!("{} {}", green_label("instance_id:"), vm_id);
     }
     Ok(())
 }
 
-async fn handle_list_vms(client: &MikromClient) -> anyhow::Result<()> {
-    let vms = client.list_vms().await.context("Failed to list VMs")?;
+async fn handle_list_deployments(client: &MikromClient) -> anyhow::Result<()> {
+    let vms = client
+        .list_vms()
+        .await
+        .context("Failed to list deployments")?;
     if vms.is_empty() {
-        println!("{}", Paint::new("No VMs found.").yellow());
+        println!("{}", Paint::new("No deployments found.").yellow());
     } else {
         println!(
             "{} {} {} {} IMAGE",
             bold_cyan("JOB_ID"),
             bold_cyan("STATUS"),
             bold_cyan("APP_NAME"),
-            bold_cyan("VM_ID")
+            bold_cyan("INSTANCE_ID")
         );
         println!("{}", "-".repeat(120));
         for vm in vms {
@@ -247,28 +274,32 @@ async fn handle_list_vms(client: &MikromClient) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_get_vm(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
+async fn handle_get_status(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
     let vm = client
         .get_vm(&job_id)
         .await
-        .context("Failed to get VM status")?;
-    println!("job_id:       {}", vm.job_id);
-    println!("status:       {}", vm.status);
-    println!("host_id:      {}", vm.host_id);
-    println!("vm_id:        {}", vm.vm_id);
-    println!("scheduled_at: {}", vm.scheduled_at);
-    println!("started_at:   {}", vm.started_at);
+        .context("Failed to get instance status")?;
+    println!("Instance Detail:");
+    println!("  Job ID:       {}", vm.job_id);
+    println!("  Status:       {}", vm.status);
+    println!("  Host ID:      {}", vm.host_id);
+    println!("  Instance ID:  {}", vm.vm_id);
+    println!("  Scheduled:    {}", format_timestamp(vm.scheduled_at));
+    println!("  Started:      {}", format_timestamp(vm.started_at));
     if vm.stopped_at > 0 {
-        println!("stopped_at:   {}", vm.stopped_at);
+        println!("  Stopped:      {}", format_timestamp(vm.stopped_at));
     }
     if !vm.error_message.is_empty() {
-        println!("error:        {}", vm.error_message);
+        println!("  Error:        {}", red_label(&vm.error_message));
     }
     Ok(())
 }
 
-async fn handle_stop_vm(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
-    let resp = client.stop_vm(&job_id).await.context("Failed to stop VM")?;
+async fn handle_stop_instance(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
+    let resp = client
+        .stop_vm(&job_id)
+        .await
+        .context("Failed to stop instance")?;
     if resp.success {
         println!(
             "{} {}",
@@ -334,11 +365,11 @@ async fn handle_logs(client: &MikromClient, job_id: String, follow: bool) -> any
     Ok(())
 }
 
-async fn handle_pause_vm(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
+async fn handle_pause_instance(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
     let resp = client
         .pause_vm(&job_id)
         .await
-        .context("Failed to pause VM")?;
+        .context("Failed to pause instance")?;
     if resp.success {
         println!(
             "{} {}",
@@ -353,11 +384,11 @@ async fn handle_pause_vm(client: &MikromClient, job_id: String) -> anyhow::Resul
     Ok(())
 }
 
-async fn handle_resume_vm(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
+async fn handle_resume_instance(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
     let resp = client
         .resume_vm(&job_id)
         .await
-        .context("Failed to resume VM")?;
+        .context("Failed to resume instance")?;
     if resp.success {
         println!(
             "{} {}",
@@ -372,11 +403,11 @@ async fn handle_resume_vm(client: &MikromClient, job_id: String) -> anyhow::Resu
     Ok(())
 }
 
-async fn handle_delete_vm(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
+async fn handle_delete_instance(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
     let resp = client
         .delete_vm(&job_id)
         .await
-        .context("Failed to delete VM")?;
+        .context("Failed to delete instance")?;
     if resp.success {
         println!(
             "{} {}",
@@ -391,11 +422,11 @@ async fn handle_delete_vm(client: &MikromClient, job_id: String) -> anyhow::Resu
     Ok(())
 }
 
-async fn handle_restart_vm(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
+async fn handle_restart_instance(client: &MikromClient, job_id: String) -> anyhow::Result<()> {
     let resp = client
         .restart_vm(&job_id)
         .await
-        .context("Failed to restart VM")?;
+        .context("Failed to restart instance")?;
     if resp.success {
         println!(
             "{} {}",
@@ -420,8 +451,8 @@ async fn handle_metrics(client: &MikromClient, job_id: Option<String>) -> anyhow
             let metrics = client
                 .get_vm_metrics(&id)
                 .await
-                .context("Failed to get VM metrics")?;
-            println!("VM: {id}");
+                .context("Failed to get instance metrics")?;
+            println!("Instance: {id}");
             println!("cpu_usage:    {:.2}%", metrics.cpu_usage);
             println!("memory:     {:.2}%", metrics.memory_usage);
             println!("disk:      {:.2}%", metrics.disk_usage);
@@ -442,6 +473,54 @@ async fn handle_whoami(client: &MikromClient) -> anyhow::Result<()> {
     println!("email:     {}", user.email);
     println!("created_at: {}", user.created_at);
     Ok(())
+}
+
+async fn handle_apps(client: &MikromClient, cmd: AppCommands) -> anyhow::Result<()> {
+    match cmd {
+        AppCommands::List => {
+            let apps = client.list_apps().await?;
+            if apps.is_empty() {
+                println!("No applications found.");
+            } else {
+                println!(
+                    "{:<38} {:<20} {:<6} {:<20} {:<30}",
+                    "ID", "NAME", "PORT", "CREATED", "GIT URL"
+                );
+                println!("{}", "-".repeat(120));
+                for app in apps {
+                    let created = &app.created_at[0..10]; // Just the date
+                    println!(
+                        "{:<38} {:<20} {:<6} {:<20} {:<30}",
+                        app.id, app.name, app.port, created, app.git_url
+                    );
+                }
+            }
+        }
+        AppCommands::Create { name, git_url } => {
+            let app = client.create_app(&name, &git_url).await?;
+            println!("Application created: {} ({})", app.name, app.id);
+            println!("Domain: {}", app.hostname.unwrap_or_default());
+        }
+        AppCommands::Delete { app_id } => {
+            client.delete_app(&app_id).await?;
+            println!("Application {} deleted.", app_id);
+        }
+        AppCommands::Deploy { app_id } => {
+            let resp = client.deploy_app_version(&app_id).await?;
+            println!("Deployment started: {}", resp.job_id);
+            println!("Status: {}", resp.status);
+        }
+    }
+    Ok(())
+}
+
+fn format_timestamp(ts: i64) -> String {
+    if ts == 0 {
+        return "N/A".to_string();
+    }
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|| "Invalid".to_string())
 }
 
 fn parse_env_vars(env: &[String]) -> anyhow::Result<HashMap<String, String>> {
@@ -589,8 +668,8 @@ mod tests {
         let url = "http://test:9999";
         let test_cases: Vec<(&str, &str)> = vec![
             ("health", "health"),
-            ("vms", "vms"),
-            ("vm", "vm j-1"),
+            ("deployments", "deployments"),
+            ("status", "status j-1"),
             ("stop", "stop j-1"),
             ("logs", "logs j-1"),
             ("pause", "pause j-1"),

@@ -88,6 +88,12 @@ impl AppScheduler {
         }
     }
 
+    pub fn update_job_ip(&self, job_id: &str, ip: String) {
+        if let Some(job) = self.jobs.write().get_mut(job_id) {
+            job.config.ip_address = Some(ip);
+        }
+    }
+
     pub fn start_job(&self, job_id: &str) {
         if let Some(job) = self.jobs.write().get_mut(job_id) {
             job.start();

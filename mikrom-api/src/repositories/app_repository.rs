@@ -1,0 +1,32 @@
+use crate::models::app::{App, Deployment};
+use async_trait::async_trait;
+use uuid::Uuid;
+
+#[mockall::automock]
+#[async_trait]
+pub trait AppRepository: Send + Sync {
+    async fn create_app(
+        &self,
+        name: &str,
+        git_url: &str,
+        port: i32,
+        hostname: Option<String>,
+        user_id: &str,
+    ) -> anyhow::Result<App>;
+    async fn get_app(&self, id: Uuid) -> anyhow::Result<Option<App>>;
+    async fn delete_app(&self, id: Uuid) -> anyhow::Result<()>;
+    async fn list_apps_by_user(&self, user_id: &str) -> anyhow::Result<Vec<App>>;
+
+    async fn create_deployment(&self, app_id: Uuid, user_id: &str) -> anyhow::Result<Deployment>;
+    async fn update_deployment_status(
+        &self,
+        id: Uuid,
+        status: &str,
+        job_id: Option<String>,
+        image_tag: Option<String>,
+        build_id: Option<String>,
+        ip_address: Option<String>,
+    ) -> anyhow::Result<()>;
+    async fn get_deployment(&self, id: Uuid) -> anyhow::Result<Option<Deployment>>;
+    async fn list_deployments_by_app(&self, app_id: Uuid) -> anyhow::Result<Vec<Deployment>>;
+}

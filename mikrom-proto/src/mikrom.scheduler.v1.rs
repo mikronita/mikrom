@@ -109,6 +109,8 @@ pub struct VmMetrics {
     pub status: i32,
     #[prost(string, tag = "4")]
     pub error_message: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub ip_address: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReportMetricsRequest {
@@ -228,6 +230,8 @@ pub struct AppStatusResponse {
     pub cpu_usage: f32,
     #[prost(uint64, tag = "10")]
     pub ram_used_bytes: u64,
+    #[prost(string, tag = "11")]
+    pub ip_address: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CancelRequest {

@@ -3,6 +3,9 @@ use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub mod handlers;
+pub use handlers::*;
+
 #[derive(Debug, Deserialize)]
 pub struct VolumeRequest {
     pub volume_id: String,
@@ -14,6 +17,7 @@ pub struct VolumeRequest {
 pub struct DeployRequestBody {
     pub app_name: String,
     pub image: String,
+    pub git_url: Option<String>,
     pub vcpus: Option<u32>,
     pub memory_mib: Option<u64>,
     pub disk_mib: Option<u64>,
@@ -27,6 +31,7 @@ pub struct DeployResponseBody {
     pub status: String,
     pub host_id: Option<String>,
     pub vm_id: Option<String>,
+    pub image_tag: Option<String>,
     pub message: String,
 }
 
@@ -36,6 +41,72 @@ pub async fn deploy_app(
     State(state): State<crate::AppState>,
     Json(payload): Json<DeployRequestBody>,
 ) -> ApiResult<Json<DeployResponseBody>> {
+    let mut final_image = payload.image.clone();
+
+    // If git_url is provided, trigger the builder
+    if let Some(git_url) = &payload.git_url {
+        tracing::info!(git_url = %git_url, "Triggering build for Git repository");
+
+        let builder_channel = crate::builder::connect(&state.builder_addr)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to connect to builder: {}", e)))?;
+
+        let mut builder_client = mikrom_proto::builder::BuilderServiceClient::new(builder_channel);
+
+        let build_req = mikrom_proto::builder::BuildRequest {
+            app_id: Uuid::new_v4().to_string(),
+            git_url: git_url.clone(),
+            image_name: payload.app_name.to_lowercase().replace(" ", "-"),
+            tag: "latest".to_string(),
+        };
+
+        let build_resp = builder_client
+            .build_app(build_req)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Build initiation failed: {}", e)))?
+            .into_inner();
+
+        let build_id = build_resp.build_id;
+        tracing::info!(build_id = %build_id, "Build initiated, polling for status");
+
+        // Simple polling loop
+        let mut attempts = 0;
+        loop {
+            if attempts > 60 {
+                // 5 minutes timeout (5s * 60)
+                return Err(ApiError::Internal("Build timed out".to_string()));
+            }
+
+            let status_resp = builder_client
+                .get_build_status(mikrom_proto::builder::GetBuildStatusRequest {
+                    build_id: build_id.clone(),
+                })
+                .await
+                .map_err(|e| ApiError::Internal(format!("Failed to get build status: {}", e)))?
+                .into_inner();
+
+            match mikrom_proto::builder::BuildStatus::try_from(status_resp.status)
+                .unwrap_or(mikrom_proto::builder::BuildStatus::Unspecified)
+            {
+                mikrom_proto::builder::BuildStatus::Success => {
+                    final_image = status_resp.image_tag;
+                    tracing::info!(image_tag = %final_image, "Build successful");
+                    break;
+                }
+                mikrom_proto::builder::BuildStatus::Failed => {
+                    return Err(ApiError::Internal(format!(
+                        "Build failed: {}",
+                        status_resp.message
+                    )));
+                }
+                _ => {
+                    attempts += 1;
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+            }
+        }
+    }
+
     let vcpus = payload.vcpus.unwrap_or(1);
     let memory_mib = payload.memory_mib.unwrap_or(256);
     let disk_mib = payload.disk_mib.unwrap_or(1024);
@@ -49,7 +120,7 @@ pub async fn deploy_app(
     let req = mikrom_proto::scheduler::DeployRequest {
         app_id: Uuid::new_v4().to_string(),
         app_name: payload.app_name.clone(),
-        image: payload.image.clone(),
+        image: final_image.clone(),
         config: Some(mikrom_proto::scheduler::AppConfig {
             vcpus,
             memory_mib: memory_mib as u32,
@@ -85,6 +156,7 @@ pub async fn deploy_app(
         status: crate::scheduler::status_name(inner.status).to_string(),
         host_id: Some(inner.host_id).filter(|s| !s.is_empty()),
         vm_id: Some(inner.vm_id).filter(|s| !s.is_empty()),
+        image_tag: Some(final_image),
         message: inner.message,
     };
 
@@ -92,5 +164,3 @@ pub async fn deploy_app(
 
     Ok(Json(result))
 }
-
-// Tests ...

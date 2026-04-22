@@ -10,5 +10,11 @@ pub mod agent {
     pub use agent_service_server::{AgentService, AgentServiceServer};
 }
 
+pub mod builder {
+    include!("mikrom.builder.v1.rs");
+    pub use builder_service_client::BuilderServiceClient;
+    pub use builder_service_server::{BuilderService, BuilderServiceServer};
+}
+
 pub mod telemetry;
 pub mod tls;

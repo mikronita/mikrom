@@ -132,13 +132,13 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               </SidebarItem>
               <SidebarItem 
                 as={Link}
-                href="/vms" 
+                href="/deployments" 
                 icon={HiServer}
-                active={pathname.startsWith("/vms")}
-                className={pathname.startsWith("/vms") ? "bg-gray-100 dark:bg-gray-700" : ""}
+                active={pathname.startsWith("/deployments")}
+                className={pathname.startsWith("/deployments") ? "bg-gray-100 dark:bg-gray-700" : ""}
                 onClick={() => setIsSidebarOpen(false)}
               >
-                Virtual Machines
+                Active Deployments
               </SidebarItem>
               <SidebarItem 
                 as={Link}

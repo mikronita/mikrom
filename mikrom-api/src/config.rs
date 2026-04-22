@@ -16,6 +16,9 @@ pub struct ApiConfig {
     #[serde(default = "default_scheduler_addr")]
     pub scheduler_addr: String,
 
+    #[serde(default = "default_builder_addr")]
+    pub builder_addr: String,
+
     #[serde(default = "default_use_tls")]
     pub use_tls: bool,
 
@@ -36,6 +39,10 @@ fn default_api_port() -> u16 {
 
 fn default_scheduler_addr() -> String {
     "http://127.0.0.1:5002".to_string()
+}
+
+fn default_builder_addr() -> String {
+    "http://127.0.0.1:5004".to_string()
 }
 
 fn default_use_tls() -> bool {

@@ -62,6 +62,7 @@ message VmMetrics {
   uint64 ram_used_bytes = 2;
   VmStatus status = 3;
   string error_message = 4;
+  string ip_address = 5;
 }
 
 message MetricsRequest {

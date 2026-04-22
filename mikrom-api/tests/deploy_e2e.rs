@@ -17,6 +17,7 @@ use tower::ServiceExt;
 use mikrom_agent::firecracker::{FirecrackerConfig, FirecrackerManager};
 use mikrom_agent::server::AgentServer;
 use mikrom_api::auth::jwt::create_token;
+use mikrom_api::repositories::PostgresAppRepository;
 use mikrom_api::repositories::user_repository::{DbError, NewUser, User, UserRepository};
 use mikrom_api::{AppState, create_app};
 use mikrom_proto::scheduler::{DeployRequest, SchedulerServiceClient};
@@ -221,14 +222,18 @@ async fn test_http_api_deploy_e2e() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // ── build the API router ──────────────────────────────────────────────────
+    let db_pool = Arc::new(sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap());
+    let app_repo = Arc::new(PostgresAppRepository::new(db_pool));
     let state = AppState {
         user_repo: Arc::new(NoopRepo),
+        app_repo,
         scheduler_client: None,
         scheduler_config: mikrom_api::scheduler::SchedulerConfig {
             addr: scheduler_url.clone(),
             use_tls: false,
             certs_dir: None,
         },
+        builder_addr: "http://localhost:5004".to_string(),
         jwt_secret: E2E_JWT_SECRET.to_string(),
         master_key: "e2e-key".into(),
     };
