@@ -10,6 +10,8 @@ pub struct Config {
     pub log_level: String,
     #[serde(default = "default_registry")]
     pub registry: String,
+    #[serde(default = "default_buildpack_builder")]
+    pub buildpack_builder: String,
 }
 
 fn default_host() -> String {
@@ -26,6 +28,10 @@ fn default_log_level() -> String {
 
 fn default_registry() -> String {
     "localhost:5000".to_string()
+}
+
+fn default_buildpack_builder() -> String {
+    "paketobuildpacks/builder-jammy-base".to_string()
 }
 
 impl Config {

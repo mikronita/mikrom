@@ -278,13 +278,10 @@ impl FirecrackerManager {
 
         // Get entrypoint to use as init
         let entrypoint = if !is_absolute {
-            match self.builder.get_entrypoint(&image).await {
-                Ok(ep) => {
-                    tracing::info!(vm_id = %vm_id, entrypoint = %ep, "Detected container entrypoint");
-                    ep
-                }
-                Err(_) => String::new(),
-            }
+            self.builder.get_entrypoint(&image).await.map(|ep| {
+                tracing::info!(vm_id = %vm_id, entrypoint = %ep, "Detected container entrypoint");
+                ep
+            }).unwrap_or_default()
         } else {
             String::new()
         };

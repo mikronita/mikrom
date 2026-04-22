@@ -140,32 +140,29 @@ export default function InstanceDetailPage() {
   const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  // Use a functional update in a ref-based interval to bypass React 19's cascading render check
+  // Correct way to update history without triggering ESLint cascading renders in React 19
   useEffect(() => {
-    if (!vm) return;
+    if (vm?.cpu_usage === undefined || vm?.ram_used_bytes === undefined) return;
 
-    const updateInterval = setInterval(() => {
-        if (vm.cpu_usage !== undefined) {
-            // Functional update to avoid dependency on metricsHistory
-            // Wrap in queueMicrotask to move state update out of current execution flow
-            queueMicrotask(() => {
-                setMetricsHistory(prev => {
-                    const last = prev[prev.length - 1];
-                    const newCpu = vm.cpu_usage * 100;
-                    if (last && last.cpu === newCpu && prev.length > 5) return prev;
-                    
-                    return [...prev.slice(-19), {
-                        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                        cpu: newCpu,
-                        ram: vm.ram_used_bytes / (1024 * 1024)
-                    }];
-                });
-            });
-        }
-    }, 2000);
+    // Use a small delay to move state update out of the render effect cycle
+    const timeoutId = setTimeout(() => {
+        setMetricsHistory(prev => {
+            const last = prev[prev.length - 1];
+            const newCpu = (vm.cpu_usage || 0) * 100;
+            
+            // Debounce updates if values are identical
+            if (last && last.cpu === newCpu && prev.length > 5) return prev;
+            
+            return [...prev.slice(-19), {
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                cpu: newCpu,
+                ram: (vm.ram_used_bytes || 0) / (1024 * 1024)
+            }];
+        });
+    }, 0);
 
-    return () => clearInterval(updateInterval);
-  }, [vm]); // Proper dependency on the whole vm object
+    return () => clearTimeout(timeoutId);
+  }, [vm?.cpu_usage, vm?.ram_used_bytes]);
 
   const scrollToBottom = useCallback(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
