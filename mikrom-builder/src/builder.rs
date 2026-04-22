@@ -2,19 +2,15 @@ use anyhow::{Context, Result};
 use git2::Repository;
 use tempfile::TempDir;
 use tokio::process::Command;
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 pub struct AppBuilder {
     registry: String,
-    buildpack_builder: String,
 }
 
 impl AppBuilder {
-    pub fn new(registry: String, buildpack_builder: String) -> Self {
-        Self {
-            registry,
-            buildpack_builder,
-        }
+    pub fn new(registry: String, _buildpack_builder: String) -> Self {
+        Self { registry }
     }
 
     #[instrument(skip(self, git_url))]
@@ -57,11 +53,19 @@ impl AppBuilder {
                 use tokio::io::AsyncWriteExt;
                 stdin.write_all(pass.as_bytes()).await?;
                 stdin.flush().await?;
+                drop(stdin); // Explicitly close stdin
             }
 
-            let login_status = child.wait().await?;
-            if !login_status.success() {
-                error!("Docker login failed for {}", registry_host);
+            let output = child.wait_with_output().await?;
+            if !output.status.success() {
+                let err_msg = String::from_utf8_lossy(&output.stderr);
+                warn!(
+                    registry = %registry_host,
+                    error = %err_msg.trim(),
+                    "Docker login failed. Build will continue assuming host is already authenticated."
+                );
+            } else {
+                info!("Docker login successful for {}", registry_host);
             }
         }
 
@@ -86,27 +90,23 @@ impl AppBuilder {
         } else {
             info!(
                 image_tag = %full_image_tag,
-                builder = %self.buildpack_builder,
-                "No Dockerfile found, using Cloud Native Buildpacks (pack build)"
+                "No Dockerfile found, using Railpack (railpack build)"
             );
 
-            let output = Command::new("pack")
+            let output = Command::new("railpack")
                 .arg("build")
-                .arg(&full_image_tag)
-                .arg("--path")
                 .arg(repo_path)
-                .arg("--builder")
-                .arg(&self.buildpack_builder)
-                .arg("--pull-policy")
-                .arg("if-not-present")
+                .arg("--name")
+                .arg(&full_image_tag)
+                .env("BUILDKIT_HOST", "docker-container://buildkit")
                 .output()
                 .await
-                .context("Failed to execute pack build command. Is pack CLI installed?")?;
+                .context("Failed to execute railpack build command. Is railpack CLI installed?")?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                error!(stderr = %stderr, "Pack build failed");
-                return Err(anyhow::anyhow!("Buildpacks failed: {}", stderr));
+                error!(stderr = %stderr, "Railpack build failed");
+                return Err(anyhow::anyhow!("Railpack failed: {}", stderr));
             }
         }
 

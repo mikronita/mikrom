@@ -37,23 +37,44 @@ pub async fn start_ip_sync_task(state: AppState) {
                         })
                         .await;
 
-                    if let Ok(inner) = status_res.map(|r| r.into_inner()) {
-                        let has_new_ip = !inner.ip_address.is_empty()
-                            && dep.ip_address.as_deref() != Some(&inner.ip_address);
+                    match status_res {
+                        Ok(resp) => {
+                            let inner = resp.into_inner();
+                            let has_new_ip = !inner.ip_address.is_empty()
+                                && dep.ip_address.as_deref() != Some(&inner.ip_address);
 
-                        if has_new_ip {
-                            info!(app = %app.name, ip = %inner.ip_address, "Syncing real IP from scheduler to DB");
+                            if has_new_ip {
+                                info!(app = %app.name, ip = %inner.ip_address, "Syncing real IP from scheduler to DB");
+                                let _ = state
+                                    .app_repo
+                                    .update_deployment_status(
+                                        dep.id,
+                                        "RUNNING",
+                                        Some(job_id.clone()),
+                                        dep.image_tag.clone(),
+                                        dep.build_id.clone(),
+                                        Some(inner.ip_address),
+                                    )
+                                    .await;
+                            }
+                        }
+                        Err(status) if status.code() == tonic::Code::NotFound => {
+                            info!(app = %app.name, job_id = %job_id, "Job not found in scheduler, marking as STOPPED in DB");
                             let _ = state
                                 .app_repo
                                 .update_deployment_status(
                                     dep.id,
-                                    "RUNNING",
+                                    "STOPPED",
                                     Some(job_id.clone()),
                                     dep.image_tag.clone(),
                                     dep.build_id.clone(),
-                                    Some(inner.ip_address),
+                                    None,
                                 )
                                 .await;
+                        }
+                        Err(e) => {
+                            // Other errors (like connection) are ignored to retry later
+                            tracing::debug!(error = %e, "Failed to get app status from scheduler");
                         }
                     }
                 }

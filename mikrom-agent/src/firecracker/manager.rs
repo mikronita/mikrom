@@ -277,15 +277,6 @@ impl FirecrackerManager {
         }
 
         // Get entrypoint to use as init
-        let entrypoint = if !is_absolute {
-            self.builder.get_entrypoint(&image).await.map(|ep| {
-                tracing::info!(vm_id = %vm_id, entrypoint = %ep, "Detected container entrypoint");
-                ep
-            }).unwrap_or_default()
-        } else {
-            String::new()
-        };
-
         let fc_binary = &self.fc_config.binary;
 
         // Resolve networking: if scheduler didn't assign an IP, allocate from bridge subnet.
@@ -492,13 +483,7 @@ impl FirecrackerManager {
         .to_string();
 
         let mut boot_args =
-            "console=ttyS0 reboot=k panic=1 pci=off nomodules rw root=/dev/vda".to_string();
-
-        if !entrypoint.is_empty() {
-            // Split entrypoint to get the binary path (e.g. "/whoami --port 80" -> "/whoami")
-            let binary = entrypoint.split_whitespace().next().unwrap_or(&entrypoint);
-            boot_args.push_str(&format!(" init={}", binary));
-        }
+            "console=ttyS0 reboot=k panic=1 pci=off nomodules rw root=/dev/vda init=/mikrom-init.sh".to_string();
 
         if let (Some(ip), Some(gw)) = (&config.ip_address, &config.gateway) {
             let mask = config.netmask.as_deref().unwrap_or("255.255.255.0");
@@ -834,7 +819,13 @@ impl FirecrackerManager {
 
         let active_vm_ids: std::collections::HashSet<String> = {
             let processes = self.processes.lock().await;
-            processes.keys().cloned().collect()
+            let vms = self.vms.read().await;
+            let mut ids: std::collections::HashSet<String> = processes.keys().cloned().collect();
+            // Also protect VMs that are currently starting
+            for id in vms.keys() {
+                ids.insert(id.clone());
+            }
+            ids
         };
 
         if let Ok(mut entries) = tokio::fs::read_dir("/tmp").await {

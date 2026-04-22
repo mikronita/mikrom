@@ -8,6 +8,7 @@ use axum::{
     },
 };
 use serde::Serialize;
+use std::collections::HashMap;
 use tokio_stream::StreamExt;
 
 #[derive(Debug, Serialize)]
@@ -40,35 +41,64 @@ pub async fn list_vms(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
 ) -> ApiResult<Json<Vec<VmInfo>>> {
-    let channel = crate::scheduler::connect(&state.scheduler_config)
+    // 1. Get all deployments for this user from DB
+    let deployments = state
+        .app_repo
+        .list_deployments_by_user(&auth.user_id)
         .await
-        .map_err(ApiError::Scheduler)?;
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
-    let req = mikrom_proto::scheduler::ListAppsRequest {
-        user_id: auth.user_id,
-        status: None,
-    };
+    // 2. Try to get real-time status from scheduler for active ones
+    let channel_res = crate::scheduler::connect(&state.scheduler_config).await;
+    let mut scheduler_apps = HashMap::new();
 
-    let resp = client
-        .list_apps(req)
-        .await
-        .map_err(|e| ApiError::Internal(e.message().to_string()))?;
+    if let Ok(channel) = channel_res {
+        let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+        let req = mikrom_proto::scheduler::ListAppsRequest {
+            user_id: auth.user_id.clone(),
+            status: None,
+        };
 
-    let vms: Vec<VmInfo> = resp
-        .into_inner()
-        .apps
-        .into_iter()
-        .map(|a| VmInfo {
-            job_id: a.job_id,
-            app_id: a.app_id,
-            app_name: a.app_name,
-            image: a.image,
-            status: crate::scheduler::status_name(a.status).to_string(),
-            host_id: a.host_id,
-            vm_id: a.vm_id,
-        })
-        .collect();
+        if let Ok(resp) = client.list_apps(req).await {
+            for app in resp.into_inner().apps {
+                scheduler_apps.insert(app.job_id.clone(), app);
+            }
+        }
+    }
+
+    // 3. Map deployments to VmInfo, using scheduler data if available
+    let mut vms = Vec::new();
+    for dep in deployments {
+        // Only show deployments that have a job_id (meaning they were at least attempted to be scheduled)
+        if let Some(job_id) = &dep.job_id {
+            let (status, host_id, vm_id) = if let Some(sch_app) = scheduler_apps.get(job_id) {
+                (
+                    crate::scheduler::status_name(sch_app.status).to_string(),
+                    sch_app.host_id.clone(),
+                    sch_app.vm_id.clone(),
+                )
+            } else {
+                (dep.status.clone(), String::new(), String::new())
+            };
+
+            // Get app name from repo (we might need a join or a cache here for performance)
+            let app_name = if let Ok(Some(app)) = state.app_repo.get_app(dep.app_id).await {
+                app.name
+            } else {
+                "Unknown".to_string()
+            };
+
+            vms.push(VmInfo {
+                job_id: job_id.clone(),
+                app_id: dep.app_id.to_string(),
+                app_name,
+                image: dep.image_tag.unwrap_or_default(),
+                status,
+                host_id,
+                vm_id,
+            });
+        }
+    }
 
     Ok(Json(vms))
 }
@@ -196,30 +226,35 @@ pub async fn delete_vm(
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let channel = crate::scheduler::connect(&state.scheduler_config)
-        .await
-        .map_err(ApiError::Scheduler)?;
+    // 1. Try to notify scheduler (optional/best effort)
+    let channel_res = crate::scheduler::connect(&state.scheduler_config).await;
 
-    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
-    let req = mikrom_proto::scheduler::DeleteAppRequest {
-        job_id,
-        user_id: auth.user_id,
-    };
+    if let Ok(channel) = channel_res {
+        let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+        let req = mikrom_proto::scheduler::DeleteAppRequest {
+            job_id: job_id.clone(),
+            user_id: auth.user_id,
+        };
 
-    let resp = client
-        .delete_app(req)
-        .await
-        .map_err(|e| ApiError::Internal(e.message().to_string()))?;
-
-    let inner = resp.into_inner();
-    if inner.success {
-        Ok(Json(serde_json::json!({
-            "success": true,
-            "message": inner.message
-        })))
+        // We ignore the result of the scheduler delete, we just try our best
+        let _ = client.delete_app(req).await;
     } else {
-        Err(ApiError::NotFound(inner.message))
+        tracing::warn!(job_id = %job_id, "Scheduler unreachable during deletion, removing from DB only");
     }
+
+    // 2. Always delete from database
+    state
+        .app_repo
+        .delete_deployment_by_job_id(&job_id)
+        .await
+        .map_err(|e| {
+            ApiError::Internal(format!("Failed to remove deployment from database: {}", e))
+        })?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": "Deployment record removed from Mikrom"
+    })))
 }
 
 #[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
