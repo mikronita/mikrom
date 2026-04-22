@@ -29,4 +29,6 @@ pub trait AppRepository: Send + Sync {
     ) -> anyhow::Result<()>;
     async fn get_deployment(&self, id: Uuid) -> anyhow::Result<Option<Deployment>>;
     async fn list_deployments_by_app(&self, app_id: Uuid) -> anyhow::Result<Vec<Deployment>>;
+    async fn list_deployments_by_user(&self, user_id: &str) -> anyhow::Result<Vec<Deployment>>;
+    async fn delete_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<()>;
 }

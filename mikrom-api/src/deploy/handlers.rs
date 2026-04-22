@@ -33,7 +33,7 @@ pub async fn create_app_handler(
     State(state): State<AppState>,
     Json(payload): Json<CreateAppRequest>,
 ) -> ApiResult<Json<AppResponse>> {
-    let port = payload.port.unwrap_or(80);
+    let port = payload.port.unwrap_or(8080);
 
     // Generate hostname based on app name if not provided
     let hostname = Some(format!(

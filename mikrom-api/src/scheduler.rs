@@ -1,3 +1,4 @@
+use std::time::Duration;
 use tonic::transport::Channel;
 
 #[derive(Clone, Debug)]
@@ -37,8 +38,13 @@ pub async fn connect(config: &SchedulerConfig) -> Result<Channel, String> {
         uri = uri.replacen("http://", "https://", 1);
     }
 
-    let ep =
+    let mut ep =
         tonic::transport::Endpoint::new(uri).map_err(|e| format!("Invalid scheduler URI: {e}"))?;
+
+    // Add reasonable timeouts
+    ep = ep
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(5));
 
     let ep = if config.use_tls {
         let certs_dir = config.certs_dir.as_deref().unwrap_or("/certs/api");

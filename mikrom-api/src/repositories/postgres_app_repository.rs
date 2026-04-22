@@ -132,6 +132,33 @@ impl AppRepository for PostgresAppRepository {
 
         Ok(deployments)
     }
+
+    async fn list_deployments_by_user(&self, user_id: &str) -> anyhow::Result<Vec<Deployment>> {
+        let deployments = if user_id == "all" {
+            sqlx::query_as::<_, Deployment>("SELECT * FROM deployments ORDER BY created_at DESC")
+                .fetch_all(&*self.pool)
+                .await?
+        } else {
+            let uid = Uuid::parse_str(user_id)?;
+            sqlx::query_as::<_, Deployment>(
+                "SELECT * FROM deployments WHERE user_id = $1 ORDER BY created_at DESC",
+            )
+            .bind(uid)
+            .fetch_all(&*self.pool)
+            .await?
+        };
+
+        Ok(deployments)
+    }
+
+    async fn delete_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM deployments WHERE job_id = $1")
+            .bind(job_id)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

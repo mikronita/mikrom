@@ -31,7 +31,7 @@ fn default_registry() -> String {
 }
 
 fn default_buildpack_builder() -> String {
-    "paketobuildpacks/builder-jammy-base".to_string()
+    "paketobuildpacks/ubuntu-noble-builder".to_string()
 }
 
 impl Config {
