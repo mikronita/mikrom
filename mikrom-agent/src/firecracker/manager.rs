@@ -1108,7 +1108,15 @@ impl FirecrackerManager {
                 FirecrackerError::ProcessError(format!("Failed to chown {current_path:?}: {e}"))
             })?;
 
-            if current_path.is_dir() {
+            let metadata = tokio::fs::symlink_metadata(&current_path)
+                .await
+                .map_err(|e| {
+                    FirecrackerError::ProcessError(format!(
+                        "Failed to get metadata for {current_path:?}: {e}"
+                    ))
+                })?;
+
+            if metadata.is_dir() {
                 let mut entries = tokio::fs::read_dir(&current_path).await.map_err(|e| {
                     FirecrackerError::ProcessError(format!(
                         "Failed to read directory {current_path:?}: {e}"
