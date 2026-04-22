@@ -47,7 +47,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   });
 
   const initials = profile 
-    ? `${profile.first_name?.[0] || ""}${profile.last_name?.[0] || ""}` || profile.email[0].toUpperCase()
+    ? `${profile.first_name?.[0] || ""}${profile.last_name?.[0] || ""}`.toUpperCase() || profile.email?.[0]?.toUpperCase() || "U"
     : "U";
 
   const fullName = profile?.first_name && profile?.last_name 

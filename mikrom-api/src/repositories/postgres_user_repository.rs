@@ -112,15 +112,41 @@ impl UserRepository for PostgresUserRepository {
         id: sqlx::types::Uuid,
         first_name: Option<String>,
         last_name: Option<String>,
-    ) -> Result<(), DbError> {
-        sqlx::query("UPDATE users SET first_name = $1, last_name = $2 WHERE id = $3")
-            .bind(first_name)
-            .bind(last_name)
-            .bind(id)
-            .execute(&*self.pool)
-            .await?;
+    ) -> Result<User, DbError> {
+        let result = sqlx::query_as::<
+            _,
+            (
+                sqlx::types::Uuid,
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
+            "UPDATE users SET first_name = COALESCE($1, first_name), last_name = COALESCE($2, last_name) \
+             WHERE id = $3 RETURNING id, email, password_hash, role, first_name, last_name",
+        )
+        .bind(first_name)
+        .bind(last_name)
+        .bind(id)
+        .fetch_one(&*self.pool)
+        .await?;
 
-        Ok(())
+        let (id, email, password_hash, role_str, first_name, last_name) = result;
+        let role = match role_str.as_str() {
+            "admin" => UserRole::Admin,
+            _ => UserRole::User,
+        };
+
+        Ok(User {
+            id,
+            email,
+            password_hash,
+            role,
+            first_name,
+            last_name,
+        })
     }
 }
 

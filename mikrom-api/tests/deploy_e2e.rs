@@ -69,11 +69,18 @@ impl UserRepository for NoopRepo {
     }
     async fn update_profile(
         &self,
-        _: sqlx::types::Uuid,
+        id: sqlx::types::Uuid,
         _: Option<String>,
         _: Option<String>,
-    ) -> Result<(), DbError> {
-        Ok(())
+    ) -> Result<User, DbError> {
+        Ok(User {
+            id,
+            email: "noop@example.com".to_string(),
+            password_hash: "".to_string(),
+            role: mikrom_api::repositories::user_repository::UserRole::User,
+            first_name: None,
+            last_name: None,
+        })
     }
 }
 

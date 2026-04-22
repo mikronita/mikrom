@@ -58,7 +58,12 @@ export default function SettingsPage() {
         if (res.error) throw new Error(res.error);
         return res.data;
       }),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // Actualizar el estado local con los datos devueltos para mantener la UI sincronizada
+      if (data) {
+        setFirstName(data.first_name || "");
+        setLastName(data.last_name || "");
+      }
       queryClient.invalidateQueries({ queryKey: ["profile"] });
       toast.success("Profile updated successfully");
     },
@@ -66,17 +71,6 @@ export default function SettingsPage() {
       toast.error(error.message || "Failed to update profile");
     }
   });
-
-  useEffect(() => {
-    if (profile) {
-      if (profile.first_name !== null && firstName === "") {
-        setTimeout(() => setFirstName(profile.first_name!), 0);
-      }
-      if (profile.last_name !== null && lastName === "") {
-        setTimeout(() => setLastName(profile.last_name!), 0);
-      }
-    }
-  }, [profile, firstName, lastName]);
 
   const handleSave = () => {
     updateMutation.mutate({ first_name: firstName, last_name: lastName });
@@ -104,10 +98,10 @@ export default function SettingsPage() {
                     <Spinner size="xl" />
                   </div>
                 ) : (
-                  <div className="p-6 space-y-8">
+                  <div className="p-6 space-y-8" key={profile?.id}>
                     <div className="flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-zinc-100 dark:border-zinc-800">
                       <Avatar 
-                        placeholderInitials={`${firstName?.[0] || ""}${lastName?.[0] || ""}` || "U"} 
+                        placeholderInitials={`${firstName?.[0] || profile?.first_name?.[0] || ""}${lastName?.[0] || profile?.last_name?.[0] || ""}` || "U"} 
                         size="xl" 
                         rounded 
                         className="ring-4 ring-zinc-50 dark:ring-zinc-800"
@@ -130,7 +124,7 @@ export default function SettingsPage() {
                         <TextInput 
                           id="firstName" 
                           placeholder="John" 
-                          value={firstName} 
+                          defaultValue={profile?.first_name || ""} 
                           onChange={(e) => setFirstName(e.target.value)} 
                         />
                       </div>
@@ -141,7 +135,7 @@ export default function SettingsPage() {
                         <TextInput 
                           id="lastName" 
                           placeholder="Doe" 
-                          value={lastName} 
+                          defaultValue={profile?.last_name || ""} 
                           onChange={(e) => setLastName(e.target.value)} 
                         />
                       </div>
