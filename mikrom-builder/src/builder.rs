@@ -6,11 +6,15 @@ use tracing::{error, info, instrument};
 
 pub struct AppBuilder {
     registry: String,
+    buildpack_builder: String,
 }
 
 impl AppBuilder {
-    pub fn new(registry: String) -> Self {
-        Self { registry }
+    pub fn new(registry: String, buildpack_builder: String) -> Self {
+        Self {
+            registry,
+            buildpack_builder,
+        }
     }
 
     #[instrument(skip(self, git_url))]
@@ -36,9 +40,7 @@ impl AppBuilder {
         let registry_host = registry_base.split('/').next().unwrap_or(registry_base);
         let full_image_tag = format!("{}/{}:{}", registry_base, image_name, tag);
 
-        info!(image_tag = %full_image_tag, "Starting docker build");
-
-        // Optional: Docker login if credentials exist in env
+        // 1. Authenticate if needed
         if let (Ok(user), Ok(pass)) = (
             std::env::var("REGISTRY_USER"),
             std::env::var("REGISTRY_PASS"),
@@ -63,22 +65,52 @@ impl AppBuilder {
             }
         }
 
-        let output = Command::new("docker")
-            .arg("build")
-            .arg("-t")
-            .arg(&full_image_tag)
-            .arg(repo_path)
-            .output()
-            .await
-            .context("Failed to execute docker build command")?;
+        // 2. Decide build strategy: Dockerfile or Buildpacks
+        let dockerfile_path = repo_path.join("Dockerfile");
+        if dockerfile_path.exists() {
+            info!(image_tag = %full_image_tag, "Dockerfile detected, using docker build");
+            let output = Command::new("docker")
+                .arg("build")
+                .arg("-t")
+                .arg(&full_image_tag)
+                .arg(repo_path)
+                .output()
+                .await
+                .context("Failed to execute docker build command")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            error!(stderr = %stderr, "Docker build failed");
-            return Err(anyhow::anyhow!("Docker build failed: {}", stderr));
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!(stderr = %stderr, "Docker build failed");
+                return Err(anyhow::anyhow!("Docker build failed: {}", stderr));
+            }
+        } else {
+            info!(
+                image_tag = %full_image_tag,
+                builder = %self.buildpack_builder,
+                "No Dockerfile found, using Cloud Native Buildpacks (pack build)"
+            );
+
+            let output = Command::new("pack")
+                .arg("build")
+                .arg(&full_image_tag)
+                .arg("--path")
+                .arg(repo_path)
+                .arg("--builder")
+                .arg(&self.buildpack_builder)
+                .arg("--pull-policy")
+                .arg("if-not-present")
+                .output()
+                .await
+                .context("Failed to execute pack build command. Is pack CLI installed?")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!(stderr = %stderr, "Pack build failed");
+                return Err(anyhow::anyhow!("Buildpacks failed: {}", stderr));
+            }
         }
 
-        info!(image_tag = %full_image_tag, "Docker build successful, pushing to registry...");
+        info!(image_tag = %full_image_tag, "Build successful, pushing to registry...");
 
         let push_status = Command::new("docker")
             .args(["push", &full_image_tag])

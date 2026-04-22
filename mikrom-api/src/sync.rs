@@ -37,11 +37,11 @@ pub async fn start_ip_sync_task(state: AppState) {
                         })
                         .await;
 
-                    if let Ok(resp) = status_res {
-                        let inner = resp.into_inner();
-                        if !inner.ip_address.is_empty()
-                            && dep.ip_address.as_deref() != Some(&inner.ip_address)
-                        {
+                    if let Ok(inner) = status_res.map(|r| r.into_inner()) {
+                        let has_new_ip = !inner.ip_address.is_empty()
+                            && dep.ip_address.as_deref() != Some(&inner.ip_address);
+
+                        if has_new_ip {
                             info!(app = %app.name, ip = %inner.ip_address, "Syncing real IP from scheduler to DB");
                             let _ = state
                                 .app_repo

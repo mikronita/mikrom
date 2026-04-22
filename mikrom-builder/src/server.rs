@@ -120,7 +120,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_build_request_status_flow() {
-        let builder = AppBuilder::new("localhost:5000".into());
+        let builder = AppBuilder::new(
+            "localhost:5000".into(),
+            "paketobuildpacks/builder-jammy-base".into(),
+        );
         let server = BuilderServer::new(builder);
 
         let req = Request::new(BuildRequest {

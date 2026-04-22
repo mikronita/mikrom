@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(addr = %addr, "Starting mikrom-builder gRPC server");
 
-    let builder = AppBuilder::new(config.registry);
+    let builder = AppBuilder::new(config.registry, config.buildpack_builder);
     let builder_server = BuilderServer::new(builder);
 
     Server::builder()
