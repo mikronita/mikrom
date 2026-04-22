@@ -45,7 +45,7 @@ pub enum DbError {
 
 /// Object-safe async repository trait.  All implementations must derive
 /// `Send + Sync`; `#[async_trait]` boxes the returned futures automatically.
-#[cfg_attr(test, mockall::automock)]
+#[mockall::automock]
 #[async_trait]
 pub trait UserRepository: Send + Sync {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError>;

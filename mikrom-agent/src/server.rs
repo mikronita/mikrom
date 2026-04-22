@@ -100,13 +100,34 @@ impl AgentService for AgentServer {
                 .vms
                 .into_iter()
                 .map(|(id, m)| {
+                    let proto_status = match m.status {
+                        crate::firecracker::VmStatus::Starting => {
+                            mikrom_proto::agent::VmStatus::Starting
+                        }
+                        crate::firecracker::VmStatus::Running => {
+                            mikrom_proto::agent::VmStatus::Running
+                        }
+                        crate::firecracker::VmStatus::Stopping => {
+                            mikrom_proto::agent::VmStatus::Stopping
+                        }
+                        crate::firecracker::VmStatus::Stopped => {
+                            mikrom_proto::agent::VmStatus::Stopped
+                        }
+                        crate::firecracker::VmStatus::Failed => {
+                            mikrom_proto::agent::VmStatus::Failed
+                        }
+                        crate::firecracker::VmStatus::Paused => {
+                            mikrom_proto::agent::VmStatus::Paused
+                        }
+                    };
                     (
                         id,
                         mikrom_proto::agent::VmMetrics {
                             cpu_usage: m.cpu_usage,
                             ram_used_bytes: m.ram_used_bytes,
-                            status: m.status as i32,
+                            status: proto_status as i32,
                             error_message: m.error_message.unwrap_or_default(),
+                            ip_address: m.ip_address.unwrap_or_default(),
                         },
                     )
                 })
@@ -561,6 +582,7 @@ impl AgentServer {
                                                     error_message: m
                                                         .error_message
                                                         .unwrap_or_default(),
+                                                    ip_address: m.ip_address.unwrap_or_default(),
                                                 },
                                             )
                                         })

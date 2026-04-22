@@ -11,6 +11,7 @@ pub struct VmMetrics {
     pub ram_used_bytes: u64,
     pub status: crate::firecracker::VmStatus,
     pub error_message: Option<String>,
+    pub ip_address: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -128,6 +129,7 @@ impl MetricsCollector {
                     ram_used_bytes: ram,
                     status: vm.status,
                     error_message: vm.error_message,
+                    ip_address: vm.ip_address,
                 },
             );
         }

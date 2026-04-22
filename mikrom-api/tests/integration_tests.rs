@@ -10,6 +10,7 @@ use tower::ServiceExt;
 
 use mikrom_api::AppState;
 use mikrom_api::auth::{get_profile, login, register, update_profile};
+use mikrom_api::repositories::PostgresAppRepository;
 use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 
 static TEST_POOL: OnceLock<PgPool> = OnceLock::new();
@@ -47,11 +48,15 @@ async fn get_test_pool() -> PgPool {
 }
 
 fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
-    let user_repo = PostgresUserRepository::new(Arc::new(pool));
+    let db_pool = Arc::new(pool);
+    let user_repo = PostgresUserRepository::new(db_pool.clone());
+    let app_repo = PostgresAppRepository::new(db_pool.clone());
     let state = AppState {
         user_repo: Arc::new(user_repo),
+        app_repo: Arc::new(app_repo),
         scheduler_client: None,
         scheduler_config: mikrom_api::scheduler::SchedulerConfig::default(),
+        builder_addr: "http://localhost:5004".to_string(),
         jwt_secret: jwt_secret.to_string(),
         master_key: "integration-master-key".into(),
     };

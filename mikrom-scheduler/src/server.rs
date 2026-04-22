@@ -141,6 +141,10 @@ impl SchedulerService for SchedulerServer {
                         mikrom_proto::scheduler::VmStatus::Running => {
                             self.scheduler
                                 .update_job_status(&id, crate::job::JobStatus::Running);
+                            if !vm_metrics.ip_address.is_empty() {
+                                self.scheduler
+                                    .update_job_ip(&id, vm_metrics.ip_address.clone());
+                            }
                         }
                         mikrom_proto::scheduler::VmStatus::Failed => {
                             self.scheduler.fail_job(&id, vm_metrics.error_message);
@@ -352,6 +356,7 @@ impl SchedulerService for SchedulerServer {
                     error_message: job.error_message.unwrap_or_default(),
                     cpu_usage,
                     ram_used_bytes,
+                    ip_address: job.config.ip_address.unwrap_or_default(),
                 };
                 Ok(Response::new(response))
             }

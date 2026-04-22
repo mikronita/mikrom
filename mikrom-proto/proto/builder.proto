@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package mikrom.builder.v1;
+
+option go_package = "mikrom/builder/v1";
+
+service BuilderService {
+  rpc BuildApp(BuildRequest) returns (BuildResponse);
+  rpc GetBuildStatus(GetBuildStatusRequest) returns (GetBuildStatusResponse);
+}
+
+message BuildRequest {
+  string app_id = 1;
+  string git_url = 2;
+  string image_name = 3;
+  string tag = 4;
+}
+
+message BuildResponse {
+  bool success = 1;
+  string build_id = 2;
+  string message = 3;
+}
+
+message GetBuildStatusRequest {
+  string build_id = 1;
+}
+
+message GetBuildStatusResponse {
+  string build_id = 1;
+  BuildStatus status = 2;
+  string image_tag = 3;
+  string message = 4;
+}
+
+enum BuildStatus {
+  BUILD_STATUS_UNSPECIFIED = 0;
+  BUILD_STATUS_PENDING = 1;
+  BUILD_STATUS_BUILDING = 2;
+  BUILD_STATUS_SUCCESS = 3;
+  BUILD_STATUS_FAILED = 4;
+}

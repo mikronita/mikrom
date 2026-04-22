@@ -48,6 +48,7 @@ impl FirecrackerManager {
                     status: vm.status,
                     error_message: vm.error_message.clone(),
                     pid,
+                    ip_address: vm.config.ip_address.clone(),
                 }
             })
             .collect()
@@ -202,7 +203,9 @@ impl FirecrackerManager {
                 .start_vm_background(vm_id_clone, app_id_clone, image_clone, config_clone)
                 .await
             {
-                tracing::error!(vm_id = %vid, error = %e, "Failed to start VM in background");
+                let err_msg = format!("Failed to start VM in background: {}", e);
+                tracing::error!(vm_id = %vid, error = %e, "{}", err_msg);
+                self_clone.set_failed(&vid, err_msg).await;
             }
         });
 
@@ -273,21 +276,37 @@ impl FirecrackerManager {
             }
         }
 
+        // Get entrypoint to use as init
+        let entrypoint = if !is_absolute {
+            match self.builder.get_entrypoint(&image).await {
+                Ok(ep) => {
+                    tracing::info!(vm_id = %vm_id, entrypoint = %ep, "Detected container entrypoint");
+                    ep
+                }
+                Err(_) => String::new(),
+            }
+        } else {
+            String::new()
+        };
+
         let fc_binary = &self.fc_config.binary;
 
         // Resolve networking: if scheduler didn't assign an IP, allocate from bridge subnet.
-        let config = if config.ip_address.is_none() || config.ip_address.as_deref() == Some("") {
-            if let Some((ip, gw, mac)) = self.allocate_vm_network().await {
-                tracing::info!(vm_id = %vm_id, ip = %ip, "Allocated IP from agent bridge subnet");
-                VmConfig {
-                    ip_address: Some(ip),
-                    gateway: Some(gw),
-                    mac_address: Some(mac),
-                    ..config
+        let config = if config.ip_address.as_deref().unwrap_or("").is_empty() {
+            match self.allocate_vm_network().await {
+                Some((ip, gw, mac)) => {
+                    tracing::info!(vm_id = %vm_id, ip = %ip, "Allocated IP from agent bridge subnet");
+                    VmConfig {
+                        ip_address: Some(ip),
+                        gateway: Some(gw),
+                        mac_address: Some(mac),
+                        ..config
+                    }
                 }
-            } else {
-                tracing::warn!(vm_id = %vm_id, "No available IPs in bridge subnet, starting without networking");
-                config
+                None => {
+                    tracing::warn!(vm_id = %vm_id, "No available IPs in bridge subnet, starting without networking");
+                    config
+                }
             }
         } else {
             config
@@ -477,6 +496,13 @@ impl FirecrackerManager {
 
         let mut boot_args =
             "console=ttyS0 reboot=k panic=1 pci=off nomodules rw root=/dev/vda".to_string();
+
+        if !entrypoint.is_empty() {
+            // Split entrypoint to get the binary path (e.g. "/whoami --port 80" -> "/whoami")
+            let binary = entrypoint.split_whitespace().next().unwrap_or(&entrypoint);
+            boot_args.push_str(&format!(" init={}", binary));
+        }
+
         if let (Some(ip), Some(gw)) = (&config.ip_address, &config.gateway) {
             let mask = config.netmask.as_deref().unwrap_or("255.255.255.0");
             boot_args.push_str(&format!(" ip={ip}::{gw}:{mask}::eth0:off"));
