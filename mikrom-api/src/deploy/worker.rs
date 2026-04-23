@@ -284,3 +284,108 @@ async fn poll_and_deploy(
     );
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repositories::app_repository::MockAppRepository;
+    use mikrom_proto::scheduler::DeployResponse;
+
+    struct MockBuilder {
+        status: BuildStatus,
+        tag: String,
+        port: u32,
+    }
+
+    #[async_trait]
+    impl BuilderClient for MockBuilder {
+        async fn get_build_status(&self, _: String) -> anyhow::Result<(BuildStatus, String, u32)> {
+            Ok((self.status, self.tag.clone(), self.port))
+        }
+    }
+
+    struct MockSchedulerClientImpl {
+        success: bool,
+    }
+
+    #[async_trait]
+    impl SchedulerClient for MockSchedulerClientImpl {
+        async fn deploy_app(&self, _: DeployRequest) -> anyhow::Result<DeployResponse> {
+            if self.success {
+                Ok(DeployResponse {
+                    job_id: "job-1".to_string(),
+                    status: 1, // Running/Scheduled
+                    host_id: "host-1".to_string(),
+                    vm_id: "vm-1".to_string(),
+                    message: "ok".to_string(),
+                })
+            } else {
+                Err(anyhow::anyhow!("failed"))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_poll_and_deploy_success() {
+        let mut mock_repo = MockAppRepository::new();
+        let app_id = Uuid::new_v4();
+        let dep_id = Uuid::new_v4();
+
+        // 1. Success expectations
+        mock_repo.expect_update_deployment_status()
+            .times(1)
+            .returning(|_, _, _, _, _, _| Ok(()));
+        
+        mock_repo.expect_get_app()
+            .returning(move |_| Ok(Some(crate::models::app::App {
+                id: app_id,
+                name: "test".into(),
+                git_url: "".into(),
+                port: 8080,
+                hostname: None,
+                user_id: Uuid::new_v4(),
+                active_deployment_id: None,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            })));
+        
+        mock_repo.expect_set_active_deployment()
+            .returning(|_, _| Ok(()));
+
+        let state = AppState {
+            user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
+            app_repo: Arc::new(mock_repo),
+            scheduler_client: None,
+            scheduler_config: crate::scheduler::SchedulerConfig {
+                addr: "".into(), use_tls: false, certs_dir: None
+            },
+            builder_addr: "".into(),
+            jwt_secret: "".into(),
+            master_key: "key".into(),
+        };
+
+        let task = BuildTask {
+            deployment_id: dep_id,
+            app_id,
+            app_name: "test".into(),
+            user_id: "user-1".into(),
+            build_id: "build-1".into(),
+            vcpus: 1,
+            memory_mib: 256,
+            disk_mib: 1024,
+            port: 8080,
+            env: HashMap::new(),
+        };
+
+        let builder = Arc::new(MockBuilder {
+            status: BuildStatus::Success,
+            tag: "img:v1".into(),
+            port: 0,
+        });
+
+        let scheduler = Arc::new(MockSchedulerClientImpl { success: true });
+
+        let result = poll_and_deploy(state, task, builder, scheduler).await;
+        assert!(result.is_ok());
+    }
+}

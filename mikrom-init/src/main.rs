@@ -123,3 +123,33 @@ fn mount_fs(source: &str, target: &str, fstype: &str, flags: MsFlags) -> anyhow:
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_deserialization() {
+        let json = r#"{
+            "env": {"FOO": "bar"},
+            "entrypoint": ["/bin/whoami"],
+            "cmd": ["--help"]
+        }"#;
+        let config: InitConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.env.get("FOO").unwrap(), "bar");
+        assert_eq!(config.entrypoint[0], "/bin/whoami");
+        assert_eq!(config.cmd[0], "--help");
+        assert_eq!(config.workdir, "/app"); // default
+    }
+
+    #[test]
+    fn test_config_minimal() {
+        let json = r#"{
+            "entrypoint": ["ls"]
+        }"#;
+        let config: InitConfig = serde_json::from_str(json).unwrap();
+        assert!(config.env.is_empty());
+        assert_eq!(config.entrypoint[0], "ls");
+        assert!(config.cmd.is_empty());
+    }
+}
