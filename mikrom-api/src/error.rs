@@ -48,25 +48,25 @@ impl IntoResponse for ApiError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Database failure".to_string(),
                 )
-            }
+            },
             Self::Repo(err) => match err {
                 crate::repositories::user_repository::DbError::NotFound => {
                     (StatusCode::NOT_FOUND, "Entity not found".to_string())
-                }
+                },
                 crate::repositories::user_repository::DbError::Conflict(msg) => {
                     (StatusCode::CONFLICT, msg)
-                }
+                },
                 crate::repositories::user_repository::DbError::Sqlx(e) => {
                     tracing::error!("Repository SQL error: {:?}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Database failure".to_string(),
                     )
-                }
+                },
                 crate::repositories::user_repository::DbError::Internal(msg) => {
                     tracing::error!("Repository internal error: {}", msg);
                     (StatusCode::INTERNAL_SERVER_ERROR, msg)
-                }
+                },
             },
             Self::Auth(msg) => (StatusCode::UNAUTHORIZED, msg),
             Self::InvalidToken => (
@@ -83,11 +83,11 @@ impl IntoResponse for ApiError {
                     StatusCode::SERVICE_UNAVAILABLE,
                     "Error communicating with scheduler".to_string(),
                 )
-            }
+            },
             Self::Internal(msg) => {
                 tracing::error!("Internal error: {}", msg);
                 (StatusCode::INTERNAL_SERVER_ERROR, msg)
-            }
+            },
         };
 
         let body = Json(json!({

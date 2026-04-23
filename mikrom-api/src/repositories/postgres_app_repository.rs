@@ -2,15 +2,14 @@ use crate::models::app::{App, Deployment};
 use crate::repositories::app_repository::AppRepository;
 use async_trait::async_trait;
 use sqlx::PgPool;
-use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct PostgresAppRepository {
-    pool: Arc<PgPool>,
+    pool: PgPool,
 }
 
 impl PostgresAppRepository {
-    pub fn new(pool: Arc<PgPool>) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -34,7 +33,7 @@ impl AppRepository for PostgresAppRepository {
         .bind(port)
         .bind(hostname)
         .bind(uid)
-        .fetch_one(&*self.pool)
+        .fetch_one(&self.pool)
         .await?;
 
         Ok(app)
@@ -43,7 +42,7 @@ impl AppRepository for PostgresAppRepository {
     async fn get_app(&self, id: Uuid) -> anyhow::Result<Option<App>> {
         let app = sqlx::query_as::<_, App>("SELECT * FROM apps WHERE id = $1")
             .bind(id)
-            .fetch_optional(&*self.pool)
+            .fetch_optional(&self.pool)
             .await?;
 
         Ok(app)
@@ -52,7 +51,7 @@ impl AppRepository for PostgresAppRepository {
     async fn delete_app(&self, id: Uuid) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM apps WHERE id = $1")
             .bind(id)
-            .execute(&*self.pool)
+            .execute(&self.pool)
             .await?;
 
         Ok(())
@@ -61,7 +60,7 @@ impl AppRepository for PostgresAppRepository {
     async fn list_apps_by_user(&self, user_id: &str) -> anyhow::Result<Vec<App>> {
         let apps = if user_id == "all" {
             sqlx::query_as::<_, App>("SELECT * FROM apps ORDER BY created_at DESC")
-                .fetch_all(&*self.pool)
+                .fetch_all(&self.pool)
                 .await?
         } else {
             let uid = Uuid::parse_str(user_id)?;
@@ -69,7 +68,7 @@ impl AppRepository for PostgresAppRepository {
                 "SELECT * FROM apps WHERE user_id = $1 ORDER BY created_at DESC",
             )
             .bind(uid)
-            .fetch_all(&*self.pool)
+            .fetch_all(&self.pool)
             .await?
         };
 
@@ -83,7 +82,7 @@ impl AppRepository for PostgresAppRepository {
         )
         .bind(app_id)
         .bind(uid)
-        .fetch_one(&*self.pool)
+        .fetch_one(&self.pool)
         .await?;
 
         Ok(deployment)
@@ -107,7 +106,7 @@ impl AppRepository for PostgresAppRepository {
         .bind(build_id)
         .bind(ip_address)
         .bind(id)
-        .execute(&*self.pool)
+        .execute(&self.pool)
         .await?;
 
         Ok(())
@@ -116,7 +115,7 @@ impl AppRepository for PostgresAppRepository {
     async fn get_deployment(&self, id: Uuid) -> anyhow::Result<Option<Deployment>> {
         let deployment = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE id = $1")
             .bind(id)
-            .fetch_optional(&*self.pool)
+            .fetch_optional(&self.pool)
             .await?;
 
         Ok(deployment)
@@ -127,7 +126,7 @@ impl AppRepository for PostgresAppRepository {
             "SELECT * FROM deployments WHERE app_id = $1 ORDER BY created_at DESC",
         )
         .bind(app_id)
-        .fetch_all(&*self.pool)
+        .fetch_all(&self.pool)
         .await?;
 
         Ok(deployments)
@@ -136,7 +135,7 @@ impl AppRepository for PostgresAppRepository {
     async fn list_deployments_by_user(&self, user_id: &str) -> anyhow::Result<Vec<Deployment>> {
         let deployments = if user_id == "all" {
             sqlx::query_as::<_, Deployment>("SELECT * FROM deployments ORDER BY created_at DESC")
-                .fetch_all(&*self.pool)
+                .fetch_all(&self.pool)
                 .await?
         } else {
             let uid = Uuid::parse_str(user_id)?;
@@ -144,7 +143,7 @@ impl AppRepository for PostgresAppRepository {
                 "SELECT * FROM deployments WHERE user_id = $1 ORDER BY created_at DESC",
             )
             .bind(uid)
-            .fetch_all(&*self.pool)
+            .fetch_all(&self.pool)
             .await?
         };
 
@@ -154,7 +153,7 @@ impl AppRepository for PostgresAppRepository {
     async fn delete_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM deployments WHERE job_id = $1")
             .bind(job_id)
-            .execute(&*self.pool)
+            .execute(&self.pool)
             .await?;
 
         Ok(())
@@ -169,15 +168,13 @@ mod tests {
     use crate::repositories::user_repository::UserRepository;
     use crate::repositories::user_repository::UserRole;
 
-    async fn get_test_pool() -> Arc<PgPool> {
+    async fn get_test_pool() -> PgPool {
         let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
             "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
         });
-        Arc::new(
-            PgPool::connect(&url)
-                .await
-                .expect("failed to connect to test db"),
-        )
+        PgPool::connect(&url)
+            .await
+            .expect("failed to connect to test db")
     }
 
     #[tokio::test]

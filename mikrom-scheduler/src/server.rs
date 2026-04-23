@@ -145,10 +145,10 @@ impl SchedulerService for SchedulerServer {
                                 self.scheduler
                                     .update_job_ip(&id, vm_metrics.ip_address.clone());
                             }
-                        }
+                        },
                         mikrom_proto::scheduler::VmStatus::Failed => {
                             self.scheduler.fail_job(&id, vm_metrics.error_message);
-                        }
+                        },
                         mikrom_proto::scheduler::VmStatus::Stopped => {
                             // Only update if it wasn't already cancelled
                             let current_status = self.scheduler.get_job(&id).map(|j| j.status);
@@ -156,12 +156,12 @@ impl SchedulerService for SchedulerServer {
                                 self.scheduler
                                     .update_job_status(&id, crate::job::JobStatus::Failed);
                             }
-                        }
+                        },
                         mikrom_proto::scheduler::VmStatus::Paused => {
                             self.scheduler
                                 .update_job_status(&id, crate::job::JobStatus::Paused);
-                        }
-                        _ => {}
+                        },
+                        _ => {},
                     }
                 }
             }
@@ -291,13 +291,13 @@ impl SchedulerService for SchedulerServer {
                             vm_id,
                             message,
                         }))
-                    }
+                    },
                     Err(e) => {
                         self.scheduler.fail_job(&job_id, e.message().to_string());
                         Err(e)
-                    }
+                    },
                 }
-            }
+            },
             Err(e) => {
                 let mut job = crate::job::Job::new(
                     job_id.clone(),
@@ -317,7 +317,7 @@ impl SchedulerService for SchedulerServer {
                     vm_id: String::new(),
                     message: e.to_string(),
                 }))
-            }
+            },
         }
     }
 
@@ -359,15 +359,15 @@ impl SchedulerService for SchedulerServer {
                     ip_address: job.config.ip_address.unwrap_or_default(),
                 };
                 Ok(Response::new(response))
-            }
+            },
             Some(_) => {
                 tracing::warn!("User {} unauthorized for job {}", req.user_id, req.job_id);
                 Err(Status::permission_denied("You do not own this job"))
-            }
+            },
             None => {
                 tracing::warn!("Job {} not found", req.job_id);
                 Err(Status::not_found("Job not found"))
-            }
+            },
         }
     }
 
@@ -822,7 +822,7 @@ impl SchedulerServer {
                     e
                 );
                 return Ok(());
-            }
+            },
         };
 
         match client
@@ -843,7 +843,7 @@ impl SchedulerServer {
                         inner.message
                     );
                 }
-            }
+            },
             Err(e) => {
                 tracing::warn!(
                     "stop_vm_on_agent: RPC error for vm {} on host {}: {}",
@@ -851,7 +851,7 @@ impl SchedulerServer {
                     host_id,
                     e.message()
                 );
-            }
+            },
         }
 
         Ok(())

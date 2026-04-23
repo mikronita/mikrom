@@ -1,16 +1,15 @@
 use async_trait::async_trait;
 use sqlx::PgPool;
-use std::sync::Arc;
 
 use super::user_repository::{DbError, NewUser, User, UserRepository, UserRole};
 
 pub struct PostgresUserRepository {
-    pool: Arc<PgPool>,
+    pool: PgPool,
 }
 
 impl PostgresUserRepository {
     #[must_use]
-    pub fn new(pool: Arc<PgPool>) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -22,7 +21,7 @@ impl UserRepository for PostgresUserRepository {
             "SELECT id, email, password_hash, role, first_name, last_name FROM users WHERE email = $1",
         )
         .bind(email)
-        .fetch_optional(&*self.pool)
+        .fetch_optional(&self.pool)
         .await?;
 
         if let Some((id, email, password_hash, role_str, first_name, last_name)) = result {
@@ -58,7 +57,7 @@ impl UserRepository for PostgresUserRepository {
             "SELECT id, email, password_hash, role, first_name, last_name FROM users WHERE id = $1",
         )
         .bind(id)
-        .fetch_optional(&*self.pool)
+        .fetch_optional(&self.pool)
         .await?;
 
         if let Some((id, email, password_hash, role_str, first_name, last_name)) = result {
@@ -92,7 +91,7 @@ impl UserRepository for PostgresUserRepository {
             .bind(role_str)
             .bind(&user.first_name)
             .bind(&user.last_name)
-            .execute(&*self.pool)
+            .execute(&self.pool)
             .await?;
 
         Ok(id)
@@ -101,7 +100,7 @@ impl UserRepository for PostgresUserRepository {
     async fn count_by_email(&self, email: &str) -> Result<i64, DbError> {
         let (count,) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM users WHERE email = $1")
             .bind(email)
-            .fetch_one(&*self.pool)
+            .fetch_one(&self.pool)
             .await?;
 
         Ok(count)
@@ -130,7 +129,7 @@ impl UserRepository for PostgresUserRepository {
         .bind(first_name)
         .bind(last_name)
         .bind(id)
-        .fetch_one(&*self.pool)
+        .fetch_one(&self.pool)
         .await?;
 
         let (id, email, password_hash, role_str, first_name, last_name) = result;
@@ -153,13 +152,10 @@ impl UserRepository for PostgresUserRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
-    fn lazy_pool() -> Arc<PgPool> {
-        Arc::new(
-            PgPool::connect_lazy("postgres://mikrom:mikrom_password@localhost:5432/mikrom_api")
-                .expect("invalid pool URL"),
-        )
+    fn lazy_pool() -> PgPool {
+        PgPool::connect_lazy("postgres://mikrom:mikrom_password@localhost:5432/mikrom_api")
+            .expect("invalid pool URL")
     }
 
     #[tokio::test]
@@ -175,7 +171,7 @@ mod tests {
         }))
         .await
         .expect("failed to connect");
-        let repo = PostgresUserRepository::new(Arc::new(pool));
+        let repo = PostgresUserRepository::new(pool);
         let result: Result<Option<User>, DbError> =
             repo.find_by_email("nonexistent@example.com").await;
         assert!(result.is_ok());
@@ -190,7 +186,7 @@ mod tests {
         }))
         .await
         .expect("failed to connect");
-        let repo = PostgresUserRepository::new(Arc::new(pool));
+        let repo = PostgresUserRepository::new(pool);
         let email = format!("repo_test_{}@example.com", uuid::Uuid::new_v4());
         let id = repo
             .create(NewUser {
@@ -221,7 +217,7 @@ mod tests {
         }))
         .await
         .expect("failed to connect");
-        let repo = PostgresUserRepository::new(Arc::new(pool));
+        let repo = PostgresUserRepository::new(pool);
         let count: i64 = repo
             .count_by_email("nobody_ever@example.com")
             .await
@@ -237,7 +233,7 @@ mod tests {
         }))
         .await
         .expect("failed to connect");
-        let repo = PostgresUserRepository::new(Arc::new(pool));
+        let repo = PostgresUserRepository::new(pool);
         let email = format!("count_test_{}@example.com", uuid::Uuid::new_v4());
         repo.create(NewUser {
             email: email.clone(),

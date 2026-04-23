@@ -75,7 +75,7 @@ impl BuilderService for BuilderServer {
                         info.status = BuildStatus::Success;
                         info.image_tag = Some(image_tag);
                     }
-                }
+                },
                 Err(e) => {
                     error!(build_id = %build_id_clone, error = %e, "Build failed");
                     let mut lock = builds.write();
@@ -83,7 +83,7 @@ impl BuilderService for BuilderServer {
                         info.status = BuildStatus::Failed;
                         info.message = Some(e.to_string());
                     }
-                }
+                },
             }
         });
 

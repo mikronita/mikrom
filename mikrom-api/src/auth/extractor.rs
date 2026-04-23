@@ -118,7 +118,7 @@ mod tests {
     }
 
     fn make_app(jwt_secret: &str) -> axum::Router {
-        let db_pool = Arc::new(sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap());
+        let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
         let app_repo = Arc::new(crate::repositories::PostgresAppRepository::new(db_pool));
         let state = crate::AppState {
             user_repo: Arc::new(NoopRepo),

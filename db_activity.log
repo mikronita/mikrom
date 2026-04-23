@@ -1,0 +1,1330 @@
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+
+                                                          query                                                           | state  | wait_event_type | wait_event 
+--------------------------------------------------------------------------------------------------------------------------+--------+-----------------+------------
+ SELECT query, state, wait_event_type, wait_event FROM pg_stat_activity WHERE datname = 'mikrom_api' AND state <> 'idle'; | active |                 | 
+(1 row)
+

@@ -44,6 +44,10 @@ pub struct ProfileResponse {
     pub last_name: Option<String>,
 }
 
+fn get_bcrypt_cost() -> u32 {
+    if cfg!(test) { 4 } else { DEFAULT_COST }
+}
+
 /// Registers a new user.
 ///
 /// # Errors
@@ -76,8 +80,17 @@ pub async fn register(
         return Err(ApiError::Conflict("Email already registered".to_string()));
     }
 
-    let password_hash = hash(&payload.password, DEFAULT_COST)
-        .map_err(|_| ApiError::Internal("Failed to hash password".to_string()))?;
+    let password = payload.password.clone();
+    let password_hash = tokio::task::spawn_blocking(move || hash(&password, get_bcrypt_cost()))
+        .await
+        .map_err(|e| {
+            tracing::error!("Blocking task failed: {}", e);
+            ApiError::Internal("Internal error".to_string())
+        })?
+        .map_err(|e| {
+            tracing::error!("Failed to hash password: {}", e);
+            ApiError::Internal("Failed to hash password".to_string())
+        })?;
 
     let user_id = state
         .user_repo
@@ -89,7 +102,10 @@ pub async fn register(
             last_name: None,
         })
         .await
-        .map_err(ApiError::from)?;
+        .map_err(|e| {
+            tracing::error!("Failed to create user in DB: {}", e);
+            ApiError::from(e)
+        })?;
 
     Ok((
         axum::http::StatusCode::CREATED,
@@ -123,7 +139,13 @@ pub async fn login(
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::Auth("Invalid credentials".to_string()))?;
 
-    if verify(&payload.password, &user.password_hash).unwrap_or(false) {
+    let password = payload.password.clone();
+    let hash = user.password_hash.clone();
+    let is_valid = tokio::task::spawn_blocking(move || verify(&password, &hash).unwrap_or(false))
+        .await
+        .map_err(|_| ApiError::Internal("Internal error".to_string()))?;
+
+    if is_valid {
         let token = crate::auth::jwt::create_token(
             &user.id.to_string(),
             &user.email,

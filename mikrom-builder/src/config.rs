@@ -7,6 +7,7 @@ pub struct Config {
     #[serde(default = "default_port")]
     pub port: u16,
     #[serde(default = "default_log_level")]
+    #[allow(dead_code)]
     pub log_level: String,
     #[serde(default = "default_registry")]
     pub registry: String,
