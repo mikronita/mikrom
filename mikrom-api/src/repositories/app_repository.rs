@@ -17,7 +17,15 @@ pub trait AppRepository: Send + Sync {
     async fn delete_app(&self, id: Uuid) -> anyhow::Result<()>;
     async fn list_apps_by_user(&self, user_id: &str) -> anyhow::Result<Vec<App>>;
 
-    async fn create_deployment(&self, app_id: Uuid, user_id: &str) -> anyhow::Result<Deployment>;
+    async fn create_deployment(
+        &self,
+        app_id: Uuid,
+        user_id: &str,
+        vcpus: i32,
+        memory_mib: i64,
+        disk_mib: i64,
+        env_vars: std::collections::HashMap<String, String>,
+    ) -> anyhow::Result<Deployment>;
     async fn update_deployment_status(
         &self,
         id: Uuid,

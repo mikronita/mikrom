@@ -57,18 +57,19 @@ pub async fn resume_pending_builds(state: AppState) {
                     "Resuming build polling"
                 );
 
-                // We need the resources (vcpus, memory) but they aren't in the DB yet.
-                // For now, use defaults. In a real system, these would be in the deployment record.
+                let env: HashMap<String, String> =
+                    serde_json::from_value(dep.env_vars.clone()).unwrap_or_default();
+
                 let task = BuildTask {
                     deployment_id: dep.id,
                     app_id: app.id,
                     app_name: app.name.clone(),
                     user_id: dep.user_id.to_string(),
                     build_id,
-                    vcpus: 1,
-                    memory_mib: 256,
-                    disk_mib: 1024,
-                    env: HashMap::new(), // TODO: Persistent env vars
+                    vcpus: dep.vcpus as u32,
+                    memory_mib: dep.memory_mib as u32,
+                    disk_mib: dep.disk_mib as u32,
+                    env,
                 };
                 start_build_polling(state.clone(), task).await;
             }

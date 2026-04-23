@@ -75,13 +75,31 @@ impl AppRepository for PostgresAppRepository {
         Ok(apps)
     }
 
-    async fn create_deployment(&self, app_id: Uuid, user_id: &str) -> anyhow::Result<Deployment> {
+    async fn create_deployment(
+        &self,
+        app_id: Uuid,
+        user_id: &str,
+        vcpus: i32,
+        memory_mib: i64,
+        disk_mib: i64,
+        env_vars: std::collections::HashMap<String, String>,
+    ) -> anyhow::Result<Deployment> {
         let uid = Uuid::parse_str(user_id)?;
+        let env_json = serde_json::to_value(env_vars)?;
+
         let deployment = sqlx::query_as::<_, Deployment>(
-            "INSERT INTO deployments (app_id, user_id, status) VALUES ($1, $2, 'PENDING') RETURNING *"
+            r#"
+            INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, env_vars)
+            VALUES ($1, $2, 'PENDING', $3, $4, $5, $6)
+            RETURNING *
+            "#,
         )
         .bind(app_id)
         .bind(uid)
+        .bind(vcpus)
+        .bind(memory_mib)
+        .bind(disk_mib)
+        .bind(env_json)
         .fetch_one(&self.pool)
         .await?;
 
@@ -217,7 +235,14 @@ mod tests {
 
         // 4. Create a deployment
         let deployment = app_repo
-            .create_deployment(app.id, &user_id.to_string())
+            .create_deployment(
+                app.id,
+                &user_id.to_string(),
+                1,
+                256,
+                1024,
+                std::collections::HashMap::new(),
+            )
             .await
             .expect("failed to create deployment");
         assert_eq!(deployment.status, "PENDING");
