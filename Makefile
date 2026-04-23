@@ -62,6 +62,7 @@ test-all-crates: ## Run unit tests for all crates plus e2e
 	cargo test -p mikrom-scheduler && \
 	cargo test -p mikrom-agent && \
 	cargo test -p mikrom-api && \
+	cargo test -p mikrom-init && \
 	make test-e2e
 
 .PHONY: test-all
@@ -93,6 +94,12 @@ run-builder: ## Run mikrom-builder with watch (port 5004)
 .PHONY: run-router
 run-router: ## Run mikrom-router (configurable via .env)
 	cd mikrom-router && cargo watch -x run
+
+.PHONY: build-init
+build-init: ## Build mikrom-init as a static binary (musl)
+	rustup target add x86_64-unknown-linux-musl >/dev/null 2>&1 || true
+	cargo build -p mikrom-init --release --target x86_64-unknown-linux-musl
+	@mkdir -p target/release && cp target/x86_64-unknown-linux-musl/release/mikrom-init target/release/mikrom-init
 
 .PHONY: run-app
 run-app: ## Run mikrom-app dev server  (port 3000)

@@ -23,6 +23,7 @@ struct BuildInfo {
     status: BuildStatus,
     image_tag: Option<String>,
     message: Option<String>,
+    exposed_port: u32,
 }
 
 impl BuilderServer {
@@ -55,6 +56,7 @@ impl BuilderService for BuilderServer {
             status: BuildStatus::Building,
             image_tag: None,
             message: None,
+            exposed_port: 0,
         };
 
         self.builds.write().insert(build_id.clone(), build_info);
@@ -69,11 +71,12 @@ impl BuilderService for BuilderServer {
                 .build_image(&req.app_id, &req.git_url, &req.image_name, &req.tag)
                 .await
             {
-                Ok(image_tag) => {
+                Ok((image_tag, exposed_port)) => {
                     let mut lock = builds.write();
                     if let Some(info) = lock.get_mut(&build_id_clone) {
                         info.status = BuildStatus::Success;
                         info.image_tag = Some(image_tag);
+                        info.exposed_port = exposed_port;
                     }
                 },
                 Err(e) => {
@@ -107,6 +110,7 @@ impl BuilderService for BuilderServer {
                 status: info.status as i32,
                 image_tag: info.image_tag.clone().unwrap_or_default(),
                 message: info.message.clone().unwrap_or_default(),
+                exposed_port: info.exposed_port,
             })),
             None => Err(Status::not_found("Build not found")),
         }

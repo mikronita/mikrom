@@ -7,6 +7,7 @@ import {
   deleteApp,
   deployAppVersion, 
   listDeployments, 
+  activateDeployment,
   CreateAppRequest,
   DeployRequest 
 } from "@/lib/api";
@@ -99,5 +100,23 @@ export function useDeployments(appId: string) {
     },
     enabled: !!token && !!appId,
     refetchInterval: 5000,
+  });
+}
+
+export function useActivateDeployment() {
+  const queryClient = useQueryClient();
+  const token = getToken();
+
+  return useMutation({
+    mutationFn: async ({ appId, deploymentId }: { appId: string, deploymentId: string }) => {
+      if (!token) throw new Error("No token found");
+      const result = await activateDeployment(token, appId, deploymentId);
+      if (result.error) throw new Error(result.error);
+      return result.success;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: appsKeys.list() });
+      queryClient.invalidateQueries({ queryKey: appsKeys.deployments(variables.appId) });
+    },
   });
 }

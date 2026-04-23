@@ -1,3 +1,4 @@
+use anyhow::Context;
 use shlex::try_quote;
 use std::path::Path;
 use std::process::Stdio;
@@ -91,7 +92,7 @@ impl ImageBuilder {
         for part in entrypoint_list.iter().chain(cmd_list.iter()) {
             full_command_parts.push(try_quote(part).unwrap_or_else(|_| part.into()).into_owned());
         }
-        let final_cmd = full_command_parts.join(" ");
+        let _final_cmd = full_command_parts.join(" ");
 
         // 3. Create temporary container to export filesystem
         let container_name = format!("mikrom-build-{}", uuid::Uuid::new_v4());
@@ -165,65 +166,88 @@ impl ImageBuilder {
             anyhow::bail!("Tar extraction or Docker export failed");
         }
 
-        // 6. Create mikrom-init.sh
-        info!("Creating /mikrom-init.sh...");
-        let init_script_path = format!("{}/mikrom-init.sh", mount_dir);
-        let mut init_content = String::from("#!/bin/sh\n\n");
+        // 6. Setup Mikrom Init (Binario estático)
+        info!("Setting up mikrom-init...");
 
-        init_content.push_str("mount -t proc proc /proc\n");
-        init_content.push_str("mount -t sysfs sys /sys\n");
-        init_content.push_str("mount -t devtmpfs devtmpfs /dev || true\n");
-        init_content.push_str("mkdir -p /run /tmp /dev/pts /dev/shm\n");
-        init_content.push_str("mount -t tmpfs tmpfs /run\n");
-        init_content.push_str("mount -t tmpfs tmpfs /tmp\n");
-        init_content.push_str("mount -t tmpfs tmpfs /dev/shm\n");
-        init_content.push_str("mount -t devpts devpts /dev/pts 2>/dev/null || true\n");
+        // Inject the binary into the rootfs
+        // We look for it in multiple locations to support both local dev and production
+        let host_init_paths = [
+            "/usr/bin/mikrom-init",
+            "target/release/mikrom-init",
+            "../target/release/mikrom-init",
+            "target/x86_64-unknown-linux-musl/release/mikrom-init",
+            "../target/x86_64-unknown-linux-musl/release/mikrom-init",
+        ];
 
-        init_content.push_str("export TERM=linux\n");
-        init_content.push_str("export COLUMNS=100\n");
-        init_content.push_str("export LINES=24\n");
+        let mut found_init = false;
+        let dest_init_path = format!("{}/mikrom-init", mount_dir);
 
-        init_content.push_str("hostname localhost\n");
-        init_content.push_str(
-            "ip link set lo up 2>/dev/null || ifconfig lo 127.0.0.1 up 2>/dev/null || true\n",
-        );
-
-        for env in env_vars {
-            if let Some((key, val)) = env.split_once('=') {
-                init_content.push_str(&format!(
-                    "export {}={}\n",
-                    key,
-                    try_quote(val).unwrap_or_else(|_| val.into())
-                ));
+        for path in &host_init_paths {
+            if std::path::Path::new(path).exists() {
+                info!(path = %path, "Found mikrom-init binary, inyecting...");
+                std::fs::copy(path, &dest_init_path)
+                    .context("Failed to copy mikrom-init binary")?;
+                found_init = true;
+                break;
             }
         }
-        init_content.push_str(&format!("export PORT={}\n", port));
 
-        init_content.push_str("echo '[mikrom] Starting application...'\n");
-        init_content.push_str("exec /bin/sh /app-run.sh\n");
+        if !found_init {
+            anyhow::bail!(
+                "CRITICAL: mikrom-init binary not found in any of the expected paths: {:?}. \
+                 Run 'make build-init' to generate it.",
+                host_init_paths
+            );
+        }
 
-        tokio::fs::write(&init_script_path, init_content).await?;
         let _ = Command::new("chmod")
-            .args(["+x", &init_script_path])
+            .args(["+x", &dest_init_path])
             .status()
             .await;
 
-        let runner_path = format!("{}/app-run.sh", mount_dir);
-        let runner_content = format!(
-            "#!/bin/sh\ncd {} || cd /\n{}\n",
-            try_quote(&workdir).unwrap_or_else(|_| "/app".into()),
-            final_cmd
-        );
-        tokio::fs::write(&runner_path, runner_content).await?;
-        let _ = Command::new("chmod")
-            .args(["+x", &runner_path])
-            .status()
-            .await;
+        // Create /etc/mikrom/init.json
+        let etc_dir = format!("{}/etc/mikrom", mount_dir);
+        std::fs::create_dir_all(&etc_dir).context("Failed to create /etc/mikrom in guest")?;
+
+        let mut env_map = std::collections::HashMap::new();
+        for env in env_vars {
+            if let Some((key, val)) = env.split_once('=') {
+                env_map.insert(key.to_string(), val.to_string());
+            }
+        }
+        env_map.insert("PORT".to_string(), port.to_string());
+
+        let init_config = serde_json::json!({
+            "env": env_map,
+            "workdir": workdir,
+            "entrypoint": entrypoint_list,
+            "cmd": cmd_list
+        });
+
+        std::fs::write(
+            format!("{}/init.json", etc_dir),
+            serde_json::to_string_pretty(&init_config)?,
+        )
+        .context("Failed to write init.json")?;
 
         // 7. Cleanup
         info!("Flushing and cleaning up...");
         let _ = Command::new("sync").status().await;
-        let _ = Command::new("umount").arg(&mount_dir).status().await;
+
+        let status = Command::new("umount").arg(&mount_dir).status().await?;
+        if !status.success() {
+            tracing::error!(
+                "Failed to unmount {}; filesystem may be corrupted",
+                mount_dir
+            );
+            // Try lazy unmount as last resort
+            let _ = Command::new("umount")
+                .arg("-l")
+                .arg(&mount_dir)
+                .status()
+                .await;
+        }
+
         let _ = tokio::fs::remove_dir(&mount_dir).await;
         let _ = Command::new("docker")
             .args(["rm", "-f", &container_name])

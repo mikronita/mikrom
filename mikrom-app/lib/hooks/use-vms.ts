@@ -1,8 +1,9 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listVms, deployApp, getVm, stopVm, deleteVm, DeployRequest } from "@/lib/api";
+import { listVms, deployApp, getVm, stopVm, deleteVm, DeployRequest, watchVmsSSE, LiveDeploymentInfo, LiveDeploymentStatus } from "@/lib/api";
 import { getToken } from "@/lib/auth";
+import { useEffect } from "react";
 
 export const vmsKeys = {
   all: ["vms"] as const,
@@ -22,8 +23,56 @@ export function useVms() {
       return result.data ?? [];
     },
     enabled: !!token,
-    refetchInterval: 5000, // Refrescar cada 5 segundos para el Punto 2 (Tiempo real)
+    // Polling disabled in favor of SSE (useWatchVms)
+    refetchInterval: false,
   });
+}
+
+export function useWatchVms() {
+  const queryClient = useQueryClient();
+  const token = getToken();
+
+  useEffect(() => {
+    if (!token) return;
+    let isMounted = true;
+    const cleanupRef = { current: null as (() => void) | null };
+
+    const startWatching = async () => {
+      cleanupRef.current = watchVmsSSE(
+        token,
+        (updatedVm) => {
+          if (!isMounted) return;
+          queryClient.setQueryData<LiveDeploymentInfo[]>(vmsKeys.list(), (old = []) => {
+            const index = old.findIndex((vm) => vm.job_id === updatedVm.job_id);
+            if (index === -1) {
+              return [...old, updatedVm];
+            }
+            const next = [...old];
+            next[index] = { ...old[index], ...updatedVm };
+            return next;
+          });
+
+          // Also update detail if it exists
+          queryClient.setQueryData<LiveDeploymentStatus>(vmsKeys.detail(updatedVm.job_id), (old) => {
+            if (!old) return old;
+            return { ...old, ...updatedVm };
+          });
+        },
+        (error) => {
+          if (isMounted) {
+            console.error("VMS SSE Error:", error);
+          }
+        }
+      );
+    };
+
+    startWatching();
+
+    return () => {
+      isMounted = false;
+      if (cleanupRef.current) cleanupRef.current();
+    };
+  }, [token, queryClient]);
 }
 
 export function useVm(jobId: string) {
@@ -94,7 +143,7 @@ export function useDeleteVm() {
       if (!token) throw new Error("No token found");
       const result = await deleteVm(token, jobId);
       if (result.error) throw new Error(result.error);
-      return result.data;
+      return result.success;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: vmsKeys.list() });

@@ -16,15 +16,13 @@ pub async fn resolve_target(state: &AppState, host: &str) -> anyhow::Result<Stri
         return Ok(target);
     }
 
-    // Lookup in DB: join apps and deployments to find the RUNNING VM's IP
+    // Lookup in DB: use the active_deployment_id pointer
     let row = sqlx::query(
         r#"
         SELECT a.port, d.ip_address
         FROM apps a
-        JOIN deployments d ON a.id = d.app_id
+        JOIN deployments d ON a.active_deployment_id = d.id
         WHERE a.hostname = $1 AND d.status = 'RUNNING' AND d.ip_address IS NOT NULL
-        ORDER BY d.created_at DESC
-        LIMIT 1
         "#,
     )
     .bind(host)

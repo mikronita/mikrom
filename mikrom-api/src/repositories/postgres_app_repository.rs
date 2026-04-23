@@ -75,6 +75,25 @@ impl AppRepository for PostgresAppRepository {
         Ok(apps)
     }
 
+    async fn set_active_deployment(&self, app_id: Uuid, deployment_id: Uuid) -> anyhow::Result<()> {
+        sqlx::query("UPDATE apps SET active_deployment_id = $1, updated_at = NOW() WHERE id = $2")
+            .bind(deployment_id)
+            .bind(app_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn update_app_port(&self, id: Uuid, port: i32) -> anyhow::Result<()> {
+        sqlx::query("UPDATE apps SET port = $1, updated_at = NOW() WHERE id = $2")
+            .bind(port)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn create_deployment(&self, data: NewDeployment) -> anyhow::Result<Deployment> {
         let uid = Uuid::parse_str(&data.user_id)?;
         let env_json = serde_json::to_value(data.env_vars)?;
@@ -123,11 +142,30 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
+    async fn update_deployment_port(&self, id: Uuid, port: i32) -> anyhow::Result<()> {
+        sqlx::query("UPDATE deployments SET port = $1, updated_at = NOW() WHERE id = $2")
+            .bind(port)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn get_deployment(&self, id: Uuid) -> anyhow::Result<Option<Deployment>> {
         let deployment = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE id = $1")
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
+
+        Ok(deployment)
+    }
+
+    async fn get_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<Option<Deployment>> {
+        let deployment =
+            sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE job_id = $1")
+                .bind(job_id)
+                .fetch_optional(&self.pool)
+                .await?;
 
         Ok(deployment)
     }

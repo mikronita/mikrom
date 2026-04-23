@@ -22,7 +22,10 @@ pub use deploy::deploy_app;
 pub use error::{ApiError, ApiResult};
 pub use repositories::app_repository::AppRepository;
 pub use repositories::user_repository::UserRepository;
-pub use vms::{delete_vm, get_vm_logs, get_vm_status, list_vms, pause_vm, resume_vm, stop_vm};
+pub use vms::{
+    delete_deployment_record, get_deployment_logs, get_deployment_status, list_active_deployments,
+    pause_deployment, resume_deployment, stop_deployment, watch_deployments,
+};
 
 use auth::{get_profile, login, register, update_profile};
 use utoipa::OpenApi;
@@ -78,13 +81,30 @@ pub fn create_app(state: AppState) -> Router {
             "/apps/:app_id/deployments",
             get(crate::deploy::list_deployments_handler),
         )
-        .route("/vms", get(list_vms))
-        .route("/vms/:job_id", get(get_vm_status))
-        .route("/vms/:job_id/logs", get(get_vm_logs))
-        .route("/vms/:job_id/pause", axum::routing::post(pause_vm))
-        .route("/vms/:job_id/resume", axum::routing::post(resume_vm))
-        .route("/vms/:job_id", axum::routing::delete(stop_vm))
-        .route("/vms/:job_id/delete", axum::routing::delete(delete_vm))
+        .route(
+            "/apps/:app_id/deployments/:deployment_id/activate",
+            axum::routing::post(crate::deploy::activate_deployment_handler),
+        )
+        .route("/deployments/active", get(list_active_deployments))
+        .route("/deployments/events", get(watch_deployments))
+        .route("/deployments/:job_id", get(get_deployment_status))
+        .route("/deployments/:job_id/logs", get(get_deployment_logs))
+        .route(
+            "/deployments/:job_id/pause",
+            axum::routing::post(pause_deployment),
+        )
+        .route(
+            "/deployments/:job_id/resume",
+            axum::routing::post(resume_deployment),
+        )
+        .route(
+            "/deployments/:job_id",
+            axum::routing::delete(stop_deployment),
+        )
+        .route(
+            "/deployments/:job_id/delete",
+            axum::routing::delete(delete_deployment_record),
+        )
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))

@@ -1,4 +1,4 @@
-use crate::client::{MikromClient, VmStatusResponse};
+use crate::client::{LiveDeploymentStatus, MikromClient};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
@@ -46,7 +46,7 @@ pub async fn run(client: MikromClient) -> anyhow::Result<()> {
 
 struct App {
     client: MikromClient,
-    vms: Vec<VmStatusResponse>,
+    vms: Vec<LiveDeploymentStatus>,
     state: TableState,
     last_tick: Instant,
 }
@@ -62,16 +62,16 @@ impl App {
     }
 
     async fn tick(&mut self) -> anyhow::Result<()> {
-        if let Ok(vms) = self.client.list_vms().await {
+        if let Ok(vms) = self.client.list_active_deployments().await {
             // Update the basic list
             let mut updated_vms = Vec::new();
             for basic_vm in vms {
-                // Fetch full status including metrics for each VM
-                if let Ok(full_status) = self.client.get_vm(&basic_vm.job_id).await {
+                // Fetch full status including metrics for each deployment
+                if let Ok(full_status) = self.client.get_deployment_status(&basic_vm.job_id).await {
                     updated_vms.push(full_status);
                 } else {
                     // Fallback to basic info if full status fails
-                    updated_vms.push(VmStatusResponse {
+                    updated_vms.push(LiveDeploymentStatus {
                         job_id: basic_vm.job_id,
                         status: basic_vm.status,
                         host_id: basic_vm.host_id,

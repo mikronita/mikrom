@@ -22,13 +22,15 @@ use utoipa::{
         delete_app_handler,
         deploy_app_version_handler,
         list_deployments_handler,
-        list_vms,
-        get_vm_status,
-        get_vm_logs,
-        pause_vm,
-        resume_vm,
-        stop_vm,
-        delete_vm
+        activate_deployment_handler,
+        list_active_deployments,
+        watch_deployments,
+        get_deployment_status,
+        get_deployment_logs,
+        pause_deployment,
+        resume_deployment,
+        stop_deployment,
+        delete_deployment_record
     ),
     components(
         schemas(
@@ -42,8 +44,8 @@ use utoipa::{
             CreateAppRequest, AppResponse,
             ManualDeployRequest,
             App, Deployment,
-            VmInfo,
-            VmStatusResponse,
+            LiveDeploymentInfo,
+            LiveDeploymentStatus,
             crate::repositories::user_repository::UserRole,
             ErrorResponse
         )
@@ -51,9 +53,8 @@ use utoipa::{
     modifiers(&SecurityAddon),
     tags(
         (name = "auth", description = "Authentication endpoints"),
-        (name = "apps", description = "Application management endpoints"),
-        (name = "deployment", description = "Legacy/Direct deployment endpoints"),
-        (name = "vms", description = "Virtual Machine status and control"),
+        (name = "apps", description = "Application management"),
+        (name = "deployment", description = "Application deployment and lifecycle management"),
         (name = "system", description = "System and health endpoints")
     )
 )]

@@ -20,7 +20,7 @@ impl AppBuilder {
         git_url: &str,
         image_name: &str,
         tag: &str,
-    ) -> Result<String> {
+    ) -> Result<(String, u32)> {
         let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
         let repo_path = temp_dir.path();
 
@@ -110,6 +110,12 @@ impl AppBuilder {
             }
         }
 
+        // 3. Detect exposed ports from image
+        let exposed_port = self.detect_exposed_port(&full_image_tag).await.unwrap_or(0);
+        if exposed_port > 0 {
+            info!(port = %exposed_port, "Detected exposed port from image");
+        }
+
         info!(image_tag = %full_image_tag, "Build successful, pushing to registry...");
 
         let push_status = Command::new("docker")
@@ -122,6 +128,43 @@ impl AppBuilder {
             return Err(anyhow::anyhow!("Docker push failed for {}", full_image_tag));
         }
 
-        Ok(full_image_tag)
+        Ok((full_image_tag, exposed_port))
+    }
+
+    async fn detect_exposed_port(&self, image_tag: &str) -> Option<u32> {
+        let output = Command::new("docker")
+            .args([
+                "inspect",
+                "--format",
+                "{{json .Config.ExposedPorts}}",
+                image_tag,
+            ])
+            .output()
+            .await
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if raw == "null" || raw.is_empty() {
+            return None;
+        }
+
+        // ExposedPorts is a map like {"80/tcp": {}, "3000/tcp": {}}
+        let ports: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let ports_map = ports.as_object()?;
+
+        for key in ports_map.keys() {
+            // "80/tcp" -> "80"
+            if let Some(port_str) = key.split('/').next() {
+                if let Ok(port) = port_str.parse::<u32>() {
+                    return Some(port);
+                }
+            }
+        }
+
+        None
     }
 }

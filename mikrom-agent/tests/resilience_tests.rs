@@ -96,6 +96,16 @@ impl SchedulerService for MockScheduler {
         unimplemented!()
     }
 
+    type WatchAppsStream = tokio_stream::wrappers::ReceiverStream<
+        Result<mikrom_proto::scheduler::WatchAppsResponse, Status>,
+    >;
+    async fn watch_apps(
+        &self,
+        _: Request<mikrom_proto::scheduler::WatchAppsRequest>,
+    ) -> Result<Response<Self::WatchAppsStream>, Status> {
+        unimplemented!()
+    }
+
     type GetAppLogsStream =
         tokio_stream::wrappers::ReceiverStream<Result<ProtoGetLogsResponse, Status>>;
     async fn get_app_logs(

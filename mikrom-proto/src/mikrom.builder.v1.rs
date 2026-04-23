@@ -34,6 +34,8 @@ pub struct GetBuildStatusResponse {
     pub image_tag: ::prost::alloc::string::String,
     #[prost(string, tag = "4")]
     pub message: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "5")]
+    pub exposed_port: u32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

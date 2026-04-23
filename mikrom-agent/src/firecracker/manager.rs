@@ -443,7 +443,8 @@ impl FirecrackerManager {
         .to_string();
 
         let mut boot_args =
-            "console=ttyS0 reboot=k panic=1 pci=off nomodules rw root=/dev/vda init=/mikrom-init.sh".to_string();
+            "console=ttyS0 reboot=k panic=1 pci=off nomodules rw root=/dev/vda init=/mikrom-init"
+                .to_string();
 
         if let (Some(ip), Some(gw)) = (&config.ip_address, &config.gateway) {
             let mask = config.netmask.as_deref().unwrap_or("255.255.255.0");

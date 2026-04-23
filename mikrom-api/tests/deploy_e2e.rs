@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{body::Body, http::Request};
-use tower::ServiceExt;
+use tower::{Service, ServiceExt};
 
 use mikrom_agent::firecracker::{FirecrackerConfig, FirecrackerManager};
 use mikrom_agent::server::AgentServer;
@@ -295,4 +295,89 @@ async fn test_http_api_deploy_e2e() {
         !json["vm_id"].as_str().unwrap_or("").is_empty(),
         "vm_id must be present"
     );
+}
+
+#[tokio::test]
+async fn test_sse_deployments_events_e2e() {
+    let scheduler_port = free_port().await;
+    let scheduler_url = format!("http://127.0.0.1:{scheduler_port}");
+
+    // ── start scheduler ───────────────────────────────────────────────────────
+    let sched_addr: SocketAddr = format!("127.0.0.1:{scheduler_port}").parse().unwrap();
+    let scheduler_server = SchedulerServer::new(None).unwrap();
+    let scheduler_handle = scheduler_server.clone();
+    tokio::spawn(async move {
+        scheduler_handle.serve(sched_addr).await.unwrap();
+    });
+    wait_for_tcp(scheduler_port).await;
+
+    // ── build the API router ──────────────────────────────────────────────────
+    let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
+    let app_repo = Arc::new(PostgresAppRepository::new(db_pool));
+    let state = AppState {
+        user_repo: Arc::new(NoopRepo),
+        app_repo: app_repo.clone(),
+        scheduler_client: None,
+        scheduler_config: mikrom_api::scheduler::SchedulerConfig {
+            addr: scheduler_url.clone(),
+            use_tls: false,
+            certs_dir: None,
+        },
+        builder_addr: "http://localhost:5004".to_string(),
+        jwt_secret: E2E_JWT_SECRET.to_string(),
+        master_key: "e2e-key".into(),
+    };
+    let app = create_app(state);
+
+    // ── create a valid JWT ────────────────────────────────────────────────────
+    let user_id = "user-sse-e2e";
+    let token = create_token(
+        user_id,
+        "sse@example.com",
+        &mikrom_api::repositories::user_repository::UserRole::User,
+        E2E_JWT_SECRET,
+    )
+    .unwrap();
+
+    // ── Subscribe to SSE /deployments/events ──────────────────────────────────
+    // We can't use oneshot because SSE is a stream. We use tower::Service directly.
+    let req = Request::builder()
+        .method("GET")
+        .uri("/deployments/events")
+        .header("Authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+
+    let mut response = app.clone().call(req).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+
+    let mut body_stream = response.into_body().into_data_stream();
+
+    // ── Trigger an event in the background ────────────────────────────────────
+    let scheduler_handle = scheduler_server.clone();
+    let user_id_str = user_id.to_string();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Directly add a job to the scheduler to trigger the broadcast
+        let job = mikrom_scheduler::job::Job::new(
+            "job-sse-1".to_string(),
+            "app-1".to_string(),
+            "test-app".to_string(),
+            "nginx".to_string(),
+            mikrom_scheduler::job::VmConfig::default(),
+            user_id_str,
+        );
+        scheduler_handle.scheduler().add_job(job);
+    });
+
+    // ── Read from SSE stream ──────────────────────────────────────────────────
+    use tokio_stream::StreamExt;
+    let first_chunk = body_stream.next().await.unwrap().unwrap();
+    let chunk_str = String::from_utf8_lossy(&first_chunk);
+
+    // SSE format is "data: {...}\n\n"
+    assert!(chunk_str.contains("data:"));
+    assert!(chunk_str.contains("job-sse-1"));
+    assert!(chunk_str.contains("test-app"));
 }

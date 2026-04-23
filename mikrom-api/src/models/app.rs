@@ -12,6 +12,7 @@ pub struct App {
     pub port: i32,
     pub hostname: Option<String>,
     pub user_id: Uuid,
+    pub active_deployment_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

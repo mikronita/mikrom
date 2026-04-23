@@ -16,6 +16,15 @@ service SchedulerService {
   rpc DeleteApp(DeleteAppRequest) returns (DeleteAppResponse);
   rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
   rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse);
+  rpc WatchApps(WatchAppsRequest) returns (stream WatchAppsResponse);
+}
+
+message WatchAppsRequest {
+  string user_id = 1;
+}
+
+message WatchAppsResponse {
+  AppInfo app = 1;
 }
 
 message ListWorkersRequest {}

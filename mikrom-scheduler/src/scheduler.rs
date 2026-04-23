@@ -47,16 +47,20 @@ pub struct AppScheduler {
     pub jobs: Arc<RwLock<HashMap<String, Job>>>,
     /// The strategy used for placing new workloads.
     pub strategy: SchedulingStrategy,
+    /// Broadcast channel for job updates.
+    pub job_updates: tokio::sync::broadcast::Sender<Job>,
 }
 
 impl AppScheduler {
     /// Creates a new scheduler with the provided worker registry.
     #[must_use]
     pub fn new(worker_registry: WorkerRegistry) -> Self {
+        let (job_updates, _) = tokio::sync::broadcast::channel(1024);
         Self {
             worker_registry,
             jobs: Arc::new(RwLock::new(HashMap::new())),
             strategy: SchedulingStrategy::default(),
+            job_updates,
         }
     }
 
@@ -75,6 +79,7 @@ impl AppScheduler {
         let job_id = job.job_id.clone();
         let job_clone = job.clone();
         self.jobs.write().insert(job_id, job_clone);
+        let _ = self.job_updates.send(job);
     }
 
     #[must_use]
@@ -85,42 +90,51 @@ impl AppScheduler {
     pub fn update_job_status(&self, job_id: &str, status: JobStatus) {
         if let Some(job) = self.jobs.write().get_mut(job_id) {
             job.status = status;
+            let _ = self.job_updates.send(job.clone());
         }
     }
 
     pub fn update_job_ip(&self, job_id: &str, ip: String) {
         if let Some(job) = self.jobs.write().get_mut(job_id) {
             job.config.ip_address = Some(ip);
+            let _ = self.job_updates.send(job.clone());
         }
     }
 
     pub fn start_job(&self, job_id: &str) {
         if let Some(job) = self.jobs.write().get_mut(job_id) {
             job.start();
+            let _ = self.job_updates.send(job.clone());
         }
     }
 
     pub fn fail_job(&self, job_id: &str, msg: String) {
         if let Some(job) = self.jobs.write().get_mut(job_id) {
             job.fail(msg);
+            let _ = self.job_updates.send(job.clone());
         }
     }
 
     pub fn cancel_job(&self, job_id: &str) {
         if let Some(job) = self.jobs.write().get_mut(job_id) {
             job.cancel();
+            let _ = self.job_updates.send(job.clone());
         }
     }
 
     #[must_use]
     pub fn remove_job(&self, job_id: &str) -> bool {
         if let Some(job) = self.jobs.write().remove(job_id) {
-            if let Some(ip) = job.config.ip_address
-                && let Some(host_id) = job.host_id
-                && let Some(worker) = self.worker_registry.get_worker(&host_id)
+            if let Some(ref ip) = job.config.ip_address
+                && let Some(ref host_id) = job.host_id
+                && let Some(worker) = self.worker_registry.get_worker(host_id)
             {
-                worker.ipam.release(&ip);
+                worker.ipam.release(ip);
             }
+            // Notify that the job is gone
+            let mut final_job = job;
+            final_job.status = JobStatus::Cancelled;
+            let _ = self.job_updates.send(final_job);
             true
         } else {
             false
