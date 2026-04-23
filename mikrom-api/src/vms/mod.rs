@@ -116,6 +116,22 @@ pub async fn list_vms(
     Ok(Json(vms))
 }
 
+#[utoipa::path(
+    get,
+    path = "/vms/{job_id}",
+    params(
+        ("job_id" = String, Path, description = "Job ID")
+    ),
+    responses(
+        (status = 200, description = "VM status", body = VmStatusResponse),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "VM not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "vms",
+    security(
+        ("jwt" = [])
+    )
+)]
 #[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
 pub async fn get_vm_status(
     auth: crate::auth::AuthUser,
@@ -157,6 +173,21 @@ pub async fn get_vm_status(
     Ok(Json(vm))
 }
 
+#[utoipa::path(
+    get,
+    path = "/vms/{job_id}/logs",
+    params(
+        ("job_id" = String, Path, description = "Job ID")
+    ),
+    responses(
+        (status = 200, description = "SSE stream of VM logs"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "vms",
+    security(
+        ("jwt" = [])
+    )
+)]
 #[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
 pub async fn get_vm_logs(
     auth: crate::auth::AuthUser,
@@ -201,6 +232,21 @@ pub async fn get_vm_logs(
     Ok(Sse::new(stream))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/vms/{job_id}",
+    params(
+        ("job_id" = String, Path, description = "Job ID")
+    ),
+    responses(
+        (status = 200, description = "VM stopped"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "vms",
+    security(
+        ("jwt" = [])
+    )
+)]
 #[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
 pub async fn stop_vm(
     auth: crate::auth::AuthUser,
@@ -233,6 +279,21 @@ pub async fn stop_vm(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/vms/{job_id}/delete",
+    params(
+        ("job_id" = String, Path, description = "Job ID")
+    ),
+    responses(
+        (status = 200, description = "VM deleted"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "vms",
+    security(
+        ("jwt" = [])
+    )
+)]
 #[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
 pub async fn delete_vm(
     auth: crate::auth::AuthUser,
@@ -270,6 +331,21 @@ pub async fn delete_vm(
     })))
 }
 
+#[utoipa::path(
+    post,
+    path = "/vms/{job_id}/pause",
+    params(
+        ("job_id" = String, Path, description = "Job ID")
+    ),
+    responses(
+        (status = 200, description = "VM paused"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "vms",
+    security(
+        ("jwt" = [])
+    )
+)]
 #[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
 pub async fn pause_vm(
     auth: crate::auth::AuthUser,
@@ -298,6 +374,21 @@ pub async fn pause_vm(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/vms/{job_id}/resume",
+    params(
+        ("job_id" = String, Path, description = "Job ID")
+    ),
+    responses(
+        (status = 200, description = "VM resumed"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "vms",
+    security(
+        ("jwt" = [])
+    )
+)]
 #[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
 pub async fn resume_vm(
     auth: crate::auth::AuthUser,

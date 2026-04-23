@@ -10,6 +10,7 @@ default = []
 test-utils = []
 
 [dependencies]
+# Axum 0.7 is required for compatibility with utoipa-swagger-ui v8
 axum = "0.7"
 tokio = { workspace = true }
 tokio-stream = "0.1"
