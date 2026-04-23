@@ -27,7 +27,8 @@ pub struct LoginResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct DeployResponse {
-    pub job_id: String,
+    pub job_id: Option<String>,
+    pub deployment_id: Option<String>,
     pub status: String,
     pub host_id: Option<String>,
     pub vm_id: Option<String>,
@@ -280,7 +281,7 @@ impl MikromClient {
                     } else {
                         None
                     }
-                }
+                },
                 Err(e) => Some(Err(anyhow::anyhow!("Stream error: {e}"))),
             }
         }))
@@ -661,7 +662,7 @@ mod tests {
             .deploy("my-app", "nginx:latest", None, None, None, HashMap::new())
             .await
             .unwrap();
-        assert_eq!(resp.job_id, "job-abc");
+        assert_eq!(resp.job_id.as_deref(), Some("job-abc"));
         assert_eq!(resp.status, "Scheduled");
         assert_eq!(resp.host_id.as_deref(), Some("host-1"));
         assert_eq!(resp.vm_id.as_deref(), Some("vm-xyz"));
@@ -1585,7 +1586,7 @@ mod tests {
             .deploy("test-app", "nginx:latest", None, None, None, HashMap::new())
             .await
             .unwrap();
-        assert_eq!(resp.job_id, "j-1");
+        assert_eq!(resp.job_id.as_deref(), Some("j-1"));
     }
 
     #[tokio::test]

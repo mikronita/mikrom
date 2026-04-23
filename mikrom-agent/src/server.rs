@@ -103,22 +103,22 @@ impl AgentService for AgentServer {
                     let proto_status = match m.status {
                         crate::firecracker::VmStatus::Starting => {
                             mikrom_proto::agent::VmStatus::Starting
-                        }
+                        },
                         crate::firecracker::VmStatus::Running => {
                             mikrom_proto::agent::VmStatus::Running
-                        }
+                        },
                         crate::firecracker::VmStatus::Stopping => {
                             mikrom_proto::agent::VmStatus::Stopping
-                        }
+                        },
                         crate::firecracker::VmStatus::Stopped => {
                             mikrom_proto::agent::VmStatus::Stopped
-                        }
+                        },
                         crate::firecracker::VmStatus::Failed => {
                             mikrom_proto::agent::VmStatus::Failed
-                        }
+                        },
                         crate::firecracker::VmStatus::Paused => {
                             mikrom_proto::agent::VmStatus::Paused
-                        }
+                        },
                     };
                     (
                         id,
@@ -287,7 +287,7 @@ impl AgentService for AgentServer {
                     vm_id,
                     message: "VM started".to_string(),
                 }))
-            }
+            },
             Err(e) => {
                 tracing::error!("Failed to start VM {}: {}", vm_id, e);
                 Ok(Response::new(StartVmResponse {
@@ -295,7 +295,7 @@ impl AgentService for AgentServer {
                     vm_id: String::new(),
                     message: e.to_string(),
                 }))
-            }
+            },
         }
     }
 
@@ -313,7 +313,7 @@ impl AgentService for AgentServer {
                     success: true,
                     message: "VM stopped".to_string(),
                 }))
-            }
+            },
             Err(e) => Ok(Response::new(StopVmResponse {
                 success: false,
                 message: e.to_string(),
@@ -381,7 +381,7 @@ impl AgentService for AgentServer {
                     started_at: 0,
                     error_message: String::new(),
                 }))
-            }
+            },
             Err(e) => Err(Status::not_found(e.to_string())),
         }
     }
@@ -504,7 +504,7 @@ impl AgentServer {
                                 resp.into_inner().success
                             );
                             break;
-                        }
+                        },
                         Err(e) => {
                             tracing::warn!(
                                 "Registration attempt {attempt} failed: {e:?}. Retrying in {backoff_secs}s..."
@@ -512,7 +512,7 @@ impl AgentServer {
                             tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs))
                                 .await;
                             backoff_secs = std::cmp::min(backoff_secs * 2, 30);
-                        }
+                        },
                     }
                 }
 
@@ -556,22 +556,22 @@ impl AgentServer {
                                             let proto_status = match m.status {
                                                 crate::firecracker::VmStatus::Starting => {
                                                     mikrom_proto::scheduler::VmStatus::Starting
-                                                }
+                                                },
                                                 crate::firecracker::VmStatus::Running => {
                                                     mikrom_proto::scheduler::VmStatus::Running
-                                                }
+                                                },
                                                 crate::firecracker::VmStatus::Stopping => {
                                                     mikrom_proto::scheduler::VmStatus::Stopping
-                                                }
+                                                },
                                                 crate::firecracker::VmStatus::Stopped => {
                                                     mikrom_proto::scheduler::VmStatus::Stopped
-                                                }
+                                                },
                                                 crate::firecracker::VmStatus::Failed => {
                                                     mikrom_proto::scheduler::VmStatus::Failed
-                                                }
+                                                },
                                                 crate::firecracker::VmStatus::Paused => {
                                                     mikrom_proto::scheduler::VmStatus::Paused
-                                                }
+                                                },
                                             };
                                             (
                                                 id,
@@ -599,7 +599,7 @@ impl AgentServer {
                                             );
                                             should_re_register = true;
                                         }
-                                    }
+                                    },
                                     Err(e) => {
                                         tracing::error!("Failed to report metrics: {}", e);
                                         // If the scheduler is unavailable, it might have been restarted.
@@ -607,16 +607,16 @@ impl AgentServer {
                                         if e.code() == tonic::Code::Unavailable {
                                             should_re_register = true;
                                         }
-                                    }
+                                    },
                                 }
-                            }
+                            },
                             Err(e) => {
                                 tracing::error!(
                                     "Failed to connect to scheduler for metrics: {}",
                                     e
                                 );
                                 should_re_register = true;
-                            }
+                            },
                         },
                         Err(e) => tracing::error!("Failed to build scheduler endpoint: {}", e),
                     }

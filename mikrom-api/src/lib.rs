@@ -47,7 +47,7 @@ pub fn create_app(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    let router = Router::new()
+    Router::new()
         .route("/health", get(health))
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))
@@ -85,12 +85,18 @@ pub fn create_app(state: AppState) -> Router {
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .layer(cors)
-        .with_state(state.clone());
+        .with_state(state)
+}
 
+pub fn start_background_tasks(state: AppState) {
     // Start background sync task for VM IPs
-    tokio::spawn(crate::sync::start_ip_sync_task(state));
+    tokio::spawn(crate::sync::start_ip_sync_task(state.clone()));
 
-    router
+    // Resume builds that were in progress
+    let state_for_builds = state;
+    tokio::spawn(async move {
+        crate::deploy::worker::resume_pending_builds(state_for_builds).await;
+    });
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -118,7 +124,7 @@ mod tests {
     #[tokio::test]
     async fn test_health_endpoint() {
         let mock_repo = repositories::user_repository::MockUserRepository::new();
-        let db_pool = Arc::new(sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap());
+        let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
         let app_repo = Arc::new(repositories::PostgresAppRepository::new(db_pool));
 
         let state = AppState {

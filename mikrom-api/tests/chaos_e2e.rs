@@ -115,7 +115,7 @@ async fn test_agent_failure_propagation_e2e() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // 3. Setup API
-    let db_pool = Arc::new(sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap());
+    let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
     let app_repo = Arc::new(PostgresAppRepository::new(db_pool));
     let state = AppState {
         user_repo: Arc::new(NoopRepo),

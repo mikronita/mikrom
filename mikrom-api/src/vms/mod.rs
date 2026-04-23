@@ -174,7 +174,7 @@ pub async fn get_vm_logs(
             })
             .to_string();
             Ok::<Event, std::convert::Infallible>(Event::default().data(data))
-        }
+        },
         Err(e) => {
             let data = serde_json::json!({
                 "line": format!("Error: {}", e),
@@ -182,7 +182,7 @@ pub async fn get_vm_logs(
             })
             .to_string();
             Ok::<Event, std::convert::Infallible>(Event::default().data(data))
-        }
+        },
     });
 
     Ok(Sse::new(stream))
@@ -319,7 +319,7 @@ fn map_grpc_error(e: tonic::Status) -> ApiError {
         tonic::Code::PermissionDenied => ApiError::Forbidden,
         tonic::Code::FailedPrecondition | tonic::Code::InvalidArgument => {
             ApiError::BadRequest(e.message().to_string())
-        }
+        },
         tonic::Code::Unavailable => ApiError::Scheduler("Scheduler unavailable".to_string()),
         _ => ApiError::Internal(e.message().to_string()),
     }

@@ -101,7 +101,7 @@ impl App {
                 } else {
                     i + 1
                 }
-            }
+            },
             None => 0,
         };
         self.state.select(Some(i));
@@ -118,7 +118,7 @@ impl App {
                 } else {
                     i - 1
                 }
-            }
+            },
             None => 0,
         };
         self.state.select(Some(i));
@@ -150,7 +150,7 @@ where
                 KeyCode::Char('q') => return Ok(()),
                 KeyCode::Down | KeyCode::Char('j') => app.next(),
                 KeyCode::Up | KeyCode::Char('k') => app.previous(),
-                _ => {}
+                _ => {},
             }
         }
 

@@ -104,13 +104,13 @@ impl FirecrackerManager {
                 Ok(Some(status)) => {
                     tracing::info!(vm_id = %vm_id, status = ?status, "Detected Firecracker process exit via GC");
                     to_remove.push(vm_id.clone());
-                }
+                },
                 Ok(None) => {
                     // Still running
-                }
+                },
                 Err(e) => {
                     tracing::error!(vm_id = %vm_id, error = %e, "Error checking Firecracker process status");
-                }
+                },
             }
         }
 
@@ -235,49 +235,7 @@ impl FirecrackerManager {
         };
 
         let rootfs_path = format!("/tmp/fc-{}-{}-rootfs.ext4", self.agent_id, vm_id);
-        tracing::info!(vm_id = %vm_id, rootfs_path = %rootfs_path, "Determined rootfs path");
-
-        // ── Image management ──────────────────────────────────────────────────
-        let image_path = std::path::Path::new(&image);
-        let is_absolute = image_path.is_absolute();
-
-        if is_absolute {
-            if !image_path.exists() {
-                let err = format!("Local image rootfs not found at absolute path: {image}");
-                tracing::error!(vm_id = %vm_id, error = %err);
-                self.set_failed(&vm_id, err.clone()).await;
-                return Err(FirecrackerError::ProcessError(err));
-            }
-            // Copy local file to our temp work area
-            tracing::info!(vm_id = %vm_id, src = %image, dst = %rootfs_path, "Linking local rootfs...");
-            self.ensure_file_at(&image, &rootfs_path)
-                .await
-                .map_err(|e| {
-                    tracing::error!(vm_id = %vm_id, error = %e, "Failed to setup rootfs");
-                    e
-                })?;
-            tracing::info!(vm_id = %vm_id, "Rootfs setup complete");
-        } else {
-            // It's a docker tag or a relative path (unsupported for now, treated as docker tag)
-            if image_path.exists() {
-                // Relative path that exists (rare but possible)
-                self.ensure_file_at(&image, &rootfs_path).await?;
-            } else {
-                tracing::info!(
-                    "Image {} not found as local file, attempting docker pull/convert",
-                    image
-                );
-                self.builder
-                    .docker_to_ext4(&image, std::path::Path::new(&rootfs_path))
-                    .await
-                    .map_err(|e| {
-                        FirecrackerError::ProcessError(format!("Image builder failed: {e}"))
-                    })?;
-            }
-        }
-
-        // Get entrypoint to use as init
-        let fc_binary = &self.fc_config.binary;
+        self.prepare_rootfs(&vm_id, &image, &rootfs_path).await?;
 
         // Resolve networking: if scheduler didn't assign an IP, allocate from bridge subnet.
         let config = if config.ip_address.as_deref().unwrap_or("").is_empty() {
@@ -290,11 +248,11 @@ impl FirecrackerManager {
                         mac_address: Some(mac),
                         ..config
                     }
-                }
+                },
                 None => {
                     tracing::warn!(vm_id = %vm_id, "No available IPs in bridge subnet, starting without networking");
                     config
-                }
+                },
             }
         } else {
             config
@@ -308,6 +266,7 @@ impl FirecrackerManager {
         };
 
         // ── Jailer setup (if enabled) ──────────────────────────────────────────
+        let fc_binary = &self.fc_config.binary;
         let (exec_binary, exec_args, socket_path, chroot_dir) = if self.fc_config.use_jailer {
             self.setup_jailer(&vm_id, &kernel_path, &rootfs_path)
                 .await?
@@ -344,7 +303,7 @@ impl FirecrackerManager {
                 }
                 self.set_failed(&vm_id, err_msg.clone()).await;
                 return Err(FirecrackerError::ProcessError(err_msg));
-            }
+            },
         };
 
         // Capture logs in a background task
@@ -458,7 +417,7 @@ impl FirecrackerManager {
                     VmProcess {
                         vm_id: vm_id.clone(),
                         child,
-                        socket_path,
+                        socket_path: socket_path.to_string(),
                         tap_name,
                         log_task,
                         chroot_dir,
@@ -614,7 +573,7 @@ impl FirecrackerManager {
             VmProcess {
                 vm_id: vm_id.clone(),
                 child,
-                socket_path,
+                socket_path: socket_path.to_string(),
                 tap_name,
                 log_task,
                 chroot_dir,
@@ -622,6 +581,40 @@ impl FirecrackerManager {
         );
 
         tracing::info!(vm_id = %vm_id, "Firecracker VM successfully started");
+        Ok(())
+    }
+
+    async fn prepare_rootfs(
+        &self,
+        vm_id: &str,
+        image: &str,
+        rootfs_path: &str,
+    ) -> Result<(), FirecrackerError> {
+        tracing::info!(vm_id = %vm_id, rootfs_path = %rootfs_path, "Preparing rootfs");
+        let image_path = std::path::Path::new(image);
+
+        if image_path.is_absolute() {
+            if !image_path.exists() {
+                let err = format!("Local image rootfs not found at absolute path: {image}");
+                return Err(FirecrackerError::ProcessError(err));
+            }
+            tracing::info!(vm_id = %vm_id, src = %image, dst = %rootfs_path, "Linking local rootfs...");
+            self.ensure_file_at(image, rootfs_path).await?;
+        } else if image_path.exists() {
+            self.ensure_file_at(image, rootfs_path).await?;
+        } else {
+            tracing::info!(
+                vm_id = %vm_id,
+                image = %image,
+                "Image not found as local file, attempting docker pull/convert"
+            );
+            self.builder
+                .docker_to_ext4(image, std::path::Path::new(rootfs_path))
+                .await
+                .map_err(|e| {
+                    FirecrackerError::ProcessError(format!("Image builder failed: {e}"))
+                })?;
+        }
         Ok(())
     }
 
@@ -1978,7 +1971,7 @@ mod tests {
                 assert!(std::path::Path::new(&format!("{chroot_val}/root/rootfs.ext4")).exists());
 
                 let _ = tokio::fs::remove_dir_all(&cfg.chroot_base).await;
-            }
+            },
             Err(e) => {
                 let err_msg = e.to_string();
                 if err_msg.contains("chown failed") || err_msg.contains("Operation not permitted") {
@@ -1987,7 +1980,7 @@ mod tests {
                     panic!("setup_jailer failed unexpectedly: {err_msg}");
                 }
                 let _ = tokio::fs::remove_dir_all(&cfg.chroot_base).await;
-            }
+            },
         }
     }
 

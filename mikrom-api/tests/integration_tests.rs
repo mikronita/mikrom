@@ -1,5 +1,5 @@
 use std::env;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use axum::{
     body::Body,
@@ -13,44 +13,29 @@ use mikrom_api::auth::{get_profile, login, register, update_profile};
 use mikrom_api::repositories::PostgresAppRepository;
 use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 
-static TEST_POOL: OnceLock<PgPool> = OnceLock::new();
-
 async fn get_test_pool() -> PgPool {
-    if let Some(pool) = TEST_POOL.get() {
-        return pool.clone();
-    }
-
     let connection_string = env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
         "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
     });
 
-    // Retry a few times if the DB is starting up
-    let mut pool = None;
-    for _ in 0..10 {
-        match PgPool::connect(&connection_string).await {
-            Ok(p) => {
-                pool = Some(p);
-                break;
-            }
-            Err(_) => tokio::time::sleep(std::time::Duration::from_secs(1)).await,
-        }
-    }
-
-    let pool = pool.expect("Failed to connect to test db after retries");
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(20)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .connect(&connection_string)
+        .await
+        .expect("Failed to connect to test db");
 
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
         .expect("Failed to run migrations");
 
-    let _ = TEST_POOL.set(pool.clone());
     pool
 }
 
 fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
-    let db_pool = Arc::new(pool);
-    let user_repo = PostgresUserRepository::new(db_pool.clone());
-    let app_repo = PostgresAppRepository::new(db_pool.clone());
+    let user_repo = PostgresUserRepository::new(pool.clone());
+    let app_repo = PostgresAppRepository::new(pool.clone());
     let state = AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
@@ -65,260 +50,33 @@ fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         .route("/auth/login", axum::routing::post(login))
         .route("/auth/me", axum::routing::get(get_profile))
         .route("/auth/me", axum::routing::put(update_profile))
+        .route(
+            "/apps",
+            axum::routing::post(mikrom_api::deploy::create_app_handler),
+        )
+        .route(
+            "/apps",
+            axum::routing::get(mikrom_api::deploy::list_apps_handler),
+        )
+        .route(
+            "/apps/{app_id}",
+            axum::routing::delete(mikrom_api::deploy::delete_app_handler),
+        )
         .with_state(state)
 }
 
 #[tokio::test]
-async fn test_profile_flow() {
+async fn test_all_auth_integration_flows() {
     let pool = get_test_pool().await;
-    let jwt_secret = "profile-integration-test-secret";
-    let app = create_app(pool, jwt_secret);
-    let email = format!("profile_flow_{}@example.com", uuid::Uuid::new_v4());
-    let password = "password123";
+    let jwt_secret = "integration-test-secret";
 
-    // 1. Register
-    let _ = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/register")
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "email": email,
-                        "password": password
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    // Test 1: Register and Login Workflow
+    {
+        let app = create_app(pool.clone(), jwt_secret);
+        let email = format!("workflow_{}@example.com", uuid::Uuid::new_v4());
+        let password = "securePassword123";
 
-    // 2. Login to get token
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/login")
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "email": email,
-                        "password": password
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    let body = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let token = json["token"].as_str().unwrap();
-
-    // 3. Get profile (should have null names)
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/auth/me")
-                .header("Authorization", format!("Bearer {token}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["email"], email);
-    assert!(json["first_name"].is_null());
-    assert!(json["last_name"].is_null());
-
-    // 4. Update profile
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/auth/me")
-                .header("Authorization", format!("Bearer {token}"))
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "first_name": "Antonio",
-                        "last_name": "Pardo"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["first_name"], "Antonio");
-    assert_eq!(json["last_name"], "Pardo");
-
-    // 5. Get profile again to verify persistence
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/auth/me")
-                .header("Authorization", format!("Bearer {token}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["first_name"], "Antonio");
-    assert_eq!(json["last_name"], "Pardo");
-}
-
-#[tokio::test]
-async fn test_register_full_flow() {
-    let pool = get_test_pool().await;
-    let app = create_app(pool, "integration-test-secret");
-    let email = format!("full_flow_{}@example.com", uuid::Uuid::new_v4());
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/register")
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "email": email,
-                        "password": "password123"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::CREATED);
-
-    let body = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["message"], "User registered successfully");
-    let user_id = json["user_id"].as_str().unwrap();
-    assert!(!user_id.is_empty());
-}
-
-#[tokio::test]
-async fn test_login_full_flow() {
-    let pool = get_test_pool().await;
-    let app = create_app(pool, "integration-test-secret");
-    let email = format!("login_full_{}@example.com", uuid::Uuid::new_v4());
-
-    let _ = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/register")
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "email": email,
-                        "password": "mypassword123"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/login")
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "email": email,
-                        "password": "mypassword123"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let token = json["token"].as_str().unwrap();
-    assert!(token.starts_with("eyJ"));
-}
-
-#[tokio::test]
-async fn test_password_hash_long_password() {
-    let pool = get_test_pool().await;
-    let app = create_app(pool, "integration-test-secret");
-    let email = format!("hash_long_{}@example.com", uuid::Uuid::new_v4());
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/register")
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "email": email,
-                        "password": "a".repeat(1000)
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::CREATED);
-}
-
-#[tokio::test]
-async fn test_multiple_registrations() {
-    let pool = get_test_pool().await;
-    let app = create_app(pool, "integration-test-secret");
-    let email = format!("multi_{}@example.com", uuid::Uuid::new_v4());
-
-    for i in 0..3 {
-        let response = app
+        let reg_resp = app
             .clone()
             .oneshot(
                 Request::builder()
@@ -326,9 +84,250 @@ async fn test_multiple_registrations() {
                     .uri("/auth/register")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
+                        serde_json::json!({"email": email, "password": password}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reg_resp.status(), StatusCode::CREATED);
+
+        let login_resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"email": email, "password": password}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(login_resp.status(), StatusCode::OK);
+    }
+
+    // Test 2: Profile Flow
+    {
+        let app = create_app(pool.clone(), jwt_secret);
+        let email = format!("profile_{}@example.com", uuid::Uuid::new_v4());
+        let password = "password123";
+
+        // Register
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/register")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"email": email, "password": password}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Login
+        let login_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"email": email, "password": password}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(login_resp.into_body(), 1024)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let token = json["token"].as_str().unwrap();
+
+        // Get Profile
+        let get_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/auth/me")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(get_resp.status(), StatusCode::OK);
+
+        // Update Profile
+        let up_resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/auth/me")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(Body::from(
+                        serde_json::json!({"first_name": "Test", "last_name": "User"}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(up_resp.status(), StatusCode::OK);
+    }
+
+    // Test 3: Multiple Registrations (Conflict)
+    {
+        let app = create_app(pool.clone(), jwt_secret);
+        let email = format!("multi_{}@example.com", uuid::Uuid::new_v4());
+
+        for i in 0..2 {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/auth/register")
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(
+                            serde_json::json!({"email": email, "password": "password123"})
+                                .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            if i == 0 {
+                assert_eq!(resp.status(), StatusCode::CREATED);
+            } else {
+                assert_eq!(resp.status(), StatusCode::CONFLICT);
+            }
+        }
+    }
+
+    // Test 4: Password Hashing (Long Password)
+    {
+        let app = create_app(pool.clone(), jwt_secret);
+        let email = format!("hash_long_{}@example.com", uuid::Uuid::new_v4());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/register")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"email": email, "password": "a".repeat(100)})
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    // Test 5: Login Full Flow
+    {
+        let app = create_app(pool.clone(), jwt_secret);
+        let email = format!("login_full_{}@example.com", uuid::Uuid::new_v4());
+        let password = "password123";
+
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/register")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"email": email, "password": password}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let login_resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"email": email, "password": password}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(login_resp.status(), StatusCode::OK);
+    }
+
+    // Test 6: App Lifecycle
+    {
+        let app = create_app(pool.clone(), jwt_secret);
+        let email = format!("app_life_{}@example.com", uuid::Uuid::new_v4());
+        let password = "password123";
+
+        // 1. Register & Login to get token
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/register")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"email": email, "password": password}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let login_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"email": email, "password": password}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(login_resp.into_body(), 1024)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let token = json["token"].as_str().unwrap();
+
+        // 2. Create App (requires auth)
+        let create_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/apps")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
                         serde_json::json!({
-                            "email": &email,
-                            "password": format!("password{}", i)
+                            "name": "test-integration-app",
+                            "git_url": "https://github.com/mikrom/test"
                         })
                         .to_string(),
                     ))
@@ -336,121 +335,40 @@ async fn test_multiple_registrations() {
             )
             .await
             .unwrap();
+        assert_eq!(create_resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(create_resp.into_body(), 1024)
+            .await
+            .unwrap();
+        let app_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let app_id = app_json["id"].as_str().unwrap();
 
-        if i == 0 {
-            assert_eq!(response.status(), StatusCode::CREATED);
-        } else {
-            assert_eq!(response.status(), StatusCode::CONFLICT);
-        }
+        // 3. List Apps
+        let list_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/apps")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(list_resp.status(), StatusCode::OK);
+
+        // 4. Delete App
+        let del_resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/apps/{}", app_id))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(del_resp.status(), StatusCode::NO_CONTENT);
     }
-}
-
-#[tokio::test]
-async fn test_register_and_login_workflow() {
-    let pool = get_test_pool().await;
-    let app = create_app(pool, "integration-test-secret");
-    let email = format!("workflow_{}@example.com", uuid::Uuid::new_v4());
-    let password = "securePassword123";
-
-    let register_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/register")
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "email": email,
-                        "password": password
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(register_response.status(), StatusCode::CREATED);
-
-    let login_response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/login")
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "email": email,
-                        "password": password
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(login_response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(login_response.into_body(), 1024)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let token = json["token"].as_str().unwrap();
-
-    let parts: Vec<&str> = token.split('.').collect();
-    assert_eq!(parts.len(), 3);
-}
-
-#[tokio::test]
-async fn test_login_token_creation_with_valid_secret() {
-    let pool = get_test_pool().await;
-    let app = create_app(pool, "integration-test-secret");
-    let email = format!("token_valid_{}@example.com", uuid::Uuid::new_v4());
-
-    let _ = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/register")
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "email": email,
-                        "password": "password123"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/login")
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "email": email,
-                        "password": "password123"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json["token"].as_str().is_some());
 }

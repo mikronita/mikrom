@@ -4,8 +4,7 @@ mod server;
 
 use std::net::SocketAddr;
 use tonic::transport::Server;
-use tracing::{Level, info};
-use tracing_subscriber::FmtSubscriber;
+use tracing::info;
 
 use crate::builder::AppBuilder;
 use crate::config::Config;
@@ -16,17 +15,7 @@ use mikrom_proto::builder::builder_service_server::BuilderServiceServer;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env().expect("Failed to load configuration");
 
-    let log_level = match config.log_level.to_lowercase().as_str() {
-        "debug" => Level::DEBUG,
-        "info" => Level::INFO,
-        "warn" => Level::WARN,
-        "error" => Level::ERROR,
-        _ => Level::INFO,
-    };
-
-    let subscriber = FmtSubscriber::builder().with_max_level(log_level).finish();
-
-    tracing::subscriber::set_global_default(subscriber).expect("Setting default subscriber failed");
+    mikrom_proto::telemetry::init_telemetry("mikrom-builder", "0.1.0")?;
 
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
 

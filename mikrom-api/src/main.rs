@@ -16,7 +16,6 @@ async fn main() -> anyhow::Result<()> {
     let db_pool = db::connect(&config.database_url).await?;
     db::run_migrations(&db_pool).await?;
 
-    let db_pool = Arc::new(db_pool);
     let user_repo = PostgresUserRepository::new(db_pool.clone());
     let app_repo = mikrom_api::repositories::PostgresAppRepository::new(db_pool.clone());
 
@@ -29,6 +28,9 @@ async fn main() -> anyhow::Result<()> {
         jwt_secret: config.jwt_secret,
         master_key: config.master_key,
     };
+
+    mikrom_api::start_background_tasks(state.clone());
+
     let app = create_app(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.api_port));

@@ -13,22 +13,15 @@ use sqlx::PgPool;
 use tracing::{error, info};
 
 mod config;
+mod resolver;
 
-#[derive(Clone)]
-struct AppState {
-    db: PgPool,
-    cache: Cache<String, String>, // Hostname -> internal IP:Port
-    #[allow(dead_code)]
-    config: config::Config,
-}
+use resolver::{AppState, resolve_target};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = config::Config::from_env().expect("Failed to load config");
 
-    tracing_subscriber::fmt()
-        .with_env_filter(&config.log_level)
-        .init();
+    mikrom_proto::telemetry::init_telemetry("mikrom-router", "0.1.0")?;
 
     let db = PgPool::connect(&config.database_url).await?;
 
@@ -37,11 +30,7 @@ async fn main() -> anyhow::Result<()> {
         .time_to_live(std::time::Duration::from_secs(60))
         .build();
 
-    let state = AppState {
-        db,
-        cache,
-        config: config.clone(),
-    };
+    let state = AppState { db, cache };
 
     let app = Router::new().fallback(any(proxy_handler)).with_state(state);
 
@@ -60,17 +49,19 @@ async fn proxy_handler(
     mut req: Request<Body>,
 ) -> impl IntoResponse {
     // 1. Get host from headers and normalize (remove port)
-    let raw_host = headers
+    let host = headers
         .get("host")
         .and_then(|h| h.to_str().ok())
+        .map(|h| h.split(':').next().unwrap_or(h))
         .unwrap_or("unknown");
-
-    let host = raw_host.split(':').next().unwrap_or(raw_host);
 
     // 2. Resolve host to internal target
     let target_url = match resolve_target(&state, host).await {
         Ok(url) => url,
-        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            info!("Host resolution failed for {}: {}", host, e);
+            return StatusCode::NOT_FOUND.into_response();
+        },
     };
 
     info!("Proxying request for {} to {}", host, target_url);
@@ -91,63 +82,12 @@ async fn proxy_handler(
                 Err(e) => {
                     error!("Proxy error: {}", e);
                     StatusCode::BAD_GATEWAY.into_response()
-                }
+                },
             }
-        }
+        },
         Err(e) => {
             error!("Invalid target URI {}: {}", full_target, e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
-    }
-}
-
-async fn resolve_target(state: &AppState, host: &str) -> anyhow::Result<String> {
-    // Check cache first
-    if let Some(target) = state.cache.get(host).await {
-        return Ok(target);
-    }
-
-    // Lookup in DB: join apps and deployments to find the RUNNING VM's IP
-    let row = sqlx::query(
-        r#"
-        SELECT a.port, d.ip_address
-        FROM apps a
-        JOIN deployments d ON a.id = d.app_id
-        WHERE a.hostname = $1 AND d.status = 'RUNNING' AND d.ip_address IS NOT NULL
-        ORDER BY d.created_at DESC
-        LIMIT 1
-        "#,
-    )
-    .bind(host)
-    .fetch_optional(&state.db)
-    .await?;
-
-    if let Some(row) = row {
-        use sqlx::Row;
-        let port: i32 = row.get("port");
-        let ip: String = row.get("ip_address");
-
-        let target = format!("http://{}:{}", ip, port);
-
-        state.cache.insert(host.to_string(), target.clone()).await;
-        return Ok(target);
-    }
-
-    Err(anyhow::anyhow!("Host not found"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_cache_logic() {
-        let cache = Cache::builder().build();
-        let host = "test.apps.mikrom.es".to_string();
-        let target = "http://10.0.2.2:80".to_string();
-
-        cache.insert(host.clone(), target.clone()).await;
-
-        assert_eq!(cache.get(&host).await.unwrap(), target);
+        },
     }
 }

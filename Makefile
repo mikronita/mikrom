@@ -67,6 +67,11 @@ test-all-crates: ## Run unit tests for all crates plus e2e
 .PHONY: test-all
 test-all: test-all-crates test-integration ## Run unit + integration + e2e tests
 
+.PHONY: test-coverage
+test-coverage: ## Run tests and generate coverage report (requires cargo-llvm-cov)
+	@command -v cargo-llvm-cov >/dev/null 2>&1 || { echo >&2 "cargo-llvm-cov is not installed. Install it with: cargo install cargo-llvm-cov"; exit 1; }
+	cargo llvm-cov --workspace --all-features --html
+
 # ── Run services ──────────────────────────────────────────────────────────────
 
 .PHONY: run-api

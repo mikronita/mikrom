@@ -40,7 +40,7 @@ async fn test_create_app_endpoint() {
         .with(
             eq(app_name),
             eq(git_url),
-            eq(80),
+            eq(8080),
             eq(Some("test-app.apps.mikrom.es".to_string())),
             eq(user_id.to_string()),
         )
@@ -95,6 +95,6 @@ async fn test_create_app_endpoint() {
 
     assert_eq!(app_resp["name"], app_name);
     assert_eq!(app_resp["git_url"], git_url);
-    assert_eq!(app_resp["port"], 80);
+    assert_eq!(app_resp["port"], 8080);
     assert_eq!(app_resp["hostname"], "test-app.apps.mikrom.es");
 }

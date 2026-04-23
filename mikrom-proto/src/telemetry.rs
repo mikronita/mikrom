@@ -8,15 +8,25 @@ use opentelemetry_sdk::{
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
 use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
-pub fn init_telemetry(service_name: &str, service_version: &str) -> anyhow::Result<()> {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let registry = Registry::default().with(filter);
+const DEFAULT_LOG_LEVEL: &str = "info";
+const DEFAULT_OTLP_ENDPOINT: &str = "http://localhost:4317";
 
-    let enable_telemetry = std::env::var("ENABLE_TELEMETRY").unwrap_or_default() == "true";
+pub fn init_telemetry(service_name: &str, service_version: &str) -> anyhow::Result<()> {
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_LEVEL));
+
+    let is_json = std::env::var("LOG_FORMAT")
+        .map(|v| v == "json")
+        .unwrap_or(false);
+    let enable_telemetry = std::env::var("ENABLE_TELEMETRY")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
+    let registry = Registry::default().with(filter);
 
     if enable_telemetry {
         let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-            .unwrap_or_else(|_| "http://localhost:4317".to_string());
+            .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
 
         let exporter = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic()
@@ -39,21 +49,21 @@ pub fn init_telemetry(service_name: &str, service_version: &str) -> anyhow::Resu
             .build();
 
         let tracer = provider.tracer("mikrom");
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
-        if std::env::var("LOG_FORMAT").unwrap_or_default() == "json" {
+        if is_json {
             registry
-                .with(telemetry)
+                .with(telemetry_layer)
                 .with(tracing_subscriber::fmt::layer().json())
                 .init();
         } else {
             registry
-                .with(telemetry)
+                .with(telemetry_layer)
                 .with(tracing_subscriber::fmt::layer())
                 .init();
         }
     } else {
-        if std::env::var("LOG_FORMAT").unwrap_or_default() == "json" {
+        if is_json {
             registry
                 .with(tracing_subscriber::fmt::layer().json())
                 .init();

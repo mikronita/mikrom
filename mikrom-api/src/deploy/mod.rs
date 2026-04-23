@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub mod handlers;
+pub mod worker;
 pub use handlers::*;
+pub use worker::*;
 
 #[derive(Debug, Deserialize)]
 pub struct VolumeRequest {
@@ -27,7 +29,8 @@ pub struct DeployRequestBody {
 
 #[derive(Debug, Serialize)]
 pub struct DeployResponseBody {
-    pub job_id: String,
+    pub job_id: Option<String>,
+    pub deployment_id: Option<Uuid>,
     pub status: String,
     pub host_id: Option<String>,
     pub vm_id: Option<String>,
@@ -41,9 +44,9 @@ pub async fn deploy_app(
     State(state): State<crate::AppState>,
     Json(payload): Json<DeployRequestBody>,
 ) -> ApiResult<Json<DeployResponseBody>> {
-    let mut final_image = payload.image.clone();
+    let final_image = payload.image.clone();
 
-    // If git_url is provided, trigger the builder
+    // If git_url is provided, trigger the builder in background
     if let Some(git_url) = &payload.git_url {
         tracing::info!(git_url = %git_url, "Triggering build for Git repository");
 
@@ -53,8 +56,9 @@ pub async fn deploy_app(
 
         let mut builder_client = mikrom_proto::builder::BuilderServiceClient::new(builder_channel);
 
+        let app_id = Uuid::new_v4();
         let build_req = mikrom_proto::builder::BuildRequest {
-            app_id: Uuid::new_v4().to_string(),
+            app_id: app_id.to_string(),
             git_url: git_url.clone(),
             image_name: payload.app_name.to_lowercase().replace(" ", "-"),
             tag: "latest".to_string(),
@@ -67,44 +71,48 @@ pub async fn deploy_app(
             .into_inner();
 
         let build_id = build_resp.build_id;
-        tracing::info!(build_id = %build_id, "Build initiated, polling for status");
+        tracing::info!(build_id = %build_id, "Build initiated, starting background polling");
 
-        // Simple polling loop
-        let mut attempts = 0;
-        loop {
-            if attempts > 60 {
-                // 5 minutes timeout (5s * 60)
-                return Err(ApiError::Internal("Build timed out".to_string()));
-            }
+        // Note: For /deploy (one-off), we might not have a deployment record in DB yet
+        // but we should probably create one if we want to be consistent.
+        // For now, we'll return BUILDING status.
 
-            let status_resp = builder_client
-                .get_build_status(mikrom_proto::builder::GetBuildStatusRequest {
-                    build_id: build_id.clone(),
-                })
-                .await
-                .map_err(|e| ApiError::Internal(format!("Failed to get build status: {}", e)))?
-                .into_inner();
+        // However, to use the background worker robustly, it needs a deployment record.
+        // If this is a one-off deploy, we can either:
+        // 1. Just block (bad)
+        // 2. Return BUILDING and lose track if it fails (bad)
+        // 3. Create a temporary app and deployment (better)
 
-            match mikrom_proto::builder::BuildStatus::try_from(status_resp.status)
-                .unwrap_or(mikrom_proto::builder::BuildStatus::Unspecified)
-            {
-                mikrom_proto::builder::BuildStatus::Success => {
-                    final_image = status_resp.image_tag;
-                    tracing::info!(image_tag = %final_image, "Build successful");
-                    break;
-                }
-                mikrom_proto::builder::BuildStatus::Failed => {
-                    return Err(ApiError::Internal(format!(
-                        "Build failed: {}",
-                        status_resp.message
-                    )));
-                }
-                _ => {
-                    attempts += 1;
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                }
-            }
-        }
+        // Given /deploy is a legacy/one-off route, we'll keep it simple but backgrounded.
+        // We'll spawn the polling task directly.
+
+        let vcpus = payload.vcpus.unwrap_or(1);
+        let memory_mib = payload.memory_mib.unwrap_or(256);
+        let disk_mib = payload.disk_mib.unwrap_or(1024);
+
+        let task = BuildTask {
+            deployment_id: Uuid::new_v4(), // Dummy for one-off
+            app_id,
+            app_name: payload.app_name.clone(),
+            user_id: auth.user_id.clone(),
+            build_id,
+            vcpus,
+            memory_mib: memory_mib as u32,
+            disk_mib: disk_mib as u32,
+            env: payload.env.clone().unwrap_or_default(),
+        };
+
+        start_build_polling(state.clone(), task).await;
+
+        return Ok(Json(DeployResponseBody {
+            job_id: None,
+            deployment_id: None,
+            status: "BUILDING".to_string(),
+            host_id: None,
+            vm_id: None,
+            image_tag: Some(final_image),
+            message: "Build initiated in background".to_string(),
+        }));
     }
 
     let vcpus = payload.vcpus.unwrap_or(1);
@@ -152,7 +160,8 @@ pub async fn deploy_app(
     let inner = response.into_inner();
 
     let result = DeployResponseBody {
-        job_id: inner.job_id,
+        job_id: Some(inner.job_id),
+        deployment_id: None,
         status: crate::scheduler::status_name(inner.status).to_string(),
         host_id: Some(inner.host_id).filter(|s| !s.is_empty()),
         vm_id: Some(inner.vm_id).filter(|s| !s.is_empty()),
@@ -160,7 +169,7 @@ pub async fn deploy_app(
         message: inner.message,
     };
 
-    tracing::info!(job_id = %result.job_id, status = %result.status, "Deployment processed");
+    tracing::info!(job_id = ?result.job_id, status = %result.status, "Deployment processed");
 
     Ok(Json(result))
 }

@@ -57,7 +57,7 @@ pub async fn start_ip_sync_task(state: AppState) {
                                     )
                                     .await;
                             }
-                        }
+                        },
                         Err(status) if status.code() == tonic::Code::NotFound => {
                             info!(app = %app.name, job_id = %job_id, "Job not found in scheduler, marking as STOPPED in DB");
                             let _ = state
@@ -71,11 +71,11 @@ pub async fn start_ip_sync_task(state: AppState) {
                                     None,
                                 )
                                 .await;
-                        }
+                        },
                         Err(e) => {
                             // Other errors (like connection) are ignored to retry later
                             tracing::debug!(error = %e, "Failed to get app status from scheduler");
-                        }
+                        },
                     }
                 }
             }

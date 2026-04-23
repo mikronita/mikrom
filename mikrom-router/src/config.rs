@@ -8,6 +8,7 @@ pub struct Config {
     pub port: u16,
     pub database_url: String,
     #[serde(default = "default_log_level")]
+    #[allow(dead_code)]
     pub log_level: String,
     #[serde(default = "default_base_domain")]
     #[allow(dead_code)]
