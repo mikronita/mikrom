@@ -1,9 +1,61 @@
 use crate::AppState;
+use async_trait::async_trait;
 use mikrom_proto::builder::{BuildStatus, BuilderServiceClient, GetBuildStatusRequest};
 use mikrom_proto::scheduler::{AppConfig, DeployRequest, SchedulerServiceClient};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tracing::{error, info};
 use uuid::Uuid;
+
+#[async_trait]
+pub trait BuilderClient: Send + Sync {
+    async fn get_build_status(&self, build_id: String) -> anyhow::Result<(BuildStatus, String)>;
+}
+
+#[async_trait]
+pub trait SchedulerClient: Send + Sync {
+    async fn deploy_app(
+        &self,
+        req: DeployRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::DeployResponse>;
+}
+
+pub struct RealBuilderClient {
+    pub addr: String,
+}
+
+#[async_trait]
+impl BuilderClient for RealBuilderClient {
+    async fn get_build_status(&self, build_id: String) -> anyhow::Result<(BuildStatus, String)> {
+        let channel = crate::builder::connect(&self.addr).await?;
+        let mut client = BuilderServiceClient::new(channel);
+        let resp = client
+            .get_build_status(GetBuildStatusRequest { build_id })
+            .await?
+            .into_inner();
+        let status = BuildStatus::try_from(resp.status).unwrap_or(BuildStatus::Unspecified);
+        Ok((status, resp.image_tag))
+    }
+}
+
+pub struct RealSchedulerClient {
+    pub config: crate::scheduler::SchedulerConfig,
+}
+
+#[async_trait]
+impl SchedulerClient for RealSchedulerClient {
+    async fn deploy_app(
+        &self,
+        req: DeployRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::DeployResponse> {
+        let channel = crate::scheduler::connect(&self.config)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let mut client = SchedulerServiceClient::new(channel);
+        let resp = client.deploy_app(req).await?.into_inner();
+        Ok(resp)
+    }
+}
 
 pub struct BuildTask {
     pub deployment_id: Uuid,
@@ -18,8 +70,15 @@ pub struct BuildTask {
 }
 
 pub async fn start_build_polling(state: AppState, task: BuildTask) {
+    let builder = Arc::new(RealBuilderClient {
+        addr: state.builder_addr.clone(),
+    });
+    let scheduler = Arc::new(RealSchedulerClient {
+        config: state.scheduler_config.clone(),
+    });
+
     tokio::spawn(async move {
-        if let Err(e) = poll_and_deploy(state, task).await {
+        if let Err(e) = poll_and_deploy(state, task, builder, scheduler).await {
             error!("Background build/deploy task failed: {}", e);
         }
     });
@@ -28,7 +87,6 @@ pub async fn start_build_polling(state: AppState, task: BuildTask) {
 pub async fn resume_pending_builds(state: AppState) {
     info!("Checking for pending builds to resume...");
     // We only resume builds for apps that are already registered.
-    // list_apps_by_user("all") is a bit of a hack to get all apps.
     let apps = match state.app_repo.list_apps_by_user("all").await {
         Ok(apps) => apps,
         Err(e) => {
@@ -77,15 +135,17 @@ pub async fn resume_pending_builds(state: AppState) {
     }
 }
 
-async fn poll_and_deploy(state: AppState, task: BuildTask) -> anyhow::Result<()> {
+async fn poll_and_deploy(
+    state: AppState,
+    task: BuildTask,
+    builder: Arc<dyn BuilderClient>,
+    scheduler: Arc<dyn SchedulerClient>,
+) -> anyhow::Result<()> {
     info!(
         app = %task.app_name,
         build_id = %task.build_id,
         "Starting background polling for build"
     );
-
-    let builder_channel = crate::builder::connect(&state.builder_addr).await?;
-    let mut builder_client = BuilderServiceClient::new(builder_channel);
 
     let mut attempts = 0;
     let final_image = loop {
@@ -104,21 +164,16 @@ async fn poll_and_deploy(state: AppState, task: BuildTask) -> anyhow::Result<()>
             return Err(anyhow::anyhow!("Build timed out"));
         }
 
-        let status_resp = builder_client
-            .get_build_status(GetBuildStatusRequest {
-                build_id: task.build_id.clone(),
-            })
-            .await?
-            .into_inner();
+        let (status, image_tag) = builder.get_build_status(task.build_id.clone()).await?;
 
-        match BuildStatus::try_from(status_resp.status).unwrap_or(BuildStatus::Unspecified) {
+        match status {
             BuildStatus::Success => {
                 info!(
                     app = %task.app_name,
-                    image = %status_resp.image_tag,
+                    image = %image_tag,
                     "Build successful, proceeding to deployment"
                 );
-                break status_resp.image_tag;
+                break image_tag;
             },
             BuildStatus::Failed => {
                 let _ = state
@@ -132,7 +187,7 @@ async fn poll_and_deploy(state: AppState, task: BuildTask) -> anyhow::Result<()>
                         None,
                     )
                     .await;
-                return Err(anyhow::anyhow!("Build failed: {}", status_resp.message));
+                return Err(anyhow::anyhow!("Build failed"));
             },
             _ => {
                 attempts += 1;
@@ -142,11 +197,6 @@ async fn poll_and_deploy(state: AppState, task: BuildTask) -> anyhow::Result<()>
     };
 
     // Build success -> Schedule VM
-    let scheduler_channel = crate::scheduler::connect(&state.scheduler_config)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to connect to scheduler: {}", e))?;
-    let mut scheduler_client = SchedulerServiceClient::new(scheduler_channel);
-
     let deploy_req = DeployRequest {
         app_id: task.app_id.to_string(),
         app_name: task.app_name.clone(),
@@ -164,11 +214,7 @@ async fn poll_and_deploy(state: AppState, task: BuildTask) -> anyhow::Result<()>
         user_id: task.user_id.clone(),
     };
 
-    let response = scheduler_client
-        .deploy_app(deploy_req)
-        .await
-        .map_err(|e| anyhow::anyhow!("Scheduler deploy failed: {}", e))?
-        .into_inner();
+    let response = scheduler.deploy_app(deploy_req).await?;
 
     // Update Deployment with Scheduler info
     let _ = state
@@ -183,6 +229,9 @@ async fn poll_and_deploy(state: AppState, task: BuildTask) -> anyhow::Result<()>
         )
         .await;
 
-    info!(app = %task.app_name, "Application deployed successfully in background");
+    info!(
+        app = %task.app_name,
+        "Application deployed successfully in background"
+    );
     Ok(())
 }
