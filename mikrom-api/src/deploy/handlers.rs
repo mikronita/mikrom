@@ -8,9 +8,10 @@ use axum::{
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateAppRequest {
     pub name: String,
     pub git_url: String,
@@ -18,7 +19,7 @@ pub struct CreateAppRequest {
     pub hostname: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AppResponse {
     pub id: Uuid,
     pub name: String,
@@ -28,6 +29,19 @@ pub struct AppResponse {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/apps",
+    request_body = CreateAppRequest,
+    responses(
+        (status = 201, description = "App created successfully", body = AppResponse),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "apps",
+    security(
+        ("jwt" = [])
+    )
+)]
 pub async fn create_app_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -71,6 +85,18 @@ pub async fn create_app_handler(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/apps",
+    responses(
+        (status = 200, description = "List of user apps", body = [AppResponse]),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "apps",
+    security(
+        ("jwt" = [])
+    )
+)]
 pub async fn list_apps_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -96,6 +122,22 @@ pub async fn list_apps_handler(
     Ok(Json(resp))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/apps/{app_id}",
+    params(
+        ("app_id" = Uuid, Path, description = "App ID")
+    ),
+    responses(
+        (status = 204, description = "App deleted successfully"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "App not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "apps",
+    security(
+        ("jwt" = [])
+    )
+)]
 pub async fn delete_app_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -126,7 +168,7 @@ pub async fn delete_app_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ManualDeployRequest {
     pub vcpus: Option<u32>,
     pub memory_mib: Option<u64>,
@@ -134,6 +176,23 @@ pub struct ManualDeployRequest {
     pub env: Option<std::collections::HashMap<String, String>>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/apps/{app_id}/deploy",
+    params(
+        ("app_id" = Uuid, Path, description = "App ID")
+    ),
+    request_body = ManualDeployRequest,
+    responses(
+        (status = 202, description = "Deployment triggered", body = crate::deploy::DeployResponseBody),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "App not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "apps",
+    security(
+        ("jwt" = [])
+    )
+)]
 pub async fn deploy_app_version_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -247,6 +306,22 @@ pub async fn deploy_app_version_handler(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/apps/{app_id}/deployments",
+    params(
+        ("app_id" = Uuid, Path, description = "App ID")
+    ),
+    responses(
+        (status = 200, description = "List of app deployments", body = [Deployment]),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "App not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "apps",
+    security(
+        ("jwt" = [])
+    )
+)]
 pub async fn list_deployments_handler(
     auth: AuthUser,
     State(state): State<AppState>,

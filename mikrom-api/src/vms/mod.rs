@@ -10,8 +10,9 @@ use axum::{
 use serde::Serialize;
 use std::collections::HashMap;
 use tokio_stream::StreamExt;
+use utoipa::ToSchema;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct VmInfo {
     pub job_id: String,
     pub app_id: String,
@@ -22,7 +23,7 @@ pub struct VmInfo {
     pub vm_id: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct VmStatusResponse {
     pub job_id: String,
     pub status: String,
@@ -36,6 +37,18 @@ pub struct VmStatusResponse {
     pub ram_used_bytes: u64,
 }
 
+#[utoipa::path(
+    get,
+    path = "/vms",
+    responses(
+        (status = 200, description = "List of user VMs", body = [VmInfo]),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "vms",
+    security(
+        ("jwt" = [])
+    )
+)]
 #[tracing::instrument(skip(state, auth))]
 pub async fn list_vms(
     auth: crate::auth::AuthUser,

@@ -12,6 +12,7 @@ pub mod db;
 pub mod deploy;
 pub mod error;
 pub mod models;
+pub mod openapi;
 pub mod repositories;
 pub mod scheduler;
 pub mod sync;
@@ -24,6 +25,8 @@ pub use repositories::user_repository::UserRepository;
 pub use vms::{delete_vm, get_vm_logs, get_vm_status, list_vms, pause_vm, resume_vm, stop_vm};
 
 use auth::{get_profile, login, register, update_profile};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -48,6 +51,10 @@ pub fn create_app(state: AppState) -> Router {
         .allow_headers(Any);
 
     Router::new()
+        .merge(
+            SwaggerUi::new("/docs")
+                .url("/api-docs/openapi.json", crate::openapi::ApiDoc::openapi()),
+        )
         .route("/health", get(health))
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))
@@ -60,24 +67,24 @@ pub fn create_app(state: AppState) -> Router {
         )
         .route("/apps", get(crate::deploy::list_apps_handler))
         .route(
-            "/apps/{app_id}",
+            "/apps/:app_id",
             axum::routing::delete(crate::deploy::delete_app_handler),
         )
         .route(
-            "/apps/{app_id}/deploy",
+            "/apps/:app_id/deploy",
             axum::routing::post(crate::deploy::deploy_app_version_handler),
         )
         .route(
-            "/apps/{app_id}/deployments",
+            "/apps/:app_id/deployments",
             get(crate::deploy::list_deployments_handler),
         )
         .route("/vms", get(list_vms))
-        .route("/vms/{job_id}", get(get_vm_status))
-        .route("/vms/{job_id}/logs", get(get_vm_logs))
-        .route("/vms/{job_id}/pause", axum::routing::post(pause_vm))
-        .route("/vms/{job_id}/resume", axum::routing::post(resume_vm))
-        .route("/vms/{job_id}", axum::routing::delete(stop_vm))
-        .route("/vms/{job_id}/delete", axum::routing::delete(delete_vm))
+        .route("/vms/:job_id", get(get_vm_status))
+        .route("/vms/:job_id/logs", get(get_vm_logs))
+        .route("/vms/:job_id/pause", axum::routing::post(pause_vm))
+        .route("/vms/:job_id/resume", axum::routing::post(resume_vm))
+        .route("/vms/:job_id", axum::routing::delete(stop_vm))
+        .route("/vms/:job_id/delete", axum::routing::delete(delete_vm))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
@@ -99,12 +106,20 @@ pub fn start_background_tasks(state: AppState) {
     });
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses(
+        (status = 200, description = "API Health Status", body = HealthResponse)
+    ),
+    tag = "system"
+)]
 async fn health() -> axum::Json<HealthResponse> {
     axum::Json(HealthResponse {
         status: "ok".to_string(),

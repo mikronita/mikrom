@@ -1,6 +1,7 @@
 use crate::error::{ApiError, ApiResult};
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub mod handlers;
@@ -8,14 +9,14 @@ pub mod worker;
 pub use handlers::*;
 pub use worker::*;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct VolumeRequest {
     pub volume_id: String,
     pub size_mib: u64,
     pub read_only: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct DeployRequestBody {
     pub app_name: String,
     pub image: String,
@@ -28,7 +29,7 @@ pub struct DeployRequestBody {
     pub volumes: Option<Vec<VolumeRequest>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct DeployResponseBody {
     pub job_id: Option<String>,
     pub deployment_id: Option<Uuid>,
@@ -39,6 +40,20 @@ pub struct DeployResponseBody {
     pub message: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/deploy",
+    request_body = DeployRequestBody,
+    responses(
+        (status = 200, description = "Deployment initiated", body = DeployResponseBody),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 500, description = "Internal server error", body = crate::error::ErrorResponse)
+    ),
+    tag = "deployment",
+    security(
+        ("jwt" = [])
+    )
+)]
 #[tracing::instrument(skip(state, auth, payload), fields(app_name = %payload.app_name, image = %payload.image))]
 pub async fn deploy_app(
     auth: crate::auth::AuthUser,
