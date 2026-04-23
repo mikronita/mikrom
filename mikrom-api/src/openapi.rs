@@ -22,7 +22,13 @@ use utoipa::{
         delete_app_handler,
         deploy_app_version_handler,
         list_deployments_handler,
-        list_vms
+        list_vms,
+        get_vm_status,
+        get_vm_logs,
+        pause_vm,
+        resume_vm,
+        stop_vm,
+        delete_vm
     ),
     components(
         schemas(
