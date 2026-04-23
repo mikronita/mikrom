@@ -11,9 +11,10 @@ build-dev: ## Build all Rust crates (debug)
 	cargo build
 
 .PHONY: deb-agent
-deb-agent: ## Build Debian package for mikrom-agent
+deb-agent: build-init ## Build Debian package for mikrom-agent
 	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
-	cd mikrom-agent && cargo deb
+	cargo build --release -p mikrom-agent
+	cd mikrom-agent && cargo deb --no-build
 
 .PHONY: fmt
 fmt: ## Format Rust code

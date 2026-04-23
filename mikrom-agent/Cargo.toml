@@ -48,6 +48,7 @@ section = "admin"
 priority = "optional"
 assets = [
     ["target/release/mikrom-agent", "/usr/bin/mikrom-agent", "755"],
+    ["target/release/mikrom-init", "/usr/bin/mikrom-init", "755"],
     ["debian/mikrom-agent.service", "/lib/systemd/system/mikrom-agent.service", "644"],
     ["debian/agent.env", "/etc/mikrom/agent.env", "644"],
 ]
