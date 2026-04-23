@@ -52,6 +52,7 @@ pub struct VmConfig {
     pub vcpus: u32,
     pub memory_mib: u64,
     pub disk_mib: u64,
+    pub port: u32,
     pub env: std::collections::HashMap<String, String>,
     pub ip_address: Option<String>,
     pub gateway: Option<String>,

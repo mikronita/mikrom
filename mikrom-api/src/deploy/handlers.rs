@@ -36,10 +36,18 @@ pub async fn create_app_handler(
     let port = payload.port.unwrap_or(8080);
 
     // Generate hostname based on app name if not provided
-    let hostname = Some(format!(
-        "{}.apps.mikrom.es",
-        payload.name.to_lowercase().replace(" ", "-")
-    ));
+    let sanitized_name = payload
+        .name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+
+    let hostname = Some(format!("{}.apps.mikrom.es", sanitized_name));
 
     let app = state
         .app_repo
@@ -155,14 +163,15 @@ pub async fn deploy_app_version_handler(
 
     let deployment = state
         .app_repo
-        .create_deployment(
-            app.id,
-            &auth.user_id,
-            vcpus as i32,
-            memory_mib as i64,
-            disk_mib as i64,
-            env_vars.clone(),
-        )
+        .create_deployment(crate::repositories::app_repository::NewDeployment {
+            app_id: app.id,
+            user_id: auth.user_id.clone(),
+            vcpus: vcpus as i32,
+            memory_mib: memory_mib as i64,
+            disk_mib: disk_mib as i64,
+            port: app.port,
+            env_vars: env_vars.clone(),
+        })
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -221,6 +230,7 @@ pub async fn deploy_app_version_handler(
         vcpus,
         memory_mib: memory_mib as u32,
         disk_mib: disk_mib as u32,
+        port: app.port as u32,
         env: env_vars,
     };
 

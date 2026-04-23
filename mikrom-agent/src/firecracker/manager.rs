@@ -235,7 +235,8 @@ impl FirecrackerManager {
         };
 
         let rootfs_path = format!("/tmp/fc-{}-{}-rootfs.ext4", self.agent_id, vm_id);
-        self.prepare_rootfs(&vm_id, &image, &rootfs_path).await?;
+        self.prepare_rootfs(&vm_id, &image, &rootfs_path, config.port)
+            .await?;
 
         // Resolve networking: if scheduler didn't assign an IP, allocate from bridge subnet.
         let config = if config.ip_address.as_deref().unwrap_or("").is_empty() {
@@ -589,6 +590,7 @@ impl FirecrackerManager {
         vm_id: &str,
         image: &str,
         rootfs_path: &str,
+        port: u32,
     ) -> Result<(), FirecrackerError> {
         tracing::info!(vm_id = %vm_id, rootfs_path = %rootfs_path, "Preparing rootfs");
         let image_path = std::path::Path::new(image);
@@ -609,7 +611,7 @@ impl FirecrackerManager {
                 "Image not found as local file, attempting docker pull/convert"
             );
             self.builder
-                .docker_to_ext4(image, std::path::Path::new(rootfs_path))
+                .docker_to_ext4(image, std::path::Path::new(rootfs_path), port)
                 .await
                 .map_err(|e| {
                     FirecrackerError::ProcessError(format!("Image builder failed: {e}"))
@@ -1204,6 +1206,7 @@ mod tests {
             vcpus: 1,
             memory_mib: 256,
             disk_mib: 1024,
+            port: 8080,
             env: Default::default(),
             ip_address: None,
             gateway: None,
@@ -1359,6 +1362,7 @@ mod tests {
             vcpus: 2,
             memory_mib: 512,
             disk_mib: 2048,
+            port: 8080,
             env,
             ip_address: None,
             gateway: None,

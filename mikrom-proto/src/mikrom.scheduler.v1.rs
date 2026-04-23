@@ -187,6 +187,8 @@ pub struct AppConfig {
     pub mac_address: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "8")]
     pub volumes: ::prost::alloc::vec::Vec<Volume>,
+    #[prost(uint32, tag = "9")]
+    pub port: u32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeployResponse {

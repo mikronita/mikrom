@@ -30,7 +30,10 @@ async fn main() -> anyhow::Result<()> {
         .time_to_live(std::time::Duration::from_secs(60))
         .build();
 
-    let state = AppState { db, cache };
+    let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
+        .build(HttpConnector::new());
+
+    let state = AppState { db, cache, client };
 
     let app = Router::new().fallback(any(proxy_handler)).with_state(state);
 
@@ -67,9 +70,6 @@ async fn proxy_handler(
     info!("Proxying request for {} to {}", host, target_url);
 
     // 3. Perform proxying
-    let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
-        .build(HttpConnector::new());
-
     // Construct the backend URL
     let path_query = req.uri().path_and_query().map(|v| v.as_str()).unwrap_or("");
     let full_target = format!("{}{}", target_url, path_query);
@@ -77,7 +77,7 @@ async fn proxy_handler(
     match full_target.parse::<hyper::Uri>() {
         Ok(uri) => {
             *req.uri_mut() = uri;
-            match client.request(req).await {
+            match state.client.request(req).await {
                 Ok(res) => res.into_response(),
                 Err(e) => {
                     error!("Proxy error: {}", e);

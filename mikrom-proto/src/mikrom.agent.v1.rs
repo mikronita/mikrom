@@ -185,6 +185,8 @@ pub struct VmConfig {
     pub netmask: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "9")]
     pub volumes: ::prost::alloc::vec::Vec<Volume>,
+    #[prost(uint32, tag = "10")]
+    pub port: u32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StartVmResponse {

@@ -1,5 +1,5 @@
 use crate::models::app::{App, Deployment};
-use crate::repositories::app_repository::AppRepository;
+use crate::repositories::app_repository::{AppRepository, NewDeployment};
 use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -75,30 +75,23 @@ impl AppRepository for PostgresAppRepository {
         Ok(apps)
     }
 
-    async fn create_deployment(
-        &self,
-        app_id: Uuid,
-        user_id: &str,
-        vcpus: i32,
-        memory_mib: i64,
-        disk_mib: i64,
-        env_vars: std::collections::HashMap<String, String>,
-    ) -> anyhow::Result<Deployment> {
-        let uid = Uuid::parse_str(user_id)?;
-        let env_json = serde_json::to_value(env_vars)?;
+    async fn create_deployment(&self, data: NewDeployment) -> anyhow::Result<Deployment> {
+        let uid = Uuid::parse_str(&data.user_id)?;
+        let env_json = serde_json::to_value(data.env_vars)?;
 
         let deployment = sqlx::query_as::<_, Deployment>(
             r#"
-            INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, env_vars)
-            VALUES ($1, $2, 'PENDING', $3, $4, $5, $6)
+            INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, port, env_vars)
+            VALUES ($1, $2, 'PENDING', $3, $4, $5, $6, $7)
             RETURNING *
             "#,
         )
-        .bind(app_id)
+        .bind(data.app_id)
         .bind(uid)
-        .bind(vcpus)
-        .bind(memory_mib)
-        .bind(disk_mib)
+        .bind(data.vcpus)
+        .bind(data.memory_mib)
+        .bind(data.disk_mib)
+        .bind(data.port)
         .bind(env_json)
         .fetch_one(&self.pool)
         .await?;
@@ -235,14 +228,15 @@ mod tests {
 
         // 4. Create a deployment
         let deployment = app_repo
-            .create_deployment(
-                app.id,
-                &user_id.to_string(),
-                1,
-                256,
-                1024,
-                std::collections::HashMap::new(),
-            )
+            .create_deployment(crate::repositories::app_repository::NewDeployment {
+                app_id: app.id,
+                user_id: user_id.to_string(),
+                vcpus: 1,
+                memory_mib: 256,
+                disk_mib: 1024,
+                port: 8080,
+                env_vars: std::collections::HashMap::new(),
+            })
             .await
             .expect("failed to create deployment");
         assert_eq!(deployment.status, "PENDING");
