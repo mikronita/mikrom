@@ -59,7 +59,7 @@ fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
             axum::routing::get(mikrom_api::deploy::list_apps_handler),
         )
         .route(
-            "/apps/{app_id}",
+            "/apps/:app_id",
             axum::routing::delete(mikrom_api::deploy::delete_app_handler),
         )
         .with_state(state)

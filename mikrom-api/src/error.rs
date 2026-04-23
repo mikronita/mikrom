@@ -3,8 +3,15 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde_json::json;
+use serde::Serialize;
 use thiserror::Error;
+use utoipa::ToSchema;
+
+#[derive(Serialize, ToSchema)]
+pub struct ErrorResponse {
+    pub error: String,
+    pub status: u16,
+}
 
 #[derive(Error, Debug)]
 pub enum ApiError {
@@ -90,10 +97,10 @@ impl IntoResponse for ApiError {
             },
         };
 
-        let body = Json(json!({
-            "error": message,
-            "status": status.as_u16(),
-        }));
+        let body = Json(ErrorResponse {
+            error: message,
+            status: status.as_u16(),
+        });
 
         (status, body).into_response()
     }

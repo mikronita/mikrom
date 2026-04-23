@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use sqlx::types::Uuid;
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, sqlx::Type, Default)]
+#[derive(
+    Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, sqlx::Type, Default, ToSchema,
+)]
 #[sqlx(rename_all = "lowercase")]
 pub enum UserRole {
     Admin,

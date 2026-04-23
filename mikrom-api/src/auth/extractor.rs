@@ -26,6 +26,7 @@ impl IntoResponse for AuthError {
     }
 }
 
+#[axum::async_trait]
 impl FromRequestParts<crate::AppState> for AuthUser {
     type Rejection = Response;
 

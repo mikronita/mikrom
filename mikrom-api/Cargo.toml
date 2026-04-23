@@ -10,7 +10,7 @@ default = []
 test-utils = []
 
 [dependencies]
-axum = "0.8"
+axum = "0.7"
 tokio = { workspace = true }
 tokio-stream = "0.1"
 serde = { version = "1", features = ["derive"] }
@@ -43,6 +43,8 @@ opentelemetry_sdk = "0.31.0"
 opentelemetry-otlp = "0.31.1"
 tracing-opentelemetry = "0.32.1"
 opentelemetry-semantic-conventions = "0.31.0"
+utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
+utoipa-swagger-ui = { version = "8", features = ["axum"] }
 
 [dev-dependencies]
 axum-test = "15"

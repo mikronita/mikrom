@@ -1,41 +1,42 @@
 use axum::{Json, extract::State};
 use bcrypt::{DEFAULT_COST, hash, verify};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::AppState;
 use crate::error::{ApiError, ApiResult};
 use crate::repositories::user_repository::NewUser;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct RegisterRequest {
     pub email: String,
     pub password: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RegisterResponse {
     pub message: String,
     pub user_id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct LoginResponse {
     pub token: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateProfileRequest {
     pub first_name: Option<String>,
     pub last_name: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ProfileResponse {
     pub id: String,
     pub email: String,
@@ -53,6 +54,17 @@ fn get_bcrypt_cost() -> u32 {
 /// # Errors
 ///
 /// Returns an error if the email is already registered or if validation fails.
+#[utoipa::path(
+    post,
+    path = "/auth/register",
+    request_body = RegisterRequest,
+    responses(
+        (status = 201, description = "User registered successfully", body = RegisterResponse),
+        (status = 400, description = "Bad request", body = crate::error::ErrorResponse),
+        (status = 409, description = "Email already registered", body = crate::error::ErrorResponse)
+    ),
+    tag = "auth"
+)]
 #[tracing::instrument(skip(state, payload), fields(email = %payload.email))]
 pub async fn register(
     State(state): State<AppState>,
@@ -116,11 +128,21 @@ pub async fn register(
     ))
 }
 
-/// Logs in an existing user and returns a JWT token.
+/// Log in a user and return a JWT token.
 ///
 /// # Errors
 ///
 /// Returns an error if credentials are invalid or token creation fails.
+#[utoipa::path(
+    post,
+    path = "/auth/login",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Login successful", body = LoginResponse),
+        (status = 401, description = "Invalid credentials", body = crate::error::ErrorResponse)
+    ),
+    tag = "auth"
+)]
 #[tracing::instrument(skip(state, payload), fields(email = %payload.email))]
 pub async fn login(
     State(state): State<AppState>,
@@ -161,6 +183,18 @@ pub async fn login(
 }
 
 /// Gets the profile of the currently authenticated user.
+#[utoipa::path(
+    get,
+    path = "/auth/me",
+    responses(
+        (status = 200, description = "Current user profile", body = ProfileResponse),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "auth",
+    security(
+        ("jwt" = [])
+    )
+)]
 #[tracing::instrument(skip(state, auth))]
 pub async fn get_profile(
     State(state): State<AppState>,
@@ -186,6 +220,19 @@ pub async fn get_profile(
 }
 
 /// Updates the profile of the currently authenticated user.
+#[utoipa::path(
+    put,
+    path = "/auth/me",
+    request_body = UpdateProfileRequest,
+    responses(
+        (status = 200, description = "Profile updated successfully", body = ProfileResponse),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "auth",
+    security(
+        ("jwt" = [])
+    )
+)]
 #[tracing::instrument(skip(state, auth, payload))]
 pub async fn update_profile(
     State(state): State<AppState>,
