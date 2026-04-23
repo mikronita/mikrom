@@ -66,6 +66,7 @@ pub struct BuildTask {
     pub vcpus: u32,
     pub memory_mib: u32,
     pub disk_mib: u32,
+    pub port: u32,
     pub env: HashMap<String, String>,
 }
 
@@ -127,6 +128,7 @@ pub async fn resume_pending_builds(state: AppState) {
                     vcpus: dep.vcpus as u32,
                     memory_mib: dep.memory_mib as u32,
                     disk_mib: dep.disk_mib as u32,
+                    port: dep.port as u32,
                     env,
                 };
                 start_build_polling(state.clone(), task).await;
@@ -196,7 +198,6 @@ async fn poll_and_deploy(
         }
     };
 
-    // Build success -> Schedule VM
     let deploy_req = DeployRequest {
         app_id: task.app_id.to_string(),
         app_name: task.app_name.clone(),
@@ -205,6 +206,7 @@ async fn poll_and_deploy(
             vcpus: task.vcpus,
             memory_mib: task.memory_mib,
             disk_mib: task.disk_mib,
+            port: task.port,
             env: task.env,
             ip_address: String::new(),
             gateway: String::new(),

@@ -20,6 +20,7 @@ pub struct DeployRequestBody {
     pub app_name: String,
     pub image: String,
     pub git_url: Option<String>,
+    pub port: Option<i32>,
     pub vcpus: Option<u32>,
     pub memory_mib: Option<u64>,
     pub disk_mib: Option<u64>,
@@ -89,6 +90,7 @@ pub async fn deploy_app(
         let vcpus = payload.vcpus.unwrap_or(1);
         let memory_mib = payload.memory_mib.unwrap_or(256);
         let disk_mib = payload.disk_mib.unwrap_or(1024);
+        let port = payload.port.unwrap_or(8080);
 
         let task = BuildTask {
             deployment_id: Uuid::new_v4(), // Dummy for one-off
@@ -99,6 +101,7 @@ pub async fn deploy_app(
             vcpus,
             memory_mib: memory_mib as u32,
             disk_mib: disk_mib as u32,
+            port: port as u32,
             env: payload.env.clone().unwrap_or_default(),
         };
 
@@ -118,6 +121,7 @@ pub async fn deploy_app(
     let vcpus = payload.vcpus.unwrap_or(1);
     let memory_mib = payload.memory_mib.unwrap_or(256);
     let disk_mib = payload.disk_mib.unwrap_or(1024);
+    let port = payload.port.unwrap_or(8080);
 
     let channel = crate::scheduler::connect(&state.scheduler_config)
         .await
@@ -133,6 +137,7 @@ pub async fn deploy_app(
             vcpus,
             memory_mib: memory_mib as u32,
             disk_mib: disk_mib as u32,
+            port: port as u32,
             env: payload.env.clone().unwrap_or_default(),
             ip_address: String::new(),
             gateway: String::new(),

@@ -192,6 +192,7 @@ impl SchedulerService for SchedulerServer {
             vcpus: req.config.as_ref().map_or(1, |c| c.vcpus),
             memory_mib: req.config.as_ref().map_or(256, |c| u64::from(c.memory_mib)),
             disk_mib: req.config.as_ref().map_or(1024, |c| u64::from(c.disk_mib)),
+            port: req.config.as_ref().map_or(8080, |c| c.port),
             env: req
                 .config
                 .as_ref()
@@ -238,6 +239,7 @@ impl SchedulerService for SchedulerServer {
                     vcpus: config.vcpus,
                     memory_mib: config.memory_mib,
                     disk_mib: config.disk_mib,
+                    port: config.port,
                     env: config.env.clone(),
                     ip_address,
                     gateway,
@@ -767,6 +769,7 @@ impl SchedulerServer {
                 vcpus: config.vcpus,
                 memory_mib: config.memory_mib as u32,
                 disk_mib: config.disk_mib as u32,
+                port: config.port,
                 env: config.env.clone(),
                 ip_address: config.ip_address.clone().unwrap_or_default(),
                 gateway: config.gateway.clone().unwrap_or_default(),
@@ -1046,6 +1049,7 @@ mod tests {
                     vcpus: 1,
                     memory_mib: 256,
                     disk_mib: 1024,
+                    port: 8080,
                     env: Default::default(),
                     ip_address: String::new(),
                     gateway: String::new(),
@@ -1343,6 +1347,7 @@ mod tests {
             vcpus: 1,
             memory_mib: 256,
             disk_mib: 1024,
+            port: 8080,
             env: Default::default(),
             ip_address: None,
             gateway: None,
@@ -1653,6 +1658,7 @@ mod tests {
                 vcpus: 1,
                 memory_mib: 128,
                 disk_mib: 512,
+                port: 8080,
                 env: HashMap::new(),
                 ip_address: String::new(),
                 gateway: String::new(),

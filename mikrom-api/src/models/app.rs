@@ -28,6 +28,7 @@ pub struct Deployment {
     pub vcpus: i32,
     pub memory_mib: i64,
     pub disk_mib: i64,
+    pub port: i32,
     pub env_vars: serde_json::Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

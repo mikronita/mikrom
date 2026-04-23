@@ -136,6 +136,7 @@ message VmConfig {
   string mac_address = 7;
   string netmask = 8;
   repeated Volume volumes = 9;
+  uint32 port = 10;
 }
 
 

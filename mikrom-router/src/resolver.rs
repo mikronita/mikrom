@@ -1,3 +1,5 @@
+use axum::body::Body;
+use hyper_util::client::legacy::connect::HttpConnector;
 use moka::future::Cache;
 use sqlx::PgPool;
 
@@ -5,6 +7,7 @@ use sqlx::PgPool;
 pub struct AppState {
     pub db: PgPool,
     pub cache: Cache<String, String>, // Hostname -> internal IP:Port
+    pub client: hyper_util::client::legacy::Client<HttpConnector, Body>,
 }
 
 pub async fn resolve_target(state: &AppState, host: &str) -> anyhow::Result<String> {
@@ -58,6 +61,10 @@ mod tests {
         let state = AppState {
             db: PgPool::connect_lazy("postgres://localhost/test").unwrap(),
             cache,
+            client: hyper_util::client::legacy::Client::builder(
+                hyper_util::rt::TokioExecutor::new(),
+            )
+            .build(hyper_util::client::legacy::connect::HttpConnector::new()),
         };
 
         let result = resolve_target(&state, host).await.unwrap();

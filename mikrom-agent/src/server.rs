@@ -228,6 +228,7 @@ impl AgentService for AgentServer {
             vcpus: req.config.as_ref().map_or(1, |c| c.vcpus),
             memory_mib: req.config.as_ref().map_or(256, |c| u64::from(c.memory_mib)),
             disk_mib: req.config.as_ref().map_or(1024, |c| u64::from(c.disk_mib)),
+            port: req.config.as_ref().map_or(8080, |c| c.port),
             env,
             ip_address: req.config.as_ref().and_then(|c| {
                 if c.ip_address.is_empty() {
@@ -894,6 +895,7 @@ mod tests {
                     vcpus: 1,
                     memory_mib: 256,
                     disk_mib: 1024,
+                    port: 8080,
                     env,
                     ip_address: String::new(),
                     gateway: String::new(),
