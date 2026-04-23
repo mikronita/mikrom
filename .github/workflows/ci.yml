@@ -169,6 +169,12 @@ jobs:
           - image: mikrom-app
             dockerfile: mikrom-app/Dockerfile
             context: mikrom-app
+          - image: mikrom-builder
+            dockerfile: mikrom-builder/Dockerfile
+            context: .
+          - image: mikrom-router
+            dockerfile: mikrom-router/Dockerfile
+            context: .
 
     steps:
       - name: Checkout
