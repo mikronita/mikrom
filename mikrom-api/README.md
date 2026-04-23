@@ -1,130 +1,75 @@
 # mikrom-api
 
-HTTP REST API for the mikrom orchestration system. Built with [Axum](https://github.com/tokio-rs/axum) and [SQLx](https://github.com/launchbakery/sqlx) on Tokio.
+The central management service for the Mikrom PaaS. It provides a REST API for authentication, application management, and deployment orchestration. Built with [Axum](https://github.com/tokio-rs/axum) and [SQLx](https://github.com/launchbakery/sqlx) on Tokio.
 
 **Port:** `5001`
 
+## Key Responsibilities
+
+- **Authentication**: User registration, login (JWT), and profile management.
+- **App Management**: CRUD operations for applications (Git URLs, hostnames, ports).
+- **Deployment Orchestration**: Coordinating with `mikrom-builder` and `mikrom-scheduler` to turn source code into running microVMs.
+- **State Persistence**: Managing the PostgreSQL database for all system metadata.
+
 ## Endpoints
 
+### Authentication
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/health` | — | Service health and version |
 | `POST` | `/auth/register` | — | Create a new user account |
 | `POST` | `/auth/login` | — | Authenticate and receive a JWT |
 | `GET` | `/auth/whoami` | JWT | Get current user info |
-| `POST` | `/deploy` | JWT | Deploy an application to a Firecracker VM |
-| `GET` | `/vms` | JWT | List all VMs for current user |
-| `GET` | `/vms/{job_id}` | JWT | Get VM status |
-| `DELETE` | `/vms/{job_id}` | JWT | Stop a VM |
-| `DELETE` | `/vms/{job_id}/delete` | JWT | Delete a VM |
-| `POST` | `/vms/{job_id}/pause` | JWT | Pause a running VM |
-| `POST` | `/vms/{job_id}/resume` | JWT | Resume a paused VM |
-| `GET` | `/vms/{job_id}/logs` | JWT | Get VM logs (SSE) |
 
-### `POST /deploy`
+### Applications & Deployments
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/apps` | JWT | List all applications |
+| `POST` | `/apps` | JWT | Create a new application (Git URL required) |
+| `DELETE` | `/apps/{id}` | JWT | Delete an application and all its deployments |
+| `POST` | `/apps/{id}/deploy` | JWT | Trigger a new deployment for an application |
+| `GET` | `/deployments` | JWT | List all deployments (formerly `/vms`) |
+| `GET` | `/deployments/{id}` | JWT | Get deployment status |
+| `DELETE` | `/deployments/{id}` | JWT | Stop and remove a deployment |
+| `GET` | `/deployments/{id}/logs` | JWT | Get real-time microVM logs (SSE) |
 
-```json
-{
-  "app_name": "my-app",
-  "image": "nginx:latest",
-  "vcpus": 1,
-  "memory_mib": 256,
-  "disk_mib": 1024,
-  "env": { "PORT": "3000" }
-}
-```
+## Database Schema
 
-`vcpus`, `memory_mib`, `disk_mib`, and `env` are optional (defaults: 1 vCPU, 256 MiB RAM, 1024 MiB disk).
-
-On each request the handler opens a new gRPC connection to `mikrom-scheduler` (`SCHEDULER_ADDR`) and calls `DeployApp`.
-
-### Response Examples
-
-**`POST /deploy` response:**
-```json
-{
-  "job_id": "job-abc-123",
-  "status": "Scheduled",
-  "host_id": "host-1",
-  "vm_id": "vm-xyz",
-  "message": "Application scheduled"
-}
-```
-
-**`GET /vms` response:**
-```json
-[
-  {
-    "job_id": "job-1",
-    "app_id": "app-1",
-    "app_name": "my-app",
-    "image": "nginx:latest",
-    "status": "Running",
-    "host_id": "host-1",
-    "vm_id": "vm-abc"
-  }
-]
-```
-
-## Authentication
-
-All endpoints (except `/health`, `/auth/register`, `/auth/login`) require a valid JWT token in the `Authorization` header:
-
-```
-Authorization: Bearer <jwt_token>
-```
-
-To obtain a token, call `/auth/login` with email and password. The token expires after 24 hours (configurable in `auth/jwt.rs`).
+Mikrom uses PostgreSQL to track the state of the cluster:
+- **`users`**: Account information and credentials.
+- **`apps`**: Project definitions (name, git repo, assigned hostname).
+- **`deployments`**: Historical and active deployment runs (image tags, job IDs, IP addresses).
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | — | PostgreSQL connection string |
-| `TEST_DATABASE_URL` | `postgres://mikrom:mikrom_password@localhost:5432/mikrom_api` | Connection string used by integration tests |
 | `JWT_SECRET` | — | Secret used to sign/verify JWT tokens |
 | `SCHEDULER_ADDR` | `http://127.0.0.1:5002` | gRPC address of the scheduler |
-| `USE_TLS` | `false` | Enable mutual TLS for the gRPC channel to the scheduler |
-| `CERTS_DIR` | — | Directory containing TLS certificates (required when `USE_TLS=true`) |
-
-Copy `.env.example` (if present) or set these variables in your shell / Docker environment.
+| `BUILDER_ADDR` | `http://127.0.0.1:5004` | gRPC address of the builder |
+| `USE_TLS` | `false` | Enable mutual TLS for gRPC communication |
 
 ## Development
 
 ```bash
-# Start the database
-docker-compose up -d postgres
+# Start PostgreSQL locally
+make db-start
 
-# Run the service
-cargo run
+# Run the API with hot-reload
+cd mikrom-api && cargo watch -x run
 
-# Unit tests (no Docker)
-cargo test --lib
-
-# Integration tests (requires running PostgreSQL)
-cargo test --test integration
+# Run tests
+cargo test
 ```
 
-The integration tests use `testcontainers` to spin up a real PostgreSQL instance; `TEST_DATABASE_URL` can override the default connection string (`postgres://mikrom:mikrom_password@localhost:5432/mikrom_api`).
-
-## Code structure
+## Internal Architecture
 
 ```
 src/
-  main.rs                        Entry point — loads env, connects DB and scheduler, starts Axum
-  lib.rs                         Router factory, AppState, health handler
-  auth/
-    handlers.rs                  /auth/register and /auth/login handlers
-    jwt.rs                       JWT creation and validation
-  deploy/
-    mod.rs                       /deploy handler — proxies to scheduler via gRPC
-  models/
-    user.rs                      User model
-  db/
-    mod.rs                       Database pool initialisation
-  repositories/
-    user_repository.rs           UserRepository trait (mockable)
-    postgres_user_repository.rs  SQLx implementation
+  auth/           # JWT, Bcrypt, and Auth handlers
+  deploy/         # Application-centric deployment logic
+  vms/            # Legacy VM-centric handlers (now mapping to deployments)
+  repositories/   # Data access layer (Postgres implementation)
+  models/         # App, Deployment, and User structs
+  sync.rs         # Background task to sync VM IPs from scheduler to DB
 ```
-
-Auth uses bcrypt for password hashing and `jsonwebtoken` for JWT creation. The `UserRepository` trait allows `mockall` mocks to be swapped in during unit tests.

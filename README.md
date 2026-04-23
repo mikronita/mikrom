@@ -1,109 +1,99 @@
-# mikrom
+# mikrom — Open-Source PaaS on Firecracker
 
 [![CI](https://github.com/antpard/mikrom/actions/workflows/ci.yml/badge.svg)](https://github.com/antpard/mikrom/actions/workflows/ci.yml)
 
-Mikrom is a microVM orchestration system that deploys containerized workloads into [Firecracker](https://firecracker-microvm.github.io/) microVMs across a fleet of worker nodes.
+Mikrom is a modern **Platform-as-a-Service (PaaS)** that deploys containerized workloads into [Firecracker](https://firecracker-microvm.github.io/) microVMs. Inspired by platforms like Fly.io and Railway, Mikrom provides a **Zero-Config** experience: point it at a Git repository, and it will build, deploy, and route traffic to your application automatically.
+
+## Key Features
+
+- **🚀 Zero-Config**: Automatic language detection and building via [Railpack](https://railpack.com/).
+- **⚡ MicroVM Isolation**: Every application runs in its own dedicated Firecracker microVM for maximum security and performance.
+- **🌐 Dynamic Routing**: Built-in ingress router with automatic hostname assignment (`app.apps.mikrom.es`).
+- **🦀 Built with Rust**: High-performance, memory-safe backend services.
+- **📊 Real-time Dashboard**: Modern web interface built with Next.js and Tailwind CSS.
+- **🛠️ Power CLI**: Full control over your apps and deployments from your terminal.
 
 ## Architecture
 
+Mikrom follows a distributed microservices architecture:
+
 ```
-HTTP Client
-  → mikrom-api     (REST, port 5001)
-    → mikrom-scheduler  (gRPC, port 5002)
-      → mikrom-agent    (gRPC, port 5003)
-        → FirecrackerManager  (in-memory stub; real Firecracker integration pending)
+User (CLI/Web) 
+  → mikrom-api      (REST Management & Auth)
+    → mikrom-builder   (Git cloning & Railpack building)
+    → mikrom-scheduler (Resource allocation & IPAM)
+      → mikrom-agent   (Worker node, Firecracker lifecycle)
+User (Traffic)
+  → mikrom-router   (Dynamic Ingress Proxy)
+    → App MicroVM      (Target instance)
 ```
 
-## Repository layout
+## Repository Layout
 
 | Directory | Description |
 |---|---|
-| `mikrom-api/` | Axum HTTP REST API — auth, deploy endpoint |
-| `mikrom-scheduler/` | Tonic gRPC scheduler — worker selection and job tracking |
-| `mikrom-agent/` | Tonic gRPC agent — runs on each worker node, manages VMs |
-| `mikrom-proto/` | Shared protobuf definitions compiled to Rust |
-| `mikrom-cli/` | CLI client for the mikrom API (`mikrom` binary) |
-| `mikrom-app/` | Next.js 16 frontend (React 19, Tailwind CSS 4) |
-| `firecracker/` | Firecracker VMM source (vendored) |
+| `mikrom-api/` | The central brain. Manages Users, Apps, and Deployments. |
+| `mikrom-builder/` | The build engine. Clones Git repos and builds OCI images using Railpack. |
+| `mikrom-router/` | High-performance dynamic reverse proxy for app ingress. |
+| `mikrom-scheduler/` | Intelligent resource manager. Places workloads on the best workers. |
+| `mikrom-agent/` | The worker daemon. Manages microVMs and network isolation. |
+| `mikrom-app/` | Dashboard (Next.js 16, React 19, Tailwind CSS 4). |
+| `mikrom-cli/` | Command-line interface (`mikrom`). |
+| `mikrom-proto/` | Shared gRPC/Protobuf definitions. |
 
-The five Rust crates share a single Cargo workspace (`Cargo.toml`).
-
-## Quick start
+## Quick Start
 
 ### Prerequisites
 
-- Rust (stable toolchain)
-- Docker (for PostgreSQL and integration tests)
-- Node.js + pnpm (for the frontend)
+- **Rust** (stable toolchain)
+- **Docker** (for build engine and local services)
+- **Node.js + pnpm** (for the dashboard)
+- **Railpack CLI** (for local building)
 
-### Option A — Docker Compose (all services)
-
-```bash
-# Copy and edit environment (JWT_SECRET is required)
-cp .env.example .env   # if provided, or export JWT_SECRET manually
-
-make up          # build images and start all services
-make logs        # follow logs
-make down        # stop and remove containers
-```
-
-Services start on their default ports (5001 API, 5002 scheduler, 5003 agent, 3000 app).
-
-### Option B — Run locally
+### Running Mikrom Locally
 
 ```bash
-# 1. Start PostgreSQL
+# 1. Start Infrastructure (PostgreSQL + Docker Registry)
 make db-start
 
-# 2. Run each service in a separate terminal
+# 2. Run the core services (separate terminals)
 make run-api        # port 5001
 make run-scheduler  # port 5002
+make run-builder    # port 5004
 make run-agent      # port 5003
+make run-router     # port 8080
 make run-app        # port 3000
 ```
 
-### mikrom-cli
-
-Install the CLI and point it at a running API:
+### Using the CLI
 
 ```bash
-make install-cli          # installs `mikrom` to ~/.cargo/bin
-mikrom health
+# Install the CLI
+make install-cli
+
+# Login
 mikrom auth login --email user@example.com --password secret
-mikrom deploy --app my-service --image nginx:latest
+
+# Create and deploy an app
+mikrom apps create --name my-app --git-url https://github.com/user/my-app.git
+mikrom apps deploy --app-id <app-id>
+
+# Check status
+mikrom deployments
 ```
-
-## Environment variables
-
-| Variable | Default | Used by |
-|---|---|---|
-| `DATABASE_URL` | — | mikrom-api |
-| `TEST_DATABASE_URL` | `postgres://mikrom:mikrom_password@localhost:5432/mikrom_api` | mikrom-api integration tests |
-| `JWT_SECRET` | — | mikrom-api |
-| `SCHEDULER_ADDR` | `http://127.0.0.1:5002` | mikrom-api, mikrom-agent |
-| `AGENT_PORT` | `5003` | mikrom-agent |
-| `AGENT_HOSTNAME` | — | mikrom-agent (overrides auto-detected IP for registration) |
-| `HOST_ID` | random UUID | mikrom-agent |
-| `USE_TLS` | `false` | mikrom-agent, mikrom-scheduler, mikrom-api |
-| `CERTS_DIR` | — | mikrom-agent, mikrom-scheduler, mikrom-api (when `USE_TLS=true`) |
-| `MIKROM_API_URL` | `http://localhost:5001` | mikrom-cli |
 
 ## Testing
 
 ```bash
-make test              # unit tests only (no Docker required)
-make test-integration  # integration tests (starts/stops PostgreSQL via Docker)
-make test-all          # unit + integration
-
-# Run a single test by name
-make test-one NAME=test_score_idle
+make test              # Unit tests only
+make test-integration  # Integration tests (requires Docker)
+make test-all          # Complete suite
 ```
 
-## Build
+## Contributing
 
-```bash
-make build          # all Rust crates (release)
-make app-build      # Next.js production build
-```
+Mikrom is an open-source project. Feel free to open issues or pull requests.
 
-See each subdirectory's README for service-specific details.
+## License
+
+Apache-2.0
