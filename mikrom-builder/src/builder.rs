@@ -148,14 +148,19 @@ impl AppBuilder {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if raw == "null" || raw.is_empty() {
+        self.parse_exposed_ports(&raw)
+    }
+
+    fn parse_exposed_ports(&self, raw_json: &str) -> Option<u32> {
+        if raw_json == "null" || raw_json.is_empty() {
             return None;
         }
 
         // ExposedPorts is a map like {"80/tcp": {}, "3000/tcp": {}}
-        let ports: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let ports: serde_json::Value = serde_json::from_str(raw_json).ok()?;
         let ports_map = ports.as_object()?;
 
+        // Pick the first port we find
         for key in ports_map.keys() {
             // "80/tcp" -> "80"
             if let Some(port_str) = key.split('/').next() {
@@ -166,5 +171,33 @@ impl AppBuilder {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_exposed_ports() {
+        let builder = AppBuilder::new("localhost:5000".into(), "any".into());
+
+        // Basic case
+        assert_eq!(builder.parse_exposed_ports("{\"80/tcp\":{}}"), Some(80));
+        
+        // Multiple ports (should pick one)
+        let multi = builder.parse_exposed_ports("{\"80/tcp\":{},\"443/tcp\":{}}");
+        assert!(multi == Some(80) || multi == Some(443));
+
+        // Different format
+        assert_eq!(builder.parse_exposed_ports("{\"3000/udp\":{}}"), Some(3000));
+
+        // Null/Empty cases
+        assert_eq!(builder.parse_exposed_ports("null"), None);
+        assert_eq!(builder.parse_exposed_ports("{}"), None);
+        assert_eq!(builder.parse_exposed_ports(""), None);
+        
+        // Invalid JSON
+        assert_eq!(builder.parse_exposed_ports("invalid"), None);
     }
 }

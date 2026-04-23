@@ -316,6 +316,7 @@ async fn test_all_auth_integration_flows() {
         let token = json["token"].as_str().unwrap();
 
         // 2. Create App (requires auth)
+        let app_name = format!("integration-app-{}", uuid::Uuid::new_v4());
         let create_resp = app
             .clone()
             .oneshot(
@@ -326,7 +327,7 @@ async fn test_all_auth_integration_flows() {
                     .header("Content-Type", "application/json")
                     .body(Body::from(
                         serde_json::json!({
-                            "name": "test-integration-app",
+                            "name": app_name,
                             "git_url": "https://github.com/mikrom/test"
                         })
                         .to_string(),
