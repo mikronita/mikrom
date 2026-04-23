@@ -25,6 +25,10 @@ pub struct Deployment {
     pub job_id: Option<String>,
     pub ip_address: Option<String>,
     pub status: String,
+    pub vcpus: i32,
+    pub memory_mib: i64,
+    pub disk_mib: i64,
+    pub env_vars: serde_json::Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

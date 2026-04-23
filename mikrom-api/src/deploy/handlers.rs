@@ -148,9 +148,21 @@ pub async fn deploy_app_version_handler(
     }
 
     // 2. Create deployment record in DB
+    let vcpus = payload.vcpus.unwrap_or(1);
+    let memory_mib = payload.memory_mib.unwrap_or(256);
+    let disk_mib = payload.disk_mib.unwrap_or(1024);
+    let env_vars = payload.env.clone().unwrap_or_default();
+
     let deployment = state
         .app_repo
-        .create_deployment(app.id, &auth.user_id)
+        .create_deployment(
+            app.id,
+            &auth.user_id,
+            vcpus as i32,
+            memory_mib as i64,
+            disk_mib as i64,
+            env_vars.clone(),
+        )
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -200,10 +212,6 @@ pub async fn deploy_app_version_handler(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Start background polling
-    let vcpus = payload.vcpus.unwrap_or(1);
-    let memory_mib = payload.memory_mib.unwrap_or(256);
-    let disk_mib = payload.disk_mib.unwrap_or(1024);
-
     let task = crate::deploy::worker::BuildTask {
         deployment_id: deployment.id,
         app_id: app.id,
@@ -213,7 +221,7 @@ pub async fn deploy_app_version_handler(
         vcpus,
         memory_mib: memory_mib as u32,
         disk_mib: disk_mib as u32,
-        env: payload.env.clone().unwrap_or_default(),
+        env: env_vars,
     };
 
     crate::deploy::worker::start_build_polling(state.clone(), task).await;
