@@ -2526,6 +2526,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mikrom-init"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "nix",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mikrom-proto"
 version = "0.1.1"
 dependencies = [
@@ -2575,6 +2585,7 @@ name = "mikrom-scheduler"
 version = "0.1.1"
 dependencies = [
  "anyhow",
+ "async-stream",
  "async-trait",
  "chrono",
  "dotenvy",

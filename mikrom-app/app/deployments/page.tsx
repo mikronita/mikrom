@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { 
   HiRefresh, 
   HiServer, 
@@ -17,7 +17,7 @@ import Link from "next/link";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { getToken } from "@/lib/auth";
-import { listVms, stopVm, deleteVm, VmInfo } from "@/lib/api";
+import { listVms, stopVm, deleteVm, listApps, LiveDeploymentInfo, AppInfo, watchDeploymentsSSE } from "@/lib/api";
 
 import { Badge, Table, TableBody, TableCell, TableHead, TableHeadCell, TableRow, TextInput, Alert, Button, Card } from "flowbite-react";
 import { cn } from "@/lib/utils";
@@ -35,7 +35,8 @@ function getStatusColor(status: string): string {
 }
 
 export default function DeploymentsPage() {
-  const [deployments, setDeployments] = useState<VmInfo[]>([]);
+  const [deployments, setDeployments] = useState<LiveDeploymentInfo[]>([]);
+  const [apps, setApps] = useState<AppInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [stoppingId, setStoppingId] = useState<string | null>(null);
@@ -48,9 +49,12 @@ export default function DeploymentsPage() {
     const token = getToken();
     if (!token) return;
     if (isInitial) setLoading(true);
-    const result = await listVms(token);
-    if (!result.error) {
-      setDeployments(result.data ?? []);
+    const [vmResult, appResult] = await Promise.all([listVms(token), listApps(token)]);
+    if (!vmResult.error) {
+      setDeployments(vmResult.data ?? []);
+    }
+    if (!appResult.error) {
+      setApps(appResult.data ?? []);
     }
     if (isInitial) setLoading(false);
   }, []);
@@ -90,46 +94,50 @@ export default function DeploymentsPage() {
     return s === "running" || s === "scheduled" || s === "pending";
   };
 
-  const deploymentsRef = useRef(deployments);
-  useEffect(() => {
-    deploymentsRef.current = deployments;
-  }, [deployments]);
-
   useEffect(() => {
     let isMounted = true;
+    const cleanupRef = { current: null as (() => void) | null };
     
     const init = async () => {
       const token = getToken();
       if (!token) return;
-      const result = await listVms(token);
-      if (isMounted && !result.error) {
-        setDeployments(result.data ?? []);
-        setLoading(false);
-      }
+      
+      const [vmResult, appResult] = await Promise.all([listVms(token), listApps(token)]);
+      
+      if (!isMounted) return;
+
+      if (!vmResult.error) setDeployments(vmResult.data ?? []);
+      if (!appResult.error) setApps(appResult.data ?? []);
+      setLoading(false);
+
+      // Start SSE for real-time updates
+      cleanupRef.current = watchDeploymentsSSE(
+        token,
+        (updatedVm) => {
+          if (!isMounted) return;
+          setDeployments(prev => {
+            const index = prev.findIndex(vm => vm.job_id === updatedVm.job_id);
+            if (index === -1) {
+              return [...prev, updatedVm];
+            }
+            const next = [...prev];
+            next[index] = { ...prev[index], ...updatedVm };
+            return next;
+          });
+        },
+        (error) => {
+          if (isMounted) {
+            console.error("Deployments SSE Error:", error);
+          }
+        }
+      );
     };
     
     init();
 
-    const intervalId = setInterval(async () => {
-      const hasTransitional = deploymentsRef.current.some(vm => {
-        const s = vm.status.toLowerCase();
-        return s === "pending" || s === "scheduled" || s === "stopping";
-      });
-
-      if (hasTransitional) {
-        const token = getToken();
-        if (token) {
-          const result = await listVms(token);
-          if (isMounted && !result.error) {
-            setDeployments(result.data ?? []);
-          }
-        }
-      }
-    }, 3000);
-
     return () => {
       isMounted = false;
-      clearInterval(intervalId);
+      if (cleanupRef.current) cleanupRef.current();
     };
   }, []);
 
@@ -227,10 +235,16 @@ export default function DeploymentsPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge color={getStatusColor(vm.status)} className="capitalize w-fit">
-                            {normalizeStatus(vm.status)}
-                          </Badge>
+                          <div className="flex flex-col gap-1">
+                            <Badge color={getStatusColor(vm.status)} className="w-fit">
+                              {normalizeStatus(vm.status)}
+                            </Badge>
+                            {apps.find(a => a.id === vm.app_id)?.active_deployment_id === vm.deployment_id && (
+                              <span className="text-[8px] bg-green-100 text-green-700 px-1 rounded font-bold uppercase w-fit">Active Production</span>
+                            )}
+                          </div>
                         </TableCell>
+
                         <TableCell className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
                           {vm.image}
                         </TableCell>

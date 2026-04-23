@@ -18,6 +18,7 @@ import {
   HiTrash,
   HiLightningBolt
 } from "react-icons/hi";
+import { HiRocketLaunch } from "react-icons/hi2";
 import { Loader2 } from "lucide-react";
 import { 
   AreaChart, 
@@ -31,8 +32,9 @@ import {
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { getToken } from "@/lib/auth";
-import { getVmLogsSSE, LogLine, pauseVm, resumeVm } from "@/lib/api";
+import { getVmLogsSSE, LogLine, pauseVm, resumeVm, activateDeployment } from "@/lib/api";
 import { useVm, useStopVm, useDeleteVm } from "@/lib/hooks/use-vms";
+import { useApps } from "@/lib/hooks/use-apps";
 import Ansi from "ansi-to-react";
 import { toast } from "sonner";
 
@@ -130,7 +132,9 @@ export default function InstanceDetailPage() {
   const router = useRouter();
   const jobId = params.job_id as string;
 
-  const { data: vm, isLoading, error, refetch, isFetching } = useVm(jobId);
+  const { data: vm, isLoading, isError, refetch, isFetching } = useVm(jobId);
+  const { data: apps = [] } = useApps();
+
   const stopVmMutation = useStopVm();
   const deleteVmMutation = useDeleteVm();
 
@@ -232,11 +236,11 @@ export default function InstanceDetailPage() {
     );
   }
 
-  if (error || !vm) {
+  if (isError || !vm) {
     return (
       <DashboardLayout>
         <Alert color="failure" icon={HiExclamationCircle}>
-          <span className="font-medium">Error loading instance:</span> {error instanceof Error ? error.message : "Instance not found"}
+          <span className="font-medium">Error loading instance:</span> Instance not found
         </Alert>
         <div className="mt-4">
           <Button color="gray" onClick={() => router.push("/deployments")}>
@@ -295,6 +299,28 @@ export default function InstanceDetailPage() {
                 <HiRefresh className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
                 Refresh
               </Button>
+
+              {vm && vm.app_id && vm.status.toLowerCase() === "running" && 
+               apps.find(a => a.id === vm.app_id)?.active_deployment_id !== vm.deployment_id && (
+                <Button 
+                  color="dark" 
+                  size="sm"
+                  onClick={async () => {
+                    const deploymentId = vm.deployment_id;
+                    const app = apps.find(a => a.id === vm.app_id);
+                    if (!deploymentId || !app) return;
+                    const res = await activateDeployment(getToken()!, app.id, deploymentId);
+                    if (res.error) toast.error(res.error);
+                    else { 
+                      toast.success("Instance promoted to production!"); 
+                      refetch();
+                    }
+                  }}
+                >
+                  <HiRocketLaunch className="w-4 h-4 mr-2" />
+                  Promote to Production
+                </Button>
+              )}
               
               {isRunning && (
                 <>

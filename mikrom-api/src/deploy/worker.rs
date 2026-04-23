@@ -9,7 +9,10 @@ use uuid::Uuid;
 
 #[async_trait]
 pub trait BuilderClient: Send + Sync {
-    async fn get_build_status(&self, build_id: String) -> anyhow::Result<(BuildStatus, String)>;
+    async fn get_build_status(
+        &self,
+        build_id: String,
+    ) -> anyhow::Result<(BuildStatus, String, u32)>;
 }
 
 #[async_trait]
@@ -26,7 +29,10 @@ pub struct RealBuilderClient {
 
 #[async_trait]
 impl BuilderClient for RealBuilderClient {
-    async fn get_build_status(&self, build_id: String) -> anyhow::Result<(BuildStatus, String)> {
+    async fn get_build_status(
+        &self,
+        build_id: String,
+    ) -> anyhow::Result<(BuildStatus, String, u32)> {
         let channel = crate::builder::connect(&self.addr).await?;
         let mut client = BuilderServiceClient::new(channel);
         let resp = client
@@ -34,7 +40,7 @@ impl BuilderClient for RealBuilderClient {
             .await?
             .into_inner();
         let status = BuildStatus::try_from(resp.status).unwrap_or(BuildStatus::Unspecified);
-        Ok((status, resp.image_tag))
+        Ok((status, resp.image_tag, resp.exposed_port))
     }
 }
 
@@ -150,7 +156,7 @@ async fn poll_and_deploy(
     );
 
     let mut attempts = 0;
-    let final_image = loop {
+    let (final_image, detected_port) = loop {
         if attempts > 60 {
             let _ = state
                 .app_repo
@@ -166,16 +172,18 @@ async fn poll_and_deploy(
             return Err(anyhow::anyhow!("Build timed out"));
         }
 
-        let (status, image_tag) = builder.get_build_status(task.build_id.clone()).await?;
+        let (status, image_tag, exposed_port) =
+            builder.get_build_status(task.build_id.clone()).await?;
 
         match status {
             BuildStatus::Success => {
                 info!(
                     app = %task.app_name,
                     image = %image_tag,
+                    port = %exposed_port,
                     "Build successful, proceeding to deployment"
                 );
-                break image_tag;
+                break (image_tag, exposed_port);
             },
             BuildStatus::Failed => {
                 let _ = state
@@ -198,6 +206,14 @@ async fn poll_and_deploy(
         }
     };
 
+    // Use detected port if available (Dockerfile EXPOSE), otherwise use original port (Railpack/Default)
+    let final_port = if detected_port > 0 {
+        info!(app = %task.app_name, port = %detected_port, "Using detected port from image");
+        detected_port
+    } else {
+        task.port
+    };
+
     let deploy_req = DeployRequest {
         app_id: task.app_id.to_string(),
         app_name: task.app_name.clone(),
@@ -206,7 +222,7 @@ async fn poll_and_deploy(
             vcpus: task.vcpus,
             memory_mib: task.memory_mib,
             disk_mib: task.disk_mib,
-            port: task.port,
+            port: final_port,
             env: task.env,
             ip_address: String::new(),
             gateway: String::new(),
@@ -217,6 +233,14 @@ async fn poll_and_deploy(
     };
 
     let response = scheduler.deploy_app(deploy_req).await?;
+
+    // Update App record with the detected port if it changed
+    if detected_port > 0 && detected_port != task.port {
+        let _ = state
+            .app_repo
+            .update_app_port(task.app_id, detected_port as i32)
+            .await;
+    }
 
     // Update Deployment with Scheduler info
     let _ = state
@@ -230,6 +254,29 @@ async fn poll_and_deploy(
             None, // IP will be synced by the other background task
         )
         .await;
+
+    // The deployment record also has a port field (used by router join)
+    if detected_port > 0 {
+        let _ = state
+            .app_repo
+            .update_deployment_port(task.deployment_id, detected_port as i32)
+            .await;
+    }
+
+    // Auto-promote if no active deployment is set
+    if let Ok(Some(app)) = state.app_repo.get_app(task.app_id).await
+        && app.active_deployment_id.is_none()
+    {
+        info!(
+            app = %task.app_name,
+            deployment_id = %task.deployment_id,
+            "No active deployment set, auto-promoting this one"
+        );
+        let _ = state
+            .app_repo
+            .set_active_deployment(task.app_id, task.deployment_id)
+            .await;
+    }
 
     info!(
         app = %task.app_name,

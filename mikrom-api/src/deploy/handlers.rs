@@ -26,6 +26,7 @@ pub struct AppResponse {
     pub git_url: String,
     pub port: i32,
     pub hostname: Option<String>,
+    pub active_deployment_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -81,6 +82,7 @@ pub async fn create_app_handler(
         git_url: app.git_url,
         port: app.port,
         hostname: app.hostname,
+        active_deployment_id: app.active_deployment_id,
         created_at: app.created_at,
     }))
 }
@@ -107,7 +109,7 @@ pub async fn list_apps_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let resp = apps
+    let resp: Vec<AppResponse> = apps
         .into_iter()
         .map(|app| AppResponse {
             id: app.id,
@@ -115,6 +117,7 @@ pub async fn list_apps_handler(
             git_url: app.git_url,
             port: app.port,
             hostname: app.hostname,
+            active_deployment_id: app.active_deployment_id,
             created_at: app.created_at,
         })
         .collect();
@@ -349,4 +352,72 @@ pub async fn list_deployments_handler(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     Ok(Json(deployments))
+}
+
+#[utoipa::path(
+    post,
+    path = "/apps/{app_id}/deployments/{deployment_id}/activate",
+    params(
+        ("app_id" = Uuid, Path, description = "App ID"),
+        ("deployment_id" = Uuid, Path, description = "Deployment ID")
+    ),
+    responses(
+        (status = 200, description = "Deployment activated"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "App or Deployment not found", body = crate::error::ErrorResponse),
+        (status = 400, description = "Deployment is not in RUNNING status", body = crate::error::ErrorResponse)
+    ),
+    tag = "apps",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn activate_deployment_handler(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path((app_id, deployment_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<StatusCode> {
+    // 1. Verify app ownership
+    let app = state
+        .app_repo
+        .get_app(app_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("App not found".to_string()))?;
+
+    if app.user_id
+        != Uuid::parse_str(&auth.user_id)
+            .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?
+    {
+        return Err(ApiError::Forbidden);
+    }
+
+    // 2. Verify deployment exists and belongs to app
+    let deployment = state
+        .app_repo
+        .get_deployment(deployment_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Deployment not found".to_string()))?;
+
+    if deployment.app_id != app_id {
+        return Err(ApiError::BadRequest(
+            "Deployment does not belong to this app".to_string(),
+        ));
+    }
+
+    if deployment.status != "RUNNING" {
+        return Err(ApiError::BadRequest(
+            "Only RUNNING deployments can be activated".to_string(),
+        ));
+    }
+
+    // 3. Set as active
+    state
+        .app_repo
+        .set_active_deployment(app_id, deployment_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(StatusCode::OK)
 }

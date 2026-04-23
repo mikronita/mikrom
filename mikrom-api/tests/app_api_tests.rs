@@ -53,6 +53,7 @@ async fn test_create_app_endpoint() {
                 port,
                 hostname: hostname.map(|s| s.to_string()),
                 user_id: Uuid::parse_str(uid).unwrap(),
+                active_deployment_id: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             })

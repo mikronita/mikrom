@@ -84,12 +84,12 @@ async fn test_openapi_json_spec() {
     assert!(spec["paths"]["/auth/register"].is_object());
     assert!(spec["paths"]["/apps"].is_object());
     assert!(spec["paths"]["/health"].is_object());
-    assert!(spec["paths"]["/vms"].is_object());
-    assert!(spec["paths"]["/vms/{job_id}"].is_object());
-    assert!(spec["paths"]["/vms/{job_id}/logs"].is_object());
-    assert!(spec["paths"]["/vms/{job_id}/pause"].is_object());
-    assert!(spec["paths"]["/vms/{job_id}/resume"].is_object());
-    assert!(spec["paths"]["/vms/{job_id}/delete"].is_object());
+    assert!(spec["paths"]["/deployments/active"].is_object());
+    assert!(spec["paths"]["/deployments/{job_id}"].is_object());
+    assert!(spec["paths"]["/deployments/{job_id}/logs"].is_object());
+    assert!(spec["paths"]["/deployments/{job_id}/pause"].is_object());
+    assert!(spec["paths"]["/deployments/{job_id}/resume"].is_object());
+    assert!(spec["paths"]["/deployments/{job_id}/delete"].is_object());
     assert!(spec["components"]["schemas"]["App"].is_object());
     assert!(spec["components"]["schemas"]["Deployment"].is_object());
     assert!(spec["components"]["schemas"]["HealthResponse"].is_object());

@@ -7,7 +7,7 @@ use mikrom_proto::scheduler::{
     DeleteAppResponse, DeployRequest, DeployResponse, GetLogsRequest, GetLogsResponse,
     ListAppsRequest, ListAppsResponse, PauseRequest, PauseResponse, RegisterWorkerRequest,
     RegisterWorkerResponse, ReportMetricsRequest, ReportMetricsResponse, ResumeRequest,
-    ResumeResponse,
+    ResumeResponse, WatchAppsRequest, WatchAppsResponse,
     scheduler_service_server::{SchedulerService, SchedulerServiceServer},
 };
 
@@ -660,6 +660,54 @@ impl SchedulerService for SchedulerServer {
             },
         ))
     }
+
+    #[tracing::instrument(skip(self, request), fields(user_id = %request.get_ref().user_id))]
+    async fn watch_apps(
+        &self,
+        request: tonic::Request<WatchAppsRequest>,
+    ) -> Result<Response<Self::WatchAppsStream>, Status> {
+        let req = request.into_inner();
+        let user_id = req.user_id;
+
+        let mut rx = self.scheduler.job_updates.subscribe();
+
+        let output_stream = async_stream::try_stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(job) => {
+                        if user_id.is_empty() || job.user_id == user_id {
+                            yield WatchAppsResponse {
+                                app: Some(AppInfo {
+                                    job_id: job.job_id,
+                                    app_id: job.app_id,
+                                    app_name: job.app_name,
+                                    image: job.image,
+                                    status: job.status as i32,
+                                    host_id: job.host_id.unwrap_or_default(),
+                                    vm_id: job.vm_id.unwrap_or_default(),
+                                }),
+                            };
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!("WatchApps stream lagged by {} events", skipped);
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                }
+            }
+        };
+
+        Ok(Response::new(
+            Box::pin(output_stream) as Self::WatchAppsStream
+        ))
+    }
+
+    type WatchAppsStream = std::pin::Pin<
+        Box<dyn tokio_stream::Stream<Item = Result<WatchAppsResponse, Status>> + Send>,
+    >;
 }
 
 impl SchedulerServer {
@@ -1712,5 +1760,74 @@ mod tests {
 
         assert!(resp.is_err());
         assert_eq!(resp.unwrap_err().code(), tonic::Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn test_watch_apps_streams_updates() {
+        let server = make_server();
+        let user_id = "user-sse-test".to_string();
+
+        // Start watching
+        let mut stream = server
+            .watch_apps(Request::new(WatchAppsRequest {
+                user_id: user_id.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Simulate a job update in the background
+        let server_clone = server.clone();
+        let user_id_clone = user_id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            let _ = server_clone
+                .deploy_app(Request::new(DeployRequest {
+                    app_id: "app-1".to_string(),
+                    app_name: "test-app".to_string(),
+                    image: "nginx".to_string(),
+                    config: None,
+                    user_id: user_id_clone,
+                }))
+                .await;
+        });
+
+        // Wait for the event
+        let next = tokio_stream::StreamExt::next(&mut stream).await;
+        assert!(next.is_some());
+        let event = next.unwrap().unwrap();
+        let app = event.app.unwrap();
+        assert_eq!(app.app_id, "app-1");
+        assert_eq!(app.app_name, "test-app");
+    }
+
+    #[tokio::test]
+    async fn test_watch_apps_filters_by_user() {
+        let server = make_server();
+        let user_1 = "user-1".to_string();
+        let user_2 = "user-2".to_string();
+
+        let mut stream_1 = server
+            .watch_apps(Request::new(WatchAppsRequest {
+                user_id: user_1.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Trigger job for user 2 (should NOT appear in stream 1)
+        let _ = server.deploy_app(Request::new(deploy_req(&user_2))).await;
+
+        // Trigger job for user 1 (should appear in stream 1)
+        let _ = server.deploy_app(Request::new(deploy_req(&user_1))).await;
+
+        // Verify stream 1 only gets user 1's job
+        let next = tokio_stream::StreamExt::next(&mut stream_1).await;
+        assert!(next.is_some());
+        let event = next.unwrap().unwrap();
+        assert_eq!(
+            event.app.unwrap().job_id,
+            server.scheduler().list_jobs(Some(&user_1), None)[0].job_id
+        );
     }
 }

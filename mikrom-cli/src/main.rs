@@ -42,25 +42,25 @@ pub enum Commands {
     },
     /// List all active deployments
     Deployments,
-    /// Get status of a specific instance
+    /// Get status of a specific deployment
     Status { job_id: String },
-    /// Stop a running instance
+    /// Stop a running deployment
     Stop { job_id: String },
-    /// Get logs for an instance
+    /// Get logs for a deployment
     Logs {
         job_id: String,
         #[arg(long, short)]
         follow: bool,
     },
-    /// Pause a running instance
+    /// Pause a running deployment
     Pause { job_id: String },
-    /// Resume a paused instance
+    /// Resume a paused deployment
     Resume { job_id: String },
-    /// Delete an instance and its resources
+    /// Delete a deployment record
     Delete { job_id: String },
-    /// Restart an instance
+    /// Restart a deployment
     Restart { job_id: String },
-    /// Get metrics for an instance or the entire cluster
+    /// Get metrics for a deployment or the entire cluster
     Metrics { job_id: Option<String> },
     /// Show information about the current user
     Whoami,
@@ -106,6 +106,11 @@ pub enum AppCommands {
     Delete { app_id: String },
     /// Deploy an application
     Deploy { app_id: String },
+    /// Activate a specific deployment for an application (Rollback/Promotion)
+    Activate {
+        app_id: String,
+        deployment_id: String,
+    },
 }
 
 #[tokio::main]

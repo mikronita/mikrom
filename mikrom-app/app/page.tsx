@@ -7,6 +7,7 @@ import {
   HiRefresh, 
   HiChartBar, 
   HiCollection, 
+  HiClock,
   HiLightningBolt, 
   HiExternalLink,
   HiExclamationCircle,
@@ -206,6 +207,11 @@ export default function Page() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
+                          <Link href={`/apps/${app.id}/deployments`}>
+                            <Button color="gray" size="xs" title="Deployment History">
+                              <HiClock className="w-3 h-3 mr-1" /> History
+                            </Button>
+                          </Link>
                           <Button 
                             color="dark" 
                             size="xs" 
@@ -256,7 +262,12 @@ export default function Page() {
                         )} />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-zinc-900 dark:text-white truncate">{vm.app_name}</p>
-                          <p className="text-[10px] text-zinc-500 truncate uppercase">{normalizeStatus(vm.status)}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-[10px] text-zinc-500 truncate uppercase">{normalizeStatus(vm.status)}</p>
+                            {apps.find(a => a.id === vm.app_id)?.active_deployment_id === vm.deployment_id && (
+                              <span className="text-[8px] bg-green-100 text-green-700 px-1 rounded font-bold uppercase">Prod</span>
+                            )}
+                          </div>
                         </div>
                         <HiExternalLink className="w-3 h-3 text-zinc-300 group-hover:text-zinc-500" />
                       </div>
