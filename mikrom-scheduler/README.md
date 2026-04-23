@@ -1,47 +1,28 @@
 # mikrom-scheduler
 
-gRPC scheduler service for the mikrom orchestration system. Built with [Tonic](https://github.com/hyperium/tonic).
+The intelligent resource manager for the Mikrom PaaS. It orchestrates the placement of microVMs across a cluster of worker nodes, ensuring optimal resource utilization and high availability. Built with [Tonic](https://github.com/hyperium/tonic).
 
 **Port:** `5002`
 
-## Architecture
+## Key Responsibilities
 
-```
-mikrom-api (REST)
-    │
-    │ DeployApp RPC
-    ▼
-mikrom-scheduler
-    │
-    ├─ WorkerRegistry: tracks registered agents
-    ├─ AppScheduler: manages job lifecycle
-    └─ HostMetrics: scores workers by available resources
-         │
-         │ StartVm RPC
-         ▼
-    mikrom-agent
-```
+- **Worker Registry**: Tracks all active worker nodes, their identity, and their networking configuration.
+- **Resource Orchestration**: Selects the best worker for every deployment using intelligent scoring.
+- **Job Lifecycle**: Manages the transitions between `PENDING`, `SCHEDULED`, `RUNNING`, and `FAILED` for every microVM.
+- **IPAM (IP Address Management)**: Automatically allocates and releases internal IP addresses for microVMs within each worker's subnet.
+- **Health Monitoring**: Detects stale workers and automatically marks their workloads as unreachable.
 
-## Responsibilities
+## Intelligent Placement
 
-- Maintains an in-memory registry of worker nodes (`WorkerRegistry`).
-- Receives `DeployApp` requests from `mikrom-api` and selects the best available worker.
-- Forwards `StartVm` RPCs to the chosen `mikrom-agent`.
-- Tracks the lifecycle of each deployment as a `Job`.
+When a deployment is requested, the scheduler evaluates candidates based on:
 
-## Worker selection
-
-When a deploy request arrives the scheduler:
-
-1. **Filter**: Workers must have reported metrics within 30 seconds (configurable via `METRICS_TTL_SECS`).
-2. **Capacity check**: Workers must have enough `memory_mib` + `disk_mib` for the requested VM.
-3. **Slot check**: Workers can host at most `MAX_APPS_PER_HOST` (10) applications.
-4. **Score**: Each candidate is scored with `HostMetrics::calculate_score`:
-   - `score = (available_memory_mib / total_memory_mib) + (available_disk_mib / total_disk_mib)`
-   - Higher score = more headroom.
-5. **Select**: The highest-scoring worker is chosen.
-
-If no workers are registered the scheduler returns `NoWorkersAvailable`. If workers exist but none can fit the VM requirements it returns `NoFit`.
+1.  **Strict Filters**: Candidates must have enough CPU, RAM, and Disk, and must have reported metrics within the last 30 seconds.
+2.  **Scoring**:
+    - **Resource Headroom**: Favors nodes with more free memory and disk.
+    - **Soft Anti-Affinity**: Mikrom tries to spread instances of the same application across different physical hosts to maximize reliability. Each existing instance of an app on a node applies a penalty to its placement score.
+3.  **Strategies**:
+    - **Least Loaded (Default)**: Spreads work across all nodes.
+    - **Bin Packing**: Fills nodes sequentially to allow idle nodes to be powered down.
 
 ## gRPC API
 
@@ -49,33 +30,20 @@ Defined in `mikrom-proto/proto/scheduler.proto`.
 
 | RPC | Direction | Description |
 |---|---|---|
-| `DeployApp` | mikrom-api → scheduler | Schedule and launch a new VM |
-| `RegisterWorker` | agent → scheduler | Register an agent node |
-| `ReportMetrics` | agent → scheduler | Update resource metrics |
-| `StopVm` | mikrom-api → scheduler | Stop a running VM |
-| `GetVmStatus` | mikrom-api → scheduler | Get VM status |
+| `DeployApp` | API → Scheduler | Orchestrate a new deployment |
+| `RegisterWorker` | Agent → Scheduler | Join the cluster as a worker |
+| `ReportMetrics` | Agent → Scheduler | Heartbeat with resource usage |
+| `DeleteApp` | API → Scheduler | Permanently stop and remove a job |
+| `GetAppStatus` | API → Scheduler | Retrieve real-time VM information |
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
-| `METRICS_TTL_SECS` | `30` | Seconds before metrics are considered stale |
-| `MAX_APPS_PER_HOST` | `10` | Maximum VMs per worker node |
-| `USE_TLS` | `false` | Enable mutual TLS for gRPC |
-| `CERTS_DIR` | — | Directory containing TLS certificates (required when `USE_TLS=true`) |
-
-## Deployment flow
-
-```
-1. API receives POST /deploy
-2. API calls DeployApp RPC → Scheduler
-3. Scheduler selects best worker (highest score)
-4. Scheduler calls StartVm RPC → Agent
-5. Agent starts Firecracker VM (stubbed)
-6. Agent returns VM details to Scheduler
-7. Scheduler returns job details to API
-8. API returns job_id to client
-```
+| `SCHEDULER_PORT` | `5002` | gRPC port |
+| `METRICS_TTL_SECS` | `30` | Heartbeat timeout |
+| `MAX_APPS_PER_HOST` | `10` | Resource isolation limit |
+| `USE_TLS` | `false` | Enable mutual TLS |
 
 ## Development
 
@@ -83,19 +51,18 @@ Defined in `mikrom-proto/proto/scheduler.proto`.
 # Run the scheduler
 cargo run -p mikrom-scheduler
 
-# Unit tests
-cargo test --lib -p mikrom-scheduler
+# Run tests
+cargo test -p mikrom-scheduler
 ```
 
-## Code structure
+## Internal Architecture
 
 ```
 src/
-  main.rs            Entry point — binds gRPC server
-  lib.rs             Public re-exports
-  server.rs          Tonic service implementation (DeployApp, RegisterWorker, ReportMetrics)
-  scheduler.rs       AppScheduler — job tracking and worker selection logic
-  worker_registry.rs WorkerRegistry — in-memory store of known agents
-  metrics.rs         HostMetrics — resource snapshot and scoring function
-  job.rs             Job and JobStatus types
+  server.rs          # Tonic implementation and request validation
+  scheduler/         # Placement algorithms and state management
+    ipam.rs          # IP Address Management (subnet-based)
+  worker_registry.rs # Thread-safe store of cluster nodes
+  metrics.rs         # Resource snapshots and scoring logic
+  job.rs             # Job and JobStatus definitions
 ```
