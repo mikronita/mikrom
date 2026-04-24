@@ -237,6 +237,7 @@ async fn test_http_api_deploy_e2e() {
         jwt_secret: E2E_JWT_SECRET.to_string(),
         master_key: "e2e-key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
     let app = create_app(state);
 
@@ -328,6 +329,7 @@ async fn test_sse_deployments_events_e2e() {
         jwt_secret: E2E_JWT_SECRET.to_string(),
         master_key: "e2e-key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
     let app = create_app(state);
 

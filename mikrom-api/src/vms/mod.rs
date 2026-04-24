@@ -552,6 +552,7 @@ mod tests {
             jwt_secret: "secret".to_string(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         let auth = AuthUser {
@@ -586,6 +587,7 @@ mod tests {
             jwt_secret: "secret".to_string(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         let _auth = AuthUser {
@@ -654,6 +656,7 @@ mod tests {
             jwt_secret: "secret".to_string(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         let auth = AuthUser {

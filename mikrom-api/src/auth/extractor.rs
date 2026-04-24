@@ -39,31 +39,37 @@ impl FromRequestParts<crate::AppState> for AuthUser {
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
         {
-            header.strip_prefix("Bearer ").ok_or_else(|| {
-                AuthError {
-                    error: "Authorization header must use Bearer scheme".to_string(),
-                }
-                .into_response()
-            })?
+            header
+                .strip_prefix("Bearer ")
+                .ok_or_else(|| {
+                    AuthError {
+                        error: "Authorization header must use Bearer scheme".to_string(),
+                    }
+                    .into_response()
+                })?
+                .to_string()
         } else {
             // Try query param for EventSource/SSE support
-            let query = parts.uri.query().unwrap_or_default();
-            let token_param = query
-                .split('&')
-                .find(|s| s.starts_with("token="))
-                .and_then(|s| s.strip_prefix("token="));
+            #[derive(serde::Deserialize)]
+            struct TokenQuery {
+                token: String,
+            }
 
-            token_param.ok_or_else(|| {
-                AuthError {
-                    error: "Missing Authorization header or token query parameter".to_string(),
-                }
-                .into_response()
-            })?
+            axum::extract::Query::<TokenQuery>::from_request_parts(parts, state)
+                .await
+                .ok()
+                .map(|q| q.0.token)
+                .ok_or_else(|| {
+                    AuthError {
+                        error: "Missing Authorization header or token query parameter".to_string(),
+                    }
+                    .into_response()
+                })?
         };
 
         let Claims {
             sub, email, role, ..
-        } = crate::auth::jwt::verify_token(token, &state.jwt_secret).map_err(|_| {
+        } = crate::auth::jwt::verify_token(&token, &state.jwt_secret).map_err(|_| {
             AuthError {
                 error: "Invalid or expired token".to_string(),
             }
@@ -139,6 +145,7 @@ mod tests {
             jwt_secret: jwt_secret.to_string(),
             master_key: "test-master-key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
         axum::Router::new()
             .route("/whoami", get(whoami))
