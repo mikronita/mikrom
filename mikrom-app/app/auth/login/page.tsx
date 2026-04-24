@@ -101,7 +101,7 @@ function LoginForm() {
         </div>
 
         <div className="flex flex-col gap-4">
-          <Button type="submit" color="dark" disabled={isLoading} className="w-full">
+          <Button type="submit" color="blue" disabled={isLoading} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

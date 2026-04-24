@@ -5,14 +5,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
   HiChartPie, 
-  HiServer, 
   HiCog, 
   HiLogout, 
   HiCube,
   HiSearch,
   HiBell,
   HiMenuAlt2,
-  HiX
+  HiX,
+  HiCollection
 } from "react-icons/hi";
 import { 
   Sidebar, 
@@ -136,13 +136,13 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               </SidebarItem>
               <SidebarItem 
                 as={Link}
-                href="/deployments" 
-                icon={HiServer}
-                active={pathname.startsWith("/deployments")}
-                className={pathname.startsWith("/deployments") ? "bg-gray-100 dark:bg-gray-700" : ""}
+                href="/apps" 
+                icon={HiCollection}
+                active={pathname.startsWith("/apps")}
+                className={pathname.startsWith("/apps") ? "bg-gray-100 dark:bg-gray-700" : ""}
                 onClick={() => setIsSidebarOpen(false)}
               >
-                Active Deployments
+                Applications
               </SidebarItem>
               <SidebarItem 
                 as={Link}

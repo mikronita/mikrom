@@ -110,8 +110,8 @@ export default function SettingsPage() {
                         <h3 className="text-lg font-bold dark:text-white">Profile Picture</h3>
                         <p className="text-sm text-zinc-500">JPG, GIF or PNG. Max size of 800K</p>
                         <div className="flex gap-2 justify-center sm:justify-start">
-                          <Button color="dark" size="xs">Upload New</Button>
-                          <Button color="gray" size="xs" outline>Delete</Button>
+                          <Button color="blue" size="xs">Upload New</Button>
+                          <Button color="failure" size="xs">Delete</Button>
                         </div>
                       </div>
                     </div>
@@ -159,7 +159,7 @@ export default function SettingsPage() {
 
                     <div className="flex justify-end">
                       <Button 
-                        color="primary" 
+                        color="blue" 
                         onClick={handleSave} 
                         disabled={updateMutation.isPending}
                       >
@@ -195,7 +195,7 @@ export default function SettingsPage() {
                         </div>
                         <TextInput id="newPassword" type="password" />
                       </div>
-                      <Button color="dark" className="w-fit">Update Password</Button>
+                      <Button color="blue" className="w-fit">Update Password</Button>
                     </div>
                   </div>
 
@@ -207,7 +207,7 @@ export default function SettingsPage() {
                       </div>
                       <Badge color="warning" icon={HiShieldCheck}>Not Enabled</Badge>
                     </div>
-                    <Button color="gray" outline size="sm">Configure 2FA</Button>
+                    <Button color="blue" size="sm">Configure 2FA</Button>
                   </div>
 
                   <div className="pt-8 border-t border-zinc-100 dark:border-zinc-800">
@@ -229,7 +229,7 @@ export default function SettingsPage() {
                       <h3 className="text-lg font-bold dark:text-white">Personal Access Tokens</h3>
                       <p className="text-sm text-zinc-500">Use tokens to authenticate with the Mikrom CLI and API.</p>
                     </div>
-                    <Button color="dark" size="sm">
+                    <Button color="blue" size="sm">
                       <HiPlus className="mr-2 h-4 w-4" />
                       Create New Token
                     </Button>
@@ -246,7 +246,7 @@ export default function SettingsPage() {
                           <p className="text-xs text-zinc-500">Last used 2 hours ago • Created April 12, 2026</p>
                         </div>
                       </div>
-                      <Button color="gray" size="xs" outline>Revoke</Button>
+                      <Button color="failure" size="xs">Revoke</Button>
                     </div>
                   </div>
                 </div>
@@ -265,8 +265,8 @@ export default function SettingsPage() {
                       <Badge color="info">Active</Badge>
                     </div>
                     <div className="mt-6 flex gap-2">
-                      <Button color="light" size="sm">Change Plan</Button>
-                      <Button color="failure" size="sm" outline className="text-white border-zinc-700 hover:bg-zinc-800">Cancel Subscription</Button>
+                      <Button color="blue" size="sm">Change Plan</Button>
+                      <Button color="failure" size="sm">Cancel Subscription</Button>
                     </div>
                   </Card>
 
@@ -278,7 +278,7 @@ export default function SettingsPage() {
                         <p className="text-sm font-bold dark:text-white">Visa ending in 4242</p>
                         <p className="text-xs text-zinc-500">Expires 12/28</p>
                       </div>
-                      <Button color="gray" size="xs" outline>Edit</Button>
+                      <Button color="light" size="xs">Edit</Button>
                     </div>
                   </div>
                 </div>

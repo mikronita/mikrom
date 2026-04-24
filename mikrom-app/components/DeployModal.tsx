@@ -136,10 +136,10 @@ export function DeployModal({ onClose }: DeployModalProps) {
           </div>
         </ModalBody>
         <ModalFooter className="justify-end">
-          <Button color="gray" onClick={onClose}>
+          <Button color="light" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" color="dark" disabled={deployMutation.isPending}>
+          <Button type="submit" color="blue" disabled={deployMutation.isPending}>
             {deployMutation.isPending ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
