@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { 
   HiServer, 
   HiSearch,
@@ -15,11 +15,10 @@ import Link from "next/link";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { getToken } from "@/lib/auth";
-import { listVms, stopVm, deleteVm, listApps, LiveDeploymentInfo, AppInfo, watchDeploymentsSSE } from "@/lib/api";
+import { useVms, useStopVm, useDeleteVm } from "@/lib/hooks/use-vms";
+import { useApps } from "@/lib/hooks/use-apps";
 
 import { Badge, Table, TableBody, TableCell, TableHead, TableHeadCell, TableRow, TextInput, Alert, Button, Card } from "flowbite-react";
-
 function normalizeStatus(status: string): string {
   return status.toLowerCase() === "cancelled" ? "stopped" : status;
 }
@@ -122,7 +121,7 @@ export default function DeploymentsPage() {
             </div>
 
             {stopError && (
-              <Alert color="failure" className="rounded-none" icon={() => <HiExclamationCircle className="w-4 h-4 mr-2" />} onDismiss={() => setStopError(null)}>
+              <Alert color="failure" className="rounded-none" icon={HiExclamationCircle} onDismiss={() => setStopError(null)}>
                 {stopError}
               </Alert>
             )}
