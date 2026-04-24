@@ -183,9 +183,10 @@ impl ImageBuilder {
         let dest_init_path = format!("{}/mikrom-init", mount_dir);
 
         for path in &host_init_paths {
-            if std::path::Path::new(path).exists() {
+            if tokio::fs::metadata(path).await.is_ok() {
                 info!(path = %path, "Found mikrom-init binary, inyecting...");
-                std::fs::copy(path, &dest_init_path)
+                tokio::fs::copy(path, &dest_init_path)
+                    .await
                     .context("Failed to copy mikrom-init binary")?;
                 found_init = true;
                 break;
@@ -207,7 +208,9 @@ impl ImageBuilder {
 
         // Create /etc/mikrom/init.json
         let etc_dir = format!("{}/etc/mikrom", mount_dir);
-        std::fs::create_dir_all(&etc_dir).context("Failed to create /etc/mikrom in guest")?;
+        tokio::fs::create_dir_all(&etc_dir)
+            .await
+            .context("Failed to create /etc/mikrom in guest")?;
 
         let mut env_map = std::collections::HashMap::new();
         for env in env_vars {
@@ -224,10 +227,11 @@ impl ImageBuilder {
             "cmd": cmd_list
         });
 
-        std::fs::write(
+        tokio::fs::write(
             format!("{}/init.json", etc_dir),
             serde_json::to_string_pretty(&init_config)?,
         )
+        .await
         .context("Failed to write init.json")?;
 
         // 7. Cleanup
