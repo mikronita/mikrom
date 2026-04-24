@@ -1,5 +1,6 @@
 use crate::auth::handlers::*;
 use crate::deploy::handlers::*;
+use crate::deploy::webhooks::*;
 use crate::error::ErrorResponse;
 use crate::models::app::*;
 use crate::vms::*;
@@ -22,6 +23,7 @@ use utoipa::{
         delete_app_handler,
         deploy_app_version_handler,
         list_deployments_handler,
+        deployments_stream_handler,
         activate_deployment_handler,
         list_active_deployments,
         watch_deployments,
@@ -30,7 +32,8 @@ use utoipa::{
         pause_deployment,
         resume_deployment,
         stop_deployment,
-        delete_deployment_record
+        delete_deployment_record,
+        github_webhook_handler
     ),
     components(
         schemas(

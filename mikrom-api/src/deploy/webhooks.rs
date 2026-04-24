@@ -18,6 +18,22 @@ pub struct GitHubPushEvent {
     pub ref_name: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/webhooks/github/{app_id}",
+    request_body(content = String, description = "GitHub Webhook Payload", content_type = "application/json"),
+    params(
+        ("app_id" = Uuid, Path, description = "Application ID")
+    ),
+    responses(
+        (status = 200, description = "Webhook ignored or processed successfully without deployment"),
+        (status = 202, description = "Webhook accepted and deployment initiated"),
+        (status = 400, description = "Bad Request"),
+        (status = 401, description = "Unauthorized (Invalid Signature)"),
+        (status = 404, description = "Application not found")
+    ),
+    tag = "system"
+)]
 pub async fn github_webhook_handler(
     State(state): State<AppState>,
     Path(app_id): Path<Uuid>,
