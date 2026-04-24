@@ -138,80 +138,80 @@ jobs:
 # ══════════════════════════════════════════════════════════════════════════════
 # JOB: docker
 # ══════════════════════════════════════════════════════════════════════════════
-  docker:
-    name: "Docker: ${{ matrix.image }}"
-    runs-on: ubuntu-latest
-    needs: [lint-rust, lint-frontend, test]
-    if: github.event_name == 'push'
-    permissions:
-      contents: read
-      packages: write
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: mikrom-api
-            dockerfile: mikrom-api/Dockerfile
-            context: .
-          - image: mikrom-scheduler
-            dockerfile: mikrom-scheduler/Dockerfile
-            context: .
-          - image: mikrom-agent
-            dockerfile: mikrom-agent/Dockerfile
-            context: .
-          - image: mikrom-cert-gen
-            dockerfile: mikrom-proto/Dockerfile.cert-gen
-            context: .
-          - image: mikrom-cli
-            dockerfile: mikrom-cli/Dockerfile
-            context: .
-          - image: mikrom-app
-            dockerfile: mikrom-app/Dockerfile
-            context: mikrom-app
-          - image: mikrom-builder
-            dockerfile: mikrom-builder/Dockerfile
-            context: .
-          - image: mikrom-router
-            dockerfile: mikrom-router/Dockerfile
-            context: .
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
-          tags: |
-            type=sha,format=short
-            type=ref,event=branch
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build and push ${{ matrix.image }}
-        uses: docker/build-push-action@v7
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,scope=${{ matrix.image }},mode=max
-          provenance: false
+#  docker:
+#    name: "Docker: ${{ matrix.image }}"
+#    runs-on: ubuntu-latest
+#    needs: [lint-rust, lint-frontend, test]
+#    if: github.event_name == 'push'
+#    permissions:
+#      contents: read
+#      packages: write
+#
+#    strategy:
+#      fail-fast: false
+#      matrix:
+#        include:
+#          - image: mikrom-api
+#            dockerfile: mikrom-api/Dockerfile
+#            context: .
+#          - image: mikrom-scheduler
+#            dockerfile: mikrom-scheduler/Dockerfile
+#            context: .
+#          - image: mikrom-agent
+#            dockerfile: mikrom-agent/Dockerfile
+#            context: .
+#          - image: mikrom-cert-gen
+#            dockerfile: mikrom-proto/Dockerfile.cert-gen
+#            context: .
+#          - image: mikrom-cli
+#            dockerfile: mikrom-cli/Dockerfile
+#            context: .
+#          - image: mikrom-app
+#            dockerfile: mikrom-app/Dockerfile
+#            context: mikrom-app
+#          - image: mikrom-builder
+#            dockerfile: mikrom-builder/Dockerfile
+#            context: .
+#          - image: mikrom-router
+#            dockerfile: mikrom-router/Dockerfile
+#            context: .
+#
+#    steps:
+#      - name: Checkout
+#        uses: actions/checkout@v6
+#
+#      - name: Docker metadata
+#        id: meta
+#        uses: docker/metadata-action@v6
+#        with:
+#          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
+#          tags: |
+#            type=sha,format=short
+#            type=ref,event=branch
+#            type=ref,event=tag
+#            type=semver,pattern={{version}}
+#            type=semver,pattern={{major}}.{{minor}}
+#            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+#            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+#
+#      - name: Log in to GitHub Container Registry
+#        uses: docker/login-action@v4
+#        with:
+#          registry: ${{ env.REGISTRY }}
+#          username: ${{ github.actor }}
+#          password: ${{ secrets.GITHUB_TOKEN }}
+#
+#      - name: Set up Docker Buildx
+#        uses: docker/setup-buildx-action@v4
+#
+#      - name: Build and push ${{ matrix.image }}
+#        uses: docker/build-push-action@v7
+#        with:
+#          context: ${{ matrix.context }}
+#          file: ${{ matrix.dockerfile }}
+#          push: true
+#          tags: ${{ steps.meta.outputs.tags }}
+#          labels: ${{ steps.meta.outputs.labels }}
+#          cache-from: type=gha,scope=${{ matrix.image }}
+#          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+#          provenance: false

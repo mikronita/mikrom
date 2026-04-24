@@ -163,10 +163,8 @@ impl AppBuilder {
         // Pick the first port we find
         for key in ports_map.keys() {
             // "80/tcp" -> "80"
-            if let Some(port_str) = key.split('/').next() {
-                if let Ok(port) = port_str.parse::<u32>() {
-                    return Some(port);
-                }
+            if let Some(port) = key.split('/').next().and_then(|s| s.parse::<u32>().ok()) {
+                return Some(port);
             }
         }
 
@@ -184,7 +182,7 @@ mod tests {
 
         // Basic case
         assert_eq!(builder.parse_exposed_ports("{\"80/tcp\":{}}"), Some(80));
-        
+
         // Multiple ports (should pick one)
         let multi = builder.parse_exposed_ports("{\"80/tcp\":{},\"443/tcp\":{}}");
         assert!(multi == Some(80) || multi == Some(443));
@@ -196,7 +194,7 @@ mod tests {
         assert_eq!(builder.parse_exposed_ports("null"), None);
         assert_eq!(builder.parse_exposed_ports("{}"), None);
         assert_eq!(builder.parse_exposed_ports(""), None);
-        
+
         // Invalid JSON
         assert_eq!(builder.parse_exposed_ports("invalid"), None);
     }
