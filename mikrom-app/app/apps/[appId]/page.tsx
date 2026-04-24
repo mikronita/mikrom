@@ -378,45 +378,46 @@ export default function AppDetailPage() {
                     </div>
                   </CardHeader>
                   <CardContent className="px-2 sm:p-6">
-                    <ChartContainer
-                      config={chartConfig}
-                      className="aspect-auto h-[250px] w-full"
-                    >
-                      <LineChart
-                        data={metricsHistory}
-                        margin={{
-                          left: 12,
-                          right: 12,
-                        }}
+                    <div style={{ width: '100%', height: '250px' }}>
+                      <ChartContainer
+                        config={chartConfig}
                       >
-                        <CartesianGrid vertical={false} />
-                        <XAxis
-                          dataKey="time"
-                          tickLine={false}
-                          axisLine={false}
-                          tickMargin={8}
-                          minTickGap={32}
-                        />
-                        <YAxis hide domain={activeChart === "cpu" ? [0, 100] : ['auto', 'auto']} />
-                        <ChartTooltip
-                          content={
-                            <ChartTooltipContent
-                              className="w-[150px]"
-                              nameKey={activeChart}
-                              labelFormatter={(value) => value}
-                            />
-                          }
-                        />
-                        <Line
-                          dataKey={activeChart}
-                          type="monotone"
-                          stroke={`var(--color-${activeChart})`}
-                          strokeWidth={2}
-                          dot={false}
-                          isAnimationActive={false}
-                        />
-                      </LineChart>
-                    </ChartContainer>
+                        <LineChart
+                          data={metricsHistory}
+                          margin={{
+                            left: 12,
+                            right: 12,
+                          }}
+                        >
+                          <CartesianGrid vertical={false} />
+                          <XAxis
+                            dataKey="time"
+                            tickLine={false}
+                            axisLine={false}
+                            tickMargin={8}
+                            minTickGap={32}
+                          />
+                          <YAxis hide domain={activeChart === "cpu" ? [0, 100] : ['auto', 'auto']} />
+                          <ChartTooltip
+                            content={
+                              <ChartTooltipContent
+                                className="w-[150px]"
+                                nameKey={activeChart}
+                                labelFormatter={(value) => value}
+                              />
+                            }
+                          />
+                          <Line
+                            dataKey={activeChart}
+                            type="monotone"
+                            stroke={`var(--color-${activeChart})`}
+                            strokeWidth={2}
+                            dot={false}
+                            isAnimationActive={false}
+                          />
+                        </LineChart>
+                      </ChartContainer>
+                    </div>
                   </CardContent>
                 </Card>
 
