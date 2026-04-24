@@ -205,9 +205,6 @@ export default function AppDetailPage() {
         <div className="space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <Link href="/apps" className="text-muted-foreground hover:text-foreground transition-colors">
-                <HiArrowLeft className="w-5 h-5" />
-              </Link>
               <div>
                 <h1 className="text-2xl font-bold tracking-tight">
                   {app?.name || "Application"} Details

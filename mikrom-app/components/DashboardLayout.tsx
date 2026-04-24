@@ -30,6 +30,14 @@ import {
   DropdownMenuSeparator, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu";
+import { 
+  Breadcrumb, 
+  BreadcrumbItem, 
+  BreadcrumbLink, 
+  BreadcrumbList, 
+  BreadcrumbPage, 
+  BreadcrumbSeparator 
+} from "@/components/ui/breadcrumb";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
@@ -188,7 +196,42 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main Content */}
       <main className="p-4 md:ml-64 pt-20">
-        {children}
+        <div className="max-w-7xl mx-auto space-y-6">
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild>
+                  <Link href="/">Home</Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              {pathname !== "/" && <BreadcrumbSeparator />}
+              {pathname
+                .split("/")
+                .filter((segment) => segment !== "")
+                .map((segment, index, array) => {
+                  const href = `/${array.slice(0, index + 1).join("/")}`;
+                  const isLast = index === array.length - 1;
+                  const name = segment.charAt(0).toUpperCase() + segment.slice(1);
+
+                  return (
+                    <React.Fragment key={href}>
+                      <BreadcrumbItem>
+                        {isLast ? (
+                          <BreadcrumbPage>{name}</BreadcrumbPage>
+                        ) : (
+                          <BreadcrumbLink asChild>
+                            <Link href={href}>{name}</Link>
+                          </BreadcrumbLink>
+                        )}
+                      </BreadcrumbItem>
+                      {!isLast && <BreadcrumbSeparator />}
+                    </React.Fragment>
+                  );
+                })}
+            </BreadcrumbList>
+          </Breadcrumb>
+          {children}
+        </div>
       </main>
 
       {/* Mobile Backdrop */}
