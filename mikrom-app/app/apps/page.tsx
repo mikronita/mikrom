@@ -97,7 +97,7 @@ export default function ApplicationsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Link href={`/apps/${app.id}/deployments`}>
+                        <Link href={`/apps/${app.id}`}>
                           <Button color="light" size="sm">
                             Manage
                           </Button>
