@@ -9,8 +9,7 @@ import {
   HiTrash,
   HiCog,
   HiChip,
-  HiServer,
-  HiTerminal
+  HiServer
 } from "react-icons/hi";
 import {
   HiCheckCircle, 
@@ -20,18 +19,16 @@ import {
 } from "react-icons/hi2";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ElementType } from "react";
+import { useEffect, useState, type ElementType } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps, useDeployments, useActivateDeployment, useDeployAppVersion, useDeleteApp } from "@/lib/hooks/use-apps";
 import { useVm } from "@/lib/hooks/use-vms";
-import { API_BASE_URL, getVmLogsSSE, LogLine } from "@/lib/api";
-import { getToken } from "@/lib/auth";
+import { API_BASE_URL } from "@/lib/api";
 import { Badge, Table, TableBody, TableCell, TableHead, TableHeadCell, TableRow, Alert, Button, Card, TextInput, Modal, ModalHeader, ModalBody, ModalFooter, Progress } from "flowbite-react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import Ansi from "ansi-to-react";
 import { 
   AreaChart, 
   Area, 
@@ -107,9 +104,7 @@ export default function AppDeploymentsPage() {
 
   // Active Instance Logic
   const { data: vm } = useVm(activeJobId || "");
-  const [logs, setLogs] = useState<LogLine[]>([]);
   const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>([]);
-  const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (vm?.cpu_usage === undefined || vm?.ram_used_bytes === undefined) return;
@@ -130,42 +125,6 @@ export default function AppDeploymentsPage() {
 
     return () => clearTimeout(timeoutId);
   }, [vm?.cpu_usage, vm?.ram_used_bytes]);
-
-  const scrollToBottom = useCallback(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-    let closeLogs: (() => void) | null = null;
-
-    if (mounted && activeJobId) {
-      const token = getToken();
-      if (token) {
-        closeLogs = getVmLogsSSE(
-          token,
-          activeJobId,
-          (log) => {
-            if (mounted) {
-              setLogs(prev => [...prev.slice(-499), log]);
-            }
-          },
-          (err) => {
-            console.error("Logs error:", err);
-          }
-        );
-      }
-    }
-
-    return () => {
-      mounted = false;
-      if (closeLogs) closeLogs();
-    };
-  }, [activeJobId]);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [logs.length, scrollToBottom]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -326,43 +285,6 @@ export default function AppDeploymentsPage() {
                         />
                       </AreaChart>
                     </ResponsiveContainer>
-                  </div>
-                </Card>
-
-                {/* Logs */}
-                <Card className="p-0 overflow-hidden bg-zinc-900 border-zinc-800 shadow-xl ring-1 ring-white/10">
-                  <div className="p-3 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                      <h5 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                        Live Instance Logs
-                      </h5>
-                    </div>
-                    <div className="text-[9px] text-zinc-500 font-mono">
-                      {logs.length} lines
-                    </div>
-                  </div>
-                  <div className="h-64 overflow-y-auto p-3 font-mono text-[10px] leading-relaxed scrollbar-thin scrollbar-thumb-zinc-700">
-                    {logs.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center h-full text-zinc-600 italic">
-                        <HiTerminal className="w-6 h-6 mb-2 opacity-20" />
-                        Waiting for logs...
-                      </div>
-                    ) : (
-                      <div className="space-y-0.5">
-                        {logs.map((log, i) => (
-                          <div key={i} className="flex gap-3 group">
-                            <span className="text-zinc-600 shrink-0 select-none opacity-50 text-[9px]">
-                              {new Date(log.timestamp).toLocaleTimeString([], { hour12: false })}
-                            </span>
-                            <span className="text-zinc-300 break-all whitespace-pre-wrap">
-                              <Ansi>{log.line}</Ansi>
-                            </span>
-                          </div>
-                        ))}
-                        <div ref={logEndRef} />
-                      </div>
-                    )}
                   </div>
                 </Card>
 
