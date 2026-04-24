@@ -181,7 +181,7 @@ impl FirecrackerManager {
         // 3. In real mode, validate the binary exists before going async.
         if let Some(_kernel) = &self.fc_config.kernel_path {
             let binary = &self.fc_config.binary;
-            if !std::path::Path::new(binary).exists() {
+            if tokio::fs::metadata(binary).await.is_err() {
                 let err_msg = format!("Firecracker binary not found: {binary}");
                 self.set_failed(&vm_id, err_msg.clone()).await;
                 return Err(FirecrackerError::ProcessError(err_msg));
@@ -362,8 +362,8 @@ impl FirecrackerManager {
         let snapshot_dir = "/tmp/mikrom-snapshots";
         let snapshot_path = format!("{snapshot_dir}/{vm_id}.snapshot");
         let mem_path = format!("{snapshot_dir}/{vm_id}.mem");
-        let has_snapshot = std::path::Path::new(&snapshot_path).exists()
-            && std::path::Path::new(&mem_path).exists();
+        let has_snapshot = tokio::fs::metadata(&snapshot_path).await.is_ok()
+            && tokio::fs::metadata(&mem_path).await.is_ok();
 
         if has_snapshot {
             tracing::info!(vm_id = %vm_id, "Found snapshot, restoring VM...");
@@ -786,7 +786,7 @@ impl FirecrackerManager {
         })?;
 
         let vol_path = format!("{vol_dir}/{volume_id}.ext4");
-        if !std::path::Path::new(&vol_path).exists() {
+        if tokio::fs::metadata(&vol_path).await.is_err() {
             let file = tokio::fs::File::create(&vol_path).await.map_err(|e| {
                 FirecrackerError::ProcessError(format!("Failed to create volume file: {e}"))
             })?;

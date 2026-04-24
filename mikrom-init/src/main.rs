@@ -110,7 +110,19 @@ fn main() -> anyhow::Result<()> {
     // If exec() returns, it failed
     println!("[mikrom-init] Failed to execute application: {}", err);
 
-    Ok(())
+    // 7. Fallback to shell
+    if Path::new("/bin/sh").exists() {
+        println!("[mikrom-init] Falling back to /bin/sh...");
+        let _ = Command::new("/bin/sh").exec();
+    }
+
+    // 8. Final safety: if everything fails, do NOT exit (avoid kernel panic)
+    println!(
+        "[mikrom-init] CRITICAL: All execution attempts failed. Entering infinite sleep to prevent kernel panic."
+    );
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
+    }
 }
 
 fn mount_fs(source: &str, target: &str, fstype: &str, flags: MsFlags) -> anyhow::Result<()> {

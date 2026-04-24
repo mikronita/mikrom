@@ -160,12 +160,24 @@ const authHeaders = (token: string) => ({
   Authorization: `Bearer ${token}`,
 });
 
-async function parseJson<T>(response: Response): Promise<T> {
+async function parseJson<T>(response: Response): Promise<T | ApiError> {
   try {
     return await response.json();
   } catch {
-    return { error: "Invalid JSON response from server" } as unknown as T;
+    return { error: "Invalid JSON response from server" };
   }
+}
+
+function getErrorMessage(result: unknown, fallback: string): string {
+  if (
+    result !== null &&
+    typeof result === "object" &&
+    "error" in result &&
+    typeof (result as Record<string, unknown>).error === "string"
+  ) {
+    return (result as { error: string }).error;
+  }
+  return fallback;
 }
 
 export async function health(): Promise<HealthResponse> {
@@ -180,9 +192,9 @@ export async function register(data: RegisterRequest): Promise<{ data?: Register
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    const result = await parseJson<RegisterResponse & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Registration failed" };
-    return { data: result };
+    const result = await parseJson<RegisterResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Registration failed") };
+    return { data: result as RegisterResponse };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -195,9 +207,9 @@ export async function login(data: LoginRequest): Promise<{ data?: LoginResponse;
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    const result = await parseJson<LoginResponse & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Login failed" };
-    return { data: result };
+    const result = await parseJson<LoginResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Login failed") };
+    return { data: result as LoginResponse };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -209,9 +221,9 @@ export async function getProfile(token: string): Promise<{ data?: UserProfile; e
       headers: authHeaders(token),
     });
     if (response.status === 401) logout();
-    const result = await parseJson<UserProfile & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Failed to fetch profile" };
-    return { data: result };
+    const result = await parseJson<UserProfile>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch profile") };
+    return { data: result as UserProfile };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -226,9 +238,9 @@ export async function updateProfile(token: string, data: UpdateProfileRequest): 
       headers: authHeaders(token),
       body: JSON.stringify(data),
     });
-    const result = await parseJson<UserProfile & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Failed to update profile" };
-    return { data: result };
+    const result = await parseJson<UserProfile>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to update profile") };
+    return { data: result as UserProfile };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -242,8 +254,8 @@ export async function listActiveDeployments(token: string): Promise<{ data?: Liv
       headers: authHeaders(token),
     });
     if (response.status === 401) logout();
-    const result = await parseJson<LiveDeploymentInfo[] & ApiError>(response);
-    if (!response.ok) return { error: (result as ApiError).error || "Failed to fetch active deployments" };
+    const result = await parseJson<LiveDeploymentInfo[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch active deployments") };
     return { data: result as LiveDeploymentInfo[] };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
@@ -255,9 +267,9 @@ export async function getLiveDeploymentStatus(token: string, jobId: string): Pro
     const response = await fetch(`${API_BASE_URL}/deployments/${jobId}`, {
       headers: authHeaders(token),
     });
-    const result = await parseJson<LiveDeploymentStatus & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Failed to fetch deployment status" };
-    return { data: result };
+    const result = await parseJson<LiveDeploymentStatus>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch deployment status") };
+    return { data: result as LiveDeploymentStatus };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -407,9 +419,9 @@ export async function pauseDeployment(token: string, jobId: string): Promise<{ d
       method: "POST",
       headers: authHeaders(token),
     });
-    const result = await parseJson<PauseDeploymentResponse & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Failed to pause deployment" };
-    return { data: result };
+    const result = await parseJson<PauseDeploymentResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to pause deployment") };
+    return { data: result as PauseDeploymentResponse };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -421,9 +433,9 @@ export async function resumeDeployment(token: string, jobId: string): Promise<{ 
       method: "POST",
       headers: authHeaders(token),
     });
-    const result = await parseJson<ResumeDeploymentResponse & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Failed to resume deployment" };
-    return { data: result };
+    const result = await parseJson<ResumeDeploymentResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to resume deployment") };
+    return { data: result as ResumeDeploymentResponse };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -435,9 +447,9 @@ export async function stopDeployment(token: string, jobId: string): Promise<{ da
       method: "DELETE",
       headers: authHeaders(token),
     });
-    const result = await parseJson<StopDeploymentResponse & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Failed to stop deployment" };
-    return { data: result };
+    const result = await parseJson<StopDeploymentResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to stop deployment") };
+    return { data: result as StopDeploymentResponse };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -451,7 +463,7 @@ export async function deleteDeploymentRecord(token: string, jobId: string): Prom
     });
     if (response.ok) return { success: true };
     const result = await parseJson<ApiError>(response);
-    return { success: false, error: result.error || "Failed to delete deployment record" };
+    return { success: false, error: getErrorMessage(result, "Failed to delete deployment record") };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Network error" };
   }
@@ -462,9 +474,9 @@ export async function getVmMetrics(token: string, jobId: string): Promise<{ data
     const response = await fetch(`${API_BASE_URL}/deployments/${jobId}/metrics`, {
       headers: authHeaders(token),
     });
-    const result = await parseJson<VmMetricsResponse & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Failed to fetch metrics" };
-    return { data: result };
+    const result = await parseJson<VmMetricsResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch metrics") };
+    return { data: result as VmMetricsResponse };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -476,8 +488,8 @@ export async function listApps(token: string): Promise<{ data?: AppInfo[]; error
       headers: authHeaders(token),
     });
     if (response.status === 401) logout();
-    const result = await parseJson<AppInfo[] & ApiError>(response);
-    if (!response.ok) return { error: (result as ApiError).error || "Failed to fetch apps" };
+    const result = await parseJson<AppInfo[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch apps") };
     return { data: result as AppInfo[] };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
@@ -491,9 +503,9 @@ export async function createApp(token: string, data: CreateAppRequest): Promise<
       headers: authHeaders(token),
       body: JSON.stringify(data),
     });
-    const result = await parseJson<AppInfo & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Failed to create app" };
-    return { data: result };
+    const result = await parseJson<AppInfo>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create app") };
+    return { data: result as AppInfo };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -507,7 +519,7 @@ export async function deleteApp(token: string, appId: string): Promise<{ success
     });
     if (response.ok) return { success: true };
     const result = await parseJson<ApiError>(response);
-    return { success: false, error: result.error || "Failed to delete app" };
+    return { success: false, error: getErrorMessage(result, "Failed to delete app") };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Network error" };
   }
@@ -523,9 +535,9 @@ export async function deployApp(
       headers: authHeaders(token),
       body: JSON.stringify(data),
     });
-    const result = await parseJson<DeployResponse & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Failed to start deployment" };
-    return { data: result };
+    const result = await parseJson<DeployResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to start deployment") };
+    return { data: result as DeployResponse };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -542,9 +554,9 @@ export async function deployAppVersion(
       headers: authHeaders(token),
       body: JSON.stringify(data),
     });
-    const result = await parseJson<DeployResponse & ApiError>(response);
-    if (!response.ok) return { error: result.error || "Failed to start deployment" };
-    return { data: result };
+    const result = await parseJson<DeployResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to start deployment") };
+    return { data: result as DeployResponse };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
   }
@@ -558,8 +570,8 @@ export async function listDeployments(
     const response = await fetch(`${API_BASE_URL}/apps/${appId}/deployments`, {
       headers: authHeaders(token),
     });
-    const result = await parseJson<DeploymentInfo[] & ApiError>(response);
-    if (!response.ok) return { error: (result as ApiError).error || "Failed to fetch deployments" };
+    const result = await parseJson<DeploymentInfo[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch deployments") };
     return { data: result as DeploymentInfo[] };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Network error" };
@@ -578,7 +590,7 @@ export async function activateDeployment(
     });
     if (response.ok) return { success: true };
     const result = await parseJson<ApiError>(response);
-    return { success: false, error: result.error || "Failed to activate deployment" };
+    return { success: false, error: getErrorMessage(result, "Failed to activate deployment") };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Network error" };
   }

@@ -81,7 +81,7 @@ pub async fn fc_patch(
 pub async fn wait_for_socket(path: &str, timeout: Duration) -> Result<(), FirecrackerError> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        if std::path::Path::new(path).exists() {
+        if tokio::fs::metadata(path).await.is_ok() {
             return Ok(());
         }
         if tokio::time::Instant::now() >= deadline {

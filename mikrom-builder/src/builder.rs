@@ -160,15 +160,25 @@ impl AppBuilder {
         let ports: serde_json::Value = serde_json::from_str(raw_json).ok()?;
         let ports_map = ports.as_object()?;
 
-        // Pick the first port we find
-        for key in ports_map.keys() {
-            // "80/tcp" -> "80"
-            if let Some(port) = key.split('/').next().and_then(|s| s.parse::<u32>().ok()) {
-                return Some(port);
+        let mut available_ports: Vec<u32> = ports_map
+            .keys()
+            .filter_map(|key| key.split('/').next()?.parse::<u32>().ok())
+            .collect();
+
+        if available_ports.is_empty() {
+            return None;
+        }
+
+        // Prioritize common web ports
+        for &p in &[80, 8080, 3000] {
+            if available_ports.contains(&p) {
+                return Some(p);
             }
         }
 
-        None
+        // Otherwise pick the smallest port to be deterministic
+        available_ports.sort_unstable();
+        available_ports.first().copied()
     }
 }
 
