@@ -7,9 +7,7 @@ import {
   HiEyeOff,
   HiClipboard,
   HiTrash,
-  HiCog,
-  HiChip,
-  HiServer
+  HiCog
 } from "react-icons/hi";
 import {
   HiCheckCircle, 
@@ -19,64 +17,79 @@ import {
 } from "react-icons/hi2";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type ElementType } from "react";
+import { useEffect, useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps, useDeployments, useActivateDeployment, useDeployAppVersion, useDeleteApp } from "@/lib/hooks/use-apps";
 import { useVm } from "@/lib/hooks/use-vms";
 import { API_BASE_URL } from "@/lib/api";
-import { Badge, Table, TableBody, TableCell, TableHead, TableHeadCell, TableRow, Alert, Button, Card, TextInput, Modal, ModalHeader, ModalBody, ModalFooter, Progress } from "flowbite-react";
+import { 
+  Badge 
+} from "@/components/ui/badge";
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow 
+} from "@/components/ui/table";
+import { 
+  Alert, 
+  AlertDescription, 
+  AlertTitle 
+} from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { 
+  Card, 
+  CardHeader, 
+  CardTitle, 
+  CardContent, 
+  CardDescription 
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogFooter 
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { 
-  AreaChart, 
-  Area, 
+  LineChart,
+  Line,
   XAxis, 
-  YAxis, 
+  YAxis,
   CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer 
 } from "recharts";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+import { cn } from "@/lib/utils";
 
-function getStatusColor(status: string): string {
+const chartConfig = {
+  cpu: {
+    label: "CPU Usage",
+    color: "var(--chart-1)",
+  },
+  ram: {
+    label: "RAM Usage",
+    color: "var(--chart-2)",
+  },
+} satisfies ChartConfig;
+
+function getStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
-  if (s === "running") return "success";
-  if (s === "building" || s === "scheduled" || s === "pending") return "warning";
-  if (s === "failed" || s === "cancelled") return "failure";
-  return "gray";
-}
-
-function MetricCard({ 
-  icon: Icon, 
-  label, 
-  value, 
-  percentage, 
-  color 
-}: { 
-  icon: ElementType;
-  label: string;
-  value: string;
-  percentage: number;
-  color: string;
-}) {
-  return (
-    <Card className="h-full border-none shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
-      <div className="flex items-center justify-between mb-4">
-        <div className="w-8 h-8 rounded-lg bg-zinc-50 dark:bg-zinc-800 flex items-center justify-center border border-zinc-100 dark:border-zinc-700">
-          <Icon className="w-4 h-4 text-zinc-500" />
-        </div>
-        <span className="text-2xl font-bold text-zinc-900 dark:text-white">{value}</span>
-      </div>
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{label}</span>
-          <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">{Math.round(percentage)}%</span>
-        </div>
-        <Progress progress={percentage} color={color} size="sm" />
-      </div>
-    </Card>
-  );
+  if (s === "running") return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800";
+  if (s === "building" || s === "scheduled" || s === "pending") return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800";
+  if (s === "failed" || s === "cancelled") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800";
+  return "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700";
 }
 
 interface MetricPoint {
@@ -95,36 +108,39 @@ export default function AppDetailPage() {
   const deleteAppMutation = useDeleteApp();
 
   const [showSecret, setShowSecret] = useState(false);
+  const [activeChart, setActiveChart] = useState<"cpu" | "ram">("cpu");
   const [showWebhookModal, setShowWebhookModal] = useState(false);
   const [confirmDeleteApp, setConfirmDeleteApp] = useState(false);
 
   const app = apps.find(a => a.id === appId);
-  const activeDeployment = deployments.find(d => d.id === app?.active_deployment_id);
+  // Prefer the active (promoted) deployment, but fallback to the latest running one if none is active
+  const activeDeployment = deployments.find(d => d.id === app?.active_deployment_id) 
+    || deployments.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).find(d => d.status === "RUNNING");
   const activeJobId = activeDeployment?.job_id;
 
   // Active Instance Logic
-  const { data: vm } = useVm(activeJobId || "");
+  const { data: vm, dataUpdatedAt } = useVm(activeJobId || "");
   const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>([]);
 
   useEffect(() => {
-    if (vm?.cpu_usage === undefined || vm?.ram_used_bytes === undefined) return;
+    if (!vm) return;
 
     const timeoutId = setTimeout(() => {
-        setMetricsHistory(prev => {
-            const last = prev[prev.length - 1];
-            const newCpu = (vm.cpu_usage || 0) * 100;
-            if (last && last.cpu === newCpu && prev.length > 5) return prev;
-            
-            return [...prev.slice(-19), {
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                cpu: newCpu,
-                ram: (vm.ram_used_bytes || 0) / (1024 * 1024)
-            }];
-        });
+      setMetricsHistory(prev => {
+          const newCpu = (vm.cpu_usage || 0) * 100;
+          const newRam = (vm.ram_used_bytes || 0) / (1024 * 1024);
+          
+          // Keep up to 30 points (approx 1.5 min at 3s polling)
+          return [...prev.slice(-29), {
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+              cpu: newCpu,
+              ram: newRam
+          }];
+      });
     }, 0);
 
     return () => clearTimeout(timeoutId);
-  }, [vm?.cpu_usage, vm?.ram_used_bytes]);
+  }, [dataUpdatedAt, vm]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -168,14 +184,20 @@ export default function AppDetailPage() {
       <AuthGuard>
         <DashboardLayout>
           <div className="flex items-center justify-center min-h-[400px]">
-            <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
+            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
           </div>
         </DashboardLayout>
       </AuthGuard>
     );
   }
 
-  const isInstanceRunning = vm && vm.status.toLowerCase() === "running";
+  const isInstanceRunning = vm && ["running", "starting", "paused"].includes(vm.status.toLowerCase());
+  const latestMetrics = metricsHistory.length > 0 
+    ? metricsHistory[metricsHistory.length - 1] 
+    : (vm ? { 
+        cpu: (vm.cpu_usage || 0) * 100, 
+        ram: (vm.ram_used_bytes || 0) / (1024 * 1024) 
+      } : { cpu: 0, ram: 0 });
 
   return (
     <AuthGuard>
@@ -183,14 +205,14 @@ export default function AppDetailPage() {
         <div className="space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <Link href="/apps" className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors">
+              <Link href="/apps" className="text-muted-foreground hover:text-foreground transition-colors">
                 <HiArrowLeft className="w-5 h-5" />
               </Link>
               <div>
-                <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
+                <h1 className="text-2xl font-bold tracking-tight">
                   {app?.name || "Application"} Details
                 </h1>
-                <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
+                <p className="text-muted-foreground text-sm mt-1">
                   Manage deployments and monitor production instances.
                 </p>
               </div>
@@ -198,7 +220,6 @@ export default function AppDetailPage() {
             <div className="flex items-center gap-2">
               <Button 
                 size="sm" 
-                color="blue" 
                 onClick={handleDeployApp}
                 disabled={deployAppVersionMutation.isPending}
               >
@@ -207,7 +228,7 @@ export default function AppDetailPage() {
               </Button>
               <Button 
                 size="sm" 
-                color="light" 
+                variant="outline"
                 onClick={() => setShowWebhookModal(true)}
               >
                 <HiCog className="w-4 h-4 mr-2" />
@@ -215,7 +236,7 @@ export default function AppDetailPage() {
               </Button>
               <Button 
                 size="sm" 
-                color="failure"
+                variant="destructive"
                 onClick={() => confirmDeleteApp ? handleDeleteApp() : setConfirmDeleteApp(true)}
                 disabled={deleteAppMutation.isPending}
               >
@@ -226,39 +247,42 @@ export default function AppDetailPage() {
           </div>
 
           <section className="space-y-4">
-            <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
+            <h2 className="text-lg font-bold tracking-tight">
               Deployment History
             </h2>
-            <Card className="overflow-hidden border-none shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
+            <Card className="overflow-hidden">
               {error && (
-                <Alert color="failure" icon={() => <HiExclamationCircle className="w-4 h-4 mr-2" />}>
-                  {error instanceof Error ? error.message : "Failed to load deployments"}
+                <Alert variant="destructive">
+                  <HiExclamationCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    {error instanceof Error ? error.message : "Failed to load deployments"}
+                  </AlertDescription>
                 </Alert>
               )}
 
               <div className="overflow-x-auto">
-                <Table hoverable>
-                  <TableHead>
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableHeadCell>Version / Image</TableHeadCell>
-                      <TableHeadCell>Status</TableHeadCell>
-                      <TableHeadCell>Created</TableHeadCell>
-                      <TableHeadCell>Production</TableHeadCell>
-                      <TableHeadCell className="text-right">Actions</TableHeadCell>
+                      <TableHead>Version / Image</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead>Production</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
-                  </TableHead>
-                  <TableBody className="divide-y">
+                  </TableHeader>
+                  <TableBody>
                     {isLoading && deployments.length === 0 ? (
                       Array.from({ length: 3 }).map((_, i) => (
-                        <TableRow key={i} className="bg-white dark:border-zinc-700 dark:bg-zinc-900">
+                        <TableRow key={i}>
                           <TableCell colSpan={5}>
-                            <div className="h-8 bg-gray-100 dark:bg-gray-800 animate-pulse rounded" />
+                            <div className="h-8 bg-muted animate-pulse rounded" />
                           </TableCell>
                         </TableRow>
                       ))
                     ) : deployments.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-10 text-gray-500">
+                        <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
                           No deployments found for this application.
                         </TableCell>
                       </TableRow>
@@ -268,19 +292,19 @@ export default function AppDetailPage() {
                         const canActivate = dep.status === "RUNNING" && !isActive;
 
                         return (
-                          <TableRow key={dep.id} className="bg-white dark:border-zinc-700 dark:bg-zinc-900">
-                            <TableCell className="whitespace-nowrap font-medium text-gray-900 dark:text-white">
+                          <TableRow key={dep.id}>
+                            <TableCell className="font-medium">
                               <div className="flex flex-col">
-                                <span className="text-xs text-zinc-500 font-mono mb-1">{dep.id.split("-")[0]}</span>
+                                <span className="text-xs text-muted-foreground font-mono mb-1">{dep.id.split("-")[0]}</span>
                                 <span>{dep.image_tag || "N/A"}</span>
                               </div>
                             </TableCell>
                             <TableCell>
-                              <Badge color={getStatusColor(dep.status)} className="w-fit">
+                              <Badge className={cn("font-semibold", getStatusBadgeClass(dep.status))}>
                                 {dep.status}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-zinc-500 text-xs">
+                            <TableCell className="text-muted-foreground text-xs">
                               {new Date(dep.created_at).toLocaleString()}
                             </TableCell>
                             <TableCell>
@@ -290,13 +314,13 @@ export default function AppDetailPage() {
                                   <span>Active</span>
                                 </div>
                               ) : (
-                                <span className="text-zinc-400 text-xs italic">Standby</span>
+                                <span className="text-muted-foreground text-xs italic">Standby</span>
                               )}
                             </TableCell>
                             <TableCell className="text-right">
                               <Button 
-                                size="xs" 
-                                color={isActive ? "light" : "success"}
+                                size="sm" 
+                                variant={isActive ? "outline" : "default"}
                                 disabled={!canActivate || activateMutation.isPending}
                                 onClick={() => handleActivate(dep.id)}
                                 className="ml-auto"
@@ -317,74 +341,92 @@ export default function AppDetailPage() {
 
           {/* Integrated Instance Monitoring */}
           {vm && isInstanceRunning && (
-            <div className="space-y-6 animate-in fade-in duration-500 pt-6 border-t border-zinc-100 dark:border-zinc-800">
-              <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
+            <div className="space-y-6 animate-in fade-in duration-500 pt-6 border-t">
+              <h2 className="text-lg font-bold tracking-tight">
                 Live Performance
               </h2>
               <div className="space-y-6">
-                {/* Metrics Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <MetricCard 
-                    icon={HiChip} 
-                    label="CPU Usage" 
-                    value={`${(vm.cpu_usage * 100).toFixed(1)}%`} 
-                    percentage={vm.cpu_usage * 100}
-                    color="indigo"
-                  />
-                  <MetricCard 
-                    icon={HiServer} 
-                    label="RAM Usage" 
-                    value={`${(vm.ram_used_bytes / (1024 * 1024)).toFixed(0)} MiB`} 
-                    percentage={(vm.ram_used_bytes / (1024 * 1024 * 512)) * 100} 
-                    color="purple"
-                  />
-                </div>
-
-                {/* Chart */}
-                <Card className="p-0 overflow-hidden border-none shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
-                  <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
-                    <h5 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                      Real-time CPU Load
-                    </h5>
-                  </div>
-                  <div className="h-48 w-full p-4">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={metricsHistory}>
-                        <defs>
-                          <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
-                            <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
-                        <XAxis dataKey="time" hide />
-                        <YAxis hide domain={[0, 100]} />
-                        <Tooltip 
-                          contentStyle={{ 
-                            backgroundColor: 'rgba(255, 255, 255, 0.8)', 
-                            borderRadius: '8px', 
-                            border: 'none',
-                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                          }} 
+                {/* Interactive Chart */}
+                <Card className="py-4 sm:py-0">
+                  <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
+                    <div className="flex flex-1 flex-col justify-center gap-1 px-6 pb-3 sm:pb-0">
+                      <CardTitle>System Performance</CardTitle>
+                      <CardDescription>
+                        Real-time CPU and RAM utilization
+                      </CardDescription>
+                    </div>
+                    <div className="flex">
+                      {(["cpu", "ram"] as const).map((key) => {
+                        return (
+                          <button
+                            key={key}
+                            data-active={activeChart === key}
+                            className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left even:border-l data-[active=true]:bg-muted/50 sm:border-t-0 sm:border-l sm:px-8 sm:py-6"
+                            onClick={() => setActiveChart(key)}
+                          >
+                            <span className="text-xs text-muted-foreground uppercase">
+                              {chartConfig[key].label}
+                            </span>
+                            <span className="text-lg leading-none font-bold sm:text-3xl">
+                              {key === "cpu" 
+                                ? `${latestMetrics.cpu.toFixed(1)}%` 
+                                : `${latestMetrics.ram.toFixed(0)} MiB`}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="px-2 sm:p-6">
+                    <ChartContainer
+                      config={chartConfig}
+                      className="aspect-auto h-[250px] w-full"
+                    >
+                      <LineChart
+                        data={metricsHistory}
+                        margin={{
+                          left: 12,
+                          right: 12,
+                        }}
+                      >
+                        <CartesianGrid vertical={false} />
+                        <XAxis
+                          dataKey="time"
+                          tickLine={false}
+                          axisLine={false}
+                          tickMargin={8}
+                          minTickGap={32}
                         />
-                        <Area 
-                          type="monotone" 
-                          dataKey="cpu" 
-                          stroke="#6366f1" 
-                          fillOpacity={1} 
-                          fill="url(#colorCpu)" 
+                        <YAxis hide domain={activeChart === "cpu" ? [0, 100] : ['auto', 'auto']} />
+                        <ChartTooltip
+                          content={
+                            <ChartTooltipContent
+                              className="w-[150px]"
+                              nameKey={activeChart}
+                              labelFormatter={(value) => value}
+                            />
+                          }
+                        />
+                        <Line
+                          dataKey={activeChart}
+                          type="monotone"
+                          stroke={`var(--color-${activeChart})`}
                           strokeWidth={2}
+                          dot={false}
                           isAnimationActive={false}
                         />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
+                      </LineChart>
+                    </ChartContainer>
+                  </CardContent>
                 </Card>
 
                 {vm.error_message && (
-                  <Alert color="failure" icon={HiExclamationCircle} className="dark:bg-red-900/20 dark:text-red-400">
-                    <h6 className="font-bold mb-1 text-xs">Termination Error</h6>
-                    <p className="text-[10px] break-words">{vm.error_message}</p>
+                  <Alert variant="destructive">
+                    <HiExclamationCircle className="h-4 w-4" />
+                    <AlertTitle className="text-xs font-bold">Termination Error</AlertTitle>
+                    <AlertDescription className="text-[10px] break-words">
+                      {vm.error_message}
+                    </AlertDescription>
                   </Alert>
                 )}
               </div>
@@ -394,81 +436,79 @@ export default function AppDetailPage() {
 
         {/* GitHub Webhook Modal */}
         {showWebhookModal && (
-          <Modal show={true} onClose={() => setShowWebhookModal(false)}>
-            <ModalHeader>GitHub Auto-deploy Configuration</ModalHeader>
-            <ModalBody>
-              <div className="space-y-6">
+          <Dialog open={true} onOpenChange={(open) => !open && setShowWebhookModal(false)}>
+            <DialogContent className="sm:max-w-[600px]">
+              <DialogHeader>
+                <DialogTitle>GitHub Auto-deploy Configuration</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-6 pt-4">
                 <div className="flex items-start gap-3">
                   <HiInformationCircle className="w-6 h-6 text-indigo-500 mt-0.5 shrink-0" />
                   <div>
-                    <p className="text-sm text-gray-600 dark:text-gray-300">
-                      Set up a webhook in your GitHub repository to enable automatic deployments on every push to the <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">main</code> or <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">master</code> branch.
+                    <p className="text-sm text-muted-foreground">
+                      Set up a webhook in your GitHub repository to enable automatic deployments on every push to the <code className="bg-muted px-1 rounded text-foreground">main</code> or <code className="bg-muted px-1 rounded text-foreground">master</code> branch.
                     </p>
                   </div>
                 </div>
 
                 <div className="space-y-4 pt-2">
-                  <div>
-                    <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Payload URL</p>
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Payload URL</p>
                     <div className="flex items-center gap-2">
-                      <TextInput
+                      <Input
                         value={`${API_BASE_URL}/webhooks/github/${appId}`}
                         readOnly
-                        sizing="sm"
-                        className="font-mono text-xs flex-1"
+                        className="font-mono text-xs flex-1 h-9"
                       />
-                      <Button color="light" size="sm" onClick={() => copyToClipboard(`${API_BASE_URL}/webhooks/github/${appId}`)}>
+                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={() => copyToClipboard(`${API_BASE_URL}/webhooks/github/${appId}`)}>
                         <HiClipboard className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
                   
-                  <div>
-                    <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Secret</p>
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Secret</p>
                     <div className="flex items-center gap-2">
                       <div className="relative flex-1">
-                        <TextInput
+                        <Input
                           type={showSecret ? "text" : "password"}
                           value={app?.github_webhook_secret || ""}
                           readOnly
-                          sizing="sm"
-                          className="font-mono text-xs w-full"
+                          className="font-mono text-xs w-full h-9 pr-10"
                         />
                         <button
                           onClick={() => setShowSecret(!showSecret)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                         >
                           {showSecret ? <HiEyeOff className="w-4 h-4" /> : <HiEye className="w-4 h-4" />}
                         </button>
                       </div>
-                      <Button color="blue" size="sm" onClick={() => copyToClipboard(app?.github_webhook_secret || "")}>
+                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={() => copyToClipboard(app?.github_webhook_secret || "")}>
                         <HiClipboard className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-lg border border-zinc-100 dark:border-zinc-800">
-                  <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 mb-2">Instructions:</h4>
-                  <ol className="text-xs text-zinc-500 dark:text-zinc-400 space-y-2 list-decimal list-inside">
+                <div className="bg-muted/50 p-4 rounded-lg border">
+                  <h4 className="text-xs font-bold mb-2">Instructions:</h4>
+                  <ol className="text-xs text-muted-foreground space-y-2 list-decimal list-inside">
                     <li>Go to your repository on GitHub.</li>
-                    <li>Click on <span className="font-medium text-zinc-700 dark:text-zinc-300">Settings</span> &gt; <span className="font-medium text-zinc-700 dark:text-zinc-300">Webhooks</span>.</li>
-                    <li>Click <span className="font-medium text-zinc-700 dark:text-zinc-300">Add webhook</span>.</li>
-                    <li>Paste the <span className="font-medium text-zinc-700 dark:text-zinc-300">Payload URL</span> and <span className="font-medium text-zinc-700 dark:text-zinc-300">Secret</span> above.</li>
-                    <li>Set <span className="font-medium text-zinc-700 dark:text-zinc-300">Content type</span> to <span className="font-mono">application/json</span>.</li>
-                    <li>Click <span className="font-medium text-zinc-700 dark:text-zinc-300">Add webhook</span> at the bottom.</li>
+                    <li>Click on <span className="font-medium text-foreground">Settings</span> &gt; <span className="font-medium text-foreground">Webhooks</span>.</li>
+                    <li>Click <span className="font-medium text-foreground">Add webhook</span>.</li>
+                    <li>Paste the <span className="font-medium text-foreground">Payload URL</span> and <span className="font-medium text-foreground">Secret</span> above.</li>
+                    <li>Set <span className="font-medium text-foreground">Content type</span> to <span className="font-mono">application/json</span>.</li>
+                    <li>Click <span className="font-medium text-foreground">Add webhook</span> at the bottom.</li>
                   </ol>
                 </div>
               </div>
-            </ModalBody>
-            <ModalFooter>
-              <div className="flex justify-end w-full">
-                <Button color="gray" onClick={() => setShowWebhookModal(false)}>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowWebhookModal(false)}>
                   Close
                 </Button>
-              </div>
-            </ModalFooter>
-          </Modal>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         )}
       </DashboardLayout>
     </AuthGuard>

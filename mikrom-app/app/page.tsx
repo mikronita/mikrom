@@ -12,7 +12,8 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useVms } from "@/lib/hooks/use-vms";
 import { useApps } from "@/lib/hooks/use-apps";
-import { Button, Card } from "flowbite-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CreateAppModal } from "@/components/CreateAppModal";
 
 export default function Page() {
@@ -34,15 +35,15 @@ export default function Page() {
         <div className="space-y-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
+              <h1 className="text-3xl font-bold tracking-tight">
                 Dashboard
               </h1>
-              <p className="text-zinc-500 dark:text-zinc-400 mt-1">
+              <p className="text-muted-foreground mt-1">
                 Overview of your cloud resources and applications.
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <Button size="sm" color="blue" onClick={() => setShowCreateApp(true)}>
+              <Button size="sm" onClick={() => setShowCreateApp(true)}>
                 <HiPlus className="w-4 h-4 mr-2" />
                 New Application
               </Button>
@@ -52,71 +53,71 @@ export default function Page() {
           {/* Stats Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             <Card>
-              <div className="flex items-center justify-between">
-                <h5 className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Applications</h5>
-                <HiCollection className="w-4 h-4 text-zinc-500" />
-              </div>
-              <div className="mt-2">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Applications</CardTitle>
+                <HiCollection className="w-4 h-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
                 {isLoadingApps ? (
-                  <div className="h-8 w-12 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
+                  <div className="h-8 w-12 bg-muted animate-pulse rounded" />
                 ) : (
-                  <div className="text-3xl font-bold dark:text-white">{apps.length}</div>
+                  <div className="text-2xl font-bold">{apps.length}</div>
                 )}
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   Projects in Git
                 </p>
-              </div>
+              </CardContent>
             </Card>
             <Card>
-              <div className="flex items-center justify-between">
-                <h5 className="text-sm font-medium text-gray-500 dark:text-gray-400">Running</h5>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Running</CardTitle>
                 <HiChartBar className="w-4 h-4 text-green-500" />
-              </div>
-              <div className="mt-2">
+              </CardHeader>
+              <CardContent>
                 {isFetchingVms && vms.length === 0 ? (
-                  <div className="h-8 w-12 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
+                  <div className="h-8 w-12 bg-muted animate-pulse rounded" />
                 ) : (
-                  <div className="text-3xl font-bold text-green-600 dark:text-green-400">{runningCount}</div>
+                  <div className="text-2xl font-bold text-green-600 dark:text-green-400">{runningCount}</div>
                 )}
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   Currently serving
                 </p>
-              </div>
+              </CardContent>
             </Card>
             <Card>
-              <div className="flex items-center justify-between">
-                <h5 className="text-sm font-medium text-gray-500 dark:text-gray-400">Deploying</h5>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Deploying</CardTitle>
                 <HiLightningBolt className="w-4 h-4 text-yellow-500" />
-              </div>
-              <div className="mt-2">
+              </CardHeader>
+              <CardContent>
                 {isFetchingVms && vms.length === 0 ? (
-                  <div className="h-8 w-12 bg-gray-200 dark:bg-gray-700 animate-pulse rounded" />
+                  <div className="h-8 w-12 bg-muted animate-pulse rounded" />
                 ) : (
-                  <div className="text-3xl font-bold text-yellow-600 dark:text-yellow-400">{pendingCount}</div>
+                  <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{pendingCount}</div>
                 )}
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   Pending tasks
                 </p>
-              </div>
+              </CardContent>
             </Card>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <Card className="lg:col-span-3">
-              <div className="flex items-center justify-between p-6">
+              <CardContent className="flex items-center justify-between p-6">
                 <div>
-                  <h5 className="text-xl font-bold dark:text-white">Welcome back!</h5>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  <h3 className="text-xl font-bold">Welcome back!</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
                     Your cloud infrastructure is running smoothly. 
                   </p>
                 </div>
                 <Link href="/apps">
-                  <Button color="blue" size="sm">
+                  <Button size="sm" variant="outline">
                     <HiCollection className="w-4 h-4 mr-2" />
                     View All Applications
                   </Button>
                 </Link>
-              </div>
+              </CardContent>
             </Card>
           </div>
         </div>

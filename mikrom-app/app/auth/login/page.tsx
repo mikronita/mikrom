@@ -7,7 +7,11 @@ import { Box, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 
 import { login } from "@/lib/api";
 import { setToken } from "@/lib/auth";
-import { Button, Card, Label, TextInput, Alert } from "flowbite-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 function LoginForm() {
   const router = useRouter();
@@ -41,84 +45,90 @@ function LoginForm() {
   };
 
   return (
-    <Card className="w-full max-w-md shadow-2xl dark:bg-zinc-900 border-zinc-200/50 dark:border-zinc-800/50">
-      <div className="space-y-1 text-center">
+    <Card className="w-full max-w-md shadow-2xl border-zinc-200/50 dark:border-zinc-800/50">
+      <CardHeader className="space-y-1 text-center">
         <div className="flex justify-center mb-4">
           <div className="w-12 h-12 bg-zinc-900 dark:bg-zinc-50 rounded-2xl flex items-center justify-center shadow-lg">
             <Box className="w-6 h-6 text-white dark:text-zinc-900" />
           </div>
         </div>
-        <h2 className="text-2xl font-bold tracking-tight dark:text-white">Welcome back</h2>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+        <CardTitle className="text-2xl font-bold tracking-tight">Welcome back</CardTitle>
+        <CardDescription>
           Enter your credentials to access your dashboard
-        </p>
-      </div>
+        </CardDescription>
+      </CardHeader>
       
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {showSuccess && (
-          <Alert color="success" icon={() => <CheckCircle2 className="w-4 h-4 mr-2" />}>
-            Account created! You can now sign in.
-          </Alert>
-        )}
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {showSuccess && (
+            <Alert variant="default" className="bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-800 dark:text-green-300">
+              <CheckCircle2 className="h-4 w-4" />
+              <AlertDescription>
+                Account created! You can now sign in.
+              </AlertDescription>
+            </Alert>
+          )}
 
-        {error && (
-          <Alert color="failure" icon={() => <AlertCircle className="w-4 h-4 mr-2" />}>
-            {error}
-          </Alert>
-        )}
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                {error}
+              </AlertDescription>
+            </Alert>
+          )}
 
-        <div>
-          <div className="mb-2 block">
+          <div className="space-y-2">
             <Label htmlFor="email">Email address</Label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="name@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={isLoading}
+              required
+            />
           </div>
-          <TextInput
-            id="email"
-            type="email"
-            placeholder="name@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={isLoading}
-            required
-          />
-        </div>
 
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <Label htmlFor="password">Password</Label>
-            <button type="button" className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 transition-colors">
-              Forgot password?
-            </button>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="password">Password</Label>
+              <button type="button" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                Forgot password?
+              </button>
+            </div>
+            <Input
+              id="password"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={isLoading}
+              required
+            />
           </div>
-          <TextInput
-            id="password"
-            type="password"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            disabled={isLoading}
-            required
-          />
-        </div>
 
-        <div className="flex flex-col gap-4">
-          <Button type="submit" color="blue" disabled={isLoading} className="w-full">
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Signing in...
-              </>
-            ) : (
-              "Sign In"
-            )}
-          </Button>
-          <div className="text-center text-sm text-zinc-500">
-            Don&apos;t have an account?{" "}
-            <Link href="/auth/register" className="font-semibold text-zinc-900 dark:text-zinc-100 hover:underline">
-              Create one for free
-            </Link>
+          <div className="flex flex-col gap-4 pt-2">
+            <Button type="submit" disabled={isLoading} className="w-full">
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Signing in...
+                </>
+              ) : (
+                "Sign In"
+              )}
+            </Button>
+            <div className="text-center text-sm text-muted-foreground">
+              Don&apos;t have an account?{" "}
+              <Link href="/auth/register" className="font-semibold text-foreground hover:underline">
+                Create one for free
+              </Link>
+            </div>
           </div>
-        </div>
-      </form>
+        </form>
+      </CardContent>
     </Card>
   );
 }

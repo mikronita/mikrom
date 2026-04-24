@@ -12,31 +12,50 @@ import {
   HiBell,
   HiMenuAlt2,
   HiX,
-  HiCollection
+  HiCollection,
+  HiMoon,
+  HiSun
 } from "react-icons/hi";
-import { 
-  Sidebar, 
-  SidebarItems, 
-  SidebarItemGroup, 
-  SidebarItem, 
-  Navbar, 
-  DarkThemeToggle,
-  Avatar,
-  Dropdown,
-  DropdownHeader,
-  DropdownItem,
-  DropdownDivider,
-  TextInput
-} from "flowbite-react";
 import { logout, getToken } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 import { getUserProfile } from "@/lib/api";
 import { useWatchVms } from "@/lib/hooks/use-vms";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuLabel, 
+  DropdownMenuSeparator, 
+  DropdownMenuTrigger 
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useTheme } from "next-themes";
+import { cn } from "@/lib/utils";
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      className="h-9 w-9"
+    >
+      <HiSun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+      <HiMoon className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+      <span className="sr-only">Toggle theme</span>
+    </Button>
+  );
+}
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const token = getToken();
+  const { theme } = useTheme();
 
   // Keep VMs synchronized globally via SSE
   useWatchVms();
@@ -58,126 +77,124 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     ? `${profile.first_name} ${profile.last_name}`
     : profile?.email.split("@")[0] || "User";
 
+  const navigation = [
+    { name: "Dashboard", href: "/", icon: HiChartPie, active: pathname === "/" },
+    { name: "Applications", href: "/apps", icon: HiCollection, active: pathname.startsWith("/apps") },
+    { name: "Settings", href: "/settings", icon: HiCog, active: pathname === "/settings" },
+  ];
+
   return (
-    <div className="antialiased bg-gray-50 dark:bg-gray-900">
+    <div className="antialiased min-h-screen bg-background">
       {/* Navbar */}
-      <Navbar fluid className="bg-white border-b border-gray-200 px-4 py-2.5 dark:bg-gray-800 dark:border-gray-700 fixed left-0 right-0 top-0 z-50">
-        <div className="flex flex-wrap justify-between items-center w-full">
-          <div className="flex justify-start items-center">
-            <button
+      <nav className="fixed left-0 right-0 top-0 z-50 flex h-16 items-center border-b bg-background/95 backdrop-blur px-4">
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-2 mr-2 text-gray-600 rounded-lg cursor-pointer md:hidden hover:text-gray-900 hover:bg-gray-100 focus:bg-gray-100 dark:focus:bg-gray-700 focus:ring-2 focus:ring-gray-100 dark:focus:ring-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-white"
+              className="md:hidden"
             >
-              {isSidebarOpen ? <HiX className="w-6 h-6" /> : <HiMenuAlt2 className="w-6 h-6" />}
-            </button>
-            <Link href="/" className="flex items-center justify-between mr-4">
-              <HiCube className="mr-3 h-8 w-8 text-zinc-900 dark:text-white" />
-              <span className="self-center text-2xl font-semibold whitespace-nowrap dark:text-white uppercase tracking-tighter">
+              {isSidebarOpen ? <HiX className="h-6 w-6" /> : <HiMenuAlt2 className="h-6 w-6" />}
+            </Button>
+            <Link href="/" className="flex items-center gap-3 mr-4">
+              <HiCube className="h-8 w-8" />
+              <span className="hidden sm:inline-block text-xl font-bold uppercase tracking-tighter">
                 Mikrom
               </span>
             </Link>
-            <form action="#" method="GET" className="hidden md:block md:pl-2">
-              <label htmlFor="topbar-search" className="sr-only">Search</label>
-              <TextInput
-                id="topbar-search"
-                icon={HiSearch}
+            <div className="hidden md:flex relative w-72">
+              <HiSearch className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="search"
                 placeholder="Search resources..."
-                className="w-72"
+                className="pl-9 h-9"
               />
-            </form>
+            </div>
           </div>
-          <div className="flex items-center lg:order-2 gap-2">
-            <button
-              type="button"
-              className="p-2 mr-1 text-gray-500 rounded-lg hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-700"
-            >
-              <span className="sr-only">View notifications</span>
-              <HiBell className="w-6 h-6" />
-            </button>
-            <DarkThemeToggle />
-            <Dropdown
-              arrowIcon={false}
-              inline
-              label={
-                <Avatar alt="User settings" img="" rounded placeholderInitials={initials} />
-              }
-            >
-              <DropdownHeader>
-                <span className="block text-sm font-bold">{fullName}</span>
-                <span className="block truncate text-sm font-medium">{profile?.email}</span>
-              </DropdownHeader>
-              <DropdownItem as={Link} href="/settings">Settings</DropdownItem>
-              <DropdownDivider />
-              <DropdownItem onClick={() => logout()} className="text-red-600">Sign out</DropdownItem>
-            </Dropdown>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" className="h-9 w-9">
+              <HiBell className="h-6 w-6" />
+            </Button>
+            <ThemeToggle />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-9 w-9 rounded-full">
+                  <Avatar className="h-9 w-9">
+                    <AvatarFallback>{initials}</AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56" align="end" forceMount>
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium leading-none">{fullName}</p>
+                    <p className="text-xs leading-none text-muted-foreground">
+                      {profile?.email}
+                    </p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link href="/settings">Settings</Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => logout()} className="text-destructive">
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
-      </Navbar>
+      </nav>
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 z-40 w-64 h-screen pt-14 transition-transform ${
+        className={cn(
+          "fixed top-0 left-0 z-40 w-64 h-screen pt-16 transition-transform border-r bg-background md:translate-x-0",
           isSidebarOpen ? "translate-x-0" : "-translate-x-full"
-        } bg-white border-r border-gray-200 md:translate-x-0 dark:bg-gray-800 dark:border-gray-700`}
-        aria-label="Sidenav"
+        )}
       >
-        <Sidebar className="h-full pt-5" theme={{ root: { inner: "bg-white dark:bg-gray-800 px-3 pb-4" } }}>
-          <SidebarItems>
-            <SidebarItemGroup>
-              <SidebarItem 
-                as={Link}
-                href="/" 
-                icon={HiChartPie}
-                active={pathname === "/"}
-                className={pathname === "/" ? "bg-gray-100 dark:bg-gray-700" : ""}
+        <div className="h-full px-3 py-4 flex flex-col justify-between">
+          <div className="space-y-1">
+            {navigation.map((item) => (
+              <Link
+                key={item.name}
+                href={item.href}
                 onClick={() => setIsSidebarOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  item.active 
+                    ? "bg-secondary text-secondary-foreground" 
+                    : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+                )}
               >
-                Dashboard
-              </SidebarItem>
-              <SidebarItem 
-                as={Link}
-                href="/apps" 
-                icon={HiCollection}
-                active={pathname.startsWith("/apps")}
-                className={pathname.startsWith("/apps") ? "bg-gray-100 dark:bg-gray-700" : ""}
-                onClick={() => setIsSidebarOpen(false)}
-              >
-                Applications
-              </SidebarItem>
-              <SidebarItem 
-                as={Link}
-                href="/settings" 
-                icon={HiCog}
-                active={pathname === "/settings"}
-                className={pathname === "/settings" ? "bg-gray-100 dark:bg-gray-700" : ""}
-                onClick={() => setIsSidebarOpen(false)}
-              >
-                Settings
-              </SidebarItem>
-            </SidebarItemGroup>
-            <SidebarItemGroup>
-              <SidebarItem 
-                href="#"
-                icon={HiLogout}
-                onClick={() => logout()}
-                className="text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-              >
-                Logout
-              </SidebarItem>
-            </SidebarItemGroup>
-          </SidebarItems>
-        </Sidebar>
+                <item.icon className="h-5 w-5" />
+                {item.name}
+              </Link>
+            ))}
+          </div>
+          <div className="pt-4 mt-4 border-t">
+            <button
+              onClick={() => logout()}
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
+            >
+              <HiLogout className="h-5 w-5" />
+              Logout
+            </button>
+          </div>
+        </div>
       </aside>
 
       {/* Main Content */}
-      <main className="p-4 md:ml-64 h-auto pt-20 min-h-screen">
+      <main className="p-4 md:ml-64 pt-20">
         {children}
       </main>
 
       {/* Mobile Backdrop */}
       {isSidebarOpen && (
         <div 
-          className="fixed inset-0 z-30 bg-gray-900/50 dark:bg-gray-900/80 md:hidden"
+          className="fixed inset-0 z-30 bg-background/80 backdrop-blur-sm md:hidden"
           onClick={() => setIsSidebarOpen(false)}
         />
       )}

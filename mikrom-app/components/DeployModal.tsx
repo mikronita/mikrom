@@ -2,7 +2,16 @@
 
 import { useState, type FormEvent } from "react";
 import { Loader2 } from "lucide-react";
-import { Button, Modal, ModalHeader, ModalBody, ModalFooter, Label, TextInput } from "flowbite-react";
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogFooter 
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useDeployApp } from "@/lib/hooks/use-vms";
 import { useRouter } from "next/navigation";
 import { DeployRequest } from "@/lib/api";
@@ -61,16 +70,16 @@ export function DeployModal({ onClose }: DeployModalProps) {
   };
 
   return (
-    <Modal show={true} onClose={onClose} size="md">
-      <ModalHeader>Deploy New App</ModalHeader>
-      <form onSubmit={handleDeploySubmit}>
-        <ModalBody>
-          <div className="space-y-6">
-            <div>
-              <div className="mb-2 block">
-                <Label htmlFor="app_name">App Name</Label>
-              </div>
-              <TextInput
+    <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Deploy New App</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleDeploySubmit} className="space-y-6 pt-4">
+          <div className="space-y-4">
+            <div className="grid w-full items-center gap-1.5">
+              <Label htmlFor="app_name">App Name</Label>
+              <Input
                 id="app_name"
                 required
                 value={form.app_name}
@@ -79,11 +88,9 @@ export function DeployModal({ onClose }: DeployModalProps) {
               />
             </div>
 
-            <div>
-              <div className="mb-2 block">
-                <Label htmlFor="image">Docker Image / RootFS</Label>
-              </div>
-              <TextInput
+            <div className="grid w-full items-center gap-1.5">
+              <Label htmlFor="image">Docker Image / RootFS</Label>
+              <Input
                 id="image"
                 required
                 value={form.image}
@@ -93,11 +100,9 @@ export function DeployModal({ onClose }: DeployModalProps) {
             </div>
 
             <div className="grid grid-cols-3 gap-4">
-              <div>
-                <div className="mb-2 block">
-                  <Label htmlFor="vcpus" className="text-[10px] uppercase">vCPUs</Label>
-                </div>
-                <TextInput
+              <div className="grid w-full items-center gap-1.5">
+                <Label htmlFor="vcpus" className="text-[10px] uppercase">vCPUs</Label>
+                <Input
                   id="vcpus"
                   type="number"
                   min="1"
@@ -106,11 +111,9 @@ export function DeployModal({ onClose }: DeployModalProps) {
                   placeholder="1"
                 />
               </div>
-              <div>
-                <div className="mb-2 block">
-                  <Label htmlFor="memory" className="text-[10px] uppercase">RAM (MiB)</Label>
-                </div>
-                <TextInput
+              <div className="grid w-full items-center gap-1.5">
+                <Label htmlFor="memory" className="text-[10px] uppercase">RAM (MiB)</Label>
+                <Input
                   id="memory"
                   type="number"
                   min="64"
@@ -119,11 +122,9 @@ export function DeployModal({ onClose }: DeployModalProps) {
                   placeholder="512"
                 />
               </div>
-              <div>
-                <div className="mb-2 block">
-                  <Label htmlFor="disk" className="text-[10px] uppercase">Disk (MiB)</Label>
-                </div>
-                <TextInput
+              <div className="grid w-full items-center gap-1.5">
+                <Label htmlFor="disk" className="text-[10px] uppercase">Disk (MiB)</Label>
+                <Input
                   id="disk"
                   type="number"
                   min="128"
@@ -134,23 +135,23 @@ export function DeployModal({ onClose }: DeployModalProps) {
               </div>
             </div>
           </div>
-        </ModalBody>
-        <ModalFooter className="justify-end">
-          <Button color="light" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" color="blue" disabled={deployMutation.isPending}>
-            {deployMutation.isPending ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Deploying...
-              </>
-            ) : (
-              "Launch Instance"
-            )}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={deployMutation.isPending}>
+              {deployMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Deploying...
+                </>
+              ) : (
+                "Launch Instance"
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
