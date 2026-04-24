@@ -225,80 +225,7 @@ export default function AppDetailPage() {
             </div>
           </div>
 
-          {/* Integrated Instance Monitoring */}
-          {vm && isInstanceRunning && (
-            <div className="space-y-6 animate-in fade-in duration-500">
-              <div className="space-y-6">
-                {/* Metrics Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <MetricCard 
-                    icon={HiChip} 
-                    label="CPU Usage" 
-                    value={`${(vm.cpu_usage * 100).toFixed(1)}%`} 
-                    percentage={vm.cpu_usage * 100}
-                    color="indigo"
-                  />
-                  <MetricCard 
-                    icon={HiServer} 
-                    label="RAM Usage" 
-                    value={`${(vm.ram_used_bytes / (1024 * 1024)).toFixed(0)} MiB`} 
-                    percentage={(vm.ram_used_bytes / (1024 * 1024 * 512)) * 100} 
-                    color="purple"
-                  />
-                </div>
-
-                {/* Chart */}
-                <Card className="p-0 overflow-hidden border-none shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
-                  <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
-                    <h5 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                      Real-time Performance
-                    </h5>
-                  </div>
-                  <div className="h-48 w-full p-4">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={metricsHistory}>
-                        <defs>
-                          <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
-                            <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
-                        <XAxis dataKey="time" hide />
-                        <YAxis hide domain={[0, 100]} />
-                        <Tooltip 
-                          contentStyle={{ 
-                            backgroundColor: 'rgba(255, 255, 255, 0.8)', 
-                            borderRadius: '8px', 
-                            border: 'none',
-                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                          }} 
-                        />
-                        <Area 
-                          type="monotone" 
-                          dataKey="cpu" 
-                          stroke="#6366f1" 
-                          fillOpacity={1} 
-                          fill="url(#colorCpu)" 
-                          strokeWidth={2}
-                          isAnimationActive={false}
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </Card>
-
-                {vm.error_message && (
-                  <Alert color="failure" icon={HiExclamationCircle} className="dark:bg-red-900/20 dark:text-red-400">
-                    <h6 className="font-bold mb-1 text-xs">Termination Error</h6>
-                    <p className="text-[10px] break-words">{vm.error_message}</p>
-                  </Alert>
-                )}
-              </div>
-            </div>
-          )}
-
-          <section className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+          <section className="space-y-4">
             <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
               Deployment History
             </h2>
@@ -387,6 +314,82 @@ export default function AppDetailPage() {
               </div>
             </Card>
           </section>
+
+          {/* Integrated Instance Monitoring */}
+          {vm && isInstanceRunning && (
+            <div className="space-y-6 animate-in fade-in duration-500 pt-6 border-t border-zinc-100 dark:border-zinc-800">
+              <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
+                Live Performance
+              </h2>
+              <div className="space-y-6">
+                {/* Metrics Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <MetricCard 
+                    icon={HiChip} 
+                    label="CPU Usage" 
+                    value={`${(vm.cpu_usage * 100).toFixed(1)}%`} 
+                    percentage={vm.cpu_usage * 100}
+                    color="indigo"
+                  />
+                  <MetricCard 
+                    icon={HiServer} 
+                    label="RAM Usage" 
+                    value={`${(vm.ram_used_bytes / (1024 * 1024)).toFixed(0)} MiB`} 
+                    percentage={(vm.ram_used_bytes / (1024 * 1024 * 512)) * 100} 
+                    color="purple"
+                  />
+                </div>
+
+                {/* Chart */}
+                <Card className="p-0 overflow-hidden border-none shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
+                  <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
+                    <h5 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                      Real-time CPU Load
+                    </h5>
+                  </div>
+                  <div className="h-48 w-full p-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={metricsHistory}>
+                        <defs>
+                          <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
+                        <XAxis dataKey="time" hide />
+                        <YAxis hide domain={[0, 100]} />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'rgba(255, 255, 255, 0.8)', 
+                            borderRadius: '8px', 
+                            border: 'none',
+                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                          }} 
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="cpu" 
+                          stroke="#6366f1" 
+                          fillOpacity={1} 
+                          fill="url(#colorCpu)" 
+                          strokeWidth={2}
+                          isAnimationActive={false}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </Card>
+
+                {vm.error_message && (
+                  <Alert color="failure" icon={HiExclamationCircle} className="dark:bg-red-900/20 dark:text-red-400">
+                    <h6 className="font-bold mb-1 text-xs">Termination Error</h6>
+                    <p className="text-[10px] break-words">{vm.error_message}</p>
+                  </Alert>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* GitHub Webhook Modal */}
