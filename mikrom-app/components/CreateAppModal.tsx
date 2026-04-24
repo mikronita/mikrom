@@ -66,10 +66,10 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
           </div>
         </ModalBody>
         <ModalFooter className="justify-end">
-          <Button color="gray" onClick={onClose}>
+          <Button color="light" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" color="dark" disabled={createAppMutation.isPending}>
+          <Button type="submit" color="blue" disabled={createAppMutation.isPending}>
             {createAppMutation.isPending ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />

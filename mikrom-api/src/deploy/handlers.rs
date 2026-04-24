@@ -587,6 +587,55 @@ pub async fn activate_deployment_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    // 4. Cleanup old instances (Auto-stop/delete old firecracker instances)
+    let old_deployments = state
+        .app_repo
+        .list_deployments_by_app(app_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let scheduler_config = state.scheduler_config.clone();
+    let app_repo = state.app_repo.clone();
+    let user_id_str = auth.user_id.clone();
+
+    tokio::spawn(async move {
+        for old_dep in old_deployments {
+            // Skip the newly activated one or non-active ones
+            if old_dep.id == deployment_id
+                || (old_dep.status != "RUNNING" && old_dep.status != "PENDING")
+            {
+                continue;
+            }
+
+            if let Some(job_id) = old_dep.job_id {
+                tracing::info!(app_id = %app_id, old_job_id = %job_id, "Cleaning up old instance after promotion");
+
+                // Best effort delete from scheduler
+                if let Ok(channel) = crate::scheduler::connect(&scheduler_config).await {
+                    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+                    let _ = client
+                        .delete_app(mikrom_proto::scheduler::DeleteAppRequest {
+                            job_id: job_id.clone(),
+                            user_id: user_id_str.clone(),
+                        })
+                        .await;
+                }
+
+                // Mark as STOPPED in database
+                let _ = app_repo
+                    .update_deployment_status(
+                        old_dep.id,
+                        "STOPPED",
+                        Some(job_id),
+                        old_dep.image_tag,
+                        old_dep.build_id,
+                        None,
+                    )
+                    .await;
+            }
+        }
+    });
+
     // Notify update
     state.deployment_events.send(app_id).ok();
 
