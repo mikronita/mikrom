@@ -2199,4 +2199,54 @@ mod tests {
             FirecrackerManager::resolve_bridge_config(Some("10.0.1.1/24".to_string()));
         assert_eq!(ip_override, "10.0.1.1/24");
     }
+
+    #[tokio::test]
+    async fn test_get_all_vms_includes_metrics_and_socket_paths() {
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let vm_id = "path-test-vm";
+        let socket_path = "/tmp/test.sock".to_string();
+        let metrics_path = Some("/tmp/test-metrics.json".to_string());
+
+        // Setup VM info
+        {
+            let mut vms = mgr.vms.write().await;
+            vms.insert(
+                vm_id.to_string(),
+                VmInfo {
+                    vm_id: vm_id.to_string(),
+                    app_id: "app1".into(),
+                    image: "img".into(),
+                    config: VmConfig::default(),
+                    status: VmStatus::Running,
+                    started_at: None,
+                    error_message: None,
+                },
+            );
+        }
+
+        // Setup process info
+        {
+            let mut processes = mgr.processes.lock().await;
+            let log_task = tokio::spawn(async {});
+            let child = tokio::process::Command::new("true").spawn().unwrap();
+            processes.insert(
+                vm_id.to_string(),
+                VmProcess {
+                    vm_id: vm_id.to_string(),
+                    child,
+                    socket_path: socket_path.clone(),
+                    metrics_path: metrics_path.clone(),
+                    tap_name: None,
+                    log_task,
+                    chroot_dir: None,
+                },
+            );
+        }
+
+        let all_vms = mgr.get_all_vms().await;
+        let vm = all_vms.iter().find(|v| v.vm_id == vm_id).unwrap();
+
+        assert_eq!(vm.socket_path, Some(socket_path));
+        assert_eq!(vm.metrics_path, metrics_path);
+    }
 }
