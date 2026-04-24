@@ -33,9 +33,11 @@ function getStatusColor(status: string): string {
 }
 
 export default function DeploymentsPage() {
-  const [deployments, setDeployments] = useState<LiveDeploymentInfo[]>([]);
-  const [apps, setApps] = useState<AppInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: deployments = [], isLoading: loading, error: vmsError } = useVms();
+  const { data: apps = [], error: appsError } = useApps();
+  const stopVmMutation = useStopVm();
+  const deleteVmMutation = useDeleteVm();
+
   const [searchQuery, setSearchQuery] = useState("");
   const [stoppingId, setStoppingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -43,47 +45,29 @@ export default function DeploymentsPage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [stopError, setStopError] = useState<string | null>(null);
 
-  const fetchDeployments = useCallback(async (isInitial = true) => {
-    const token = getToken();
-    if (!token) return;
-    if (isInitial) setLoading(true);
-    const [vmResult, appResult] = await Promise.all([listVms(token), listApps(token)]);
-    if (!vmResult.error) {
-      setDeployments(vmResult.data ?? []);
-    }
-    if (!appResult.error) {
-      setApps(appResult.data ?? []);
-    }
-    if (isInitial) setLoading(false);
-  }, []);
-
   const handleStop = async (jobId: string) => {
-    const token = getToken();
-    if (!token) return;
     setStoppingId(jobId);
     setConfirmStopId(null);
     setStopError(null);
-    const result = await stopVm(token, jobId);
-    setStoppingId(null);
-    if (result.error) {
-      setStopError(result.error);
-    } else {
-      await fetchDeployments(false);
+    try {
+      await stopVmMutation.mutateAsync(jobId);
+    } catch (err) {
+      setStopError(err instanceof Error ? err.message : "Failed to stop VM");
+    } finally {
+      setStoppingId(null);
     }
   };
 
   const handleDelete = async (jobId: string) => {
-    const token = getToken();
-    if (!token) return;
     setDeletingId(jobId);
     setConfirmDeleteId(null);
     setStopError(null);
-    const result = await deleteVm(token, jobId);
-    setDeletingId(null);
-    if (result.error) {
-      setStopError(result.error);
-    } else {
-      await fetchDeployments(false);
+    try {
+      await deleteVmMutation.mutateAsync(jobId);
+    } catch (err) {
+      setStopError(err instanceof Error ? err.message : "Failed to delete VM");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -91,53 +75,6 @@ export default function DeploymentsPage() {
     const s = status.toLowerCase();
     return s === "running" || s === "scheduled" || s === "pending";
   };
-
-  useEffect(() => {
-    let isMounted = true;
-    const cleanupRef = { current: null as (() => void) | null };
-    
-    const init = async () => {
-      const token = getToken();
-      if (!token) return;
-      
-      const [vmResult, appResult] = await Promise.all([listVms(token), listApps(token)]);
-      
-      if (!isMounted) return;
-
-      if (!vmResult.error) setDeployments(vmResult.data ?? []);
-      if (!appResult.error) setApps(appResult.data ?? []);
-      setLoading(false);
-
-      // Start SSE for real-time updates
-      cleanupRef.current = watchDeploymentsSSE(
-        token,
-        (updatedVm) => {
-          if (!isMounted) return;
-          setDeployments(prev => {
-            const index = prev.findIndex(vm => vm.job_id === updatedVm.job_id);
-            if (index === -1) {
-              return [...prev, updatedVm];
-            }
-            const next = [...prev];
-            next[index] = { ...prev[index], ...updatedVm };
-            return next;
-          });
-        },
-        (error) => {
-          if (isMounted) {
-            console.error("Deployments SSE Error:", error);
-          }
-        }
-      );
-    };
-    
-    init();
-
-    return () => {
-      isMounted = false;
-      if (cleanupRef.current) cleanupRef.current();
-    };
-  }, []);
 
   const filteredDeployments = deployments.filter(vm =>
     vm.app_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -159,17 +96,20 @@ export default function DeploymentsPage() {
             </div>
           </div>
 
+          {(vmsError || appsError) && (
+            <Alert color="failure" icon={HiExclamationCircle}>
+              <span>{vmsError?.message || appsError?.message}</span>
+            </Alert>
+          )}
+
           <Card className="overflow-hidden border-none shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
             <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="relative w-full sm:max-w-xs">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                  <HiSearch className="w-4 h-4 text-zinc-400" />
-                </div>
                 <TextInput
                   placeholder="Search deployments..."
+                  icon={HiSearch}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
                   sizing="sm"
                 />
               </div>
@@ -182,7 +122,7 @@ export default function DeploymentsPage() {
             </div>
 
             {stopError && (
-              <Alert color="failure" className="rounded-none" icon={() => <HiExclamationCircle className="w-4 h-4 mr-2" />}>
+              <Alert color="failure" className="rounded-none" icon={() => <HiExclamationCircle className="w-4 h-4 mr-2" />} onDismiss={() => setStopError(null)}>
                 {stopError}
               </Alert>
             )}

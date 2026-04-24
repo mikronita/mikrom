@@ -30,8 +30,8 @@ function normalizeStatus(status: string): string {
 
 export default function Page() {
   const router = useRouter();
-  const { data: vms = [] } = useVms();
-  const { data: apps = [], isLoading: isLoadingApps } = useApps();
+  const { data: vms = [], isFetching: isFetchingVms, error: vmsError } = useVms();
+  const { data: apps = [], isLoading: isLoadingApps, error: appsError } = useApps();
   const deleteAppMutation = useDeleteApp();
   const [showCreateApp, setShowCreateApp] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
