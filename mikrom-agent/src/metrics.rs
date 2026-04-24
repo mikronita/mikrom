@@ -314,4 +314,62 @@ mod tests {
         // Cloned collector shares the same Arc state
         assert_eq!(clone.collect().await.apps_count, 1);
     }
+
+    #[tokio::test]
+    async fn test_collect_with_vms_and_metrics_file() {
+        use crate::firecracker::config::FirecrackerConfig;
+        use crate::firecracker::config::VmConfig;
+        use crate::firecracker::manager::FirecrackerManager;
+
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let collector = MetricsCollector::with_firecracker(mgr.clone());
+
+        let vm_id = "test-vm-metrics";
+        let metrics_file = format!("/tmp/metrics-{}.json", uuid::Uuid::new_v4());
+
+        // Simulate Firecracker metrics JSON
+        let metrics_content = serde_json::json!({
+            "vcpu": { "exit_io_in": 10 },
+            "balloon": { "inflate_count": 5 }
+        })
+        .to_string();
+        tokio::fs::write(&metrics_file, metrics_content)
+            .await
+            .unwrap();
+
+        // Start a stub VM
+        mgr.start_vm(
+            vm_id.to_string(),
+            "app-1".to_string(),
+            "image".to_string(),
+            VmConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        // Inject metrics path manually for testing since stub mode doesn't run the full background task
+        {
+            let mut processes = mgr.processes.lock().await;
+            let log_task = tokio::spawn(async {});
+            let child = tokio::process::Command::new("true").spawn().unwrap();
+            processes.insert(
+                vm_id.to_string(),
+                crate::firecracker::process::VmProcess {
+                    vm_id: vm_id.to_string(),
+                    child,
+                    socket_path: "/tmp/fake.sock".into(),
+                    metrics_path: Some(metrics_file.clone()),
+                    tap_name: None,
+                    log_task,
+                    chroot_dir: None,
+                },
+            );
+        }
+
+        let metrics = collector.collect().await;
+        assert!(metrics.vms.contains_key(vm_id));
+
+        // Cleanup
+        let _ = tokio::fs::remove_file(metrics_file).await;
+    }
 }
