@@ -348,7 +348,7 @@ async fn test_sse_deployments_events_e2e() {
         .body(Body::empty())
         .unwrap();
 
-    let mut response = app.clone().call(req).await.unwrap();
+    let response = app.clone().call(req).await.unwrap();
     assert_eq!(response.status(), axum::http::StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "text/event-stream");
 

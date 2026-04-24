@@ -523,9 +523,9 @@ fn map_grpc_error(e: tonic::Status) -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AppState;
     use crate::auth::AuthUser;
     use crate::repositories::app_repository::MockAppRepository;
-    use crate::AppState;
     use axum::extract::State;
     use std::sync::Arc;
     use uuid::Uuid;
@@ -533,9 +533,10 @@ mod tests {
     #[tokio::test]
     async fn test_list_active_deployments_empty() {
         let mut mock_repo = MockAppRepository::new();
-        
+
         // Mock list_deployments_by_user returning empty
-        mock_repo.expect_list_deployments_by_user()
+        mock_repo
+            .expect_list_deployments_by_user()
             .returning(|_| Ok(vec![]));
 
         let state = AppState {
@@ -565,9 +566,10 @@ mod tests {
     #[tokio::test]
     async fn test_get_deployment_status_not_found() {
         let mut mock_repo = MockAppRepository::new();
-        
+
         // Mock get_deployment_by_job_id returning None
-        mock_repo.expect_get_deployment_by_job_id()
+        mock_repo
+            .expect_get_deployment_by_job_id()
             .returning(|_| Ok(None));
 
         let _state = AppState {
@@ -598,11 +600,12 @@ mod tests {
         let mut mock_repo = MockAppRepository::new();
         let app_id = Uuid::new_v4();
         let user_id = Uuid::new_v4();
-        
+
         // Mock list_deployments_by_user returning some data
-        mock_repo.expect_list_deployments_by_user()
-            .returning(move |_| Ok(vec![
-                crate::models::app::Deployment {
+        mock_repo
+            .expect_list_deployments_by_user()
+            .returning(move |_| {
+                Ok(vec![crate::models::app::Deployment {
                     id: Uuid::new_v4(),
                     app_id,
                     user_id,
@@ -618,11 +621,11 @@ mod tests {
                     env_vars: serde_json::json!({}),
                     created_at: chrono::Utc::now(),
                     updated_at: chrono::Utc::now(),
-                }
-            ]));
+                }])
+            });
 
-        mock_repo.expect_get_app()
-            .returning(|id| Ok(Some(crate::models::app::App {
+        mock_repo.expect_get_app().returning(|id| {
+            Ok(Some(crate::models::app::App {
                 id,
                 name: "test-app".into(),
                 git_url: "".into(),
@@ -632,14 +635,15 @@ mod tests {
                 active_deployment_id: None,
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
-            })));
-        
+            }))
+        });
+
         let state = AppState {
             user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
             app_repo: Arc::new(mock_repo),
             scheduler_client: None,
             scheduler_config: crate::scheduler::SchedulerConfig {
-                addr: "http://invalid:1".to_string(), 
+                addr: "http://invalid:1".to_string(),
                 use_tls: false,
                 certs_dir: None,
             },

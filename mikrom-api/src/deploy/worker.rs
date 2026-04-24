@@ -332,12 +332,13 @@ mod tests {
         let dep_id = Uuid::new_v4();
 
         // 1. Success expectations
-        mock_repo.expect_update_deployment_status()
+        mock_repo
+            .expect_update_deployment_status()
             .times(1)
             .returning(|_, _, _, _, _, _| Ok(()));
-        
-        mock_repo.expect_get_app()
-            .returning(move |_| Ok(Some(crate::models::app::App {
+
+        mock_repo.expect_get_app().returning(move |_| {
+            Ok(Some(crate::models::app::App {
                 id: app_id,
                 name: "test".into(),
                 git_url: "".into(),
@@ -347,9 +348,11 @@ mod tests {
                 active_deployment_id: None,
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
-            })));
-        
-        mock_repo.expect_set_active_deployment()
+            }))
+        });
+
+        mock_repo
+            .expect_set_active_deployment()
             .returning(|_, _| Ok(()));
 
         let state = AppState {
@@ -357,7 +360,9 @@ mod tests {
             app_repo: Arc::new(mock_repo),
             scheduler_client: None,
             scheduler_config: crate::scheduler::SchedulerConfig {
-                addr: "".into(), use_tls: false, certs_dir: None
+                addr: "".into(),
+                use_tls: false,
+                certs_dir: None,
             },
             builder_addr: "".into(),
             jwt_secret: "".into(),
