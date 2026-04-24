@@ -131,7 +131,7 @@ export default function InstanceDetailPage() {
   const router = useRouter();
   const jobId = params.job_id as string;
 
-  const { data: vm, isLoading, isError } = useVm(jobId);
+  const { data: vm, isLoading, isError, refetch } = useVm(jobId);
   const { data: apps = [] } = useApps();
 
   const stopVmMutation = useStopVm();
