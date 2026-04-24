@@ -10,10 +10,7 @@ import {
   HiCog,
   HiChip,
   HiServer,
-  HiTerminal,
-  HiHashtag,
-  HiClock,
-  HiLightningBolt
+  HiTerminal
 } from "react-icons/hi";
 import {
   HiCheckCircle, 
@@ -23,7 +20,7 @@ import {
 } from "react-icons/hi2";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ElementType, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ElementType } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -44,7 +41,6 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from "recharts";
-import { cn } from "@/lib/utils";
 
 function getStatusColor(status: string): string {
   const s = status.toLowerCase();
@@ -52,42 +48,6 @@ function getStatusColor(status: string): string {
   if (s === "building" || s === "scheduled" || s === "pending") return "warning";
   if (s === "failed" || s === "cancelled") return "failure";
   return "gray";
-}
-
-function formatTimestamp(ts: number): string {
-  if (!ts) return "—";
-  return new Date(ts * 1000).toLocaleString();
-}
-
-function DetailRow({ 
-  icon: Icon, 
-  label, 
-  value, 
-  mono = false 
-}: { 
-  icon: ElementType;
-  label: string; 
-  value: ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex items-start gap-4 py-4 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
-      <div className="mt-0.5 w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
-        <Icon className="w-4 h-4 text-zinc-500" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <dt className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
-          {label}
-        </dt>
-        <dd className={cn(
-          "text-sm text-zinc-900 dark:text-zinc-100 break-all",
-          mono && "font-mono bg-zinc-50 dark:bg-zinc-800/50 px-1.5 py-0.5 rounded"
-        )}>
-          {value}
-        </dd>
-      </div>
-    </div>
-  );
 }
 
 function MetricCard({ 
@@ -309,125 +269,109 @@ export default function AppDeploymentsPage() {
           {/* Integrated Instance Monitoring */}
           {vm && isInstanceRunning && (
             <div className="space-y-6 animate-in fade-in duration-500">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 space-y-6">
-                  {/* Metrics Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <MetricCard 
-                      icon={HiChip} 
-                      label="CPU Usage" 
-                      value={`${(vm.cpu_usage * 100).toFixed(1)}%`} 
-                      percentage={vm.cpu_usage * 100}
-                      color="indigo"
-                    />
-                    <MetricCard 
-                      icon={HiServer} 
-                      label="RAM Usage" 
-                      value={`${(vm.ram_used_bytes / (1024 * 1024)).toFixed(0)} MiB`} 
-                      percentage={(vm.ram_used_bytes / (1024 * 1024 * 512)) * 100} 
-                      color="purple"
-                    />
-                  </div>
+              <div className="space-y-6">
+                {/* Metrics Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <MetricCard 
+                    icon={HiChip} 
+                    label="CPU Usage" 
+                    value={`${(vm.cpu_usage * 100).toFixed(1)}%`} 
+                    percentage={vm.cpu_usage * 100}
+                    color="indigo"
+                  />
+                  <MetricCard 
+                    icon={HiServer} 
+                    label="RAM Usage" 
+                    value={`${(vm.ram_used_bytes / (1024 * 1024)).toFixed(0)} MiB`} 
+                    percentage={(vm.ram_used_bytes / (1024 * 1024 * 512)) * 100} 
+                    color="purple"
+                  />
+                </div>
 
-                  {/* Chart */}
-                  <Card className="p-0 overflow-hidden border-none shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
-                    <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
-                      <h5 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                        Real-time Performance
+                {/* Chart */}
+                <Card className="p-0 overflow-hidden border-none shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
+                  <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
+                    <h5 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                      Real-time Performance
+                    </h5>
+                  </div>
+                  <div className="h-48 w-full p-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={metricsHistory}>
+                        <defs>
+                          <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
+                        <XAxis dataKey="time" hide />
+                        <YAxis hide domain={[0, 100]} />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'rgba(255, 255, 255, 0.8)', 
+                            borderRadius: '8px', 
+                            border: 'none',
+                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                          }} 
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="cpu" 
+                          stroke="#6366f1" 
+                          fillOpacity={1} 
+                          fill="url(#colorCpu)" 
+                          strokeWidth={2}
+                          isAnimationActive={false}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </Card>
+
+                {/* Logs */}
+                <Card className="p-0 overflow-hidden bg-zinc-900 border-zinc-800 shadow-xl ring-1 ring-white/10">
+                  <div className="p-3 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                      <h5 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                        Live Instance Logs
                       </h5>
                     </div>
-                    <div className="h-48 w-full p-4">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={metricsHistory}>
-                          <defs>
-                            <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
-                              <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
-                          <XAxis dataKey="time" hide />
-                          <YAxis hide domain={[0, 100]} />
-                          <Tooltip 
-                            contentStyle={{ 
-                              backgroundColor: 'rgba(255, 255, 255, 0.8)', 
-                              borderRadius: '8px', 
-                              border: 'none',
-                              boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                            }} 
-                          />
-                          <Area 
-                            type="monotone" 
-                            dataKey="cpu" 
-                            stroke="#6366f1" 
-                            fillOpacity={1} 
-                            fill="url(#colorCpu)" 
-                            strokeWidth={2}
-                            isAnimationActive={false}
-                          />
-                        </AreaChart>
-                      </ResponsiveContainer>
+                    <div className="text-[9px] text-zinc-500 font-mono">
+                      {logs.length} lines
                     </div>
-                  </Card>
-
-                  {/* Logs */}
-                  <Card className="p-0 overflow-hidden bg-zinc-900 border-zinc-800 shadow-xl ring-1 ring-white/10">
-                    <div className="p-3 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                        <h5 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                          Live Instance Logs
-                        </h5>
+                  </div>
+                  <div className="h-64 overflow-y-auto p-3 font-mono text-[10px] leading-relaxed scrollbar-thin scrollbar-thumb-zinc-700">
+                    {logs.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full text-zinc-600 italic">
+                        <HiTerminal className="w-6 h-6 mb-2 opacity-20" />
+                        Waiting for logs...
                       </div>
-                      <div className="text-[9px] text-zinc-500 font-mono">
-                        {logs.length} lines
+                    ) : (
+                      <div className="space-y-0.5">
+                        {logs.map((log, i) => (
+                          <div key={i} className="flex gap-3 group">
+                            <span className="text-zinc-600 shrink-0 select-none opacity-50 text-[9px]">
+                              {new Date(log.timestamp).toLocaleTimeString([], { hour12: false })}
+                            </span>
+                            <span className="text-zinc-300 break-all whitespace-pre-wrap">
+                              <Ansi>{log.line}</Ansi>
+                            </span>
+                          </div>
+                        ))}
+                        <div ref={logEndRef} />
                       </div>
-                    </div>
-                    <div className="h-64 overflow-y-auto p-3 font-mono text-[10px] leading-relaxed scrollbar-thin scrollbar-thumb-zinc-700">
-                      {logs.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-zinc-600 italic">
-                          <HiTerminal className="w-6 h-6 mb-2 opacity-20" />
-                          Waiting for logs...
-                        </div>
-                      ) : (
-                        <div className="space-y-0.5">
-                          {logs.map((log, i) => (
-                            <div key={i} className="flex gap-3 group">
-                              <span className="text-zinc-600 shrink-0 select-none opacity-50 text-[9px]">
-                                {new Date(log.timestamp).toLocaleTimeString([], { hour12: false })}
-                              </span>
-                              <span className="text-zinc-300 break-all whitespace-pre-wrap">
-                                <Ansi>{log.line}</Ansi>
-                              </span>
-                            </div>
-                          ))}
-                          <div ref={logEndRef} />
-                        </div>
-                      )}
-                    </div>
-                  </Card>
-                </div>
+                    )}
+                  </div>
+                </Card>
 
-                <div className="space-y-6">
-                  <Card className="border-none shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
-                    <h5 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-4">
-                      Active Instance
-                    </h5>
-                    <dl className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                      <DetailRow icon={HiLightningBolt} label="Instance ID" value={vm.vm_id || "Not assigned"} mono />
-                      <DetailRow icon={HiHashtag} label="Job ID" value={activeJobId || ""} mono />
-                      <DetailRow icon={HiServer} label="Worker Node" value={vm.host_id || "Unassigned"} />
-                      <DetailRow icon={HiClock} label="Started At" value={formatTimestamp(vm.started_at)} />
-                    </dl>
-                  </Card>
-                  
-                  {vm.error_message && (
-                    <Alert color="failure" icon={HiExclamationCircle} className="dark:bg-red-900/20 dark:text-red-400">
-                      <h6 className="font-bold mb-1 text-xs">Termination Error</h6>
-                      <p className="text-[10px] break-words">{vm.error_message}</p>
-                    </Alert>
-                  )}
-                </div>
+                {vm.error_message && (
+                  <Alert color="failure" icon={HiExclamationCircle} className="dark:bg-red-900/20 dark:text-red-400">
+                    <h6 className="font-bold mb-1 text-xs">Termination Error</h6>
+                    <p className="text-[10px] break-words">{vm.error_message}</p>
+                  </Alert>
+                )}
               </div>
             </div>
           )}
