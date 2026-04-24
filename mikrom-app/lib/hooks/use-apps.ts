@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   listApps, 
@@ -9,7 +10,8 @@ import {
   listDeployments, 
   activateDeployment,
   CreateAppRequest,
-  DeployRequest 
+  DeployRequest,
+  API_BASE_URL
 } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 
@@ -89,6 +91,33 @@ export function useDeployAppVersion() {
 
 export function useDeployments(appId: string) {
   const token = getToken();
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!token || !appId) return;
+
+    const eventSource = new EventSource(`${API_BASE_URL}/apps/${appId}/deployments/stream?token=${token}`);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        queryClient.setQueryData(appsKeys.deployments(appId), data);
+      } catch (err) {
+        console.error("Failed to parse SSE data", err);
+      }
+    };
+
+    eventSource.onerror = () => {
+      // EventSource automatically reconnects, but we log the error
+      console.debug("SSE connection error, attempting to reconnect...");
+    };
+
+    return () => {
+      eventSource.onmessage = null;
+      eventSource.onerror = null;
+      eventSource.close();
+    };
+  }, [appId, token, queryClient]);
 
   return useQuery({
     queryKey: appsKeys.deployments(appId),
@@ -99,7 +128,6 @@ export function useDeployments(appId: string) {
       return result.data ?? [];
     },
     enabled: !!token && !!appId,
-    refetchInterval: 5000,
   });
 }
 

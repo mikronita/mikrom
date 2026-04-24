@@ -551,6 +551,7 @@ mod tests {
             builder_addr: "http://localhost:5004".to_string(),
             jwt_secret: "secret".to_string(),
             master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
         };
 
         let auth = AuthUser {
@@ -584,6 +585,7 @@ mod tests {
             builder_addr: "http://localhost:5004".to_string(),
             jwt_secret: "secret".to_string(),
             master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
         };
 
         let _auth = AuthUser {
@@ -632,6 +634,7 @@ mod tests {
                 port: 80,
                 hostname: None,
                 user_id: Uuid::new_v4(),
+                github_webhook_secret: None,
                 active_deployment_id: None,
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
@@ -650,6 +653,7 @@ mod tests {
             builder_addr: "http://localhost:5004".to_string(),
             jwt_secret: "secret".to_string(),
             master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
         };
 
         let auth = AuthUser {

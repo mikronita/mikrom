@@ -39,6 +39,7 @@ async fn test_activate_deployment_endpoint() {
         port: 8080,
         hostname: None,
         user_id,
+        github_webhook_secret: None,
         active_deployment_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -88,6 +89,7 @@ async fn test_activate_deployment_endpoint() {
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
     };
 
     let router = create_app(state);
@@ -136,6 +138,7 @@ async fn test_activate_deployment_wrong_owner() {
         port: 8080,
         hostname: None,
         user_id: other_user_id, // Owned by someone else
+        github_webhook_secret: None,
         active_deployment_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -152,6 +155,7 @@ async fn test_activate_deployment_wrong_owner() {
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
     };
 
     let response = create_app(state)
@@ -197,6 +201,7 @@ async fn test_activate_deployment_not_running() {
         port: 8080,
         hostname: None,
         user_id,
+        github_webhook_secret: None,
         active_deployment_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -234,6 +239,7 @@ async fn test_activate_deployment_not_running() {
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
     };
 
     let response = create_app(state)

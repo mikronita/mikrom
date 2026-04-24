@@ -19,6 +19,7 @@ pub mod sync;
 pub mod vms;
 
 pub use deploy::deploy_app;
+use deploy::webhooks::github_webhook_handler;
 pub use error::{ApiError, ApiResult};
 pub use repositories::app_repository::AppRepository;
 pub use repositories::user_repository::UserRepository;
@@ -40,6 +41,7 @@ pub struct AppState {
     pub builder_addr: String,
     pub jwt_secret: String,
     pub master_key: String,
+    pub deployment_events: tokio::sync::broadcast::Sender<uuid::Uuid>,
 }
 
 #[derive(Clone)]
@@ -61,6 +63,10 @@ pub fn create_app(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))
+        .route(
+            "/webhooks/github",
+            axum::routing::post(github_webhook_handler),
+        )
         .route("/auth/me", get(get_profile))
         .route("/auth/me", axum::routing::put(update_profile))
         .route("/deploy", axum::routing::post(deploy_app))
@@ -80,6 +86,10 @@ pub fn create_app(state: AppState) -> Router {
         .route(
             "/apps/:app_id/deployments",
             get(crate::deploy::list_deployments_handler),
+        )
+        .route(
+            "/apps/:app_id/deployments/stream",
+            get(crate::deploy::deployments_stream_handler),
         )
         .route(
             "/apps/:app_id/deployments/:deployment_id/activate",
@@ -170,6 +180,7 @@ mod tests {
             builder_addr: "http://localhost:5004".to_string(),
             jwt_secret: "test".to_string(),
             master_key: "test".to_string(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
         };
         let app = create_app(state);
 

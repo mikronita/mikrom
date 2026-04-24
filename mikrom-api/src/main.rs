@@ -19,6 +19,8 @@ async fn main() -> anyhow::Result<()> {
     let user_repo = PostgresUserRepository::new(db_pool.clone());
     let app_repo = mikrom_api::repositories::PostgresAppRepository::new(db_pool.clone());
 
+    let (deployment_events, _) = tokio::sync::broadcast::channel(100);
+
     let state = AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
@@ -27,6 +29,7 @@ async fn main() -> anyhow::Result<()> {
         builder_addr: config.builder_addr,
         jwt_secret: config.jwt_secret,
         master_key: config.master_key,
+        deployment_events,
     };
 
     mikrom_api::start_background_tasks(state.clone());

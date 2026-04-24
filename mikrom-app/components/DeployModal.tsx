@@ -49,7 +49,9 @@ export function DeployModal({ onClose }: DeployModalProps) {
         toast.success(`App ${form.app_name} deployment initiated`);
         onClose();
         if (data?.job_id) {
-          router.push(`/vms/${data.job_id}`);
+          router.push(`/deployments/${data.job_id}`);
+        } else {
+          router.push("/deployments");
         }
       },
       onError: (error) => {

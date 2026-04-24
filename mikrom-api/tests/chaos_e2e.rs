@@ -129,6 +129,7 @@ async fn test_agent_failure_propagation_e2e() {
         builder_addr: "http://localhost:5004".to_string(),
         jwt_secret: CHAOS_JWT_SECRET.to_string(),
         master_key: "chaos-key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
     };
     let app = create_app(state);
     let token = create_token(

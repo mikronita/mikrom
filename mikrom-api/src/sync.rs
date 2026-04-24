@@ -75,6 +75,7 @@ pub async fn start_ip_sync_task(state: AppState) {
                                             Some(inner.ip_address),
                                         )
                                         .await;
+                                    state.deployment_events.send(dep.app_id).ok();
                                 }
                             },
                             Err(status) if status.code() == tonic::Code::NotFound => {
@@ -90,6 +91,7 @@ pub async fn start_ip_sync_task(state: AppState) {
                                         None,
                                     )
                                     .await;
+                                state.deployment_events.send(dep.app_id).ok();
                             },
                             Err(e) => {
                                 debug!(error = %e, "Failed to get app status from scheduler");

@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { 
   HiPlus, 
-  HiRefresh, 
   HiChartBar, 
   HiCollection, 
   HiClock,
@@ -29,20 +29,29 @@ function normalizeStatus(status: string): string {
 }
 
 export default function Page() {
-  const { data: vms = [], error: vmsError, refetch: refetchVms, isFetching: isFetchingVms } = useVms();
-  const { data: apps = [], isLoading: isLoadingApps, error: appsError, refetch: refetchApps, isFetching: isFetchingApps } = useApps();
+  const router = useRouter();
+  const { data: vms = [] } = useVms();
+  const { data: apps = [], isLoading: isLoadingApps } = useApps();
   const deleteAppMutation = useDeleteApp();
   const [showCreateApp, setShowCreateApp] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const deployAppVersionMutation = useDeployAppVersion();
 
-  const handleDeployApp = (appId: string, appName: string) => {
-    toast.promise(deployAppVersionMutation.mutateAsync({ appId }), {
-      loading: `Building and deploying ${appName}...`,
-      success: `Deployment for ${appName} initiated`,
-      error: (err) => `Failed to deploy ${appName}: ${err instanceof Error ? err.message : "Unknown error"}`,
-    });
+  const handleDeployApp = async (appId: string, appName: string) => {
+    try {
+      const result = await deployAppVersionMutation.mutateAsync({ appId });
+      toast.success(`Deployment for ${appName} initiated`);
+      
+      if (result?.job_id) {
+        router.push(`/deployments/${result.job_id}`);
+      } else {
+        // If building (no job_id yet), redirect to the history page
+        router.push(`/apps/${appId}/deployments`);
+      }
+    } catch (err) {
+      toast.error(`Failed to deploy ${appName}: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
   };
 
   const handleDeleteApp = (appId: string, appName: string) => {
@@ -52,12 +61,6 @@ export default function Page() {
       success: `App ${appName} deleted`,
       error: (err) => `Failed to delete ${appName}: ${err instanceof Error ? err.message : "Unknown error"}`,
     });
-  };
-
-  const isFetching = isFetchingVms || isFetchingApps;
-  const refetch = () => { 
-    refetchVms(); 
-    refetchApps(); 
   };
 
   const runningCount = vms.filter((v) => v.status.toLowerCase() === "running").length;
@@ -82,10 +85,6 @@ export default function Page() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <Button color="gray" size="sm" onClick={() => refetch()} disabled={isFetching}>
-                <HiRefresh className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
-                Refresh
-              </Button>
               <Button size="sm" color="dark" onClick={() => setShowCreateApp(true)}>
                 <HiPlus className="w-4 h-4 mr-2" />
                 New Application
