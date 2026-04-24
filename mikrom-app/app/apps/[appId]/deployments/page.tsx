@@ -19,6 +19,7 @@ import { useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps, useDeployments, useActivateDeployment } from "@/lib/hooks/use-apps";
+import { API_BASE_URL } from "@/lib/api";
 import { Badge, Table, TableBody, TableCell, TableHead, TableHeadCell, TableRow, Alert, Button, Card, TextInput } from "flowbite-react";
 import { toast } from "sonner";
 
