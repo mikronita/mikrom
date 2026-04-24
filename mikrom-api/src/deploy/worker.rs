@@ -169,6 +169,7 @@ async fn poll_and_deploy(
                     None,
                 )
                 .await;
+            state.deployment_events.send(task.app_id).ok();
             return Err(anyhow::anyhow!("Build timed out"));
         }
 
@@ -178,10 +179,10 @@ async fn poll_and_deploy(
         match status {
             BuildStatus::Success => {
                 info!(
-                    app = %task.app_name,
-                    image = %image_tag,
-                    port = %exposed_port,
-                    "Build successful, proceeding to deployment"
+                app = %task.app_name,
+                image = %image_tag,
+                port = %exposed_port,
+                "Build successful, proceeding to deployment"
                 );
                 break (image_tag, exposed_port);
             },
@@ -197,6 +198,7 @@ async fn poll_and_deploy(
                         None,
                     )
                     .await;
+                state.deployment_events.send(task.app_id).ok();
                 return Err(anyhow::anyhow!("Build failed"));
             },
             _ => {
@@ -251,9 +253,11 @@ async fn poll_and_deploy(
             Some(response.job_id),
             Some(final_image),
             Some(task.build_id),
-            None, // IP will be synced by the other background task
+            None,
         )
         .await;
+
+    state.deployment_events.send(task.app_id).ok();
 
     // The deployment record also has a port field (used by router join)
     if detected_port > 0 {
@@ -345,6 +349,7 @@ mod tests {
                 port: 8080,
                 hostname: None,
                 user_id: Uuid::new_v4(),
+                github_webhook_secret: None,
                 active_deployment_id: None,
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
@@ -366,7 +371,8 @@ mod tests {
             },
             builder_addr: "".into(),
             jwt_secret: "".into(),
-            master_key: "key".into(),
+            master_key: "".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
         };
 
         let task = BuildTask {

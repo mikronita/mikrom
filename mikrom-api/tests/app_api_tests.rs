@@ -43,9 +43,10 @@ async fn test_create_app_endpoint() {
             eq(8080),
             eq(Some("test-app.apps.mikrom.es".to_string())),
             eq(user_id.to_string()),
+            always(),
         )
         .times(1)
-        .returning(move |name, url, port, hostname, uid| {
+        .returning(move |name, url, port, hostname, uid, secret| {
             Ok(App {
                 id: app_id,
                 name: name.to_string(),
@@ -53,6 +54,7 @@ async fn test_create_app_endpoint() {
                 port,
                 hostname: hostname.map(|s| s.to_string()),
                 user_id: Uuid::parse_str(uid).unwrap(),
+                github_webhook_secret: secret,
                 active_deployment_id: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
@@ -67,6 +69,7 @@ async fn test_create_app_endpoint() {
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
     };
 
     let router = create_app(state);

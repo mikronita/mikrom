@@ -44,6 +44,9 @@ pub enum ApiError {
 
     #[error("Scheduler error: {0}")]
     Scheduler(String),
+
+    #[error("Anyhow error: {0}")]
+    Anyhow(#[from] anyhow::Error),
 }
 
 impl IntoResponse for ApiError {
@@ -89,6 +92,13 @@ impl IntoResponse for ApiError {
                 (
                     StatusCode::SERVICE_UNAVAILABLE,
                     "Error communicating with scheduler".to_string(),
+                )
+            },
+            Self::Anyhow(err) => {
+                tracing::error!("Anyhow error: {:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Internal error: {}", err),
                 )
             },
             Self::Internal(msg) => {

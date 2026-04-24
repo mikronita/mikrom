@@ -236,6 +236,7 @@ async fn test_http_api_deploy_e2e() {
         builder_addr: "http://localhost:5004".to_string(),
         jwt_secret: E2E_JWT_SECRET.to_string(),
         master_key: "e2e-key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
     };
     let app = create_app(state);
 
@@ -326,6 +327,7 @@ async fn test_sse_deployments_events_e2e() {
         builder_addr: "http://localhost:5004".to_string(),
         jwt_secret: E2E_JWT_SECRET.to_string(),
         master_key: "e2e-key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
     };
     let app = create_app(state);
 

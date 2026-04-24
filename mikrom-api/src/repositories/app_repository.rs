@@ -23,8 +23,10 @@ pub trait AppRepository: Send + Sync {
         port: i32,
         hostname: Option<String>,
         user_id: &str,
+        github_webhook_secret: Option<String>,
     ) -> anyhow::Result<App>;
     async fn get_app(&self, id: Uuid) -> anyhow::Result<Option<App>>;
+    async fn get_app_by_name(&self, name: &str) -> anyhow::Result<Option<App>>;
     async fn delete_app(&self, id: Uuid) -> anyhow::Result<()>;
     async fn list_apps_by_user(&self, user_id: &str) -> anyhow::Result<Vec<App>>;
     async fn set_active_deployment(&self, app_id: Uuid, deployment_id: Uuid) -> anyhow::Result<()>;

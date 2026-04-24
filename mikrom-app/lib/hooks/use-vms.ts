@@ -57,11 +57,6 @@ export function useWatchVms() {
             if (!old) return old;
             return { ...old, ...updatedVm };
           });
-        },
-        (error) => {
-          if (isMounted) {
-            console.error("VMS SSE Error:", error);
-          }
         }
       );
     };
@@ -87,14 +82,8 @@ export function useVm(jobId: string) {
       return result.data;
     },
     enabled: !!token && !!jobId,
-    refetchInterval: (query) => {
-      // Solo refrescar si no está en un estado final
-      const status = query.state.data?.status?.toLowerCase();
-      if (status === "running" || status === "failed" || status === "cancelled") {
-        return 10000; // Más lento si ya está listo o falló
-      }
-      return 2000; // Rápido si está pending/scheduled
-    },
+    // Polling disabled in favor of SSE (useWatchVms)
+    refetchInterval: false,
   });
 }
 

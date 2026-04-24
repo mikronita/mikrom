@@ -23,16 +23,18 @@ impl AppRepository for PostgresAppRepository {
         port: i32,
         hostname: Option<String>,
         user_id: &str,
+        github_webhook_secret: Option<String>,
     ) -> anyhow::Result<App> {
         let uid = Uuid::parse_str(user_id)?;
         let app = sqlx::query_as::<_, App>(
-            "INSERT INTO apps (name, git_url, port, hostname, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING *"
+            "INSERT INTO apps (name, git_url, port, hostname, user_id, github_webhook_secret) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *"
         )
         .bind(name)
         .bind(git_url)
         .bind(port)
         .bind(hostname)
         .bind(uid)
+        .bind(github_webhook_secret)
         .fetch_one(&self.pool)
         .await?;
 
@@ -42,6 +44,15 @@ impl AppRepository for PostgresAppRepository {
     async fn get_app(&self, id: Uuid) -> anyhow::Result<Option<App>> {
         let app = sqlx::query_as::<_, App>("SELECT * FROM apps WHERE id = $1")
             .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(app)
+    }
+
+    async fn get_app_by_name(&self, name: &str) -> anyhow::Result<Option<App>> {
+        let app = sqlx::query_as::<_, App>("SELECT * FROM apps WHERE name = $1")
+            .bind(name)
             .fetch_optional(&self.pool)
             .await?;
 
@@ -250,7 +261,7 @@ mod tests {
         let app_name = "test-app";
         let git_url = "https://github.com/test/repo";
         let app = app_repo
-            .create_app(app_name, git_url, 80, None, &user_id.to_string())
+            .create_app(app_name, git_url, 80, None, &user_id.to_string(), None)
             .await
             .expect("failed to create app");
         assert_eq!(app.name, app_name);

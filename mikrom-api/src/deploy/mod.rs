@@ -5,6 +5,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub mod handlers;
+pub mod webhooks;
 pub mod worker;
 pub use handlers::*;
 pub use worker::*;

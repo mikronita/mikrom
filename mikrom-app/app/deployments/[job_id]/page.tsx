@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { 
   HiChevronLeft, 
-  HiRefresh, 
   HiClock, 
   HiServer, 
   HiHashtag, 
@@ -132,7 +131,7 @@ export default function InstanceDetailPage() {
   const router = useRouter();
   const jobId = params.job_id as string;
 
-  const { data: vm, isLoading, isError, refetch, isFetching } = useVm(jobId);
+  const { data: vm, isLoading, isError } = useVm(jobId);
   const { data: apps = [] } = useApps();
 
   const stopVmMutation = useStopVm();
@@ -295,11 +294,6 @@ export default function InstanceDetailPage() {
             </div>
 
             <div className="flex items-center gap-3">
-              <Button color="gray" size="sm" onClick={() => refetch()} disabled={isFetching}>
-                <HiRefresh className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
-                Refresh
-              </Button>
-
               {vm && vm.app_id && vm.status.toLowerCase() === "running" && 
                apps.find(a => a.id === vm.app_id)?.active_deployment_id !== vm.deployment_id && (
                 <Button 

@@ -34,23 +34,32 @@ impl FromRequestParts<crate::AppState> for AuthUser {
         parts: &mut Parts,
         state: &crate::AppState,
     ) -> Result<Self, Self::Rejection> {
-        let auth_header = parts
+        let token = if let Some(header) = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
-            .ok_or_else(|| {
+        {
+            header.strip_prefix("Bearer ").ok_or_else(|| {
                 AuthError {
-                    error: "Missing Authorization header".to_string(),
+                    error: "Authorization header must use Bearer scheme".to_string(),
                 }
                 .into_response()
-            })?;
+            })?
+        } else {
+            // Try query param for EventSource/SSE support
+            let query = parts.uri.query().unwrap_or_default();
+            let token_param = query
+                .split('&')
+                .find(|s| s.starts_with("token="))
+                .and_then(|s| s.strip_prefix("token="));
 
-        let token = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
-            AuthError {
-                error: "Authorization header must use Bearer scheme".to_string(),
-            }
-            .into_response()
-        })?;
+            token_param.ok_or_else(|| {
+                AuthError {
+                    error: "Missing Authorization header or token query parameter".to_string(),
+                }
+                .into_response()
+            })?
+        };
 
         let Claims {
             sub, email, role, ..
@@ -120,15 +129,16 @@ mod tests {
 
     fn make_app(jwt_secret: &str) -> axum::Router {
         let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
-        let app_repo = Arc::new(crate::repositories::PostgresAppRepository::new(db_pool));
+        let app_repo = crate::repositories::PostgresAppRepository::new(db_pool);
         let state = crate::AppState {
             user_repo: Arc::new(NoopRepo),
-            app_repo,
+            app_repo: Arc::new(app_repo),
             scheduler_client: None,
             scheduler_config: crate::scheduler::SchedulerConfig::default(),
             builder_addr: "http://localhost:5004".to_string(),
             jwt_secret: jwt_secret.to_string(),
-            master_key: "test-key".into(),
+            master_key: "test-master-key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
         };
         axum::Router::new()
             .route("/whoami", get(whoami))

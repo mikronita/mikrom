@@ -31,11 +31,15 @@ import {
 import { logout, getToken } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 import { getUserProfile } from "@/lib/api";
+import { useWatchVms } from "@/lib/hooks/use-vms";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const token = getToken();
+
+  // Keep VMs synchronized globally via SSE
+  useWatchVms();
 
   const { data: profile } = useQuery({
     queryKey: ["profile"],

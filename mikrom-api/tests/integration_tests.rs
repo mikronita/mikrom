@@ -44,6 +44,7 @@ fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         builder_addr: "http://localhost:5004".to_string(),
         jwt_secret: jwt_secret.to_string(),
         master_key: "integration-master-key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
     };
     axum::Router::new()
         .route("/auth/register", axum::routing::post(register))

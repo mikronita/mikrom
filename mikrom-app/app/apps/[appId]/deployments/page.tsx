@@ -3,20 +3,23 @@
 import { useParams } from "next/navigation";
 import { 
   HiArrowLeft, 
-  HiRefresh, 
+  HiEye,
+  HiEyeOff,
+  HiClipboard
 } from "react-icons/hi";
 import {
   HiCheckCircle, 
   HiExclamationCircle,
-  HiRocketLaunch
+  HiRocketLaunch,
+  HiInformationCircle
 } from "react-icons/hi2";
 import Link from "next/link";
+import { useState } from "react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps, useDeployments, useActivateDeployment } from "@/lib/hooks/use-apps";
-import { Badge, Table, TableBody, TableCell, TableHead, TableHeadCell, TableRow, Alert, Button, Card } from "flowbite-react";
-import { cn } from "@/lib/utils";
+import { Badge, Table, TableBody, TableCell, TableHead, TableHeadCell, TableRow, Alert, Button, Card, TextInput } from "flowbite-react";
 import { toast } from "sonner";
 
 function getStatusColor(status: string): string {
@@ -30,10 +33,16 @@ function getStatusColor(status: string): string {
 export default function AppDeploymentsPage() {
   const { appId } = useParams() as { appId: string };
   const { data: apps = [] } = useApps();
-  const { data: deployments = [], isLoading, isFetching, refetch, error } = useDeployments(appId);
+  const { data: deployments = [], isLoading, error } = useDeployments(appId);
   const activateMutation = useActivateDeployment();
+  const [showSecret, setShowSecret] = useState(false);
 
   const app = apps.find(a => a.id === appId);
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success("Copied to clipboard!");
+  };
 
   const handleActivate = async (deploymentId: string) => {
     toast.promise(activateMutation.mutateAsync({ appId, deploymentId }), {
@@ -67,11 +76,43 @@ export default function AppDeploymentsPage() {
                 Version history and production promotion.
               </p>
             </div>
-            <Button color="gray" size="sm" onClick={() => refetch()} disabled={isFetching}>
-              <HiRefresh className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
-              Refresh
-            </Button>
           </div>
+
+          {/* GitHub Webhook Info */}
+          {app?.github_webhook_secret && (
+            <Card className="bg-indigo-50/50 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-900/30">
+              <div className="flex items-start gap-3">
+                <HiInformationCircle className="w-5 h-5 text-indigo-500 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="text-sm font-bold text-indigo-900 dark:text-indigo-100">GitHub Auto-deploy</h3>
+                  <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-1">
+                    Use this secret in your GitHub repository webhooks to enable automatic deployments on every push.
+                  </p>
+                  
+                  <div className="mt-3 flex items-center gap-2 max-w-md">
+                    <div className="relative flex-1">
+                      <TextInput
+                        type={showSecret ? "text" : "password"}
+                        value={app.github_webhook_secret}
+                        readOnly
+                        sizing="sm"
+                        className="font-mono text-xs"
+                      />
+                      <button
+                        onClick={() => setShowSecret(!showSecret)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                      >
+                        {showSecret ? <HiEyeOff className="w-4 h-4" /> : <HiEye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <Button color="gray" size="xs" onClick={() => copyToClipboard(app.github_webhook_secret!)}>
+                      <HiClipboard className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
 
           <Card className="overflow-hidden border-none shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
             {error && (

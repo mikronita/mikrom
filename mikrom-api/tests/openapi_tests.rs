@@ -21,6 +21,7 @@ async fn test_openapi_docs_endpoint() {
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: "test-secret".into(),
         master_key: "key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
     };
 
     let router = create_app(state);
@@ -55,6 +56,7 @@ async fn test_openapi_json_spec() {
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: "test-secret".into(),
         master_key: "key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
     };
 
     let router = create_app(state);

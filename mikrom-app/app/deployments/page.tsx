@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { 
-  HiRefresh, 
   HiServer, 
   HiSearch,
   HiExternalLink,
@@ -20,7 +19,6 @@ import { getToken } from "@/lib/auth";
 import { listVms, stopVm, deleteVm, listApps, LiveDeploymentInfo, AppInfo, watchDeploymentsSSE } from "@/lib/api";
 
 import { Badge, Table, TableBody, TableCell, TableHead, TableHeadCell, TableRow, TextInput, Alert, Button, Card } from "flowbite-react";
-import { cn } from "@/lib/utils";
 
 function normalizeStatus(status: string): string {
   return status.toLowerCase() === "cancelled" ? "stopped" : status;
@@ -158,12 +156,6 @@ export default function DeploymentsPage() {
               <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
                 Monitor and manage your running application instances.
               </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <Button color="gray" size="sm" onClick={() => fetchDeployments(true)} disabled={loading}>
-                <HiRefresh className={cn("w-4 h-4 mr-2", loading && "animate-spin")} />
-                Refresh
-              </Button>
             </div>
           </div>
 

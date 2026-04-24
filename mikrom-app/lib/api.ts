@@ -1,6 +1,6 @@
 import { logout } from "@/lib/auth";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
 
 export interface RegisterRequest {
   email: string;
@@ -114,6 +114,7 @@ export interface AppInfo {
   git_url: string;
   port: number;
   hostname: string | null;
+  github_webhook_secret?: string;
   active_deployment_id: string | null;
   created_at: string;
 }
@@ -348,68 +349,27 @@ export function getDeploymentLogsSSE(
 
 export function watchDeploymentsSSE(
   token: string,
-  onMessage: (deployment: LiveDeploymentInfo) => void,
-  onError: (err: string) => void
+  onMessage: (deployment: LiveDeploymentInfo) => void
 ): () => void {
-  const abortController = new AbortController();
-  let isAborted = false;
+  const eventSource = new EventSource(`${API_BASE_URL}/deployments/events?token=${token}`);
 
-  const connect = async () => {
-    while (!isAborted) {
-      try {
-        const response = await fetch(`${API_BASE_URL}/deployments/events`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          signal: abortController.signal,
-        });
-
-        if (!response.ok) {
-          if (response.status === 401) logout();
-          throw new Error(`Failed to connect to deployment stream: ${response.status} ${response.statusText}`);
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error("No response body");
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (!isAborted) {
-          const { value, done } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.substring(6));
-                onMessage(data);
-              } catch (e) {
-                console.error("Failed to parse deployment event", e);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        if (!isAborted) {
-          onError(err instanceof Error ? err.message : "Stream error");
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-        }
-      }
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onMessage(data);
+    } catch (e) {
+      console.error("Failed to parse deployment event", e);
     }
   };
 
-  connect();
+  eventSource.onerror = () => {
+    console.debug("VMs SSE connection error, attempting to reconnect...");
+  };
 
   return () => {
-    isAborted = true;
-    abortController.abort();
+    eventSource.onmessage = null;
+    eventSource.onerror = null;
+    eventSource.close();
   };
 }
 

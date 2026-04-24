@@ -6,8 +6,13 @@ use axum::{
     Json,
     extract::{Path, State},
     http::StatusCode,
+    response::sse::{Event, Sse},
 };
+use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -26,6 +31,7 @@ pub struct AppResponse {
     pub git_url: String,
     pub port: i32,
     pub hostname: Option<String>,
+    pub github_webhook_secret: Option<String>,
     pub active_deployment_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -64,6 +70,8 @@ pub async fn create_app_handler(
 
     let hostname = Some(format!("{}.apps.mikrom.es", sanitized_name));
 
+    let webhook_secret = Some(uuid::Uuid::new_v4().to_string().replace("-", ""));
+
     let app = state
         .app_repo
         .create_app(
@@ -72,6 +80,7 @@ pub async fn create_app_handler(
             port,
             hostname,
             &auth.user_id,
+            webhook_secret,
         )
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -82,6 +91,7 @@ pub async fn create_app_handler(
         git_url: app.git_url,
         port: app.port,
         hostname: app.hostname,
+        github_webhook_secret: app.github_webhook_secret,
         active_deployment_id: app.active_deployment_id,
         created_at: app.created_at,
     }))
@@ -117,6 +127,7 @@ pub async fn list_apps_handler(
             git_url: app.git_url,
             port: app.port,
             hostname: app.hostname,
+            github_webhook_secret: app.github_webhook_secret,
             active_deployment_id: app.active_deployment_id,
             created_at: app.created_at,
         })
@@ -248,6 +259,9 @@ pub async fn deploy_app_version_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    // Notify update
+    state.deployment_events.send(app.id).ok();
+
     // Connect to builder
     let builder_channel = crate::builder::connect(&state.builder_addr)
         .await
@@ -305,8 +319,100 @@ pub async fn deploy_app_version_handler(
         host_id: None,
         vm_id: None,
         image_tag: None,
-        message: "Build initiated in background. Poll deployment status for updates.".to_string(),
+        message: "Build initiated in background".to_string(),
     }))
+}
+
+/// Helper function to trigger a build and deployment for an app.
+/// Reuses logic from deploy_app_version_handler.
+pub async fn trigger_app_build(
+    state: crate::AppState,
+    app: crate::models::app::App,
+) -> ApiResult<Uuid> {
+    // 1. Create deployment record in DB (using defaults)
+    let vcpus = 1;
+    let memory_mib = 256;
+    let disk_mib = 1024;
+    let env_vars = std::collections::HashMap::new();
+
+    let deployment = state
+        .app_repo
+        .create_deployment(crate::repositories::app_repository::NewDeployment {
+            app_id: app.id,
+            user_id: app.user_id.to_string(),
+            vcpus,
+            memory_mib: memory_mib as i64,
+            disk_mib: disk_mib as i64,
+            port: app.port,
+            env_vars: env_vars.clone(),
+        })
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    // 2. Trigger build and deploy
+    let git_url = app.git_url.clone();
+    let app_name = app.name.clone();
+
+    state
+        .app_repo
+        .update_deployment_status(deployment.id, "BUILDING", None, None, None, None)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    // Notify update
+    state.deployment_events.send(app.id).ok();
+
+    // Connect to builder
+    let builder_channel = crate::builder::connect(&state.builder_addr)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to connect to builder: {}", e)))?;
+
+    let mut builder_client = mikrom_proto::builder::BuilderServiceClient::new(builder_channel);
+
+    let build_req = mikrom_proto::builder::BuildRequest {
+        app_id: app.id.to_string(),
+        git_url: git_url.clone(),
+        image_name: app_name.to_lowercase().replace(" ", "-"),
+        tag: deployment.id.to_string(),
+    };
+
+    let build_resp = builder_client
+        .build_app(build_req)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Build initiation failed: {}", e)))?
+        .into_inner();
+
+    let build_id = build_resp.build_id;
+    state
+        .app_repo
+        .update_deployment_status(
+            deployment.id,
+            "BUILDING",
+            None,
+            None,
+            Some(build_id.clone()),
+            None,
+        )
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    // Start background polling
+    let task = crate::deploy::worker::BuildTask {
+        deployment_id: deployment.id,
+        app_id: app.id,
+        app_name: app.name.clone(),
+        user_id: app.user_id.to_string(),
+        build_id: build_id.clone(),
+        vcpus: vcpus as u32,
+        memory_mib: memory_mib as u32,
+        disk_mib: disk_mib as u32,
+        port: app.port as u32,
+        env: env_vars,
+    };
+
+    crate::deploy::worker::start_build_polling(state, task).await;
+
+    Ok(deployment.id)
 }
 
 #[utoipa::path(
@@ -352,6 +458,68 @@ pub async fn list_deployments_handler(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     Ok(Json(deployments))
+}
+
+#[utoipa::path(
+    get,
+    path = "/apps/{app_id}/deployments/stream",
+    params(
+        ("app_id" = Uuid, Path, description = "App ID"),
+        ("token" = String, Query, description = "JWT Token")
+    ),
+    responses(
+        (status = 200, description = "SSE stream for deployments"),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "App not found")
+    ),
+    tag = "apps",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn deployments_stream_handler(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(app_id): Path<Uuid>,
+) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    // Verify ownership
+    let app = state
+        .app_repo
+        .get_app(app_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("App not found".to_string()))?;
+
+    if app.user_id
+        != Uuid::parse_str(&auth.user_id)
+            .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?
+    {
+        return Err(ApiError::Forbidden);
+    }
+
+    let app_repo = state.app_repo.clone();
+    let receiver = state.deployment_events.subscribe();
+
+    let stream = async_stream::stream! {
+        // Initial event
+        if let Some(json) = app_repo.list_deployments_by_app(app_id).await.ok().and_then(|d| serde_json::to_string(&d).ok()) {
+            yield Ok(Event::default().data(json));
+        }
+
+        let mut broadcast_stream = BroadcastStream::new(receiver);
+        while let Some(result) = broadcast_stream.next().await {
+            match result {
+                Ok(event_app_id) if event_app_id == app_id => {
+                    if let Some(json) = app_repo.list_deployments_by_app(app_id).await.ok().and_then(|d| serde_json::to_string(&d).ok()) {
+                        yield Ok(Event::default().data(json));
+                    }
+                }
+                _ => {} // Ignore errors or other app_ids
+            }
+        }
+    };
+
+    Ok(Sse::new(stream))
 }
 
 #[utoipa::path(
@@ -418,6 +586,9 @@ pub async fn activate_deployment_handler(
         .set_active_deployment(app_id, deployment_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    // Notify update
+    state.deployment_events.send(app_id).ok();
 
     Ok(StatusCode::OK)
 }
