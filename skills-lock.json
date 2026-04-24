@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "nextjs": {
+      "source": "vercel-labs/vercel-plugin",
+      "sourceType": "github",
+      "computedHash": "d3a48eada4dbae95856d643a0c9c54a38974ee7896a4d34f93aead13d26c343a"
+    },
+    "shadcn": {
+      "source": "shadcn/ui",
+      "sourceType": "github",
+      "computedHash": "2bc6cf38ec7b4a5778a43fabb3e87642c9897ad45e9eb42438b57fd2def6cca8"
+    }
+  }
+}
