@@ -22,6 +22,7 @@ async fn test_openapi_docs_endpoint() {
         jwt_secret: "test-secret".into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
 
     let router = create_app(state);
@@ -57,6 +58,7 @@ async fn test_openapi_json_spec() {
         jwt_secret: "test-secret".into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
 
     let router = create_app(state);

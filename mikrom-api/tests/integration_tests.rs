@@ -45,6 +45,7 @@ fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         jwt_secret: jwt_secret.to_string(),
         master_key: "integration-master-key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
     axum::Router::new()
         .route("/auth/register", axum::routing::post(register))

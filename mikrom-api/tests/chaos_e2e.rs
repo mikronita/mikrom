@@ -130,6 +130,7 @@ async fn test_agent_failure_propagation_e2e() {
         jwt_secret: CHAOS_JWT_SECRET.to_string(),
         master_key: "chaos-key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
     let app = create_app(state);
     let token = create_token(

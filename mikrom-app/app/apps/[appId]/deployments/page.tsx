@@ -86,28 +86,48 @@ export default function AppDeploymentsPage() {
                 <div className="flex-1">
                   <h3 className="text-sm font-bold text-indigo-900 dark:text-indigo-100">GitHub Auto-deploy</h3>
                   <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-1">
-                    Use this secret in your GitHub repository webhooks to enable automatic deployments on every push.
+                    Set up a webhook in your GitHub repository to enable automatic deployments on every push.
                   </p>
-                  
-                  <div className="mt-3 flex items-center gap-2 max-w-md">
-                    <div className="relative flex-1">
-                      <TextInput
-                        type={showSecret ? "text" : "password"}
-                        value={app.github_webhook_secret}
-                        readOnly
-                        sizing="sm"
-                        className="font-mono text-xs"
-                      />
-                      <button
-                        onClick={() => setShowSecret(!showSecret)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                      >
-                        {showSecret ? <HiEyeOff className="w-4 h-4" /> : <HiEye className="w-4 h-4" />}
-                      </button>
+
+                  <div className="mt-4 space-y-3">
+                    <div>
+                      <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-1">Payload URL</p>
+                      <div className="flex items-center gap-2 max-w-md">
+                        <TextInput
+                          value={`${API_BASE_URL}/webhooks/github/${appId}`}
+                          readOnly
+                          sizing="sm"
+                          className="font-mono text-xs flex-1"
+                        />
+                        <Button color="gray" size="xs" onClick={() => copyToClipboard(`${API_BASE_URL}/webhooks/github/${appId}`)}>
+                          <HiClipboard className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </div>
-                    <Button color="gray" size="xs" onClick={() => copyToClipboard(app.github_webhook_secret!)}>
-                      <HiClipboard className="w-4 h-4" />
-                    </Button>
+                    
+                    <div>
+                      <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-1">Secret</p>
+                      <div className="flex items-center gap-2 max-w-md">
+                        <div className="relative flex-1">
+                          <TextInput
+                            type={showSecret ? "text" : "password"}
+                            value={app.github_webhook_secret}
+                            readOnly
+                            sizing="sm"
+                            className="font-mono text-xs w-full"
+                          />
+                          <button
+                            onClick={() => setShowSecret(!showSecret)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                          >
+                            {showSecret ? <HiEyeOff className="w-4 h-4" /> : <HiEye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                        <Button color="gray" size="xs" onClick={() => copyToClipboard(app.github_webhook_secret!)}>
+                          <HiClipboard className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

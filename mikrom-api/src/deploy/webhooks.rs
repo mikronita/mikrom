@@ -1,13 +1,14 @@
 use crate::AppState;
 use crate::error::{ApiError, ApiResult};
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
 };
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -15,18 +16,11 @@ type HmacSha256 = Hmac<Sha256>;
 pub struct GitHubPushEvent {
     #[serde(rename = "ref")]
     pub ref_name: String,
-    pub repository: GitHubRepository,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct GitHubRepository {
-    pub name: String,
-    pub full_name: String,
-    pub html_url: String,
 }
 
 pub async fn github_webhook_handler(
     State(state): State<AppState>,
+    Path(app_id): Path<Uuid>,
     headers: HeaderMap,
     body_bytes: axum::body::Bytes,
 ) -> ApiResult<StatusCode> {
@@ -36,54 +30,27 @@ pub async fn github_webhook_handler(
         .and_then(|h| h.to_str().ok())
         .unwrap_or("unknown");
 
+    if event_type == "ping" {
+        return Ok(StatusCode::OK);
+    }
+
     if event_type != "push" {
         info!("Ignoring GitHub event type: {}", event_type);
         return Ok(StatusCode::OK);
     }
 
-    // 2. Parse Payload early to find the application
-    let payload: GitHubPushEvent = serde_json::from_slice(&body_bytes).map_err(|e| {
-        error!("Failed to parse GitHub webhook payload: {}", e);
-        ApiError::BadRequest(format!("Invalid JSON: {e}"))
+    // 2. Find Application by ID
+    let app = state.app_repo.get_app(app_id).await?.ok_or_else(|| {
+        warn!(%app_id, "Webhook received for non-existent application");
+        ApiError::NotFound("Application not found".into())
     })?;
 
-    // 3. Check branch (only main/master)
-    if payload.ref_name != "refs/heads/main" && payload.ref_name != "refs/heads/master" {
-        info!("Ignoring push to non-main branch: {}", payload.ref_name);
-        return Ok(StatusCode::OK);
-    }
-
-    // 4. Find Application to get its specific secret
-    let app = if let Some(a) = state
-        .app_repo
-        .get_app_by_name(&payload.repository.name)
-        .await?
-    {
-        Some(a)
-    } else {
-        state
-            .app_repo
-            .get_app_by_name(&payload.repository.full_name)
-            .await?
-    };
-
-    let app = match app {
-        Some(a) => a,
-        None => {
-            warn!(
-                "No application found matching repository: {}",
-                payload.repository.full_name
-            );
-            return Ok(StatusCode::OK);
-        },
-    };
-
-    // 5. Validate Signature using app-specific secret
+    // 3. Validate Signature BEFORE parsing
     let signature_header = headers
         .get("x-hub-signature-256")
         .and_then(|h| h.to_str().ok())
         .ok_or_else(|| {
-            warn!("Missing x-hub-signature-256 header");
+            warn!(app_name = %app.name, "Missing x-hub-signature-256 header");
             ApiError::Auth("Missing signature".into())
         })?;
 
@@ -101,12 +68,24 @@ pub async fn github_webhook_handler(
     })?;
 
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .map_err(|e| ApiError::Internal(format!("HMAC initialization failed: {e}")))?;
+        .map_err(|_| ApiError::Internal("HMAC initialization failed".into()))?;
     mac.update(&body_bytes);
 
     if mac.verify_slice(&expected_signature).is_err() {
         warn!(app_name = %app.name, "GitHub webhook signature verification failed");
         return Err(ApiError::Auth("Invalid signature".into()));
+    }
+
+    // 4. Now that signature is verified, parse payload
+    let payload: GitHubPushEvent = serde_json::from_slice(&body_bytes).map_err(|e| {
+        error!(app_name = %app.name, "Failed to parse GitHub webhook payload: {}", e);
+        ApiError::BadRequest("Invalid payload format".into())
+    })?;
+
+    // 5. Check branch (only main/master)
+    if payload.ref_name != "refs/heads/main" && payload.ref_name != "refs/heads/master" {
+        info!(app_name = %app.name, branch = %payload.ref_name, "Ignoring push to non-main branch");
+        return Ok(StatusCode::OK);
     }
 
     info!(app_name = %app.name, "GitHub trigger detected and verified, initiating auto-deploy");
@@ -144,6 +123,7 @@ mod tests {
             jwt_secret: "secret".into(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }
 
@@ -157,12 +137,12 @@ mod tests {
     #[tokio::test]
     async fn test_github_webhook_invalid_signature() {
         let mut mock_repo = MockAppRepository::new();
-        let app_name = "test-repo";
+        let app_id = Uuid::new_v4();
         let secret = "correct-secret";
 
         let app = App {
-            id: Uuid::new_v4(),
-            name: app_name.to_string(),
+            id: app_id,
+            name: "test-app".to_string(),
             git_url: "https://github.com/owner/test-repo".into(),
             port: 8080,
             hostname: None,
@@ -174,11 +154,12 @@ mod tests {
         };
 
         mock_repo
-            .expect_get_app_by_name()
+            .expect_get_app()
+            .with(mockall::predicate::eq(app_id))
             .returning(move |_| Ok(Some(app.clone())));
 
         let state = create_test_state(mock_repo);
-        let body = r#"{"ref": "refs/heads/main", "repository": {"name": "test-repo", "full_name": "owner/test-repo", "html_url": "..."}}"#;
+        let body = r#"{"ref": "refs/heads/main"}"#;
         let mut headers = HeaderMap::new();
         headers.insert("x-github-event", "push".parse().unwrap());
         headers.insert(
@@ -188,7 +169,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let result = github_webhook_handler(State(state), headers, body.into()).await;
+        let result = github_webhook_handler(State(state), Path(app_id), headers, body.into()).await;
 
         match result {
             Err(ApiError::Auth(msg)) => assert_eq!(msg, "Invalid signature"),
@@ -200,11 +181,12 @@ mod tests {
     async fn test_github_webhook_wrong_event() {
         let mock_repo = MockAppRepository::new();
         let state = create_test_state(mock_repo);
+        let app_id = Uuid::new_v4();
 
         let mut headers = HeaderMap::new();
         headers.insert("x-github-event", "ping".parse().unwrap());
 
-        let result = github_webhook_handler(State(state), headers, "{}".into())
+        let result = github_webhook_handler(State(state), Path(app_id), headers, "{}".into())
             .await
             .unwrap();
         assert_eq!(result, StatusCode::OK);
@@ -212,14 +194,36 @@ mod tests {
 
     #[tokio::test]
     async fn test_github_webhook_wrong_branch() {
-        let mock_repo = MockAppRepository::new();
+        let mut mock_repo = MockAppRepository::new();
+        let app_id = Uuid::new_v4();
+        let secret = "secret";
+
+        let app = App {
+            id: app_id,
+            name: "test-app".to_string(),
+            git_url: "".into(),
+            port: 8080,
+            hostname: None,
+            user_id: Uuid::new_v4(),
+            github_webhook_secret: Some(secret.to_string()),
+            active_deployment_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        mock_repo
+            .expect_get_app()
+            .returning(move |_| Ok(Some(app.clone())));
+
         let state = create_test_state(mock_repo);
 
-        let body = r#"{"ref": "refs/heads/feature", "repository": {"name": "repo", "full_name": "owner/repo", "html_url": "..."}}"#;
+        let body = r#"{"ref": "refs/heads/feature"}"#;
+        let signature = compute_signature(secret, body.as_bytes());
         let mut headers = HeaderMap::new();
         headers.insert("x-github-event", "push".parse().unwrap());
+        headers.insert("x-hub-signature-256", signature.parse().unwrap());
 
-        let result = github_webhook_handler(State(state), headers, body.into())
+        let result = github_webhook_handler(State(state), Path(app_id), headers, body.into())
             .await
             .unwrap();
         assert_eq!(result, StatusCode::OK);
@@ -228,12 +232,12 @@ mod tests {
     #[tokio::test]
     async fn test_github_webhook_success() {
         let mut mock_repo = MockAppRepository::new();
-        let app_name = "test-repo";
+        let app_id = Uuid::new_v4();
         let secret = "my-secret";
 
         let app = App {
-            id: Uuid::new_v4(),
-            name: app_name.to_string(),
+            id: app_id,
+            name: "test-repo".to_string(),
             git_url: "https://github.com/owner/test-repo".into(),
             port: 8080,
             hostname: None,
@@ -245,19 +249,19 @@ mod tests {
         };
 
         mock_repo
-            .expect_get_app_by_name()
-            .with(mockall::predicate::eq(app_name))
+            .expect_get_app()
+            .with(mockall::predicate::eq(app_id))
             .returning(move |_| Ok(Some(app.clone())));
 
         let state = create_test_state(mock_repo);
-        let body = r#"{"ref": "refs/heads/main", "repository": {"name": "test-repo", "full_name": "owner/test-repo", "html_url": "..."}}"#;
+        let body = r#"{"ref": "refs/heads/main"}"#;
         let signature = compute_signature(secret, body.as_bytes());
 
         let mut headers = HeaderMap::new();
         headers.insert("x-github-event", "push".parse().unwrap());
         headers.insert("x-hub-signature-256", signature.parse().unwrap());
 
-        let result = github_webhook_handler(State(state), headers, body.into())
+        let result = github_webhook_handler(State(state), Path(app_id), headers, body.into())
             .await
             .unwrap();
         assert_eq!(result, StatusCode::ACCEPTED);

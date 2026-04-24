@@ -44,6 +44,7 @@ pub struct AppState {
     pub jwt_secret: String,
     pub master_key: String,
     pub deployment_events: tokio::sync::broadcast::Sender<uuid::Uuid>,
+    pub build_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Clone)]
@@ -66,7 +67,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))
         .route(
-            "/webhooks/github",
+            "/webhooks/github/:app_id",
             axum::routing::post(github_webhook_handler),
         )
         .route("/auth/me", get(get_profile))
@@ -197,6 +198,7 @@ mod tests {
             jwt_secret: "test".to_string(),
             master_key: "test".to_string(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
         let app = create_app(state);
 

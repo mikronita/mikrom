@@ -149,6 +149,12 @@ async fn poll_and_deploy(
     builder: Arc<dyn BuilderClient>,
     scheduler: Arc<dyn SchedulerClient>,
 ) -> anyhow::Result<()> {
+    // Acquire permit to limit concurrent builds
+    let _permit = state.build_semaphore.acquire().await.map_err(|e| {
+        error!("Failed to acquire build permit: {}", e);
+        anyhow::anyhow!("Build system overloaded")
+    })?;
+
     info!(
         app = %task.app_name,
         build_id = %task.build_id,
@@ -373,6 +379,7 @@ mod tests {
             jwt_secret: "".into(),
             master_key: "".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         let task = BuildTask {

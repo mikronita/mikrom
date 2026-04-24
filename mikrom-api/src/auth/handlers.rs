@@ -284,6 +284,7 @@ mod tests {
             jwt_secret: "secret".into(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         let payload = RegisterRequest {
@@ -324,6 +325,7 @@ mod tests {
             jwt_secret: secret.clone(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         let payload = LoginRequest { email, password };
@@ -362,6 +364,7 @@ mod tests {
             jwt_secret: "secret".into(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         let auth = crate::auth::extractor::AuthUser {
@@ -410,6 +413,7 @@ mod tests {
             jwt_secret: "secret".into(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         let auth = crate::auth::extractor::AuthUser {

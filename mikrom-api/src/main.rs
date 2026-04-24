@@ -20,6 +20,7 @@ async fn main() -> anyhow::Result<()> {
     let app_repo = mikrom_api::repositories::PostgresAppRepository::new(db_pool.clone());
 
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
+    let build_semaphore = Arc::new(tokio::sync::Semaphore::new(5)); // Limit to 5 concurrent builds
 
     let state = AppState {
         user_repo: Arc::new(user_repo),
@@ -30,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
         jwt_secret: config.jwt_secret,
         master_key: config.master_key,
         deployment_events,
+        build_semaphore,
     };
 
     mikrom_api::start_background_tasks(state.clone());
