@@ -85,7 +85,7 @@ interface MetricPoint {
   ram: number;
 }
 
-export default function AppDeploymentsPage() {
+export default function AppDetailPage() {
   const { appId } = useParams() as { appId: string };
   const router = useRouter();
   const { data: apps = [] } = useApps();
