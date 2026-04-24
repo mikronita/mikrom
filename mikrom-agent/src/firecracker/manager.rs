@@ -42,13 +42,19 @@ impl FirecrackerManager {
 
         vms.values()
             .map(|vm| {
-                let pid = processes.get(&vm.vm_id).map(|p| p.child.id().unwrap_or(0));
+                let proc = processes.get(&vm.vm_id);
+                let pid = proc.map(|p| p.child.id().unwrap_or(0));
+                let metrics_path = proc.and_then(|p| p.metrics_path.clone());
+                let socket_path = proc.map(|p| p.socket_path.clone());
+
                 VmDetailedInfo {
                     vm_id: vm.vm_id.clone(),
                     status: vm.status,
                     error_message: vm.error_message.clone(),
                     pid,
                     ip_address: vm.config.ip_address.clone(),
+                    metrics_path,
+                    socket_path,
                 }
             })
             .collect()
@@ -358,6 +364,35 @@ impl FirecrackerManager {
             return Err(e);
         }
 
+        // ── Metrics setup ──────────────────────────────────────────────────────
+        let (metrics_host_path, metrics_api_path) = if let Some(chroot) = &chroot_dir {
+            let host_path = format!("{chroot}/root/metrics.json");
+            // Create empty file and set permissions for jailer
+            tokio::fs::write(&host_path, b"").await.map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to create metrics file: {e}"))
+            })?;
+            self.recursive_chown(
+                &host_path,
+                self.fc_config.jailer_uid,
+                self.fc_config.jailer_gid,
+            )
+            .await?;
+            (Some(host_path), "/metrics.json".to_string())
+        } else {
+            let host_path = format!("/tmp/fc-{}-{}-metrics.json", self.agent_id, vm_id);
+            (Some(host_path.clone()), host_path)
+        };
+
+        let metrics_config = serde_json::json!({
+            "metrics_path": metrics_api_path
+        })
+        .to_string();
+
+        // Configure metrics API
+        if let Err(e) = fc_put(&socket_path, "/metrics", &metrics_config).await {
+            tracing::warn!(vm_id = %vm_id, "Failed to configure metrics: {e}");
+        }
+
         // Check if we have a snapshot to restore from
         let snapshot_dir = "/tmp/mikrom-snapshots";
         let snapshot_path = format!("{snapshot_dir}/{vm_id}.snapshot");
@@ -419,6 +454,7 @@ impl FirecrackerManager {
                         vm_id: vm_id.clone(),
                         child,
                         socket_path: socket_path.to_string(),
+                        metrics_path: metrics_host_path.clone(),
                         tap_name,
                         log_task,
                         chroot_dir,
@@ -497,13 +533,15 @@ impl FirecrackerManager {
 
         // ── API calls ──────────────────────────────────────────────────────────
         let chroot_dir_clone = chroot_dir.clone();
+        let socket_path_clone = socket_path.clone();
+
         let res = (async {
-            fc_put(&socket_path, "/machine-config", &machine_config).await?;
-            fc_put(&socket_path, "/boot-source", &boot_source).await?;
-            fc_put(&socket_path, "/drives/rootfs", &drives).await?;
+            fc_put(&socket_path_clone, "/machine-config", &machine_config).await?;
+            fc_put(&socket_path_clone, "/boot-source", &boot_source).await?;
+            fc_put(&socket_path_clone, "/drives/rootfs", &drives).await?;
 
             if let Some(net_json) = &network_interface {
-                fc_put(&socket_path, "/network-interfaces/eth0", net_json).await?;
+                fc_put(&socket_path_clone, "/network-interfaces/eth0", net_json).await?;
             }
 
             // ── Attach additional volumes ──────────────────────────────────────────
@@ -576,6 +614,7 @@ impl FirecrackerManager {
                 vm_id: vm_id.clone(),
                 child,
                 socket_path: socket_path.to_string(),
+                metrics_path: metrics_host_path,
                 tap_name,
                 log_task,
                 chroot_dir,
@@ -1173,6 +1212,7 @@ impl FirecrackerManager {
                 vm_id: vm_id.to_string(),
                 child,
                 socket_path,
+                metrics_path: None,
                 tap_name: None,
                 log_task,
                 chroot_dir: None,

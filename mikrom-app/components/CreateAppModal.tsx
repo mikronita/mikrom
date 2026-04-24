@@ -2,7 +2,16 @@
 
 import { useState, type FormEvent } from "react";
 import { Loader2 } from "lucide-react";
-import { Button, Modal, ModalHeader, ModalBody, ModalFooter, Label, TextInput } from "flowbite-react";
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogFooter 
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useCreateApp } from "@/lib/hooks/use-apps";
 import { toast } from "sonner";
 
@@ -30,16 +39,16 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
   };
 
   return (
-    <Modal show={true} onClose={onClose} size="md">
-      <ModalHeader>Create New Application</ModalHeader>
-      <form onSubmit={handleSubmit}>
-        <ModalBody>
-          <div className="space-y-6">
-            <div>
-              <div className="mb-2 block">
-                <Label htmlFor="app_name">App Name</Label>
-              </div>
-              <TextInput
+    <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Create New Application</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-6 pt-4">
+          <div className="space-y-4">
+            <div className="grid w-full items-center gap-1.5">
+              <Label htmlFor="app_name">App Name</Label>
+              <Input
                 id="app_name"
                 required
                 value={name}
@@ -48,39 +57,37 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
               />
             </div>
 
-            <div>
-              <div className="mb-2 block">
-                <Label htmlFor="git_url">Git Repository URL</Label>
-              </div>
-              <TextInput
+            <div className="grid w-full items-center gap-1.5">
+              <Label htmlFor="git_url">Git Repository URL</Label>
+              <Input
                 id="git_url"
                 required
                 value={gitUrl}
                 onChange={(e) => setGitUrl(e.target.value)}
                 placeholder="https://github.com/user/repo"
               />
-              <p className="text-[10px] text-gray-500 mt-1 italic">
+              <p className="text-[10px] text-muted-foreground italic">
                 Mikrom will automatically detect your Dockerfile or build settings.
               </p>
             </div>
           </div>
-        </ModalBody>
-        <ModalFooter className="justify-end">
-          <Button color="light" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" color="blue" disabled={createAppMutation.isPending}>
-            {createAppMutation.isPending ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Creating...
-              </>
-            ) : (
-              "Create App"
-            )}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={createAppMutation.isPending}>
+              {createAppMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                "Create App"
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

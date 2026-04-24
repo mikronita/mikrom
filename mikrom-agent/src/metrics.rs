@@ -96,18 +96,43 @@ impl MetricsCollector {
             Vec::new()
         };
 
-        let mut system = self.system.write();
-        system.refresh_all();
+        // ── Pre-collect: Flush Firecracker metrics ──────────────────────────
+        for vm in &vms_info {
+            if let Some(socket) = &vm.socket_path {
+                let flush_body = serde_json::json!({
+                    "action_type": "FlushMetrics"
+                })
+                .to_string();
+                let _ = crate::firecracker::api::fc_put(socket, "/actions", &flush_body).await;
+            }
+        }
 
-        let cpu_usage = system.global_cpu_usage() / 100.0;
-        let ram_used_bytes = system.used_memory();
-        let ram_total_bytes = system.total_memory();
+        let mut system_metrics = {
+            let mut system = self.system.write();
+            system.refresh_all();
 
-        let (disk_used_bytes, disk_total_bytes) = self.get_disk_usage();
+            let cpu_usage = system.global_cpu_usage() / 100.0;
+            let ram_used_bytes = system.used_memory();
+            let ram_total_bytes = system.total_memory();
 
-        let apps_count = *self.apps_count.read();
+            let (disk_used_bytes, disk_total_bytes) = self.get_disk_usage();
+            let apps_count = *self.apps_count.read();
+            let load_avg = System::load_average();
 
-        let load_avg = System::load_average();
+            SystemMetrics {
+                cpu_usage,
+                ram_used_bytes,
+                ram_total_bytes,
+                disk_used_bytes,
+                disk_total_bytes,
+                apps_count,
+                load_avg_1: load_avg.one as f32,
+                load_avg_5: load_avg.five as f32,
+                load_avg_15: load_avg.fifteen as f32,
+                vms: HashMap::new(),
+                timestamp: now,
+            }
+        };
 
         // Collect per-VM metrics
         let mut vms = HashMap::new();
@@ -115,11 +140,23 @@ impl MetricsCollector {
             let mut cpu = 0.0;
             let mut ram = 0;
 
+            // Primary: Use sysinfo to get host-side process metrics (most reliable for cgroup-limited VMs)
             if let Some(pid) = vm.pid
-                && let Some(process) = system.process(sysinfo::Pid::from(pid as usize))
+                && pid > 0
             {
-                cpu = process.cpu_usage() / 100.0;
-                ram = process.memory();
+                let system = self.system.read();
+                if let Some(process) = system.process(sysinfo::Pid::from(pid as usize)) {
+                    cpu = process.cpu_usage() / 100.0;
+                    ram = process.memory();
+                }
+            }
+
+            // Secondary: Try to read Firecracker internal metrics if available
+            if let Some(metrics_path) = &vm.metrics_path
+                && let Ok(content) = tokio::fs::read_to_string(metrics_path).await
+                && let Ok(_json) = serde_json::from_str::<serde_json::Value>(&content)
+            {
+                tracing::debug!(vm_id = %vm.vm_id, "Read Firecracker metrics successfully");
             }
 
             vms.insert(
@@ -134,20 +171,8 @@ impl MetricsCollector {
             );
         }
 
-        let metrics = SystemMetrics {
-            cpu_usage,
-            ram_used_bytes,
-            ram_total_bytes,
-            disk_used_bytes,
-            disk_total_bytes,
-            apps_count,
-            load_avg_1: load_avg.one as f32,
-            load_avg_5: load_avg.five as f32,
-            load_avg_15: load_avg.fifteen as f32,
-            vms,
-            timestamp: now,
-        };
-
+        system_metrics.vms = vms;
+        let metrics = system_metrics;
         *self.cached_metrics.write() = Some((metrics.clone(), now));
         metrics
     }

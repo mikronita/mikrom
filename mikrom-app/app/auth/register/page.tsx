@@ -6,7 +6,11 @@ import Link from "next/link";
 import { Loader2, AlertCircle, UserPlus } from "lucide-react";
 
 import { register } from "@/lib/api";
-import { Button, Card, Label, TextInput, Alert } from "flowbite-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -54,93 +58,92 @@ export default function RegisterPage() {
         <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-zinc-200 dark:bg-zinc-800 rounded-full blur-[100px]" />
       </div>
 
-      <Card className="w-full max-w-md shadow-2xl dark:bg-zinc-900 border-zinc-200/50 dark:border-zinc-800/50">
-        <div className="space-y-1 text-center">
+      <Card className="w-full max-w-md shadow-2xl border-zinc-200/50 dark:border-zinc-800/50">
+        <CardHeader className="space-y-1 text-center">
           <div className="flex justify-center mb-4">
             <div className="w-12 h-12 bg-zinc-900 dark:bg-zinc-50 rounded-2xl flex items-center justify-center shadow-lg">
               <UserPlus className="w-6 h-6 text-white dark:text-zinc-900" />
             </div>
           </div>
-          <h2 className="text-2xl font-bold tracking-tight dark:text-white">Create an account</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <CardTitle className="text-2xl font-bold tracking-tight">Create an account</CardTitle>
+          <CardDescription>
             Enter your details to get started with Mikrom
-          </p>
-        </div>
+          </CardDescription>
+        </CardHeader>
         
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
-            <Alert color="failure" icon={() => <AlertCircle className="w-4 h-4 mr-2" />}>
-              {error}
-            </Alert>
-          )}
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  {error}
+                </AlertDescription>
+              </Alert>
+            )}
 
-          <div>
-            <div className="mb-2 block">
+            <div className="space-y-2">
               <Label htmlFor="email">Email address</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading}
+                required
+              />
             </div>
-            <TextInput
-              id="email"
-              type="email"
-              placeholder="name@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={isLoading}
-              required
-            />
-          </div>
 
-          <div>
-            <div className="mb-2 block">
+            <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="At least 8 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={isLoading}
+                required
+              />
             </div>
-            <TextInput
-              id="password"
-              type="password"
-              placeholder="At least 8 characters"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={isLoading}
-              required
-            />
-          </div>
 
-          <div>
-            <div className="mb-2 block">
+            <div className="space-y-2">
               <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <Input
+                id="confirmPassword"
+                type="password"
+                placeholder="Repeat your password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                disabled={isLoading}
+                required
+              />
             </div>
-            <TextInput
-              id="confirmPassword"
-              type="password"
-              placeholder="Repeat your password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              disabled={isLoading}
-              required
-            />
-          </div>
 
-          <div className="flex flex-col gap-4">
-            <Button type="submit" color="blue" className="w-full" disabled={isLoading}>
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Creating account...
-                </>
-              ) : (
-                "Create Account"
-              )}
-            </Button>
-            <div className="text-center text-sm text-zinc-500">
-              Already have an account?{" "}
-              <Link href="/auth/login" className="font-semibold text-zinc-900 dark:text-zinc-100 hover:underline">
-                Sign in
-              </Link>
+            <div className="flex flex-col gap-4 pt-2">
+              <Button type="submit" className="w-full" disabled={isLoading}>
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating account...
+                  </>
+                ) : (
+                  "Create Account"
+                )}
+              </Button>
+              <div className="text-center text-sm text-muted-foreground">
+                Already have an account?{" "}
+                <Link href="/auth/login" className="font-semibold text-foreground hover:underline">
+                  Sign in
+                </Link>
+              </div>
             </div>
-          </div>
-        </form>
+          </form>
+        </CardContent>
       </Card>
 
-      <p className="mt-8 text-center text-xs text-zinc-500 max-w-[300px]">
+      <p className="mt-8 text-center text-xs text-muted-foreground max-w-[300px]">
         By clicking continue, you agree to our Terms of Service and Privacy Policy.
       </p>
     </div>

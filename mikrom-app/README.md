@@ -2,7 +2,7 @@
 
 The modern, real-time dashboard for the Mikrom PaaS. It allows users to manage their applications, monitor deployments, and view live logs from their Firecracker microVMs.
 
-**Stack:** [Next.js 16](https://nextjs.org/) · [React 19](https://react.dev/) · [Tailwind CSS 4](https://tailwindcss.com/) · [Flowbite React](https://flowbite-react.com/)
+**Stack:** [Next.js 16](https://nextjs.org/) · [React 19](https://react.dev/) · [Tailwind CSS 4](https://tailwindcss.com/) · [shadcn/ui](https://ui.shadcn.com/)
 
 **Port:** `3000`
 
@@ -16,9 +16,10 @@ The modern, real-time dashboard for the Mikrom PaaS. It allows users to manage t
 
 ## UI Conventions
 
-Mikrom strictly follows the [Flowbite React](https://flowbite-react.com/) component library.
-- **Strict Rule**: Do not create custom UI wrappers or abstractions in `components/ui`. Always import and use components directly from `flowbite-react`.
-- **Styling**: Vanilla CSS is used for global styles, while Tailwind CSS 4 handles component-specific utility classes.
+Mikrom uses [shadcn/ui](https://ui.shadcn.com/) for its component library.
+- **Component Architecture**: Primitive components are located in `components/ui` and can be customized as needed.
+- **Theming**: Supports Dark/Light mode using `next-themes` and CSS variables.
+- **Styling**: Tailwind CSS 4 handles component-specific utility classes and variable-based theming.
 
 ## Development
 
@@ -29,23 +30,9 @@ pnpm install
 # Run the development server (http://localhost:3000)
 pnpm dev
 
-# Lint and check for Hydration/ESLint issues
+# Lint and check for issues
 pnpm lint
-```
 
-## Configuration
-
-Set the target Mikrom API URL in `.env.local`:
-
-```
-NEXT_PUBLIC_API_URL=http://localhost:5001
-```
-
-## Internal Architecture
-
-```
-app/            # App Router pages (auth, deployments, settings)
-components/     # Shared layout and modal components
-lib/            # API clients, hooks, and utility functions
-public/         # Static assets and favicons
+# Build for production
+pnpm build
 ```
