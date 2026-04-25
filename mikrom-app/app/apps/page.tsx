@@ -79,7 +79,7 @@ export default function ApplicationsPage() {
                     </Button>
                   </div>
                 ) : (
-                  apps.map((app) => (
+                  [...apps].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((app) => (
                     <div
                       key={app.id}
                       className="group px-6 py-4 flex items-center justify-between hover:bg-muted/30 transition-colors"
