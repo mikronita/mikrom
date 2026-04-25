@@ -122,10 +122,12 @@ impl ImageBuilder {
         }
 
         // 5. Mount and copy files
-        let mount_dir = format!("/tmp/mnt-{container_name}");
+        let parent_dir = output_path.parent().unwrap_or(Path::new("/tmp"));
+        let mount_dir = parent_dir.join(format!("mnt-{container_name}"));
         tokio::fs::create_dir_all(&mount_dir).await?;
 
-        info!("Mounting image to {}...", mount_dir);
+        let mount_dir_str = mount_dir.to_string_lossy();
+        info!("Mounting image to {}...", mount_dir_str);
         let status = Command::new("mount")
             .arg("-o")
             .arg("loop")
@@ -144,8 +146,9 @@ impl ImageBuilder {
             .stdout(Stdio::piped())
             .spawn()?;
 
+        let mount_dir_str = mount_dir.to_string_lossy();
         let mut tar_child = Command::new("tar")
-            .args(["-C", &mount_dir, "-xf", "-"])
+            .args(["-C", &mount_dir_str, "-xf", "-"])
             .stdin(Stdio::piped())
             .spawn()?;
 
@@ -180,7 +183,7 @@ impl ImageBuilder {
         ];
 
         let mut found_init = false;
-        let dest_init_path = format!("{}/mikrom-init", mount_dir);
+        let dest_init_path = mount_dir.join("mikrom-init");
 
         for path in &host_init_paths {
             if tokio::fs::metadata(path).await.is_ok() {
@@ -202,12 +205,12 @@ impl ImageBuilder {
         }
 
         let _ = Command::new("chmod")
-            .args(["+x", &dest_init_path])
+            .args(["+x", &dest_init_path.to_string_lossy()])
             .status()
             .await;
 
         // Create /etc/mikrom/init.json
-        let etc_dir = format!("{}/etc/mikrom", mount_dir);
+        let etc_dir = mount_dir.join("etc/mikrom");
         tokio::fs::create_dir_all(&etc_dir)
             .await
             .context("Failed to create /etc/mikrom in guest")?;
@@ -228,7 +231,7 @@ impl ImageBuilder {
         });
 
         tokio::fs::write(
-            format!("{}/init.json", etc_dir),
+            etc_dir.join("init.json"),
             serde_json::to_string_pretty(&init_config)?,
         )
         .await
@@ -242,7 +245,7 @@ impl ImageBuilder {
         if !status.success() {
             tracing::error!(
                 "Failed to unmount {}; filesystem may be corrupted",
-                mount_dir
+                mount_dir_str
             );
             // Try lazy unmount as last resort
             let _ = Command::new("umount")

@@ -330,7 +330,11 @@ mod tests {
         let collector = MetricsCollector::with_firecracker(mgr.clone());
 
         let vm_id = "test-vm-metrics";
-        let metrics_file = format!("/tmp/metrics-{}.json", uuid::Uuid::new_v4());
+        let metrics_file = format!(
+            "{}/metrics-{}.json",
+            mgr.fc_config.data_dir,
+            uuid::Uuid::new_v4()
+        );
 
         // Simulate Firecracker metrics JSON
         let metrics_content = serde_json::json!({
@@ -362,7 +366,7 @@ mod tests {
                 crate::firecracker::process::VmProcess {
                     vm_id: vm_id.to_string(),
                     child,
-                    socket_path: "/tmp/fake.sock".into(),
+                    socket_path: format!("{}/fake.sock", mgr.fc_config.data_dir),
                     metrics_path: Some(metrics_file.clone()),
                     tap_name: None,
                     log_task,

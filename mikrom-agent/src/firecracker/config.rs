@@ -66,6 +66,7 @@ pub struct FirecrackerConfig {
     pub kernel_path: Option<String>,
     pub binary: String,
     pub rootfs_path: String,
+    pub data_dir: String,
     pub use_jailer: bool,
     pub jailer_binary: String,
     pub jailer_uid: u32,
@@ -85,6 +86,8 @@ impl FirecrackerConfig {
                 .unwrap_or_else(|_| "/usr/bin/firecracker".to_string()),
             rootfs_path: std::env::var("FC_ROOTFS_PATH")
                 .unwrap_or_else(|_| "/opt/firecracker/rootfs.ext4".to_string()),
+            data_dir: std::env::var("FC_DATA_DIR")
+                .unwrap_or_else(|_| "/var/lib/mikrom/data".to_string()),
             use_jailer: std::env::var("USE_JAILER").is_ok_and(|v| v == "true"),
             jailer_binary: std::env::var("JAILER_BINARY")
                 .unwrap_or_else(|_| "/usr/bin/jailer".to_string()),
@@ -107,6 +110,7 @@ impl FirecrackerConfig {
             kernel_path: None,
             binary: String::new(),
             rootfs_path: String::new(),
+            data_dir: "/tmp/mikrom-stub-data".to_string(),
             use_jailer: false,
             jailer_binary: String::new(),
             jailer_uid: 0,
