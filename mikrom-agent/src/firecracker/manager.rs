@@ -75,18 +75,38 @@ impl FirecrackerManager {
 
         // Ensure data directory exists and handle persistent agent_id
         if !fc_config.data_dir.is_empty() {
-            let _ = std::fs::create_dir_all(&fc_config.data_dir);
-            let _ = std::fs::create_dir_all(format!("{}/snapshots", fc_config.data_dir));
-            let _ = std::fs::create_dir_all(format!("{}/volumes", fc_config.data_dir));
+            let data_path = std::path::Path::new(&fc_config.data_dir);
 
-            let id_path = format!("{}/agent_id.txt", fc_config.data_dir);
+            if let Err(e) = std::fs::create_dir_all(data_path) {
+                tracing::error!("Failed to create data directory {:?}: {}", data_path, e);
+            }
+
+            let snapshots_path = data_path.join("snapshots");
+            if let Err(e) = std::fs::create_dir_all(&snapshots_path) {
+                tracing::error!(
+                    "Failed to create snapshots directory {:?}: {}",
+                    snapshots_path,
+                    e
+                );
+            }
+
+            let volumes_path = data_path.join("volumes");
+            if let Err(e) = std::fs::create_dir_all(&volumes_path) {
+                tracing::error!(
+                    "Failed to create volumes directory {:?}: {}",
+                    volumes_path,
+                    e
+                );
+            }
+
+            let id_path = data_path.join("agent_id.txt");
             if let Ok(id) = std::fs::read_to_string(&id_path) {
                 let id = id.trim().to_string();
                 if !id.is_empty() {
                     agent_id = id;
                 }
-            } else {
-                let _ = std::fs::write(&id_path, &agent_id);
+            } else if let Err(e) = std::fs::write(&id_path, &agent_id) {
+                tracing::error!("Failed to write agent id to {:?}: {}", id_path, e);
             }
         }
 
@@ -142,7 +162,11 @@ impl FirecrackerManager {
 
         for vm_id in to_remove {
             if let Some(proc) = processes.remove(&vm_id) {
-                let _ = tokio::fs::remove_file(&proc.socket_path).await;
+                if let Err(e) = tokio::fs::remove_file(&proc.socket_path).await
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::debug!("Failed to remove socket {}: {}", proc.socket_path, e);
+                }
                 if let Some(tap) = &proc.tap_name {
                     self.cleanup_tap(tap).await;
                 }
@@ -260,10 +284,10 @@ impl FirecrackerManager {
             return Ok(());
         };
 
-        let rootfs_path = format!(
-            "{}/fc-{}-{}-rootfs.ext4",
-            self.fc_config.data_dir, self.agent_id, vm_id
-        );
+        let rootfs_path = std::path::Path::new(&self.fc_config.data_dir)
+            .join(format!("fc-{}-{}-rootfs.ext4", self.agent_id, vm_id))
+            .to_string_lossy()
+            .to_string();
         self.prepare_rootfs(&vm_id, &image, &rootfs_path, config.port)
             .await?;
 
@@ -301,12 +325,16 @@ impl FirecrackerManager {
             self.setup_jailer(&vm_id, &kernel_path, &rootfs_path)
                 .await?
         } else {
-            let socket_path = format!(
-                "{}/fc-{}-{}.sock",
-                self.fc_config.data_dir, self.agent_id, vm_id
-            );
+            let socket_path = std::path::Path::new(&self.fc_config.data_dir)
+                .join(format!("fc-{}-{}.sock", self.agent_id, vm_id))
+                .to_string_lossy()
+                .to_string();
             // Remove any stale socket from a previous run.
-            let _ = tokio::fs::remove_file(&socket_path).await;
+            if let Err(e) = tokio::fs::remove_file(&socket_path).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::debug!("Failed to remove stale socket {}: {}", socket_path, e);
+            }
 
             (
                 fc_binary.clone(),
@@ -331,8 +359,14 @@ impl FirecrackerManager {
                 if let Some(tap) = &tap_name {
                     self.cleanup_tap(tap).await;
                 }
-                if let Some(chroot) = chroot_dir {
-                    let _ = tokio::fs::remove_dir_all(chroot).await;
+                if let Some(chroot) = chroot_dir
+                    && let Err(e) = tokio::fs::remove_dir_all(&chroot).await
+                {
+                    tracing::error!(
+                        "Failed to remove chroot directory {} on failure: {}",
+                        chroot,
+                        e
+                    );
                 }
                 self.set_failed(&vm_id, err_msg.clone()).await;
                 return Err(FirecrackerError::ProcessError(err_msg));
@@ -383,8 +417,14 @@ impl FirecrackerManager {
             if let Some(tap) = &tap_name {
                 self.cleanup_tap(tap).await;
             }
-            if let Some(chroot) = chroot_dir {
-                let _ = tokio::fs::remove_dir_all(chroot).await;
+            if let Some(chroot) = chroot_dir
+                && let Err(e) = tokio::fs::remove_dir_all(&chroot).await
+            {
+                tracing::error!(
+                    "Failed to clean up chroot directory {} on failure: {}",
+                    chroot,
+                    e
+                );
             }
             self.set_failed(&vm_id, e.to_string()).await;
             return Err(e);
@@ -405,10 +445,10 @@ impl FirecrackerManager {
             .await?;
             (Some(host_path), "/metrics.json".to_string())
         } else {
-            let host_path = format!(
-                "{}/fc-{}-{}-metrics.json",
-                self.fc_config.data_dir, self.agent_id, vm_id
-            );
+            let host_path = std::path::Path::new(&self.fc_config.data_dir)
+                .join(format!("fc-{}-{}-metrics.json", self.agent_id, vm_id))
+                .to_string_lossy()
+                .to_string();
             (Some(host_path.clone()), host_path)
         };
 
@@ -423,9 +463,9 @@ impl FirecrackerManager {
         }
 
         // Check if we have a snapshot to restore from
-        let snapshot_dir = format!("{}/snapshots", self.fc_config.data_dir);
-        let snapshot_path = format!("{snapshot_dir}/{vm_id}.snapshot");
-        let mem_path = format!("{snapshot_dir}/{vm_id}.mem");
+        let snapshot_dir = std::path::Path::new(&self.fc_config.data_dir).join("snapshots");
+        let snapshot_path = format!("{}/{vm_id}.snapshot", snapshot_dir.display());
+        let mem_path = format!("{}/{vm_id}.mem", snapshot_dir.display());
         let has_snapshot = tokio::fs::metadata(&snapshot_path).await.is_ok()
             && tokio::fs::metadata(&mem_path).await.is_ok();
 
@@ -618,8 +658,14 @@ impl FirecrackerManager {
             if let Some(tap) = &tap_name {
                 self.cleanup_tap(tap).await;
             }
-            if let Some(chroot) = chroot_dir {
-                let _ = tokio::fs::remove_dir_all(chroot).await;
+            if let Some(chroot) = chroot_dir
+                && let Err(e) = tokio::fs::remove_dir_all(&chroot).await
+            {
+                tracing::error!(
+                    "Failed to clean up chroot directory {} on failure: {}",
+                    chroot,
+                    e
+                );
             }
             self.set_failed(&vm_id, e.to_string()).await;
             return Err(e);
@@ -663,6 +709,7 @@ impl FirecrackerManager {
     ) -> Result<(), FirecrackerError> {
         tracing::info!(vm_id = %vm_id, rootfs_path = %rootfs_path, "Preparing rootfs");
         let image_path = std::path::Path::new(image);
+        let dst_path = std::path::Path::new(rootfs_path);
 
         if image_path.is_absolute() {
             if !image_path.exists() {
@@ -680,7 +727,7 @@ impl FirecrackerManager {
                 "Image not found as local file, attempting docker pull/convert"
             );
             self.builder
-                .docker_to_ext4(image, std::path::Path::new(rootfs_path), port)
+                .docker_to_ext4(image, dst_path, port)
                 .await
                 .map_err(|e| {
                     FirecrackerError::ProcessError(format!("Image builder failed: {e}"))
@@ -705,20 +752,40 @@ impl FirecrackerManager {
             proc.log_task.abort();
             let _ = proc.child.kill().await;
             let _ = proc.child.wait().await;
-            let _ = tokio::fs::remove_file(&proc.socket_path).await;
-            let _ = tokio::fs::remove_file(format!(
-                "{}/fc-{}-{}-rootfs.ext4",
-                self.fc_config.data_dir, self.agent_id, vm_id
-            ))
-            .await;
+            if let Err(e) = tokio::fs::remove_file(&proc.socket_path).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::debug!("Failed to remove socket {}: {}", proc.socket_path, e);
+            }
 
-            let snapshot_dir = format!("{}/snapshots", self.fc_config.data_dir);
-            let _ = tokio::fs::remove_file(format!("{snapshot_dir}/{vm_id}.snapshot")).await;
-            let _ = tokio::fs::remove_file(format!("{snapshot_dir}/{vm_id}.mem")).await;
+            let rootfs_path = std::path::Path::new(&self.fc_config.data_dir)
+                .join(format!("fc-{}-{}-rootfs.ext4", self.agent_id, vm_id));
+            if let Err(e) = tokio::fs::remove_file(&rootfs_path).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::debug!("Failed to remove rootfs {:?}: {}", rootfs_path, e);
+            }
+
+            let snapshot_dir = std::path::Path::new(&self.fc_config.data_dir).join("snapshots");
+            let snap_path = snapshot_dir.join(format!("{vm_id}.snapshot"));
+            let mem_path = snapshot_dir.join(format!("{vm_id}.mem"));
+
+            if let Err(e) = tokio::fs::remove_file(&snap_path).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::debug!("Failed to remove snapshot {:?}: {}", snap_path, e);
+            }
+            if let Err(e) = tokio::fs::remove_file(&mem_path).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::debug!("Failed to remove memory file {:?}: {}", mem_path, e);
+            }
 
             if let Some(chroot) = proc.chroot_dir {
                 tracing::info!(vm_id = %vm_id, chroot_dir = %chroot, "Cleaning up jailer chroot");
-                let _ = tokio::fs::remove_dir_all(chroot).await;
+                if let Err(e) = tokio::fs::remove_dir_all(&chroot).await {
+                    tracing::error!("Failed to remove chroot directory {}: {}", chroot, e);
+                }
             }
 
             if let Some(tap) = &proc.tap_name {
@@ -749,15 +816,15 @@ impl FirecrackerManager {
         let pause_body = serde_json::json!({ "state": "Paused" }).to_string();
         fc_patch(&proc.socket_path, "/vm", &pause_body).await?;
 
-        let snapshot_dir = format!("{}/snapshots", self.fc_config.data_dir);
+        let snapshot_dir = std::path::Path::new(&self.fc_config.data_dir).join("snapshots");
         tokio::fs::create_dir_all(&snapshot_dir)
             .await
             .map_err(|e| {
                 FirecrackerError::ProcessError(format!("Failed to create snapshots dir: {e}"))
             })?;
 
-        let snapshot_path = format!("{snapshot_dir}/{vm_id}.snapshot");
-        let mem_path = format!("{snapshot_dir}/{vm_id}.mem");
+        let snapshot_path = format!("{}/{vm_id}.snapshot", snapshot_dir.display());
+        let mem_path = format!("{}/{vm_id}.mem", snapshot_dir.display());
 
         let snapshot_body = serde_json::json!({
             "snapshot_type": "Full",
@@ -901,27 +968,40 @@ impl FirecrackerManager {
 
         if let Ok(mut entries) = tokio::fs::read_dir(&self.fc_config.data_dir).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
-                if let Ok(file_name) = entry.file_name().into_string()
-                    && file_name.starts_with(&prefix)
-                    && (file_name.ends_with(".sock")
-                        || file_name.ends_with("-rootfs.ext4")
-                        || file_name.ends_with("-metrics.json"))
-                {
+                if let Ok(file_name) = entry.file_name().into_string() {
+                    if !file_name.starts_with(&prefix) {
+                        continue;
+                    }
+
+                    // Check for exact VM ID match in filename to avoid false positives
                     let mut is_active = false;
                     for vm_id in &active_vm_ids {
-                        if file_name.contains(vm_id) {
+                        let expected_socket = format!("{prefix}{vm_id}.sock");
+                        let expected_rootfs = format!("{prefix}{vm_id}-rootfs.ext4");
+                        let expected_metrics = format!("{prefix}{vm_id}-metrics.json");
+
+                        if file_name == expected_socket
+                            || file_name == expected_rootfs
+                            || file_name == expected_metrics
+                        {
                             is_active = true;
                             break;
                         }
                     }
 
-                    if is_active {
-                        continue;
+                    if !is_active
+                        && (file_name.ends_with(".sock")
+                            || file_name.ends_with("-rootfs.ext4")
+                            || file_name.ends_with("-metrics.json"))
+                    {
+                        let path = entry.path();
+                        tracing::debug!("Removing stale file: {:?}", path);
+                        if let Err(e) = tokio::fs::remove_file(&path).await
+                            && e.kind() != std::io::ErrorKind::NotFound
+                        {
+                            tracing::debug!("Failed to remove stale file {:?}: {}", path, e);
+                        }
                     }
-
-                    let path = entry.path();
-                    tracing::debug!("Removing stale file: {:?}", path);
-                    let _ = tokio::fs::remove_file(path).await;
                 }
             }
         }
@@ -1018,7 +1098,7 @@ impl FirecrackerManager {
                 FirecrackerError::ProcessError(format!("Failed to enable IP forwarding: {e}"))
             })?;
 
-        let _ = tokio::process::Command::new("iptables")
+        let output = tokio::process::Command::new("iptables")
             .args([
                 "-t",
                 "nat",
@@ -1034,6 +1114,17 @@ impl FirecrackerManager {
             ])
             .output()
             .await;
+
+        if let Ok(o) = output {
+            if !o.status.success() {
+                tracing::warn!(
+                    "Failed to setup iptables MASQUERADE: {}",
+                    String::from_utf8_lossy(&o.stderr)
+                );
+            }
+        } else if let Err(e) = output {
+            tracing::warn!("Error running iptables: {}", e);
+        }
 
         Ok(())
     }
@@ -1112,33 +1203,38 @@ impl FirecrackerManager {
             .and_then(|n| n.to_str())
             .unwrap_or("firecracker");
 
-        let chroot_dir = format!("{}/{}/{}", self.fc_config.chroot_base, exec_name, vm_id);
-        let root_dir = format!("{chroot_dir}/root");
-        let run_dir = format!("{root_dir}/run");
+        let chroot_dir = std::path::Path::new(&self.fc_config.chroot_base)
+            .join(exec_name)
+            .join(vm_id);
+        let root_dir = chroot_dir.join("root");
+        let run_dir = root_dir.join("run");
 
         tokio::fs::create_dir_all(&run_dir).await.map_err(|e| {
             FirecrackerError::ProcessError(format!(
-                "Failed to create jailer directory {run_dir}: {e}"
+                "Failed to create jailer directory {:?}: {}",
+                run_dir, e
             ))
         })?;
 
         let kernel_filename = "vmlinux.bin";
         let rootfs_filename = "rootfs.ext4";
 
-        let chroot_kernel_path = format!("{root_dir}/{kernel_filename}");
-        let chroot_rootfs_path = format!("{root_dir}/{rootfs_filename}");
+        let chroot_kernel_path = root_dir.join(kernel_filename);
+        let chroot_rootfs_path = root_dir.join(rootfs_filename);
 
-        self.ensure_file_at(kernel_host_path, &chroot_kernel_path)
+        self.ensure_file_at(kernel_host_path, &chroot_kernel_path.to_string_lossy())
             .await?;
 
-        self.ensure_file_at(rootfs_host_path, &chroot_rootfs_path)
+        self.ensure_file_at(rootfs_host_path, &chroot_rootfs_path.to_string_lossy())
             .await?;
 
         let uid = self.fc_config.jailer_uid;
         let gid = self.fc_config.jailer_gid;
 
-        self.recursive_chown(&chroot_dir, uid, gid).await?;
+        self.recursive_chown(&chroot_dir.to_string_lossy(), uid, gid)
+            .await?;
 
+        let socket_path = "/run/firecracker.socket";
         let args = vec![
             "--id".to_string(),
             vm_id.to_string(),
@@ -1152,16 +1248,16 @@ impl FirecrackerManager {
             self.fc_config.chroot_base.clone(),
             "--".to_string(),
             "--api-sock".to_string(),
-            "/run/firecracker.socket".to_string(),
+            socket_path.to_string(),
         ];
 
-        let host_socket_path = format!("{root_dir}/run/firecracker.socket");
+        let host_socket_path = root_dir.join("run/firecracker.socket");
 
         Ok((
             self.fc_config.jailer_binary.clone(),
             args,
-            host_socket_path,
-            Some(chroot_dir),
+            host_socket_path.to_string_lossy().to_string(),
+            Some(chroot_dir.to_string_lossy().to_string()),
         ))
     }
 
@@ -1657,23 +1753,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_wait_for_socket_succeeds_immediately_when_file_exists() {
-        let path = format!("/tmp/fc-wait-exists-{}.sock", uuid::Uuid::new_v4());
+        let path =
+            std::env::temp_dir().join(format!("fc-wait-exists-{}.sock", uuid::Uuid::new_v4()));
         tokio::fs::write(&path, b"").await.unwrap();
-        let result = wait_for_socket(&path, Duration::from_millis(200)).await;
-        let _ = tokio::fs::remove_file(&path).await;
+        let result = wait_for_socket(&path.to_string_lossy(), Duration::from_millis(200)).await;
+        if let Err(e) = tokio::fs::remove_file(&path).await {
+            tracing::warn!("Failed to remove test socket {:?}: {}", path, e);
+        }
         assert!(result.is_ok(), "{result:?}");
     }
 
     #[tokio::test]
     async fn test_wait_for_socket_succeeds_when_file_appears_later() {
-        let path = format!("/tmp/fc-wait-late-{}.sock", uuid::Uuid::new_v4());
+        let path = std::env::temp_dir().join(format!("fc-wait-late-{}.sock", uuid::Uuid::new_v4()));
         let path2 = path.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(80)).await;
             let _ = tokio::fs::write(&path2, b"").await;
         });
-        let result = wait_for_socket(&path, Duration::from_millis(500)).await;
-        let _ = tokio::fs::remove_file(&path).await;
+        let result = wait_for_socket(&path.to_string_lossy(), Duration::from_millis(500)).await;
+        if let Err(e) = tokio::fs::remove_file(&path).await {
+            tracing::warn!("Failed to remove test socket {:?}: {}", path, e);
+        }
         assert!(result.is_ok(), "{result:?}");
     }
 
@@ -1688,7 +1789,7 @@ mod tests {
 
     async fn spawn_mock_api(response: &'static str) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let path = format!("/tmp/fc-mock-{}.sock", uuid::Uuid::new_v4());
+        let path = std::env::temp_dir().join(format!("fc-mock-{}.sock", uuid::Uuid::new_v4()));
         let listener = tokio::net::UnixListener::bind(&path).unwrap();
         let path_clone = path.clone();
         tokio::spawn(async move {
@@ -1698,10 +1799,12 @@ mod tests {
                 let _ = stream.write_all(response.as_bytes()).await;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            let _ = tokio::fs::remove_file(&path_clone).await;
+            if let Err(e) = tokio::fs::remove_file(&path_clone).await {
+                tracing::debug!("Failed to remove mock API socket {:?}: {}", path_clone, e);
+            }
         });
         tokio::task::yield_now().await;
-        path
+        path.to_string_lossy().to_string()
     }
 
     #[tokio::test]
@@ -1776,15 +1879,17 @@ mod tests {
     }
 
     async fn real_config_bad_binary() -> (FirecrackerConfig, String) {
-        let rootfs = format!("/tmp/fc-test-rootfs-{}.ext4", uuid::Uuid::new_v4());
+        let rootfs =
+            std::env::temp_dir().join(format!("fc-test-rootfs-{}.ext4", uuid::Uuid::new_v4()));
+        let rootfs_str = rootfs.to_string_lossy().to_string();
         tokio::fs::write(&rootfs, b"fake").await.unwrap();
         let cfg = FirecrackerConfig {
             kernel_path: Some("/fake/vmlinux".to_string()),
             binary: "/nonexistent/firecracker-binary-xyz".to_string(),
-            rootfs_path: rootfs.clone(),
+            rootfs_path: rootfs_str.clone(),
             ..FirecrackerConfig::stub()
         };
-        (cfg, rootfs)
+        (cfg, rootfs_str)
     }
 
     #[tokio::test]
@@ -1799,7 +1904,9 @@ mod tests {
                 config(),
             )
             .await;
-        let _ = tokio::fs::remove_file(&rootfs).await;
+        if let Err(e) = tokio::fs::remove_file(&rootfs).await {
+            tracing::warn!("Failed to remove test rootfs {:?}: {}", rootfs, e);
+        }
 
         assert!(
             matches!(result, Err(FirecrackerError::ProcessError(_))),
@@ -1815,17 +1922,20 @@ mod tests {
     async fn test_start_vm_real_mode_failed_vm_has_error_message() {
         let (cfg, rootfs) = real_config_bad_binary().await;
         let mgr = FirecrackerManager::with_config(cfg);
-        let _ = mgr
+        let vm_id = "vm-fail-msg";
+        let _result = mgr
             .start_vm(
-                "vm-err-msg".to_string(),
+                vm_id.to_string(),
                 "app-1".to_string(),
                 "img.ext4".to_string(),
                 config(),
             )
             .await;
-        let _ = tokio::fs::remove_file(&rootfs).await;
 
-        let vm = mgr.get_vm("vm-err-msg").await.unwrap();
+        if let Err(e) = tokio::fs::remove_file(&rootfs).await {
+            tracing::warn!("Failed to remove test rootfs {:?}: {}", rootfs, e);
+        }
+        let vm = mgr.get_vm(vm_id).await.unwrap();
         assert!(vm.error_message.is_some());
         assert!(!vm.error_message.unwrap().is_empty());
     }
@@ -1871,7 +1981,9 @@ mod tests {
             );
         }
 
-        let socket_path = format!("/tmp/fc-test-kill-{}.sock", uuid::Uuid::new_v4());
+        let socket_path =
+            std::env::temp_dir().join(format!("fc-test-kill-{}.sock", uuid::Uuid::new_v4()));
+        let socket_path_str = socket_path.to_string_lossy().to_string();
         tokio::fs::write(&socket_path, b"").await.unwrap();
 
         let child = tokio::process::Command::new("sleep")
@@ -1879,16 +1991,13 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id().unwrap();
-        mgr.insert_process_for_test(vm_id, child, socket_path.clone())
+        mgr.insert_process_for_test(vm_id, child, socket_path_str.clone())
             .await;
 
         mgr.stop_vm(vm_id).await.unwrap();
         assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
         assert!(!mgr.has_process(vm_id).await);
-        assert!(
-            !std::path::Path::new(&socket_path).exists(),
-            "socket file should be cleaned up"
-        );
+        assert!(!socket_path.exists(), "socket file should be cleaned up");
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         let proc_alive = std::path::Path::new(&format!("/proc/{pid}")).exists();
@@ -1957,14 +2066,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_ensure_file_at_links_or_copies() {
-        let temp_dir = format!("/tmp/ensure-file-test-{}", uuid::Uuid::new_v4());
+        let temp_dir =
+            std::env::temp_dir().join(format!("ensure-file-test-{}", uuid::Uuid::new_v4()));
         tokio::fs::create_dir_all(&temp_dir).await.unwrap();
-        let src = format!("{temp_dir}/src");
-        let dst = format!("{temp_dir}/dst");
+        let src = temp_dir.join("src");
+        let dst = temp_dir.join("dst");
         tokio::fs::write(&src, b"data").await.unwrap();
 
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        mgr.ensure_file_at(&src, &dst)
+        mgr.ensure_file_at(&src.to_string_lossy(), &dst.to_string_lossy())
             .await
             .expect("ensure_file_at failed");
 
@@ -1984,19 +2094,19 @@ mod tests {
             );
         }
 
-        tokio::fs::remove_dir_all(&temp_dir).await.unwrap();
+        if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+            tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
+        }
     }
 
     #[tokio::test]
     async fn test_recursive_chown_traversal() {
-        let temp_dir = format!("/tmp/chown-test-{}", uuid::Uuid::new_v4());
-        tokio::fs::create_dir_all(format!("{temp_dir}/sub/dir"))
+        let temp_dir = std::env::temp_dir().join(format!("chown-test-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(temp_dir.join("sub/dir"))
             .await
             .unwrap();
-        tokio::fs::write(format!("{temp_dir}/file1"), b"")
-            .await
-            .unwrap();
-        tokio::fs::write(format!("{temp_dir}/sub/file2"), b"")
+        tokio::fs::write(temp_dir.join("file1"), b"").await.unwrap();
+        tokio::fs::write(temp_dir.join("sub/file2"), b"")
             .await
             .unwrap();
 
@@ -2009,34 +2119,45 @@ mod tests {
             let uid = meta.uid();
             let gid = meta.gid();
 
-            mgr.recursive_chown(&temp_dir, uid, gid)
+            mgr.recursive_chown(&temp_dir.to_string_lossy(), uid, gid)
                 .await
                 .expect("recursive_chown failed");
         }
 
-        tokio::fs::remove_dir_all(&temp_dir).await.unwrap();
+        if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+            tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
+        }
     }
 
     #[tokio::test]
     async fn test_jailer_setup_logic() {
         let mut cfg = FirecrackerConfig::stub();
         cfg.use_jailer = true;
-        cfg.chroot_base = format!("/tmp/jailer-test-{}", uuid::Uuid::new_v4());
+        cfg.chroot_base = std::env::temp_dir()
+            .join(format!("jailer-test-{}", uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string();
 
-        let temp_dir = format!("/tmp/fc-test-{}", uuid::Uuid::new_v4());
+        let temp_dir = std::env::temp_dir().join(format!("fc-test-{}", uuid::Uuid::new_v4()));
         tokio::fs::create_dir_all(&temp_dir).await.unwrap();
-        let kernel_path = format!("{temp_dir}/vmlinux");
-        let rootfs_path = format!("{temp_dir}/rootfs");
+        let kernel_path = temp_dir.join("vmlinux");
+        let rootfs_path = temp_dir.join("rootfs");
         tokio::fs::write(&kernel_path, b"kernel").await.unwrap();
         tokio::fs::write(&rootfs_path, b"rootfs").await.unwrap();
 
         let mgr = FirecrackerManager::with_config(cfg.clone());
 
         let result = mgr
-            .setup_jailer("vm-jail-1", &kernel_path, &rootfs_path)
+            .setup_jailer(
+                "vm-jail-1",
+                &kernel_path.to_string_lossy(),
+                &rootfs_path.to_string_lossy(),
+            )
             .await;
 
-        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+            tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
+        }
 
         match result {
             Ok((bin, args, socket, chroot)) => {
@@ -2053,7 +2174,13 @@ mod tests {
                 assert!(std::path::Path::new(&format!("{chroot_val}/root/vmlinux.bin")).exists());
                 assert!(std::path::Path::new(&format!("{chroot_val}/root/rootfs.ext4")).exists());
 
-                let _ = tokio::fs::remove_dir_all(&cfg.chroot_base).await;
+                if let Err(e) = tokio::fs::remove_dir_all(&cfg.chroot_base).await {
+                    tracing::error!(
+                        "Failed to clean up jailer test base {:?}: {}",
+                        cfg.chroot_base,
+                        e
+                    );
+                }
             },
             Err(e) => {
                 let err_msg = e.to_string();
@@ -2062,22 +2189,34 @@ mod tests {
                 } else {
                     panic!("setup_jailer failed unexpectedly: {err_msg}");
                 }
-                let _ = tokio::fs::remove_dir_all(&cfg.chroot_base).await;
+                if let Err(e) = tokio::fs::remove_dir_all(&cfg.chroot_base).await {
+                    tracing::error!(
+                        "Failed to clean up jailer test base {:?}: {}",
+                        cfg.chroot_base,
+                        e
+                    );
+                }
             },
         }
     }
 
     #[tokio::test]
     async fn test_gc_cleans_finished_processes() {
-        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let temp_uuid = uuid::Uuid::new_v4();
+        let temp_dir = std::env::temp_dir().join(format!("mikrom-test-gc-{}", temp_uuid));
+        let mut cfg = FirecrackerConfig::stub();
+        cfg.data_dir = temp_dir.to_string_lossy().to_string();
+
+        let mgr = FirecrackerManager::with_config(cfg);
         let vm_id = "gc-test";
 
         let child = tokio::process::Command::new("true").spawn().unwrap();
 
-        let socket = format!("{}/fc-{}-gc.sock", mgr.fc_config.data_dir, mgr.agent_id);
+        let socket = std::path::Path::new(&mgr.fc_config.data_dir)
+            .join(format!("fc-{}-gc.sock", mgr.agent_id));
         tokio::fs::write(&socket, b"").await.unwrap();
 
-        mgr.insert_process_for_test(vm_id, child, socket.clone())
+        mgr.insert_process_for_test(vm_id, child, socket.to_string_lossy().to_string())
             .await;
 
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -2086,10 +2225,11 @@ mod tests {
 
         assert!(!mgr.processes.lock().await.contains_key(vm_id));
         assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
-        assert!(
-            !std::path::Path::new(&socket).exists(),
-            "Socket should be cleaned up by GC"
-        );
+        assert!(!socket.exists(), "Socket should be cleaned up by GC");
+
+        if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+            tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
+        }
     }
 
     #[tokio::test]
@@ -2144,59 +2284,69 @@ mod tests {
         let size_mib = 10;
 
         let path = mgr.ensure_volume(&volume_id, size_mib).await.unwrap();
-        assert!(std::path::Path::new(&path).exists());
+        let path_buf = std::path::PathBuf::from(&path);
+        assert!(path_buf.exists());
 
         let metadata = std::fs::metadata(&path).unwrap();
         assert_eq!(metadata.len(), size_mib * 1024 * 1024);
 
-        let _ = std::fs::remove_file(path);
+        if let Err(e) = std::fs::remove_file(path) {
+            tracing::error!("Failed to clean up test volume file: {}", e);
+        }
     }
 
     #[tokio::test]
     async fn test_cleanup_stale_resources() {
-        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let temp_uuid = uuid::Uuid::new_v4();
+        let temp_dir = std::env::temp_dir().join(format!("mikrom-test-stale-{}", temp_uuid));
+        let mut cfg = FirecrackerConfig::stub();
+        cfg.data_dir = temp_dir.to_string_lossy().to_string();
 
-        let socket = format!(
-            "{}/fc-{}-stale-test.sock",
-            mgr.fc_config.data_dir, mgr.agent_id
-        );
-        let rootfs = format!(
-            "{}/fc-{}-stale-test-rootfs.ext4",
-            mgr.fc_config.data_dir, mgr.agent_id
-        );
+        let mgr = FirecrackerManager::with_config(cfg);
+        let data_dir = std::path::Path::new(&mgr.fc_config.data_dir);
+
+        let socket = data_dir.join(format!("fc-{}-stale-test.sock", mgr.agent_id));
+        let rootfs = data_dir.join(format!("fc-{}-stale-test-rootfs.ext4", mgr.agent_id));
+
         tokio::fs::write(&socket, b"").await.unwrap();
         tokio::fs::write(&rootfs, b"").await.unwrap();
 
-        assert!(std::path::Path::new(&socket).exists());
-        assert!(std::path::Path::new(&rootfs).exists());
+        assert!(socket.exists());
+        assert!(rootfs.exists());
 
         mgr.cleanup_all_stale_resources().await;
 
-        assert!(
-            !std::path::Path::new(&socket).exists(),
-            "Socket should have been removed"
-        );
-        assert!(
-            !std::path::Path::new(&rootfs).exists(),
-            "Rootfs should have been removed"
-        );
+        assert!(!socket.exists(), "Socket should have been removed");
+        assert!(!rootfs.exists(), "Rootfs should have been removed");
+
+        if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+            tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
+        }
     }
 
     #[tokio::test]
     async fn test_cleanup_does_not_touch_other_agents() {
-        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let temp_uuid = uuid::Uuid::new_v4();
+        let temp_dir = std::env::temp_dir().join(format!("mikrom-test-gc-others-{}", temp_uuid));
+        let mut cfg = FirecrackerConfig::stub();
+        cfg.data_dir = temp_dir.to_string_lossy().to_string();
 
-        let other_socket = format!("{}/fc-other-agent-vm1.sock", mgr.fc_config.data_dir);
+        let mgr = FirecrackerManager::with_config(cfg);
+        let data_dir = std::path::Path::new(&mgr.fc_config.data_dir);
+
+        let other_socket = data_dir.join("fc-other-agent-vm1.sock");
         tokio::fs::write(&other_socket, b"").await.unwrap();
 
         mgr.cleanup_all_stale_resources().await;
 
         assert!(
-            std::path::Path::new(&other_socket).exists(),
+            other_socket.exists(),
             "File from other agent should NOT have been removed"
         );
 
-        let _ = tokio::fs::remove_file(&other_socket).await;
+        if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+            tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
+        }
     }
 
     #[tokio::test]
@@ -2296,9 +2446,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_id_persistence() {
-        let temp_dir = format!("/tmp/mikrom-test-persistence-{}", uuid::Uuid::new_v4());
+        let temp_uuid = uuid::Uuid::new_v4();
+        let temp_dir = std::env::temp_dir().join(format!("mikrom-test-persistence-{}", temp_uuid));
         let mut cfg = FirecrackerConfig::stub();
-        cfg.data_dir = temp_dir.clone();
+        cfg.data_dir = temp_dir.to_string_lossy().to_string();
 
         // First run: should generate and save a new ID
         let id1 = {
@@ -2314,14 +2465,17 @@ mod tests {
 
         assert_eq!(id1, id2, "Agent ID should be persistent across restarts");
 
-        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+            tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
+        }
     }
 
     #[tokio::test]
     async fn test_cleanup_stale_resources_after_restart() {
-        let temp_dir = format!("/tmp/mikrom-test-gc-restart-{}", uuid::Uuid::new_v4());
+        let temp_uuid = uuid::Uuid::new_v4();
+        let temp_dir = std::env::temp_dir().join(format!("mikrom-test-gc-restart-{}", temp_uuid));
         let mut cfg = FirecrackerConfig::stub();
-        cfg.data_dir = temp_dir.clone();
+        cfg.data_dir = temp_dir.to_string_lossy().to_string();
 
         let agent_id = {
             let mgr = FirecrackerManager::with_config(cfg.clone());
@@ -2329,8 +2483,10 @@ mod tests {
         };
 
         // Simulate stale files from a previous run
-        let socket = format!("{}/fc-{}-stale.sock", temp_dir, agent_id);
-        let rootfs = format!("{}/fc-{}-stale-rootfs.ext4", temp_dir, agent_id);
+        let vm_id = "stale-vm";
+        let socket = temp_dir.join(format!("fc-{}-{}.sock", agent_id, vm_id));
+        let rootfs = temp_dir.join(format!("fc-{}-{}-rootfs.ext4", agent_id, vm_id));
+
         tokio::fs::write(&socket, b"").await.unwrap();
         tokio::fs::write(&rootfs, b"").await.unwrap();
 
@@ -2343,14 +2499,16 @@ mod tests {
 
         // Files should be gone because they aren't in mgr.processes
         assert!(
-            !std::path::Path::new(&socket).exists(),
+            !socket.exists(),
             "Stale socket should be cleaned up after restart"
         );
         assert!(
-            !std::path::Path::new(&rootfs).exists(),
+            !rootfs.exists(),
             "Stale rootfs should be cleaned up after restart"
         );
 
-        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+            tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
+        }
     }
 }

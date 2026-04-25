@@ -255,11 +255,27 @@ impl ImageBuilder {
                 .await;
         }
 
-        let _ = tokio::fs::remove_dir(&mount_dir).await;
-        let _ = Command::new("docker")
+        if let Err(e) = tokio::fs::remove_dir(&mount_dir).await {
+            tracing::warn!("Failed to remove mount directory {:?}: {}", mount_dir, e);
+        }
+        let status = Command::new("docker")
             .args(["rm", "-f", &container_name])
             .status()
             .await;
+        if let Ok(s) = status {
+            if !s.success() {
+                tracing::warn!(
+                    "Failed to remove temporary docker container {}",
+                    container_name
+                );
+            }
+        } else if let Err(e) = status {
+            tracing::warn!(
+                "Error removing temporary docker container {}: {}",
+                container_name,
+                e
+            );
+        }
 
         info!("Successfully created ext4 rootfs for {}", image);
         Ok(())

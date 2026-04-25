@@ -379,6 +379,8 @@ mod tests {
         assert!(metrics.vms.contains_key(vm_id));
 
         // Cleanup
-        let _ = tokio::fs::remove_file(metrics_file).await;
+        if let Err(e) = tokio::fs::remove_file(metrics_file).await {
+            tracing::warn!("Failed to remove test metrics file: {}", e);
+        }
     }
 }
