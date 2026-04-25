@@ -108,7 +108,7 @@ pub async fn create_app_handler(
         .map_err(|e| {
             let msg = e.to_string();
             if msg.contains("is already taken") {
-                ApiError::BadRequest(msg)
+                ApiError::Conflict(msg)
             } else {
                 ApiError::Internal(msg)
             }

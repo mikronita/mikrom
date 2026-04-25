@@ -97,7 +97,7 @@ impl IntoResponse for ApiError {
             Self::Anyhow(err) => {
                 let msg = err.to_string();
                 if msg.contains("is already taken") {
-                    (StatusCode::BAD_REQUEST, msg)
+                    (StatusCode::CONFLICT, msg)
                 } else {
                     tracing::error!("Anyhow error: {:?}", err);
                     (
