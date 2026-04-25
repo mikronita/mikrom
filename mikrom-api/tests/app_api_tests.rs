@@ -162,7 +162,7 @@ async fn test_create_app_duplicate_name() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::CONFLICT);
 
     let body = axum::body::to_bytes(response.into_body(), 1024)
         .await

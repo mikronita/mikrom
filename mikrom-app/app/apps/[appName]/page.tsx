@@ -483,11 +483,11 @@ export default function AppDetailPage() {
                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Payload URL</p>
                     <div className="flex items-center gap-2">
                       <Input
-                        value={`${API_BASE_URL}/webhooks/github/${appId}`}
+                        value={`${API_BASE_URL}/webhooks/github/${decodedName}`}
                         readOnly
                         className="font-mono text-xs flex-1 h-9"
                       />
-                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={() => copyToClipboard(`${API_BASE_URL}/webhooks/github/${appId}`)}>
+                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={() => copyToClipboard(`${API_BASE_URL}/webhooks/github/${decodedName}`)}>
                         <HiClipboard className="w-4 h-4" />
                       </Button>
                     </div>

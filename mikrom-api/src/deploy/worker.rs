@@ -138,6 +138,7 @@ pub async fn resume_pending_builds(state: AppState) {
                     port: dep.port as u32,
                     env,
                 };
+
                 start_build_polling(state.clone(), task).await;
             }
         }

@@ -699,13 +699,12 @@ impl SchedulerService for SchedulerServer {
 
                             if let Some(host_id) = &job.host_id
                                 && let Some(vm_id) = &job.vm_id
-                                && let Some(worker) = worker_registry.get_worker(host_id)
-                                && let Some(metrics) = worker.metrics
-                                && let Some(vm_metrics) = metrics.vms.get(vm_id)
-                            {
-                                cpu_usage = vm_metrics.cpu_usage;
-                                ram_used_bytes = vm_metrics.ram_used_bytes;
-                            }
+                                    && let Some(worker) = worker_registry.get_worker(host_id)
+                                        && let Some(metrics) = worker.metrics
+                                            && let Some(vm_metrics) = metrics.vms.get(vm_id) {
+                                                cpu_usage = vm_metrics.cpu_usage;
+                                                ram_used_bytes = vm_metrics.ram_used_bytes;
+                                            }
 
                             yield WatchAppsResponse {
                                 app: Some(AppInfo {
