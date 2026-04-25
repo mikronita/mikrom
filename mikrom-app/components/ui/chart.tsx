@@ -109,9 +109,9 @@ const ChartTooltipContent = React.forwardRef<
       indicator?: "line" | "dot" | "dashed"
       nameKey?: string
       labelKey?: string
-      payload?: any[]
+      payload?: Record<string, any>[] // eslint-disable-line @typescript-eslint/no-explicit-any
       active?: boolean
-      label?: any
+      label?: any // eslint-disable-line @typescript-eslint/no-explicit-any
     }
 >(
   (
@@ -263,7 +263,7 @@ const ChartLegendContent = React.forwardRef<
     React.ComponentProps<typeof RechartsPrimitive.Legend> & {
       hideIcon?: boolean
       nameKey?: string
-      payload?: any[]
+      payload?: Record<string, any>[] // eslint-disable-line @typescript-eslint/no-explicit-any
     }
 >(({ className, hideIcon = false, payload, verticalAlign, nameKey }, ref) => {
   const { config } = useChart()
