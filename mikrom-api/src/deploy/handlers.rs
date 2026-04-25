@@ -36,6 +36,28 @@ pub struct AppResponse {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+async fn get_app_by_name_and_auth(
+    state: &AppState,
+    app_name: &str,
+    auth: &AuthUser,
+) -> ApiResult<crate::models::app::App> {
+    let app = state
+        .app_repo
+        .get_app_by_name(app_name)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
+
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?;
+
+    if app.user_id != user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    Ok(app)
+}
+
 #[utoipa::path(
     post,
     path = "/apps",
@@ -83,7 +105,14 @@ pub async fn create_app_handler(
             webhook_secret,
         )
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("is already taken") {
+                ApiError::BadRequest(msg)
+            } else {
+                ApiError::Internal(msg)
+            }
+        })?;
 
     Ok(Json(AppResponse {
         id: app.id,
@@ -138,9 +167,9 @@ pub async fn list_apps_handler(
 
 #[utoipa::path(
     delete,
-    path = "/apps/{app_id}",
+    path = "/apps/{app_name}",
     params(
-        ("app_id" = Uuid, Path, description = "App ID")
+        ("app_name" = String, Path, description = "App Name")
     ),
     responses(
         (status = 204, description = "App deleted successfully"),
@@ -155,27 +184,15 @@ pub async fn list_apps_handler(
 pub async fn delete_app_handler(
     auth: AuthUser,
     State(state): State<AppState>,
-    Path(app_id): Path<Uuid>,
+    Path(app_name): Path<String>,
 ) -> ApiResult<StatusCode> {
     // 1. Verify app exists and belongs to user
-    let app = state
-        .app_repo
-        .get_app(app_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("App not found".to_string()))?;
-
-    if app.user_id
-        != Uuid::parse_str(&auth.user_id)
-            .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?
-    {
-        return Err(ApiError::Forbidden);
-    }
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
     // 2. Delete the app (cascading will handle deployments)
     state
         .app_repo
-        .delete_app(app_id)
+        .delete_app(app.id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -192,9 +209,9 @@ pub struct ManualDeployRequest {
 
 #[utoipa::path(
     post,
-    path = "/apps/{app_id}/deploy",
+    path = "/apps/{app_name}/deploy",
     params(
-        ("app_id" = Uuid, Path, description = "App ID")
+        ("app_name" = String, Path, description = "App Name")
     ),
     request_body = ManualDeployRequest,
     responses(
@@ -210,23 +227,11 @@ pub struct ManualDeployRequest {
 pub async fn deploy_app_version_handler(
     auth: AuthUser,
     State(state): State<AppState>,
-    Path(app_id): Path<Uuid>,
+    Path(app_name): Path<String>,
     Json(payload): Json<ManualDeployRequest>,
 ) -> ApiResult<Json<crate::deploy::DeployResponseBody>> {
     // 1. Verify app exists and belongs to user
-    let app = state
-        .app_repo
-        .get_app(app_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("App not found".to_string()))?;
-
-    if app.user_id
-        != Uuid::parse_str(&auth.user_id)
-            .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?
-    {
-        return Err(ApiError::Forbidden);
-    }
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
     // 2. Create deployment record in DB
     let vcpus = payload.vcpus.unwrap_or(1);
@@ -417,9 +422,9 @@ pub async fn trigger_app_build(
 
 #[utoipa::path(
     get,
-    path = "/apps/{app_id}/deployments",
+    path = "/apps/{app_name}/deployments",
     params(
-        ("app_id" = Uuid, Path, description = "App ID")
+        ("app_name" = String, Path, description = "App Name")
     ),
     responses(
         (status = 200, description = "List of app deployments", body = [Deployment]),
@@ -434,26 +439,14 @@ pub async fn trigger_app_build(
 pub async fn list_deployments_handler(
     auth: AuthUser,
     State(state): State<AppState>,
-    Path(app_id): Path<Uuid>,
+    Path(app_name): Path<String>,
 ) -> ApiResult<Json<Vec<Deployment>>> {
     // Verify ownership
-    let app = state
-        .app_repo
-        .get_app(app_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("App not found".to_string()))?;
-
-    if app.user_id
-        != Uuid::parse_str(&auth.user_id)
-            .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?
-    {
-        return Err(ApiError::Forbidden);
-    }
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
     let deployments = state
         .app_repo
-        .list_deployments_by_app(app_id)
+        .list_deployments_by_app(app.id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -462,9 +455,9 @@ pub async fn list_deployments_handler(
 
 #[utoipa::path(
     get,
-    path = "/apps/{app_id}/deployments/stream",
+    path = "/apps/{app_name}/deployments/stream",
     params(
-        ("app_id" = Uuid, Path, description = "App ID"),
+        ("app_name" = String, Path, description = "App Name"),
         ("token" = String, Query, description = "JWT Token")
     ),
     responses(
@@ -480,23 +473,12 @@ pub async fn list_deployments_handler(
 pub async fn deployments_stream_handler(
     auth: AuthUser,
     State(state): State<AppState>,
-    Path(app_id): Path<Uuid>,
+    Path(app_name): Path<String>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     // Verify ownership
-    let app = state
-        .app_repo
-        .get_app(app_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("App not found".to_string()))?;
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
-    if app.user_id
-        != Uuid::parse_str(&auth.user_id)
-            .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?
-    {
-        return Err(ApiError::Forbidden);
-    }
-
+    let app_id = app.id;
     let app_repo = state.app_repo.clone();
     let receiver = state.deployment_events.subscribe();
 
@@ -524,9 +506,9 @@ pub async fn deployments_stream_handler(
 
 #[utoipa::path(
     post,
-    path = "/apps/{app_id}/deployments/{deployment_id}/activate",
+    path = "/apps/{app_name}/deployments/{deployment_id}/activate",
     params(
-        ("app_id" = Uuid, Path, description = "App ID"),
+        ("app_name" = String, Path, description = "App Name"),
         ("deployment_id" = Uuid, Path, description = "Deployment ID")
     ),
     responses(
@@ -543,22 +525,11 @@ pub async fn deployments_stream_handler(
 pub async fn activate_deployment_handler(
     auth: AuthUser,
     State(state): State<AppState>,
-    Path((app_id, deployment_id)): Path<(Uuid, Uuid)>,
+    Path((app_name, deployment_id)): Path<(String, Uuid)>,
 ) -> ApiResult<StatusCode> {
     // 1. Verify app ownership
-    let app = state
-        .app_repo
-        .get_app(app_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("App not found".to_string()))?;
-
-    if app.user_id
-        != Uuid::parse_str(&auth.user_id)
-            .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?
-    {
-        return Err(ApiError::Forbidden);
-    }
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+    let app_id = app.id;
 
     // 2. Verify deployment exists and belongs to app
     let deployment = state

@@ -31,7 +31,7 @@ async fn test_activate_deployment_endpoint() {
     )
     .unwrap();
 
-    // 1. Mock get_app
+    // 1. Mock get_app_by_name
     let app_for_get = App {
         id: app_id,
         name: "test-app".to_string(),
@@ -45,8 +45,8 @@ async fn test_activate_deployment_endpoint() {
         updated_at: Utc::now(),
     };
     mock_app_repo
-        .expect_get_app()
-        .with(eq(app_id))
+        .expect_get_app_by_name()
+        .with(eq("test-app"))
         .times(1)
         .returning(move |_| Ok(Some(app_for_get.clone())));
 
@@ -108,7 +108,7 @@ async fn test_activate_deployment_endpoint() {
                 .method("POST")
                 .uri(format!(
                     "/apps/{}/deployments/{}/activate",
-                    app_id, deployment_id
+                    "test-app", deployment_id
                 ))
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
@@ -152,7 +152,7 @@ async fn test_activate_deployment_wrong_owner() {
         updated_at: Utc::now(),
     };
     mock_app_repo
-        .expect_get_app()
+        .expect_get_app_by_name()
         .returning(move |_| Ok(Some(app.clone())));
 
     let state = AppState {
@@ -173,7 +173,7 @@ async fn test_activate_deployment_wrong_owner() {
                 .method("POST")
                 .uri(format!(
                     "/apps/{}/deployments/{}/activate",
-                    app_id, deployment_id
+                    "test-app", deployment_id
                 ))
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
@@ -216,7 +216,7 @@ async fn test_activate_deployment_not_running() {
         updated_at: Utc::now(),
     };
     mock_app_repo
-        .expect_get_app()
+        .expect_get_app_by_name()
         .returning(move |_| Ok(Some(app.clone())));
 
     let dep = Deployment {
@@ -258,7 +258,7 @@ async fn test_activate_deployment_not_running() {
                 .method("POST")
                 .uri(format!(
                     "/apps/{}/deployments/{}/activate",
-                    app_id, deployment_id
+                    "test-app", deployment_id
                 ))
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())

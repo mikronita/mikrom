@@ -103,3 +103,75 @@ async fn test_create_app_endpoint() {
     assert_eq!(app_resp["port"], 8080);
     assert_eq!(app_resp["hostname"], "test-app.apps.mikrom.es");
 }
+
+#[tokio::test]
+async fn test_create_app_duplicate_name() {
+    let mock_user_repo = mikrom_api::repositories::user_repository::MockUserRepository::new();
+    let mut mock_app_repo = MockAppRepository::new();
+
+    let user_id = Uuid::new_v4();
+    let app_name = "already-exists";
+    let jwt_secret = "test-secret";
+
+    let token = mikrom_api::auth::jwt::create_token(
+        &user_id.to_string(),
+        "test@example.com",
+        &mikrom_api::repositories::user_repository::UserRole::User,
+        jwt_secret,
+    )
+    .unwrap();
+
+    // Mock: repo returns error for duplicate name
+    mock_app_repo
+        .expect_create_app()
+        .times(1)
+        .returning(move |name, _, _, _, _, _| {
+            Err(anyhow::anyhow!(
+                "Application name '{}' is already taken",
+                name
+            ))
+        });
+
+    let state = AppState {
+        user_repo: Arc::new(mock_user_repo),
+        app_repo: Arc::new(mock_app_repo),
+        scheduler_client: None,
+        scheduler_config: Default::default(),
+        builder_addr: "http://localhost:5004".into(),
+        jwt_secret: jwt_secret.into(),
+        master_key: "key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
+        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+    };
+
+    let router = create_app(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/apps")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::from(format!(
+                    r#"{{"name": "{}", "git_url": "git"}}"#,
+                    app_name
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let error_resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        error_resp["error"]
+            .as_str()
+            .unwrap()
+            .contains("already taken")
+    );
+}

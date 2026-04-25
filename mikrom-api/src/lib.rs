@@ -85,7 +85,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))
         .route(
-            "/webhooks/github/:app_id",
+            "/webhooks/github/:app_name",
             axum::routing::post(github_webhook_handler),
         )
         .route("/auth/me", get(get_profile))
@@ -97,23 +97,23 @@ pub fn create_app(state: AppState) -> Router {
         )
         .route("/apps", get(crate::deploy::list_apps_handler))
         .route(
-            "/apps/:app_id",
+            "/apps/:app_name",
             axum::routing::delete(crate::deploy::delete_app_handler),
         )
         .route(
-            "/apps/:app_id/deploy",
+            "/apps/:app_name/deploy",
             axum::routing::post(crate::deploy::deploy_app_version_handler),
         )
         .route(
-            "/apps/:app_id/deployments",
+            "/apps/:app_name/deployments",
             get(crate::deploy::list_deployments_handler),
         )
         .route(
-            "/apps/:app_id/deployments/stream",
+            "/apps/:app_name/deployments/stream",
             get(crate::deploy::deployments_stream_handler),
         )
         .route(
-            "/apps/:app_id/deployments/:deployment_id/activate",
+            "/apps/:app_name/deployments/:deployment_id/activate",
             axum::routing::post(crate::deploy::activate_deployment_handler),
         )
         .route("/deployments/active", get(list_active_deployments))

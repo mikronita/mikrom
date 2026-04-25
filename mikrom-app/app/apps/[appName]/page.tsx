@@ -97,10 +97,11 @@ interface MetricPoint {
 }
 
 export default function AppDetailPage() {
-  const { appId } = useParams() as { appId: string };
+  const { appName } = useParams() as { appName: string };
+  const decodedName = decodeURIComponent(appName);
   const router = useRouter();
   const { data: apps = [] } = useApps();
-  const { data: deployments = [], isLoading, error } = useDeployments(appId);
+  const { data: deployments = [], isLoading, error } = useDeployments(decodedName);
   const activateMutation = useActivateDeployment();
   const deployAppVersionMutation = useDeployAppVersion();
   const deleteAppMutation = useDeleteApp();
@@ -110,7 +111,7 @@ export default function AppDetailPage() {
   const [showWebhookModal, setShowWebhookModal] = useState(false);
   const [confirmDeleteApp, setConfirmDeleteApp] = useState(false);
 
-  const app = apps.find(a => a.id === appId);
+  const app = apps.find(a => a.name === decodedName);
   // Prefer the active (promoted) deployment, but fallback to the latest running one if none is active
   const activeDeployment = deployments.find(d => d.id === app?.active_deployment_id) 
     || [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).find(d => d.status === "RUNNING");
@@ -148,7 +149,7 @@ export default function AppDetailPage() {
   const handleDeployApp = async () => {
     if (!app) return;
     try {
-      const result = await deployAppVersionMutation.mutateAsync({ appId: app.id });
+      const result = await deployAppVersionMutation.mutateAsync({ appName: decodedName });
       toast.success(`Deployment for ${app.name} initiated`);
       if (result?.job_id) {
         // Since we are unifying, we stay here. The SSE will update the activeJobId eventually.
@@ -161,7 +162,7 @@ export default function AppDetailPage() {
   const handleDeleteApp = async () => {
     if (!app) return;
     try {
-      await deleteAppMutation.mutateAsync(app.id);
+      await deleteAppMutation.mutateAsync(decodedName);
       toast.success(`Application ${app.name} deleted`);
       router.push("/apps");
     } catch (err) {
@@ -170,7 +171,7 @@ export default function AppDetailPage() {
   };
 
   const handleActivate = async (deploymentId: string) => {
-    toast.promise(activateMutation.mutateAsync({ appId, deploymentId }), {
+    toast.promise(activateMutation.mutateAsync({ appName: decodedName, deploymentId }), {
       loading: "Promoting deployment to production...",
       success: "Deployment activated successfully!",
       error: (err) => `Failed to activate: ${err instanceof Error ? err.message : "Unknown error"}`,
@@ -463,7 +464,7 @@ export default function AppDetailPage() {
         {/* GitHub Webhook Modal */}
         {showWebhookModal && (
           <Dialog open={true} onOpenChange={(open) => !open && setShowWebhookModal(false)}>
-            <DialogContent className="sm:max-w-[600px]">
+            <DialogContent className="sm:max-w-[600px]" aria-describedby={undefined}>
               <DialogHeader>
                 <DialogTitle>GitHub Auto-deploy Configuration</DialogTitle>
               </DialogHeader>

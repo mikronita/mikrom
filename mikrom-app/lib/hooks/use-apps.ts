@@ -19,7 +19,7 @@ export const appsKeys = {
   all: ["apps"] as const,
   list: () => [...appsKeys.all, "list"] as const,
   detail: (id: string) => [...appsKeys.all, "detail", id] as const,
-  deployments: (appId: string) => [...appsKeys.all, "deployments", appId] as const,
+  deployments: (appName: string) => [...appsKeys.all, "deployments", appName] as const,
 };
 
 export function useApps() {
@@ -59,9 +59,9 @@ export function useDeleteApp() {
   const token = getToken();
 
   return useMutation({
-    mutationFn: async (appId: string) => {
+    mutationFn: async (appName: string) => {
       if (!token) throw new Error("No token found");
-      const result = await deleteApp(token, appId);
+      const result = await deleteApp(token, appName);
       if (result.error) throw new Error(result.error);
       return result.success;
     },
@@ -76,32 +76,32 @@ export function useDeployAppVersion() {
   const token = getToken();
 
   return useMutation({
-    mutationFn: async ({ appId, data }: { appId: string, data?: Partial<DeployRequest> }) => {
+    mutationFn: async ({ appName, data }: { appName: string, data?: Partial<DeployRequest> }) => {
       if (!token) throw new Error("No token found");
-      const result = await deployAppVersion(token, appId, data);
+      const result = await deployAppVersion(token, appName, data);
       if (result.error) throw new Error(result.error);
       return result.data;
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: appsKeys.deployments(variables.appId) });
+      queryClient.invalidateQueries({ queryKey: appsKeys.deployments(variables.appName) });
       queryClient.invalidateQueries({ queryKey: ["vms"] });
     },
   });
 }
 
-export function useDeployments(appId: string) {
+export function useDeployments(appName: string) {
   const token = getToken();
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!token || !appId) return;
+    if (!token || !appName) return;
 
-    const eventSource = new EventSource(`${API_BASE_URL}/apps/${appId}/deployments/stream?token=${token}`);
+    const eventSource = new EventSource(`${API_BASE_URL}/apps/${appName}/deployments/stream?token=${token}`);
 
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        queryClient.setQueryData(appsKeys.deployments(appId), data);
+        queryClient.setQueryData(appsKeys.deployments(appName), data);
       } catch (err) {
         console.error("Failed to parse SSE data", err);
       }
@@ -117,17 +117,17 @@ export function useDeployments(appId: string) {
       eventSource.onerror = null;
       eventSource.close();
     };
-  }, [appId, token, queryClient]);
+  }, [appName, token, queryClient]);
 
   return useQuery({
-    queryKey: appsKeys.deployments(appId),
+    queryKey: appsKeys.deployments(appName),
     queryFn: async () => {
       if (!token) throw new Error("No token found");
-      const result = await listDeployments(token, appId);
+      const result = await listDeployments(token, appName);
       if (result.error) throw new Error(result.error);
       return result.data ?? [];
     },
-    enabled: !!token && !!appId,
+    enabled: !!token && !!appName,
   });
 }
 
@@ -136,15 +136,15 @@ export function useActivateDeployment() {
   const token = getToken();
 
   return useMutation({
-    mutationFn: async ({ appId, deploymentId }: { appId: string, deploymentId: string }) => {
+    mutationFn: async ({ appName, deploymentId }: { appName: string, deploymentId: string }) => {
       if (!token) throw new Error("No token found");
-      const result = await activateDeployment(token, appId, deploymentId);
+      const result = await activateDeployment(token, appName, deploymentId);
       if (result.error) throw new Error(result.error);
       return result.success;
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: appsKeys.list() });
-      queryClient.invalidateQueries({ queryKey: appsKeys.deployments(variables.appId) });
+      queryClient.invalidateQueries({ queryKey: appsKeys.deployments(variables.appName) });
     },
   });
 }

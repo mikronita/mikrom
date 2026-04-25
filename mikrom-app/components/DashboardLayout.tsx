@@ -210,7 +210,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 .map((segment, index, array) => {
                   const href = `/${array.slice(0, index + 1).join("/")}`;
                   const isLast = index === array.length - 1;
-                  const name = segment.charAt(0).toUpperCase() + segment.slice(1);
+                  const decodedSegment = decodeURIComponent(segment);
+                  const name = decodedSegment.charAt(0).toUpperCase() + decodedSegment.slice(1);
 
                   return (
                     <React.Fragment key={href}>

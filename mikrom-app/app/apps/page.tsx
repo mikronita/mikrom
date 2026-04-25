@@ -100,7 +100,7 @@ export default function ApplicationsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Link href={`/apps/${app.id}`}>
+                        <Link href={`/apps/${encodeURIComponent(app.name)}`}>
                           <Button variant="outline" size="sm">
                             Manage
                           </Button>

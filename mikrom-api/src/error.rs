@@ -95,11 +95,16 @@ impl IntoResponse for ApiError {
                 )
             },
             Self::Anyhow(err) => {
-                tracing::error!("Anyhow error: {:?}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Internal error: {}", err),
-                )
+                let msg = err.to_string();
+                if msg.contains("is already taken") {
+                    (StatusCode::BAD_REQUEST, msg)
+                } else {
+                    tracing::error!("Anyhow error: {:?}", err);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Internal error: {}", err),
+                    )
+                }
             },
             Self::Internal(msg) => {
                 tracing::error!("Internal error: {}", msg);

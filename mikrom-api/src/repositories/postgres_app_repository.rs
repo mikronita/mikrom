@@ -26,7 +26,7 @@ impl AppRepository for PostgresAppRepository {
         github_webhook_secret: Option<String>,
     ) -> anyhow::Result<App> {
         let uid = Uuid::parse_str(user_id)?;
-        let app = sqlx::query_as::<_, App>(
+        let result = sqlx::query_as::<_, App>(
             "INSERT INTO apps (name, git_url, port, hostname, user_id, github_webhook_secret) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *"
         )
         .bind(name)
@@ -36,9 +36,22 @@ impl AppRepository for PostgresAppRepository {
         .bind(uid)
         .bind(github_webhook_secret)
         .fetch_one(&self.pool)
-        .await?;
+        .await;
 
-        Ok(app)
+        match result {
+            Ok(app) => Ok(app),
+            Err(e) => {
+                if let Some(db_err) = e.as_database_error()
+                    && db_err.code().as_deref() == Some("23505")
+                {
+                    return Err(anyhow::anyhow!(
+                        "Application name '{}' is already taken",
+                        name
+                    ));
+                }
+                Err(e.into())
+            },
+        }
     }
 
     async fn get_app(&self, id: Uuid) -> anyhow::Result<Option<App>> {
@@ -312,5 +325,28 @@ mod tests {
         assert_eq!(updated.job_id.as_deref(), Some("job-123"));
         assert_eq!(updated.image_tag.as_deref(), Some("img:v1"));
         assert_eq!(updated.build_id.as_deref(), Some("build-abc"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
+    async fn test_get_app_by_name() {
+        let pool = get_test_pool().await;
+        let app_repo = PostgresAppRepository::new(pool.clone());
+        let user_id = Uuid::new_v4();
+        let name = format!("name-test-{}", Uuid::new_v4());
+
+        // Create app
+        app_repo
+            .create_app(&name, "git", 8080, None, &user_id.to_string(), None)
+            .await
+            .unwrap();
+
+        // Get by name
+        let app = app_repo.get_app_by_name(&name).await.unwrap().unwrap();
+        assert_eq!(app.name, name);
+        assert_eq!(app.user_id, user_id);
+
+        // Cleanup
+        app_repo.delete_app(app.id).await.unwrap();
     }
 }
