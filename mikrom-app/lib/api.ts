@@ -54,6 +54,8 @@ export interface LiveDeploymentInfo {
   vm_id: string;
   vcpus?: number;
   memory_mib?: number;
+  cpu_usage?: number;
+  ram_used_bytes?: number;
 }
 
 export interface LiveDeploymentStatus {

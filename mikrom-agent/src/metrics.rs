@@ -97,15 +97,20 @@ impl MetricsCollector {
         };
 
         // ── Pre-collect: Flush Firecracker metrics ──────────────────────────
-        for vm in &vms_info {
-            if let Some(socket) = &vm.socket_path {
-                let flush_body = serde_json::json!({
-                    "action_type": "FlushMetrics"
-                })
-                .to_string();
-                let _ = crate::firecracker::api::fc_put(socket, "/actions", &flush_body).await;
-            }
-        }
+        let flush_body = serde_json::json!({
+            "action_type": "FlushMetrics"
+        })
+        .to_string();
+
+        let flush_futures: Vec<_> = vms_info
+            .iter()
+            .filter_map(|vm| {
+                vm.socket_path
+                    .as_ref()
+                    .map(|socket| crate::firecracker::api::fc_put(socket, "/actions", &flush_body))
+            })
+            .collect();
+        futures::future::join_all(flush_futures).await;
 
         let mut system_metrics = {
             let mut system = self.system.write();

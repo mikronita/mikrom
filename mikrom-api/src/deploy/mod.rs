@@ -139,11 +139,10 @@ pub async fn deploy_app(
     let disk_mib = payload.disk_mib.unwrap_or(1024);
     let port = payload.port.unwrap_or(8080);
 
-    let channel = crate::scheduler::connect(&state.scheduler_config)
+    let mut client = state
+        .get_scheduler_client()
         .await
         .map_err(ApiError::Scheduler)?;
-
-    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
 
     let req = mikrom_proto::scheduler::DeployRequest {
         app_id: Uuid::new_v4().to_string(),

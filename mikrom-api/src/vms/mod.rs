@@ -22,6 +22,8 @@ pub struct LiveDeploymentInfo {
     pub status: String,
     pub host_id: String,
     pub vm_id: String,
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -69,11 +71,9 @@ pub async fn list_active_deployments(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // 2. Try to get real-time status from scheduler for active ones
-    let channel_res = crate::scheduler::connect(&state.scheduler_config).await;
     let mut scheduler_apps = HashMap::new();
 
-    if let Ok(channel) = channel_res {
-        let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+    if let Ok(mut client) = state.get_scheduler_client().await {
         let req = mikrom_proto::scheduler::ListAppsRequest {
             user_id: auth.user_id.clone(),
             status: None,
@@ -91,15 +91,18 @@ pub async fn list_active_deployments(
     for dep in deployments {
         // Only show deployments that have a job_id (meaning they were at least attempted to be scheduled)
         if let Some(job_id) = &dep.job_id {
-            let (status, host_id, vm_id) = if let Some(sch_app) = scheduler_apps.get(job_id) {
-                (
-                    crate::scheduler::status_name(sch_app.status).to_string(),
-                    sch_app.host_id.clone(),
-                    sch_app.vm_id.clone(),
-                )
-            } else {
-                (dep.status.clone(), String::new(), String::new())
-            };
+            let (status, host_id, vm_id, cpu_usage, ram_used_bytes) =
+                if let Some(sch_app) = scheduler_apps.get(job_id) {
+                    (
+                        crate::scheduler::status_name(sch_app.status).to_string(),
+                        sch_app.host_id.clone(),
+                        sch_app.vm_id.clone(),
+                        sch_app.cpu_usage,
+                        sch_app.ram_used_bytes,
+                    )
+                } else {
+                    (dep.status.clone(), String::new(), String::new(), 0.0, 0)
+                };
 
             // Get app name from repo (we might need a join or a cache here for performance)
             let app_name = if let Ok(Some(app)) = state.app_repo.get_app(dep.app_id).await {
@@ -117,6 +120,8 @@ pub async fn list_active_deployments(
                 status,
                 host_id,
                 vm_id,
+                cpu_usage,
+                ram_used_bytes,
             });
         }
     }
@@ -141,11 +146,10 @@ pub async fn watch_deployments(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
 ) -> ApiResult<impl IntoResponse> {
-    let channel = crate::scheduler::connect(&state.scheduler_config)
+    let mut client = state
+        .get_scheduler_client()
         .await
         .map_err(ApiError::Scheduler)?;
-
-    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::WatchAppsRequest {
         user_id: auth.user_id,
     };
@@ -158,7 +162,7 @@ pub async fn watch_deployments(
     let stream = resp.into_inner().map(move |res| match res {
         Ok(msg) => {
             if let Some(app) = msg.app {
-                let data = serde_json::json!(LiveDeploymentInfo {
+                let data = serde_json::json!(LiveDeploymentStatus {
                     job_id: app.job_id,
                     deployment_id: String::new(), // job_id is sufficient for UI reconciliation
                     app_id: app.app_id,
@@ -167,6 +171,15 @@ pub async fn watch_deployments(
                     status: crate::scheduler::status_name(app.status).to_string(),
                     host_id: app.host_id,
                     vm_id: app.vm_id,
+                    cpu_usage: app.cpu_usage,
+                    ram_used_bytes: app.ram_used_bytes,
+                    // These fields are not available in AppInfo but we can use defaults
+                    scheduled_at: 0,
+                    started_at: 0,
+                    stopped_at: 0,
+                    error_message: String::new(),
+                    vcpus: 0,
+                    memory_mib: 0,
                 })
                 .to_string();
                 Ok::<Event, std::convert::Infallible>(Event::default().data(data))
@@ -209,11 +222,10 @@ pub async fn get_deployment_status(
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> ApiResult<Json<LiveDeploymentStatus>> {
-    let channel = crate::scheduler::connect(&state.scheduler_config)
+    let mut client = state
+        .get_scheduler_client()
         .await
         .map_err(ApiError::Scheduler)?;
-
-    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::AppStatusRequest {
         job_id,
         user_id: auth.user_id,
@@ -288,11 +300,10 @@ pub async fn get_deployment_logs(
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> ApiResult<impl IntoResponse> {
-    let channel = crate::scheduler::connect(&state.scheduler_config)
+    let mut client = state
+        .get_scheduler_client()
         .await
         .map_err(ApiError::Scheduler)?;
-
-    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::GetLogsRequest {
         job_id,
         user_id: auth.user_id,
@@ -347,11 +358,10 @@ pub async fn stop_deployment(
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let channel = crate::scheduler::connect(&state.scheduler_config)
+    let mut client = state
+        .get_scheduler_client()
         .await
         .map_err(ApiError::Scheduler)?;
-
-    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::CancelRequest {
         job_id: job_id.clone(),
         user_id: auth.user_id,
@@ -395,10 +405,7 @@ pub async fn delete_deployment_record(
     Path(job_id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // 1. Try to notify scheduler (optional/best effort)
-    let channel_res = crate::scheduler::connect(&state.scheduler_config).await;
-
-    if let Ok(channel) = channel_res {
-        let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+    if let Ok(mut client) = state.get_scheduler_client().await {
         let req = mikrom_proto::scheduler::DeleteAppRequest {
             job_id: job_id.clone(),
             user_id: auth.user_id,
@@ -446,11 +453,10 @@ pub async fn pause_deployment(
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let channel = crate::scheduler::connect(&state.scheduler_config)
+    let mut client = state
+        .get_scheduler_client()
         .await
         .map_err(ApiError::Scheduler)?;
-
-    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::PauseRequest {
         job_id,
         user_id: auth.user_id,
@@ -489,11 +495,10 @@ pub async fn resume_deployment(
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let channel = crate::scheduler::connect(&state.scheduler_config)
+    let mut client = state
+        .get_scheduler_client()
         .await
         .map_err(ApiError::Scheduler)?;
-
-    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
     let req = mikrom_proto::scheduler::ResumeRequest {
         job_id,
         user_id: auth.user_id,

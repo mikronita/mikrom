@@ -47,6 +47,24 @@ pub struct AppState {
     pub build_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
+impl AppState {
+    pub async fn get_scheduler_client(
+        &self,
+    ) -> Result<mikrom_proto::scheduler::SchedulerServiceClient<tonic::transport::Channel>, String>
+    {
+        if let Some(ref client) = self.scheduler_client {
+            Ok(mikrom_proto::scheduler::SchedulerServiceClient::new(
+                client.channel.clone(),
+            ))
+        } else {
+            let channel = crate::scheduler::connect(&self.scheduler_config).await?;
+            Ok(mikrom_proto::scheduler::SchedulerServiceClient::new(
+                channel,
+            ))
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SchedulerClient {
     pub channel: tonic::transport::Channel,

@@ -287,6 +287,10 @@ pub struct AppInfo {
     pub host_id: ::prost::alloc::string::String,
     #[prost(string, tag = "7")]
     pub vm_id: ::prost::alloc::string::String,
+    #[prost(float, tag = "8")]
+    pub cpu_usage: f32,
+    #[prost(uint64, tag = "9")]
+    pub ram_used_bytes: u64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

@@ -2,7 +2,6 @@
 
 import { useParams } from "next/navigation";
 import { 
-  HiArrowLeft, 
   HiEye,
   HiEyeOff,
   HiClipboard,
@@ -15,7 +14,6 @@ import {
   HiRocketLaunch,
   HiInformationCircle
 } from "react-icons/hi2";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -382,19 +380,30 @@ export default function AppDetailPage() {
                         <LineChart
                           data={metricsHistory}
                           margin={{
-                            left: 12,
+                            left: 0,
                             right: 12,
+                            top: 10,
+                            bottom: 0,
                           }}
                         >
-                          <CartesianGrid vertical={false} />
+                          <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--muted)/0.2)" />
                           <XAxis
                             dataKey="time"
                             tickLine={false}
                             axisLine={false}
                             tickMargin={8}
                             minTickGap={32}
+                            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
                           />
-                          <YAxis hide domain={activeChart === "cpu" ? [0, 100] : ['auto', 'auto']} />
+                          <YAxis 
+                            domain={activeChart === "cpu" ? [0, 100] : ['auto', 'auto']} 
+                            tickLine={false}
+                            axisLine={false}
+                            tickMargin={8}
+                            width={40}
+                            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                            tickFormatter={(value) => activeChart === "cpu" ? `${value}%` : `${value}`}
+                          />
                           <ChartTooltip
                             content={
                               <ChartTooltipContent

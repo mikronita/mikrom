@@ -82,7 +82,8 @@ export function useVm(jobId: string) {
       return result.data;
     },
     enabled: !!token && !!jobId,
-    refetchInterval: 3000, // Poll every 3 seconds for real-time metrics
+    // Polling disabled in favor of SSE (watchDeploymentsSSE)
+    refetchInterval: false,
   });
 }
 
