@@ -189,7 +189,6 @@ export default function AppDetailPage() {
     );
   }
 
-  const isInstanceRunning = vm && ["running", "starting", "paused"].includes(vm.status.toLowerCase());
   const latestMetrics = metricsHistory.length > 0 
     ? metricsHistory[metricsHistory.length - 1] 
     : (vm ? { 
@@ -204,11 +203,23 @@ export default function AppDetailPage() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <div>
-                <h1 className="text-2xl font-bold tracking-tight">
-                  {app?.name || "Application"} Details
-                </h1>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-2xl font-bold tracking-tight">
+                    {app?.hostname || app?.name || "Application"}
+                  </h1>
+                  {app?.hostname && (
+                    <a 
+                      href={`https://${app.hostname}`} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-sm font-medium text-indigo-500 hover:underline flex items-center gap-1"
+                    >
+                      Visit site ↗
+                    </a>
+                  )}
+                </div>
                 <p className="text-muted-foreground text-sm mt-1">
-                  Manage deployments and monitor production instances.
+                  Manage {app?.name || "application"} deployments and monitor production instances.
                 </p>
               </div>
             </div>
@@ -335,106 +346,114 @@ export default function AppDetailPage() {
           </section>
 
           {/* Integrated Instance Monitoring */}
-          {vm && isInstanceRunning && (
+          {activeDeployment && ["RUNNING", "PAUSED", "STARTING", "SCHEDULED"].includes(activeDeployment.status.toUpperCase()) && (
             <div className="space-y-6 animate-in fade-in duration-500 pt-6 border-t">
               <h2 className="text-lg font-bold tracking-tight">
                 Live Performance
               </h2>
               <div className="space-y-6">
-                {/* Interactive Chart */}
-                <Card className="py-4 sm:py-0">
-                  <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
-                    <div className="flex flex-1 flex-col justify-center gap-1 px-6 pb-3 sm:pb-0">
-                      <CardTitle>System Performance</CardTitle>
-                      <CardDescription>
-                        Real-time CPU and RAM utilization
-                      </CardDescription>
-                    </div>
-                    <div className="flex">
-                      {(["cpu", "ram"] as const).map((key) => {
-                        return (
-                          <button
-                            key={key}
-                            data-active={activeChart === key}
-                            className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left even:border-l data-[active=true]:bg-muted/50 sm:border-t-0 sm:border-l sm:px-8 sm:py-6"
-                            onClick={() => setActiveChart(key)}
+                {!vm ? (
+                  <Card className="p-12 flex flex-col items-center justify-center text-center space-y-4">
+                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                    <p className="text-muted-foreground">Connecting to instance metrics...</p>
+                  </Card>
+                ) : (
+                  <>
+                    {/* Interactive Chart */}
+                    <Card className="py-4 sm:py-0">
+                      <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
+                        <div className="flex flex-1 flex-col justify-center gap-1 px-6 pb-3 sm:pb-0">
+                          <CardTitle>System Performance</CardTitle>
+                          <CardDescription>
+                            Real-time CPU and RAM utilization
+                          </CardDescription>
+                        </div>
+                        <div className="flex">
+                          {(["cpu", "ram"] as const).map((key) => {
+                            return (
+                              <button
+                                key={key}
+                                data-active={activeChart === key}
+                                className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left even:border-l data-[active=true]:bg-muted/50 sm:border-t-0 sm:border-l sm:px-8 sm:py-6"
+                                onClick={() => setActiveChart(key)}
+                              >
+                                <span className="text-xs text-muted-foreground uppercase">
+                                  {chartConfig[key].label}
+                                </span>
+                                <span className="text-lg leading-none font-bold sm:text-3xl">
+                                  {key === "cpu" 
+                                    ? `${latestMetrics.cpu.toFixed(1)}%` 
+                                    : `${latestMetrics.ram.toFixed(0)} MiB`}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </CardHeader>
+                      <CardContent className="px-2 sm:p-6">
+                        <div style={{ width: '100%', height: '250px' }}>
+                          <ChartContainer
+                            config={chartConfig}
                           >
-                            <span className="text-xs text-muted-foreground uppercase">
-                              {chartConfig[key].label}
-                            </span>
-                            <span className="text-lg leading-none font-bold sm:text-3xl">
-                              {key === "cpu" 
-                                ? `${latestMetrics.cpu.toFixed(1)}%` 
-                                : `${latestMetrics.ram.toFixed(0)} MiB`}
-                            </span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="px-2 sm:p-6">
-                    <div style={{ width: '100%', height: '250px' }}>
-                      <ChartContainer
-                        config={chartConfig}
-                      >
-                        <LineChart
-                          data={metricsHistory}
-                          margin={{
-                            left: 0,
-                            right: 12,
-                            top: 10,
-                            bottom: 0,
-                          }}
-                        >
-                          <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--muted)/0.2)" />
-                          <XAxis
-                            dataKey="time"
-                            tickLine={false}
-                            axisLine={false}
-                            tickMargin={8}
-                            minTickGap={32}
-                            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                          />
-                          <YAxis 
-                            domain={activeChart === "cpu" ? [0, 100] : ['auto', 'auto']} 
-                            tickLine={false}
-                            axisLine={false}
-                            tickMargin={8}
-                            width={40}
-                            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                            tickFormatter={(value) => activeChart === "cpu" ? `${value}%` : `${value}`}
-                          />
-                          <ChartTooltip
-                            content={
-                              <ChartTooltipContent
-                                className="w-[150px]"
-                                nameKey={activeChart}
-                                labelFormatter={(value) => value}
+                            <LineChart
+                              data={metricsHistory}
+                              margin={{
+                                left: 0,
+                                right: 12,
+                                top: 10,
+                                bottom: 0,
+                              }}
+                            >
+                              <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" opacity={0.4} />
+                              <XAxis
+                                dataKey="time"
+                                tickLine={false}
+                                axisLine={false}
+                                tickMargin={8}
+                                minTickGap={32}
+                                tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
                               />
-                            }
-                          />
-                          <Line
-                            dataKey={activeChart}
-                            type="monotone"
-                            stroke={`var(--color-${activeChart})`}
-                            strokeWidth={2}
-                            dot={false}
-                            isAnimationActive={false}
-                          />
-                        </LineChart>
-                      </ChartContainer>
-                    </div>
-                  </CardContent>
-                </Card>
+                              <YAxis 
+                                domain={activeChart === "cpu" ? [0, 100] : ['auto', 'auto']} 
+                                tickLine={false}
+                                axisLine={false}
+                                tickMargin={8}
+                                width={40}
+                                tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
+                                tickFormatter={(value) => activeChart === "cpu" ? `${value}%` : `${value}`}
+                              />
+                              <ChartTooltip
+                                content={
+                                  <ChartTooltipContent
+                                    className="w-[150px]"
+                                    nameKey={activeChart}
+                                    labelFormatter={(value) => value}
+                                  />
+                                }
+                              />                              <Line
+                                dataKey={activeChart}
+                                type="monotone"
+                                stroke={`var(--color-${activeChart})`}
+                                strokeWidth={2}
+                                dot={false}
+                                isAnimationActive={false}
+                              />
+                            </LineChart>
+                          </ChartContainer>
+                        </div>
+                      </CardContent>
+                    </Card>
 
-                {vm.error_message && (
-                  <Alert variant="destructive">
-                    <HiExclamationCircle className="h-4 w-4" />
-                    <AlertTitle className="text-xs font-bold">Termination Error</AlertTitle>
-                    <AlertDescription className="text-[10px] break-words">
-                      {vm.error_message}
-                    </AlertDescription>
-                  </Alert>
+                    {vm.error_message && (
+                      <Alert variant="destructive">
+                        <HiExclamationCircle className="h-4 w-4" />
+                        <AlertTitle className="text-xs font-bold">Termination Error</AlertTitle>
+                        <AlertDescription className="text-[10px] break-words">
+                          {vm.error_message}
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </>
                 )}
               </div>
             </div>
