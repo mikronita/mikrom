@@ -81,6 +81,13 @@ async fn test_activate_deployment_endpoint() {
         .times(1)
         .returning(|_, _| Ok(()));
 
+    // 4. Mock list_deployments_by_app for cleanup logic
+    mock_app_repo
+        .expect_list_deployments_by_app()
+        .with(eq(app_id))
+        .times(1)
+        .returning(move |_| Ok(vec![]));
+
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
