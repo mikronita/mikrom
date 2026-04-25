@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { 
   Dialog, 
@@ -20,6 +21,7 @@ interface CreateAppModalProps {
 }
 
 export function CreateAppModal({ onClose }: CreateAppModalProps) {
+  const router = useRouter();
   const [name, setName] = useState("");
   const [gitUrl, setGitUrl] = useState("");
   const createAppMutation = useCreateApp();
@@ -28,9 +30,12 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
     e.preventDefault();
 
     createAppMutation.mutate({ name, git_url: gitUrl }, {
-      onSuccess: () => {
+      onSuccess: (data) => {
         toast.success(`App ${name} created successfully`);
         onClose();
+        if (data?.id) {
+          router.push(`/apps/${data.id}`);
+        }
       },
       onError: (error) => {
         toast.error(error instanceof Error ? error.message : "Failed to create app");
