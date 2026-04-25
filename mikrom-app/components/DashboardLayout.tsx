@@ -217,10 +217,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                     <React.Fragment key={href}>
                       <BreadcrumbItem>
                         {isLast ? (
-                          <BreadcrumbPage>{name}</BreadcrumbPage>
+                          <BreadcrumbPage className="font-bold text-foreground">{name}</BreadcrumbPage>
                         ) : (
                           <BreadcrumbLink asChild>
-                            <Link href={href}>{name}</Link>
+                            <Link href={href} className="hover:text-foreground transition-colors">{name}</Link>
                           </BreadcrumbLink>
                         )}
                       </BreadcrumbItem>

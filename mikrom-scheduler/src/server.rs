@@ -623,14 +623,31 @@ impl SchedulerService for SchedulerServer {
 
         let apps = jobs
             .into_iter()
-            .map(|j| AppInfo {
-                job_id: j.job_id,
-                app_id: j.app_id,
-                app_name: j.app_name,
-                image: j.image,
-                status: j.status as i32,
-                host_id: j.host_id.unwrap_or_default(),
-                vm_id: j.vm_id.unwrap_or_default(),
+            .map(|j| {
+                let mut cpu_usage = 0.0;
+                let mut ram_used_bytes = 0;
+
+                if let Some(host_id) = &j.host_id
+                    && let Some(vm_id) = &j.vm_id
+                    && let Some(worker) = self.scheduler.worker_registry().get_worker(host_id)
+                    && let Some(metrics) = worker.metrics
+                    && let Some(vm_metrics) = metrics.vms.get(vm_id)
+                {
+                    cpu_usage = vm_metrics.cpu_usage;
+                    ram_used_bytes = vm_metrics.ram_used_bytes;
+                }
+
+                AppInfo {
+                    job_id: j.job_id,
+                    app_id: j.app_id,
+                    app_name: j.app_name,
+                    image: j.image,
+                    status: j.status as i32,
+                    host_id: j.host_id.unwrap_or_default(),
+                    vm_id: j.vm_id.unwrap_or_default(),
+                    cpu_usage,
+                    ram_used_bytes,
+                }
             })
             .collect();
 
@@ -670,12 +687,26 @@ impl SchedulerService for SchedulerServer {
         let user_id = req.user_id;
 
         let mut rx = self.scheduler.job_updates.subscribe();
+        let worker_registry = self.scheduler.worker_registry().clone();
 
         let output_stream = async_stream::try_stream! {
             loop {
                 match rx.recv().await {
                     Ok(job) => {
                         if user_id.is_empty() || job.user_id == user_id {
+                            let mut cpu_usage = 0.0;
+                            let mut ram_used_bytes = 0;
+
+                            if let Some(host_id) = &job.host_id
+                                && let Some(vm_id) = &job.vm_id
+                                && let Some(worker) = worker_registry.get_worker(host_id)
+                                && let Some(metrics) = worker.metrics
+                                && let Some(vm_metrics) = metrics.vms.get(vm_id)
+                            {
+                                cpu_usage = vm_metrics.cpu_usage;
+                                ram_used_bytes = vm_metrics.ram_used_bytes;
+                            }
+
                             yield WatchAppsResponse {
                                 app: Some(AppInfo {
                                     job_id: job.job_id,
@@ -685,6 +716,8 @@ impl SchedulerService for SchedulerServer {
                                     status: job.status as i32,
                                     host_id: job.host_id.unwrap_or_default(),
                                     vm_id: job.vm_id.unwrap_or_default(),
+                                    cpu_usage,
+                                    ram_used_bytes,
                                 }),
                             };
                         }

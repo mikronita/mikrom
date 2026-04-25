@@ -594,8 +594,7 @@ pub async fn activate_deployment_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let scheduler_config = state.scheduler_config.clone();
-    let app_repo = state.app_repo.clone();
+    let state_clone = state.clone();
     let user_id_str = auth.user_id.clone();
 
     tokio::spawn(async move {
@@ -611,8 +610,7 @@ pub async fn activate_deployment_handler(
                 tracing::info!(app_id = %app_id, old_job_id = %job_id, "Cleaning up old instance after promotion");
 
                 // Best effort delete from scheduler
-                if let Ok(channel) = crate::scheduler::connect(&scheduler_config).await {
-                    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+                if let Ok(mut client) = state_clone.get_scheduler_client().await {
                     let _ = client
                         .delete_app(mikrom_proto::scheduler::DeleteAppRequest {
                             job_id: job_id.clone(),
@@ -622,7 +620,8 @@ pub async fn activate_deployment_handler(
                 }
 
                 // Mark as STOPPED in database
-                let _ = app_repo
+                let _ = state_clone
+                    .app_repo
                     .update_deployment_status(
                         old_dep.id,
                         "STOPPED",

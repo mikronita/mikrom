@@ -226,4 +226,6 @@ message AppInfo {
   DeployStatus status = 5;
   string host_id = 6;
   string vm_id = 7;
+  float cpu_usage = 8;
+  uint64 ram_used_bytes = 9;
 }

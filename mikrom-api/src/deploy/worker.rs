@@ -1,7 +1,7 @@
 use crate::AppState;
 use async_trait::async_trait;
 use mikrom_proto::builder::{BuildStatus, BuilderServiceClient, GetBuildStatusRequest};
-use mikrom_proto::scheduler::{AppConfig, DeployRequest, SchedulerServiceClient};
+use mikrom_proto::scheduler::{AppConfig, DeployRequest};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -45,7 +45,7 @@ impl BuilderClient for RealBuilderClient {
 }
 
 pub struct RealSchedulerClient {
-    pub config: crate::scheduler::SchedulerConfig,
+    pub state: AppState,
 }
 
 #[async_trait]
@@ -54,10 +54,11 @@ impl SchedulerClient for RealSchedulerClient {
         &self,
         req: DeployRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::DeployResponse> {
-        let channel = crate::scheduler::connect(&self.config)
+        let mut client = self
+            .state
+            .get_scheduler_client()
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
-        let mut client = SchedulerServiceClient::new(channel);
         let resp = client.deploy_app(req).await?.into_inner();
         Ok(resp)
     }
@@ -81,7 +82,7 @@ pub async fn start_build_polling(state: AppState, task: BuildTask) {
         addr: state.builder_addr.clone(),
     });
     let scheduler = Arc::new(RealSchedulerClient {
-        config: state.scheduler_config.clone(),
+        state: state.clone(),
     });
 
     tokio::spawn(async move {

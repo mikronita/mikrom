@@ -1,6 +1,5 @@
 use crate::AppState;
 use futures::stream::{FuturesUnordered, StreamExt};
-use mikrom_proto::scheduler::SchedulerServiceClient;
 use tokio::time::{Duration, interval};
 use tracing::{debug, error, info};
 
@@ -20,15 +19,14 @@ pub async fn start_ip_sync_task(state: AppState) {
             },
         };
 
-        // 2. Connect to scheduler once per interval
-        let channel = match crate::scheduler::connect(&state.scheduler_config).await {
+        // 2. Try to get scheduler client
+        let client = match state.get_scheduler_client().await {
             Ok(c) => c,
             Err(e) => {
-                error!("Failed to connect to scheduler for sync: {}", e);
+                error!("Failed to get scheduler client for sync: {}", e);
                 continue;
             },
         };
-        let client = SchedulerServiceClient::new(channel);
 
         let mut workers = FuturesUnordered::new();
 
