@@ -113,7 +113,7 @@ export default function AppDetailPage() {
   const app = apps.find(a => a.id === appId);
   // Prefer the active (promoted) deployment, but fallback to the latest running one if none is active
   const activeDeployment = deployments.find(d => d.id === app?.active_deployment_id) 
-    || deployments.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).find(d => d.status === "RUNNING");
+    || [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).find(d => d.status === "RUNNING");
   const activeJobId = activeDeployment?.job_id;
 
   // Active Instance Logic
@@ -293,7 +293,7 @@ export default function AppDetailPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      deployments.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((dep) => {
+                      [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((dep) => {
                         const isActive = app?.active_deployment_id === dep.id;
                         const canActivate = dep.status === "RUNNING" && !isActive;
 
