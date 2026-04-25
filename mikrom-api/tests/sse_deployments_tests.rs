@@ -39,27 +39,30 @@ async fn test_sse_deployments_stream_initial_data() {
     let mut mock_app_repo = MockAppRepository::new();
     let app_id = Uuid::new_v4();
     let user_id = Uuid::new_v4();
+    let app_name = "test-app";
 
     // Mock app ownership check
     let app_id_clone = app_id;
-    mock_app_repo.expect_get_app().returning(move |id| {
-        if id == app_id_clone {
-            Ok(Some(mikrom_api::models::app::App {
-                id: app_id_clone,
-                name: "test-app".into(),
-                git_url: "".into(),
-                port: 80,
-                hostname: None,
-                user_id,
-                github_webhook_secret: None,
-                active_deployment_id: None,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-            }))
-        } else {
-            Ok(None)
-        }
-    });
+    mock_app_repo
+        .expect_get_app_by_name()
+        .returning(move |name| {
+            if name == "test-app" {
+                Ok(Some(mikrom_api::models::app::App {
+                    id: app_id_clone,
+                    name: "test-app".into(),
+                    git_url: "".into(),
+                    port: 80,
+                    hostname: None,
+                    user_id,
+                    github_webhook_secret: None,
+                    active_deployment_id: None,
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                }))
+            } else {
+                Ok(None)
+            }
+        });
 
     // Mock initial deployments
     mock_app_repo
@@ -95,7 +98,7 @@ async fn test_sse_deployments_stream_initial_data() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(format!("/apps/{}/deployments/stream", app_id))
+        .uri(format!("/apps/{}/deployments/stream", app_name))
         .header("Authorization", format!("Bearer {}", token))
         .body(Body::empty())
         .unwrap();
@@ -118,8 +121,9 @@ async fn test_sse_deployments_auth_via_query_param() {
     let mut mock_app_repo = MockAppRepository::new();
     let app_id = Uuid::new_v4();
     let user_id = Uuid::new_v4();
+    let app_name = "test-app";
 
-    mock_app_repo.expect_get_app().returning(move |_| {
+    mock_app_repo.expect_get_app_by_name().returning(move |_| {
         Ok(Some(mikrom_api::models::app::App {
             id: app_id,
             name: "test-app".into(),
@@ -152,7 +156,7 @@ async fn test_sse_deployments_auth_via_query_param() {
         .method("GET")
         .uri(format!(
             "/apps/{}/deployments/stream?token={}",
-            app_id, token
+            app_name, token
         ))
         .body(Body::empty())
         .unwrap();
@@ -166,8 +170,9 @@ async fn test_sse_deployments_stream_updates() {
     let mut mock_app_repo = MockAppRepository::new();
     let app_id = Uuid::new_v4();
     let user_id = Uuid::new_v4();
+    let app_name = "test-app";
 
-    mock_app_repo.expect_get_app().returning(move |_| {
+    mock_app_repo.expect_get_app_by_name().returning(move |_| {
         Ok(Some(mikrom_api::models::app::App {
             id: app_id,
             name: "test-app".into(),
@@ -240,7 +245,7 @@ async fn test_sse_deployments_stream_updates() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(format!("/apps/{}/deployments/stream", app_id))
+        .uri(format!("/apps/{}/deployments/stream", app_name))
         .header("Authorization", format!("Bearer {}", token))
         .body(Body::empty())
         .unwrap();

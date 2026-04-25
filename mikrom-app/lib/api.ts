@@ -473,9 +473,9 @@ export async function createApp(token: string, data: CreateAppRequest): Promise<
   }
 }
 
-export async function deleteApp(token: string, appId: string): Promise<{ success: boolean; error?: string }> {
+export async function deleteApp(token: string, appName: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/apps/${appId}`, {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}`, {
       method: "DELETE",
       headers: authHeaders(token),
     });
@@ -507,11 +507,11 @@ export async function deployApp(
 
 export async function deployAppVersion(
   token: string,
-  appId: string,
+  appName: string,
   data: Partial<DeployRequest> = {}
 ): Promise<{ data?: DeployResponse; error?: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/apps/${appId}/deploy`, {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/deploy`, {
       method: "POST",
       headers: authHeaders(token),
       body: JSON.stringify(data),
@@ -526,10 +526,10 @@ export async function deployAppVersion(
 
 export async function listDeployments(
   token: string,
-  appId: string
+  appName: string
 ): Promise<{ data?: DeploymentInfo[]; error?: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/apps/${appId}/deployments`, {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/deployments`, {
       headers: authHeaders(token),
     });
     const result = await parseJson<DeploymentInfo[]>(response);
@@ -542,11 +542,11 @@ export async function listDeployments(
 
 export async function activateDeployment(
   token: string,
-  appId: string,
+  appName: string,
   deploymentId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/apps/${appId}/deployments/${deploymentId}/activate`, {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/deployments/${deploymentId}/activate`, {
       method: "POST",
       headers: authHeaders(token),
     });

@@ -8,7 +8,6 @@ use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 use tracing::{error, info, warn};
-use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -20,10 +19,10 @@ pub struct GitHubPushEvent {
 
 #[utoipa::path(
     post,
-    path = "/webhooks/github/{app_id}",
+    path = "/webhooks/github/{app_name}",
     request_body(content = String, description = "GitHub Webhook Payload", content_type = "application/json"),
     params(
-        ("app_id" = Uuid, Path, description = "Application ID")
+        ("app_name" = String, Path, description = "Application Name")
     ),
     responses(
         (status = 200, description = "Webhook ignored or processed successfully without deployment"),
@@ -36,7 +35,7 @@ pub struct GitHubPushEvent {
 )]
 pub async fn github_webhook_handler(
     State(state): State<AppState>,
-    Path(app_id): Path<Uuid>,
+    Path(app_name): Path<String>,
     headers: HeaderMap,
     body_bytes: axum::body::Bytes,
 ) -> ApiResult<StatusCode> {
@@ -55,11 +54,15 @@ pub async fn github_webhook_handler(
         return Ok(StatusCode::OK);
     }
 
-    // 2. Find Application by ID
-    let app = state.app_repo.get_app(app_id).await?.ok_or_else(|| {
-        warn!(%app_id, "Webhook received for non-existent application");
-        ApiError::NotFound("Application not found".into())
-    })?;
+    // 2. Find Application by Name
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await?
+        .ok_or_else(|| {
+            warn!(%app_name, "Webhook received for non-existent application");
+            ApiError::NotFound("Application not found".into())
+        })?;
 
     // 3. Validate Signature BEFORE parsing
     let signature_header = headers
@@ -170,8 +173,8 @@ mod tests {
         };
 
         mock_repo
-            .expect_get_app()
-            .with(mockall::predicate::eq(app_id))
+            .expect_get_app_by_name()
+            .with(mockall::predicate::eq("test-app"))
             .returning(move |_| Ok(Some(app.clone())));
 
         let state = create_test_state(mock_repo);
@@ -185,7 +188,13 @@ mod tests {
                 .unwrap(),
         );
 
-        let result = github_webhook_handler(State(state), Path(app_id), headers, body.into()).await;
+        let result = github_webhook_handler(
+            State(state),
+            Path("test-app".to_string()),
+            headers,
+            body.into(),
+        )
+        .await;
 
         match result {
             Err(ApiError::Auth(msg)) => assert_eq!(msg, "Invalid signature"),
@@ -197,14 +206,18 @@ mod tests {
     async fn test_github_webhook_wrong_event() {
         let mock_repo = MockAppRepository::new();
         let state = create_test_state(mock_repo);
-        let app_id = Uuid::new_v4();
 
         let mut headers = HeaderMap::new();
         headers.insert("x-github-event", "ping".parse().unwrap());
 
-        let result = github_webhook_handler(State(state), Path(app_id), headers, "{}".into())
-            .await
-            .unwrap();
+        let result = github_webhook_handler(
+            State(state),
+            Path("any-app".to_string()),
+            headers,
+            "{}".into(),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, StatusCode::OK);
     }
 
@@ -228,7 +241,7 @@ mod tests {
         };
 
         mock_repo
-            .expect_get_app()
+            .expect_get_app_by_name()
             .returning(move |_| Ok(Some(app.clone())));
 
         let state = create_test_state(mock_repo);
@@ -239,9 +252,14 @@ mod tests {
         headers.insert("x-github-event", "push".parse().unwrap());
         headers.insert("x-hub-signature-256", signature.parse().unwrap());
 
-        let result = github_webhook_handler(State(state), Path(app_id), headers, body.into())
-            .await
-            .unwrap();
+        let result = github_webhook_handler(
+            State(state),
+            Path("test-app".to_string()),
+            headers,
+            body.into(),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, StatusCode::OK);
     }
 
@@ -265,8 +283,8 @@ mod tests {
         };
 
         mock_repo
-            .expect_get_app()
-            .with(mockall::predicate::eq(app_id))
+            .expect_get_app_by_name()
+            .with(mockall::predicate::eq("test-repo"))
             .returning(move |_| Ok(Some(app.clone())));
 
         let state = create_test_state(mock_repo);
@@ -277,9 +295,14 @@ mod tests {
         headers.insert("x-github-event", "push".parse().unwrap());
         headers.insert("x-hub-signature-256", signature.parse().unwrap());
 
-        let result = github_webhook_handler(State(state), Path(app_id), headers, body.into())
-            .await
-            .unwrap();
+        let result = github_webhook_handler(
+            State(state),
+            Path("test-repo".to_string()),
+            headers,
+            body.into(),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, StatusCode::ACCEPTED);
     }
 }

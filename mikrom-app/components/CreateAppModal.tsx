@@ -33,8 +33,8 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
       onSuccess: (data) => {
         toast.success(`App ${name} created successfully`);
         onClose();
-        if (data?.id) {
-          router.push(`/apps/${data.id}`);
+        if (data?.name) {
+          router.push(`/apps/${encodeURIComponent(data.name)}`);
         }
       },
       onError: (error) => {
@@ -45,7 +45,7 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
 
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px]" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Create New Application</DialogTitle>
         </DialogHeader>

@@ -71,7 +71,7 @@ export function DeployModal({ onClose }: DeployModalProps) {
 
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px]" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Deploy New App</DialogTitle>
         </DialogHeader>

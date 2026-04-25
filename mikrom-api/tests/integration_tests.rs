@@ -339,11 +339,6 @@ async fn test_all_auth_integration_flows() {
             .await
             .unwrap();
         assert_eq!(create_resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(create_resp.into_body(), 1024)
-            .await
-            .unwrap();
-        let app_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let app_id = app_json["id"].as_str().unwrap();
 
         // 3. List Apps
         let list_resp = app
@@ -365,7 +360,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri(format!("/apps/{}", app_id))
+                    .uri(format!("/apps/{}", app_name))
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::empty())
                     .unwrap(),
