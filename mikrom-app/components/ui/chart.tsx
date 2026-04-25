@@ -109,6 +109,9 @@ const ChartTooltipContent = React.forwardRef<
       indicator?: "line" | "dot" | "dashed"
       nameKey?: string
       labelKey?: string
+      payload?: any[]
+      active?: boolean
+      label?: any
     }
 >(
   (
@@ -260,6 +263,7 @@ const ChartLegendContent = React.forwardRef<
     React.ComponentProps<typeof RechartsPrimitive.Legend> & {
       hideIcon?: boolean
       nameKey?: string
+      payload?: any[]
     }
 >(({ className, hideIcon = false, payload, verticalAlign, nameKey }, ref) => {
   const { config } = useChart()
