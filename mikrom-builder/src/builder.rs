@@ -275,7 +275,7 @@ mod tests {
 
         let tree_id = index.write_tree()?;
         let tree = repo.find_tree(tree_id)?;
-        let sig = repo.signature()?;
+        let sig = git2::Signature::now("Test User", "test@example.com")?;
 
         let commit_id = repo.commit(
             Some("HEAD"),
