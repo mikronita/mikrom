@@ -54,7 +54,7 @@ make test-all          # Complete test suite
 
 ## Development Conventions
 
-- **Frontend UI (mikrom-app)**: **Strictly use Flowbite React components.** Do not create custom wrappers or abstractions in `components/ui` for primitive components like buttons or cards. Always import directly from `flowbite-react`.
+- **Frontend UI (mikrom-app)**: **Strictly use shadcn/ui components.** Do not use Flowbite React or other external component libraries unless absolutely necessary. Standard components should be imported from `@/components/ui`. Always prefer composing existing shadcn/ui primitives over creating custom HTML/CSS wrappers.
 - **Rust Services**: Standard Rust workspace conventions.
 - **Protocol Buffers**: Changes to `mikrom-proto/proto/*.proto` require regenerating code (managed by build scripts).
 - **Security**: Internal gRPC communication between services uses **mutual TLS (mTLS)** for encryption and authentication.
