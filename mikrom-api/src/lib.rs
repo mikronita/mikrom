@@ -1,5 +1,6 @@
 use axum::extract::ConnectInfo;
-use axum::{Router, routing::get};
+use axum::{Router, extract::State, routing::get};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
@@ -42,6 +43,7 @@ pub struct AppState {
     pub scheduler: Arc<dyn Scheduler>,
     pub scheduler_config: scheduler::SchedulerConfig,
     pub builder_addr: String,
+    pub router_addr: String,
     pub jwt_secret: String,
     pub master_key: String,
     pub deployment_events: tokio::sync::broadcast::Sender<uuid::Uuid>,
@@ -165,6 +167,7 @@ pub fn start_background_tasks(state: AppState) {
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
+    pub services: HashMap<String, String>,
 }
 
 #[utoipa::path(
@@ -175,10 +178,90 @@ pub struct HealthResponse {
     ),
     tag = "system"
 )]
-async fn health() -> axum::Json<HealthResponse> {
+async fn health(State(state): State<AppState>) -> axum::Json<HealthResponse> {
+    let mut services = HashMap::new();
+
+    // API is always ONLINE if we are here
+    services.insert("API".to_string(), "ONLINE".to_string());
+
+    // Check Scheduler & Agents
+    match state.scheduler_config.addr.parse::<tonic::transport::Uri>() {
+        Ok(uri) => {
+            let channel = tonic::transport::Channel::builder(uri)
+                .connect_timeout(std::time::Duration::from_secs(1))
+                .connect_lazy();
+            let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+
+            match client
+                .list_workers(mikrom_proto::scheduler::ListWorkersRequest {})
+                .await
+            {
+                Ok(resp) => {
+                    services.insert("Scheduler".to_string(), "ONLINE".to_string());
+                    let workers = resp.into_inner().workers;
+                    if workers.is_empty() {
+                        services.insert("Agents".to_string(), "OFFLINE".to_string());
+                    } else {
+                        // Check if any worker has a recent heartbeat (last 30s)
+                        let now = chrono::Utc::now().timestamp();
+                        let active_agents = workers
+                            .iter()
+                            .filter(|w| now - w.last_heartbeat < 30)
+                            .count();
+                        if active_agents > 0 {
+                            services.insert("Agents".to_string(), "ONLINE".to_string());
+                        } else {
+                            services.insert("Agents".to_string(), "OFFLINE".to_string());
+                        }
+                    }
+                },
+                Err(_) => {
+                    services.insert("Scheduler".to_string(), "OFFLINE".to_string());
+                    services.insert("Agents".to_string(), "OFFLINE".to_string());
+                },
+            }
+        },
+        Err(_) => {
+            services.insert("Scheduler".to_string(), "OFFLINE".to_string());
+            services.insert("Agents".to_string(), "OFFLINE".to_string());
+        },
+    }
+
+    // Check Builder
+    if let Ok(uri) = state.builder_addr.parse::<tonic::transport::Uri>() {
+        let _channel = tonic::transport::Channel::builder(uri)
+            .connect_timeout(std::time::Duration::from_secs(1))
+            .connect_lazy();
+        // Just checking if we can create a channel is not enough, but Builder is a gRPC service.
+        // We don't have a simple Ping RPC yet, so we just check if it's reachable.
+        let addr = state
+            .builder_addr
+            .replace("http://", "")
+            .replace("https://", "");
+        if tokio::net::TcpStream::connect(&addr).await.is_ok() {
+            services.insert("Builder".to_string(), "ONLINE".to_string());
+        } else {
+            services.insert("Builder".to_string(), "OFFLINE".to_string());
+        }
+    } else {
+        services.insert("Builder".to_string(), "OFFLINE".to_string());
+    }
+
+    // Check Router
+    let router_addr = state
+        .router_addr
+        .replace("http://", "")
+        .replace("https://", "");
+    if tokio::net::TcpStream::connect(&router_addr).await.is_ok() {
+        services.insert("Router".to_string(), "ONLINE".to_string());
+    } else {
+        services.insert("Router".to_string(), "OFFLINE".to_string());
+    }
+
     axum::Json(HealthResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        services,
     })
 }
 
@@ -203,6 +286,7 @@ mod tests {
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: scheduler::SchedulerConfig::default(),
             builder_addr: "http://localhost:5004".to_string(),
+            router_addr: "http://localhost:8080".to_string(),
             jwt_secret: "test".to_string(),
             master_key: "test".to_string(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -233,12 +317,16 @@ mod tests {
 
     #[test]
     fn test_health_response_serialization() {
+        let mut services = HashMap::new();
+        services.insert("API".to_string(), "ONLINE".to_string());
         let response = HealthResponse {
             status: "ok".to_string(),
             version: "1.0.0".to_string(),
+            services,
         };
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("ok"));
         assert!(json.contains("1.0.0"));
+        assert!(json.contains("ONLINE"));
     }
 }

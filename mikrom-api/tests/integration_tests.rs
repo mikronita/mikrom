@@ -42,6 +42,7 @@ fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         scheduler_config: mikrom_api::scheduler::SchedulerConfig::default(),
         builder_addr: "http://localhost:5004".to_string(),
+        router_addr: "http://localhost:8080".to_string(),
         jwt_secret: jwt_secret.to_string(),
         master_key: "integration-master-key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,

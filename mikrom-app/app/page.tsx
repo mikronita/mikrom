@@ -7,8 +7,6 @@ import {
   Plus, 
   LayoutDashboard, 
   Activity, 
-  BookOpen,
-  Settings,
   ArrowRight,
   Container
 } from "lucide-react";
@@ -27,7 +25,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 
 export default function Page() {
-  const { data: vms = [], isFetching: isFetchingVms, error: vmsError } = useVms();
+  const { data: vms = [], isFetching: isFetchingVms } = useVms();
   const { data: apps = [], isLoading: isLoadingApps } = useApps();
   const { data: healthData, isError: isHealthError } = useHealth();
   const [showCreateApp, setShowCreateApp] = useState(false);
@@ -165,12 +163,12 @@ export default function Page() {
                   <div className="flex flex-col items-center text-center space-y-3 p-6 rounded-xl bg-background/50 border shadow-sm">
                     <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">1</div>
                     <h4 className="font-bold">Connect Git</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed">Link your GitHub repository to Mikrom and we'll detect your app type automatically.</p>
+                    <p className="text-sm text-muted-foreground leading-relaxed">Link your GitHub repository to Mikrom and we&apos;ll detect your app type automatically.</p>
                   </div>
                   <div className="flex flex-col items-center text-center space-y-3 p-6 rounded-xl bg-background/50 border shadow-sm">
                     <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">2</div>
                     <h4 className="font-bold">Configure</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed">Define vCPUs, RAM and environment variables to match your application's needs.</p>
+                    <p className="text-sm text-muted-foreground leading-relaxed">Define vCPUs, RAM and environment variables to match your application&apos;s needs.</p>
                   </div>
                   <div className="flex flex-col items-center text-center space-y-3 p-6 rounded-xl bg-background/50 border shadow-sm">
                     <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">3</div>
@@ -270,27 +268,30 @@ export default function Page() {
                     <CardDescription>Health of core services.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">API Service</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] uppercase font-bold text-muted-foreground">{healthData?.status || 'checking'}</span>
-                        <div className={cn("w-2.5 h-2.5 rounded-full", isHealthError ? "bg-red-500 animate-pulse" : "bg-green-500")} />
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">Scheduler</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] uppercase font-bold text-muted-foreground">{vmsError ? 'error' : 'online'}</span>
-                        <div className={cn("w-2.5 h-2.5 rounded-full", vmsError ? "bg-red-500 animate-pulse" : "bg-green-500")} />
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">Build Engine</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] uppercase font-bold text-muted-foreground">{healthData ? 'ready' : 'checking'}</span>
-                        <div className={cn("w-2.5 h-2.5 rounded-full", !healthData ? "bg-yellow-500 animate-pulse" : "bg-green-500")} />
-                      </div>
-                    </div>
+                    {[
+                      { name: "API", key: "API" },
+                      { name: "Agents", key: "Agents" },
+                      { name: "Scheduler", key: "Scheduler" },
+                      { name: "Builder", key: "Builder" },
+                      { name: "Router", key: "Router" },
+                    ].map((service) => {
+                      const status = healthData?.services?.[service.key] || (isHealthError ? 'OFFLINE' : 'CHECKING');
+                      const isOnline = status === 'ONLINE';
+                      const isChecking = status === 'CHECKING';
+                      
+                      return (
+                        <div key={service.name} className="flex items-center justify-between">
+                          <span className="text-sm font-medium">{service.name}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] uppercase font-bold text-muted-foreground">{status}</span>
+                            <div className={cn(
+                              "w-2.5 h-2.5 rounded-full",
+                              isOnline ? "bg-green-500" : (isChecking ? "bg-yellow-500 animate-pulse" : "bg-red-500 animate-pulse")
+                            )} />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </CardContent>
                   <div className="bg-muted/30 px-6 py-3 border-t">
                     <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest">Version {healthData?.version || '0.0.0'}</p>

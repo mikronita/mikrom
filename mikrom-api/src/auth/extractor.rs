@@ -142,6 +142,7 @@ mod tests {
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: crate::scheduler::SchedulerConfig::default(),
             builder_addr: "http://localhost:5004".to_string(),
+            router_addr: "http://localhost:8080".to_string(),
             jwt_secret: jwt_secret.to_string(),
             master_key: "test-master-key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
