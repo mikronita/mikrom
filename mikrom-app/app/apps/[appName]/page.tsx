@@ -16,7 +16,7 @@ import {
 } from "react-icons/hi2";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Rocket } from "lucide-react";
+import { Rocket, GitBranch, Zap, User } from "lucide-react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -332,10 +332,11 @@ export default function AppDetailPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Version / Image</TableHead>
+                      <TableHead>Deployment</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Duration</TableHead>
                       <TableHead>Created</TableHead>
-                      <TableHead>Production</TableHead>
+                      <TableHead>Environment</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -343,14 +344,14 @@ export default function AppDetailPage() {
                     {isLoading && deployments.length === 0 ? (
                       Array.from({ length: 3 }).map((_, i) => (
                         <TableRow key={i}>
-                          <TableCell colSpan={5}>
+                          <TableCell colSpan={6}>
                             <div className="h-8 bg-muted animate-pulse rounded" />
                           </TableCell>
                         </TableRow>
                       ))
                     ) : deployments.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="py-10">
+                        <TableCell colSpan={6} className="py-10">
                           <Empty className="border-none">
                             <EmptyHeader>
                               <EmptyMedia variant="icon">
@@ -388,12 +389,41 @@ export default function AppDetailPage() {
                             return "Promote to Prod";
                           };
 
+                          const formatDuration = (start: string, end: string) => {
+                            const diff = new Date(end).getTime() - new Date(start).getTime();
+                            if (diff <= 0) return "--";
+                            const seconds = Math.floor(diff / 1000);
+                            if (seconds < 60) return `${seconds}s`;
+                            const minutes = Math.floor(seconds / 60);
+                            return `${minutes}m ${seconds % 60}s`;
+                          };
+
                           return (
                             <TableRow key={dep.id}>
-                              <TableCell className="font-medium">
-                                <div className="flex flex-col">
-                                  <span className="text-xs text-muted-foreground font-mono mb-1">{dep.id.split("-")[0]}</span>
-                                  <span>{dep.image_tag || "N/A"}</span>
+                              <TableCell className="py-4">
+                                <div className="flex flex-col gap-1">
+                                  <span className="font-semibold text-sm line-clamp-1 max-w-[300px]">
+                                    {dep.git_commit_message || dep.image_tag || (
+                                      dep.status === "BUILDING" 
+                                        ? `Deploying ${dep.id.split("-")[0]}...` 
+                                        : `Deployment ${dep.id.split("-")[0]}`
+                                    )}
+                                  </span>
+                                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                    <span className="bg-muted px-1.5 py-0.5 rounded flex items-center gap-1">
+                                      <GitBranch className="w-3 h-3" />
+                                      {dep.git_branch || "main"}
+                                    </span>
+                                    <span className="font-mono">{dep.git_commit_hash?.substring(0, 7) || dep.id.split("-")[0]}</span>
+                                    <span className="flex items-center gap-1">
+                                      {dep.trigger_source === "github_webhook" ? (
+                                        <Zap className="w-3 h-3 fill-yellow-400 text-yellow-400" />
+                                      ) : (
+                                        <User className="w-3 h-3" />
+                                      )}
+                                      {dep.trigger_source || "manual"}
+                                    </span>
+                                  </div>
                                 </div>
                               </TableCell>
                               <TableCell>
@@ -401,17 +431,22 @@ export default function AppDetailPage() {
                                   {dep.status}
                                 </Badge>
                               </TableCell>
-                              <TableCell className="text-muted-foreground text-xs">
+                              <TableCell className="text-muted-foreground text-xs font-medium">
+                                {dep.status === "RUNNING" || dep.status === "FAILED" || dep.status === "STOPPED" 
+                                  ? formatDuration(dep.created_at, dep.updated_at)
+                                  : "..."}
+                              </TableCell>
+                              <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
                                 {new Date(dep.created_at).toLocaleString()}
                               </TableCell>
                               <TableCell>
                                 {isCurrentlyInProd ? (
                                   <div className="flex items-center gap-1.5 text-green-600 dark:text-green-400 font-semibold text-sm">
                                     <HiCheckCircle className="w-5 h-5" />
-                                    <span>Active</span>
+                                    <span>Production</span>
                                   </div>
                                 ) : (
-                                  <span className="text-muted-foreground text-xs italic">Standby</span>
+                                  <span className="text-muted-foreground text-xs italic">Preview</span>
                                 )}
                               </TableCell>
                               <TableCell className="text-right">

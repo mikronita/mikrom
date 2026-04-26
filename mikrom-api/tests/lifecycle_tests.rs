@@ -103,9 +103,12 @@ async fn test_promotion_back_and_forth() {
             always(),
             always(),
             always(),
+            always(),
+            always(),
+            always(),
         )
         .times(1)
-        .returning(|_, _, _, _, _, _| Ok(()));
+        .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
 
     // Expect dep2 to be resumed
     mock_scheduler
@@ -124,9 +127,12 @@ async fn test_promotion_back_and_forth() {
             always(),
             always(),
             always(),
+            always(),
+            always(),
+            always(),
         )
         .times(1)
-        .returning(|_, _, _, _, _, _| Ok(()));
+        .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -247,9 +253,12 @@ async fn test_promotion_pauses_previous_active() {
             always(),
             always(),
             always(),
+            always(),
+            always(),
+            always(),
         )
         .times(1)
-        .returning(|_, _, _, _, _, _| Ok(()));
+        .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -365,9 +374,12 @@ async fn test_activate_stopped_deployment_resumes_it() {
             always(),
             always(),
             always(),
+            always(),
+            always(),
+            always(),
         )
         .times(1)
-        .returning(|_, _, _, _, _, _| Ok(()));
+        .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),

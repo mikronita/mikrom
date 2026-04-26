@@ -36,6 +36,12 @@ pub struct GetBuildStatusResponse {
     pub message: ::prost::alloc::string::String,
     #[prost(uint32, tag = "5")]
     pub exposed_port: u32,
+    #[prost(string, tag = "6")]
+    pub git_commit_hash: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub git_commit_message: ::prost::alloc::string::String,
+    #[prost(string, tag = "8")]
+    pub git_branch: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

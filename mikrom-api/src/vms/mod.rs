@@ -464,6 +464,9 @@ pub async fn pause_deployment(
                     dep.image_tag,
                     dep.build_id,
                     None,
+                    dep.git_commit_hash,
+                    dep.git_commit_message,
+                    dep.git_branch,
                 )
                 .await;
         }
@@ -515,6 +518,9 @@ pub async fn resume_deployment(
                     dep.image_tag,
                     dep.build_id,
                     None,
+                    dep.git_commit_hash,
+                    dep.git_commit_message,
+                    dep.git_branch,
                 )
                 .await;
         }
@@ -630,6 +636,10 @@ mod tests {
                     disk_mib: 1024,
                     port: 80,
                     env_vars: serde_json::json!({}),
+                    git_commit_hash: None,
+                    git_commit_message: None,
+                    git_branch: None,
+                    trigger_source: "manual".into(),
                     created_at: chrono::Utc::now(),
                     updated_at: chrono::Utc::now(),
                 }])

@@ -1,0 +1,100 @@
+use mikrom_api::repositories::app_repository::{AppRepository, NewDeployment};
+use mikrom_api::repositories::postgres_app_repository::PostgresAppRepository;
+use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
+use mikrom_api::repositories::user_repository::{NewUser, UserRepository, UserRole};
+use sqlx::PgPool;
+use uuid::Uuid;
+
+async fn get_test_pool() -> PgPool {
+    let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
+    });
+    PgPool::connect(&url)
+        .await
+        .expect("failed to connect to test db")
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn test_deployment_metadata_persistence() {
+    let pool = get_test_pool().await;
+    let user_repo = PostgresUserRepository::new(pool.clone());
+    let app_repo = PostgresAppRepository::new(pool.clone());
+
+    // 1. Create a user
+    let email = format!("metadata_test_{}@example.com", Uuid::new_v4());
+    let user_id = user_repo
+        .create(NewUser {
+            email,
+            password_hash: "pass".into(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+        })
+        .await
+        .expect("failed to create user");
+
+    // 2. Create an app
+    let app = app_repo
+        .create_app(
+            "metadata-app",
+            "https://github.com/test/repo",
+            80,
+            None,
+            &user_id.to_string(),
+            None,
+        )
+        .await
+        .expect("failed to create app");
+
+    // 3. Create a deployment with trigger_source
+    let deployment = app_repo
+        .create_deployment(NewDeployment {
+            app_id: app.id,
+            user_id: user_id.to_string(),
+            vcpus: 1,
+            memory_mib: 256,
+            disk_mib: 1024,
+            port: 80,
+            env_vars: std::collections::HashMap::new(),
+            trigger_source: "github_webhook".to_string(),
+        })
+        .await
+        .expect("failed to create deployment");
+
+    assert_eq!(deployment.trigger_source, "github_webhook");
+    assert!(deployment.git_commit_hash.is_none());
+
+    // 4. Update with git metadata
+    let commit_hash = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0";
+    let commit_msg = "feat: add exhaustive metadata tests";
+    let branch = "feature/metadata";
+
+    app_repo
+        .update_deployment_status(
+            deployment.id,
+            "SUCCESS",
+            Some("job-abc".to_string()),
+            Some("img:v2".to_string()),
+            Some("build-xyz".to_string()),
+            Some("192.168.1.100".to_string()),
+            Some(commit_hash.to_string()),
+            Some(commit_msg.to_string()),
+            Some(branch.to_string()),
+        )
+        .await
+        .expect("failed to update deployment status with metadata");
+
+    // 5. Verify persistence
+    let updated = app_repo
+        .get_deployment(deployment.id)
+        .await
+        .expect("failed to get deployment")
+        .expect("deployment not found");
+
+    assert_eq!(updated.status, "SUCCESS");
+    assert_eq!(updated.trigger_source, "github_webhook");
+    assert_eq!(updated.git_commit_hash.as_deref(), Some(commit_hash));
+    assert_eq!(updated.git_commit_message.as_deref(), Some(commit_msg));
+    assert_eq!(updated.git_branch.as_deref(), Some(branch));
+}

@@ -65,6 +65,10 @@ async fn test_activate_deployment_endpoint() {
         disk_mib: 1024,
         port: 8080,
         env_vars: serde_json::Value::Object(serde_json::Map::new()),
+        git_commit_hash: None,
+        git_commit_message: None,
+        git_branch: None,
+        trigger_source: "manual".into(),
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
@@ -233,6 +237,10 @@ async fn test_activate_deployment_not_running() {
         disk_mib: 1024,
         port: 8080,
         env_vars: serde_json::Value::Object(serde_json::Map::new()),
+        git_commit_hash: None,
+        git_commit_message: None,
+        git_branch: None,
+        trigger_source: "manual".into(),
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };

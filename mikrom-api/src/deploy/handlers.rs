@@ -266,6 +266,7 @@ pub async fn deploy_app_version_handler(
             disk_mib: disk_mib as i64,
             port: app.port,
             env_vars: env_vars.clone(),
+            trigger_source: "manual".to_string(),
         })
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -277,7 +278,17 @@ pub async fn deploy_app_version_handler(
     // We update the deployment status to BUILDING
     state
         .app_repo
-        .update_deployment_status(deployment.id, "BUILDING", None, None, None, None)
+        .update_deployment_status(
+            deployment.id,
+            "BUILDING",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -313,6 +324,9 @@ pub async fn deploy_app_version_handler(
             None,
             None,
             Some(build_id.clone()),
+            None,
+            None,
+            None,
             None,
         )
         .await
@@ -367,6 +381,7 @@ pub async fn trigger_app_build(
             disk_mib: disk_mib as i64,
             port: app.port,
             env_vars: env_vars.clone(),
+            trigger_source: "github_webhook".to_string(),
         })
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -377,7 +392,17 @@ pub async fn trigger_app_build(
 
     state
         .app_repo
-        .update_deployment_status(deployment.id, "BUILDING", None, None, None, None)
+        .update_deployment_status(
+            deployment.id,
+            "BUILDING",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -413,6 +438,9 @@ pub async fn trigger_app_build(
             None,
             None,
             Some(build_id.clone()),
+            None,
+            None,
+            None,
             None,
         )
         .await
@@ -637,9 +665,12 @@ pub async fn activate_deployment_handler(
                             dep.id,
                             "STOPPED",
                             Some(old_job_id),
-                            dep.image_tag,
-                            dep.build_id,
+                            dep.image_tag.clone(),
+                            dep.build_id.clone(),
                             None,
+                            dep.git_commit_hash.clone(),
+                            dep.git_commit_message.clone(),
+                            dep.git_branch.clone(),
                         )
                         .await;
                 }
@@ -665,7 +696,17 @@ pub async fn activate_deployment_handler(
 
         let _ = state
             .app_repo
-            .update_deployment_status(deployment_id, "RUNNING", Some(job_id), None, None, None)
+            .update_deployment_status(
+                deployment_id,
+                "RUNNING",
+                Some(job_id),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .await;
     }
 

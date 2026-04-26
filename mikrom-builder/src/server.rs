@@ -24,6 +24,9 @@ struct BuildInfo {
     image_tag: Option<String>,
     message: Option<String>,
     exposed_port: u32,
+    git_commit_hash: Option<String>,
+    git_commit_message: Option<String>,
+    git_branch: Option<String>,
 }
 
 impl BuilderServer {
@@ -57,6 +60,9 @@ impl BuilderService for BuilderServer {
             image_tag: None,
             message: None,
             exposed_port: 0,
+            git_commit_hash: None,
+            git_commit_message: None,
+            git_branch: None,
         };
 
         self.builds.write().insert(build_id.clone(), build_info);
@@ -65,18 +71,44 @@ impl BuilderService for BuilderServer {
         let builds = self.builds.clone();
         let build_id_clone = build_id.clone();
 
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::builder::GitMetadata>(1);
+
         // Spawn background task for building
         tokio::spawn(async move {
+            // Task to listen for early metadata
+            let builds_meta = builds.clone();
+            let build_id_meta = build_id_clone.clone();
+            tokio::spawn(async move {
+                if let Some(meta) = rx.recv().await {
+                    let mut lock = builds_meta.write();
+                    if let Some(info) = lock.get_mut(&build_id_meta) {
+                        info.git_commit_hash = Some(meta.hash);
+                        info.git_commit_message = Some(meta.message);
+                        info.git_branch = Some(meta.branch);
+                        info!("Updated build info with early git metadata");
+                    }
+                }
+            });
+
             match builder
-                .build_image(&req.app_id, &req.git_url, &req.image_name, &req.tag)
+                .build_image(
+                    &req.app_id,
+                    &req.git_url,
+                    &req.image_name,
+                    &req.tag,
+                    Some(tx),
+                )
                 .await
             {
-                Ok((image_tag, exposed_port)) => {
+                Ok(result) => {
                     let mut lock = builds.write();
                     if let Some(info) = lock.get_mut(&build_id_clone) {
                         info.status = BuildStatus::Success;
-                        info.image_tag = Some(image_tag);
-                        info.exposed_port = exposed_port;
+                        info.image_tag = Some(result.image_tag);
+                        info.exposed_port = result.exposed_port;
+                        info.git_commit_hash = Some(result.git_commit_hash);
+                        info.git_commit_message = Some(result.git_commit_message);
+                        info.git_branch = Some(result.git_branch);
                     }
                 },
                 Err(e) => {
@@ -111,6 +143,9 @@ impl BuilderService for BuilderServer {
                 image_tag: info.image_tag.clone().unwrap_or_default(),
                 message: info.message.clone().unwrap_or_default(),
                 exposed_port: info.exposed_port,
+                git_commit_hash: info.git_commit_hash.clone().unwrap_or_default(),
+                git_commit_message: info.git_commit_message.clone().unwrap_or_default(),
+                git_branch: info.git_branch.clone().unwrap_or_default(),
             })),
             None => Err(Status::not_found("Build not found")),
         }
