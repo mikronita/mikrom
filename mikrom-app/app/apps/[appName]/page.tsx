@@ -141,9 +141,62 @@ export default function AppDetailPage() {
     return () => clearTimeout(timeoutId);
   }, [dataUpdatedAt, vm]);
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success("Copied to clipboard!");
+  const copyToClipboard = async (text: string, e?: React.MouseEvent) => {
+    if (!text) {
+      toast.error("Nothing to copy");
+      return;
+    }
+
+    // Try modern API first
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast.success("Copied to clipboard!");
+        return;
+      } catch (err) {
+        console.warn("Modern clipboard API failed, falling back", err);
+      }
+    }
+
+    // Robust fallback for non-secure contexts or failed API
+    try {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      
+      // Ensure it's not visible and doesn't affect layout/scroll
+      textArea.style.position = "fixed";
+      textArea.style.left = "-9999px";
+      textArea.style.top = "0";
+      textArea.style.width = "2em";
+      textArea.style.height = "2em";
+      textArea.style.padding = "0";
+      textArea.style.border = "none";
+      textArea.style.outline = "none";
+      textArea.style.boxShadow = "none";
+      textArea.style.background = "transparent";
+      
+      // Append to the parent of the clicked element to bypass potential focus traps (like Radix Dialog)
+      const target = e?.currentTarget as HTMLElement;
+      const parent = target?.parentElement || document.body;
+      parent.appendChild(textArea);
+      
+      // Select the text
+      textArea.focus({ preventScroll: true });
+      textArea.select();
+      textArea.setSelectionRange(0, 99999); // Mobile compatibility
+      
+      const successful = document.execCommand('copy');
+      parent.removeChild(textArea);
+      
+      if (successful) {
+        toast.success("Copied to clipboard!");
+      } else {
+        throw new Error("execCommand returned false");
+      }
+    } catch (err) {
+      console.error("Clipboard fallback failed:", err);
+      toast.error("Failed to copy to clipboard");
+    }
   };
 
   const handleDeployApp = async () => {
@@ -510,7 +563,7 @@ export default function AppDetailPage() {
                         readOnly
                         className="font-mono text-xs flex-1 h-9"
                       />
-                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={() => copyToClipboard(`${API_BASE_URL}/webhooks/github/${decodedName}`)}>
+                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={(e) => copyToClipboard(`${API_BASE_URL}/webhooks/github/${decodedName}`, e)}>
                         <HiClipboard className="w-4 h-4" />
                       </Button>
                     </div>
@@ -533,7 +586,7 @@ export default function AppDetailPage() {
                           {showSecret ? <HiEyeOff className="w-4 h-4" /> : <HiEye className="w-4 h-4" />}
                         </button>
                       </div>
-                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={() => copyToClipboard(app?.github_webhook_secret || "")}>
+                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={(e) => copyToClipboard(app?.github_webhook_secret || "", e)}>
                         <HiClipboard className="w-4 h-4" />
                       </Button>
                     </div>
