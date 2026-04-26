@@ -14,9 +14,7 @@ import {
   Cpu,
   Zap,
   CheckCircle2,
-  AlertCircle,
-  Clock,
-  ExternalLink
+  Clock
 } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -58,16 +56,6 @@ export default function Page() {
 
   const vcpuProgress = Math.min((totalVcpus / MAX_VCPUS) * 100, 100);
   const memoryProgress = Math.min((totalMemory / MAX_MEMORY) * 100, 100);
-
-  // Activity feed from VMs status
-  const recentActivity = vms
-    .slice(0, 5)
-    .map(vm => ({
-      id: vm.vm_id || vm.job_id,
-      app: vm.app_name,
-      status: vm.status,
-      icon: vm.status.toLowerCase() === "running" ? CheckCircle2 : (vm.status.toLowerCase() === "building" ? Clock : Activity)
-    }));
 
   // Map apps to their live status if available
   const appsWithStatus = apps.slice(0, 5).map(app => {
@@ -356,34 +344,6 @@ export default function Page() {
                   <div className="bg-muted/30 px-6 py-3 border-t">
                     <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest">Version {healthData?.version || '0.0.0'}</p>
                   </div>
-                </Card>
-
-                {/* Activity Feed */}
-                <Card className="shadow-sm">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-lg font-bold">Recent Activity</CardTitle>
-                    <CardDescription>Live infrastructure events.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {recentActivity.length > 0 ? (
-                      recentActivity.map((event, i) => (
-                        <div key={event.id + i} className="flex gap-3">
-                          <div className={cn(
-                            "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
-                            event.status.toLowerCase() === "running" ? "bg-green-500/10 text-green-600" : "bg-yellow-500/10 text-yellow-600"
-                          )}>
-                            <event.icon className="w-4 h-4" />
-                          </div>
-                          <div className="space-y-0.5">
-                            <p className="text-sm font-bold leading-none">{event.app}</p>
-                            <p className="text-xs text-muted-foreground capitalize">{event.status.toLowerCase()}</p>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-sm text-muted-foreground py-4 text-center">No recent activity</p>
-                    )}
-                  </CardContent>
                 </Card>
 
                 {/* Quick Actions */}
