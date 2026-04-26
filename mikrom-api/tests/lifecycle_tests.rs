@@ -14,6 +14,135 @@ use mikrom_api::models::app::{App, Deployment};
 use mikrom_api::repositories::{MockAppRepository, MockUserRepository};
 
 #[tokio::test]
+async fn test_promotion_back_and_forth() {
+    let mock_user_repo = MockUserRepository::new();
+    let mut mock_app_repo = MockAppRepository::new();
+
+    let user_id = Uuid::new_v4();
+    let app_id = Uuid::new_v4();
+    let dep1_id = Uuid::new_v4();
+    let dep2_id = Uuid::new_v4();
+    let jwt_secret = "test-secret";
+
+    let token = mikrom_api::auth::jwt::create_token(
+        &user_id.to_string(),
+        "test@example.com",
+        &mikrom_api::repositories::user_repository::UserRole::User,
+        jwt_secret,
+    )
+    .unwrap();
+
+    let app = App {
+        id: app_id,
+        name: "test-app".to_string(),
+        git_url: "git".to_string(),
+        port: 8080,
+        hostname: None,
+        user_id,
+        github_webhook_secret: None,
+        active_deployment_id: Some(dep1_id),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+
+    // We simulate activating dep2.
+    mock_app_repo
+        .expect_get_app_by_name()
+        .returning(move |_| Ok(Some(app.clone())));
+
+    let dep2 = Deployment {
+        id: dep2_id,
+        app_id,
+        user_id,
+        status: "STOPPED".to_string(),
+        job_id: Some("job-2".to_string()),
+        ..Default::default()
+    };
+
+    let dep2_clone = dep2.clone();
+    mock_app_repo
+        .expect_get_deployment()
+        .with(eq(dep2_id))
+        .returning(move |_| Ok(Some(dep2_clone.clone())));
+
+    mock_app_repo
+        .expect_set_active_deployment()
+        .with(eq(app_id), eq(dep2_id))
+        .returning(|_, _| Ok(()));
+
+    let dep1 = Deployment {
+        id: dep1_id,
+        app_id,
+        user_id,
+        status: "RUNNING".to_string(),
+        job_id: Some("job-1".to_string()),
+        ..Default::default()
+    };
+
+    let all_deps = vec![dep1.clone(), dep2.clone()];
+    mock_app_repo
+        .expect_list_deployments_by_app()
+        .returning(move |_| Ok(all_deps.clone()));
+
+    // Expect dep1 to be STOPPED
+    mock_app_repo
+        .expect_update_deployment_status()
+        .with(
+            eq(dep1_id),
+            eq("STOPPED"),
+            always(),
+            always(),
+            always(),
+            always(),
+        )
+        .times(1)
+        .returning(|_, _, _, _, _, _| Ok(()));
+
+    // Expect dep2 to be RUNNING
+    mock_app_repo
+        .expect_update_deployment_status()
+        .with(
+            eq(dep2_id),
+            eq("RUNNING"),
+            eq(Some("job-2".to_string())),
+            always(),
+            always(),
+            always(),
+        )
+        .times(1)
+        .returning(|_, _, _, _, _, _| Ok(()));
+
+    let state = AppState {
+        user_repo: Arc::new(mock_user_repo),
+        app_repo: Arc::new(mock_app_repo),
+        scheduler_client: None,
+        scheduler_config: Default::default(),
+        builder_addr: "http://localhost:5004".into(),
+        jwt_secret: jwt_secret.into(),
+        master_key: "key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
+        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+    };
+
+    let router = create_app(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/apps/test-app/deployments/{}/activate", dep2_id))
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+}
+
+#[tokio::test]
 async fn test_promotion_pauses_previous_active() {
     let mock_user_repo = MockUserRepository::new();
     let mut mock_app_repo = MockAppRepository::new();

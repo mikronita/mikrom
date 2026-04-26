@@ -853,4 +853,103 @@ mod tests {
         let result = poll_and_deploy(state, task, builder, scheduler).await;
         assert!(result.is_ok());
     }
+
+    #[tokio::test]
+    async fn test_poll_and_deploy_rotation_logic() {
+        let mut mock_repo = MockAppRepository::new();
+        let app_id = Uuid::new_v4();
+        let task_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let now = chrono::Utc::now();
+
+        // 1. Setup 5 existing deployments, oldest first
+        let mut existing_deps = vec![];
+        for i in 0..5 {
+            existing_deps.push(Deployment {
+                id: Uuid::new_v4(),
+                app_id,
+                user_id,
+                status: "STOPPED".to_string(),
+                job_id: Some(format!("job-old-{}", i)),
+                created_at: now - chrono::Duration::days(10 - i),
+                ..Default::default()
+            });
+        }
+        let oldest_job_id = existing_deps[0].job_id.clone().unwrap();
+
+        // 2. Mock expectations
+        mock_repo.expect_get_app().returning(move |_| {
+            Ok(Some(crate::models::app::App {
+                id: app_id,
+                active_deployment_id: None,
+                ..Default::default()
+            }))
+        });
+
+        // When listing for cleanup, return the 5 existing + 1 new
+        let mut all_deps = existing_deps.clone();
+        all_deps.push(Deployment {
+            id: task_id,
+            app_id,
+            status: "RUNNING".to_string(),
+            ..Default::default()
+        });
+        mock_repo
+            .expect_list_deployments_by_app()
+            .returning(move |_| Ok(all_deps.clone()));
+
+        // Expect delete_deployment_by_job_id for the OLDEST one
+        mock_repo
+            .expect_delete_deployment_by_job_id()
+            .with(mockall::predicate::eq(oldest_job_id))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        // Other boilerplate mocks
+        mock_repo
+            .expect_update_deployment_status()
+            .returning(|_, _, _, _, _, _| Ok(()));
+        mock_repo
+            .expect_set_active_deployment()
+            .returning(|_, _| Ok(()));
+        mock_repo
+            .expect_update_deployment_port()
+            .returning(|_, _| Ok(()));
+
+        let state = AppState {
+            user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
+            app_repo: Arc::new(mock_repo),
+            scheduler_client: None,
+            scheduler_config: Default::default(),
+            builder_addr: "".into(),
+            jwt_secret: "".into(),
+            master_key: "".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+        };
+
+        let task = BuildTask {
+            deployment_id: task_id,
+            app_id,
+            app_name: "test".into(),
+            user_id: user_id.to_string(),
+            build_id: "b-new".into(),
+            vcpus: 1,
+            memory_mib: 128,
+            disk_mib: 512,
+            port: 8080,
+            env: HashMap::new(),
+        };
+
+        let builder = Arc::new(MockBuilder {
+            status: BuildStatus::Success,
+            tag: "t".into(),
+            port: 8080,
+        });
+
+        let scheduler = Arc::new(MockSchedulerClientImpl { success: true });
+
+        let result = poll_and_deploy(state, task, builder, scheduler).await;
+        assert!(result.is_ok());
+    }
 }

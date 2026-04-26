@@ -2712,4 +2712,47 @@ mod tests {
         // In stub mode, start_vm immediately marks it as Running
         assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Starting);
     }
+
+    #[tokio::test]
+    async fn test_delete_vm_purges_all_resources() {
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let vm_id = "delete-purge-test";
+
+        // 1. Setup fake files
+        let data_dir = std::path::Path::new(&mgr.fc_config.data_dir);
+        tokio::fs::create_dir_all(data_dir).await.unwrap();
+
+        let rootfs = data_dir.join(format!("fc-{}-{}-rootfs.ext4", mgr.agent_id, vm_id));
+        tokio::fs::write(&rootfs, b"fake").await.unwrap();
+
+        let snap_dir = data_dir.join("snapshots");
+        tokio::fs::create_dir_all(&snap_dir).await.unwrap();
+        let snap = snap_dir.join(format!("{vm_id}.snapshot"));
+        let mem = snap_dir.join(format!("{vm_id}.mem"));
+        tokio::fs::write(&snap, b"fake").await.unwrap();
+        tokio::fs::write(&mem, b"fake").await.unwrap();
+
+        // 2. Setup fake jailer chroot
+        let exec_name = "firecracker";
+        let chroot = std::path::Path::new(&mgr.fc_config.chroot_base)
+            .join(exec_name)
+            .join(vm_id);
+        tokio::fs::create_dir_all(&chroot).await.unwrap();
+        tokio::fs::write(chroot.join("fake-jail"), b"fake")
+            .await
+            .unwrap();
+
+        // 3. Register VM in memory
+        mgr.set_status_for_test(vm_id, VmStatus::Stopped).await;
+
+        // 4. Perform delete
+        mgr.delete_vm(vm_id).await.expect("delete_vm failed");
+
+        // 5. Verify everything is gone
+        assert!(!mgr.has_process(vm_id).await);
+        assert!(!rootfs.exists());
+        assert!(!snap.exists());
+        assert!(!mem.exists());
+        assert!(!chroot.exists());
+    }
 }
