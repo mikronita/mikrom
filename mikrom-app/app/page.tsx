@@ -10,11 +10,7 @@ import {
   BookOpen,
   Settings,
   ArrowRight,
-  Container,
-  Cpu,
-  Zap,
-  CheckCircle2,
-  Clock
+  Container
 } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -27,7 +23,6 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CreateAppModal } from "@/components/CreateAppModal";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
-import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 
@@ -45,17 +40,6 @@ export default function Page() {
       v.status.toLowerCase() === "pending" ||
       v.status.toLowerCase() === "building"
   ).length;
-
-  // Resource Calculations
-  const totalVcpus = runningVms.reduce((acc, vm) => acc + (vm.vcpus || 0), 0);
-  const totalMemory = runningVms.reduce((acc, vm) => acc + (vm.memory_mib || 0), 0);
-  
-  // Assuming a dev cluster limit for visualization
-  const MAX_VCPUS = 8;
-  const MAX_MEMORY = 16384; // 16GB
-
-  const vcpuProgress = Math.min((totalVcpus / MAX_VCPUS) * 100, 100);
-  const memoryProgress = Math.min((totalMemory / MAX_MEMORY) * 100, 100);
 
   // Map apps to their live status if available
   const appsWithStatus = apps.slice(0, 5).map(app => {
@@ -207,39 +191,6 @@ export default function Page() {
             /* Dashboard Content */
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 space-y-8">
-                {/* Resource Utilization */}
-                <Card className="shadow-sm">
-                  <CardHeader className="pb-4">
-                    <CardTitle className="text-lg font-bold flex items-center gap-2">
-                      <Cpu className="w-5 h-5 text-primary" />
-                      Cluster Resources
-                    </CardTitle>
-                    <CardDescription>Aggregate usage across all running MicroVMs.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium flex items-center gap-2">
-                          <Cpu className="w-4 h-4 text-muted-foreground" />
-                          vCPU Allocation
-                        </span>
-                        <span className="text-muted-foreground font-mono">{totalVcpus} / {MAX_VCPUS} Cores</span>
-                      </div>
-                      <Progress value={vcpuProgress} className="h-2 bg-muted" />
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium flex items-center gap-2">
-                          <Zap className="w-4 h-4 text-muted-foreground" />
-                          RAM Allocation
-                        </span>
-                        <span className="text-muted-foreground font-mono">{(totalMemory / 1024).toFixed(1)}GB / {MAX_MEMORY / 1024}GB</span>
-                      </div>
-                      <Progress value={memoryProgress} className="h-2 bg-muted" />
-                    </div>
-                  </CardContent>
-                </Card>
-
                 {/* Recent Applications */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
@@ -344,37 +295,6 @@ export default function Page() {
                   <div className="bg-muted/30 px-6 py-3 border-t">
                     <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest">Version {healthData?.version || '0.0.0'}</p>
                   </div>
-                </Card>
-
-                {/* Quick Actions */}
-                <Card className="shadow-sm">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-lg font-bold">Quick Actions</CardTitle>
-                  </CardHeader>
-                  <CardContent className="grid gap-4">
-                    <Button variant="outline" className="group justify-start h-auto py-3 px-4 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all" onClick={() => setShowCreateApp(true)}>
-                      <Plus className="mr-3 h-5 w-5 text-primary group-hover:scale-110 transition-transform" />
-                      <div className="flex flex-col items-start">
-                        <span className="font-bold text-sm">New App</span>
-                      </div>
-                    </Button>
-                    <Button variant="outline" className="group justify-start h-auto py-3 px-4 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all" asChild>
-                      <Link href="/docs" className="flex">
-                        <BookOpen className="mr-3 h-5 w-5 text-blue-500 group-hover:scale-110 transition-transform" />
-                        <div className="flex flex-col items-start">
-                          <span className="font-bold text-sm">Documentation</span>
-                        </div>
-                      </Link>
-                    </Button>
-                    <Button variant="outline" className="group justify-start h-auto py-3 px-4 hover:bg-muted transition-all" asChild>
-                      <Link href="/settings" className="flex">
-                        <Settings className="mr-3 h-5 w-5 text-muted-foreground group-hover:scale-110 transition-transform" />
-                        <div className="flex flex-col items-start">
-                          <span className="font-bold text-sm">Settings</span>
-                        </div>
-                      </Link>
-                    </Button>
-                  </CardContent>
                 </Card>
               </div>
             </div>
