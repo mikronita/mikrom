@@ -227,7 +227,7 @@ async fn test_http_api_deploy_e2e() {
     let state = AppState {
         user_repo: Arc::new(NoopRepo),
         app_repo,
-        scheduler_client: None,
+        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         scheduler_config: mikrom_api::scheduler::SchedulerConfig {
             addr: scheduler_url.clone(),
             use_tls: false,
@@ -319,7 +319,7 @@ async fn test_sse_deployments_events_e2e() {
     let state = AppState {
         user_repo: Arc::new(NoopRepo),
         app_repo: app_repo.clone(),
-        scheduler_client: None,
+        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         scheduler_config: mikrom_api::scheduler::SchedulerConfig {
             addr: scheduler_url.clone(),
             use_tls: false,

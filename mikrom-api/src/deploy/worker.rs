@@ -82,39 +82,60 @@ impl SchedulerClient for RealSchedulerClient {
         &self,
         req: mikrom_proto::scheduler::DeleteAppRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::DeleteAppResponse> {
-        let mut client = self
+        let success = self
             .state
-            .get_scheduler_client()
+            .scheduler
+            .delete_app(req.job_id, req.user_id)
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
-        let resp = client.delete_app(req).await?.into_inner();
-        Ok(resp)
+        Ok(mikrom_proto::scheduler::DeleteAppResponse {
+            success,
+            message: if success {
+                "ok".into()
+            } else {
+                "failed".into()
+            },
+        })
     }
 
     async fn pause_app(
         &self,
         req: mikrom_proto::scheduler::PauseRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::PauseResponse> {
-        let mut client = self
+        let success = self
             .state
-            .get_scheduler_client()
+            .scheduler
+            .pause_app(req.job_id, req.user_id)
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
-        let resp = client.pause_app(req).await?.into_inner();
-        Ok(resp)
+        Ok(mikrom_proto::scheduler::PauseResponse {
+            success,
+            message: if success {
+                "ok".into()
+            } else {
+                "failed".into()
+            },
+        })
     }
 
     async fn resume_app(
         &self,
         req: mikrom_proto::scheduler::ResumeRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::ResumeResponse> {
-        let mut client = self
+        let success = self
             .state
-            .get_scheduler_client()
+            .scheduler
+            .resume_app(req.job_id, req.user_id)
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
-        let resp = client.resume_app(req).await?.into_inner();
-        Ok(resp)
+        Ok(mikrom_proto::scheduler::ResumeResponse {
+            success,
+            message: if success {
+                "ok".into()
+            } else {
+                "failed".into()
+            },
+        })
     }
 }
 
@@ -562,7 +583,7 @@ mod tests {
         let state = AppState {
             user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
             app_repo: Arc::new(mock_repo),
-            scheduler_client: None,
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: crate::scheduler::SchedulerConfig {
                 addr: "".into(),
                 use_tls: false,
@@ -696,7 +717,7 @@ mod tests {
         let state = AppState {
             user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
             app_repo: Arc::new(mock_repo),
-            scheduler_client: None,
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: crate::scheduler::SchedulerConfig {
                 addr: "".into(),
                 use_tls: false,
@@ -816,7 +837,7 @@ mod tests {
         let state = AppState {
             user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
             app_repo: Arc::new(mock_repo),
-            scheduler_client: None,
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: crate::scheduler::SchedulerConfig {
                 addr: "".into(),
                 use_tls: false,
@@ -919,7 +940,7 @@ mod tests {
         let state = AppState {
             user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
             app_repo: Arc::new(mock_repo),
-            scheduler_client: None,
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: Default::default(),
             builder_addr: "".into(),
             jwt_secret: "".into(),

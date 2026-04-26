@@ -61,6 +61,57 @@ pub async fn connect(config: &SchedulerConfig) -> Result<Channel, String> {
         .map_err(|e| format!("Scheduler unavailable: {e}"))
 }
 
+#[async_trait::async_trait]
+pub trait Scheduler: Send + Sync {
+    async fn pause_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
+    async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
+    async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
+}
+
+pub struct TonicScheduler {
+    pub client: mikrom_proto::scheduler::SchedulerServiceClient<Channel>,
+}
+
+#[async_trait::async_trait]
+impl Scheduler for TonicScheduler {
+    async fn pause_app(&self, job_id: String, user_id: String) -> Result<bool, String> {
+        let mut client = self.client.clone();
+        let resp = client
+            .pause_app(mikrom_proto::scheduler::PauseRequest { job_id, user_id })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(resp.into_inner().success)
+    }
+
+    async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String> {
+        let mut client = self.client.clone();
+        let resp = client
+            .resume_app(mikrom_proto::scheduler::ResumeRequest { job_id, user_id })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(resp.into_inner().success)
+    }
+
+    async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String> {
+        let mut client = self.client.clone();
+        let resp = client
+            .delete_app(mikrom_proto::scheduler::DeleteAppRequest { job_id, user_id })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(resp.into_inner().success)
+    }
+}
+
+mockall::mock! {
+    pub Scheduler {}
+    #[async_trait::async_trait]
+    impl Scheduler for Scheduler {
+        async fn pause_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
+        async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
+        async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
+    }
+}
+
 #[must_use]
 pub fn status_name(code: i32) -> &'static str {
     use mikrom_proto::scheduler::DeployStatus;

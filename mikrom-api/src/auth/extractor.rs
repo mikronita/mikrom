@@ -139,7 +139,7 @@ mod tests {
         let state = crate::AppState {
             user_repo: Arc::new(NoopRepo),
             app_repo: Arc::new(app_repo),
-            scheduler_client: None,
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: crate::scheduler::SchedulerConfig::default(),
             builder_addr: "http://localhost:5004".to_string(),
             jwt_secret: jwt_secret.to_string(),

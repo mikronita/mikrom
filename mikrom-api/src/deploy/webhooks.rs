@@ -136,7 +136,7 @@ mod tests {
         AppState {
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(app_repo),
-            scheduler_client: None,
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: crate::scheduler::SchedulerConfig::default(),
             builder_addr: "http://localhost:5004".into(),
             jwt_secret: "secret".into(),

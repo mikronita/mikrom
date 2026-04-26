@@ -25,6 +25,7 @@ use deploy::webhooks::github_webhook_handler;
 pub use error::{ApiError, ApiResult};
 pub use repositories::app_repository::AppRepository;
 pub use repositories::user_repository::UserRepository;
+pub use scheduler::Scheduler;
 pub use vms::{
     delete_deployment_record, get_deployment_logs, get_deployment_status, list_active_deployments,
     pause_deployment, resume_deployment, stop_deployment, watch_deployments,
@@ -38,7 +39,7 @@ use utoipa_swagger_ui::SwaggerUi;
 pub struct AppState {
     pub user_repo: Arc<dyn UserRepository>,
     pub app_repo: Arc<dyn AppRepository>,
-    pub scheduler_client: Option<SchedulerClient>,
+    pub scheduler: Arc<dyn Scheduler>,
     pub scheduler_config: scheduler::SchedulerConfig,
     pub builder_addr: String,
     pub jwt_secret: String,
@@ -52,22 +53,11 @@ impl AppState {
         &self,
     ) -> Result<mikrom_proto::scheduler::SchedulerServiceClient<tonic::transport::Channel>, String>
     {
-        if let Some(ref client) = self.scheduler_client {
-            Ok(mikrom_proto::scheduler::SchedulerServiceClient::new(
-                client.channel.clone(),
-            ))
-        } else {
-            let channel = crate::scheduler::connect(&self.scheduler_config).await?;
-            Ok(mikrom_proto::scheduler::SchedulerServiceClient::new(
-                channel,
-            ))
-        }
+        let channel = crate::scheduler::connect(&self.scheduler_config).await?;
+        Ok(mikrom_proto::scheduler::SchedulerServiceClient::new(
+            channel,
+        ))
     }
-}
-
-#[derive(Clone)]
-pub struct SchedulerClient {
-    pub channel: tonic::transport::Channel,
 }
 
 pub fn create_app(state: AppState) -> Router {
@@ -210,7 +200,7 @@ mod tests {
         let state = AppState {
             user_repo: Arc::new(mock_repo),
             app_repo,
-            scheduler_client: None,
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: scheduler::SchedulerConfig::default(),
             builder_addr: "http://localhost:5004".to_string(),
             jwt_secret: "test".to_string(),
