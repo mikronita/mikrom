@@ -54,7 +54,7 @@ make test-all          # Complete test suite
 
 ## Development Conventions
 
-- **Frontend UI (mikrom-app)**: **Strictly use shadcn/ui components.** Do not use Flowbite React or other external component libraries unless absolutely necessary. Standard components should be imported from `@/components/ui`. Always prefer composing existing shadcn/ui primitives over creating custom HTML/CSS wrappers.
+- **Frontend UI (mikrom-app)**: **Strictly use shadcn/ui components.** Do not use Flowbite React or other external component libraries. Standard components must be imported from `@/components/ui`. Always prefer composing existing shadcn/ui primitives over creating custom HTML/CSS wrappers. Specifically for forms, you MUST follow the project's strict shadcn composition rules: use `FieldGroup` + `Field` instead of `div`, `InputGroup` + `InputGroupAddon` for inputs with icons or buttons, and `FieldSet` + `FieldLegend` for groups of inputs/switches.
 - **Rust Services**: Standard Rust workspace conventions.
 - **Protocol Buffers**: Changes to `mikrom-proto/proto/*.proto` require regenerating code (managed by build scripts).
 - **Security**: Internal gRPC communication between services uses **mutual TLS (mTLS)** for encryption and authentication.
