@@ -64,7 +64,7 @@ async fn test_create_app_endpoint() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        scheduler_client: None,
+        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         scheduler_config: Default::default(),
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: jwt_secret.into(),
@@ -135,7 +135,7 @@ async fn test_create_app_duplicate_name() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        scheduler_client: None,
+        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         scheduler_config: Default::default(),
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: jwt_secret.into(),

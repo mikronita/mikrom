@@ -39,7 +39,7 @@ fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
     let state = AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
-        scheduler_client: None,
+        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         scheduler_config: mikrom_api::scheduler::SchedulerConfig::default(),
         builder_addr: "http://localhost:5004".to_string(),
         jwt_secret: jwt_secret.to_string(),

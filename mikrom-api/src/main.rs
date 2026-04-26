@@ -23,21 +23,18 @@ async fn main() -> anyhow::Result<()> {
     let build_semaphore = Arc::new(tokio::sync::Semaphore::new(5)); // Limit to 5 concurrent builds
 
     let scheduler_config = config.scheduler_config();
-    let scheduler_client = match mikrom_api::scheduler::connect(&scheduler_config).await {
-        Ok(channel) => {
-            tracing::info!(addr = %scheduler_config.addr, "Connected to scheduler");
-            Some(mikrom_api::SchedulerClient { channel })
-        },
-        Err(e) => {
-            tracing::warn!(addr = %scheduler_config.addr, "Could not connect to scheduler at startup: {}", e);
-            None
-        },
-    };
+    let channel = tonic::transport::Channel::from_shared(scheduler_config.addr.clone())
+        .map_err(|e| anyhow::anyhow!("Invalid scheduler address: {}", e))?
+        .connect_lazy();
+
+    let scheduler = Arc::new(mikrom_api::scheduler::TonicScheduler {
+        client: mikrom_proto::scheduler::SchedulerServiceClient::new(channel),
+    });
 
     let state = AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
-        scheduler_client,
+        scheduler,
         scheduler_config,
         builder_addr: config.builder_addr,
         jwt_secret: config.jwt_secret,

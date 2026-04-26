@@ -12,11 +12,13 @@ use mikrom_api::AppState;
 use mikrom_api::create_app;
 use mikrom_api::models::app::{App, Deployment};
 use mikrom_api::repositories::{MockAppRepository, MockUserRepository};
+use mikrom_api::scheduler::MockScheduler;
 
 #[tokio::test]
 async fn test_promotion_back_and_forth() {
     let mock_user_repo = MockUserRepository::new();
     let mut mock_app_repo = MockAppRepository::new();
+    let mut mock_scheduler = MockScheduler::new();
 
     let user_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
@@ -84,13 +86,20 @@ async fn test_promotion_back_and_forth() {
         .expect_list_deployments_by_app()
         .returning(move |_| Ok(all_deps.clone()));
 
-    // Expect dep1 to be STOPPED
+    // Expect dep1 to be paused
+    mock_scheduler
+        .expect_pause_app()
+        .with(eq("job-1".to_string()), eq(user_id.to_string()))
+        .times(1)
+        .returning(|_, _| Ok(true));
+
+    // Expect dep1 status update to STOPPED
     mock_app_repo
         .expect_update_deployment_status()
         .with(
             eq(dep1_id),
             eq("STOPPED"),
-            always(),
+            eq(Some("job-1".to_string())),
             always(),
             always(),
             always(),
@@ -98,7 +107,14 @@ async fn test_promotion_back_and_forth() {
         .times(1)
         .returning(|_, _, _, _, _, _| Ok(()));
 
-    // Expect dep2 to be RUNNING
+    // Expect dep2 to be resumed
+    mock_scheduler
+        .expect_resume_app()
+        .with(eq("job-2".to_string()), eq(user_id.to_string()))
+        .times(1)
+        .returning(|_, _| Ok(true));
+
+    // Expect dep2 status update to RUNNING
     mock_app_repo
         .expect_update_deployment_status()
         .with(
@@ -115,7 +131,7 @@ async fn test_promotion_back_and_forth() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        scheduler_client: None,
+        scheduler: Arc::new(mock_scheduler),
         scheduler_config: Default::default(),
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: jwt_secret.into(),
@@ -146,6 +162,7 @@ async fn test_promotion_back_and_forth() {
 async fn test_promotion_pauses_previous_active() {
     let mock_user_repo = MockUserRepository::new();
     let mut mock_app_repo = MockAppRepository::new();
+    let mut mock_scheduler = MockScheduler::new();
 
     let user_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
@@ -213,6 +230,13 @@ async fn test_promotion_pauses_previous_active() {
         .expect_list_deployments_by_app()
         .returning(move |_| Ok(all_deps.clone()));
 
+    // Expect hibernation of old_dep
+    mock_scheduler
+        .expect_pause_app()
+        .with(eq("job-old".to_string()), eq(user_id.to_string()))
+        .times(1)
+        .returning(|_, _| Ok(true));
+
     // 5. Mock update_deployment_status for the old deployment (marking it STOPPED)
     mock_app_repo
         .expect_update_deployment_status()
@@ -230,7 +254,7 @@ async fn test_promotion_pauses_previous_active() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        scheduler_client: None,
+        scheduler: Arc::new(mock_scheduler),
         scheduler_config: Default::default(),
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: jwt_secret.into(),
@@ -266,6 +290,7 @@ async fn test_promotion_pauses_previous_active() {
 async fn test_activate_stopped_deployment_resumes_it() {
     let mock_user_repo = MockUserRepository::new();
     let mut mock_app_repo = MockAppRepository::new();
+    let mut mock_scheduler = MockScheduler::new();
 
     let user_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
@@ -323,6 +348,13 @@ async fn test_activate_stopped_deployment_resumes_it() {
         .expect_list_deployments_by_app()
         .returning(move |_| Ok(vec![paused_dep_clone2.clone()]));
 
+    // Expect resumption
+    mock_scheduler
+        .expect_resume_app()
+        .with(eq("job-stopped".to_string()), eq(user_id.to_string()))
+        .times(1)
+        .returning(|_, _| Ok(true));
+
     // 5. Mock update_deployment_status for resuming (marking it RUNNING)
     mock_app_repo
         .expect_update_deployment_status()
@@ -340,7 +372,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        scheduler_client: None,
+        scheduler: Arc::new(mock_scheduler),
         scheduler_config: Default::default(),
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: jwt_secret.into(),
@@ -376,6 +408,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
 async fn test_delete_app_cleans_up_resources() {
     let mock_user_repo = MockUserRepository::new();
     let mut mock_app_repo = MockAppRepository::new();
+    let mut mock_scheduler = MockScheduler::new();
 
     let user_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
@@ -421,6 +454,13 @@ async fn test_delete_app_cleans_up_resources() {
         .with(eq(app_id))
         .returning(move |_| Ok(vec![dep.clone()]));
 
+    // Expect deletion in scheduler
+    mock_scheduler
+        .expect_delete_app()
+        .with(eq("job-to-delete".to_string()), eq(user_id.to_string()))
+        .times(1)
+        .returning(|_, _| Ok(true));
+
     // 3. Mock delete_app
     mock_app_repo
         .expect_delete_app()
@@ -431,7 +471,7 @@ async fn test_delete_app_cleans_up_resources() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        scheduler_client: None,
+        scheduler: Arc::new(mock_scheduler),
         scheduler_config: Default::default(),
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: jwt_secret.into(),

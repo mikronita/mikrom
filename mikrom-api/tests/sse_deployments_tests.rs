@@ -22,12 +22,12 @@ fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        scheduler_client: None,
+        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         scheduler_config: Default::default(),
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: JWT_SECRET.into(),
         master_key: "key".into(),
-        deployment_events,
+        deployment_events: deployment_events.clone(),
         build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
 
@@ -225,12 +225,12 @@ async fn test_sse_deployments_stream_updates() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        scheduler_client: None,
+        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         scheduler_config: Default::default(),
         builder_addr: "http://localhost:5004".into(),
         jwt_secret: JWT_SECRET.into(),
         master_key: "key".into(),
-        deployment_events,
+        deployment_events: deployment_events.clone(),
         build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
 

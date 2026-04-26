@@ -196,16 +196,13 @@ pub async fn delete_app_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    if let Ok(mut scheduler) = state.get_scheduler_client().await {
-        for deployment in deployments {
-            if let Some(job_id) = deployment.job_id {
-                let req = mikrom_proto::scheduler::DeleteAppRequest {
-                    job_id,
-                    user_id: auth.user_id.clone(),
-                };
-                // We ignore errors here as some deployments might already be gone
-                let _ = scheduler.delete_app(req).await;
-            }
+    for deployment in deployments {
+        if let Some(job_id) = deployment.job_id {
+            // We ignore errors here as some deployments might already be gone
+            let _ = state
+                .scheduler
+                .delete_app(job_id, auth.user_id.clone())
+                .await;
         }
     }
 
@@ -609,46 +606,42 @@ pub async fn activate_deployment_handler(
                     "Hibernating instance during promotion for exclusivity"
                 );
 
-                if let Ok(mut client) = state.get_scheduler_client().await {
-                    // Call pause_app on scheduler
-                    let mut success = false;
-                    match client
-                        .pause_app(mikrom_proto::scheduler::PauseRequest {
-                            job_id: old_job_id.clone(),
-                            user_id: auth.user_id.clone(),
-                        })
-                        .await
-                    {
-                        Ok(resp) => {
-                            success = resp.get_ref().success;
-                        },
-                        Err(e) => {
-                            tracing::warn!(
-                                app_id = %app_id,
-                                job_id = %old_job_id,
-                                "Failed to hibernate instance: {}",
-                                e
-                            );
-                            // If it's "not found", it's effectively stopped/gone
-                            if e.to_string().contains("not found") {
-                                success = true;
-                            }
-                        },
-                    }
+                // Call pause_app on scheduler
+                let mut success = false;
+                match state
+                    .scheduler
+                    .pause_app(old_job_id.clone(), auth.user_id.clone())
+                    .await
+                {
+                    Ok(s) => {
+                        success = s;
+                    },
+                    Err(e) => {
+                        tracing::warn!(
+                            app_id = %app_id,
+                            job_id = %old_job_id,
+                            "Failed to hibernate instance: {}",
+                            e
+                        );
+                        // If it's "not found", it's effectively stopped/gone
+                        if e.contains("not found") {
+                            success = true;
+                        }
+                    },
+                }
 
-                    if success {
-                        let _ = state
-                            .app_repo
-                            .update_deployment_status(
-                                dep.id,
-                                "STOPPED",
-                                Some(old_job_id),
-                                dep.image_tag,
-                                dep.build_id,
-                                None,
-                            )
-                            .await;
-                    }
+                if success {
+                    let _ = state
+                        .app_repo
+                        .update_deployment_status(
+                            dep.id,
+                            "STOPPED",
+                            Some(old_job_id),
+                            dep.image_tag,
+                            dep.build_id,
+                            None,
+                        )
+                        .await;
                 }
             });
         }
@@ -665,14 +658,10 @@ pub async fn activate_deployment_handler(
         && let Some(job_id) = deployment_job_id
     {
         tracing::info!(app_id = %app_id, job_id = %job_id, "Resuming stopped deployment for promotion");
-        if let Ok(mut client) = state.get_scheduler_client().await {
-            let _ = client
-                .resume_app(mikrom_proto::scheduler::ResumeRequest {
-                    job_id: job_id.clone(),
-                    user_id: auth.user_id.clone(),
-                })
-                .await;
-        }
+        let _ = state
+            .scheduler
+            .resume_app(job_id.clone(), auth.user_id.clone())
+            .await;
 
         let _ = state
             .app_repo

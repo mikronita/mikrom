@@ -120,7 +120,7 @@ async fn test_agent_failure_propagation_e2e() {
     let state = AppState {
         user_repo: Arc::new(NoopRepo),
         app_repo,
-        scheduler_client: None,
+        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         scheduler_config: mikrom_api::scheduler::SchedulerConfig {
             addr: scheduler_url.clone(),
             use_tls: false,

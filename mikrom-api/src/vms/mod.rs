@@ -405,17 +405,10 @@ pub async fn delete_deployment_record(
     Path(job_id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // 1. Try to notify scheduler (optional/best effort)
-    if let Ok(mut client) = state.get_scheduler_client().await {
-        let req = mikrom_proto::scheduler::DeleteAppRequest {
-            job_id: job_id.clone(),
-            user_id: auth.user_id,
-        };
-
-        // We ignore the result of the scheduler delete, we just try our best
-        let _ = client.delete_app(req).await;
-    } else {
-        tracing::warn!(job_id = %job_id, "Scheduler unreachable during deletion, removing from DB only");
-    }
+    let _ = state
+        .scheduler
+        .delete_app(job_id.clone(), auth.user_id)
+        .await;
 
     // 2. Always delete from database
     state
@@ -453,19 +446,13 @@ pub async fn pause_deployment(
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let mut client = state
-        .get_scheduler_client()
+    let success = state
+        .scheduler
+        .pause_app(job_id.clone(), auth.user_id)
         .await
         .map_err(ApiError::Scheduler)?;
-    let req = mikrom_proto::scheduler::PauseRequest {
-        job_id: job_id.clone(),
-        user_id: auth.user_id,
-    };
 
-    let resp = client.pause_app(req).await.map_err(map_grpc_error)?;
-
-    let inner = resp.into_inner();
-    if inner.success {
+    if success {
         // Update database status
         if let Ok(Some(dep)) = state.app_repo.get_deployment_by_job_id(&job_id).await {
             let _ = state
@@ -482,10 +469,10 @@ pub async fn pause_deployment(
         }
 
         Ok(Json(
-            serde_json::json!({ "success": true, "message": inner.message }),
+            serde_json::json!({ "success": true, "message": "Paused" }),
         ))
     } else {
-        Err(ApiError::BadRequest(inner.message))
+        Err(ApiError::BadRequest("Failed to pause".to_string()))
     }
 }
 
@@ -510,19 +497,13 @@ pub async fn resume_deployment(
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let mut client = state
-        .get_scheduler_client()
+    let success = state
+        .scheduler
+        .resume_app(job_id.clone(), auth.user_id)
         .await
         .map_err(ApiError::Scheduler)?;
-    let req = mikrom_proto::scheduler::ResumeRequest {
-        job_id: job_id.clone(),
-        user_id: auth.user_id,
-    };
 
-    let resp = client.resume_app(req).await.map_err(map_grpc_error)?;
-
-    let inner = resp.into_inner();
-    if inner.success {
+    if success {
         // Update database status
         if let Ok(Some(dep)) = state.app_repo.get_deployment_by_job_id(&job_id).await {
             let _ = state
@@ -539,19 +520,10 @@ pub async fn resume_deployment(
         }
 
         Ok(Json(
-            serde_json::json!({ "success": true, "message": inner.message }),
+            serde_json::json!({ "success": true, "message": "Resumed" }),
         ))
     } else {
-        Err(ApiError::BadRequest(inner.message))
-    }
-}
-
-fn map_grpc_error(e: tonic::Status) -> ApiError {
-    match e.code() {
-        tonic::Code::NotFound => ApiError::NotFound(e.message().to_string()),
-        tonic::Code::InvalidArgument => ApiError::BadRequest(e.message().to_string()),
-        tonic::Code::Unavailable => ApiError::Scheduler("Scheduler unavailable".to_string()),
-        _ => ApiError::Internal(e.message().to_string()),
+        Err(ApiError::BadRequest("Failed to resume".to_string()))
     }
 }
 
@@ -577,7 +549,7 @@ mod tests {
         let state = AppState {
             user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
             app_repo: Arc::new(mock_repo),
-            scheduler_client: None,
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: crate::scheduler::SchedulerConfig {
                 addr: "http://localhost:5002".to_string(),
                 use_tls: false,
@@ -612,7 +584,7 @@ mod tests {
         let _state = AppState {
             user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
             app_repo: Arc::new(mock_repo),
-            scheduler_client: None,
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: crate::scheduler::SchedulerConfig {
                 addr: "http://localhost:5002".to_string(),
                 use_tls: false,
@@ -681,7 +653,7 @@ mod tests {
         let state = AppState {
             user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
             app_repo: Arc::new(mock_repo),
-            scheduler_client: None,
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             scheduler_config: crate::scheduler::SchedulerConfig {
                 addr: "http://invalid:1".to_string(),
                 use_tls: false,
