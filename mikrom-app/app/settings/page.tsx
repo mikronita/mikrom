@@ -90,20 +90,20 @@ export default function SettingsPage() {
 
           <div className="bg-card rounded-2xl border shadow-sm overflow-hidden">
             <Tabs defaultValue="profile" className="w-full">
-              <TabsList className="w-full justify-start rounded-none border-b bg-transparent h-12 p-0">
-                <TabsTrigger value="profile" className="rounded-none border-b-2 border-transparent px-6 py-3 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+              <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent">
+                <TabsTrigger value="profile">
                   <HiUser className="mr-2 h-4 w-4" /> Profile
                 </TabsTrigger>
-                <TabsTrigger value="security" className="rounded-none border-b-2 border-transparent px-6 py-3 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+                <TabsTrigger value="security">
                   <HiKey className="mr-2 h-4 w-4" /> Security
                 </TabsTrigger>
-                <TabsTrigger value="api" className="rounded-none border-b-2 border-transparent px-6 py-3 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+                <TabsTrigger value="api">
                   <HiCloudDownload className="mr-2 h-4 w-4" /> API Access
                 </TabsTrigger>
-                <TabsTrigger value="billing" className="rounded-none border-b-2 border-transparent px-6 py-3 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+                <TabsTrigger value="billing">
                   <HiCreditCard className="mr-2 h-4 w-4" /> Billing
                 </TabsTrigger>
-                <TabsTrigger value="notifications" className="rounded-none border-b-2 border-transparent px-6 py-3 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+                <TabsTrigger value="notifications">
                   <HiBell className="mr-2 h-4 w-4" /> Notifications
                 </TabsTrigger>
               </TabsList>
