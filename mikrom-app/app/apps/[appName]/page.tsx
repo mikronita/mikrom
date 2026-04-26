@@ -391,9 +391,13 @@ export default function AppDetailPage() {
 
                           const formatDuration = (start: string, end: string) => {
                             const diff = new Date(end).getTime() - new Date(start).getTime();
-                            if (diff <= 0) return "--";
+                            if (diff < 0) return "--";
+                            if (diff < 1000) return `${diff}ms`;
                             const seconds = Math.floor(diff / 1000);
-                            if (seconds < 60) return `${seconds}s`;
+                            if (seconds < 60) {
+                                const ms = diff % 1000;
+                                return ms > 0 ? `${seconds}s ${ms}ms` : `${seconds}s`;
+                            }
                             const minutes = Math.floor(seconds / 60);
                             return `${minutes}m ${seconds % 60}s`;
                           };
