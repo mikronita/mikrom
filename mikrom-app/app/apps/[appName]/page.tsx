@@ -294,51 +294,74 @@ export default function AppDetailPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((dep) => {
-                        const isActive = app?.active_deployment_id === dep.id;
-                        const canActivate = dep.status === "RUNNING" && !isActive;
+                      (() => {
+                        const sortedDeps = [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                        
+                        // Single source of truth for what we consider "Production" in the UI
+                        const productionDepId = app?.active_deployment_id || sortedDeps.find(d => d.status === "RUNNING")?.id;
 
-                        return (
-                          <TableRow key={dep.id}>
-                            <TableCell className="font-medium">
-                              <div className="flex flex-col">
-                                <span className="text-xs text-muted-foreground font-mono mb-1">{dep.id.split("-")[0]}</span>
-                                <span>{dep.image_tag || "N/A"}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <Badge className={cn("font-semibold", getStatusBadgeClass(dep.status))}>
-                                {dep.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-muted-foreground text-xs">
-                              {new Date(dep.created_at).toLocaleString()}
-                            </TableCell>
-                            <TableCell>
-                              {isActive ? (
-                                <div className="flex items-center gap-1.5 text-green-600 dark:text-green-400 font-semibold text-sm">
-                                  <HiCheckCircle className="w-5 h-5" />
-                                  <span>Active</span>
+                        return sortedDeps.map((dep, index) => {
+                          const isProduction = productionDepId === dep.id && dep.status === "RUNNING";
+                          const isLatest = index === 0;
+                          
+                          // A deployment is "Currently in Prod" if it's the designated production one 
+                          // OR if it's the latest one and it's already running (auto-promotion)
+                          const isCurrentlyInProd = isProduction || (isLatest && dep.status === "RUNNING");
+                          
+                          const canActivate = (["RUNNING", "STOPPED", "FAILED"].includes(dep.status)) && !isCurrentlyInProd;
+                          
+                          const getButtonText = () => {
+                            if (isCurrentlyInProd) return "Currently in Prod";
+                            if (dep.status === "BUILDING") return "Building...";
+                            if (["STARTING", "SCHEDULED"].includes(dep.status)) return "Starting...";
+                            return "Promote to Prod";
+                          };
+
+                          return (
+                            <TableRow key={dep.id}>
+                              <TableCell className="font-medium">
+                                <div className="flex flex-col">
+                                  <span className="text-xs text-muted-foreground font-mono mb-1">{dep.id.split("-")[0]}</span>
+                                  <span>{dep.image_tag || "N/A"}</span>
                                 </div>
-                              ) : (
-                                <span className="text-muted-foreground text-xs italic">Standby</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Button 
-                                size="sm" 
-                                variant={isActive ? "outline" : "default"}
-                                disabled={!canActivate || activateMutation.isPending}
-                                onClick={() => handleActivate(dep.id)}
-                                className="ml-auto"
-                              >
-                                {isActive ? "Currently in Prod" : "Promote to Prod"}
-                                {!isActive && <HiRocketLaunch className="ml-2 w-3 h-3" />}
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
+                              </TableCell>
+                              <TableCell>
+                                <Badge className={cn("font-semibold", getStatusBadgeClass(dep.status))}>
+                                  {dep.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-muted-foreground text-xs">
+                                {new Date(dep.created_at).toLocaleString()}
+                              </TableCell>
+                              <TableCell>
+                                {isCurrentlyInProd ? (
+                                  <div className="flex items-center gap-1.5 text-green-600 dark:text-green-400 font-semibold text-sm">
+                                    <HiCheckCircle className="w-5 h-5" />
+                                    <span>Active</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs italic">Standby</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button 
+                                  size="sm" 
+                                  variant={isCurrentlyInProd ? "outline" : "default"}
+                                  disabled={!canActivate || activateMutation.isPending}
+                                  onClick={() => handleActivate(dep.id)}
+                                  className="ml-auto"
+                                >
+                                  {getButtonText()}
+                                  {!isCurrentlyInProd && !["BUILDING", "STARTING", "SCHEDULED"].includes(dep.status) && <HiRocketLaunch className="ml-2 w-3 h-3" />}
+                                  {(dep.status === "BUILDING" || (activateMutation.isPending && activateMutation.variables?.deploymentId === dep.id)) && (
+                                    <Loader2 className="ml-2 w-3 h-3 animate-spin" />
+                                  )}
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        });
+                      })()
                     )}
                   </TableBody>
                 </Table>
@@ -347,7 +370,7 @@ export default function AppDetailPage() {
           </section>
 
           {/* Integrated Instance Monitoring */}
-          {activeDeployment && ["RUNNING", "PAUSED", "STARTING", "SCHEDULED"].includes(activeDeployment.status.toUpperCase()) && (
+          {activeDeployment && ["RUNNING", "STOPPED", "STARTING", "SCHEDULED"].includes(activeDeployment.status.toUpperCase()) && (
             <div className="space-y-6 animate-in fade-in duration-500 pt-6 border-t">
               <h2 className="text-lg font-bold tracking-tight">
                 Live Performance

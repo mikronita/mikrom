@@ -14,7 +14,17 @@ service AgentService {
   rpc StopVm(StopVmRequest) returns (StopVmResponse);
   rpc PauseVm(PauseVmRequest) returns (PauseVmResponse);
   rpc ResumeVm(ResumeVmRequest) returns (ResumeVmResponse);
+  rpc DeleteVm(DeleteVmRequest) returns (DeleteVmResponse);
   rpc GetVmStatus(GetVmStatusRequest) returns (GetVmStatusResponse);
+}
+
+message DeleteVmRequest {
+  string vm_id = 1;
+}
+
+message DeleteVmResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 // ... other messages ...
