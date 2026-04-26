@@ -146,44 +146,19 @@ export default function Page() {
           </div>
 
           {isEmpty ? (
-            /* Onboarding / Empty State */
-            <div className="mt-12">
-              <Empty className="border-2 border-dashed bg-muted/20">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon" className="bg-primary/10 text-primary scale-125 mb-4">
-                    <Rocket className="w-8 h-8" />
-                  </EmptyMedia>
-                  <EmptyTitle className="text-3xl">Welcome to Mikrom</EmptyTitle>
-                  <EmptyDescription className="text-lg max-w-lg mx-auto">
-                    Mikrom allows you to deploy containerized workloads into high-performance Firecracker microVMs in seconds.
-                  </EmptyDescription>
-                </EmptyHeader>
-                
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full max-w-4xl mt-12 mb-8">
-                  <div className="flex flex-col items-center text-center space-y-3 p-6 rounded-xl bg-background/50 border shadow-sm">
-                    <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">1</div>
-                    <h4 className="font-bold">Connect Git</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed">Link your GitHub repository to Mikrom and we&apos;ll detect your app type automatically.</p>
-                  </div>
-                  <div className="flex flex-col items-center text-center space-y-3 p-6 rounded-xl bg-background/50 border shadow-sm">
-                    <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">2</div>
-                    <h4 className="font-bold">Configure</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed">Define vCPUs, RAM and environment variables to match your application&apos;s needs.</p>
-                  </div>
-                  <div className="flex flex-col items-center text-center space-y-3 p-6 rounded-xl bg-background/50 border shadow-sm">
-                    <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">3</div>
-                    <h4 className="font-bold">Deploy</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed">Your app will be built and deployed to a dedicated Firecracker VM instantly.</p>
-                  </div>
-                </div>
-
-                <EmptyContent>
-                  <Button size="lg" className="mt-4 px-10 h-12 text-lg shadow-lg" onClick={() => setShowCreateApp(true)}>
-                    <Plus className="w-6 h-6 mr-2" />
-                    Create Your First Application
-                  </Button>
-                </EmptyContent>
-              </Empty>
+            /* Minimal Empty State */
+            <div className="flex flex-col items-center justify-center min-h-[400px] border-2 border-dashed rounded-xl bg-muted/5 p-12 text-center">
+              <div className="w-16 h-16 bg-primary/10 text-primary rounded-full flex items-center justify-center mb-6">
+                <Rocket className="w-8 h-8" />
+              </div>
+              <h2 className="text-2xl font-bold tracking-tight">No applications found</h2>
+              <p className="text-muted-foreground mt-2 max-w-sm">
+                Get started by creating your first application and deploying it to Mikrom Cloud Platform.
+              </p>
+              <Button size="lg" className="mt-8 shadow-sm" onClick={() => setShowCreateApp(true)}>
+                <Plus className="w-5 h-5 mr-2" />
+                Create Application
+              </Button>
             </div>
           ) : (
             /* Dashboard Content */
