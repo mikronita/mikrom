@@ -124,8 +124,8 @@ impl AppRepository for PostgresAppRepository {
 
         let deployment = sqlx::query_as::<_, Deployment>(
             r#"
-            INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, port, env_vars)
-            VALUES ($1, $2, 'PENDING', $3, $4, $5, $6, $7)
+            INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, port, env_vars, trigger_source)
+            VALUES ($1, $2, 'PENDING', $3, $4, $5, $6, $7, $8)
             RETURNING *
             "#,
         )
@@ -136,12 +136,14 @@ impl AppRepository for PostgresAppRepository {
         .bind(data.disk_mib)
         .bind(data.port)
         .bind(env_json)
+        .bind(data.trigger_source)
         .fetch_one(&self.pool)
         .await?;
 
         Ok(deployment)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn update_deployment_status(
         &self,
         id: Uuid,
@@ -150,15 +152,21 @@ impl AppRepository for PostgresAppRepository {
         image_tag: Option<String>,
         build_id: Option<String>,
         ip_address: Option<String>,
+        git_commit_hash: Option<String>,
+        git_commit_message: Option<String>,
+        git_branch: Option<String>,
     ) -> anyhow::Result<()> {
         sqlx::query(
-            "UPDATE deployments SET status = $1, job_id = COALESCE($2, job_id), image_tag = COALESCE($3, image_tag), build_id = COALESCE($4, build_id), ip_address = COALESCE($5, ip_address), updated_at = NOW() WHERE id = $6"
+            "UPDATE deployments SET status = $1, job_id = COALESCE($2, job_id), image_tag = COALESCE($3, image_tag), build_id = COALESCE($4, build_id), ip_address = COALESCE($5, ip_address), git_commit_hash = COALESCE($6, git_commit_hash), git_commit_message = COALESCE($7, git_commit_message), git_branch = COALESCE($8, git_branch), updated_at = NOW() WHERE id = $9"
         )
         .bind(status)
         .bind(job_id)
         .bind(image_tag)
         .bind(build_id)
         .bind(ip_address)
+        .bind(git_commit_hash)
+        .bind(git_commit_message)
+        .bind(git_branch)
         .bind(id)
         .execute(&self.pool)
         .await?;
@@ -298,6 +306,7 @@ mod tests {
                 disk_mib: 1024,
                 port: 8080,
                 env_vars: std::collections::HashMap::new(),
+                trigger_source: "manual".to_string(),
             })
             .await
             .expect("failed to create deployment");
@@ -312,6 +321,9 @@ mod tests {
                 Some("img:v1".to_string()),
                 Some("build-abc".to_string()),
                 Some("10.0.0.1".to_string()),
+                None,
+                None,
+                None,
             )
             .await
             .expect("failed to update deployment");

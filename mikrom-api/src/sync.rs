@@ -83,6 +83,9 @@ pub async fn start_ip_sync_task(state: AppState) {
                                             dep.image_tag.clone(),
                                             dep.build_id.clone(),
                                             if !inner.ip_address.is_empty() { Some(inner.ip_address) } else { dep.ip_address.clone() },
+                                            dep.git_commit_hash.clone(),
+                                            dep.git_commit_message.clone(),
+                                            dep.git_branch.clone(),
                                         )
                                         .await;
                                     state.deployment_events.send(dep.app_id).ok();
@@ -99,6 +102,9 @@ pub async fn start_ip_sync_task(state: AppState) {
                                         dep.image_tag.clone(),
                                         dep.build_id.clone(),
                                         None,
+                                        dep.git_commit_hash.clone(),
+                                        dep.git_commit_message.clone(),
+                                        dep.git_branch.clone(),
                                     )
                                     .await;
                                 state.deployment_events.send(dep.app_id).ok();

@@ -11,6 +11,7 @@ pub struct NewDeployment {
     pub disk_mib: i64,
     pub port: i32,
     pub env_vars: std::collections::HashMap<String, String>,
+    pub trigger_source: String,
 }
 
 #[mockall::automock]
@@ -33,6 +34,7 @@ pub trait AppRepository: Send + Sync {
     async fn update_app_port(&self, id: Uuid, port: i32) -> anyhow::Result<()>;
 
     async fn create_deployment(&self, data: NewDeployment) -> anyhow::Result<Deployment>;
+    #[allow(clippy::too_many_arguments)]
     async fn update_deployment_status(
         &self,
         id: Uuid,
@@ -41,6 +43,9 @@ pub trait AppRepository: Send + Sync {
         image_tag: Option<String>,
         build_id: Option<String>,
         ip_address: Option<String>,
+        git_commit_hash: Option<String>,
+        git_commit_message: Option<String>,
+        git_branch: Option<String>,
     ) -> anyhow::Result<()>;
     async fn update_deployment_port(&self, id: Uuid, port: i32) -> anyhow::Result<()>;
     async fn get_deployment(&self, id: Uuid) -> anyhow::Result<Option<Deployment>>;

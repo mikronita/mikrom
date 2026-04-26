@@ -12,7 +12,14 @@ pub trait BuilderClient: Send + Sync {
     async fn get_build_status(
         &self,
         build_id: String,
-    ) -> anyhow::Result<(BuildStatus, String, u32)>;
+    ) -> anyhow::Result<(
+        BuildStatus,
+        String,
+        u32,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )>;
 }
 
 #[async_trait]
@@ -47,7 +54,14 @@ impl BuilderClient for RealBuilderClient {
     async fn get_build_status(
         &self,
         build_id: String,
-    ) -> anyhow::Result<(BuildStatus, String, u32)> {
+    ) -> anyhow::Result<(
+        BuildStatus,
+        String,
+        u32,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> {
         let channel = crate::builder::connect(&self.addr).await?;
         let mut client = BuilderServiceClient::new(channel);
         let resp = client
@@ -55,7 +69,26 @@ impl BuilderClient for RealBuilderClient {
             .await?
             .into_inner();
         let status = BuildStatus::try_from(resp.status).unwrap_or(BuildStatus::Unspecified);
-        Ok((status, resp.image_tag, resp.exposed_port))
+        Ok((
+            status,
+            resp.image_tag,
+            resp.exposed_port,
+            if resp.git_commit_hash.is_empty() {
+                None
+            } else {
+                Some(resp.git_commit_hash)
+            },
+            if resp.git_commit_message.is_empty() {
+                None
+            } else {
+                Some(resp.git_commit_message)
+            },
+            if resp.git_branch.is_empty() {
+                None
+            } else {
+                Some(resp.git_branch)
+            },
+        ))
     }
 }
 
@@ -239,7 +272,7 @@ async fn poll_and_deploy(
     );
 
     let mut attempts = 0;
-    let (final_image, detected_port) = loop {
+    let (final_image, detected_port, git_hash, git_msg, git_branch) = loop {
         if attempts > 60 {
             let _ = state
                 .app_repo
@@ -250,24 +283,45 @@ async fn poll_and_deploy(
                     None,
                     Some(task.build_id.clone()),
                     None,
+                    None,
+                    None,
+                    None,
                 )
                 .await;
             state.deployment_events.send(task.app_id).ok();
             return Err(anyhow::anyhow!("Build timed out"));
         }
 
-        let (status, image_tag, exposed_port) =
+        let (status, image_tag, exposed_port, g_hash, g_msg, g_branch) =
             builder.get_build_status(task.build_id.clone()).await?;
+
+        // Update git metadata in DB as soon as we have it
+        if g_hash.is_some() || g_msg.is_some() || g_branch.is_some() {
+            let _ = state
+                .app_repo
+                .update_deployment_status(
+                    task.deployment_id,
+                    "BUILDING",
+                    None,
+                    None,
+                    Some(task.build_id.clone()),
+                    None,
+                    g_hash.clone(),
+                    g_msg.clone(),
+                    g_branch.clone(),
+                )
+                .await;
+        }
 
         match status {
             BuildStatus::Success => {
                 info!(
-                app = %task.app_name,
-                image = %image_tag,
-                port = %exposed_port,
-                "Build successful, proceeding to deployment"
+                    app = %task.app_name,
+                    image = %image_tag,
+                    port = %exposed_port,
+                    "Build successful, proceeding to deployment"
                 );
-                break (image_tag, exposed_port);
+                break (image_tag, exposed_port, g_hash, g_msg, g_branch);
             },
             BuildStatus::Failed => {
                 let _ = state
@@ -278,6 +332,9 @@ async fn poll_and_deploy(
                         None,
                         None,
                         Some(task.build_id.clone()),
+                        None,
+                        None,
+                        None,
                         None,
                     )
                     .await;
@@ -337,6 +394,9 @@ async fn poll_and_deploy(
             Some(final_image),
             Some(task.build_id),
             None,
+            git_hash,
+            git_msg,
+            git_branch,
         )
         .await;
 
@@ -457,9 +517,12 @@ async fn poll_and_deploy(
                             dep.id,
                             "STOPPED",
                             Some(old_job_id),
-                            dep.image_tag,
-                            dep.build_id,
+                            dep.image_tag.clone(),
+                            dep.build_id.clone(),
                             None,
+                            dep.git_commit_hash.clone(),
+                            dep.git_commit_message.clone(),
+                            dep.git_branch.clone(),
                         )
                         .await;
                 }
@@ -490,8 +553,25 @@ mod tests {
 
     #[async_trait]
     impl BuilderClient for MockBuilder {
-        async fn get_build_status(&self, _: String) -> anyhow::Result<(BuildStatus, String, u32)> {
-            Ok((self.status, self.tag.clone(), self.port))
+        async fn get_build_status(
+            &self,
+            _: String,
+        ) -> anyhow::Result<(
+            BuildStatus,
+            String,
+            u32,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        )> {
+            Ok((
+                self.status,
+                self.tag.clone(),
+                self.port,
+                Some("abc1234".into()),
+                Some("Initial commit".into()),
+                Some("main".into()),
+            ))
         }
     }
 
@@ -552,10 +632,10 @@ mod tests {
         let app_id = Uuid::new_v4();
         let dep_id = Uuid::new_v4();
 
-        // 1. Success expectations
+        // Status updates expectations
         mock_repo
             .expect_update_deployment_status()
-            .returning(|_, _, _, _, _, _| Ok(()));
+            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
 
         mock_repo
             .expect_list_deployments_by_app()
@@ -668,7 +748,7 @@ mod tests {
 
         mock_repo
             .expect_update_deployment_status()
-            .returning(|_, _, _, _, _, _| Ok(()));
+            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
 
         mock_repo
             .expect_update_deployment_port()
@@ -792,32 +872,10 @@ mod tests {
             .times(1)
             .returning(|_, _| Ok(()));
 
-        // EXPECTATION: Update the previous deployment status to STOPPED
+        // EXPECTATION: Status updates (BUILDING, STOPPED for old, RUNNING for new)
         mock_repo
             .expect_update_deployment_status()
-            .with(
-                mockall::predicate::eq(dep_id_prev),
-                mockall::predicate::eq("STOPPED"),
-                always(),
-                always(),
-                always(),
-                always(),
-            )
-            .times(1)
-            .returning(|_, _, _, _, _, _| Ok(()));
-
-        // Also the new one being set to RUNNING
-        mock_repo
-            .expect_update_deployment_status()
-            .with(
-                mockall::predicate::eq(dep_id_new),
-                mockall::predicate::eq("RUNNING"),
-                always(),
-                always(),
-                always(),
-                always(),
-            )
-            .returning(|_, _, _, _, _, _| Ok(()));
+            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
 
         mock_repo
             .expect_update_deployment_port()
@@ -929,7 +987,7 @@ mod tests {
         // Other boilerplate mocks
         mock_repo
             .expect_update_deployment_status()
-            .returning(|_, _, _, _, _, _| Ok(()));
+            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
         mock_repo
             .expect_set_active_deployment()
             .returning(|_, _| Ok(()));
@@ -966,6 +1024,124 @@ mod tests {
             status: BuildStatus::Success,
             tag: "t".into(),
             port: 8080,
+        });
+
+        let scheduler = Arc::new(MockSchedulerClientImpl { success: true });
+
+        let result = poll_and_deploy(state, task, builder, scheduler).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_poll_and_deploy_propagates_git_metadata() {
+        let mut mock_repo = MockAppRepository::new();
+        let app_id = Uuid::new_v4();
+        let dep_id = Uuid::new_v4();
+
+        let git_hash = "hash123";
+        let git_msg = "feat: test metadata";
+        let git_branch = "main";
+
+        // EXPECTATION: The final update should include the git metadata
+        mock_repo
+            .expect_update_deployment_status()
+            .with(
+                mockall::predicate::eq(dep_id),
+                mockall::predicate::eq("RUNNING"),
+                always(),
+                always(),
+                always(),
+                always(),
+                mockall::predicate::eq(Some(git_hash.to_string())),
+                mockall::predicate::eq(Some(git_msg.to_string())),
+                mockall::predicate::eq(Some(git_branch.to_string())),
+            )
+            .times(1)
+            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
+
+        // Generic mock for other calls (like BUILDING state)
+        mock_repo
+            .expect_update_deployment_status()
+            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
+
+        mock_repo.expect_get_app().returning(move |_| {
+            Ok(Some(crate::models::app::App {
+                id: app_id,
+                ..Default::default()
+            }))
+        });
+
+        mock_repo
+            .expect_list_deployments_by_app()
+            .returning(move |_| Ok(vec![]));
+
+        mock_repo
+            .expect_set_active_deployment()
+            .returning(|_, _| Ok(()));
+
+        mock_repo
+            .expect_update_deployment_port()
+            .returning(|_, _| Ok(()));
+
+        let state = AppState {
+            user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
+            app_repo: Arc::new(mock_repo),
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
+            scheduler_config: Default::default(),
+            builder_addr: "".into(),
+            jwt_secret: "".into(),
+            master_key: "".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+        };
+
+        let task = BuildTask {
+            deployment_id: dep_id,
+            app_id,
+            app_name: "test".into(),
+            user_id: "user-1".into(),
+            build_id: "build-1".into(),
+            vcpus: 1,
+            memory_mib: 128,
+            disk_mib: 512,
+            port: 8080,
+            env: HashMap::new(),
+        };
+
+        struct MetadataBuilder {
+            hash: String,
+            msg: String,
+            branch: String,
+        }
+
+        #[async_trait]
+        impl BuilderClient for MetadataBuilder {
+            async fn get_build_status(
+                &self,
+                _: String,
+            ) -> anyhow::Result<(
+                BuildStatus,
+                String,
+                u32,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            )> {
+                Ok((
+                    BuildStatus::Success,
+                    "img:latest".into(),
+                    8080,
+                    Some(self.hash.clone()),
+                    Some(self.msg.clone()),
+                    Some(self.branch.clone()),
+                ))
+            }
+        }
+
+        let builder = Arc::new(MetadataBuilder {
+            hash: git_hash.into(),
+            msg: git_msg.into(),
+            branch: git_branch.into(),
         });
 
         let scheduler = Arc::new(MockSchedulerClientImpl { success: true });

@@ -32,6 +32,9 @@ message GetBuildStatusResponse {
   string image_tag = 3;
   string message = 4;
   uint32 exposed_port = 5;
+  string git_commit_hash = 6;
+  string git_commit_message = 7;
+  string git_branch = 8;
 }
 
 enum BuildStatus {

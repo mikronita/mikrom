@@ -34,6 +34,10 @@ pub struct Deployment {
     pub port: i32,
     #[schema(value_type = Object)]
     pub env_vars: serde_json::Value,
+    pub git_commit_hash: Option<String>,
+    pub git_commit_message: Option<String>,
+    pub git_branch: Option<String>,
+    pub trigger_source: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

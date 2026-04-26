@@ -133,6 +133,10 @@ export interface DeploymentInfo {
   image_tag: string | null;
   job_id: string | null;
   status: string;
+  git_commit_hash: string | null;
+  git_commit_message: string | null;
+  git_branch: string | null;
+  trigger_source: string;
   created_at: string;
   updated_at: string;
 }
