@@ -3,18 +3,27 @@
 import { useState } from "react";
 import Link from "next/link";
 import { 
-  HiPlus, 
-  HiChartBar, 
-  HiCollection, 
-  HiLightningBolt
-} from "react-icons/hi";
+  Rocket, 
+  Plus, 
+  LayoutDashboard, 
+  Activity, 
+  Globe, 
+  BookOpen,
+  Settings,
+  ArrowRight,
+  ExternalLink,
+  Container
+} from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useVms } from "@/lib/hooks/use-vms";
 import { useApps } from "@/lib/hooks/use-apps";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CreateAppModal } from "@/components/CreateAppModal";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 
 export default function Page() {
   const { data: vms = [], isFetching: isFetchingVms } = useVms();
@@ -29,33 +38,47 @@ export default function Page() {
       v.status.toLowerCase() === "building"
   ).length;
 
+  // Map apps to their live status if available
+  const appsWithStatus = apps.slice(0, 5).map(app => {
+    const liveVm = vms.find(vm => vm.app_id === app.id || vm.app_name === app.name);
+    return {
+      ...app,
+      status: liveVm ? liveVm.status : "Stopped"
+    };
+  });
+
+  const isEmpty = !isLoadingApps && apps.length === 0;
+
   return (
     <AuthGuard>
       <DashboardLayout>
         <div className="space-y-8">
+          {/* Header */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold tracking-tight">
                 Dashboard
               </h1>
               <p className="text-muted-foreground mt-1">
-                Overview of your cloud resources and applications.
+                Monitor and manage your cloud infrastructure.
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <Button size="sm" onClick={() => setShowCreateApp(true)}>
-                <HiPlus className="w-4 h-4 mr-2" />
-                New Application
-              </Button>
-            </div>
+            {!isEmpty && (
+              <div className="flex items-center gap-3">
+                <Button onClick={() => setShowCreateApp(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  New Application
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Stats Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            <Card>
+            <Card className="relative overflow-hidden shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Applications</CardTitle>
-                <HiCollection className="w-4 h-4 text-muted-foreground" />
+                <Container className="w-4 h-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 {isLoadingApps ? (
@@ -64,14 +87,16 @@ export default function Page() {
                   <div className="text-2xl font-bold">{apps.length}</div>
                 )}
                 <p className="text-xs text-muted-foreground mt-1">
-                  Projects in Git
+                  Active projects
                 </p>
               </CardContent>
+              <div className="absolute bottom-0 left-0 h-1 w-full bg-primary/10" />
             </Card>
-            <Card>
+            
+            <Card className="relative overflow-hidden shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Running</CardTitle>
-                <HiChartBar className="w-4 h-4 text-green-500" />
+                <CardTitle className="text-sm font-medium">Running VMs</CardTitle>
+                <Activity className="w-4 h-4 text-green-500" />
               </CardHeader>
               <CardContent>
                 {isFetchingVms && vms.length === 0 ? (
@@ -80,14 +105,16 @@ export default function Page() {
                   <div className="text-2xl font-bold text-green-600 dark:text-green-400">{runningCount}</div>
                 )}
                 <p className="text-xs text-muted-foreground mt-1">
-                  Currently serving
+                  Currently serving traffic
                 </p>
               </CardContent>
+              <div className="absolute bottom-0 left-0 h-1 w-full bg-green-500/10" />
             </Card>
-            <Card>
+
+            <Card className="relative overflow-hidden shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Deploying</CardTitle>
-                <HiLightningBolt className="w-4 h-4 text-yellow-500" />
+                <Rocket className="w-4 h-4 text-yellow-500" />
               </CardHeader>
               <CardContent>
                 {isFetchingVms && vms.length === 0 ? (
@@ -96,30 +123,163 @@ export default function Page() {
                   <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{pendingCount}</div>
                 )}
                 <p className="text-xs text-muted-foreground mt-1">
-                  Pending tasks
+                  Ongoing deployments
                 </p>
               </CardContent>
+              <div className="absolute bottom-0 left-0 h-1 w-full bg-yellow-500/10" />
             </Card>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <Card className="lg:col-span-3">
-              <CardContent className="flex items-center justify-between p-6">
-                <div>
-                  <h3 className="text-xl font-bold">Welcome back!</h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Your cloud infrastructure is running smoothly. 
-                  </p>
+          {isEmpty ? (
+            /* Onboarding / Empty State */
+            <div className="mt-12">
+              <Empty className="border-2 border-dashed bg-muted/20">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon" className="bg-primary/10 text-primary scale-125 mb-4">
+                    <Rocket className="w-8 h-8" />
+                  </EmptyMedia>
+                  <EmptyTitle className="text-3xl">Welcome to Mikrom</EmptyTitle>
+                  <EmptyDescription className="text-lg max-w-lg mx-auto">
+                    Mikrom allows you to deploy containerized workloads into high-performance Firecracker microVMs in seconds.
+                  </EmptyDescription>
+                </EmptyHeader>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full max-w-4xl mt-12 mb-8">
+                  <div className="flex flex-col items-center text-center space-y-3 p-6 rounded-xl bg-background/50 border shadow-sm">
+                    <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">1</div>
+                    <h4 className="font-bold">Connect Git</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed">Link your GitHub repository to Mikrom and we'll detect your app type automatically.</p>
+                  </div>
+                  <div className="flex flex-col items-center text-center space-y-3 p-6 rounded-xl bg-background/50 border shadow-sm">
+                    <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">2</div>
+                    <h4 className="font-bold">Configure</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed">Define vCPUs, RAM and environment variables to match your application's needs.</p>
+                  </div>
+                  <div className="flex flex-col items-center text-center space-y-3 p-6 rounded-xl bg-background/50 border shadow-sm">
+                    <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">3</div>
+                    <h4 className="font-bold">Deploy</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed">Your app will be built and deployed to a dedicated Firecracker VM instantly.</p>
+                  </div>
                 </div>
-                <Link href="/apps">
-                  <Button size="sm" variant="outline">
-                    <HiCollection className="w-4 h-4 mr-2" />
-                    View All Applications
+
+                <EmptyContent>
+                  <Button size="lg" className="mt-4 px-10 h-12 text-lg shadow-lg" onClick={() => setShowCreateApp(true)}>
+                    <Plus className="w-6 h-6 mr-2" />
+                    Create Your First Application
                   </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          </div>
+                </EmptyContent>
+              </Empty>
+            </div>
+          ) : (
+            /* Dashboard Content */
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Recent Applications */}
+              <div className="lg:col-span-2 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-semibold flex items-center gap-2">
+                    <LayoutDashboard className="w-5 h-5 text-primary" />
+                    Recent Applications
+                  </h2>
+                  <Link href="/apps">
+                    <Button variant="ghost" size="sm" className="text-primary hover:bg-primary/5">
+                      View all
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </Link>
+                </div>
+                
+                <Card className="overflow-hidden border-0 shadow-sm ring-1 ring-border">
+                  <Table>
+                    <TableHeader className="bg-muted/30">
+                      <TableRow>
+                        <TableHead className="py-3">Application</TableHead>
+                        <TableHead className="py-3">Status</TableHead>
+                        <TableHead className="py-3 text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isLoadingApps ? (
+                        Array(3).fill(0).map((_, i) => (
+                          <TableRow key={i}>
+                            <TableCell><div className="h-4 w-32 bg-muted animate-pulse rounded" /></TableCell>
+                            <TableCell><div className="h-4 w-16 bg-muted animate-pulse rounded" /></TableCell>
+                            <TableCell className="text-right"><div className="h-8 w-20 bg-muted animate-pulse rounded ml-auto" /></TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        appsWithStatus.map((app) => (
+                          <TableRow key={app.id} className="hover:bg-muted/10 transition-colors cursor-default">
+                            <TableCell>
+                              <div className="flex flex-col">
+                                <span className="font-bold text-base">{app.name}</span>
+                                <span className="text-xs text-muted-foreground truncate max-w-[250px]">{app.git_url}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge 
+                                variant={
+                                  app.status.toLowerCase() === "running" ? "success" : 
+                                  (app.status.toLowerCase() === "building" || app.status.toLowerCase() === "pending") ? "warning" : 
+                                  "secondary"
+                                }
+                                className="capitalize px-3 py-1 font-medium"
+                              >
+                                {app.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Link href={`/apps/${app.name}`}>
+                                <Button size="sm" variant="outline" className="h-8 px-4">
+                                  Manage
+                                </Button>
+                              </Link>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </Card>
+              </div>
+
+              {/* Sidebar / Quick Actions */}
+              <div className="space-y-6">
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg font-bold">Quick Actions</CardTitle>
+                    <CardDescription>Common tasks and shortcuts.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-4">
+                    <Button variant="outline" className="group justify-start h-auto py-4 px-4 border-2 hover:border-primary/50 hover:bg-primary/5 transition-all" onClick={() => setShowCreateApp(true)}>
+                      <Plus className="mr-4 h-6 w-6 text-primary group-hover:scale-110 transition-transform" />
+                      <div className="flex flex-col items-start">
+                        <span className="font-bold">New App</span>
+                        <span className="text-xs text-muted-foreground">Deploy from a Git repo</span>
+                      </div>
+                    </Button>
+                    <Button variant="outline" className="group justify-start h-auto py-4 px-4 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all" asChild>
+                      <Link href="/docs" className="flex">
+                        <BookOpen className="mr-4 h-6 w-6 text-blue-500 group-hover:scale-110 transition-transform" />
+                        <div className="flex flex-col items-start">
+                          <span className="font-bold">Documentation</span>
+                          <span className="text-xs text-muted-foreground">Learn how to use Mikrom</span>
+                        </div>
+                      </Link>
+                    </Button>
+                    <Button variant="outline" className="group justify-start h-auto py-4 px-4 hover:bg-muted transition-all" asChild>
+                      <Link href="/settings" className="flex">
+                        <Settings className="mr-4 h-6 w-6 text-muted-foreground group-hover:scale-110 transition-transform" />
+                        <div className="flex flex-col items-start">
+                          <span className="font-bold">Settings</span>
+                          <span className="text-xs text-muted-foreground">Account and API keys</span>
+                        </div>
+                      </Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
         </div>
 
         {showCreateApp && <CreateAppModal onClose={() => setShowCreateApp(false)} />}
