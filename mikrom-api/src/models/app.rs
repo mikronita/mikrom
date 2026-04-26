@@ -4,7 +4,7 @@ use sqlx::FromRow;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, FromRow, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone, ToSchema, Default)]
 pub struct App {
     pub id: Uuid,
     pub name: String,
@@ -18,7 +18,7 @@ pub struct App {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize, Deserialize, FromRow, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone, ToSchema, Default)]
 pub struct Deployment {
     pub id: Uuid,
     pub app_id: Uuid,

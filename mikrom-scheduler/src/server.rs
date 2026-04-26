@@ -150,16 +150,19 @@ impl SchedulerService for SchedulerServer {
                             self.scheduler.fail_job(&id, vm_metrics.error_message);
                         },
                         mikrom_proto::scheduler::VmStatus::Stopped => {
-                            // Only update if it wasn't already cancelled
+                            // If the job is already Stopped (hibernated), keep it that way.
+                            // If it's something else (like Running), then it truly failed or was stopped externally.
                             let current_status = self.scheduler.get_job(&id).map(|j| j.status);
-                            if current_status != Some(crate::job::JobStatus::Cancelled) {
+                            if current_status != Some(crate::job::JobStatus::Cancelled)
+                                && current_status != Some(crate::job::JobStatus::Stopped)
+                            {
                                 self.scheduler
                                     .update_job_status(&id, crate::job::JobStatus::Failed);
                             }
                         },
                         mikrom_proto::scheduler::VmStatus::Paused => {
                             self.scheduler
-                                .update_job_status(&id, crate::job::JobStatus::Paused);
+                                .update_job_status(&id, crate::job::JobStatus::Stopped);
                         },
                         _ => {},
                     }
@@ -258,13 +261,35 @@ impl SchedulerService for SchedulerServer {
 
                 let mut job = crate::job::Job::new(
                     job_id.clone(),
-                    req.app_id,
+                    req.app_id.clone(),
                     req.app_name,
                     req.image,
                     job_config.clone(),
-                    req.user_id,
+                    req.user_id.clone(),
                 );
                 job.schedule(host_id.clone(), vm_id.clone());
+
+                // ── Exclusivity Cluster-wide ──────────────────────────────────
+                let other_jobs: Vec<String> = self
+                    .scheduler
+                    .jobs
+                    .read()
+                    .values()
+                    .filter(|j| {
+                        j.app_id == req.app_id
+                            && j.job_id != job_id
+                            && j.status != crate::job::JobStatus::Stopped
+                            && j.status != crate::job::JobStatus::Cancelled
+                            && j.status != crate::job::JobStatus::Failed
+                    })
+                    .map(|j| j.job_id.clone())
+                    .collect();
+
+                for old_job_id in other_jobs {
+                    tracing::info!(new_job_id = %job_id, old_job_id = %old_job_id, app_id = %req.app_id, "Pausing existing cluster instance for exclusivity");
+                    let _ = self.pause_job_internal(&old_job_id, &req.user_id).await;
+                }
+
                 self.scheduler.add_job(job);
 
                 tracing::info!(
@@ -482,10 +507,10 @@ impl SchedulerService for SchedulerServer {
                 return Err(Status::permission_denied("You do not own this job"));
             }
 
-            // First stop it if it's running
+            // First stop it and purge resources if it was scheduled
             if let Some(vm_id) = &job.vm_id {
                 let _ = self
-                    .stop_vm_on_agent(job.host_id.as_deref().unwrap_or(""), vm_id)
+                    .delete_vm_on_agent(job.host_id.as_deref().unwrap_or(""), vm_id)
                     .await;
             }
 
@@ -518,48 +543,9 @@ impl SchedulerService for SchedulerServer {
         request: tonic::Request<PauseRequest>,
     ) -> Result<Response<PauseResponse>, Status> {
         let req = request.into_inner();
-        let job = self.scheduler.get_job(&req.job_id).ok_or_else(|| {
-            tracing::warn!("Job {} not found", req.job_id);
-            Status::not_found("Job not found")
-        })?;
+        let (success, message) = self.pause_job_internal(&req.job_id, &req.user_id).await?;
 
-        if job.user_id != req.user_id {
-            tracing::warn!("User {} unauthorized for job {}", req.user_id, req.job_id);
-            return Err(Status::permission_denied("Not your job"));
-        }
-
-        let host_id = job.host_id.ok_or_else(|| {
-            tracing::error!("Job {} not scheduled", req.job_id);
-            Status::failed_precondition("Job not scheduled")
-        })?;
-        let vm_id = job.vm_id.ok_or_else(|| {
-            tracing::error!("Job {} has no VM ID assigned", req.job_id);
-            Status::failed_precondition("No VM ID assigned")
-        })?;
-
-        let mut client = self.get_agent_client(&host_id).await?;
-        let agent_resp = client
-            .pause_vm(mikrom_proto::agent::PauseVmRequest { vm_id })
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    "Failed to pause VM {} on host {}: {}",
-                    req.job_id,
-                    host_id,
-                    e
-                );
-                e
-            })?;
-
-        if agent_resp.get_ref().success {
-            self.scheduler
-                .update_job_status(&req.job_id, crate::job::JobStatus::Paused);
-        }
-
-        Ok(Response::new(PauseResponse {
-            success: agent_resp.get_ref().success,
-            message: agent_resp.get_ref().message.clone(),
-        }))
+        Ok(Response::new(PauseResponse { success, message }))
     }
 
     #[tracing::instrument(skip(self, request), fields(job_id = %request.get_ref().job_id))]
@@ -582,14 +568,37 @@ impl SchedulerService for SchedulerServer {
             tracing::error!("Job {} not scheduled", req.job_id);
             Status::failed_precondition("Job not scheduled")
         })?;
-        let vm_id = job.vm_id.ok_or_else(|| {
+        let vm_id = job.vm_id.as_deref().ok_or_else(|| {
             tracing::error!("Job {} has no VM ID assigned", req.job_id);
             Status::failed_precondition("No VM ID assigned")
         })?;
 
+        // ── Exclusivity Cluster-wide ──────────────────────────────────
+        let other_jobs: Vec<String> = self
+            .scheduler
+            .jobs
+            .read()
+            .values()
+            .filter(|j| {
+                j.app_id == job.app_id
+                    && j.job_id != req.job_id
+                    && j.status != crate::job::JobStatus::Stopped
+                    && j.status != crate::job::JobStatus::Cancelled
+                    && j.status != crate::job::JobStatus::Failed
+            })
+            .map(|j| j.job_id.clone())
+            .collect();
+
+        for old_job_id in other_jobs {
+            tracing::info!(new_job_id = %req.job_id, old_job_id = %old_job_id, app_id = %job.app_id, "Pausing existing cluster instance during resume for exclusivity");
+            let _ = self.pause_job_internal(&old_job_id, &req.user_id).await;
+        }
+
         let mut client = self.get_agent_client(&host_id).await?;
         let agent_resp = client
-            .resume_vm(mikrom_proto::agent::ResumeVmRequest { vm_id })
+            .resume_vm(mikrom_proto::agent::ResumeVmRequest {
+                vm_id: vm_id.to_string(),
+            })
             .await
             .map_err(|e| {
                 tracing::error!(
@@ -601,14 +610,15 @@ impl SchedulerService for SchedulerServer {
                 e
             })?;
 
-        if agent_resp.get_ref().success {
+        let inner = agent_resp.into_inner();
+        if inner.success {
             self.scheduler
                 .update_job_status(&req.job_id, crate::job::JobStatus::Running);
         }
 
         Ok(Response::new(ResumeResponse {
-            success: agent_resp.get_ref().success,
-            message: agent_resp.get_ref().message.clone(),
+            success: inner.success,
+            message: inner.message,
         }))
     }
 
@@ -890,6 +900,96 @@ impl SchedulerServer {
         }
     }
 
+    async fn pause_job_internal(
+        &self,
+        job_id: &str,
+        user_id: &str,
+    ) -> Result<(bool, String), Status> {
+        let job = self.scheduler.get_job(job_id).ok_or_else(|| {
+            tracing::warn!("Job {} not found", job_id);
+            Status::not_found("Job not found")
+        })?;
+
+        if job.user_id != user_id {
+            tracing::warn!("User {} unauthorized for job {}", user_id, job_id);
+            return Err(Status::permission_denied("Not your job"));
+        }
+
+        // If it's already stopped, just return success
+        if job.status == crate::job::JobStatus::Stopped {
+            return Ok((true, "Already stopped".to_string()));
+        }
+
+        let host_id = job.host_id.as_deref().ok_or_else(|| {
+            tracing::error!("Job {} not scheduled", job_id);
+            Status::failed_precondition("Job not scheduled")
+        })?;
+        let vm_id = job.vm_id.as_deref().ok_or_else(|| {
+            tracing::error!("Job {} has no VM ID assigned", job_id);
+            Status::failed_precondition("No VM ID assigned")
+        })?;
+
+        let mut client = self.get_agent_client(host_id).await?;
+        let (mut success, mut message) = match client
+            .pause_vm(mikrom_proto::agent::PauseVmRequest {
+                vm_id: vm_id.to_string(),
+            })
+            .await
+        {
+            Ok(resp) => {
+                let inner = resp.into_inner();
+                (inner.success, inner.message)
+            },
+            Err(e) => {
+                tracing::warn!(
+                    "PauseVm failed for VM {} on host {}, falling back to StopVm: {}",
+                    job_id,
+                    host_id,
+                    e
+                );
+                (false, e.to_string())
+            },
+        };
+
+        if !success {
+            // FALLBACK: Forced stop if hibernation fails for any reason
+            tracing::warn!("Agent reported pause failure for {}, forcing stop", job_id);
+            match client
+                .stop_vm(mikrom_proto::agent::StopVmRequest {
+                    vm_id: vm_id.to_string(),
+                })
+                .await
+            {
+                Ok(resp) => {
+                    let inner = resp.into_inner();
+                    if inner.success {
+                        success = true;
+                        message = format!("Pause failed but fallback stop succeeded: {}", message);
+                    } else {
+                        message =
+                            format!("Pause failed and fallback stop failed: {}", inner.message);
+                    }
+                },
+                Err(stop_err) => {
+                    tracing::error!(
+                        "StopVm fallback also failed for VM {} on host {}: {}",
+                        job_id,
+                        host_id,
+                        stop_err
+                    );
+                    message = format!("Pause failed and fallback RPC failed: {}", stop_err);
+                },
+            }
+        }
+
+        if success {
+            self.scheduler
+                .update_job_status(job_id, crate::job::JobStatus::Stopped);
+        }
+
+        Ok((success, message))
+    }
+
     async fn stop_vm_on_agent(&self, host_id: &str, vm_id: &str) -> Result<(), Status> {
         if host_id.is_empty() {
             return Ok(());
@@ -930,6 +1030,56 @@ impl SchedulerServer {
             Err(e) => {
                 tracing::warn!(
                     "stop_vm_on_agent: RPC error for vm {} on host {}: {}",
+                    vm_id,
+                    host_id,
+                    e.message()
+                );
+            },
+        }
+
+        Ok(())
+    }
+
+    async fn delete_vm_on_agent(&self, host_id: &str, vm_id: &str) -> Result<(), Status> {
+        if host_id.is_empty() {
+            return Ok(());
+        }
+
+        let mut client = match self.get_agent_client(host_id).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    "delete_vm_on_agent: could not connect to agent {} for vm {}: {}",
+                    host_id,
+                    vm_id,
+                    e
+                );
+                return Ok(());
+            },
+        };
+
+        match client
+            .delete_vm(mikrom_proto::agent::DeleteVmRequest {
+                vm_id: vm_id.to_string(),
+            })
+            .await
+        {
+            Ok(resp) => {
+                let inner = resp.into_inner();
+                if inner.success {
+                    tracing::info!("VM {} resources purged on host {}", vm_id, host_id);
+                } else {
+                    tracing::warn!(
+                        "Agent reported failure purging VM {} on host {}: {}",
+                        vm_id,
+                        host_id,
+                        inner.message
+                    );
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    "delete_vm_on_agent: RPC error for vm {} on host {}: {}",
                     vm_id,
                     host_id,
                     e.message()

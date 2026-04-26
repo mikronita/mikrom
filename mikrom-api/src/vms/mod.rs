@@ -458,7 +458,7 @@ pub async fn pause_deployment(
         .await
         .map_err(ApiError::Scheduler)?;
     let req = mikrom_proto::scheduler::PauseRequest {
-        job_id,
+        job_id: job_id.clone(),
         user_id: auth.user_id,
     };
 
@@ -466,6 +466,21 @@ pub async fn pause_deployment(
 
     let inner = resp.into_inner();
     if inner.success {
+        // Update database status
+        if let Ok(Some(dep)) = state.app_repo.get_deployment_by_job_id(&job_id).await {
+            let _ = state
+                .app_repo
+                .update_deployment_status(
+                    dep.id,
+                    "STOPPED",
+                    Some(job_id),
+                    dep.image_tag,
+                    dep.build_id,
+                    None,
+                )
+                .await;
+        }
+
         Ok(Json(
             serde_json::json!({ "success": true, "message": inner.message }),
         ))
@@ -500,7 +515,7 @@ pub async fn resume_deployment(
         .await
         .map_err(ApiError::Scheduler)?;
     let req = mikrom_proto::scheduler::ResumeRequest {
-        job_id,
+        job_id: job_id.clone(),
         user_id: auth.user_id,
     };
 
@@ -508,6 +523,21 @@ pub async fn resume_deployment(
 
     let inner = resp.into_inner();
     if inner.success {
+        // Update database status
+        if let Ok(Some(dep)) = state.app_repo.get_deployment_by_job_id(&job_id).await {
+            let _ = state
+                .app_repo
+                .update_deployment_status(
+                    dep.id,
+                    "RUNNING",
+                    Some(job_id),
+                    dep.image_tag,
+                    dep.build_id,
+                    None,
+                )
+                .await;
+        }
+
         Ok(Json(
             serde_json::json!({ "success": true, "message": inner.message }),
         ))

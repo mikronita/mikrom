@@ -71,7 +71,7 @@ pub fn status_name(code: i32) -> &'static str {
         DeployStatus::Running => "Running",
         DeployStatus::Failed => "Failed",
         DeployStatus::Cancelled => "Cancelled",
-        DeployStatus::Paused => "Paused",
+        DeployStatus::Paused => "Stopped",
     }
 }
 
@@ -87,6 +87,7 @@ mod tests {
         assert_eq!(status_name(3), "Running");
         assert_eq!(status_name(4), "Failed");
         assert_eq!(status_name(5), "Cancelled");
+        assert_eq!(status_name(6), "Stopped");
     }
 
     #[test]

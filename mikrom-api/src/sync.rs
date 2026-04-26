@@ -4,8 +4,8 @@ use tokio::time::{Duration, interval};
 use tracing::{debug, error, info};
 
 pub async fn start_ip_sync_task(state: AppState) {
-    let mut interval = interval(Duration::from_secs(5));
-    info!("Starting IP sync background task");
+    let mut interval = interval(Duration::from_secs(2));
+    info!("Starting IP/Status sync background task");
 
     loop {
         interval.tick().await;
@@ -43,9 +43,11 @@ pub async fn start_ip_sync_task(state: AppState) {
                     .await
                     .unwrap_or_default();
 
-                let running_deps: Vec<_> = deployments.into_iter().filter(|d| d.status == "RUNNING").collect();
+                let active_deps: Vec<_> = deployments.into_iter()
+                    .filter(|d| ["RUNNING", "STOPPED", "STARTING", "SCHEDULED"].contains(&d.status.as_str()))
+                    .collect();
 
-                for dep in running_deps {
+                for dep in active_deps {
                     if let Some(job_id) = &dep.job_id {
                         let status_res = client
                             .get_app_status(mikrom_proto::scheduler::AppStatusRequest {
@@ -57,27 +59,37 @@ pub async fn start_ip_sync_task(state: AppState) {
                         match status_res {
                             Ok(resp) => {
                                 let inner = resp.into_inner();
+                                let proto_status = mikrom_proto::scheduler::DeployStatus::try_from(inner.status).unwrap_or(mikrom_proto::scheduler::DeployStatus::Unspecified);
+                                let db_status = map_deploy_status(proto_status);
+
+                                let status_changed = db_status != dep.status;
                                 let has_new_ip = !inner.ip_address.is_empty()
                                     && dep.ip_address.as_deref() != Some(&inner.ip_address);
 
-                                if has_new_ip {
-                                    info!(app = %app_name, ip = %inner.ip_address, "Syncing real IP from scheduler to DB");
+                                if status_changed || has_new_ip {
+                                    if status_changed {
+                                        info!(app = %app_name, job_id = %job_id, from = %dep.status, to = %db_status, "Syncing status from scheduler to DB");
+                                    }
+                                    if has_new_ip {
+                                        info!(app = %app_name, ip = %inner.ip_address, "Syncing real IP from scheduler to DB");
+                                    }
+
                                     let _ = state
                                         .app_repo
                                         .update_deployment_status(
                                             dep.id,
-                                            "RUNNING",
+                                            &db_status,
                                             Some(job_id.clone()),
                                             dep.image_tag.clone(),
                                             dep.build_id.clone(),
-                                            Some(inner.ip_address),
+                                            if !inner.ip_address.is_empty() { Some(inner.ip_address) } else { dep.ip_address.clone() },
                                         )
                                         .await;
                                     state.deployment_events.send(dep.app_id).ok();
                                 }
                             },
                             Err(status) if status.code() == tonic::Code::NotFound => {
-                                info!(app = %app_name, job_id = %job_id, "Job not found in scheduler, marking as STOPPED in DB");
+                                info!(app = %app_name, job_id = %job_id, "Job not found in scheduler (hibernated), marking as STOPPED in DB");
                                 let _ = state
                                     .app_repo
                                     .update_deployment_status(
@@ -101,5 +113,17 @@ pub async fn start_ip_sync_task(state: AppState) {
         }
 
         while workers.next().await.is_some() {}
+    }
+}
+
+fn map_deploy_status(status: mikrom_proto::scheduler::DeployStatus) -> String {
+    match status {
+        mikrom_proto::scheduler::DeployStatus::Running => "RUNNING".to_string(),
+        mikrom_proto::scheduler::DeployStatus::Paused => "STOPPED".to_string(),
+        mikrom_proto::scheduler::DeployStatus::Failed => "FAILED".to_string(),
+        mikrom_proto::scheduler::DeployStatus::Cancelled => "CANCELLED".to_string(),
+        mikrom_proto::scheduler::DeployStatus::Scheduled => "SCHEDULED".to_string(),
+        mikrom_proto::scheduler::DeployStatus::Pending => "PENDING".to_string(),
+        _ => "UNKNOWN".to_string(),
     }
 }

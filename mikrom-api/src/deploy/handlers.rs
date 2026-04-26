@@ -189,7 +189,27 @@ pub async fn delete_app_handler(
     // 1. Verify app exists and belongs to user
     let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
-    // 2. Delete the app (cascading will handle deployments)
+    // 2. Cleanup associated resources (VMs, rootfs, etc) for all deployments
+    let deployments = state
+        .app_repo
+        .list_deployments_by_app(app.id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    if let Ok(mut scheduler) = state.get_scheduler_client().await {
+        for deployment in deployments {
+            if let Some(job_id) = deployment.job_id {
+                let req = mikrom_proto::scheduler::DeleteAppRequest {
+                    job_id,
+                    user_id: auth.user_id.clone(),
+                };
+                // We ignore errors here as some deployments might already be gone
+                let _ = scheduler.delete_app(req).await;
+            }
+        }
+    }
+
+    // 3. Delete the app (cascading will handle deployments record removal)
     state
         .app_repo
         .delete_app(app.id)
@@ -545,66 +565,98 @@ pub async fn activate_deployment_handler(
         ));
     }
 
-    if deployment.status != "RUNNING" {
+    if deployment.status != "RUNNING" && deployment.status != "STOPPED" {
         return Err(ApiError::BadRequest(
-            "Only RUNNING deployments can be activated".to_string(),
+            "Only RUNNING or STOPPED deployments can be activated".to_string(),
         ));
     }
 
-    // 3. Set as active
+    let deployment_status = deployment.status.clone();
+    let deployment_job_id = deployment.job_id.clone();
+
+    // 3. Set as active in database
     state
         .app_repo
         .set_active_deployment(app_id, deployment_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    // 4. Cleanup old instances (Auto-stop/delete old firecracker instances)
-    let old_deployments = state
+    // 4. Manage instances (Synchronously hibernate ALL others, then Resume new one)
+    let deployments = state
         .app_repo
         .list_deployments_by_app(app_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let state_clone = state.clone();
-    let user_id_str = auth.user_id.clone();
+    for dep in deployments {
+        // Skip the current deployment and already terminal ones
+        if dep.id == deployment_id
+            || ["STOPPED", "FAILED", "CANCELLED"].contains(&dep.status.as_str())
+        {
+            continue;
+        }
 
-    tokio::spawn(async move {
-        for old_dep in old_deployments {
-            // Skip the newly activated one or non-active ones
-            if old_dep.id == deployment_id
-                || (old_dep.status != "RUNNING" && old_dep.status != "PENDING")
-            {
-                continue;
-            }
+        if let Some(old_job_id) = dep.job_id {
+            tracing::info!(app_id = %app_id, old_job_id = %old_job_id, "Hibernating instance during promotion for exclusivity");
 
-            if let Some(job_id) = old_dep.job_id {
-                tracing::info!(app_id = %app_id, old_job_id = %job_id, "Cleaning up old instance after promotion");
-
-                // Best effort delete from scheduler
-                if let Ok(mut client) = state_clone.get_scheduler_client().await {
-                    let _ = client
-                        .delete_app(mikrom_proto::scheduler::DeleteAppRequest {
-                            job_id: job_id.clone(),
-                            user_id: user_id_str.clone(),
-                        })
-                        .await;
+            if let Ok(mut client) = state.get_scheduler_client().await {
+                // Call pause_app on scheduler
+                let mut success = false;
+                match client
+                    .pause_app(mikrom_proto::scheduler::PauseRequest {
+                        job_id: old_job_id.clone(),
+                        user_id: auth.user_id.clone(),
+                    })
+                    .await
+                {
+                    Ok(resp) => {
+                        success = resp.get_ref().success;
+                    },
+                    Err(e) => {
+                        tracing::warn!(app_id = %app_id, job_id = %old_job_id, "Failed to hibernate instance: {}", e);
+                        // If it's "not found", it's effectively stopped/gone
+                        if e.to_string().contains("not found") {
+                            success = true;
+                        }
+                    },
                 }
 
-                // Mark as STOPPED in database
-                let _ = state_clone
-                    .app_repo
-                    .update_deployment_status(
-                        old_dep.id,
-                        "STOPPED",
-                        Some(job_id),
-                        old_dep.image_tag,
-                        old_dep.build_id,
-                        None,
-                    )
-                    .await;
+                if success {
+                    let _ = state
+                        .app_repo
+                        .update_deployment_status(
+                            dep.id,
+                            "STOPPED",
+                            Some(old_job_id),
+                            dep.image_tag,
+                            dep.build_id,
+                            None,
+                        )
+                        .await;
+                }
             }
         }
-    });
+    }
+
+    // 5. Finally, resume the newly activated deployment if it was stopped
+    if deployment_status == "STOPPED"
+        && let Some(job_id) = deployment_job_id
+    {
+        tracing::info!(app_id = %app_id, job_id = %job_id, "Resuming stopped deployment for promotion");
+        if let Ok(mut client) = state.get_scheduler_client().await {
+            let _ = client
+                .resume_app(mikrom_proto::scheduler::ResumeRequest {
+                    job_id: job_id.clone(),
+                    user_id: auth.user_id.clone(),
+                })
+                .await;
+        }
+
+        let _ = state
+            .app_repo
+            .update_deployment_status(deployment_id, "RUNNING", Some(job_id), None, None, None)
+            .await;
+    }
 
     // Notify update
     state.deployment_events.send(app_id).ok();
