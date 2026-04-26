@@ -201,16 +201,24 @@ impl FirecrackerManager {
         {
             let mut vms = self.vms.write().await;
             if let Some(vm) = vms.get_mut(&vm_id) {
-                if vm.status == VmStatus::Running || vm.status == VmStatus::Starting {
+                if vm.status == VmStatus::Running
+                    || vm.status == VmStatus::Starting
+                    || vm.status == VmStatus::Stopping
+                {
                     return Err(FirecrackerError::StartFailed(
-                        "VM already exists and is running or starting".to_string(),
+                        "VM already exists and is running, starting, or stopping".to_string(),
                     ));
                 }
 
+                let old_status = vm.status;
                 // Transition existing VM back to Starting
                 vm.status = VmStatus::Starting;
                 vm.error_message = None;
-                tracing::info!(vm_id = %vm_id, current_status = ?vm.status, "Restarting existing VM");
+                tracing::info!(
+                    vm_id = %vm_id,
+                    previous_status = ?old_status,
+                    "Restarting existing VM"
+                );
             } else {
                 vms.insert(
                     vm_id.clone(),
@@ -870,14 +878,7 @@ impl FirecrackerManager {
         let _ = tokio::fs::remove_file(snapshot_dir.join(format!("{vm_id}.mem"))).await;
 
         // Cleanup jailer chroot (Crucial fix for user request)
-        let exec_name = std::path::Path::new(&self.fc_config.binary)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("firecracker");
-
-        let chroot_dir = std::path::Path::new(&self.fc_config.chroot_base)
-            .join(exec_name)
-            .join(vm_id);
+        let chroot_dir = self.get_chroot_dir(vm_id);
 
         if chroot_dir.exists() {
             tracing::info!(chroot_dir = ?chroot_dir, "Removing jailer chroot directory");
@@ -915,7 +916,7 @@ impl FirecrackerManager {
             "snapshot_type": "Full",
             "snapshot_path": snapshot_path,
             "mem_file_path": mem_path,
-            "version": "1.15.1"
+            "version": self.fc_config.fc_version
         })
         .to_string();
 
@@ -1301,20 +1302,25 @@ impl FirecrackerManager {
             .await;
     }
 
+    /// Helper to get the jailer chroot directory for a VM.
+    fn get_chroot_dir(&self, vm_id: &str) -> std::path::PathBuf {
+        let exec_name = std::path::Path::new(&self.fc_config.binary)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("firecracker");
+
+        std::path::Path::new(&self.fc_config.chroot_base)
+            .join(exec_name)
+            .join(vm_id)
+    }
+
     async fn setup_jailer(
         &self,
         vm_id: &str,
         kernel_host_path: &str,
         rootfs_host_path: &str,
     ) -> Result<(String, Vec<String>, String, Option<String>), FirecrackerError> {
-        let exec_name = std::path::Path::new(&self.fc_config.binary)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("firecracker");
-
-        let chroot_dir = std::path::Path::new(&self.fc_config.chroot_base)
-            .join(exec_name)
-            .join(vm_id);
+        let chroot_dir = self.get_chroot_dir(vm_id);
         let root_dir = chroot_dir.join("root");
         let run_dir = root_dir.join("run");
 

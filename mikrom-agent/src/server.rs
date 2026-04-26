@@ -331,14 +331,10 @@ impl AgentService for AgentServer {
         tracing::info!(vm_id = %req.vm_id, "Handling delete_vm request");
 
         match self.firecracker.delete_vm(&req.vm_id).await {
-            Ok(()) => {
-                // If it was running, decrement count (stop_vm does this but it might fail gracefully)
-                self.metrics_collector.decrement_app_count();
-                Ok(Response::new(DeleteVmResponse {
-                    success: true,
-                    message: "VM resources purged".to_string(),
-                }))
-            },
+            Ok(()) => Ok(Response::new(DeleteVmResponse {
+                success: true,
+                message: "VM resources purged".to_string(),
+            })),
             Err(e) => Ok(Response::new(DeleteVmResponse {
                 success: false,
                 message: e.to_string(),

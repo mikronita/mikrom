@@ -588,6 +588,8 @@ pub async fn activate_deployment_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    let mut hibernation_tasks = futures::stream::FuturesUnordered::new();
+
     for dep in deployments {
         // Skip the current deployment and already terminal ones
         if dep.id == deployment_id
@@ -597,46 +599,66 @@ pub async fn activate_deployment_handler(
         }
 
         if let Some(old_job_id) = dep.job_id {
-            tracing::info!(app_id = %app_id, old_job_id = %old_job_id, "Hibernating instance during promotion for exclusivity");
+            let state = state.clone();
+            let auth = auth.clone();
 
-            if let Ok(mut client) = state.get_scheduler_client().await {
-                // Call pause_app on scheduler
-                let mut success = false;
-                match client
-                    .pause_app(mikrom_proto::scheduler::PauseRequest {
-                        job_id: old_job_id.clone(),
-                        user_id: auth.user_id.clone(),
-                    })
-                    .await
-                {
-                    Ok(resp) => {
-                        success = resp.get_ref().success;
-                    },
-                    Err(e) => {
-                        tracing::warn!(app_id = %app_id, job_id = %old_job_id, "Failed to hibernate instance: {}", e);
-                        // If it's "not found", it's effectively stopped/gone
-                        if e.to_string().contains("not found") {
-                            success = true;
-                        }
-                    },
-                }
+            hibernation_tasks.push(async move {
+                tracing::info!(
+                    app_id = %app_id,
+                    old_job_id = %old_job_id,
+                    "Hibernating instance during promotion for exclusivity"
+                );
 
-                if success {
-                    let _ = state
-                        .app_repo
-                        .update_deployment_status(
-                            dep.id,
-                            "STOPPED",
-                            Some(old_job_id),
-                            dep.image_tag,
-                            dep.build_id,
-                            None,
-                        )
-                        .await;
+                if let Ok(mut client) = state.get_scheduler_client().await {
+                    // Call pause_app on scheduler
+                    let mut success = false;
+                    match client
+                        .pause_app(mikrom_proto::scheduler::PauseRequest {
+                            job_id: old_job_id.clone(),
+                            user_id: auth.user_id.clone(),
+                        })
+                        .await
+                    {
+                        Ok(resp) => {
+                            success = resp.get_ref().success;
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                app_id = %app_id,
+                                job_id = %old_job_id,
+                                "Failed to hibernate instance: {}",
+                                e
+                            );
+                            // If it's "not found", it's effectively stopped/gone
+                            if e.to_string().contains("not found") {
+                                success = true;
+                            }
+                        },
+                    }
+
+                    if success {
+                        let _ = state
+                            .app_repo
+                            .update_deployment_status(
+                                dep.id,
+                                "STOPPED",
+                                Some(old_job_id),
+                                dep.image_tag,
+                                dep.build_id,
+                                None,
+                            )
+                            .await;
+                    }
                 }
-            }
+            });
         }
     }
+
+    // Wait for all hibernation tasks to complete
+    while futures::StreamExt::next(&mut hibernation_tasks)
+        .await
+        .is_some()
+    {}
 
     // 5. Finally, resume the newly activated deployment if it was stopped
     if deployment_status == "STOPPED"
