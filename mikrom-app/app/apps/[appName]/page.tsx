@@ -16,6 +16,7 @@ import {
 } from "react-icons/hi2";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Rocket } from "lucide-react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -38,6 +39,13 @@ import {
   AlertDescription, 
   AlertTitle 
 } from "@/components/ui/alert";
+import { 
+  Empty, 
+  EmptyDescription, 
+  EmptyHeader, 
+  EmptyMedia, 
+  EmptyTitle 
+} from "@/components/ui/empty";
 import { Button } from "@/components/ui/button";
 import { 
   Card, 
@@ -342,8 +350,18 @@ export default function AppDetailPage() {
                       ))
                     ) : deployments.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
-                          No deployments found for this application.
+                        <TableCell colSpan={5} className="py-10">
+                          <Empty className="border-none">
+                            <EmptyHeader>
+                              <EmptyMedia variant="icon">
+                                <Rocket />
+                              </EmptyMedia>
+                              <EmptyTitle>No deployments yet</EmptyTitle>
+                              <EmptyDescription>
+                                Deployments for this application will appear here.
+                              </EmptyDescription>
+                            </EmptyHeader>
+                          </Empty>
                         </TableCell>
                       </TableRow>
                     ) : (

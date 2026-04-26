@@ -7,6 +7,7 @@ import {
   HiCollection, 
   HiExclamationCircle
 } from "react-icons/hi";
+import { FolderPlus } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps } from "@/lib/hooks/use-apps";
@@ -14,6 +15,14 @@ import { useVms } from "@/lib/hooks/use-vms";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { 
+  Empty, 
+  EmptyContent, 
+  EmptyDescription, 
+  EmptyHeader, 
+  EmptyMedia, 
+  EmptyTitle 
+} from "@/components/ui/empty";
 import { cn } from "@/lib/utils";
 import { CreateAppModal } from "@/components/CreateAppModal";
 
@@ -72,12 +81,23 @@ export default function ApplicationsPage() {
                     </div>
                   ))
                 ) : apps.length === 0 && !isLoadingApps ? (
-                  <div className="flex flex-col items-center justify-center py-16 text-center">
-                    <p className="text-muted-foreground text-sm">No applications found.</p>
-                    <Button size="sm" className="mt-4" onClick={() => setShowCreateApp(true)}>
-                      Connect your first repository
-                    </Button>
-                  </div>
+                  <Empty className="border-none py-16">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <FolderPlus />
+                      </EmptyMedia>
+                      <EmptyTitle>No applications found</EmptyTitle>
+                      <EmptyDescription>
+                        Get started by connecting your first repository.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent>
+                      <Button size="sm" onClick={() => setShowCreateApp(true)}>
+                        <HiPlus className="w-4 h-4 mr-2" />
+                        Connect your first repository
+                      </Button>
+                    </EmptyContent>
+                  </Empty>
                 ) : (
                   [...apps].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((app) => (
                     <div
