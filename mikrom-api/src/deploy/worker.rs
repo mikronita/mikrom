@@ -272,6 +272,8 @@ async fn poll_and_deploy(
     );
 
     let mut attempts = 0;
+    let mut git_metadata_saved = false;
+
     let (final_image, detected_port, git_hash, git_msg, git_branch) = loop {
         if attempts > 60 {
             let _ = state
@@ -292,11 +294,33 @@ async fn poll_and_deploy(
             return Err(anyhow::anyhow!("Build timed out"));
         }
 
-        let (status, image_tag, exposed_port, g_hash, g_msg, g_branch) =
-            builder.get_build_status(task.build_id.clone()).await?;
+        let build_status_result = builder.get_build_status(task.build_id.clone()).await;
 
-        // Update git metadata in DB as soon as we have it
-        if g_hash.is_some() || g_msg.is_some() || g_branch.is_some() {
+        let (status, image_tag, exposed_port, g_hash, g_msg, g_branch) = match build_status_result {
+            Ok(res) => res,
+            Err(e) => {
+                error!(build_id = %task.build_id, error = %e, "gRPC error getting build status");
+                let _ = state
+                    .app_repo
+                    .update_deployment_status(
+                        task.deployment_id,
+                        "FAILED",
+                        None,
+                        None,
+                        Some(task.build_id.clone()),
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await;
+                state.deployment_events.send(task.app_id).ok();
+                return Err(anyhow::anyhow!("gRPC error: {}", e));
+            },
+        };
+
+        // Update git metadata in DB only ONCE when it becomes available
+        if !git_metadata_saved && (g_hash.is_some() || g_msg.is_some() || g_branch.is_some()) {
             let _ = state
                 .app_repo
                 .update_deployment_status(
@@ -311,6 +335,7 @@ async fn poll_and_deploy(
                     g_branch.clone(),
                 )
                 .await;
+            git_metadata_saved = true;
         }
 
         match status {
