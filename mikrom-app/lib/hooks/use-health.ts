@@ -9,6 +9,6 @@ export function useHealth() {
     queryFn: async () => {
       return await health();
     },
-    refetchInterval: 30000, // Refetch every 30 seconds
+    refetchInterval: 5000, // Refetch every 5 seconds for real-time feel
   });
 }
