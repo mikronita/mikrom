@@ -19,7 +19,15 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+import {
+  Field,
+  FieldLabel,
+  FieldGroup,
+  FieldSet,
+  FieldLegend,
+  FieldDescription
+} from "@/components/ui/field";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -90,21 +98,21 @@ export default function SettingsPage() {
 
           <div className="bg-card rounded-2xl border shadow-sm overflow-hidden">
             <Tabs defaultValue="profile" className="w-full">
-              <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent">
+              <TabsList>
                 <TabsTrigger value="profile">
-                  <HiUser className="mr-2 h-4 w-4" /> Profile
+                  <HiUser data-icon="inline-start" /> Profile
                 </TabsTrigger>
                 <TabsTrigger value="security">
-                  <HiKey className="mr-2 h-4 w-4" /> Security
+                  <HiKey data-icon="inline-start" /> Security
                 </TabsTrigger>
                 <TabsTrigger value="api">
-                  <HiCloudDownload className="mr-2 h-4 w-4" /> API Access
+                  <HiCloudDownload data-icon="inline-start" /> API Access
                 </TabsTrigger>
                 <TabsTrigger value="billing">
-                  <HiCreditCard className="mr-2 h-4 w-4" /> Billing
+                  <HiCreditCard data-icon="inline-start" /> Billing
                 </TabsTrigger>
                 <TabsTrigger value="notifications">
-                  <HiBell className="mr-2 h-4 w-4" /> Notifications
+                  <HiBell data-icon="inline-start" /> Notifications
                 </TabsTrigger>
               </TabsList>
 
@@ -129,43 +137,44 @@ export default function SettingsPage() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="firstName">First Name</Label>
+                    <FieldGroup className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <Field>
+                        <FieldLabel htmlFor="firstName">First Name</FieldLabel>
                         <Input 
                           id="firstName" 
                           placeholder="John" 
                           defaultValue={profile?.first_name || ""} 
                           onChange={(e) => setFirstName(e.target.value)} 
                         />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="lastName">Last Name</Label>
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="lastName">Last Name</FieldLabel>
                         <Input 
                           id="lastName" 
                           placeholder="Doe" 
                           defaultValue={profile?.last_name || ""} 
                           onChange={(e) => setLastName(e.target.value)} 
                         />
-                      </div>
-                      <div className="md:col-span-2 space-y-2">
-                        <Label htmlFor="email">Email Address</Label>
-                        <div className="relative">
-                          <HiMail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                          <Input 
+                      </Field>
+                      <Field className="md:col-span-2">
+                        <FieldLabel htmlFor="email">Email Address</FieldLabel>
+                        <InputGroup>
+                          <InputGroupAddon>
+                            <HiMail data-icon="inline-start" />
+                          </InputGroupAddon>
+                          <InputGroupInput 
                             id="email" 
                             type="email" 
                             placeholder="john@example.com" 
                             value={profile?.email || ""} 
                             disabled 
-                            className="pl-9"
                           />
-                        </div>
-                        <p className="text-[0.8rem] text-muted-foreground">
+                        </InputGroup>
+                        <FieldDescription>
                           Email cannot be changed yet.
-                        </p>
-                      </div>
-                    </div>
+                        </FieldDescription>
+                      </Field>
+                    </FieldGroup>
 
                     <div className="flex justify-end">
                       <Button 
@@ -189,17 +198,17 @@ export default function SettingsPage() {
               <TabsContent value="security" className="p-6 space-y-8">
                 <div>
                   <h3 className="text-lg font-bold mb-4">Change Password</h3>
-                  <div className="grid grid-cols-1 gap-4 max-w-md">
-                    <div className="space-y-2">
-                      <Label htmlFor="currentPassword">Current Password</Label>
+                  <FieldGroup className="max-w-md">
+                    <Field>
+                      <FieldLabel htmlFor="currentPassword">Current Password</FieldLabel>
                       <Input id="currentPassword" type="password" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="newPassword">New Password</Label>
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="newPassword">New Password</FieldLabel>
                       <Input id="newPassword" type="password" />
-                    </div>
+                    </Field>
                     <Button className="w-fit">Update Password</Button>
-                  </div>
+                  </FieldGroup>
                 </div>
 
                 <div className="pt-8 border-t">
@@ -283,28 +292,28 @@ export default function SettingsPage() {
               </TabsContent>
 
               <TabsContent value="notifications" className="p-6 space-y-6">
-                <div>
-                  <h3 className="text-lg font-bold mb-1">Email Notifications</h3>
-                  <p className="text-sm text-muted-foreground mb-6">Choose what updates you want to receive via email.</p>
+                <FieldSet>
+                  <FieldLegend variant="label">Email Notifications</FieldLegend>
+                  <FieldDescription>Choose what updates you want to receive via email.</FieldDescription>
                   
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label className="text-base font-bold">Deployment Status</Label>
-                        <p className="text-xs text-muted-foreground">Receive an email when your deployments finish or fail.</p>
+                  <FieldGroup className="gap-6">
+                    <Field orientation="horizontal">
+                      <div className="flex-1 space-y-0.5">
+                        <FieldLabel className="text-base">Deployment Status</FieldLabel>
+                        <FieldDescription className="text-xs">Receive an email when your deployments finish or fail.</FieldDescription>
                       </div>
                       <Switch checked={emailNotifications} onCheckedChange={setEmailNotifications} />
-                    </div>
+                    </Field>
                     
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label className="text-base font-bold">Marketing Emails</Label>
-                        <p className="text-xs text-muted-foreground">New features, tips and weekly summaries.</p>
+                    <Field orientation="horizontal">
+                      <div className="flex-1 space-y-0.5">
+                        <FieldLabel className="text-base">Marketing Emails</FieldLabel>
+                        <FieldDescription className="text-xs">New features, tips and weekly summaries.</FieldDescription>
                       </div>
                       <Switch checked={marketingEmails} onCheckedChange={setMarketingNotifications} />
-                    </div>
-                  </div>
-                </div>
+                    </Field>
+                  </FieldGroup>
+                </FieldSet>
               </TabsContent>
             </Tabs>
           </div>
