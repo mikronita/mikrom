@@ -35,7 +35,10 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState { db, cache, client };
 
-    let app = Router::new().fallback(any(proxy_handler)).with_state(state);
+    let app = Router::new()
+        .route("/health", any(health_handler))
+        .fallback(any(proxy_handler))
+        .with_state(state);
 
     let addr = format!("{}:{}", config.host, config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -44,6 +47,10 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+async fn health_handler() -> impl IntoResponse {
+    StatusCode::OK
 }
 
 async fn proxy_handler(

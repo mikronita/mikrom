@@ -41,6 +41,7 @@ export interface UpdateProfileRequest {
 export interface HealthResponse {
   status: string;
   version: string;
+  services?: Record<string, string>;
 }
 
 export interface LiveDeploymentInfo {

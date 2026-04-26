@@ -127,6 +127,7 @@ async fn test_agent_failure_propagation_e2e() {
             certs_dir: None,
         },
         builder_addr: "http://localhost:5004".to_string(),
+        router_addr: "http://localhost:8080".to_string(),
         jwt_secret: CHAOS_JWT_SECRET.to_string(),
         master_key: "chaos-key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,

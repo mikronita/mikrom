@@ -37,6 +37,7 @@ async fn main() -> anyhow::Result<()> {
         scheduler,
         scheduler_config,
         builder_addr: config.builder_addr,
+        router_addr: config.router_addr,
         jwt_secret: config.jwt_secret,
         master_key: config.master_key,
         deployment_events,
