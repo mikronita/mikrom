@@ -1,8 +1,12 @@
 use axum::extract::ConnectInfo;
+use axum::response::sse::{Event, Sse};
 use axum::{Router, extract::State, routing::get};
+use futures::Stream;
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::Level;
@@ -74,6 +78,7 @@ pub fn create_app(state: AppState) -> Router {
                 .url("/api-docs/openapi.json", crate::openapi::ApiDoc::openapi()),
         )
         .route("/health", get(health))
+        .route("/health/stream", get(health_stream))
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))
         .route(
@@ -263,6 +268,91 @@ async fn health(State(state): State<AppState>) -> axum::Json<HealthResponse> {
         version: env!("CARGO_PKG_VERSION").to_string(),
         services,
     })
+}
+
+#[utoipa::path(
+    get,
+    path = "/health/stream",
+    responses(
+        (status = 200, description = "SSE stream of System Health Updates"),
+    ),
+    tag = "system"
+)]
+async fn health_stream(
+    State(state): State<AppState>,
+) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    let stream = async_stream::stream! {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+
+            // We reuse the logic from the health() function by manually calling it
+            // or we could refactor it. For simplicity, we just calculate it here.
+            let mut services = HashMap::new();
+            services.insert("API".to_string(), "ONLINE".to_string());
+
+            match state.scheduler_config.addr.parse::<tonic::transport::Uri>() {
+                Ok(uri) => {
+                    let channel = tonic::transport::Channel::builder(uri)
+                        .connect_timeout(Duration::from_secs(1))
+                        .connect_lazy();
+                    let mut client = mikrom_proto::scheduler::SchedulerServiceClient::new(channel);
+
+                    match client.list_workers(mikrom_proto::scheduler::ListWorkersRequest {}).await {
+                        Ok(resp) => {
+                            services.insert("Scheduler".to_string(), "ONLINE".to_string());
+                            let workers = resp.into_inner().workers;
+                            let now = chrono::Utc::now().timestamp();
+                            let active_agents = workers.iter().filter(|w| now - w.last_heartbeat < 30).count();
+                            if active_agents > 0 {
+                                services.insert("Agents".to_string(), "ONLINE".to_string());
+                            } else {
+                                services.insert("Agents".to_string(), "OFFLINE".to_string());
+                            }
+                        },
+                        Err(_) => {
+                            services.insert("Scheduler".to_string(), "OFFLINE".to_string());
+                            services.insert("Agents".to_string(), "OFFLINE".to_string());
+                        }
+                    }
+                },
+                Err(_) => {
+                    services.insert("Scheduler".to_string(), "OFFLINE".to_string());
+                    services.insert("Agents".to_string(), "OFFLINE".to_string());
+                }
+            }
+
+            let builder_addr = state.builder_addr.replace("http://", "").replace("https://", "");
+            if tokio::net::TcpStream::connect(&builder_addr).await.is_ok() {
+                services.insert("Builder".to_string(), "ONLINE".to_string());
+            } else {
+                services.insert("Builder".to_string(), "OFFLINE".to_string());
+            }
+
+            let router_addr = state.router_addr.replace("http://", "").replace("https://", "");
+            if tokio::net::TcpStream::connect(&router_addr).await.is_ok() {
+                services.insert("Router".to_string(), "ONLINE".to_string());
+            } else {
+                services.insert("Router".to_string(), "OFFLINE".to_string());
+            }
+
+            let response = HealthResponse {
+                status: "ok".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                services,
+            };
+
+            if let Ok(data) = serde_json::to_string(&response) {
+                yield Ok(Event::default().data(data));
+            }
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    ))
 }
 
 #[cfg(test)]
