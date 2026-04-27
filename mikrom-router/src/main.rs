@@ -10,6 +10,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use moka::future::Cache;
 use sqlx::PgPool;
+use tokio_stream::StreamExt;
 use tracing::{error, info};
 
 mod config;
@@ -33,7 +34,26 @@ async fn main() -> anyhow::Result<()> {
     let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
         .build(HttpConnector::new());
 
+    // NATS client for cache invalidation
+    info!("Connecting to NATS at {}...", config.nats_url);
+    let nats_client = async_nats::connect(&config.nats_url)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to connect to NATS: {}", e))?;
+
     let state = AppState { db, cache, client };
+
+    // Background task to listen for cache invalidation events
+    let cache_clone = state.cache.clone();
+    let mut nats_sub = nats_client
+        .subscribe("mikrom.router.config_updated")
+        .await?;
+    tokio::spawn(async move {
+        info!("Listening for router config updates via NATS...");
+        while nats_sub.next().await.is_some() {
+            info!("Cache invalidation requested via NATS, clearing router cache");
+            cache_clone.invalidate_all();
+        }
+    });
 
     let app = Router::new()
         .route("/health", any(health_handler))

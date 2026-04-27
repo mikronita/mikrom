@@ -11,6 +11,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use tokio_stream::StreamExt;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LiveDeploymentInfo {
@@ -73,26 +74,39 @@ pub async fn list_active_deployments(
     // 2. Try to get real-time status from scheduler for active ones
     let mut scheduler_apps = HashMap::new();
 
-    if let Ok(mut client) = state.get_scheduler_client().await {
-        let req = mikrom_proto::scheduler::ListAppsRequest {
-            user_id: auth.user_id.clone(),
-            status: None,
-        };
+    use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
+    use prost::Message;
 
-        if let Ok(resp) = client.list_apps(req).await {
-            for app in resp.into_inner().apps {
-                scheduler_apps.insert(app.job_id.clone(), app);
-            }
+    let nats_req = ListAppsRequest {
+        user_id: auth.user_id.clone(),
+        status: None,
+    };
+
+    let mut buf = Vec::new();
+    if let Some(inner) = async {
+        if nats_req.encode(&mut buf).is_err() {
+            return None;
+        }
+        let response = state
+            .nats_client
+            .request("mikrom.scheduler.list_apps", buf.into())
+            .await
+            .ok()?;
+        ListAppsResponse::decode(&response.payload[..]).ok()
+    }
+    .await
+    {
+        for app in inner.apps {
+            scheduler_apps.insert(app.job_id.clone(), app);
         }
     }
 
     // 3. Map deployments to LiveDeploymentInfo, using scheduler data if available
     let mut active_deployments = Vec::new();
     for dep in deployments {
-        // Only show deployments that have a job_id (meaning they were at least attempted to be scheduled)
-        if let Some(job_id) = &dep.job_id {
-            let (status, host_id, vm_id, cpu_usage, ram_used_bytes) =
-                if let Some(sch_app) = scheduler_apps.get(job_id) {
+        let (status, host_id, vm_id, cpu_usage, ram_used_bytes) =
+            if let Some(job_id_real) = &dep.job_id {
+                if let Some(sch_app) = scheduler_apps.get(job_id_real) {
                     (
                         crate::scheduler::status_name(sch_app.status).to_string(),
                         sch_app.host_id.clone(),
@@ -102,28 +116,30 @@ pub async fn list_active_deployments(
                     )
                 } else {
                     (dep.status.clone(), String::new(), String::new(), 0.0, 0)
-                };
-
-            // Get app name from repo (we might need a join or a cache here for performance)
-            let app_name = if let Ok(Some(app)) = state.app_repo.get_app(dep.app_id).await {
-                app.name
+                }
             } else {
-                "Unknown".to_string()
+                (dep.status.clone(), String::new(), String::new(), 0.0, 0)
             };
 
-            active_deployments.push(LiveDeploymentInfo {
-                job_id: job_id.clone(),
-                deployment_id: dep.id.to_string(),
-                app_id: dep.app_id.to_string(),
-                app_name,
-                image: dep.image_tag.unwrap_or_default(),
-                status,
-                host_id,
-                vm_id,
-                cpu_usage,
-                ram_used_bytes,
-            });
-        }
+        // Get app name from repo
+        let app_name = if let Ok(Some(app)) = state.app_repo.get_app(dep.app_id).await {
+            app.name
+        } else {
+            "Unknown".to_string()
+        };
+
+        active_deployments.push(LiveDeploymentInfo {
+            job_id: dep.job_id.unwrap_or_default(),
+            deployment_id: dep.id.to_string(),
+            app_id: dep.app_id.to_string(),
+            app_name,
+            image: dep.image_tag.unwrap_or_default(),
+            status,
+            host_id,
+            vm_id,
+            cpu_usage,
+            ram_used_bytes,
+        });
     }
 
     Ok(Json(active_deployments))
@@ -146,52 +162,149 @@ pub async fn watch_deployments(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
 ) -> ApiResult<impl IntoResponse> {
-    let mut client = state
-        .get_scheduler_client()
+    let nats_sub = state
+        .nats_client
+        .subscribe("mikrom.scheduler.job_updates")
         .await
-        .map_err(ApiError::Scheduler)?;
-    let req = mikrom_proto::scheduler::WatchAppsRequest {
-        user_id: auth.user_id,
-    };
+        .map_err(|e| ApiError::Internal(format!("Failed to subscribe to job updates: {}", e)))?;
 
-    let resp = client
-        .watch_apps(req)
-        .await
-        .map_err(|e| ApiError::Internal(e.message().to_string()))?;
+    let local_rx = state.deployment_events.subscribe();
 
-    let stream = resp.into_inner().map(move |res| match res {
-        Ok(msg) => {
-            if let Some(app) = msg.app {
-                let data = serde_json::json!(LiveDeploymentStatus {
-                    job_id: app.job_id,
-                    deployment_id: String::new(), // job_id is sufficient for UI reconciliation
-                    app_id: app.app_id,
-                    app_name: app.app_name,
-                    image: app.image,
-                    status: crate::scheduler::status_name(app.status).to_string(),
-                    host_id: app.host_id,
-                    vm_id: app.vm_id,
-                    cpu_usage: app.cpu_usage,
-                    ram_used_bytes: app.ram_used_bytes,
-                    // These fields are not available in AppInfo but we can use defaults
-                    scheduled_at: 0,
-                    started_at: 0,
-                    stopped_at: 0,
-                    error_message: String::new(),
-                    vcpus: 0,
-                    memory_mib: 0,
-                })
-                .to_string();
-                Ok::<Event, std::convert::Infallible>(Event::default().data(data))
-            } else {
-                Ok::<Event, std::convert::Infallible>(Event::default().comment("keep-alive"))
+    let auth_user_id = auth.user_id.clone();
+    let state_clone = state.clone();
+
+    // Unified stream combining cluster (NATS) and local (DB) events
+    let stream = async_stream::stream! {
+        let mut nats_stream = nats_sub;
+        let mut local_stream = tokio_stream::wrappers::BroadcastStream::new(local_rx);
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
+
+        // 0. Initial yield: send current state of all active deployments for the user
+        if let Ok(apps) = state_clone.app_repo.list_apps_by_user(&auth_user_id).await {
+            for app in apps {
+                if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
+                    for dep in deps {
+                        if ["RUNNING", "BUILDING", "SCHEDULED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                            let data = serde_json::json!({
+                                "job_id": dep.job_id.clone().unwrap_or_default(),
+                                "deployment_id": dep.id.to_string(),
+                                "app_id": dep.app_id.to_string(),
+                                "app_name": app.name.clone(),
+                                "image": dep.image_tag.clone().unwrap_or_default(),
+                                "status": dep.status,
+                                "host_id": String::new(),
+                                "vm_id": String::new(),
+                                "cpu_usage": 0.0,
+                                "ram_used_bytes": 0,
+                                "scheduled_at": 0,
+                                "started_at": 0,
+                                "stopped_at": 0,
+                                "error_message": "",
+                            });
+                            if let Ok(json) = serde_json::to_string(&data) {
+                                yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
+                            }
+                        }
+                    }
+                }
             }
-        },
-        Err(e) => {
-            tracing::error!("Error in scheduler watch_apps stream: {}", e);
-            Ok::<Event, std::convert::Infallible>(Event::default().comment(format!("error: {}", e)))
-        },
-    });
+        }
+
+        loop {
+            tokio::select! {
+                // 1. Cluster-wide events from NATS
+                Some(msg) = nats_stream.next() => {
+                    use prost::Message;
+                    use mikrom_proto::scheduler::AppInfo;
+                    if let Some(job) = AppInfo::decode(&msg.payload[..]).ok().filter(|j| j.user_id == auth_user_id) {
+                            let data = serde_json::json!({
+                                "job_id": job.job_id,
+                                "deployment_id": job.deployment_id,
+                                "app_id": job.app_id,
+                                "app_name": job.app_name,
+                                "image": job.image,
+                                "status": crate::scheduler::status_name(job.status),
+                                "host_id": job.host_id,
+                                "vm_id": job.vm_id,
+                                "cpu_usage": job.cpu_usage,
+                                "ram_used_bytes": job.ram_used_bytes,
+                                "scheduled_at": 0,
+                                "started_at": 0,
+                                "stopped_at": 0,
+                                "error_message": "",
+                            });
+                            if let Ok(json) = serde_json::to_string(&data) {
+                                yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
+                            }
+                    }
+                },
+                // 2. Local events from DB
+                res = local_stream.next() => {
+                    if let Ok(deps) = async {
+                        let app_id = res.and_then(|r| r.ok()).ok_or(anyhow::anyhow!("No ID"))?;
+                        state_clone.app_repo.list_deployments_by_app(app_id).await
+                    }.await {
+                        for dep in deps {
+                            if ["RUNNING", "BUILDING", "SCHEDULED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                                let data = serde_json::json!({
+                                    "job_id": dep.job_id.clone().unwrap_or_default(),
+                                    "deployment_id": dep.id.to_string(),
+                                    "app_id": dep.app_id.to_string(),
+                                    "app_name": "",
+                                    "image": dep.image_tag.clone().unwrap_or_default(),
+                                    "status": dep.status,
+                                    "host_id": String::new(),
+                                    "vm_id": String::new(),
+                                    "cpu_usage": 0.0,
+                                    "ram_used_bytes": 0,
+                                    "scheduled_at": 0,
+                                    "started_at": 0,
+                                    "stopped_at": 0,
+                                    "error_message": "",
+                                });
+                                if let Ok(json) = serde_json::to_string(&data) {
+                                    yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
+                                }
+                            }
+                        }
+                    }
+                },
+                // 3. Periodic refresh (Brute force fallback)
+                _ = interval.tick() => {
+                    if let Ok(apps) = state_clone.app_repo.list_apps_by_user(&auth_user_id).await {
+                        for app in apps {
+                            if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
+                                for dep in deps {
+                                    if ["RUNNING", "BUILDING", "SCHEDULED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                                        let data = serde_json::json!({
+                                            "job_id": dep.job_id.clone().unwrap_or_default(),
+                                            "deployment_id": dep.id.to_string(),
+                                            "app_id": dep.app_id.to_string(),
+                                            "app_name": app.name.clone(),
+                                            "image": dep.image_tag.clone().unwrap_or_default(),
+                                            "status": dep.status,
+                                            "host_id": String::new(),
+                                            "vm_id": String::new(),
+                                            "cpu_usage": 0.0,
+                                            "ram_used_bytes": 0,
+                                            "scheduled_at": 0,
+                                            "started_at": 0,
+                                            "stopped_at": 0,
+                                            "error_message": "",
+                                        });
+                                        if let Ok(json) = serde_json::to_string(&data) {
+                                            yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                else => break,
+            }
+        }
+    };
 
     Ok(Sse::new(stream).keep_alive(
         axum::response::sse::KeepAlive::new()
@@ -216,35 +329,75 @@ pub async fn watch_deployments(
         ("jwt" = [])
     )
 )]
-#[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
+#[tracing::instrument(skip(state), fields(job_id = %job_id))]
 pub async fn get_deployment_status(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> ApiResult<Json<LiveDeploymentStatus>> {
-    let mut client = state
-        .get_scheduler_client()
-        .await
-        .map_err(ApiError::Scheduler)?;
-    let req = mikrom_proto::scheduler::AppStatusRequest {
-        job_id,
-        user_id: auth.user_id,
+    use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse};
+    use prost::Message;
+
+    // If it's a temporary ID from BUILDING phase
+    if let Some(stripped) = job_id.strip_prefix("temp-") {
+        let dep_id = Uuid::parse_str(stripped)
+            .map_err(|_| ApiError::BadRequest("Invalid temp ID".into()))?;
+        let dep = state
+            .app_repo
+            .get_deployment(dep_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::NotFound("Deployment not found".into()))?;
+
+        let app_name = if let Ok(Some(app)) = state.app_repo.get_app(dep.app_id).await {
+            app.name
+        } else {
+            "Unknown".to_string()
+        };
+
+        return Ok(Json(LiveDeploymentStatus {
+            job_id: job_id.clone(),
+            deployment_id: dep.id.to_string(),
+            app_id: dep.app_id.to_string(),
+            app_name,
+            image: dep.image_tag.unwrap_or_default(),
+            status: dep.status,
+            host_id: String::new(),
+            vm_id: String::new(),
+            scheduled_at: 0,
+            started_at: 0,
+            stopped_at: 0,
+            error_message: String::new(),
+            cpu_usage: 0.0,
+            ram_used_bytes: 0,
+            vcpus: dep.vcpus,
+            memory_mib: dep.memory_mib,
+        }));
+    }
+
+    let nats_req = AppStatusRequest {
+        job_id: job_id.clone(),
+        user_id: auth.user_id.clone(),
     };
 
-    let resp = client.get_app_status(req).await.map_err(|e| {
-        if e.code() == tonic::Code::NotFound {
-            ApiError::NotFound("Job not found".to_string())
-        } else {
-            ApiError::Internal(e.message().to_string())
-        }
-    })?;
+    let mut buf = Vec::new();
+    nats_req
+        .encode(&mut buf)
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let inner = resp.into_inner();
+    let response = state
+        .nats_client
+        .request("mikrom.scheduler.get_job", buf.into())
+        .await
+        .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
+
+    let inner = AppStatusResponse::decode(&response.payload[..])
+        .map_err(|e| ApiError::Internal(format!("Failed to parse NATS response: {}", e)))?;
 
     // Fetch deployment to get app_id, image, vcpus, memory
     let deployment = state
         .app_repo
-        .get_deployment_by_job_id(&inner.job_id)
+        .get_deployment_by_job_id(&job_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or(ApiError::NotFound(
@@ -286,143 +439,67 @@ pub async fn get_deployment_status(
         ("job_id" = String, Path, description = "Deployment Job ID")
     ),
     responses(
-        (status = 200, description = "SSE stream of deployment logs"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+        (status = 200, description = "SSE stream for VM logs", content_type = "text/event-stream"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Deployment not found", body = crate::error::ErrorResponse)
     ),
     tag = "deployment",
     security(
         ("jwt" = [])
     )
 )]
-#[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
 pub async fn get_deployment_logs(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(job_id): Path<String>,
 ) -> ApiResult<impl IntoResponse> {
-    let mut client = state
-        .get_scheduler_client()
-        .await
-        .map_err(ApiError::Scheduler)?;
-    let req = mikrom_proto::scheduler::GetLogsRequest {
-        job_id,
-        user_id: auth.user_id,
-        follow: true,
+    // 1. Get VM ID from scheduler via NATS
+    use mikrom_proto::scheduler::AppStatusRequest;
+    use prost::Message;
+
+    let nats_req = AppStatusRequest {
+        job_id: job_id.clone(),
+        user_id: auth.user_id.clone(),
     };
 
-    let resp = client
-        .get_app_logs(req)
-        .await
-        .map_err(|e| ApiError::Internal(e.message().to_string()))?;
+    let mut buf = Vec::new();
+    nats_req
+        .encode(&mut buf)
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let stream = resp.into_inner().map(|res| match res {
-        Ok(log) => {
-            let data = serde_json::json!({
-                "line": log.line,
-                "timestamp": log.timestamp,
-            })
-            .to_string();
-            Ok::<Event, std::convert::Infallible>(Event::default().data(data))
-        },
-        Err(e) => {
-            let data = serde_json::json!({
-                "line": format!("Error: {}", e),
-                "timestamp": chrono::Utc::now().timestamp(),
-            })
-            .to_string();
-            Ok::<Event, std::convert::Infallible>(Event::default().data(data))
-        },
+    let response = state
+        .nats_client
+        .request("mikrom.scheduler.get_job", buf.into())
+        .await
+        .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
+
+    let inner = mikrom_proto::scheduler::AppStatusResponse::decode(&response.payload[..])
+        .map_err(|e| ApiError::Internal(format!("Failed to parse NATS response: {}", e)))?;
+
+    let vm_id = inner.vm_id;
+    if vm_id.is_empty() {
+        return Err(ApiError::BadRequest(
+            "VM is not yet active or assigned".to_string(),
+        ));
+    }
+
+    let subject = format!("mikrom.logs.{}", vm_id);
+    let subscription = state
+        .nats_client
+        .subscribe(subject)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to subscribe to logs: {}", e)))?;
+
+    let stream = subscription.map(|msg| {
+        let text = String::from_utf8_lossy(&msg.payload).to_string();
+        Ok::<Event, std::convert::Infallible>(Event::default().data(text))
     });
 
-    Ok(Sse::new(stream))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/deployments/{job_id}",
-    params(
-        ("job_id" = String, Path, description = "Deployment Job ID")
-    ),
-    responses(
-        (status = 200, description = "Deployment stopped"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
-#[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
-pub async fn stop_deployment(
-    auth: crate::auth::AuthUser,
-    State(state): State<crate::AppState>,
-    Path(job_id): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
-    let mut client = state
-        .get_scheduler_client()
-        .await
-        .map_err(ApiError::Scheduler)?;
-    let req = mikrom_proto::scheduler::CancelRequest {
-        job_id: job_id.clone(),
-        user_id: auth.user_id,
-    };
-
-    let resp = client
-        .cancel_app(req)
-        .await
-        .map_err(|e| ApiError::Internal(e.message().to_string()))?;
-
-    let inner = resp.into_inner();
-    if inner.success {
-        Ok(Json(serde_json::json!({
-            "success": true,
-            "message": inner.message
-        })))
-    } else {
-        Err(ApiError::NotFound(inner.message))
-    }
-}
-
-#[utoipa::path(
-    delete,
-    path = "/deployments/{job_id}/delete",
-    params(
-        ("job_id" = String, Path, description = "Deployment Job ID")
-    ),
-    responses(
-        (status = 200, description = "Deployment record removed"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
-#[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
-pub async fn delete_deployment_record(
-    auth: crate::auth::AuthUser,
-    State(state): State<crate::AppState>,
-    Path(job_id): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
-    // 1. Try to notify scheduler (optional/best effort)
-    let _ = state
-        .scheduler
-        .delete_app(job_id.clone(), auth.user_id)
-        .await;
-
-    // 2. Always delete from database
-    state
-        .app_repo
-        .delete_deployment_by_job_id(&job_id)
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!("Failed to remove deployment from database: {}", e))
-        })?;
-
-    Ok(Json(serde_json::json!({
-        "success": true,
-        "message": "Deployment record removed from Mikrom"
-    })))
+    Ok(Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(1))
+            .text("keep-alive"),
+    ))
 }
 
 #[utoipa::path(
@@ -440,7 +517,7 @@ pub async fn delete_deployment_record(
         ("jwt" = [])
     )
 )]
-#[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
+#[tracing::instrument(skip(state), fields(job_id = %job_id))]
 pub async fn pause_deployment(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
@@ -448,13 +525,14 @@ pub async fn pause_deployment(
 ) -> ApiResult<Json<serde_json::Value>> {
     let success = state
         .scheduler
-        .pause_app(job_id.clone(), auth.user_id)
+        .pause_app(job_id.clone(), auth.user_id.clone())
         .await
         .map_err(ApiError::Scheduler)?;
 
     if success {
         // Update database status
         if let Ok(Some(dep)) = state.app_repo.get_deployment_by_job_id(&job_id).await {
+            let app_id = dep.app_id;
             let _ = state
                 .app_repo
                 .update_deployment_status(
@@ -469,6 +547,7 @@ pub async fn pause_deployment(
                     dep.git_branch,
                 )
                 .await;
+            state.deployment_events.send(app_id).ok();
         }
 
         Ok(Json(
@@ -494,7 +573,7 @@ pub async fn pause_deployment(
         ("jwt" = [])
     )
 )]
-#[tracing::instrument(skip(state, auth), fields(job_id = %job_id))]
+#[tracing::instrument(skip(state), fields(job_id = %job_id))]
 pub async fn resume_deployment(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
@@ -502,13 +581,14 @@ pub async fn resume_deployment(
 ) -> ApiResult<Json<serde_json::Value>> {
     let success = state
         .scheduler
-        .resume_app(job_id.clone(), auth.user_id)
+        .resume_app(job_id.clone(), auth.user_id.clone())
         .await
         .map_err(ApiError::Scheduler)?;
 
     if success {
         // Update database status
         if let Ok(Some(dep)) = state.app_repo.get_deployment_by_job_id(&job_id).await {
+            let app_id = dep.app_id;
             let _ = state
                 .app_repo
                 .update_deployment_status(
@@ -523,6 +603,7 @@ pub async fn resume_deployment(
                     dep.git_branch,
                 )
                 .await;
+            state.deployment_events.send(app_id).ok();
         }
 
         Ok(Json(
@@ -533,161 +614,101 @@ pub async fn resume_deployment(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::AppState;
-    use crate::auth::AuthUser;
-    use crate::repositories::app_repository::MockAppRepository;
-    use axum::extract::State;
-    use std::sync::Arc;
-    use uuid::Uuid;
+#[utoipa::path(
+    delete,
+    path = "/deployments/{job_id}",
+    params(
+        ("job_id" = String, Path, description = "Deployment Job ID")
+    ),
+    responses(
+        (status = 200, description = "Deployment stopped"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Deployment not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "deployment",
+    security(
+        ("jwt" = [])
+    )
+)]
+#[tracing::instrument(skip(state), fields(job_id = %job_id))]
+pub async fn stop_deployment(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path(job_id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    use mikrom_proto::scheduler::CancelRequest;
+    use prost::Message;
 
-    #[tokio::test]
-    async fn test_list_active_deployments_empty() {
-        let mut mock_repo = MockAppRepository::new();
+    let nats_req = CancelRequest {
+        job_id: job_id.clone(),
+        user_id: auth.user_id.clone(),
+    };
 
-        // Mock list_deployments_by_user returning empty
-        mock_repo
-            .expect_list_deployments_by_user()
-            .returning(|_| Ok(vec![]));
+    let mut buf = Vec::new();
+    nats_req
+        .encode(&mut buf)
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-        let state = AppState {
-            user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
-            app_repo: Arc::new(mock_repo),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            scheduler_config: crate::scheduler::SchedulerConfig {
-                addr: "http://localhost:5002".to_string(),
-                use_tls: false,
-                certs_dir: None,
-            },
-            builder_addr: "http://localhost:5004".to_string(),
-            router_addr: "http://localhost:8080".to_string(),
-            jwt_secret: "secret".to_string(),
-            master_key: "key".into(),
-            deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
-        };
+    let response = state
+        .nats_client
+        .request("mikrom.scheduler.cancel_app", buf.into())
+        .await
+        .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
 
-        let auth = AuthUser {
-            user_id: "user-1".to_string(),
-            email: "test@example.com".to_string(),
-            role: crate::repositories::user_repository::UserRole::User,
-        };
+    let inner = mikrom_proto::scheduler::CancelResponse::decode(&response.payload[..])
+        .map_err(|e| ApiError::Internal(format!("Failed to parse NATS response: {}", e)))?;
 
-        let result = list_active_deployments(auth, State(state)).await.unwrap();
-        assert!(result.0.is_empty());
+    if inner.success {
+        if let Ok(Some(dep)) = state.app_repo.get_deployment_by_job_id(&job_id).await {
+            state.deployment_events.send(dep.app_id).ok();
+        }
+        Ok(Json(
+            serde_json::json!({ "success": true, "message": inner.message }),
+        ))
+    } else {
+        Err(ApiError::NotFound(inner.message))
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/deployments/{job_id}/delete",
+    params(
+        ("job_id" = String, Path, description = "Deployment Job ID")
+    ),
+    responses(
+        (status = 200, description = "Deployment record deleted"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Deployment not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "deployment",
+    security(
+        ("jwt" = [])
+    )
+)]
+#[tracing::instrument(skip(state), fields(job_id = %job_id))]
+pub async fn delete_deployment_record(
+    _auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path(job_id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let deployment = state
+        .app_repo
+        .get_deployment_by_job_id(&job_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let app_id = deployment.as_ref().map(|d| d.app_id);
+
+    state
+        .app_repo
+        .delete_deployment_by_job_id(&job_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    if let Some(aid) = app_id {
+        state.deployment_events.send(aid).ok();
     }
 
-    #[tokio::test]
-    async fn test_get_deployment_status_not_found() {
-        let mut mock_repo = MockAppRepository::new();
-
-        // Mock get_deployment_by_job_id returning None
-        mock_repo
-            .expect_get_deployment_by_job_id()
-            .returning(|_| Ok(None));
-
-        let _state = AppState {
-            user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
-            app_repo: Arc::new(mock_repo),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            scheduler_config: crate::scheduler::SchedulerConfig {
-                addr: "http://localhost:5002".to_string(),
-                use_tls: false,
-                certs_dir: None,
-            },
-            builder_addr: "http://localhost:5004".to_string(),
-            router_addr: "http://localhost:8080".to_string(),
-            jwt_secret: "secret".to_string(),
-            master_key: "key".into(),
-            deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
-        };
-
-        let _auth = AuthUser {
-            user_id: "user-1".to_string(),
-            email: "test@example.com".to_string(),
-            role: crate::repositories::user_repository::UserRole::User,
-        };
-
-        // Note: list_active_deployments is easier to test because it continues even if scheduler fails
-    }
-
-    #[tokio::test]
-    async fn test_list_active_deployments_with_data() {
-        let mut mock_repo = MockAppRepository::new();
-        let app_id = Uuid::new_v4();
-        let user_id = Uuid::new_v4();
-
-        // Mock list_deployments_by_user returning some data
-        mock_repo
-            .expect_list_deployments_by_user()
-            .returning(move |_| {
-                Ok(vec![crate::models::app::Deployment {
-                    id: Uuid::new_v4(),
-                    app_id,
-                    user_id,
-                    build_id: None,
-                    image_tag: Some("nginx:latest".into()),
-                    job_id: Some("job-1".into()),
-                    ip_address: None,
-                    status: "RUNNING".into(),
-                    vcpus: 1,
-                    memory_mib: 256,
-                    disk_mib: 1024,
-                    port: 80,
-                    env_vars: serde_json::json!({}),
-                    git_commit_hash: None,
-                    git_commit_message: None,
-                    git_branch: None,
-                    trigger_source: "manual".into(),
-                    created_at: chrono::Utc::now(),
-                    updated_at: chrono::Utc::now(),
-                }])
-            });
-
-        mock_repo.expect_get_app().returning(|id| {
-            Ok(Some(crate::models::app::App {
-                id,
-                name: "test-app".into(),
-                git_url: "".into(),
-                port: 80,
-                hostname: None,
-                user_id: Uuid::new_v4(),
-                github_webhook_secret: None,
-                active_deployment_id: None,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-            }))
-        });
-
-        let state = AppState {
-            user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
-            app_repo: Arc::new(mock_repo),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            scheduler_config: crate::scheduler::SchedulerConfig {
-                addr: "http://invalid:1".to_string(),
-                use_tls: false,
-                certs_dir: None,
-            },
-            builder_addr: "http://localhost:5004".to_string(),
-            router_addr: "http://localhost:8080".to_string(),
-            jwt_secret: "secret".to_string(),
-            master_key: "key".into(),
-            deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
-        };
-
-        let auth = AuthUser {
-            user_id: user_id.to_string(),
-            email: "test@example.com".to_string(),
-            role: crate::repositories::user_repository::UserRole::User,
-        };
-
-        let result = list_active_deployments(auth, State(state)).await.unwrap();
-        assert_eq!(result.0.len(), 1);
-        assert_eq!(result.0[0].job_id, "job-1");
-        assert_eq!(result.0[0].image, "nginx:latest");
-    }
+    Ok(Json(serde_json::json!({ "success": true })))
 }

@@ -22,21 +22,20 @@ async fn main() -> anyhow::Result<()> {
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
     let build_semaphore = Arc::new(tokio::sync::Semaphore::new(5)); // Limit to 5 concurrent builds
 
-    let scheduler_config = config.scheduler_config();
-    let channel = tonic::transport::Channel::from_shared(scheduler_config.addr.clone())
-        .map_err(|e| anyhow::anyhow!("Invalid scheduler address: {}", e))?
-        .connect_lazy();
+    tracing::info!("Connecting to NATS at {}...", config.nats_url);
+    let nats_client = async_nats::connect(&config.nats_url)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to connect to NATS: {}", e))?;
 
-    let scheduler = Arc::new(mikrom_api::scheduler::TonicScheduler {
-        client: mikrom_proto::scheduler::SchedulerServiceClient::new(channel),
+    let scheduler = Arc::new(mikrom_api::scheduler::NatsScheduler {
+        client: nats_client.clone(),
     });
 
     let state = AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
         scheduler,
-        scheduler_config,
-        builder_addr: config.builder_addr,
+        nats_client,
         router_addr: config.router_addr,
         jwt_secret: config.jwt_secret,
         master_key: config.master_key,

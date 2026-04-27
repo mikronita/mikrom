@@ -144,6 +144,7 @@ async fn test_agent_re_registers_when_scheduler_rejects_metrics() {
     let agent_config = mikrom_agent::config::AgentConfig {
         host_id: "test-host".to_string(),
         scheduler_addr: format!("http://{actual_addr}"),
+        nats_url: "nats://localhost:4222".to_string(),
         use_tls: false,
         agent_port: 0,
         bridge_ip: "10.0.0.1/8".to_string(),

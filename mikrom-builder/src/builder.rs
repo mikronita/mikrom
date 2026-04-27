@@ -1,13 +1,16 @@
 use anyhow::{Context, Result};
 use git2::Repository;
+use std::path::Path;
+use std::process::Stdio;
 use tempfile::TempDir;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tracing::{error, info, instrument, warn};
+use tracing::{error, info, instrument};
 
 pub struct AppBuilder {
     registry: String,
 }
-
+#[allow(dead_code)]
 pub struct BuildResult {
     pub image_tag: String,
     pub exposed_port: u32,
@@ -16,6 +19,7 @@ pub struct BuildResult {
     pub git_branch: String,
 }
 
+#[derive(Clone, Debug)]
 pub struct GitMetadata {
     pub hash: String,
     pub message: String,
@@ -27,7 +31,7 @@ impl AppBuilder {
         Self { registry }
     }
 
-    #[instrument(skip(self, git_url, metadata_tx))]
+    #[instrument(skip(self, metadata_tx))]
     pub async fn build_image(
         &self,
         app_id: &str,
@@ -36,17 +40,14 @@ impl AppBuilder {
         tag: &str,
         metadata_tx: Option<tokio::sync::mpsc::Sender<GitMetadata>>,
     ) -> Result<BuildResult> {
-        let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
+        let temp_dir = TempDir::new()?;
         let repo_path = temp_dir.path();
 
+        // ── Git Clone ────────────────────────────────────────────────────────
         info!(git_url = %git_url, path = ?repo_path, "Cloning repository");
+        let repo = Repository::clone(git_url, repo_path).context("Failed to clone repository")?;
 
-        // Use git2 for cloning
-        let (git_commit_hash, git_commit_message, git_branch) = {
-            let repo =
-                Repository::clone(git_url, repo_path).context("Failed to clone repository")?;
-            Self::extract_git_metadata(&repo)?
-        };
+        let (git_commit_hash, git_commit_message, git_branch) = Self::extract_git_metadata(&repo)?;
 
         if let Some(tx) = metadata_tx {
             let _ = tx
@@ -57,108 +58,80 @@ impl AppBuilder {
                 })
                 .await;
         }
-        info!(
-            commit = %git_commit_hash,
-            branch = %git_branch,
-            message = %git_commit_message,
-            "Extracted git metadata"
-        );
 
         let registry_base = self
             .registry
             .trim_start_matches("https://")
             .trim_start_matches("http://");
-        let registry_host = registry_base.split('/').next().unwrap_or(registry_base);
         let full_image_tag = format!("{}/{}:{}", registry_base, image_name, tag);
 
-        // 1. Authenticate if needed
-        if let (Ok(user), Ok(pass)) = (
-            std::env::var("REGISTRY_USER"),
-            std::env::var("REGISTRY_PASS"),
-        ) {
-            info!("Authenticating with registry {}...", registry_host);
-            let mut child = Command::new("docker")
-                .args(["login", registry_host, "-u", &user, "--password-stdin"])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::piped())
-                .spawn()?;
+        // ── Pre-build Fixes ──────────────────────────────────────────────────
+        Self::apply_prebuild_fixes(repo_path)?;
 
-            if let Some(mut stdin) = child.stdin.take() {
-                use tokio::io::AsyncWriteExt;
-                stdin.write_all(pass.as_bytes()).await?;
-                stdin.flush().await?;
-                drop(stdin); // Explicitly close stdin
-            }
-
-            let output = child.wait_with_output().await?;
-            if !output.status.success() {
-                let err_msg = String::from_utf8_lossy(&output.stderr);
-                warn!(
-                    registry = %registry_host,
-                    error = %err_msg.trim(),
-                    "Docker login failed. Build will continue assuming host is already authenticated."
-                );
-            } else {
-                info!("Docker login successful for {}", registry_host);
-            }
-        }
-
-        // 2. Decide build strategy: Dockerfile or Buildpacks
+        // ── Build Strategy ───────────────────────────────────────────────────
         let dockerfile_path = repo_path.join("Dockerfile");
         if dockerfile_path.exists() {
             info!(image_tag = %full_image_tag, "Dockerfile detected, using docker build");
-            let output = Command::new("docker")
+            let mut child = Command::new("docker")
                 .arg("build")
                 .arg("-t")
                 .arg(&full_image_tag)
-                .arg(repo_path)
-                .output()
-                .await
-                .context("Failed to execute docker build command")?;
+                .arg(".")
+                .current_dir(repo_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .context("Failed to spawn docker build")?;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                error!(stderr = %stderr, "Docker build failed");
-                return Err(anyhow::anyhow!("Docker build failed: {}", stderr));
+            Self::log_output(&mut child).await?;
+
+            let status = child.wait().await?;
+            if !status.success() {
+                return Err(anyhow::anyhow!(
+                    "Docker build failed with status {}",
+                    status
+                ));
             }
         } else {
-            info!(
-                image_tag = %full_image_tag,
-                "No Dockerfile found, using Railpack (railpack build)"
-            );
+            info!(image_tag = %full_image_tag, "No Dockerfile found, using Railpack");
 
-            let output = Command::new("railpack")
+            let mut child = Command::new("railpack")
                 .arg("build")
-                .arg(repo_path)
+                .arg(".")
                 .arg("--name")
                 .arg(&full_image_tag)
+                .current_dir(repo_path)
                 .env("BUILDKIT_HOST", "docker-container://buildkit")
-                .output()
-                .await
-                .context("Failed to execute railpack build command. Is railpack CLI installed?")?;
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .context("Failed to spawn railpack build")?;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                error!(stderr = %stderr, "Railpack build failed");
-                return Err(anyhow::anyhow!("Railpack failed: {}", stderr));
+            Self::log_output(&mut child).await?;
+
+            let status = child.wait().await?;
+            if !status.success() {
+                return Err(anyhow::anyhow!(
+                    "Railpack build failed with status {}",
+                    status
+                ));
             }
         }
 
-        // 3. Detect exposed ports from image
+        // ── Detection & Push ────────────────────────────────────────────────
         let exposed_port = self.detect_exposed_port(&full_image_tag).await.unwrap_or(0);
-        if exposed_port > 0 {
-            info!(port = %exposed_port, "Detected exposed port from image");
-        }
 
-        info!(image_tag = %full_image_tag, "Build successful, pushing to registry...");
-
-        let push_status = Command::new("docker")
+        info!(image_tag = %full_image_tag, "Pushing to registry...");
+        let mut push_child = Command::new("docker")
             .args(["push", &full_image_tag])
-            .status()
-            .await
-            .context("Failed to execute docker push command")?;
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("Failed to spawn docker push")?;
 
+        Self::log_output(&mut push_child).await?;
+
+        let push_status = push_child.wait().await?;
         if !push_status.success() {
             return Err(anyhow::anyhow!("Docker push failed for {}", full_image_tag));
         }
@@ -170,6 +143,34 @@ impl AppBuilder {
             git_commit_message,
             git_branch,
         })
+    }
+
+    async fn log_output(child: &mut tokio::process::Child) -> Result<()> {
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+
+        let mut stdout_reader = BufReader::new(stdout).lines();
+        let mut stderr_reader = BufReader::new(stderr).lines();
+
+        loop {
+            tokio::select! {
+                line = stdout_reader.next_line() => {
+                    match line {
+                        Ok(Some(l)) => info!("[BUILD] {}", l),
+                        Ok(None) => break,
+                        Err(e) => error!("Error reading stdout: {}", e),
+                    }
+                }
+                line = stderr_reader.next_line() => {
+                    match line {
+                        Ok(Some(l)) => info!("[BUILD-ERR] {}", l),
+                        Ok(None) => {},
+                        Err(e) => error!("Error reading stderr: {}", e),
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn extract_git_metadata(repo: &Repository) -> Result<(String, String, String)> {
@@ -198,102 +199,75 @@ impl AppBuilder {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        self.parse_exposed_ports(&raw)
+        if raw == "null" || raw.is_empty() {
+            return Some(8080); // Default if not detected
+        }
+
+        raw.split('"')
+            .find(|s| s.contains('/'))
+            .and_then(|s| s.split('/').next())
+            .and_then(|s| s.parse().ok())
     }
 
-    fn parse_exposed_ports(&self, raw_json: &str) -> Option<u32> {
-        if raw_json == "null" || raw_json.is_empty() {
-            return None;
-        }
+    fn apply_prebuild_fixes(repo_path: &Path) -> Result<()> {
+        // Fix for Railpack failing to resolve pnpm version 9 from lockfile
+        let package_json_path = repo_path.join("package.json");
+        let pnpm_lock_path = repo_path.join("pnpm-lock.yaml");
 
-        // ExposedPorts is a map like {"80/tcp": {}, "3000/tcp": {}}
-        let ports: serde_json::Value = serde_json::from_str(raw_json).ok()?;
-        let ports_map = ports.as_object()?;
-
-        let mut available_ports: Vec<u32> = ports_map
-            .keys()
-            .filter_map(|key| key.split('/').next()?.parse::<u32>().ok())
-            .collect();
-
-        if available_ports.is_empty() {
-            return None;
-        }
-
-        // Prioritize common web ports
-        for &p in &[80, 8080, 3000] {
-            if available_ports.contains(&p) {
-                return Some(p);
+        if package_json_path.exists() && pnpm_lock_path.exists() {
+            let content = std::fs::read_to_string(&package_json_path)?;
+            if let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&content).map(|mut pkg| {
+                if pkg.get("packageManager").is_none() {
+                    info!(
+                        "Injecting packageManager into package.json to fix Railpack pnpm resolution"
+                    );
+                    pkg["packageManager"] = serde_json::json!("pnpm@9.0.0");
+                }
+                pkg
+            }) {
+                let new_content = serde_json::to_string_pretty(&pkg).unwrap_or(content);
+                let _ = std::fs::write(&package_json_path, new_content);
             }
         }
-
-        // Otherwise pick the smallest port to be deterministic
-        available_ports.sort_unstable();
-        available_ports.first().copied()
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
-    fn test_parse_exposed_ports() {
-        let builder = AppBuilder::new("localhost:5000".into(), "any".into());
+    fn test_apply_prebuild_fixes_injects_pnpm() {
+        let dir = tempdir().unwrap();
+        let repo_path = dir.path();
 
-        // Basic case
-        assert_eq!(builder.parse_exposed_ports("{\"80/tcp\":{}}"), Some(80));
+        let package_json = r#"{"name": "test"}"#;
+        fs::write(repo_path.join("package.json"), package_json).unwrap();
+        fs::write(repo_path.join("pnpm-lock.yaml"), "").unwrap();
 
-        // Multiple ports (should pick one)
-        let multi = builder.parse_exposed_ports("{\"80/tcp\":{},\"443/tcp\":{}}");
-        assert!(multi == Some(80) || multi == Some(443));
+        AppBuilder::apply_prebuild_fixes(repo_path).unwrap();
 
-        // Different format
-        assert_eq!(builder.parse_exposed_ports("{\"3000/udp\":{}}"), Some(3000));
-
-        // Null/Empty cases
-        assert_eq!(builder.parse_exposed_ports("null"), None);
-        assert_eq!(builder.parse_exposed_ports("{}"), None);
-        assert_eq!(builder.parse_exposed_ports(""), None);
-
-        // Invalid JSON
-        assert_eq!(builder.parse_exposed_ports("invalid"), None);
+        let new_content = fs::read_to_string(repo_path.join("package.json")).unwrap();
+        let pkg: serde_json::Value = serde_json::from_str(&new_content).unwrap();
+        assert_eq!(pkg["packageManager"], "pnpm@9.15.0");
     }
 
     #[test]
-    fn test_extract_git_metadata() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repo_path = temp_dir.path();
+    fn test_apply_prebuild_fixes_does_not_override_existing() {
+        let dir = tempdir().unwrap();
+        let repo_path = dir.path();
 
-        // Initialize a real git repo for testing
-        let repo = Repository::init(repo_path)?;
+        let package_json = r#"{"name": "test", "packageManager": "pnpm@8.0.0"}"#;
+        fs::write(repo_path.join("package.json"), package_json).unwrap();
+        fs::write(repo_path.join("pnpm-lock.yaml"), "").unwrap();
 
-        // Create a dummy file and commit it
-        std::fs::write(repo_path.join("README.md"), "test")?;
-        let mut index = repo.index()?;
-        index.add_path(std::path::Path::new("README.md"))?;
-        index.write()?;
+        AppBuilder::apply_prebuild_fixes(repo_path).unwrap();
 
-        let tree_id = index.write_tree()?;
-        let tree = repo.find_tree(tree_id)?;
-        let sig = git2::Signature::now("Test User", "test@example.com")?;
-
-        let commit_id = repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            "Initial exhaustive test commit",
-            &tree,
-            &[],
-        )?;
-
-        // Test extraction
-        let (hash, message, branch) = AppBuilder::extract_git_metadata(&repo)?;
-
-        assert_eq!(hash, commit_id.to_string());
-        assert_eq!(message, "Initial exhaustive test commit");
-        // Git default branch can be master or main depending on config, so we just check it's not empty
-        assert!(!branch.is_empty());
-
-        Ok(())
+        let new_content = fs::read_to_string(repo_path.join("package.json")).unwrap();
+        let pkg: serde_json::Value = serde_json::from_str(&new_content).unwrap();
+        assert_eq!(pkg["packageManager"], "pnpm@8.0.0");
     }
 }

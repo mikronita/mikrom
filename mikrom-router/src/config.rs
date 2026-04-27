@@ -13,6 +13,7 @@ pub struct Config {
     #[serde(default = "default_base_domain")]
     #[allow(dead_code)]
     pub base_domain: String,
+    pub nats_url: String,
 }
 
 fn default_host() -> String {

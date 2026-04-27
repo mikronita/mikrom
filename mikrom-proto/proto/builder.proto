@@ -37,6 +37,12 @@ message GetBuildStatusResponse {
   string git_branch = 8;
 }
 
+message BuildProgress {
+  string build_id = 1;
+  string message = 2;
+  float percent = 3;
+}
+
 enum BuildStatus {
   BUILD_STATUS_UNSPECIFIED = 0;
   BUILD_STATUS_PENDING = 1;

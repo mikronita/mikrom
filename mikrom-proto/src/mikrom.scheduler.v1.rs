@@ -9,6 +9,21 @@ pub struct WatchAppsResponse {
     #[prost(message, optional, tag = "1")]
     pub app: ::core::option::Option<AppInfo>,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WorkerHeartbeat {
+    #[prost(string, tag = "1")]
+    pub host_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub hostname: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub ip_address: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "4")]
+    pub agent_port: u32,
+    #[prost(string, tag = "5")]
+    pub bridge_ip: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "6")]
+    pub metrics: ::core::option::Option<ReportMetricsRequest>,
+}
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct ListWorkersRequest {}
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -166,6 +181,8 @@ pub struct DeployRequest {
     pub config: ::core::option::Option<AppConfig>,
     #[prost(string, tag = "5")]
     pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub deployment_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Volume {
@@ -212,6 +229,8 @@ pub struct DeployResponse {
     pub vm_id: ::prost::alloc::string::String,
     #[prost(string, tag = "5")]
     pub message: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub ip_address: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppStatusRequest {
@@ -291,6 +310,10 @@ pub struct AppInfo {
     pub cpu_usage: f32,
     #[prost(uint64, tag = "9")]
     pub ram_used_bytes: u64,
+    #[prost(string, tag = "10")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "11")]
+    pub deployment_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

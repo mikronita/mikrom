@@ -3,8 +3,10 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     #[serde(default = "default_host")]
+    #[allow(dead_code)]
     pub host: String,
     #[serde(default = "default_port")]
+    #[allow(dead_code)]
     pub port: u16,
     #[serde(default = "default_log_level")]
     #[allow(dead_code)]
@@ -13,6 +15,12 @@ pub struct Config {
     pub registry: String,
     #[serde(default = "default_buildpack_builder")]
     pub buildpack_builder: String,
+    #[serde(default = "default_nats_url")]
+    pub nats_url: String,
+}
+
+fn default_nats_url() -> String {
+    "nats://localhost:4222".to_string()
 }
 
 fn default_host() -> String {

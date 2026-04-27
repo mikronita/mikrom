@@ -102,6 +102,8 @@ export function useDeployments(appName: string) {
       try {
         const data = JSON.parse(event.data);
         queryClient.setQueryData(appsKeys.deployments(appName), data);
+        // Also invalidate the apps list to update active_deployment_id and other metadata
+        queryClient.invalidateQueries({ queryKey: appsKeys.list() });
       } catch (err) {
         console.error("Failed to parse SSE data", err);
       }

@@ -15,16 +15,16 @@ use uuid::Uuid;
 
 const JWT_SECRET: &str = "test-secret";
 
-fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
+async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
     let mock_user_repo = MockUserRepository::new();
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
+    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-        scheduler_config: Default::default(),
-        builder_addr: "http://localhost:5004".into(),
+        nats_client,
         router_addr: "http://localhost:8080".to_string(),
         jwt_secret: JWT_SECRET.into(),
         master_key: "key".into(),
@@ -92,7 +92,7 @@ async fn test_sse_deployments_stream_initial_data() {
             }])
         });
 
-    let mut router = setup_app(mock_app_repo);
+    let mut router = setup_app(mock_app_repo).await;
     let token = create_token(
         &user_id.to_string(),
         "test@test.com",
@@ -147,7 +147,7 @@ async fn test_sse_deployments_auth_via_query_param() {
         .expect_list_deployments_by_app()
         .returning(|_| Ok(vec![]));
 
-    let mut router = setup_app(mock_app_repo);
+    let mut router = setup_app(mock_app_repo).await;
     let token = create_token(
         &user_id.to_string(),
         "test@test.com",
@@ -230,13 +230,13 @@ async fn test_sse_deployments_stream_updates() {
     let mock_user_repo = MockUserRepository::new();
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
     let tx = deployment_events.clone();
+    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-        scheduler_config: Default::default(),
-        builder_addr: "http://localhost:5004".into(),
+        nats_client,
         router_addr: "http://localhost:8080".to_string(),
         jwt_secret: JWT_SECRET.into(),
         master_key: "key".into(),

@@ -12,12 +12,12 @@ async fn test_health_endpoint_structure() {
     let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
     let app_repo = Arc::new(repositories::PostgresAppRepository::new(db_pool));
 
+    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_repo),
         app_repo,
         scheduler: Arc::new(scheduler::MockScheduler::new()),
-        scheduler_config: scheduler::SchedulerConfig::default(),
-        builder_addr: "http://127.0.0.1:5004".to_string(),
+        nats_client,
         router_addr: "http://127.0.0.1:8080".to_string(),
         jwt_secret: "test".to_string(),
         master_key: "test".to_string(),
@@ -47,7 +47,6 @@ async fn test_health_endpoint_structure() {
     assert_eq!(json["status"], "ok");
     assert!(json["services"].is_object());
     assert_eq!(json["services"]["API"], "ONLINE");
-    // Other services might be OFFLINE since they are not running
 }
 
 #[tokio::test]
@@ -56,12 +55,12 @@ async fn test_health_stream_endpoint() {
     let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
     let app_repo = Arc::new(repositories::PostgresAppRepository::new(db_pool));
 
+    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_repo),
         app_repo,
         scheduler: Arc::new(scheduler::MockScheduler::new()),
-        scheduler_config: scheduler::SchedulerConfig::default(),
-        builder_addr: "http://127.0.0.1:5004".to_string(),
+        nats_client,
         router_addr: "http://127.0.0.1:8080".to_string(),
         jwt_secret: "test".to_string(),
         master_key: "test".to_string(),
@@ -83,10 +82,4 @@ async fn test_health_stream_endpoint() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "text/event-stream");
-
-    // Test that we can receive at least one event
-    // Note: The stream has a 5s interval, so this might take a moment.
-    // However, the first tick() usually happens immediately or we can reduce the interval for tests if needed.
-    // Since we can't easily change the interval inside the handler without refactoring,
-    // we'll just check that it's a valid SSE response.
 }

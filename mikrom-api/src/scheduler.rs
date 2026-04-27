@@ -68,6 +68,67 @@ pub trait Scheduler: Send + Sync {
     async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
 }
 
+pub struct NatsScheduler {
+    pub client: async_nats::Client,
+}
+
+#[async_trait::async_trait]
+impl Scheduler for NatsScheduler {
+    async fn pause_app(&self, job_id: String, user_id: String) -> Result<bool, String> {
+        use mikrom_proto::scheduler::{PauseRequest, PauseResponse};
+        use prost::Message;
+        let nats_req = PauseRequest { job_id, user_id };
+        let mut buf = Vec::new();
+        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
+
+        let response = self
+            .client
+            .request("mikrom.scheduler.pause_app", buf.into())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let inner = PauseResponse::decode(&response.payload[..]).map_err(|e| e.to_string())?;
+
+        Ok(inner.success)
+    }
+
+    async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String> {
+        use mikrom_proto::scheduler::{ResumeRequest, ResumeResponse};
+        use prost::Message;
+        let nats_req = ResumeRequest { job_id, user_id };
+        let mut buf = Vec::new();
+        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
+
+        let response = self
+            .client
+            .request("mikrom.scheduler.resume_app", buf.into())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let inner = ResumeResponse::decode(&response.payload[..]).map_err(|e| e.to_string())?;
+
+        Ok(inner.success)
+    }
+
+    async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String> {
+        use mikrom_proto::scheduler::{DeleteAppRequest, DeleteAppResponse};
+        use prost::Message;
+        let nats_req = DeleteAppRequest { job_id, user_id };
+        let mut buf = Vec::new();
+        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
+
+        let response = self
+            .client
+            .request("mikrom.scheduler.delete_app", buf.into())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let inner = DeleteAppResponse::decode(&response.payload[..]).map_err(|e| e.to_string())?;
+
+        Ok(inner.success)
+    }
+}
+
 pub struct TonicScheduler {
     pub client: mikrom_proto::scheduler::SchedulerServiceClient<Channel>,
 }
@@ -116,13 +177,13 @@ mockall::mock! {
 pub fn status_name(code: i32) -> &'static str {
     use mikrom_proto::scheduler::DeployStatus;
     match DeployStatus::try_from(code).unwrap_or(DeployStatus::Unspecified) {
-        DeployStatus::Unspecified => "Unspecified",
-        DeployStatus::Pending => "Pending",
-        DeployStatus::Scheduled => "Scheduled",
-        DeployStatus::Running => "Running",
-        DeployStatus::Failed => "Failed",
-        DeployStatus::Cancelled => "Cancelled",
-        DeployStatus::Paused => "Stopped",
+        DeployStatus::Unspecified => "UNKNOWN",
+        DeployStatus::Pending => "PENDING",
+        DeployStatus::Scheduled => "SCHEDULED",
+        DeployStatus::Running => "RUNNING",
+        DeployStatus::Failed => "FAILED",
+        DeployStatus::Cancelled => "CANCELLED",
+        DeployStatus::Paused => "STOPPED",
     }
 }
 
@@ -132,19 +193,19 @@ mod tests {
 
     #[test]
     fn test_status_name_all_variants() {
-        assert_eq!(status_name(0), "Unspecified");
-        assert_eq!(status_name(1), "Pending");
-        assert_eq!(status_name(2), "Scheduled");
-        assert_eq!(status_name(3), "Running");
-        assert_eq!(status_name(4), "Failed");
-        assert_eq!(status_name(5), "Cancelled");
-        assert_eq!(status_name(6), "Stopped");
+        assert_eq!(status_name(0), "UNKNOWN");
+        assert_eq!(status_name(1), "PENDING");
+        assert_eq!(status_name(2), "SCHEDULED");
+        assert_eq!(status_name(3), "RUNNING");
+        assert_eq!(status_name(4), "FAILED");
+        assert_eq!(status_name(5), "CANCELLED");
+        assert_eq!(status_name(6), "STOPPED");
     }
 
     #[test]
     fn test_status_name_unknown_code_returns_unspecified() {
-        assert_eq!(status_name(99), "Unspecified");
-        assert_eq!(status_name(-1), "Unspecified");
+        assert_eq!(status_name(99), "UNKNOWN");
+        assert_eq!(status_name(-1), "UNKNOWN");
     }
 
     #[tokio::test]

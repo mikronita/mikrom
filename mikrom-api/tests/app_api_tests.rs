@@ -61,12 +61,12 @@ async fn test_create_app_endpoint() {
             })
         });
 
+    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-        scheduler_config: Default::default(),
-        builder_addr: "http://localhost:5004".into(),
+        nats_client,
         router_addr: "http://localhost:8080".to_string(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
@@ -133,12 +133,12 @@ async fn test_create_app_duplicate_name() {
             ))
         });
 
+    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-        scheduler_config: Default::default(),
-        builder_addr: "http://localhost:5004".into(),
+        nats_client,
         router_addr: "http://localhost:8080".to_string(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),

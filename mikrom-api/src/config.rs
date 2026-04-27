@@ -3,6 +3,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize, Clone)]
 pub struct ApiConfig {
     pub database_url: String,
+    pub nats_url: String,
 
     #[serde(default = "default_jwt_secret")]
     pub jwt_secret: String,
@@ -15,9 +16,6 @@ pub struct ApiConfig {
 
     #[serde(default = "default_scheduler_addr")]
     pub scheduler_addr: String,
-
-    #[serde(default = "default_builder_addr")]
-    pub builder_addr: String,
 
     #[serde(default = "default_router_addr")]
     pub router_addr: String,
@@ -42,10 +40,6 @@ fn default_api_port() -> u16 {
 
 fn default_scheduler_addr() -> String {
     "http://127.0.0.1:5002".to_string()
-}
-
-fn default_builder_addr() -> String {
-    "http://127.0.0.1:5004".to_string()
 }
 
 fn default_router_addr() -> String {
