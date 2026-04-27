@@ -2,32 +2,31 @@ mod builder;
 mod config;
 mod server;
 
-use std::net::SocketAddr;
-use tonic::transport::Server;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::builder::AppBuilder;
 use crate::config::Config;
 use crate::server::BuilderServer;
-use mikrom_proto::builder::builder_service_server::BuilderServiceServer;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     let config = Config::from_env().expect("Failed to load configuration");
 
     mikrom_proto::telemetry::init_telemetry("mikrom-builder", "0.1.0")?;
 
-    let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
-
-    info!(addr = %addr, "Starting mikrom-builder gRPC server");
+    info!("Connecting to NATS at {}...", config.nats_url);
+    let nats_client = async_nats::connect(&config.nats_url)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to connect to NATS: {}", e))?;
 
     let builder = AppBuilder::new(config.registry, config.buildpack_builder);
     let builder_server = BuilderServer::new(builder);
 
-    Server::builder()
-        .add_service(BuilderServiceServer::new(builder_server))
-        .serve(addr)
-        .await?;
+    info!("mikrom-builder started");
+
+    if let Err(e) = builder_server.listen(nats_client).await {
+        error!("Builder server listener failed: {}", e);
+    }
 
     Ok(())
 }

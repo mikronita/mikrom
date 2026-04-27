@@ -125,7 +125,7 @@ impl AppRepository for PostgresAppRepository {
         let deployment = sqlx::query_as::<_, Deployment>(
             r#"
             INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, port, env_vars, trigger_source)
-            VALUES ($1, $2, 'PENDING', $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, 'BUILDING', $3, $4, $5, $6, $7, $8)
             RETURNING *
             "#,
         )

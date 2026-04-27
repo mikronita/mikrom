@@ -3,6 +3,8 @@ use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AgentConfig {
+    pub nats_url: String,
+
     #[serde(default = "default_host_id")]
     pub host_id: String,
 

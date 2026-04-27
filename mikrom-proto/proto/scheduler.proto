@@ -27,6 +27,15 @@ message WatchAppsResponse {
   AppInfo app = 1;
 }
 
+message WorkerHeartbeat {
+  string host_id = 1;
+  string hostname = 2;
+  string ip_address = 3;
+  uint32 agent_port = 4;
+  string bridge_ip = 5;
+  ReportMetricsRequest metrics = 6;
+}
+
 message ListWorkersRequest {}
 
 message ListWorkersResponse {
@@ -141,6 +150,7 @@ message DeployRequest {
   string image = 3;
   AppConfig config = 4;
   string user_id = 5;
+  string deployment_id = 6;
 }
 
 message Volume {
@@ -168,6 +178,7 @@ message DeployResponse {
   string host_id = 3;
   string vm_id = 4;
   string message = 5;
+  string ip_address = 6;
 }
 
 enum DeployStatus {
@@ -228,4 +239,6 @@ message AppInfo {
   string vm_id = 7;
   float cpu_usage = 8;
   uint64 ram_used_bytes = 9;
+  string user_id = 10;
+  string deployment_id = 11;
 }

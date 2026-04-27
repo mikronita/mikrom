@@ -131,14 +131,13 @@ mod tests {
     use sha2::Sha256;
     use std::sync::Arc;
     use uuid::Uuid;
-
-    fn create_test_state(app_repo: MockAppRepository) -> AppState {
+    async fn create_test_state(app_repo: MockAppRepository) -> AppState {
+        let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
         AppState {
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(app_repo),
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            scheduler_config: crate::scheduler::SchedulerConfig::default(),
-            builder_addr: "http://localhost:5004".into(),
+            nats_client,
             router_addr: "http://localhost:8080".into(),
             jwt_secret: "secret".into(),
             master_key: "key".into(),
@@ -178,7 +177,8 @@ mod tests {
             .with(mockall::predicate::eq("test-app"))
             .returning(move |_| Ok(Some(app.clone())));
 
-        let state = create_test_state(mock_repo);
+        let state = create_test_state(mock_repo).await;
+
         let body = r#"{"ref": "refs/heads/main"}"#;
         let mut headers = HeaderMap::new();
         headers.insert("x-github-event", "push".parse().unwrap());
@@ -206,7 +206,7 @@ mod tests {
     #[tokio::test]
     async fn test_github_webhook_wrong_event() {
         let mock_repo = MockAppRepository::new();
-        let state = create_test_state(mock_repo);
+        let state = create_test_state(mock_repo).await;
 
         let mut headers = HeaderMap::new();
         headers.insert("x-github-event", "ping".parse().unwrap());
@@ -245,7 +245,7 @@ mod tests {
             .expect_get_app_by_name()
             .returning(move |_| Ok(Some(app.clone())));
 
-        let state = create_test_state(mock_repo);
+        let state = create_test_state(mock_repo).await;
 
         let body = r#"{"ref": "refs/heads/feature"}"#;
         let signature = compute_signature(secret, body.as_bytes());
@@ -288,7 +288,8 @@ mod tests {
             .with(mockall::predicate::eq("test-repo"))
             .returning(move |_| Ok(Some(app.clone())));
 
-        let state = create_test_state(mock_repo);
+        let state = create_test_state(mock_repo).await;
+
         let body = r#"{"ref": "refs/heads/main"}"#;
         let signature = compute_signature(secret, body.as_bytes());
 

@@ -32,6 +32,8 @@ pub struct FirecrackerManager {
     pub executor: Arc<dyn CommandExecutor>,
     /// Tracks allocated IP addresses on the host bridge.
     pub allocated_ips: Arc<tokio::sync::Mutex<std::collections::HashSet<std::net::Ipv4Addr>>>,
+    /// NATS client for log streaming.
+    pub nats_client: Arc<RwLock<Option<async_nats::Client>>>,
 }
 
 impl FirecrackerManager {
@@ -119,7 +121,13 @@ impl FirecrackerManager {
             builder: Arc::new(builder),
             executor: Arc::new(RealCommandExecutor),
             allocated_ips: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+            nats_client: Arc::new(RwLock::new(None)),
         }
+    }
+
+    pub async fn set_nats_client(&self, client: async_nats::Client) {
+        let mut n = self.nats_client.write().await;
+        *n = Some(client);
     }
 
     pub fn with_executor(mut self, executor: Arc<dyn CommandExecutor>) -> Self {
@@ -414,6 +422,7 @@ impl FirecrackerManager {
         let stderr = child.stderr.take().expect("Failed to take stderr");
         let vm_id_clone = vm_id.clone();
         let logs_clone = self.logs.clone();
+        let nats_clone = self.nats_client.clone();
 
         let log_task = tokio::spawn(async move {
             let mut stdout_lines = BufReader::new(stdout).lines();
@@ -427,14 +436,32 @@ impl FirecrackerManager {
                 };
 
                 if let Some(l) = line {
-                    let mut logs = logs_clone.write().await;
-                    let vm_logs = logs
-                        .entry(vm_id_clone.clone())
-                        .or_insert_with(|| VecDeque::with_capacity(1000));
-                    if vm_logs.len() >= 1000 {
-                        vm_logs.pop_front();
+                    // 1. In-memory buffer (existing)
+                    {
+                        let mut logs = logs_clone.write().await;
+                        let vm_logs = logs
+                            .entry(vm_id_clone.clone())
+                            .or_insert_with(|| VecDeque::with_capacity(1000));
+                        if vm_logs.len() >= 1000 {
+                            vm_logs.pop_front();
+                        }
+                        vm_logs.push_back(l.clone());
                     }
-                    vm_logs.push_back(l);
+
+                    // 2. Publish to NATS (new)
+                    if let Some(nats) = nats_clone.read().await.as_ref() {
+                        let subject = format!("mikrom.logs.{}", vm_id_clone);
+                        let payload = serde_json::json!({
+                            "line": l,
+                            "timestamp": chrono::Utc::now().timestamp(),
+                        });
+                        let _ = nats
+                            .publish(
+                                subject,
+                                serde_json::to_vec(&payload).unwrap_or_default().into(),
+                            )
+                            .await;
+                    }
                 } else {
                     break;
                 }

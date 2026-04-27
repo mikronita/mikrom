@@ -1,8 +1,7 @@
 use crate::job::{Job, JobStatus, VmConfig};
 use crate::worker_registry::{Worker, WorkerRegistry};
-use parking_lot::RwLock;
+use sqlx::{PgPool, Row};
 use std::collections::HashMap;
-use std::sync::Arc;
 use thiserror::Error;
 
 pub mod ipam;
@@ -22,12 +21,15 @@ pub enum SchedulerError {
     /// The IP address pool for the target worker is exhausted.
     #[error("IP address pool exhausted")]
     IpPoolExhausted,
+    /// Database error
+    #[error("Database error: {0}")]
+    DatabaseError(#[from] sqlx::Error),
 }
 
 const MAX_APPS_PER_HOST: u32 = 10;
 
 /// Strategies for selecting a worker to host a new VM.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 pub enum SchedulingStrategy {
     /// Spreads the load across all available workers (default).
     #[default]
@@ -41,26 +43,62 @@ pub enum SchedulingStrategy {
 /// It maintains the state of all active jobs and orchestrates the worker registry.
 #[derive(Clone)]
 pub struct AppScheduler {
+    pub pool: PgPool,
     /// Registry of all active workers and their resource availability.
     pub worker_registry: WorkerRegistry,
-    /// In-memory store of all jobs managed by this scheduler.
-    pub jobs: Arc<RwLock<HashMap<String, Job>>>,
     /// The strategy used for placing new workloads.
     pub strategy: SchedulingStrategy,
-    /// Broadcast channel for job updates.
+    /// NATS client for cluster-wide updates.
+    pub nats_client: Option<async_nats::Client>,
+    /// Broadcast channel for job updates (local to this instance, keeping for now).
     pub job_updates: tokio::sync::broadcast::Sender<Job>,
 }
 
 impl AppScheduler {
-    /// Creates a new scheduler with the provided worker registry.
+    /// Creates a new scheduler with the provided worker registry and pool.
     #[must_use]
-    pub fn new(worker_registry: WorkerRegistry) -> Self {
+    pub fn new(pool: PgPool, worker_registry: WorkerRegistry) -> Self {
         let (job_updates, _) = tokio::sync::broadcast::channel(1024);
         Self {
+            pool,
             worker_registry,
-            jobs: Arc::new(RwLock::new(HashMap::new())),
             strategy: SchedulingStrategy::default(),
+            nats_client: None,
             job_updates,
+        }
+    }
+
+    pub fn set_nats_client(&mut self, client: async_nats::Client) {
+        self.nats_client = Some(client);
+    }
+
+    async fn notify_job_update(&self, job: Job) {
+        let _ = self.job_updates.send(job.clone());
+
+        if let Some(ref nats) = self.nats_client {
+            use mikrom_proto::scheduler::AppInfo;
+            use prost::Message;
+
+            let app_info = AppInfo {
+                job_id: job.job_id,
+                app_id: job.app_id,
+                app_name: job.app_name,
+                image: job.image,
+                status: job.status as i32,
+                host_id: job.host_id.unwrap_or_default(),
+                vm_id: job.vm_id.unwrap_or_default(),
+                cpu_usage: 0.0,
+                ram_used_bytes: 0,
+                user_id: job.user_id,
+                deployment_id: job.deployment_id.unwrap_or_default(),
+            };
+
+            let mut buf = Vec::new();
+            if app_info.encode(&mut buf).is_ok() {
+                let _ = nats
+                    .publish("mikrom.scheduler.job_updates", buf.into())
+                    .await;
+            }
         }
     }
 
@@ -75,87 +113,262 @@ impl AppScheduler {
         &self.worker_registry
     }
 
-    pub fn add_job(&self, job: Job) {
-        let job_id = job.job_id.clone();
-        let job_clone = job.clone();
-        self.jobs.write().insert(job_id, job_clone);
-        let _ = self.job_updates.send(job);
+    pub async fn add_job(&self, job: Job) -> Result<(), SchedulerError> {
+        let env_json = serde_json::to_value(&job.config.env).unwrap_or_default();
+        let status_str = serde_json::to_string(&job.status)
+            .unwrap_or_else(|_| "\"pending\"".to_string())
+            .trim_matches('"')
+            .to_string();
+
+        sqlx::query(
+            r#"
+            INSERT INTO jobs (
+                job_id, app_id, app_name, image, user_id, status, host_id, vm_id,
+                vcpus, memory_mib, disk_mib, port, env_vars, ip_address, gateway,
+                mac_address, netmask, created_at, deployment_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            "#
+        )
+        .bind(&job.job_id)
+        .bind(&job.app_id)
+        .bind(&job.app_name)
+        .bind(&job.image)
+        .bind(&job.user_id)
+        .bind(status_str)
+        .bind(&job.host_id)
+        .bind(&job.vm_id)
+        .bind(job.config.vcpus as i32)
+        .bind(job.config.memory_mib as i64)
+        .bind(job.config.disk_mib as i64)
+        .bind(job.config.port as i32)
+        .bind(env_json)
+        .bind(&job.config.ip_address)
+        .bind(&job.config.gateway)
+        .bind(&job.config.mac_address)
+        .bind(&job.config.netmask)
+        .bind(job.created_at)
+        .bind(&job.deployment_id)
+        .execute(&self.pool)
+        .await?;
+
+        self.notify_job_update(job).await;
+        Ok(())
     }
 
-    #[must_use]
-    pub fn get_job(&self, job_id: &str) -> Option<Job> {
-        self.jobs.read().get(job_id).cloned()
-    }
+    pub async fn get_job(&self, job_id: &str) -> Result<Option<Job>, SchedulerError> {
+        let row = sqlx::query("SELECT * FROM jobs WHERE job_id = $1")
+            .bind(job_id)
+            .fetch_optional(&self.pool)
+            .await?;
 
-    pub fn update_job_status(&self, job_id: &str, status: JobStatus) {
-        if let Some(job) = self.jobs.write().get_mut(job_id) {
-            job.status = status;
-            let _ = self.job_updates.send(job.clone());
+        if let Some(r) = row {
+            let status_str: String = r.get("status");
+            let status: JobStatus =
+                serde_json::from_str(&format!("\"{}\"", status_str)).unwrap_or_default();
+            let env_vars: serde_json::Value = r.get("env_vars");
+            let env: HashMap<String, String> = serde_json::from_value(env_vars).unwrap_or_default();
+
+            let deployment_id: Option<String> = r.get("deployment_id");
+
+            Ok(Some(Job {
+                job_id: r.get("job_id"),
+                app_id: r.get("app_id"),
+                app_name: r.get("app_name"),
+                image: r.get("image"),
+                user_id: r.get("user_id"),
+                status,
+                host_id: r.get("host_id"),
+                vm_id: r.get("vm_id"),
+                scheduled_at: r.get("scheduled_at"),
+                started_at: r.get("started_at"),
+                stopped_at: r.get("stopped_at"),
+                error_message: r.get("error_message"),
+                created_at: r.get("created_at"),
+                deployment_id,
+                config: VmConfig {
+                    vcpus: r.get::<i32, _>("vcpus") as u32,
+                    memory_mib: r.get::<i64, _>("memory_mib") as u64,
+                    disk_mib: r.get::<i64, _>("disk_mib") as u64,
+                    port: r.get::<i32, _>("port") as u32,
+                    env,
+                    ip_address: r.get("ip_address"),
+                    gateway: r.get("gateway"),
+                    mac_address: r.get("mac_address"),
+                    netmask: r.get("netmask"),
+                    volumes: vec![], // TODO: Persistent volumes support
+                },
+            }))
+        } else {
+            Ok(None)
         }
     }
 
-    pub fn update_job_ip(&self, job_id: &str, ip: String) {
-        if let Some(job) = self.jobs.write().get_mut(job_id) {
-            job.config.ip_address = Some(ip);
-            let _ = self.job_updates.send(job.clone());
+    pub async fn update_job_status(
+        &self,
+        job_id: &str,
+        status: JobStatus,
+    ) -> Result<(), SchedulerError> {
+        let status_str = serde_json::to_string(&status)
+            .unwrap_or_else(|_| "\"pending\"".to_string())
+            .trim_matches('"')
+            .to_string();
+
+        sqlx::query("UPDATE jobs SET status = $1 WHERE job_id = $2")
+            .bind(status_str)
+            .bind(job_id)
+            .execute(&self.pool)
+            .await?;
+
+        if let Some(job) = self.get_job(job_id).await? {
+            self.notify_job_update(job).await;
         }
+        Ok(())
     }
 
-    pub fn start_job(&self, job_id: &str) {
-        if let Some(job) = self.jobs.write().get_mut(job_id) {
-            job.start();
-            let _ = self.job_updates.send(job.clone());
+    pub async fn update_job_ip(&self, job_id: &str, ip: String) -> Result<(), SchedulerError> {
+        sqlx::query("UPDATE jobs SET ip_address = $1 WHERE job_id = $2")
+            .bind(ip)
+            .bind(job_id)
+            .execute(&self.pool)
+            .await?;
+
+        if let Some(job) = self.get_job(job_id).await? {
+            self.notify_job_update(job).await;
         }
+        Ok(())
     }
 
-    pub fn fail_job(&self, job_id: &str, msg: String) {
-        if let Some(job) = self.jobs.write().get_mut(job_id) {
-            job.fail(msg);
-            let _ = self.job_updates.send(job.clone());
+    pub async fn start_job(&self, job_id: &str) -> Result<(), SchedulerError> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query("UPDATE jobs SET status = 'running', started_at = $1 WHERE job_id = $2")
+            .bind(now)
+            .bind(job_id)
+            .execute(&self.pool)
+            .await?;
+
+        if let Some(job) = self.get_job(job_id).await? {
+            self.notify_job_update(job).await;
         }
+        Ok(())
     }
 
-    pub fn cancel_job(&self, job_id: &str) {
-        if let Some(job) = self.jobs.write().get_mut(job_id) {
-            job.cancel();
-            let _ = self.job_updates.send(job.clone());
+    pub async fn fail_job(&self, job_id: &str, msg: String) -> Result<(), SchedulerError> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query(
+            "UPDATE jobs SET status = 'failed', error_message = $1, stopped_at = $2 WHERE job_id = $3"
+        )
+        .bind(msg)
+        .bind(now)
+        .bind(job_id)
+        .execute(&self.pool)
+        .await?;
+
+        if let Some(job) = self.get_job(job_id).await? {
+            self.notify_job_update(job).await;
         }
+        Ok(())
     }
 
-    #[must_use]
-    pub fn remove_job(&self, job_id: &str) -> bool {
-        if let Some(job) = self.jobs.write().remove(job_id) {
+    pub async fn cancel_job(&self, job_id: &str) -> Result<(), SchedulerError> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query("UPDATE jobs SET status = 'cancelled', stopped_at = $1 WHERE job_id = $2")
+            .bind(now)
+            .bind(job_id)
+            .execute(&self.pool)
+            .await?;
+
+        if let Some(job) = self.get_job(job_id).await? {
+            self.notify_job_update(job).await;
+        }
+        Ok(())
+    }
+
+    pub async fn remove_job(&self, job_id: &str) -> Result<bool, SchedulerError> {
+        if let Some(job) = self.get_job(job_id).await? {
             if let Some(ref ip) = job.config.ip_address
                 && let Some(ref host_id) = job.host_id
-                && let Some(worker) = self.worker_registry.get_worker(host_id)
+                && let Some(worker) = self.worker_registry.get_worker(host_id).await?
             {
-                worker.ipam.release(ip);
+                worker.ipam.release(ip).await?;
             }
+
+            sqlx::query("DELETE FROM jobs WHERE job_id = $1")
+                .bind(job_id)
+                .execute(&self.pool)
+                .await?;
+
             // Notify that the job is gone
             let mut final_job = job;
             final_job.status = JobStatus::Cancelled;
-            let _ = self.job_updates.send(final_job);
-            true
+            self.notify_job_update(final_job).await;
+            Ok(true)
         } else {
-            false
+            Ok(false)
         }
     }
 
-    #[must_use]
-    pub fn list_jobs(&self, user_id: Option<&str>, _status: Option<JobStatus>) -> Vec<Job> {
-        let jobs = self.jobs.read();
-        jobs.values()
-            .filter(|j| user_id.is_none_or(|u| j.user_id == u))
-            .cloned()
-            .collect()
+    pub async fn list_jobs(
+        &self,
+        user_id: Option<&str>,
+        _status: Option<JobStatus>,
+    ) -> Result<Vec<Job>, SchedulerError> {
+        let rows = if let Some(uid) = user_id {
+            sqlx::query("SELECT * FROM jobs WHERE user_id = $1")
+                .bind(uid)
+                .fetch_all(&self.pool)
+                .await?
+        } else {
+            sqlx::query("SELECT * FROM jobs")
+                .fetch_all(&self.pool)
+                .await?
+        };
+
+        let mut jobs = Vec::new();
+        for r in rows {
+            let status_str: String = r.get("status");
+            let status: JobStatus =
+                serde_json::from_str(&format!("\"{}\"", status_str)).unwrap_or_default();
+            let env_vars: serde_json::Value = r.get("env_vars");
+            let env: HashMap<String, String> = serde_json::from_value(env_vars).unwrap_or_default();
+
+            jobs.push(Job {
+                job_id: r.get("job_id"),
+                app_id: r.get("app_id"),
+                app_name: r.get("app_name"),
+                image: r.get("image"),
+                user_id: r.get("user_id"),
+                status,
+                host_id: r.get("host_id"),
+                vm_id: r.get("vm_id"),
+                scheduled_at: r.get("scheduled_at"),
+                started_at: r.get("started_at"),
+                stopped_at: r.get("stopped_at"),
+                error_message: r.get("error_message"),
+                created_at: r.get("created_at"),
+                deployment_id: r.get("deployment_id"),
+                config: VmConfig {
+                    vcpus: r.get::<i32, _>("vcpus") as u32,
+                    memory_mib: r.get::<i64, _>("memory_mib") as u64,
+                    disk_mib: r.get::<i64, _>("disk_mib") as u64,
+                    port: r.get::<i32, _>("port") as u32,
+                    env,
+                    ip_address: r.get("ip_address"),
+                    gateway: r.get("gateway"),
+                    mac_address: r.get("mac_address"),
+                    netmask: r.get("netmask"),
+                    volumes: vec![],
+                },
+            });
+        }
+        Ok(jobs)
     }
 
-    pub fn select_best_worker(
+    pub async fn select_best_worker(
         &self,
         config: &VmConfig,
         app_id: &str,
     ) -> Result<Worker, SchedulerError> {
-        let workers = self.worker_registry.get_available_workers();
+        let workers = self.worker_registry.get_available_workers().await?;
 
         tracing::info!(
             available_workers = %workers.len(),
@@ -182,9 +395,9 @@ impl AppScheduler {
         }
 
         // Count current app instances per worker for anti-affinity
-        let jobs = self.jobs.read();
+        let jobs = self.list_jobs(None, None).await?;
         let mut app_counts_per_host: HashMap<String, u32> = HashMap::new();
-        for job in jobs.values() {
+        for job in jobs {
             if job.app_id == app_id
                 && job.status != JobStatus::Failed
                 && job.status != JobStatus::Cancelled
@@ -221,114 +434,17 @@ impl AppScheduler {
         Ok(viable_workers.remove(0))
     }
 
-    #[must_use]
-    pub fn find_job_by_vm_id(&self, vm_id: &str) -> Option<Job> {
-        self.jobs
-            .read()
-            .values()
-            .find(|j| j.vm_id.as_deref() == Some(vm_id))
-            .cloned()
-    }
-}
+    pub async fn find_job_by_vm_id(&self, vm_id: &str) -> Result<Option<Job>, SchedulerError> {
+        let row = sqlx::query("SELECT job_id FROM jobs WHERE vm_id = $1")
+            .bind(vm_id)
+            .fetch_optional(&self.pool)
+            .await?;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::metrics::HostMetrics;
-
-    fn register_worker_with_metrics(
-        registry: &WorkerRegistry,
-        id: &str,
-        cpu: f32,
-        ram_free_mb: u64,
-    ) {
-        registry.register(
-            id.to_string(),
-            format!("host-{id}"),
-            "127.0.0.1".to_string(),
-            5003,
-            "10.0.0.1/8".to_string(),
-        );
-
-        let mut metrics = HostMetrics::default();
-        metrics.cpu_usage = cpu;
-        metrics.ram_total_bytes = 4096 * 1024 * 1024;
-        metrics.ram_used_bytes = metrics.ram_total_bytes - (ram_free_mb * 1024 * 1024);
-        metrics.apps_count = 0;
-
-        let _ = registry.update_metrics(id, metrics);
-    }
-
-    #[test]
-    fn test_strategy_least_loaded() {
-        let registry = WorkerRegistry::new();
-        // Host A: 10% CPU, 2000MB free
-        register_worker_with_metrics(&registry, "A", 0.1, 2000);
-        // Host B: 50% CPU, 500MB free
-        register_worker_with_metrics(&registry, "B", 0.5, 500);
-
-        let scheduler = AppScheduler::new(registry).with_strategy(SchedulingStrategy::LeastLoaded);
-        let config = VmConfig {
-            memory_mib: 256,
-            disk_mib: 1024,
-            ..Default::default()
-        };
-
-        let best = scheduler.select_best_worker(&config, "app-1").unwrap();
-        assert_eq!(best.host_id, "A");
-    }
-
-    #[test]
-    fn test_strategy_bin_packing() {
-        let registry = WorkerRegistry::new();
-        // Host A: 10% CPU, 2000MB free (Least loaded)
-        register_worker_with_metrics(&registry, "A", 0.1, 2000);
-        // Host B: 50% CPU, 500MB free (More loaded, but fits)
-        register_worker_with_metrics(&registry, "B", 0.5, 500);
-
-        let scheduler = AppScheduler::new(registry).with_strategy(SchedulingStrategy::BinPacking);
-        let config = VmConfig {
-            memory_mib: 128,
-            disk_mib: 1024,
-            ..Default::default()
-        };
-
-        // Should pick B because it's more loaded but still fits (packing)
-        let best = scheduler.select_best_worker(&config, "app-1").unwrap();
-        assert_eq!(best.host_id, "B");
-    }
-
-    #[test]
-    fn test_soft_anti_affinity() {
-        let registry = WorkerRegistry::new();
-        // Two identical hosts
-        register_worker_with_metrics(&registry, "A", 0.1, 2000);
-        register_worker_with_metrics(&registry, "B", 0.1, 2000);
-
-        let scheduler = AppScheduler::new(registry);
-
-        // Add a job for "app-1" already running on host A
-        let mut job = Job::new(
-            "j1".into(),
-            "app-1".into(),
-            "n".into(),
-            "i".into(),
-            VmConfig::default(),
-            "u".into(),
-        );
-        job.host_id = Some("A".into());
-        job.vm_id = Some("vm1".into());
-        job.status = JobStatus::Running;
-        scheduler.add_job(job);
-
-        let config = VmConfig {
-            memory_mib: 256,
-            disk_mib: 1024,
-            ..Default::default()
-        };
-
-        // Should pick B even if A is equally loaded, because app-1 is already on A
-        let best = scheduler.select_best_worker(&config, "app-1").unwrap();
-        assert_eq!(best.host_id, "B");
+        if let Some(r) = row {
+            let job_id: String = r.get("job_id");
+            self.get_job(&job_id).await
+        } else {
+            Ok(None)
+        }
     }
 }

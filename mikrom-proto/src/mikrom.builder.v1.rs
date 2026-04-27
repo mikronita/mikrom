@@ -43,6 +43,15 @@ pub struct GetBuildStatusResponse {
     #[prost(string, tag = "8")]
     pub git_branch: ::prost::alloc::string::String,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BuildProgress {
+    #[prost(string, tag = "1")]
+    pub build_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(float, tag = "3")]
+    pub percent: f32,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum BuildStatus {

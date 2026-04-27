@@ -75,9 +75,13 @@ async fn test_agent_failure_propagation_e2e() {
     let scheduler_url = format!("http://127.0.0.1:{scheduler_port}");
 
     // 1. Start Scheduler
+    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+    let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
     let sched_addr: SocketAddr = format!("127.0.0.1:{scheduler_port}").parse().unwrap();
+    let nats_client_clone = nats_client.clone();
+    let db_pool_clone = db_pool.clone();
     tokio::spawn(async move {
-        SchedulerServer::new(None)
+        SchedulerServer::new(db_pool_clone, nats_client_clone, None)
             .unwrap()
             .serve(sched_addr)
             .await
@@ -95,6 +99,7 @@ async fn test_agent_failure_propagation_e2e() {
     let manager = FirecrackerManager::with_config(failing_config);
 
     let agent_config = mikrom_agent::config::AgentConfig {
+        nats_url: "nats://localhost:4222".to_string(),
         host_id: "chaos-agent-1".to_string(),
         scheduler_addr: scheduler_url.clone(),
         use_tls: false,
@@ -121,12 +126,7 @@ async fn test_agent_failure_propagation_e2e() {
         user_repo: Arc::new(NoopRepo),
         app_repo,
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-        scheduler_config: mikrom_api::scheduler::SchedulerConfig {
-            addr: scheduler_url.clone(),
-            use_tls: false,
-            certs_dir: None,
-        },
-        builder_addr: "http://localhost:5004".to_string(),
+        nats_client,
         router_addr: "http://localhost:8080".to_string(),
         jwt_secret: CHAOS_JWT_SECRET.to_string(),
         master_key: "chaos-key".into(),
@@ -195,9 +195,13 @@ async fn test_ipam_sequential_allocation_e2e() {
     let scheduler_url = format!("http://127.0.0.1:{scheduler_port}");
 
     // Start Scheduler
+    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+    let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
     let sched_addr: SocketAddr = format!("127.0.0.1:{scheduler_port}").parse().unwrap();
+    let nats_client_clone = nats_client.clone();
+    let db_pool_clone = db_pool.clone();
     tokio::spawn(async move {
-        SchedulerServer::new(None)
+        SchedulerServer::new(db_pool_clone, nats_client_clone, None)
             .unwrap()
             .serve(sched_addr)
             .await
@@ -249,6 +253,7 @@ async fn test_ipam_sequential_allocation_e2e() {
             image: "nginx".to_string(),
             config: None,
             user_id: "user-1".to_string(),
+            deployment_id: "dep-1".to_string(),
         })
         .await
         .unwrap()
@@ -261,6 +266,7 @@ async fn test_ipam_sequential_allocation_e2e() {
             image: "nginx".to_string(),
             config: None,
             user_id: "user-1".to_string(),
+            deployment_id: "dep-2".to_string(),
         })
         .await
         .unwrap()

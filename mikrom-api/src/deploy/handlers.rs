@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
+use tracing::info;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -20,8 +21,7 @@ use uuid::Uuid;
 pub struct CreateAppRequest {
     pub name: String,
     pub git_url: String,
-    pub port: Option<i32>,
-    pub hostname: Option<String>,
+    pub port: Option<u32>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -29,33 +29,15 @@ pub struct AppResponse {
     pub id: Uuid,
     pub name: String,
     pub git_url: String,
-    pub port: i32,
-    pub hostname: Option<String>,
-    pub github_webhook_secret: Option<String>,
-    pub active_deployment_id: Option<Uuid>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub port: u32,
 }
 
-async fn get_app_by_name_and_auth(
-    state: &AppState,
-    app_name: &str,
-    auth: &AuthUser,
-) -> ApiResult<crate::models::app::App> {
-    let app = state
-        .app_repo
-        .get_app_by_name(app_name)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
-
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?;
-
-    if app.user_id != user_id {
-        return Err(ApiError::Forbidden);
-    }
-
-    Ok(app)
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ManualDeployRequest {
+    pub vcpus: Option<u32>,
+    pub memory_mib: Option<u32>,
+    pub disk_mib: Option<u32>,
+    pub env: Option<std::collections::HashMap<String, String>>,
 }
 
 #[utoipa::path(
@@ -63,8 +45,9 @@ async fn get_app_by_name_and_auth(
     path = "/apps",
     request_body = CreateAppRequest,
     responses(
-        (status = 201, description = "App created successfully", body = AppResponse),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+        (status = 201, description = "Application created", body = AppResponse),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 500, description = "Internal error", body = crate::error::ErrorResponse)
     ),
     tag = "apps",
     security(
@@ -75,62 +58,42 @@ pub async fn create_app_handler(
     auth: AuthUser,
     State(state): State<AppState>,
     Json(payload): Json<CreateAppRequest>,
-) -> ApiResult<Json<AppResponse>> {
+) -> ApiResult<(StatusCode, Json<AppResponse>)> {
     let port = payload.port.unwrap_or(8080);
-
-    // Generate hostname based on app name if not provided
-    let sanitized_name = payload
-        .name
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-
-    let hostname = Some(format!("{}.apps.mikrom.es", sanitized_name));
-
-    let webhook_secret = Some(uuid::Uuid::new_v4().to_string().replace("-", ""));
+    let hostname = format!(
+        "{}.apps.mikrom.es",
+        payload.name.to_lowercase().replace(' ', "-")
+    );
 
     let app = state
         .app_repo
         .create_app(
             &payload.name,
             &payload.git_url,
-            port,
-            hostname,
+            port as i32,
+            Some(hostname),
             &auth.user_id,
-            webhook_secret,
+            None,
         )
         .await
-        .map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("is already taken") {
-                ApiError::Conflict(msg)
-            } else {
-                ApiError::Internal(msg)
-            }
-        })?;
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    Ok(Json(AppResponse {
-        id: app.id,
-        name: app.name,
-        git_url: app.git_url,
-        port: app.port,
-        hostname: app.hostname,
-        github_webhook_secret: app.github_webhook_secret,
-        active_deployment_id: app.active_deployment_id,
-        created_at: app.created_at,
-    }))
+    Ok((
+        StatusCode::CREATED,
+        Json(AppResponse {
+            id: app.id,
+            name: app.name,
+            git_url: app.git_url,
+            port: app.port as u32,
+        }),
+    ))
 }
 
 #[utoipa::path(
     get,
     path = "/apps",
     responses(
-        (status = 200, description = "List of user apps", body = [AppResponse]),
+        (status = 200, description = "List applications", body = [AppResponse]),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
     ),
     tag = "apps",
@@ -148,33 +111,28 @@ pub async fn list_apps_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let resp: Vec<AppResponse> = apps
-        .into_iter()
-        .map(|app| AppResponse {
-            id: app.id,
-            name: app.name,
-            git_url: app.git_url,
-            port: app.port,
-            hostname: app.hostname,
-            github_webhook_secret: app.github_webhook_secret,
-            active_deployment_id: app.active_deployment_id,
-            created_at: app.created_at,
-        })
-        .collect();
-
-    Ok(Json(resp))
+    Ok(Json(
+        apps.into_iter()
+            .map(|a| AppResponse {
+                id: a.id,
+                name: a.name,
+                git_url: a.git_url,
+                port: a.port as u32,
+            })
+            .collect(),
+    ))
 }
 
 #[utoipa::path(
     delete,
     path = "/apps/{app_name}",
     params(
-        ("app_name" = String, Path, description = "App Name")
+        ("app_name" = String, Path, description = "Application name")
     ),
     responses(
-        (status = 204, description = "App deleted successfully"),
+        (status = 204, description = "Application deleted"),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "App not found", body = crate::error::ErrorResponse)
+        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
     ),
     tag = "apps",
     security(
@@ -186,57 +144,209 @@ pub async fn delete_app_handler(
     State(state): State<AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<StatusCode> {
-    // 1. Verify app exists and belongs to user
     let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
-
-    // 2. Cleanup associated resources (VMs, rootfs, etc) for all deployments
-    let deployments = state
-        .app_repo
-        .list_deployments_by_app(app.id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    for deployment in deployments {
-        if let Some(job_id) = deployment.job_id {
-            // We ignore errors here as some deployments might already be gone
-            let _ = state
-                .scheduler
-                .delete_app(job_id, auth.user_id.clone())
-                .await;
-        }
-    }
-
-    // 3. Delete the app (cascading will handle deployments record removal)
     state
         .app_repo
         .delete_app(app.id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct ManualDeployRequest {
-    pub vcpus: Option<u32>,
-    pub memory_mib: Option<u64>,
-    pub disk_mib: Option<u64>,
-    pub env: Option<std::collections::HashMap<String, String>>,
+#[utoipa::path(
+    get,
+    path = "/apps/{app_name}/deployments",
+    params(
+        ("app_name" = String, Path, description = "Application name")
+    ),
+    responses(
+        (status = 200, description = "List deployments", body = [Deployment]),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "deployment",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn list_deployments_handler(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(app_name): Path<String>,
+) -> ApiResult<Json<Vec<Deployment>>> {
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+    let deployments = state
+        .app_repo
+        .list_deployments_by_app(app.id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(deployments))
+}
+
+#[utoipa::path(
+    get,
+    path = "/apps/{app_name}/deployments/stream",
+    params(
+        ("app_name" = String, Path, description = "Application name")
+    ),
+    responses(
+        (status = 200, description = "SSE stream for deployment updates", content_type = "text/event-stream"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "deployment",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn deployments_stream_handler(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(app_name): Path<String>,
+) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+    let app_id = app.id;
+    let rx = state.deployment_events.subscribe();
+    let state_clone = state.clone();
+
+    // Subscribe to NATS for instant cluster-wide updates
+    let nats_sub = state
+        .nats_client
+        .subscribe("mikrom.scheduler.job_updates")
+        .await
+        .map_err(|e| ApiError::Internal(format!("NATS sub error: {}", e)))?;
+
+    let stream = async_stream::stream! {
+        let mut local_stream = BroadcastStream::new(rx);
+        let mut nats_stream = nats_sub;
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+
+        // 0. Initial yield: send current state immediately upon connection
+        if let Ok(json) = state_clone.app_repo.list_deployments_by_app(app_id).await
+            .and_then(|deps| serde_json::to_string(&deps).map_err(|e| anyhow::anyhow!(e))) {
+                yield Ok(Event::default().data(json));
+        }
+
+        loop {
+            tokio::select! {
+                // 1. Local events (DB changes)
+                res = local_stream.next() => {
+                    match res {
+                        Some(Ok(id)) if id == app_id => {
+                            if let Ok(json) = state_clone.app_repo.list_deployments_by_app(app_id).await
+                                .and_then(|deps| serde_json::to_string(&deps).map_err(|e| anyhow::anyhow!(e))) {
+                                    yield Ok(Event::default().data(json));
+                            }
+                        },
+                        Some(Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_))) => {
+                            // If we lag, just refresh anyway
+                            if let Ok(json) = state_clone.app_repo.list_deployments_by_app(app_id).await
+                                .and_then(|deps| serde_json::to_string(&deps).map_err(|e| anyhow::anyhow!(e))) {
+                                    yield Ok(Event::default().data(json));
+                            }
+                        },
+                        _ => {}
+                    }
+                },
+                // 2. Cluster events (Scheduler changes)
+                Some(msg) = nats_stream.next() => {
+                    use prost::Message;
+                    use mikrom_proto::scheduler::AppInfo;
+                    if let Ok(json) = async {
+                        let info = AppInfo::decode(&msg.payload[..])?;
+                        if info.app_id != app_id.to_string() { return Err(anyhow::anyhow!("Mismatch")); }
+                        let deps = state_clone.app_repo.list_deployments_by_app(app_id).await?;
+                        serde_json::to_string(&deps).map_err(|e| anyhow::anyhow!(e))
+                    }.await {
+                        yield Ok(Event::default().data(json));
+                    }
+                },
+                // 3. Periodic refresh (Brute force fallback to ensure UI stays in sync)
+                _ = interval.tick() => {
+                    if let Ok(json) = state_clone.app_repo.list_deployments_by_app(app_id).await
+                        .and_then(|deps| serde_json::to_string(&deps).map_err(|e| anyhow::anyhow!(e))) {
+                            yield Ok(Event::default().data(json));
+                    }
+                },
+                else => break,
+            }
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(5))
+            .text("keep-alive"),
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/apps/{app_name}/deployments/{deployment_id}/activate",
+    params(
+        ("app_name" = String, Path, description = "Application name"),
+        ("deployment_id" = Uuid, Path, description = "Deployment ID")
+    ),
+    responses(
+        (status = 200, description = "Deployment activated"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Deployment not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "deployment",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn activate_deployment_handler(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path((_app_name, deployment_id)): Path<(String, Uuid)>,
+) -> ApiResult<StatusCode> {
+    let deployment = state
+        .app_repo
+        .get_deployment(deployment_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Deployment not found".into()))?;
+
+    // 1. Update active pointer in DB
+    state
+        .app_repo
+        .set_active_deployment(deployment.app_id, deployment_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    // Give the DB a moment to ensure the update is committed before notifying other systems
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    // 2. If it has a job_id, ensure it's running
+    if let Some(job_id) = deployment.job_id {
+        info!(job_id = %job_id, "Activating deployment, ensuring it's running in the cluster...");
+        let _ = state.scheduler.resume_app(job_id, auth.user_id).await;
+    }
+
+    state.deployment_events.send(deployment.app_id).ok();
+
+    // Notify router
+    let _ = state
+        .nats_client
+        .publish("mikrom.router.config_updated", "refresh".into())
+        .await;
+
+    Ok(StatusCode::OK)
 }
 
 #[utoipa::path(
     post,
     path = "/apps/{app_name}/deploy",
     params(
-        ("app_name" = String, Path, description = "App Name")
+        ("app_name" = String, Path, description = "Application name")
     ),
     request_body = ManualDeployRequest,
     responses(
-        (status = 202, description = "Deployment triggered", body = crate::deploy::DeployResponseBody),
+        (status = 200, description = "Deployment triggered", body = crate::deploy::DeployResponseBody),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "App not found", body = crate::error::ErrorResponse)
+        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
     ),
-    tag = "apps",
+    tag = "deployment",
     security(
         ("jwt" = [])
     )
@@ -247,10 +357,8 @@ pub async fn deploy_app_version_handler(
     Path(app_name): Path<String>,
     Json(payload): Json<ManualDeployRequest>,
 ) -> ApiResult<Json<crate::deploy::DeployResponseBody>> {
-    // 1. Verify app exists and belongs to user
     let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
-    // 2. Create deployment record in DB
     let vcpus = payload.vcpus.unwrap_or(1);
     let memory_mib = payload.memory_mib.unwrap_or(256);
     let disk_mib = payload.disk_mib.unwrap_or(1024);
@@ -271,11 +379,6 @@ pub async fn deploy_app_version_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    // 3. Trigger build and deploy
-    let git_url = app.git_url.clone();
-    let app_name = app.name.clone();
-
-    // We update the deployment status to BUILDING
     state
         .app_repo
         .update_deployment_status(
@@ -292,28 +395,52 @@ pub async fn deploy_app_version_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    // Notify update
+    // Notify cluster via NATS for BUILDING phase
+    {
+        use mikrom_proto::scheduler::AppInfo;
+        use prost::Message;
+        let info = AppInfo {
+            job_id: format!("temp-{}", deployment.id),
+            app_id: app.id.to_string(),
+            app_name: app.name.clone(),
+            image: String::new(),
+            status: 1, // Pending/Building
+            user_id: auth.user_id.clone(),
+            deployment_id: deployment.id.to_string(),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        if info.encode(&mut buf).is_ok() {
+            let _ = state
+                .nats_client
+                .publish("mikrom.scheduler.job_updates", buf.into())
+                .await;
+        }
+    }
+
     state.deployment_events.send(app.id).ok();
 
-    // Connect to builder
-    let builder_channel = crate::builder::connect(&state.builder_addr)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to connect to builder: {}", e)))?;
-
-    let mut builder_client = mikrom_proto::builder::BuilderServiceClient::new(builder_channel);
-
+    use prost::Message;
     let build_req = mikrom_proto::builder::BuildRequest {
         app_id: app.id.to_string(),
-        git_url: git_url.clone(),
-        image_name: app_name.to_lowercase().replace(" ", "-"),
-        tag: deployment.id.to_string(), // Use deployment ID as tag for uniqueness
+        git_url: app.git_url.clone(),
+        image_name: app.name.to_lowercase().replace(' ', "-"),
+        tag: deployment.id.to_string(),
     };
 
-    let build_resp = builder_client
-        .build_app(build_req)
+    let mut buf = Vec::new();
+    build_req
+        .encode(&mut buf)
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let response = state
+        .nats_client
+        .request("mikrom.builder.build", buf.into())
         .await
-        .map_err(|e| ApiError::Internal(format!("Build initiation failed: {}", e)))?
-        .into_inner();
+        .map_err(|e| ApiError::Internal(format!("Failed to trigger build via NATS: {}", e)))?;
+
+    let build_resp = mikrom_proto::builder::BuildResponse::decode(&response.payload[..])
+        .map_err(|e| ApiError::Internal(format!("Failed to decode builder response: {}", e)))?;
 
     let build_id = build_resp.build_id;
     state
@@ -332,7 +459,6 @@ pub async fn deploy_app_version_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    // Start background polling
     let task = crate::deploy::worker::BuildTask {
         deployment_id: deployment.id,
         app_id: app.id,
@@ -340,8 +466,8 @@ pub async fn deploy_app_version_handler(
         user_id: auth.user_id.clone(),
         build_id: build_id.clone(),
         vcpus,
-        memory_mib: memory_mib as u32,
-        disk_mib: disk_mib as u32,
+        memory_mib: memory_mib as u64,
+        disk_mib: disk_mib as u64,
         port: app.port as u32,
         env: env_vars,
     };
@@ -350,22 +476,19 @@ pub async fn deploy_app_version_handler(
 
     Ok(Json(crate::deploy::DeployResponseBody {
         job_id: None,
-        deployment_id: Some(deployment.id),
+        deployment_id: Some(deployment.id.to_string()),
         status: "BUILDING".to_string(),
         host_id: None,
         vm_id: None,
         image_tag: None,
-        message: "Build initiated in background".to_string(),
+        message: "Build initiated via NATS".to_string(),
     }))
 }
 
-/// Helper function to trigger a build and deployment for an app.
-/// Reuses logic from deploy_app_version_handler.
 pub async fn trigger_app_build(
     state: crate::AppState,
     app: crate::models::app::App,
 ) -> ApiResult<Uuid> {
-    // 1. Create deployment record in DB (using defaults)
     let vcpus = 1;
     let memory_mib = 256;
     let disk_mib = 1024;
@@ -386,10 +509,6 @@ pub async fn trigger_app_build(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    // 2. Trigger build and deploy
-    let git_url = app.git_url.clone();
-    let app_name = app.name.clone();
-
     state
         .app_repo
         .update_deployment_status(
@@ -406,28 +525,52 @@ pub async fn trigger_app_build(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    // Notify update
+    // Notify cluster via NATS for BUILDING phase
+    {
+        use mikrom_proto::scheduler::AppInfo;
+        use prost::Message;
+        let info = AppInfo {
+            job_id: format!("temp-{}", deployment.id),
+            app_id: app.id.to_string(),
+            app_name: app.name.clone(),
+            image: String::new(),
+            status: 1, // Pending/Building
+            user_id: app.user_id.to_string(),
+            deployment_id: deployment.id.to_string(),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        if info.encode(&mut buf).is_ok() {
+            let _ = state
+                .nats_client
+                .publish("mikrom.scheduler.job_updates", buf.into())
+                .await;
+        }
+    }
+
     state.deployment_events.send(app.id).ok();
 
-    // Connect to builder
-    let builder_channel = crate::builder::connect(&state.builder_addr)
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to connect to builder: {}", e)))?;
-
-    let mut builder_client = mikrom_proto::builder::BuilderServiceClient::new(builder_channel);
-
+    use prost::Message;
     let build_req = mikrom_proto::builder::BuildRequest {
         app_id: app.id.to_string(),
-        git_url: git_url.clone(),
-        image_name: app_name.to_lowercase().replace(" ", "-"),
+        git_url: app.git_url.clone(),
+        image_name: app.name.to_lowercase().replace(' ', "-"),
         tag: deployment.id.to_string(),
     };
 
-    let build_resp = builder_client
-        .build_app(build_req)
+    let mut buf = Vec::new();
+    build_req
+        .encode(&mut buf)
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let response = state
+        .nats_client
+        .request("mikrom.builder.build", buf.into())
         .await
-        .map_err(|e| ApiError::Internal(format!("Build initiation failed: {}", e)))?
-        .into_inner();
+        .map_err(|e| ApiError::Internal(format!("Failed to trigger build via NATS: {}", e)))?;
+
+    let build_resp = mikrom_proto::builder::BuildResponse::decode(&response.payload[..])
+        .map_err(|e| ApiError::Internal(format!("Failed to decode builder response: {}", e)))?;
 
     let build_id = build_resp.build_id;
     state
@@ -446,7 +589,6 @@ pub async fn trigger_app_build(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    // Start background polling
     let task = crate::deploy::worker::BuildTask {
         deployment_id: deployment.id,
         app_id: app.id,
@@ -454,264 +596,32 @@ pub async fn trigger_app_build(
         user_id: app.user_id.to_string(),
         build_id: build_id.clone(),
         vcpus: vcpus as u32,
-        memory_mib: memory_mib as u32,
-        disk_mib: disk_mib as u32,
+        memory_mib: memory_mib as u64,
+        disk_mib: disk_mib as u64,
         port: app.port as u32,
         env: env_vars,
     };
 
-    crate::deploy::worker::start_build_polling(state, task).await;
+    crate::deploy::worker::start_build_polling(state.clone(), task).await;
 
     Ok(deployment.id)
 }
 
-#[utoipa::path(
-    get,
-    path = "/apps/{app_name}/deployments",
-    params(
-        ("app_name" = String, Path, description = "App Name")
-    ),
-    responses(
-        (status = 200, description = "List of app deployments", body = [Deployment]),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "App not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "apps",
-    security(
-        ("jwt" = [])
-    )
-)]
-pub async fn list_deployments_handler(
-    auth: AuthUser,
-    State(state): State<AppState>,
-    Path(app_name): Path<String>,
-) -> ApiResult<Json<Vec<Deployment>>> {
-    // Verify ownership
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
-
-    let deployments = state
+async fn get_app_by_name_and_auth(
+    state: &AppState,
+    app_name: &str,
+    auth: &AuthUser,
+) -> ApiResult<crate::models::app::App> {
+    let app = state
         .app_repo
-        .list_deployments_by_app(app.id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    Ok(Json(deployments))
-}
-
-#[utoipa::path(
-    get,
-    path = "/apps/{app_name}/deployments/stream",
-    params(
-        ("app_name" = String, Path, description = "App Name"),
-        ("token" = String, Query, description = "JWT Token")
-    ),
-    responses(
-        (status = 200, description = "SSE stream for deployments"),
-        (status = 401, description = "Unauthorized"),
-        (status = 404, description = "App not found")
-    ),
-    tag = "apps",
-    security(
-        ("jwt" = [])
-    )
-)]
-pub async fn deployments_stream_handler(
-    auth: AuthUser,
-    State(state): State<AppState>,
-    Path(app_name): Path<String>,
-) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    // Verify ownership
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
-
-    let app_id = app.id;
-    let app_repo = state.app_repo.clone();
-    let receiver = state.deployment_events.subscribe();
-
-    let stream = async_stream::stream! {
-        // Initial event
-        if let Some(json) = app_repo.list_deployments_by_app(app_id).await.ok().and_then(|d| serde_json::to_string(&d).ok()) {
-            yield Ok(Event::default().data(json));
-        }
-
-        let mut broadcast_stream = BroadcastStream::new(receiver);
-        while let Some(result) = broadcast_stream.next().await {
-            match result {
-                Ok(event_app_id) if event_app_id == app_id => {
-                    if let Some(json) = app_repo.list_deployments_by_app(app_id).await.ok().and_then(|d| serde_json::to_string(&d).ok()) {
-                        yield Ok(Event::default().data(json));
-                    }
-                }
-                _ => {} // Ignore errors or other app_ids
-            }
-        }
-    };
-
-    Ok(Sse::new(stream))
-}
-
-#[utoipa::path(
-    post,
-    path = "/apps/{app_name}/deployments/{deployment_id}/activate",
-    params(
-        ("app_name" = String, Path, description = "App Name"),
-        ("deployment_id" = Uuid, Path, description = "Deployment ID")
-    ),
-    responses(
-        (status = 200, description = "Deployment activated"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "App or Deployment not found", body = crate::error::ErrorResponse),
-        (status = 400, description = "Deployment is not in RUNNING status", body = crate::error::ErrorResponse)
-    ),
-    tag = "apps",
-    security(
-        ("jwt" = [])
-    )
-)]
-pub async fn activate_deployment_handler(
-    auth: AuthUser,
-    State(state): State<AppState>,
-    Path((app_name, deployment_id)): Path<(String, Uuid)>,
-) -> ApiResult<StatusCode> {
-    // 1. Verify app ownership
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
-    let app_id = app.id;
-
-    // 2. Verify deployment exists and belongs to app
-    let deployment = state
-        .app_repo
-        .get_deployment(deployment_id)
+        .get_app_by_name(app_name)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Deployment not found".to_string()))?;
+        .ok_or_else(|| ApiError::NotFound("Application not found".into()))?;
 
-    if deployment.app_id != app_id {
-        return Err(ApiError::BadRequest(
-            "Deployment does not belong to this app".to_string(),
-        ));
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
     }
 
-    if deployment.status != "RUNNING" && deployment.status != "STOPPED" {
-        return Err(ApiError::BadRequest(
-            "Only RUNNING or STOPPED deployments can be activated".to_string(),
-        ));
-    }
-
-    let deployment_status = deployment.status.clone();
-    let deployment_job_id = deployment.job_id.clone();
-
-    // 3. Set as active in database
-    state
-        .app_repo
-        .set_active_deployment(app_id, deployment_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // 4. Manage instances (Synchronously hibernate ALL others, then Resume new one)
-    let deployments = state
-        .app_repo
-        .list_deployments_by_app(app_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let mut hibernation_tasks = futures::stream::FuturesUnordered::new();
-
-    for dep in deployments {
-        // Skip the current deployment and already terminal ones
-        if dep.id == deployment_id
-            || ["STOPPED", "FAILED", "CANCELLED"].contains(&dep.status.as_str())
-        {
-            continue;
-        }
-
-        if let Some(old_job_id) = dep.job_id {
-            let state = state.clone();
-            let auth = auth.clone();
-
-            hibernation_tasks.push(async move {
-                tracing::info!(
-                    app_id = %app_id,
-                    old_job_id = %old_job_id,
-                    "Hibernating instance during promotion for exclusivity"
-                );
-
-                // Call pause_app on scheduler
-                let mut success = false;
-                match state
-                    .scheduler
-                    .pause_app(old_job_id.clone(), auth.user_id.clone())
-                    .await
-                {
-                    Ok(s) => {
-                        success = s;
-                    },
-                    Err(e) => {
-                        tracing::warn!(
-                            app_id = %app_id,
-                            job_id = %old_job_id,
-                            "Failed to hibernate instance: {}",
-                            e
-                        );
-                        // If it's "not found", it's effectively stopped/gone
-                        if e.contains("not found") {
-                            success = true;
-                        }
-                    },
-                }
-
-                if success {
-                    let _ = state
-                        .app_repo
-                        .update_deployment_status(
-                            dep.id,
-                            "STOPPED",
-                            Some(old_job_id),
-                            dep.image_tag.clone(),
-                            dep.build_id.clone(),
-                            None,
-                            dep.git_commit_hash.clone(),
-                            dep.git_commit_message.clone(),
-                            dep.git_branch.clone(),
-                        )
-                        .await;
-                }
-            });
-        }
-    }
-
-    // Wait for all hibernation tasks to complete
-    while futures::StreamExt::next(&mut hibernation_tasks)
-        .await
-        .is_some()
-    {}
-
-    // 5. Finally, resume the newly activated deployment if it was stopped
-    if deployment_status == "STOPPED"
-        && let Some(job_id) = deployment_job_id
-    {
-        tracing::info!(app_id = %app_id, job_id = %job_id, "Resuming stopped deployment for promotion");
-        let _ = state
-            .scheduler
-            .resume_app(job_id.clone(), auth.user_id.clone())
-            .await;
-
-        let _ = state
-            .app_repo
-            .update_deployment_status(
-                deployment_id,
-                "RUNNING",
-                Some(job_id),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .await;
-    }
-
-    // Notify update
-    state.deployment_events.send(app_id).ok();
-
-    Ok(StatusCode::OK)
+    Ok(app)
 }

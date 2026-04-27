@@ -43,7 +43,10 @@ export function useWatchVms() {
         (updatedVm) => {
           if (!isMounted) return;
           queryClient.setQueryData<LiveDeploymentInfo[]>(vmsKeys.list(), (old = []) => {
-            const index = old.findIndex((vm) => vm.job_id === updatedVm.job_id);
+            const index = old.findIndex((vm) => 
+              vm.deployment_id === updatedVm.deployment_id || 
+              (vm.job_id === updatedVm.job_id && vm.job_id !== "")
+            );
             if (index === -1) {
               return [...old, updatedVm];
             }
@@ -82,7 +85,6 @@ export function useVm(jobId: string) {
       return result.data;
     },
     enabled: !!token && !!jobId,
-    refetchInterval: 3000, // Poll every 3 seconds for real-time metrics
   });
 }
 

@@ -1,3 +1,5 @@
+#![allow(clippy::large_enum_variant)]
+
 pub mod scheduler {
     include!("mikrom.scheduler.v1.rs");
     pub use scheduler_service_client::SchedulerServiceClient;

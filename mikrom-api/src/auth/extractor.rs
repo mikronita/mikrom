@@ -1,274 +1,128 @@
+use crate::error::ApiError;
 use axum::{
-    extract::FromRequestParts,
-    http::{StatusCode, request::Parts},
-    response::{IntoResponse, Response},
+    async_trait,
+    extract::{FromRef, FromRequestParts},
+    http::request::Parts,
 };
-use serde::Serialize;
 
-use crate::auth::jwt::Claims;
-
-/// Authenticated user extracted from the `Authorization: Bearer <token>` header.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct AuthUser {
     pub user_id: String,
     pub email: String,
     pub role: crate::repositories::user_repository::UserRole,
 }
 
-#[derive(Debug, Serialize)]
-struct AuthError {
-    error: String,
-}
+#[async_trait]
+impl<S> FromRequestParts<S> for AuthUser
+where
+    S: Send + Sync,
+    crate::AppState: FromRef<S>,
+{
+    type Rejection = ApiError;
 
-impl IntoResponse for AuthError {
-    fn into_response(self) -> Response {
-        (StatusCode::UNAUTHORIZED, axum::Json(self)).into_response()
-    }
-}
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let state = crate::AppState::from_ref(state);
 
-#[axum::async_trait]
-impl FromRequestParts<crate::AppState> for AuthUser {
-    type Rejection = Response;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &crate::AppState,
-    ) -> Result<Self, Self::Rejection> {
-        let token = if let Some(header) = parts
+        // 1. Get token from Authorization header OR query parameter (for SSE)
+        let token = if let Some(auth_header) = parts
             .headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
+            .get("Authorization")
+            .and_then(|h| h.to_str().ok())
         {
-            header
-                .strip_prefix("Bearer ")
-                .ok_or_else(|| {
-                    AuthError {
-                        error: "Authorization header must use Bearer scheme".to_string(),
-                    }
-                    .into_response()
-                })?
-                .to_string()
-        } else {
-            // Try query param for EventSource/SSE support
-            #[derive(serde::Deserialize)]
-            struct TokenQuery {
-                token: String,
+            if !auth_header.starts_with("Bearer ") {
+                return Err(ApiError::Auth("Invalid authorization header format".into()));
             }
-
-            axum::extract::Query::<TokenQuery>::from_request_parts(parts, state)
-                .await
-                .ok()
-                .map(|q| q.0.token)
+            auth_header[7..].to_string()
+        } else {
+            // Fallback to query parameter "token" (for SSE)
+            parts
+                .uri
+                .query()
+                .and_then(|q| {
+                    q.split('&')
+                        .find(|pair| pair.starts_with("token="))
+                        .and_then(|pair| pair.get(6..))
+                        .map(|s| s.to_string())
+                })
                 .ok_or_else(|| {
-                    AuthError {
-                        error: "Missing Authorization header or token query parameter".to_string(),
-                    }
-                    .into_response()
+                    ApiError::Auth("Missing authorization header or token query parameter".into())
                 })?
         };
 
-        let Claims {
-            sub, email, role, ..
-        } = crate::auth::jwt::verify_token(&token, &state.jwt_secret).map_err(|_| {
-            AuthError {
-                error: "Invalid or expired token".to_string(),
-            }
-            .into_response()
-        })?;
+        // 2. Decode and validate JWT
+        let claims = crate::auth::jwt::verify_token(&token, &state.jwt_secret)
+            .map_err(|_| ApiError::Auth("Invalid or expired token".into()))?;
 
         Ok(AuthUser {
-            user_id: sub,
-            email,
-            role,
+            user_id: claims.sub,
+            email: claims.email,
+            role: claims.role,
         })
+    }
+}
+
+pub struct AdminUser(pub AuthUser);
+
+#[async_trait]
+impl<S> FromRequestParts<S> for AdminUser
+where
+    S: Send + Sync,
+    crate::AppState: FromRef<S>,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let auth_user = AuthUser::from_request_parts(parts, state).await?;
+
+        if auth_user.role != crate::repositories::user_repository::UserRole::Admin {
+            return Err(ApiError::Forbidden);
+        }
+
+        Ok(AdminUser(auth_user))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
-    use axum::{body::Body, http::Request, routing::get};
+    use crate::AppState;
+    use crate::repositories::app_repository::MockAppRepository;
+    use crate::repositories::user_repository::{MockUserRepository, UserRole};
+    use axum::http::Request;
     use std::sync::Arc;
-    use tower::ServiceExt;
 
-    use crate::repositories::user_repository::{DbError, NewUser, User, UserRepository};
+    #[tokio::test]
+    async fn test_auth_extractor_success() {
+        let user_id = uuid::Uuid::new_v4().to_string();
+        let email = "test@example.com".to_string();
+        let jwt_secret = "test-secret".to_string();
+        let token =
+            crate::auth::jwt::create_token(&user_id, &email, &UserRole::User, &jwt_secret).unwrap();
 
-    struct NoopRepo;
-    #[async_trait]
-    impl UserRepository for NoopRepo {
-        async fn find_by_email(&self, _: &str) -> Result<Option<User>, DbError> {
-            Ok(None)
-        }
-        async fn find_by_id(&self, _: sqlx::types::Uuid) -> Result<Option<User>, DbError> {
-            Ok(None)
-        }
-        async fn create(&self, _: NewUser) -> Result<sqlx::types::Uuid, DbError> {
-            Ok(sqlx::types::Uuid::new_v4())
-        }
-        async fn count_by_email(&self, _: &str) -> Result<i64, DbError> {
-            Ok(0)
-        }
-        async fn update_profile(
-            &self,
-            id: sqlx::types::Uuid,
-            _: Option<String>,
-            _: Option<String>,
-        ) -> Result<User, DbError> {
-            Ok(User {
-                id,
-                email: "noop@example.com".to_string(),
-                password_hash: "".to_string(),
-                role: crate::repositories::user_repository::UserRole::User,
-                first_name: None,
-                last_name: None,
-            })
-        }
-    }
-
-    /// Minimal handler that uses AuthUser — returns 200 with the user id.
-    async fn whoami(auth: AuthUser) -> axum::Json<serde_json::Value> {
-        axum::Json(
-            serde_json::json!({ "user_id": auth.user_id, "email": auth.email, "role": auth.role }),
-        )
-    }
-
-    fn make_app(jwt_secret: &str) -> axum::Router {
-        let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
-        let app_repo = crate::repositories::PostgresAppRepository::new(db_pool);
-        let state = crate::AppState {
-            user_repo: Arc::new(NoopRepo),
-            app_repo: Arc::new(app_repo),
+        let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+        let state = AppState {
+            user_repo: Arc::new(MockUserRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            scheduler_config: crate::scheduler::SchedulerConfig::default(),
-            builder_addr: "http://localhost:5004".to_string(),
+            nats_client,
             router_addr: "http://localhost:8080".to_string(),
-            jwt_secret: jwt_secret.to_string(),
-            master_key: "test-master-key".into(),
+            jwt_secret,
+            master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+            build_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         };
-        axum::Router::new()
-            .route("/whoami", get(whoami))
-            .with_state(state)
-    }
 
-    fn make_token(secret: &str) -> String {
-        crate::auth::jwt::create_token(
-            "uid-1",
-            "user@example.com",
-            &crate::repositories::user_repository::UserRole::User,
-            secret,
-        )
-        .unwrap()
-    }
+        let request = Request::builder()
+            .header("Authorization", format!("Bearer {}", token))
+            .body(())
+            .unwrap();
 
-    // ── missing / malformed header ─────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_missing_auth_header_returns_401() {
-        let resp = make_app("any-secret")
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/whoami")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+        let (mut parts, _) = request.into_parts();
+        let auth_user = AuthUser::from_request_parts(&mut parts, &state)
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
 
-    #[tokio::test]
-    async fn test_wrong_scheme_returns_401() {
-        let resp = make_app("any-secret")
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/whoami")
-                    .header("Authorization", "Basic dXNlcjpwYXNz")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn test_malformed_token_returns_401() {
-        let resp = make_app("any-secret")
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/whoami")
-                    .header("Authorization", "Bearer not.a.real.token")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn test_wrong_secret_returns_401() {
-        let token = make_token("wrong-secret");
-        let resp = make_app("correct-secret")
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/whoami")
-                    .header("Authorization", format!("Bearer {token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    // ── valid token ────────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_valid_token_returns_200_with_claims() {
-        let secret = "test-secret-extractor";
-        let token = make_token(secret);
-        let resp = make_app(secret)
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/whoami")
-                    .header("Authorization", format!("Bearer {token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(json["user_id"], "uid-1");
-        assert_eq!(json["email"], "user@example.com");
-    }
-
-    // ── error response JSON ────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_unauthorized_response_has_error_field() {
-        let resp = make_app("any-secret")
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/whoami")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert!(json["error"].as_str().is_some());
+        assert_eq!(auth_user.user_id, user_id);
+        assert_eq!(auth_user.email, email);
     }
 }

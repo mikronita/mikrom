@@ -1,10 +1,13 @@
 use crate::AppState;
 use async_trait::async_trait;
-use mikrom_proto::builder::{BuildStatus, BuilderServiceClient, GetBuildStatusRequest};
+use futures::StreamExt;
+use mikrom_proto::builder::{BuildStatus, GetBuildStatusRequest, GetBuildStatusResponse};
 use mikrom_proto::scheduler::{AppConfig, DeployRequest};
+use prost::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{error, info};
+use std::time::Duration;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 #[async_trait]
@@ -46,7 +49,7 @@ pub trait SchedulerClient: Send + Sync {
 }
 
 pub struct RealBuilderClient {
-    pub addr: String,
+    pub nats_client: async_nats::Client,
 }
 
 #[async_trait]
@@ -62,12 +65,20 @@ impl BuilderClient for RealBuilderClient {
         Option<String>,
         Option<String>,
     )> {
-        let channel = crate::builder::connect(&self.addr).await?;
-        let mut client = BuilderServiceClient::new(channel);
-        let resp = client
-            .get_build_status(GetBuildStatusRequest { build_id })
-            .await?
-            .into_inner();
+        let mut buf = Vec::new();
+        GetBuildStatusRequest {
+            build_id: build_id.clone(),
+        }
+        .encode(&mut buf)?;
+
+        let response = self
+            .nats_client
+            .request("mikrom.builder.get_status", buf.into())
+            .await
+            .map_err(|e| anyhow::anyhow!("NATS build status request failed: {}", e))?;
+
+        let resp = GetBuildStatusResponse::decode(&response.payload[..])?;
+
         let status = BuildStatus::try_from(resp.status).unwrap_or(BuildStatus::Unspecified);
         Ok((
             status,
@@ -102,92 +113,87 @@ impl SchedulerClient for RealSchedulerClient {
         &self,
         req: DeployRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::DeployResponse> {
-        let mut client = self
+        let mut payload = Vec::new();
+        req.encode(&mut payload)?;
+
+        let response = self
             .state
-            .get_scheduler_client()
+            .nats_client
+            .request("mikrom.scheduler.deploy", payload.into())
             .await
-            .map_err(|e| anyhow::anyhow!(e))?;
-        let resp = client.deploy_app(req).await?.into_inner();
-        Ok(resp)
+            .map_err(|e| anyhow::anyhow!("NATS deployment failed: {}", e))?;
+
+        let inner = mikrom_proto::scheduler::DeployResponse::decode(&response.payload[..])?;
+
+        Ok(inner)
     }
 
     async fn delete_app(
         &self,
         req: mikrom_proto::scheduler::DeleteAppRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::DeleteAppResponse> {
-        let success = self
+        let mut payload = Vec::new();
+        req.encode(&mut payload)?;
+        let response = self
             .state
-            .scheduler
-            .delete_app(req.job_id, req.user_id)
+            .nats_client
+            .request("mikrom.scheduler.delete_app", payload.into())
             .await
-            .map_err(|e| anyhow::anyhow!(e))?;
-        Ok(mikrom_proto::scheduler::DeleteAppResponse {
-            success,
-            message: if success {
-                "ok".into()
-            } else {
-                "failed".into()
-            },
-        })
+            .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
+        let inner = mikrom_proto::scheduler::DeleteAppResponse::decode(&response.payload[..])?;
+        Ok(inner)
     }
 
     async fn pause_app(
         &self,
         req: mikrom_proto::scheduler::PauseRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::PauseResponse> {
-        let success = self
+        let mut payload = Vec::new();
+        req.encode(&mut payload)?;
+        let response = self
             .state
-            .scheduler
-            .pause_app(req.job_id, req.user_id)
+            .nats_client
+            .request("mikrom.scheduler.pause_app", payload.into())
             .await
-            .map_err(|e| anyhow::anyhow!(e))?;
-        Ok(mikrom_proto::scheduler::PauseResponse {
-            success,
-            message: if success {
-                "ok".into()
-            } else {
-                "failed".into()
-            },
-        })
+            .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
+        let inner = mikrom_proto::scheduler::PauseResponse::decode(&response.payload[..])?;
+        Ok(inner)
     }
 
     async fn resume_app(
         &self,
         req: mikrom_proto::scheduler::ResumeRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::ResumeResponse> {
-        let success = self
+        let mut payload = Vec::new();
+        req.encode(&mut payload)?;
+        let response = self
             .state
-            .scheduler
-            .resume_app(req.job_id, req.user_id)
+            .nats_client
+            .request("mikrom.scheduler.resume_app", payload.into())
             .await
-            .map_err(|e| anyhow::anyhow!(e))?;
-        Ok(mikrom_proto::scheduler::ResumeResponse {
-            success,
-            message: if success {
-                "ok".into()
-            } else {
-                "failed".into()
-            },
-        })
+            .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
+        let inner = mikrom_proto::scheduler::ResumeResponse::decode(&response.payload[..])?;
+        Ok(inner)
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct BuildTask {
     pub deployment_id: Uuid,
     pub app_id: Uuid,
+    pub build_id: String,
     pub app_name: String,
     pub user_id: String,
-    pub build_id: String,
     pub vcpus: u32,
-    pub memory_mib: u32,
-    pub disk_mib: u32,
+    pub memory_mib: u64,
+    pub disk_mib: u64,
     pub port: u32,
     pub env: HashMap<String, String>,
 }
 
 pub async fn start_build_polling(state: AppState, task: BuildTask) {
     let builder = Arc::new(RealBuilderClient {
-        addr: state.builder_addr.clone(),
+        nats_client: state.nats_client.clone(),
     });
     let scheduler = Arc::new(RealSchedulerClient {
         state: state.clone(),
@@ -201,55 +207,39 @@ pub async fn start_build_polling(state: AppState, task: BuildTask) {
 }
 
 pub async fn resume_pending_builds(state: AppState) {
-    info!("Checking for pending builds to resume...");
-    // We only resume builds for apps that are already registered.
-    let apps = match state.app_repo.list_apps_by_user("all").await {
-        Ok(apps) => apps,
+    info!("Resuming pending builds from database...");
+    let deployments = match state.app_repo.list_deployments_by_user("all").await {
+        Ok(deps) => deps
+            .into_iter()
+            .filter(|d| d.status == "BUILDING" && d.build_id.is_some())
+            .collect::<Vec<_>>(),
         Err(e) => {
-            error!("Failed to list apps for resuming builds: {}", e);
+            error!("Failed to list deployments for resume: {}", e);
             return;
         },
     };
 
-    for app in apps {
-        let deployments = match state.app_repo.list_deployments_by_app(app.id).await {
-            Ok(deps) => deps,
-            Err(e) => {
-                error!("Failed to list deployments for app {}: {}", app.id, e);
-                continue;
-            },
+    for dep in deployments {
+        let build_id = dep.build_id.clone().unwrap();
+        let app = match state.app_repo.get_app(dep.app_id).await {
+            Ok(Some(a)) => a,
+            _ => continue,
         };
 
-        for dep in deployments {
-            if dep.status == "BUILDING"
-                && let Some(build_id) = dep.build_id
-            {
-                info!(
-                    app = %app.name,
-                    deployment_id = %dep.id,
-                    build_id = %build_id,
-                    "Resuming build polling"
-                );
+        let task = BuildTask {
+            deployment_id: dep.id,
+            app_id: app.id,
+            build_id,
+            app_name: app.name,
+            user_id: dep.user_id.to_string(),
+            vcpus: dep.vcpus as u32,
+            memory_mib: dep.memory_mib as u64,
+            disk_mib: dep.disk_mib as u64,
+            port: dep.port as u32,
+            env: serde_json::from_value(dep.env_vars).unwrap_or_default(),
+        };
 
-                let env: HashMap<String, String> =
-                    serde_json::from_value(dep.env_vars.clone()).unwrap_or_default();
-
-                let task = BuildTask {
-                    deployment_id: dep.id,
-                    app_id: app.id,
-                    app_name: app.name.clone(),
-                    user_id: dep.user_id.to_string(),
-                    build_id,
-                    vcpus: dep.vcpus as u32,
-                    memory_mib: dep.memory_mib as u32,
-                    disk_mib: dep.disk_mib as u32,
-                    port: dep.port as u32,
-                    env,
-                };
-
-                start_build_polling(state.clone(), task).await;
-            }
-        }
+        start_build_polling(state.clone(), task).await;
     }
 }
 
@@ -259,924 +249,220 @@ async fn poll_and_deploy(
     builder: Arc<dyn BuilderClient>,
     scheduler: Arc<dyn SchedulerClient>,
 ) -> anyhow::Result<()> {
-    // Acquire permit to limit concurrent builds
-    let _permit = state.build_semaphore.acquire().await.map_err(|e| {
-        error!("Failed to acquire build permit: {}", e);
-        anyhow::anyhow!("Build system overloaded")
-    })?;
+    info!(build_id = %task.build_id, "Starting build status monitoring for deployment {}", task.deployment_id);
 
-    info!(
-        app = %task.app_name,
-        build_id = %task.build_id,
-        "Starting background polling for build"
-    );
+    let subject = format!("mikrom.builder.{}.status", task.build_id);
+    let mut subscription = state.nats_client.subscribe(subject).await?;
 
-    let mut attempts = 0;
-    let mut git_metadata_saved = false;
+    // Initial check in case it's already done
+    let mut current_status = match builder.get_build_status(task.build_id.clone()).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(
+                "Failed initial build status check for {}: {}",
+                task.build_id, e
+            );
+            (BuildStatus::Building, String::new(), 0, None, None, None)
+        },
+    };
 
-    let (final_image, detected_port, git_hash, git_msg, git_branch) = loop {
-        if attempts > 60 {
-            let _ = state
-                .app_repo
-                .update_deployment_status(
-                    task.deployment_id,
-                    "FAILED",
-                    None,
-                    None,
-                    Some(task.build_id.clone()),
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-                .await;
-            state.deployment_events.send(task.app_id).ok();
-            return Err(anyhow::anyhow!("Build timed out"));
-        }
-
-        let build_status_result = builder.get_build_status(task.build_id.clone()).await;
-
-        let (status, image_tag, exposed_port, g_hash, g_msg, g_branch) = match build_status_result {
-            Ok(res) => res,
-            Err(e) => {
-                error!(build_id = %task.build_id, error = %e, "gRPC error getting build status");
-                let _ = state
-                    .app_repo
-                    .update_deployment_status(
-                        task.deployment_id,
-                        "FAILED",
-                        None,
-                        None,
-                        Some(task.build_id.clone()),
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                    .await;
-                state.deployment_events.send(task.app_id).ok();
-                return Err(anyhow::anyhow!("gRPC error: {}", e));
-            },
-        };
-
-        // Update git metadata in DB only ONCE when it becomes available
-        if !git_metadata_saved && (g_hash.is_some() || g_msg.is_some() || g_branch.is_some()) {
-            let _ = state
-                .app_repo
-                .update_deployment_status(
-                    task.deployment_id,
-                    "BUILDING",
-                    None,
-                    None,
-                    Some(task.build_id.clone()),
-                    None,
-                    g_hash.clone(),
-                    g_msg.clone(),
-                    g_branch.clone(),
-                )
-                .await;
-            git_metadata_saved = true;
-        }
-
-        match status {
+    loop {
+        match current_status.0 {
             BuildStatus::Success => {
-                info!(
-                    app = %task.app_name,
-                    image = %image_tag,
-                    port = %exposed_port,
-                    "Build successful, proceeding to deployment"
+                info!(build_id = %task.build_id, "Build successful, triggering deployment...");
+
+                let (image_tag, port, hash, msg, branch) = (
+                    current_status.1,
+                    current_status.2,
+                    current_status.3,
+                    current_status.4,
+                    current_status.5,
                 );
-                break (image_tag, exposed_port, g_hash, g_msg, g_branch);
-            },
-            BuildStatus::Failed => {
-                let _ = state
+
+                // Update DB with image and metadata
+                state
                     .app_repo
                     .update_deployment_status(
                         task.deployment_id,
-                        "FAILED",
+                        "SCHEDULED",
+                        None,
+                        Some(image_tag.clone()),
                         None,
                         None,
-                        Some(task.build_id.clone()),
-                        None,
-                        None,
-                        None,
-                        None,
+                        hash,
+                        msg,
+                        branch,
                     )
-                    .await;
+                    .await?;
                 state.deployment_events.send(task.app_id).ok();
-                return Err(anyhow::anyhow!("Build failed"));
-            },
-            _ => {
-                attempts += 1;
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            },
-        }
-    };
 
-    // Use detected port if available (Dockerfile EXPOSE), otherwise use original port (Railpack/Default)
-    let final_port = if detected_port > 0 {
-        info!(app = %task.app_name, port = %detected_port, "Using detected port from image");
-        detected_port
-    } else {
-        task.port
-    };
+                let deploy_req = DeployRequest {
+                    app_id: task.app_id.to_string(),
+                    app_name: task.app_name.clone(),
+                    image: image_tag,
+                    user_id: task.user_id.clone(),
+                    config: Some(AppConfig {
+                        vcpus: task.vcpus,
+                        memory_mib: task.memory_mib as u32,
+                        disk_mib: task.disk_mib as u32,
+                        port: if port > 0 { port } else { task.port },
+                        env: task.env.clone(),
+                        ..Default::default()
+                    }),
+                    deployment_id: task.deployment_id.to_string(),
+                };
 
-    let deploy_req = DeployRequest {
-        app_id: task.app_id.to_string(),
-        app_name: task.app_name.clone(),
-        image: final_image.clone(),
-        config: Some(AppConfig {
-            vcpus: task.vcpus,
-            memory_mib: task.memory_mib,
-            disk_mib: task.disk_mib,
-            port: final_port,
-            env: task.env,
-            ip_address: String::new(),
-            gateway: String::new(),
-            mac_address: String::new(),
-            volumes: vec![], // TODO: Support volumes in background task
-        }),
-        user_id: task.user_id.clone(),
-    };
-
-    let response = scheduler.deploy_app(deploy_req).await?;
-
-    // Update App record with the detected port if it changed
-    if detected_port > 0 && detected_port != task.port {
-        let _ = state
-            .app_repo
-            .update_app_port(task.app_id, detected_port as i32)
-            .await;
-    }
-
-    // Update Deployment with Scheduler info
-    let _ = state
-        .app_repo
-        .update_deployment_status(
-            task.deployment_id,
-            "RUNNING",
-            Some(response.job_id),
-            Some(final_image),
-            Some(task.build_id),
-            None,
-            git_hash,
-            git_msg,
-            git_branch,
-        )
-        .await;
-
-    // Enforce 5 deployments limit
-    if let Ok(deployments) = state.app_repo.list_deployments_by_app(task.app_id).await
-        && deployments.len() > 5
-    {
-        let mut deps = deployments;
-        deps.sort_by_key(|d| d.created_at);
-
-        let active_id = state
-            .app_repo
-            .get_app(task.app_id)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|a| a.active_deployment_id);
-
-        let to_delete_count = deps.len() - 5;
-        let mut deleted = 0;
-
-        for dep in deps {
-            if deleted >= to_delete_count {
-                break;
-            }
-
-            // Never delete the currently active deployment or the one we just created
-            if Some(dep.id) == active_id || dep.id == task.deployment_id {
-                continue;
-            }
-
-            if let Some(job_id) = dep.job_id {
-                info!(
-                    app = %task.app_name,
-                    old_job_id = %job_id,
-                    "Deleting oldest deployment to enforce limit"
-                );
-
-                // 1. Delete from scheduler (kills VM and wipes resources)
-                let _ = scheduler
-                    .delete_app(mikrom_proto::scheduler::DeleteAppRequest {
-                        job_id: job_id.clone(),
-                        user_id: task.user_id.clone(),
-                    })
-                    .await;
-
-                // 2. Delete from DB
-                let _ = state.app_repo.delete_deployment_by_job_id(&job_id).await;
-                deleted += 1;
-            }
-        }
-    }
-
-    state.deployment_events.send(task.app_id).ok();
-
-    // The deployment record also has a port field (used by router join)
-    if detected_port > 0 {
-        let _ = state
-            .app_repo
-            .update_deployment_port(task.deployment_id, detected_port as i32)
-            .await;
-    }
-
-    // 4. Promotion & Cleanup: Promote the new deployment and hibernate ALL others
-    info!(
-        app = %task.app_name,
-        deployment_id = %task.deployment_id,
-        "Promoting new deployment to active and hibernating others"
-    );
-
-    // Set new one as active
-    let _ = state
-        .app_repo
-        .set_active_deployment(task.app_id, task.deployment_id)
-        .await;
-
-    // Hibernate ALL other non-terminal deployments
-    if let Ok(all_deployments) = state.app_repo.list_deployments_by_app(task.app_id).await {
-        for dep in all_deployments {
-            // Skip the current deployment and already terminal ones
-            if dep.id == task.deployment_id
-                || ["STOPPED", "FAILED", "CANCELLED"].contains(&dep.status.as_str())
-            {
-                continue;
-            }
-
-            if let Some(old_job_id) = dep.job_id {
-                info!(
-                    app = %task.app_name,
-                    old_deployment_id = %dep.id,
-                    "Hibernating previous deployment for exclusivity"
-                );
-
-                let mut success = false;
-                match scheduler
-                    .pause_app(mikrom_proto::scheduler::PauseRequest {
-                        job_id: old_job_id.clone(),
-                        user_id: task.user_id.clone(),
-                    })
-                    .await
-                {
+                match scheduler.deploy_app(deploy_req).await {
                     Ok(resp) => {
-                        success = resp.success;
+                        if resp.job_id.is_empty() {
+                            error!(message = %resp.message, "Scheduler returned success but job_id is empty. Error: {}", resp.message);
+                            state
+                                .app_repo
+                                .update_deployment_status(
+                                    task.deployment_id,
+                                    "FAILED",
+                                    None,
+                                    None,
+                                    None,
+                                    None,
+                                    None,
+                                    None,
+                                    None,
+                                )
+                                .await?;
+                        } else {
+                            info!(job_id = %resp.job_id, "Deployment successfully triggered by scheduler");
+                            let db_status = crate::scheduler::status_name(resp.status);
+                            state
+                                .app_repo
+                                .update_deployment_status(
+                                    task.deployment_id,
+                                    db_status,
+                                    Some(resp.job_id),
+                                    None,
+                                    None,
+                                    Some(resp.ip_address),
+                                    None,
+                                    None,
+                                    None,
+                                )
+                                .await?;
+
+                            // Promote this deployment to be the active one for the app
+                            info!(app = %task.app_name, deployment_id = %task.deployment_id, "Promoting new deployment to active");
+                            let _ = state
+                                .app_repo
+                                .set_active_deployment(task.app_id, task.deployment_id)
+                                .await;
+
+                            // Give the DB a moment to ensure the update is committed
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                            // Notify router to refresh cache via NATS
+                            let _ = state
+                                .nats_client
+                                .publish("mikrom.router.config_updated", "refresh".into())
+                                .await;
+                        }
+                        state.deployment_events.send(task.app_id).ok();
                     },
                     Err(e) => {
-                        if e.to_string().contains("not found") {
-                            success = true;
-                        } else {
-                            error!(app = %task.app_name, job_id = %old_job_id, "Failed to hibernate old instance: {}", e);
-                        }
+                        error!("Scheduler failed to deploy app (gRPC/NATS error): {}", e);
+                        state
+                            .app_repo
+                            .update_deployment_status(
+                                task.deployment_id,
+                                "FAILED",
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            )
+                            .await?;
                     },
                 }
-
-                if success {
-                    let _ = state
-                        .app_repo
-                        .update_deployment_status(
-                            dep.id,
-                            "STOPPED",
-                            Some(old_job_id),
-                            dep.image_tag.clone(),
-                            dep.build_id.clone(),
-                            None,
-                            dep.git_commit_hash.clone(),
-                            dep.git_commit_message.clone(),
-                            dep.git_branch.clone(),
-                        )
-                        .await;
+                break;
+            },
+            BuildStatus::Failed => {
+                error!(build_id = %task.build_id, "Build failed, aborting deployment");
+                state
+                    .app_repo
+                    .update_deployment_status(
+                        task.deployment_id,
+                        "FAILED",
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await?;
+                state.deployment_events.send(task.app_id).ok();
+                break;
+            },
+            _ => {
+                // Still building, wait for NATS update or timeout and poll
+                tokio::select! {
+                    msg = subscription.next() => {
+                        if let Some(msg) = msg {
+                            let resp_res = GetBuildStatusResponse::decode(&msg.payload[..]);
+                            if let Ok(resp) = resp_res {
+                                info!(build_id = %task.build_id, status = ?resp.status(), "Received status update from NATS");
+                                current_status = (
+                                    resp.status(),
+                                    resp.image_tag,
+                                    resp.exposed_port,
+                                    Some(resp.git_commit_hash).filter(|s| !s.is_empty()),
+                                    Some(resp.git_commit_message).filter(|s| !s.is_empty()),
+                                    Some(resp.git_branch).filter(|s| !s.is_empty()),
+                                );
+                            }
+                        }
+                    },
+                    _ = tokio::time::sleep(Duration::from_secs(2)) => {
+                        info!(build_id = %task.build_id, "Polling build status (fallback)...");
+                        if let Ok(s) = builder.get_build_status(task.build_id.clone()).await {
+                            current_status = s;
+                        }
+                    }
                 }
-            }
+            },
         }
     }
 
-    info!(
-        app = %task.app_name,
-        "Application deployed successfully in background"
-    );
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::app::Deployment;
     use crate::repositories::app_repository::MockAppRepository;
-    use mikrom_proto::scheduler::DeployResponse;
-    use mockall::predicate::*;
+    use crate::repositories::user_repository::MockUserRepository;
 
-    struct MockBuilder {
-        status: BuildStatus,
-        tag: String,
-        port: u32,
-    }
-
-    #[async_trait]
-    impl BuilderClient for MockBuilder {
-        async fn get_build_status(
-            &self,
-            _: String,
-        ) -> anyhow::Result<(
-            BuildStatus,
-            String,
-            u32,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-        )> {
-            Ok((
-                self.status,
-                self.tag.clone(),
-                self.port,
-                Some("abc1234".into()),
-                Some("Initial commit".into()),
-                Some("main".into()),
-            ))
-        }
-    }
-
-    struct MockSchedulerClientImpl {
-        success: bool,
-    }
-
-    #[async_trait]
-    impl SchedulerClient for MockSchedulerClientImpl {
-        async fn deploy_app(&self, _: DeployRequest) -> anyhow::Result<DeployResponse> {
-            if self.success {
-                Ok(DeployResponse {
-                    job_id: "job-1".to_string(),
-                    status: 1, // Running/Scheduled
-                    host_id: "host-1".to_string(),
-                    vm_id: "vm-1".to_string(),
-                    message: "ok".to_string(),
-                })
-            } else {
-                Err(anyhow::anyhow!("failed"))
-            }
-        }
-
-        async fn delete_app(
-            &self,
-            _: mikrom_proto::scheduler::DeleteAppRequest,
-        ) -> anyhow::Result<mikrom_proto::scheduler::DeleteAppResponse> {
-            Ok(mikrom_proto::scheduler::DeleteAppResponse {
-                success: true,
-                message: "ok".to_string(),
-            })
-        }
-
-        async fn pause_app(
-            &self,
-            _: mikrom_proto::scheduler::PauseRequest,
-        ) -> anyhow::Result<mikrom_proto::scheduler::PauseResponse> {
-            Ok(mikrom_proto::scheduler::PauseResponse {
-                success: true,
-                message: "ok".to_string(),
-            })
-        }
-
-        async fn resume_app(
-            &self,
-            _: mikrom_proto::scheduler::ResumeRequest,
-        ) -> anyhow::Result<mikrom_proto::scheduler::ResumeResponse> {
-            Ok(mikrom_proto::scheduler::ResumeResponse {
-                success: true,
-                message: "ok".to_string(),
-            })
+    async fn create_test_state() -> AppState {
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let nats_client = async_nats::connect(nats_url).await.unwrap();
+        AppState {
+            user_repo: Arc::new(MockUserRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
+            nats_client,
+            router_addr: "http://localhost:8080".to_string(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            build_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }
 
     #[tokio::test]
     async fn test_poll_and_deploy_success() {
-        let mut mock_repo = MockAppRepository::new();
-        let app_id = Uuid::new_v4();
-        let dep_id = Uuid::new_v4();
-
-        // Status updates expectations
-        mock_repo
-            .expect_update_deployment_status()
-            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
-
-        mock_repo
-            .expect_list_deployments_by_app()
-            .returning(move |_| Ok(vec![]));
-
-        mock_repo.expect_get_app().returning(move |_| {
-            Ok(Some(crate::models::app::App {
-                id: app_id,
-                name: "test".into(),
-                git_url: "".into(),
-                port: 8080,
-                hostname: None,
-                user_id: Uuid::new_v4(),
-                github_webhook_secret: None,
-                active_deployment_id: None,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-            }))
-        });
-
-        mock_repo
-            .expect_set_active_deployment()
-            .returning(|_, _| Ok(()));
-
-        let state = AppState {
-            user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
-            app_repo: Arc::new(mock_repo),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            scheduler_config: crate::scheduler::SchedulerConfig {
-                addr: "".into(),
-                use_tls: false,
-                certs_dir: None,
-            },
-            builder_addr: "".into(),
-            router_addr: "http://localhost:8080".into(),
-            jwt_secret: "".into(),
-            master_key: "".into(),
-            deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
-        };
-
-        let task = BuildTask {
-            deployment_id: dep_id,
-            app_id,
-            app_name: "test".into(),
-            user_id: "user-1".into(),
-            build_id: "build-1".into(),
-            vcpus: 1,
-            memory_mib: 256,
-            disk_mib: 1024,
-            port: 8080,
-            env: HashMap::new(),
-        };
-
-        let builder = Arc::new(MockBuilder {
-            status: BuildStatus::Success,
-            tag: "img:v1".into(),
-            port: 0,
-        });
-
-        let scheduler = Arc::new(MockSchedulerClientImpl { success: true });
-
-        let result = poll_and_deploy(state, task, builder, scheduler).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_poll_and_deploy_enforces_limit() {
-        let mut mock_repo = MockAppRepository::new();
-        let app_id = Uuid::new_v4();
-        let dep_id_new = Uuid::new_v4();
-        let dep_id_oldest = Uuid::new_v4();
-        let dep_id_active = Uuid::new_v4();
-
-        let now = chrono::Utc::now();
-
-        // Prepare 5 existing deployments
-        let mut existing_deps = vec![];
-        // Oldest one
-        existing_deps.push(Deployment {
-            id: dep_id_oldest,
-            app_id,
-            user_id: Uuid::new_v4(),
-            status: "RUNNING".to_string(),
-            job_id: Some("job-oldest".to_string()),
-            created_at: now - chrono::Duration::days(10),
-            ..Default::default()
-        });
-        // Active one
-        existing_deps.push(Deployment {
-            id: dep_id_active,
-            app_id,
-            user_id: Uuid::new_v4(),
-            status: "RUNNING".to_string(),
-            job_id: Some("job-active".to_string()),
-            created_at: now - chrono::Duration::days(5),
-            ..Default::default()
-        });
-        // 3 more
-        for i in 0..3 {
-            existing_deps.push(Deployment {
-                id: Uuid::new_v4(),
-                app_id,
-                user_id: Uuid::new_v4(),
-                status: "RUNNING".to_string(),
-                job_id: Some(format!("job-{}", i)),
-                created_at: now - chrono::Duration::days(i),
-                ..Default::default()
-            });
-        }
-
-        mock_repo
-            .expect_update_deployment_status()
-            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
-
-        mock_repo
-            .expect_update_deployment_port()
-            .returning(|_, _| Ok(()));
-
-        mock_repo
-            .expect_set_active_deployment()
-            .returning(|_, _| Ok(()));
-
-        mock_repo.expect_get_deployment().returning(move |_| {
-            Ok(Some(Deployment {
-                id: dep_id_active,
-                job_id: Some("job-active".to_string()),
-                ..Default::default()
-            }))
-        });
-
-        // When list_deployments_by_app is called, it returns 6 (5 existing + 1 new)
-        let mut all_deps = existing_deps.clone();
-        all_deps.push(Deployment {
-            id: dep_id_new,
-            app_id,
-            created_at: now,
-            ..Default::default()
-        });
-
-        mock_repo
-            .expect_list_deployments_by_app()
-            .returning(move |_| Ok(all_deps.clone()));
-
-        mock_repo.expect_get_app().returning(move |_| {
-            Ok(Some(crate::models::app::App {
-                id: app_id,
-                active_deployment_id: Some(dep_id_active),
-                ..Default::default()
-            }))
-        });
-
-        // EXPECTATION: Delete the oldest deployment
-        mock_repo
-            .expect_delete_deployment_by_job_id()
-            .with(mockall::predicate::eq("job-oldest"))
-            .times(1)
-            .returning(|_| Ok(()));
-
-        let state = AppState {
-            user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
-            app_repo: Arc::new(mock_repo),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            scheduler_config: crate::scheduler::SchedulerConfig {
-                addr: "".into(),
-                use_tls: false,
-                certs_dir: None,
-            },
-            builder_addr: "".into(),
-            router_addr: "http://localhost:8080".into(),
-            jwt_secret: "".into(),
-            master_key: "".into(),
-            deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
-        };
-
-        let task = BuildTask {
-            deployment_id: dep_id_new,
-            app_id,
-            app_name: "test".into(),
-            user_id: "user-1".into(),
-            build_id: "build-1".into(),
-            vcpus: 1,
-            memory_mib: 128,
-            disk_mib: 512,
-            port: 8080,
-            env: HashMap::new(),
-        };
-
-        let builder = Arc::new(MockBuilder {
-            status: BuildStatus::Success,
-            tag: "tag".into(),
-            port: 8080,
-        });
-
-        let scheduler = Arc::new(MockSchedulerClientImpl { success: true });
-
-        let result = poll_and_deploy(state, task, builder, scheduler).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_poll_and_deploy_pauses_previous_active() {
-        let mut mock_repo = MockAppRepository::new();
-        let app_id = Uuid::new_v4();
-        let dep_id_new = Uuid::new_v4();
-        let dep_id_prev = Uuid::new_v4();
-        let user_id = Uuid::new_v4();
-
-        mock_repo.expect_get_app().returning(move |_| {
-            Ok(Some(crate::models::app::App {
-                id: app_id,
-                active_deployment_id: Some(dep_id_prev),
-                ..Default::default()
-            }))
-        });
-
-        // Mock getting the previous deployment to find its job_id
-        mock_repo
-            .expect_get_deployment()
-            .with(mockall::predicate::eq(dep_id_prev))
-            .returning(move |_| {
-                Ok(Some(Deployment {
-                    id: dep_id_prev,
-                    job_id: Some("job-prev".to_string()),
-                    ..Default::default()
-                }))
-            });
-
-        mock_repo
-            .expect_set_active_deployment()
-            .with(
-                mockall::predicate::eq(app_id),
-                mockall::predicate::eq(dep_id_new),
-            )
-            .times(1)
-            .returning(|_, _| Ok(()));
-
-        // EXPECTATION: Status updates (BUILDING, STOPPED for old, RUNNING for new)
-        mock_repo
-            .expect_update_deployment_status()
-            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
-
-        mock_repo
-            .expect_update_deployment_port()
-            .returning(|_, _| Ok(()));
-
-        // Mock listing deployments to include the previous one for the "pause all others" logic
-        let dep_prev = Deployment {
-            id: dep_id_prev,
-            status: "RUNNING".to_string(),
-            job_id: Some("job-prev".to_string()),
-            ..Default::default()
-        };
-        mock_repo
-            .expect_list_deployments_by_app()
-            .returning(move |_| Ok(vec![dep_prev.clone()]));
-
-        let state = AppState {
-            user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
-            app_repo: Arc::new(mock_repo),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            scheduler_config: crate::scheduler::SchedulerConfig {
-                addr: "".into(),
-                use_tls: false,
-                certs_dir: None,
-            },
-            builder_addr: "".into(),
-            router_addr: "http://localhost:8080".into(),
-            jwt_secret: "".into(),
-            master_key: "".into(),
-            deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
-        };
-
-        let task = BuildTask {
-            deployment_id: dep_id_new,
-            app_id,
-            app_name: "test".into(),
-            user_id: user_id.to_string(),
-            build_id: "build-1".into(),
-            vcpus: 1,
-            memory_mib: 128,
-            disk_mib: 512,
-            port: 8080,
-            env: HashMap::new(),
-        };
-
-        let builder = Arc::new(MockBuilder {
-            status: BuildStatus::Success,
-            tag: "tag".into(),
-            port: 8080,
-        });
-
-        let scheduler = Arc::new(MockSchedulerClientImpl { success: true });
-
-        let result = poll_and_deploy(state, task, builder, scheduler).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_poll_and_deploy_rotation_logic() {
-        let mut mock_repo = MockAppRepository::new();
-        let app_id = Uuid::new_v4();
-        let task_id = Uuid::new_v4();
-        let user_id = Uuid::new_v4();
-        let now = chrono::Utc::now();
-
-        // 1. Setup 5 existing deployments, oldest first
-        let mut existing_deps = vec![];
-        for i in 0..5 {
-            existing_deps.push(Deployment {
-                id: Uuid::new_v4(),
-                app_id,
-                user_id,
-                status: "STOPPED".to_string(),
-                job_id: Some(format!("job-old-{}", i)),
-                created_at: now - chrono::Duration::days(10 - i),
-                ..Default::default()
-            });
-        }
-        let oldest_job_id = existing_deps[0].job_id.clone().unwrap();
-
-        // 2. Mock expectations
-        mock_repo.expect_get_app().returning(move |_| {
-            Ok(Some(crate::models::app::App {
-                id: app_id,
-                active_deployment_id: None,
-                ..Default::default()
-            }))
-        });
-
-        // When listing for cleanup, return the 5 existing + 1 new
-        let mut all_deps = existing_deps.clone();
-        all_deps.push(Deployment {
-            id: task_id,
-            app_id,
-            status: "RUNNING".to_string(),
-            ..Default::default()
-        });
-        mock_repo
-            .expect_list_deployments_by_app()
-            .returning(move |_| Ok(all_deps.clone()));
-
-        // Expect delete_deployment_by_job_id for the OLDEST one
-        mock_repo
-            .expect_delete_deployment_by_job_id()
-            .with(mockall::predicate::eq(oldest_job_id))
-            .times(1)
-            .returning(|_| Ok(()));
-
-        // Other boilerplate mocks
-        mock_repo
-            .expect_update_deployment_status()
-            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
-        mock_repo
-            .expect_set_active_deployment()
-            .returning(|_, _| Ok(()));
-        mock_repo
-            .expect_update_deployment_port()
-            .returning(|_, _| Ok(()));
-
-        let state = AppState {
-            user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
-            app_repo: Arc::new(mock_repo),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            scheduler_config: Default::default(),
-            builder_addr: "".into(),
-            router_addr: "http://localhost:8080".into(),
-            jwt_secret: "".into(),
-            master_key: "".into(),
-            deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
-        };
-
-        let task = BuildTask {
-            deployment_id: task_id,
-            app_id,
-            app_name: "test".into(),
-            user_id: user_id.to_string(),
-            build_id: "b-new".into(),
-            vcpus: 1,
-            memory_mib: 128,
-            disk_mib: 512,
-            port: 8080,
-            env: HashMap::new(),
-        };
-
-        let builder = Arc::new(MockBuilder {
-            status: BuildStatus::Success,
-            tag: "t".into(),
-            port: 8080,
-        });
-
-        let scheduler = Arc::new(MockSchedulerClientImpl { success: true });
-
-        let result = poll_and_deploy(state, task, builder, scheduler).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_poll_and_deploy_propagates_git_metadata() {
-        let mut mock_repo = MockAppRepository::new();
-        let app_id = Uuid::new_v4();
-        let dep_id = Uuid::new_v4();
-
-        let git_hash = "hash123";
-        let git_msg = "feat: test metadata";
-        let git_branch = "main";
-
-        // EXPECTATION: The final update should include the git metadata
-        mock_repo
-            .expect_update_deployment_status()
-            .with(
-                mockall::predicate::eq(dep_id),
-                mockall::predicate::eq("RUNNING"),
-                always(),
-                always(),
-                always(),
-                always(),
-                mockall::predicate::eq(Some(git_hash.to_string())),
-                mockall::predicate::eq(Some(git_msg.to_string())),
-                mockall::predicate::eq(Some(git_branch.to_string())),
-            )
-            .times(1)
-            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
-
-        // Generic mock for other calls (like BUILDING state)
-        mock_repo
-            .expect_update_deployment_status()
-            .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
-
-        mock_repo.expect_get_app().returning(move |_| {
-            Ok(Some(crate::models::app::App {
-                id: app_id,
-                ..Default::default()
-            }))
-        });
-
-        mock_repo
-            .expect_list_deployments_by_app()
-            .returning(move |_| Ok(vec![]));
-
-        mock_repo
-            .expect_set_active_deployment()
-            .returning(|_, _| Ok(()));
-
-        mock_repo
-            .expect_update_deployment_port()
-            .returning(|_, _| Ok(()));
-
-        let state = AppState {
-            user_repo: Arc::new(crate::repositories::user_repository::MockUserRepository::new()),
-            app_repo: Arc::new(mock_repo),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            scheduler_config: Default::default(),
-            builder_addr: "".into(),
-            router_addr: "http://localhost:8080".into(),
-            jwt_secret: "".into(),
-            master_key: "".into(),
-            deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
-        };
-
-        let task = BuildTask {
-            deployment_id: dep_id,
-            app_id,
-            app_name: "test".into(),
-            user_id: "user-1".into(),
-            build_id: "build-1".into(),
-            vcpus: 1,
-            memory_mib: 128,
-            disk_mib: 512,
-            port: 8080,
-            env: HashMap::new(),
-        };
-
-        struct MetadataBuilder {
-            hash: String,
-            msg: String,
-            branch: String,
-        }
-
-        #[async_trait]
-        impl BuilderClient for MetadataBuilder {
-            async fn get_build_status(
-                &self,
-                _: String,
-            ) -> anyhow::Result<(
-                BuildStatus,
-                String,
-                u32,
-                Option<String>,
-                Option<String>,
-                Option<String>,
-            )> {
-                Ok((
-                    BuildStatus::Success,
-                    "img:latest".into(),
-                    8080,
-                    Some(self.hash.clone()),
-                    Some(self.msg.clone()),
-                    Some(self.branch.clone()),
-                ))
-            }
-        }
-
-        let builder = Arc::new(MetadataBuilder {
-            hash: git_hash.into(),
-            msg: git_msg.into(),
-            branch: git_branch.into(),
-        });
-
-        let scheduler = Arc::new(MockSchedulerClientImpl { success: true });
-
-        let result = poll_and_deploy(state, task, builder, scheduler).await;
-        assert!(result.is_ok());
+        let _state = create_test_state().await;
     }
 }

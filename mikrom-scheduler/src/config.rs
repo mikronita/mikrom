@@ -2,6 +2,9 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct SchedulerConfig {
+    pub database_url: String,
+    pub nats_url: String,
+
     #[serde(default = "default_use_tls")]
     pub use_tls: bool,
 
