@@ -1,8 +1,8 @@
 # mikrom-agent
 
-The worker daemon for the Mikrom PaaS. It runs on every worker node and manages the full lifecycle of Firecracker microVMs. Built with [Tonic](https://github.com/hyperium/tonic), [sysinfo](https://github.com/GuillaumeGomez/sysinfo), and deep Linux integration.
+The worker daemon for the Mikrom PaaS. It runs on every worker node and manages the full lifecycle of Firecracker microVMs. Built with NATS, [sysinfo](https://github.com/GuillaumeGomez/sysinfo), and deep Linux integration.
 
-**Port:** `5003`
+**Port:** NATS connection
 
 ## Key Responsibilities
 
@@ -32,11 +32,10 @@ When a deployment is triggered:
 
 | Variable | Default | Description |
 |---|---|---|
-| `SCHEDULER_ADDR` | `http://127.0.0.1:5002` | gRPC address of the scheduler |
-| `AGENT_PORT` | `5003` | Port the agent listens on |
+| `NATS_URL` | `nats://127.0.0.1:4222` | URL of the NATS server |
 | `HOST_ID` | random UUID | Stable identifier for this node |
 | `AGENT_HOSTNAME` | — | IP/Hostname advertised to the scheduler |
-| `USE_TLS` | `false` | Enable mutual TLS for gRPC |
+| `USE_TLS` | `false` | Enable mutual TLS for NATS |
 
 ## Development
 
@@ -52,7 +51,7 @@ cargo test -p mikrom-agent
 
 ```
 src/
-  server.rs        # Tonic gRPC server and scheduler heartbeat
+  server.rs        # NATS subscriber/handler and scheduler heartbeat
   builder.rs       # Image conversion logic (Docker -> ext4 + boot scripts)
   metrics.rs       # Host resource collection
   firecracker/     # Core VMM management

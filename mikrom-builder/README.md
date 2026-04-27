@@ -2,7 +2,7 @@
 
 The automated build engine for the Mikrom PaaS. It turns Git repositories into optimized OCI images ready for deployment.
 
-**Port:** `5004`
+**Port:** NATS connection
 
 ## Key Responsibilities
 
@@ -24,7 +24,7 @@ The automated build engine for the Mikrom PaaS. It turns Git repositories into o
 
 | Variable | Default | Description |
 |---|---|---|
-| `BUILDER_PORT` | `5004` | gRPC port the builder listens on |
+| `NATS_URL` | `nats://127.0.0.1:4222` | URL of the NATS server |
 | `REGISTRY_URL` | `registry.mikrom.es` | Target OCI registry |
 | `REGISTRY_USER` | — | Registry username |
 | `REGISTRY_PASS` | — | Registry password |
@@ -44,8 +44,8 @@ curl -sSL https://railpack.com/install.sh | sh
 
 ```
 src/
-  main.rs      # Configuration and gRPC setup
-  server.rs    # Tonic implementation of BuilderService
+  main.rs      # Configuration and NATS setup
+  server.rs    # NATS subscriber implementation of Builder logic
   builder.rs   # Core build logic (Git -> Railpack/Docker -> Registry)
   config.rs    # Environment-based configuration
 ```

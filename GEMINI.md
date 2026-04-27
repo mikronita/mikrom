@@ -5,9 +5,9 @@
 Mikrom is a microVM orchestration system that deploys containerized workloads into Firecracker microVMs. It consists of several services working together:
 
 - **mikrom-api**: Axum/SQLx based REST API for management, auth, and deployments (Port 5001).
-- **mikrom-scheduler**: Tonic-based gRPC scheduler for resource management and IPAM (Port 5002).
-- **mikrom-agent**: Tonic-based gRPC agent running on worker nodes for microVM lifecycle (Port 5003).
-- **mikrom-builder**: Automated build engine using Railpack to turn Git repos into OCI images (Port 5004).
+- **mikrom-scheduler**: NATS-based scheduler for resource management and IPAM.
+- **mikrom-agent**: NATS-based agent running on worker nodes for microVM lifecycle.
+- **mikrom-builder**: Automated build engine using Railpack to turn Git repos into OCI images.
 - **mikrom-router**: High-performance dynamic ingress router using Hyper and Moka (Port 8080).
 - **mikrom-cli**: Command-line interface to interact with the system.
 - **mikrom-proto**: Shared Protocol Buffer definitions and generated code.
@@ -57,6 +57,6 @@ make test-all          # Complete test suite
 - **Frontend UI (mikrom-app)**: **Strictly use shadcn/ui components.** Do not use Flowbite React or other external component libraries. Standard components must be imported from `@/components/ui`. Always prefer composing existing shadcn/ui primitives over creating custom HTML/CSS wrappers. Specifically for forms, you MUST follow the project's strict shadcn composition rules: use `FieldGroup` + `Field` instead of `div`, `InputGroup` + `InputGroupAddon` for inputs with icons or buttons, and `FieldSet` + `FieldLegend` for groups of inputs/switches.
 - **Rust Services**: Standard Rust workspace conventions.
 - **Protocol Buffers**: Changes to `mikrom-proto/proto/*.proto` require regenerating code (managed by build scripts).
-- **Security**: Internal gRPC communication between services uses **mutual TLS (mTLS)** for encryption and authentication.
+- **Security**: Internal communication between services uses **NATS with mutual TLS (mTLS)** for encryption and authentication.
 - **Agent Boot System**: Uses a dual-script system: `mikrom-init.sh` (PID 1) and `app-run.sh` (executes the app entrypoint).
 - **Environment**: Configuration is driven by environment variables. Check `.env.example` in `mikrom-api/` for reference.

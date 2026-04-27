@@ -45,9 +45,8 @@ Mikrom uses PostgreSQL to track the state of the cluster:
 |---|---|---|
 | `DATABASE_URL` | — | PostgreSQL connection string |
 | `JWT_SECRET` | — | Secret used to sign/verify JWT tokens |
-| `SCHEDULER_ADDR` | `http://127.0.0.1:5002` | gRPC address of the scheduler |
-| `BUILDER_ADDR` | `http://127.0.0.1:5004` | gRPC address of the builder |
-| `USE_TLS` | `false` | Enable mutual TLS for gRPC communication |
+| `NATS_URL` | `nats://127.0.0.1:4222` | URL of the NATS server |
+| `USE_TLS` | `false` | Enable mutual TLS for NATS communication |
 
 ## Development
 
