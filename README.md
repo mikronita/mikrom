@@ -39,7 +39,7 @@ User (Traffic)
 | `mikrom-agent/` | The worker daemon. Manages microVMs and network isolation. |
 | `mikrom-app/` | Dashboard (Next.js 16, React 19, Tailwind CSS 4). |
 | `mikrom-cli/` | Command-line interface (`mikrom`). |
-| `mikrom-proto/` | Shared gRPC/Protobuf definitions. |
+| `mikrom-proto/` | Shared NATS/Protobuf definitions. |
 
 ## Quick Start
 

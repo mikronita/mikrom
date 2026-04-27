@@ -1,8 +1,8 @@
 # mikrom-scheduler
 
-The intelligent resource manager for the Mikrom PaaS. It orchestrates the placement of microVMs across a cluster of worker nodes, ensuring optimal resource utilization and high availability. Built with [Tonic](https://github.com/hyperium/tonic).
+The intelligent resource manager for the Mikrom PaaS. It orchestrates the placement of microVMs across a cluster of worker nodes, ensuring optimal resource utilization and high availability. Built with NATS.
 
-**Port:** `5002`
+**Port:** NATS connection
 
 ## Key Responsibilities
 
@@ -24,26 +24,26 @@ When a deployment is requested, the scheduler evaluates candidates based on:
     - **Least Loaded (Default)**: Spreads work across all nodes.
     - **Bin Packing**: Fills nodes sequentially to allow idle nodes to be powered down.
 
-## gRPC API
+## NATS API
 
-Defined in `mikrom-proto/proto/scheduler.proto`.
+Messages are defined in `mikrom-proto/proto/*.proto`.
 
-| RPC | Direction | Description |
+| Subject | Direction | Description |
 |---|---|---|
-| `DeployApp` | API → Scheduler | Orchestrate a new deployment |
-| `RegisterWorker` | Agent → Scheduler | Join the cluster as a worker |
-| `ReportMetrics` | Agent → Scheduler | Heartbeat with resource usage |
-| `DeleteApp` | API → Scheduler | Permanently stop and remove a job |
-| `GetAppStatus` | API → Scheduler | Retrieve real-time VM information |
+| `mikrom.scheduler.deploy` | API → Scheduler | Orchestrate a new deployment |
+| `mikrom.scheduler.register` | Agent → Scheduler | Join the cluster as a worker |
+| `mikrom.scheduler.metrics` | Agent → Scheduler | Heartbeat with resource usage |
+| `mikrom.scheduler.delete` | API → Scheduler | Permanently stop and remove a job |
+| `mikrom.scheduler.status` | API → Scheduler | Retrieve real-time VM information |
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
-| `SCHEDULER_PORT` | `5002` | gRPC port |
+| `NATS_URL` | `nats://127.0.0.1:4222` | URL of the NATS server |
 | `METRICS_TTL_SECS` | `30` | Heartbeat timeout |
 | `MAX_APPS_PER_HOST` | `10` | Resource isolation limit |
-| `USE_TLS` | `false` | Enable mutual TLS |
+| `USE_TLS` | `false` | Enable mutual TLS for NATS |
 
 ## Development
 
@@ -59,7 +59,7 @@ cargo test -p mikrom-scheduler
 
 ```
 src/
-  server.rs          # Tonic implementation and request validation
+  server.rs          # NATS subscriber implementation and request validation
   scheduler/         # Placement algorithms and state management
     ipam.rs          # IP Address Management (subnet-based)
   worker_registry.rs # Thread-safe store of cluster nodes
