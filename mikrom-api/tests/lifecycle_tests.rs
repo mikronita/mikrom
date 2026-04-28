@@ -48,9 +48,10 @@ async fn test_promotion_back_and_forth() {
     };
 
     // We simulate activating dep2.
+    let app_for_mock = app.clone();
     mock_app_repo
         .expect_get_app_by_name()
-        .returning(move |_| Ok(Some(app.clone())));
+        .returning(move |_| Ok(Some(app_for_mock.clone())));
 
     let dep2 = Deployment {
         id: dep2_id,
@@ -66,6 +67,13 @@ async fn test_promotion_back_and_forth() {
         .expect_get_deployment()
         .with(eq(dep2_id))
         .returning(move |_| Ok(Some(dep2_clone.clone())));
+
+    // Mock get_app
+    let app_clone = app.clone();
+    mock_app_repo
+        .expect_get_app()
+        .with(eq(app_id))
+        .returning(move |_| Ok(Some(app_clone.clone())));
 
     mock_app_repo
         .expect_set_active_deployment()
@@ -198,9 +206,10 @@ async fn test_promotion_pauses_previous_active() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
+    let app_for_mock = app.clone();
     mock_app_repo
         .expect_get_app_by_name()
-        .returning(move |_| Ok(Some(app.clone())));
+        .returning(move |_| Ok(Some(app_for_mock.clone())));
 
     // 2. Mock get_deployment for the new deployment
     let new_dep = Deployment {
@@ -216,6 +225,13 @@ async fn test_promotion_pauses_previous_active() {
         .expect_get_deployment()
         .with(eq(new_dep_id))
         .returning(move |_| Ok(Some(new_dep_clone.clone())));
+
+    // Mock get_app
+    let app_clone = app.clone();
+    mock_app_repo
+        .expect_get_app()
+        .with(eq(app_id))
+        .returning(move |_| Ok(Some(app_clone.clone())));
 
     // 3. Mock set_active_deployment
     mock_app_repo
@@ -244,12 +260,36 @@ async fn test_promotion_pauses_previous_active() {
         .times(1)
         .returning(|_, _| Ok(true));
 
+    // Expect resume of new_dep
+    mock_scheduler
+        .expect_resume_app()
+        .with(eq("job-new".to_string()), eq(user_id.to_string()))
+        .times(1)
+        .returning(|_, _| Ok(true));
+
     // 5. Mock update_deployment_status for the old deployment (marking it STOPPED)
     mock_app_repo
         .expect_update_deployment_status()
         .with(
             eq(old_dep_id),
             eq("STOPPED"),
+            always(),
+            always(),
+            always(),
+            always(),
+            always(),
+            always(),
+            always(),
+        )
+        .times(1)
+        .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
+
+    // Expect update for the new deployment (marking it RUNNING)
+    mock_app_repo
+        .expect_update_deployment_status()
+        .with(
+            eq(new_dep_id),
+            eq("RUNNING"),
             always(),
             always(),
             always(),
@@ -329,9 +369,10 @@ async fn test_activate_stopped_deployment_resumes_it() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
+    let app_for_mock = app.clone();
     mock_app_repo
         .expect_get_app_by_name()
-        .returning(move |_| Ok(Some(app.clone())));
+        .returning(move |_| Ok(Some(app_for_mock.clone())));
 
     // 2. Mock get_deployment for the PAUSED deployment
     let paused_dep = Deployment {
@@ -347,6 +388,13 @@ async fn test_activate_stopped_deployment_resumes_it() {
         .expect_get_deployment()
         .with(eq(dep_id))
         .returning(move |_| Ok(Some(paused_dep_clone.clone())));
+
+    // Mock get_app
+    let app_clone = app.clone();
+    mock_app_repo
+        .expect_get_app()
+        .with(eq(app_id))
+        .returning(move |_| Ok(Some(app_clone.clone())));
 
     // 3. Mock set_active_deployment
     mock_app_repo
@@ -451,9 +499,10 @@ async fn test_delete_app_cleans_up_resources() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
+    let app_for_mock = app.clone();
     mock_app_repo
         .expect_get_app_by_name()
-        .returning(move |_| Ok(Some(app.clone())));
+        .returning(move |_| Ok(Some(app_for_mock.clone())));
 
     // 2. Mock list_deployments_by_app to return one deployment with job_id
     let dep = Deployment {

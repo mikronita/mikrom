@@ -66,8 +66,7 @@ pub async fn register(
             first_name: None,
             last_name: None,
         })
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .await?;
     Ok(StatusCode::CREATED)
 }
 
@@ -88,8 +87,7 @@ pub async fn login(
     let user = state
         .user_repo
         .find_by_email(&payload.email)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .await?
         .ok_or(ApiError::Auth("Invalid credentials".into()))?;
 
     if !verify(payload.password, &user.password_hash)
@@ -134,8 +132,7 @@ pub async fn get_profile(
     let user = state
         .user_repo
         .find_by_id(user_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .await?
         .ok_or(ApiError::NotFound("User not found".into()))?;
 
     Ok(Json(UserProfileResponse {
@@ -170,14 +167,12 @@ pub async fn update_profile(
     state
         .user_repo
         .update_profile(user_id, payload.first_name, payload.last_name)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .await?;
 
     let user = state
         .user_repo
         .find_by_id(user_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .await?
         .ok_or(ApiError::NotFound("User not found".into()))?;
 
     Ok(Json(UserProfileResponse {

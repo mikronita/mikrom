@@ -63,8 +63,3 @@ mikrom-agent = { path = "../mikrom-agent" }
 name = "integration"
 path = "tests/integration_tests.rs"
 test = true
-
-[[test]]
-name = "deploy_e2e"
-path = "tests/deploy_e2e.rs"
-test = true
