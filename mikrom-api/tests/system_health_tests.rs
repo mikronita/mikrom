@@ -9,7 +9,10 @@ use tower::ServiceExt;
 #[tokio::test]
 async fn test_health_endpoint_structure() {
     let mock_repo = repositories::user_repository::MockUserRepository::new();
-    let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
+    let db_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
+    });
+    let db_pool = sqlx::PgPool::connect_lazy(&db_url).unwrap();
     let app_repo = Arc::new(repositories::PostgresAppRepository::new(db_pool));
 
     let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
@@ -52,7 +55,10 @@ async fn test_health_endpoint_structure() {
 #[tokio::test]
 async fn test_health_stream_endpoint() {
     let mock_repo = repositories::user_repository::MockUserRepository::new();
-    let db_pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
+    let db_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
+    });
+    let db_pool = sqlx::PgPool::connect_lazy(&db_url).unwrap();
     let app_repo = Arc::new(repositories::PostgresAppRepository::new(db_pool));
 
     let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();

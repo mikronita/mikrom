@@ -167,8 +167,10 @@ mod tests {
     use super::*;
 
     fn lazy_pool() -> PgPool {
-        PgPool::connect_lazy("postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test")
-            .expect("invalid pool URL")
+        let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
+        });
+        PgPool::connect_lazy(&url).expect("invalid pool URL")
     }
 
     #[tokio::test]
