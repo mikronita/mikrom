@@ -64,7 +64,13 @@ async fn test_agent_nats_command_handler() {
         }
     });
 
-    let resp_msg = client.request(subject, buf.into()).await.unwrap();
+    let resp_msg = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client.request(subject, buf.into()),
+    )
+    .await
+    .expect("Timeout waiting for agent response")
+    .expect("Request failed");
     let resp = AgentCommandResponse::decode(&resp_msg.payload[..]).unwrap();
     assert!(resp.success);
     assert!(resp.message.contains("vm-123"));

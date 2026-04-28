@@ -76,7 +76,11 @@ async fn test_builder_nats_flow() {
     let mut buf = Vec::new();
     req.encode(&mut buf).unwrap();
 
-    let resp_msg = client.request(subject, buf.into()).await.unwrap();
+    let resp_msg =
+        tokio::time::timeout(Duration::from_secs(5), client.request(subject, buf.into()))
+            .await
+            .expect("Timeout waiting for builder response")
+            .expect("Request failed");
     let resp = BuildResponse::decode(&resp_msg.payload[..]).unwrap();
     assert!(resp.success);
     assert_eq!(resp.build_id, build_id);

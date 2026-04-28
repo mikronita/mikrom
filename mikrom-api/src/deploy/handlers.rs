@@ -457,11 +457,15 @@ pub async fn deploy_app_version_handler(
         .encode(&mut buf)
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let response = state
-        .nats_client
-        .request("mikrom.builder.build", buf.into())
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to trigger build via NATS: {}", e)))?;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        state
+            .nats_client
+            .request("mikrom.builder.build", buf.into()),
+    )
+    .await
+    .map_err(|_| ApiError::Internal("Builder request timed out".into()))?
+    .map_err(|e| ApiError::Internal(format!("Failed to trigger build via NATS: {}", e)))?;
 
     let build_resp = mikrom_proto::builder::BuildResponse::decode(&response.payload[..])
         .map_err(|e| ApiError::Internal(format!("Failed to decode builder response: {}", e)))?;
@@ -587,11 +591,15 @@ pub async fn trigger_app_build(
         .encode(&mut buf)
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let response = state
-        .nats_client
-        .request("mikrom.builder.build", buf.into())
-        .await
-        .map_err(|e| ApiError::Internal(format!("Failed to trigger build via NATS: {}", e)))?;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        state
+            .nats_client
+            .request("mikrom.builder.build", buf.into()),
+    )
+    .await
+    .map_err(|_| ApiError::Internal("Builder request timed out".into()))?
+    .map_err(|e| ApiError::Internal(format!("Failed to trigger build via NATS: {}", e)))?;
 
     let build_resp = mikrom_proto::builder::BuildResponse::decode(&response.payload[..])
         .map_err(|e| ApiError::Internal(format!("Failed to decode builder response: {}", e)))?;
