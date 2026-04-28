@@ -6,7 +6,7 @@ use sqlx::PgPool;
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
-    pub cache: Cache<String, String>, // Hostname -> internal IP:Port
+    pub cache: Cache<String, String>, // Hostname -> target_url
     pub client: hyper_util::client::legacy::Client<HttpConnector, Body>,
 }
 
@@ -16,13 +16,10 @@ pub async fn resolve_target(state: &AppState, host: &str) -> anyhow::Result<Stri
         return Ok(target);
     }
 
-    // Lookup in DB: use the active_deployment_id pointer
+    // Lookup in local routes table
     let row = sqlx::query(
         r#"
-        SELECT a.port, d.ip_address
-        FROM apps a
-        JOIN deployments d ON a.active_deployment_id = d.id
-        WHERE a.hostname = $1 AND d.status = 'RUNNING' AND d.ip_address IS NOT NULL
+        SELECT target_url FROM routes WHERE hostname = $1
         "#,
     )
     .bind(host)
@@ -31,10 +28,7 @@ pub async fn resolve_target(state: &AppState, host: &str) -> anyhow::Result<Stri
 
     if let Some(row) = row {
         use sqlx::Row;
-        let port: i32 = row.get("port");
-        let ip: String = row.get("ip_address");
-
-        let target = format!("http://{}:{}", ip, port);
+        let target: String = row.get("target_url");
 
         state.cache.insert(host.to_string(), target.clone()).await;
         return Ok(target);
@@ -55,7 +49,6 @@ mod tests {
         let target = "http://1.2.3.4:8080";
         cache.insert(host.to_string(), target.to_string()).await;
 
-        // We don't need a real DB pool if it hits the cache
         let state = AppState {
             db: PgPool::connect_lazy("postgres://localhost/test").unwrap(),
             cache,

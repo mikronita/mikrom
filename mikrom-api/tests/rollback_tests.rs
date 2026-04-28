@@ -85,7 +85,26 @@ async fn test_activate_deployment_endpoint() {
         .times(1)
         .returning(|_, _| Ok(()));
 
-    // 4. Mock list_deployments_by_app for cleanup logic
+    // 4. Mock get_app for notify_router
+    let app_for_notify = App {
+        id: app_id,
+        name: "test-app".to_string(),
+        git_url: "git".to_string(),
+        port: 8080,
+        hostname: None,
+        user_id,
+        github_webhook_secret: None,
+        active_deployment_id: Some(deployment_id),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    mock_app_repo
+        .expect_get_app()
+        .with(eq(app_id))
+        .times(1)
+        .returning(move |_| Ok(Some(app_for_notify.clone())));
+
+    // 5. Mock list_deployments_by_app for cleanup logic
     mock_app_repo
         .expect_list_deployments_by_app()
         .with(eq(app_id))

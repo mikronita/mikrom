@@ -168,5 +168,6 @@ async fn sync_deployment_state(
             )
             .await;
         state.deployment_events.send(dep.app_id).ok();
+        let _ = state.notify_router(dep.app_id).await;
     }
 }

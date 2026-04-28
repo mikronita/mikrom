@@ -20,6 +20,9 @@ async fn main() -> anyhow::Result<()> {
         .connect(&config.database_url)
         .await?;
 
+    tracing::info!("Running database migrations...");
+    sqlx::migrate!("./migrations").run(&pool).await?;
+
     let certs = if config.use_tls {
         tracing::info!("Loading TLS certificates from {}", config.certs_dir);
         Some(mikrom_proto::tls::ServiceCerts::load(&config.certs_dir)?)

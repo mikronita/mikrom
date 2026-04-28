@@ -1,5 +1,4 @@
--- Migration: 012_scheduler_persistence.sql
--- Description: Tables for persistent scheduler state (Workers, IPAM, and Jobs)
+-- Tables for persistent scheduler state (Workers, IPAM, and Jobs)
 
 CREATE TABLE IF NOT EXISTS workers (
     id VARCHAR PRIMARY KEY,

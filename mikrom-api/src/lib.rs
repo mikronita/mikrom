@@ -52,7 +52,51 @@ pub struct AppState {
     pub build_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
-impl AppState {}
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct RouterConfig {
+    pub hostname: String,
+    pub target_url: Option<String>,
+}
+
+impl AppState {
+    pub async fn notify_router(&self, app_id: uuid::Uuid) -> anyhow::Result<()> {
+        let app = match self.app_repo.get_app(app_id).await? {
+            Some(a) => a,
+            None => return Ok(()),
+        };
+
+        let hostname = match &app.hostname {
+            Some(h) => h,
+            None => return Ok(()),
+        };
+
+        let target_url = if let Some(dep_id) = app.active_deployment_id {
+            if let Some(dep) = self.app_repo.get_deployment(dep_id).await? {
+                if let Some(ip) = dep.ip_address {
+                    Some(format!("http://{}:{}", ip, app.port))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let config = RouterConfig {
+            hostname: hostname.clone(),
+            target_url,
+        };
+
+        let payload = serde_json::to_vec(&config)?;
+        self.nats_client
+            .publish("mikrom.router.config_updated", payload.into())
+            .await?;
+
+        Ok(())
+    }
+}
 
 pub fn create_app(state: AppState) -> Router {
     let cors = CorsLayer::new()
