@@ -33,13 +33,13 @@ cargo run -p mikrom-scheduler
 cargo run -p mikrom-agent
 
 # Run unit tests only (no Docker required)
-cargo test --lib
+cargo nextest run --lib
 
 # Run mikrom-api integration tests (requires Docker)
-cd mikrom-api && docker-compose up -d postgres && cargo test --test integration
+cd mikrom-api && docker-compose up -d postgres && cargo nextest run --test integration
 
 # Run a single test by name
-cargo test <test_name>
+cargo nextest run <test_name>
 ```
 
 ### mikrom-app (Next.js)

@@ -7,16 +7,16 @@
 cargo run
 
 # Run all tests (requires docker-compose up)
-cargo test
+cargo nextest run
 
 # Run a single test
-cargo test test_name
+cargo nextest run test_name
 
 # Run unit tests only
-cargo test --lib
+cargo nextest run --lib
 
 # Run integration tests
-cargo test --test integration
+cargo nextest run --test integration
 ```
 
 ## Prerequisites

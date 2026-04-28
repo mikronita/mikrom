@@ -58,7 +58,7 @@ make db-start
 cd mikrom-api && cargo watch -x run
 
 # Run tests
-cargo test
+cargo nextest run
 ```
 
 ## Internal Architecture

@@ -30,44 +30,49 @@ clippy: ## Run Clippy linter
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
+define check_nextest
+	@command -v cargo-nextest >/dev/null 2>&1 || { echo >&2 "cargo-nextest is not installed. Install it with: cargo binstall cargo-nextest or cargo install cargo-nextest"; exit 1; }
+endef
+
 .PHONY: test
 test: ## Run all unit tests (no DB required)
-	cargo test --lib
+	$(call check_nextest)
+	cargo nextest run --lib
 
 .PHONY: test-verbose
 test-verbose: ## Run unit tests with output
-	cargo test --lib -- --nocapture
+	$(call check_nextest)
+	cargo nextest run --lib -- --nocapture
 
 .PHONY: test-one
 test-one: ## Run a single test by name  →  make test-one NAME=test_score_idle
-	cargo test --lib $(NAME)
+	$(call check_nextest)
+	cargo nextest run --lib $(NAME)
 
 .PHONY: test-cli
 test-cli: ## Run mikrom-cli unit tests
-	cargo test --lib -p mikrom-cli
+	$(call check_nextest)
+	cargo nextest run --lib -p mikrom-cli
 
 .PHONY: test-integration
 test-integration: ## Run integration tests (starts PostgreSQL via Docker)
+	$(call check_nextest)
 	docker compose up -d postgres && \
 	  sleep 5 && \
-	  cargo test --test integration; \
+	  cargo nextest run --test integration; \
 	  docker compose stop postgres
 
-.PHONY: test-e2e
-test-e2e: ## Run end-to-end deployment tests
-	cargo test -p mikrom-api --test deploy_e2e
-
 .PHONY: test-all-crates
-test-all-crates: ## Run unit tests for all crates plus e2e
-	cargo test -p mikrom-proto && \
-	cargo test -p mikrom-scheduler && \
-	cargo test -p mikrom-agent && \
-	cargo test -p mikrom-api && \
-	cargo test -p mikrom-init && \
-	make test-e2e
+test-all-crates: ## Run unit tests for all crates
+	$(call check_nextest)
+	cargo nextest run -p mikrom-proto && \
+	cargo nextest run -p mikrom-scheduler && \
+	cargo nextest run -p mikrom-agent && \
+	cargo nextest run -p mikrom-api && \
+	cargo nextest run -p mikrom-init
 
 .PHONY: test-all
-test-all: test-all-crates test-integration ## Run unit + integration + e2e tests
+test-all: test-all-crates test-integration ## Run unit + integration tests
 
 .PHONY: test-coverage
 test-coverage: ## Run tests and generate coverage report (requires cargo-llvm-cov)
