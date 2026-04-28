@@ -250,6 +250,14 @@ async fn test_activate_deployment_not_running() {
         .expect_get_deployment()
         .returning(move |_| Ok(Some(dep.clone())));
 
+    mock_app_repo
+        .expect_list_deployments_by_app()
+        .returning(|_| Ok(vec![]));
+
+    mock_app_repo
+        .expect_set_active_deployment()
+        .returning(|_, _| Ok(()));
+
     let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
