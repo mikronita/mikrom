@@ -493,7 +493,7 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
         }
 
         self.scheduler
-            .cancel_job(&req.job_id)
+            .remove_job(&req.job_id)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 

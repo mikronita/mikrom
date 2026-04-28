@@ -50,6 +50,7 @@ export function useCreateApp() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: appsKeys.list() });
+      queryClient.invalidateQueries({ queryKey: ["vms"] });
     },
   });
 }
@@ -67,6 +68,7 @@ export function useDeleteApp() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: appsKeys.list() });
+      queryClient.invalidateQueries({ queryKey: ["vms"] });
     },
   });
 }
