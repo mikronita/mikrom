@@ -20,6 +20,7 @@ export const appsKeys = {
   list: () => [...appsKeys.all, "list"] as const,
   detail: (id: string) => [...appsKeys.all, "detail", id] as const,
   deployments: (appName: string) => [...appsKeys.all, "deployments", appName] as const,
+  vms: ["vms"] as const,
 };
 
 export function useApps() {
@@ -50,7 +51,7 @@ export function useCreateApp() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: appsKeys.list() });
-      queryClient.invalidateQueries({ queryKey: ["vms"] });
+      queryClient.invalidateQueries({ queryKey: appsKeys.vms });
     },
   });
 }
@@ -66,9 +67,10 @@ export function useDeleteApp() {
       if (result.error) throw new Error(result.error);
       return result.success;
     },
-    onSuccess: () => {
+    onSuccess: (_, appName) => {
       queryClient.invalidateQueries({ queryKey: appsKeys.list() });
-      queryClient.invalidateQueries({ queryKey: ["vms"] });
+      queryClient.invalidateQueries({ queryKey: appsKeys.deployments(appName) });
+      queryClient.invalidateQueries({ queryKey: appsKeys.vms });
     },
   });
 }
@@ -86,7 +88,7 @@ export function useDeployAppVersion() {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: appsKeys.deployments(variables.appName) });
-      queryClient.invalidateQueries({ queryKey: ["vms"] });
+      queryClient.invalidateQueries({ queryKey: appsKeys.vms });
     },
   });
 }
