@@ -249,6 +249,30 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
                     return Err(Status::permission_denied("Unauthorized"));
                 }
 
+                let (cpu_usage, ram_used_bytes) = if let Some(host_id) = &j.host_id {
+                    if let Some(metrics) = self
+                        .scheduler
+                        .worker_registry()
+                        .get_metrics(host_id)
+                        .await
+                        .map_err(|e| Status::internal(e.to_string()))?
+                    {
+                        if let Some(vm_id) = &j.vm_id {
+                            if let Some(vm_m) = metrics.vms.get(vm_id) {
+                                (vm_m.cpu_usage, vm_m.ram_used_bytes)
+                            } else {
+                                (0.0, 0)
+                            }
+                        } else {
+                            (0.0, 0)
+                        }
+                    } else {
+                        (0.0, 0)
+                    }
+                } else {
+                    (0.0, 0)
+                };
+
                 let response = AppStatusResponse {
                     job_id: j.job_id,
                     status: j.status as i32,
@@ -258,8 +282,8 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
                     started_at: j.started_at.unwrap_or(0),
                     stopped_at: j.stopped_at.unwrap_or(0),
                     error_message: j.error_message.unwrap_or_default(),
-                    cpu_usage: 0.0,
-                    ram_used_bytes: 0,
+                    cpu_usage,
+                    ram_used_bytes,
                     ip_address: j.config.ip_address.unwrap_or_default(),
                 };
                 Ok(Response::new(response))

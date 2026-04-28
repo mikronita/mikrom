@@ -79,6 +79,24 @@ impl AppScheduler {
             use mikrom_proto::scheduler::AppInfo;
             use prost::Message;
 
+            let (cpu_usage, ram_used_bytes) = if let Some(host_id) = &job.host_id {
+                if let Ok(Some(metrics)) = self.worker_registry.get_metrics(host_id).await {
+                    if let Some(vm_id) = &job.vm_id {
+                        if let Some(vm_m) = metrics.vms.get(vm_id) {
+                            (vm_m.cpu_usage, vm_m.ram_used_bytes)
+                        } else {
+                            (0.0, 0)
+                        }
+                    } else {
+                        (0.0, 0)
+                    }
+                } else {
+                    (0.0, 0)
+                }
+            } else {
+                (0.0, 0)
+            };
+
             let app_info = AppInfo {
                 job_id: job.job_id,
                 app_id: job.app_id,
@@ -87,8 +105,8 @@ impl AppScheduler {
                 status: job.status as i32,
                 host_id: job.host_id.unwrap_or_default(),
                 vm_id: job.vm_id.unwrap_or_default(),
-                cpu_usage: 0.0,
-                ram_used_bytes: 0,
+                cpu_usage,
+                ram_used_bytes,
                 user_id: job.user_id,
                 deployment_id: job.deployment_id.unwrap_or_default(),
             };
