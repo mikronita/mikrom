@@ -76,7 +76,7 @@ pub async fn create_app_handler(
             None,
         )
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(ApiError::from)?;
 
     Ok((
         StatusCode::CREATED,
