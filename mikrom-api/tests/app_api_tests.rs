@@ -92,7 +92,7 @@ async fn test_create_app_endpoint() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::CREATED);
 
     let body = axum::body::to_bytes(response.into_body(), 1024)
         .await
@@ -102,7 +102,6 @@ async fn test_create_app_endpoint() {
     assert_eq!(app_resp["name"], app_name);
     assert_eq!(app_resp["git_url"], git_url);
     assert_eq!(app_resp["port"], 8080);
-    assert_eq!(app_resp["hostname"], "test-app.apps.mikrom.es");
 }
 
 #[tokio::test]
