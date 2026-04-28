@@ -44,7 +44,7 @@ When a deployment is triggered:
 cargo run -p mikrom-agent
 
 # Run tests (requires sudo for some Firecracker operations)
-cargo test -p mikrom-agent
+cargo nextest run -p mikrom-agent
 ```
 
 ## Internal Architecture

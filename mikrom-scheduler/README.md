@@ -52,7 +52,7 @@ Messages are defined in `mikrom-proto/proto/*.proto`.
 cargo run -p mikrom-scheduler
 
 # Run tests
-cargo test -p mikrom-scheduler
+cargo nextest run -p mikrom-scheduler
 ```
 
 ## Internal Architecture
