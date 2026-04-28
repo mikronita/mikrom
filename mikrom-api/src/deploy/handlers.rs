@@ -145,6 +145,30 @@ pub async fn delete_app_handler(
     Path(app_name): Path<String>,
 ) -> ApiResult<StatusCode> {
     let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+
+    // Clean up all deployments before deleting the app
+    let deployments = state
+        .app_repo
+        .list_deployments_by_app(app.id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    for dep in deployments {
+        if let Some(job_id) = dep.job_id {
+            // Tell the scheduler to clean up resources for this job
+            if let Err(e) = state
+                .scheduler
+                .delete_app(job_id, app.user_id.to_string())
+                .await
+            {
+                tracing::error!(
+                    "Failed to clean up deployment resources in scheduler: {}",
+                    e
+                );
+            }
+        }
+    }
+
     state
         .app_repo
         .delete_app(app.id)
