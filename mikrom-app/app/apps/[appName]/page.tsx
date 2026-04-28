@@ -267,18 +267,16 @@ export default function AppDetailPage() {
               <div>
                 <div className="flex items-center gap-3">
                   <h1 className="text-2xl font-bold tracking-tight">
-                    {app?.hostname || app?.name || "Application"}
+                    {app?.name || decodedName}.apps.mikrom.es
                   </h1>
-                  {app?.hostname && (
-                    <a 
-                      href={`https://${app.hostname}`} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-sm font-medium text-indigo-500 hover:underline flex items-center gap-1"
-                    >
-                      Visit site ↗
-                    </a>
-                  )}
+                  <a 
+                    href={`https://${app?.name || decodedName}.apps.mikrom.es`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-sm font-medium text-indigo-500 hover:underline flex items-center gap-1"
+                  >
+                    Visit site ↗
+                  </a>
                 </div>
                 <p className="text-muted-foreground text-sm mt-1">
                   Manage {app?.name || "application"} deployments and monitor production instances.
