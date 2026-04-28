@@ -221,7 +221,7 @@ impl AppBuilder {
                     info!(
                         "Injecting packageManager into package.json to fix Railpack pnpm resolution"
                     );
-                    pkg["packageManager"] = serde_json::json!("pnpm@9.0.0");
+                    pkg["packageManager"] = serde_json::json!("pnpm@9.15.0");
                 }
                 pkg
             }) {

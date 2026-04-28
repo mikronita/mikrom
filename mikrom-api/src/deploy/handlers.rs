@@ -322,27 +322,34 @@ pub async fn deployments_stream_handler(
 pub async fn activate_deployment_handler(
     auth: AuthUser,
     State(state): State<AppState>,
-    Path((_app_name, deployment_id)): Path<(String, Uuid)>,
+    Path((app_name, deployment_id)): Path<(String, Uuid)>,
 ) -> ApiResult<StatusCode> {
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+
     let deployment = state
         .app_repo
         .get_deployment(deployment_id)
         .await?
         .ok_or(ApiError::NotFound("Deployment not found".into()))?;
 
+    if deployment.status == "FAILED" {
+        return Err(ApiError::BadRequest(
+            "Cannot activate a failed deployment".into(),
+        ));
+    }
+
+    if deployment.app_id != app.id {
+        return Err(ApiError::BadRequest(
+            "Deployment does not belong to this application".into(),
+        ));
+    }
+
     // 1. Find currently active deployment to stop it if necessary
     let all_deps = state
         .app_repo
-        .list_deployments_by_app(deployment.app_id)
+        .list_deployments_by_app(app.id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let app = state
-        .app_repo
-        .get_app(deployment.app_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Application not found".into()))?;
 
     if let Some(active_id) = app.active_deployment_id
         && active_id != deployment_id
@@ -375,7 +382,7 @@ pub async fn activate_deployment_handler(
     // 2. Update active pointer in DB
     state
         .app_repo
-        .set_active_deployment(deployment.app_id, deployment_id)
+        .set_active_deployment(app.id, deployment_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -407,7 +414,7 @@ pub async fn activate_deployment_handler(
             .await;
     }
 
-    state.deployment_events.send(deployment.app_id).ok();
+    state.deployment_events.send(app.id).ok();
 
     // Notify router
     let _ = state
