@@ -129,11 +129,11 @@ async fn sync_deployment_state(
     // Prevent status downgrades (e.g., RUNNING -> PENDING due to out-of-order NATS messages)
     fn status_priority(status: &str) -> i32 {
         match status {
-            "RUNNING" => 4,
+            "FAILED" | "CANCELLED" => 5, // Terminal states have highest priority
+            "RUNNING" | "STOPPED" => 4,  // Allow transitions between running and stopped
             "SCHEDULED" => 3,
             "PENDING" => 2,
             "BUILDING" => 1,
-            "FAILED" | "STOPPED" | "CANCELLED" => 5, // Terminal states have highest priority
             _ => 0,
         }
     }

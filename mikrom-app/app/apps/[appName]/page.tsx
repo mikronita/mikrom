@@ -377,8 +377,7 @@ export default function AppDetailPage() {
                           const isLatest = index === 0;
                           
                           // A deployment is "Currently in Prod" if it's the designated production one 
-                          // OR if it's the latest one and it's already running (auto-promotion)
-                          const isCurrentlyInProd = isProduction || (isLatest && dep.status === "RUNNING");
+                          const isCurrentlyInProd = isProduction;
                           
                           const canActivate = (["RUNNING", "STOPPED", "FAILED"].includes(dep.status)) && !isCurrentlyInProd;
                           
