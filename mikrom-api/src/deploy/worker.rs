@@ -373,11 +373,8 @@ async fn poll_and_deploy(
                             // Give the DB a moment to ensure the update is committed
                             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-                            // Notify router to refresh cache via NATS
-                            let _ = state
-                                .nats_client
-                                .publish("mikrom.router.config_updated", "refresh".into())
-                                .await;
+                            // Notify router
+                            let _ = state.notify_router(task.app_id).await;
                         }
                         state.deployment_events.send(task.app_id).ok();
                     },

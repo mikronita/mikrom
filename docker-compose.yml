@@ -8,7 +8,7 @@ services:
     volumes:
       - certs:/certs
 
-  postgres:
+  postgres-api:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: mikrom
@@ -17,9 +17,45 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_api_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mikrom -d mikrom_api"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mikrom
+
+  postgres-scheduler:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: mikrom
+      POSTGRES_PASSWORD: mikrom_password
+      POSTGRES_DB: mikrom_scheduler
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_scheduler_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mikrom -d mikrom_scheduler"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mikrom
+
+  postgres-router:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: mikrom
+      POSTGRES_PASSWORD: mikrom_password
+      POSTGRES_DB: mikrom_router
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_router_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mikrom -d mikrom_router"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -40,6 +76,7 @@ services:
       dockerfile: mikrom-scheduler/Dockerfile
     environment:
       NATS_URL: nats://nats:4222
+      DATABASE_URL: postgres://mikrom:mikrom_password@postgres-scheduler:5432/mikrom_scheduler
       USE_TLS: "true"
       CERTS_DIR: /certs/scheduler
     ports:
@@ -49,47 +86,13 @@ services:
     depends_on:
       cert-gen:
         condition: service_completed_successfully
+      postgres-scheduler:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 5002"]
       interval: 5s
       timeout: 5s
       retries: 5
-    networks:
-      - mikrom
-
-  mikrom-agent:
-    build:
-      context: .
-      dockerfile: mikrom-agent/Dockerfile
-    privileged: true
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    environment:
-      NATS_URL: nats://nats:4222
-      SCHEDULER_ADDR: https://mikrom-scheduler:5002
-      AGENT_PORT: "5003"
-      AGENT_HOSTNAME: mikrom-agent
-      USE_TLS: "true"
-      CERTS_DIR: /certs/agent
-      FC_KERNEL_PATH: ${FC_KERNEL_PATH:-/opt/firecracker/vmlinux-6.1.155}
-      FC_ROOTFS_PATH: ${FC_ROOTFS_PATH:-/opt/firecracker/ubuntu-24.04.ext4}
-      FC_BINARY: /usr/local/bin/firecracker
-    ports:
-      - "5003:5003"
-    devices:
-      - /dev/kvm:/dev/kvm
-    volumes:
-      - certs:/certs
-      - /opt/firecracker:/opt/firecracker:ro
-      - /usr/local/bin/firecracker:/usr/local/bin/firecracker:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /tmp:/tmp
-    depends_on:
-      cert-gen:
-        condition: service_completed_successfully
-      mikrom-scheduler:
-        condition: service_started
     networks:
       - mikrom
 
@@ -99,7 +102,7 @@ services:
       dockerfile: mikrom-api/Dockerfile
     environment:
       NATS_URL: nats://nats:4222
-      DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_api
+      DATABASE_URL: postgres://mikrom:mikrom_password@postgres-api:5432/mikrom_api
       SCHEDULER_ADDR: https://mikrom-scheduler:5002
       JWT_SECRET: ${JWT_SECRET:-change_me_in_production}
       USE_TLS: "true"
@@ -111,10 +114,26 @@ services:
     depends_on:
       cert-gen:
         condition: service_completed_successfully
-      postgres:
+      postgres-api:
         condition: service_healthy
       mikrom-scheduler:
         condition: service_started
+    networks:
+      - mikrom
+
+  mikrom-router:
+    build:
+      context: .
+      dockerfile: mikrom-router/Dockerfile
+    environment:
+      NATS_URL: nats://nats:4222
+      DATABASE_URL: postgres://mikrom:mikrom_password@postgres-router:5432/mikrom_router
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - nats
+      - postgres-router
     networks:
       - mikrom
 
@@ -124,7 +143,6 @@ services:
       dockerfile: mikrom-builder/Dockerfile
     environment:
       NATS_URL: nats://nats:4222
-      # Builder might need docker socket if it uses docker-in-docker or similar
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -144,7 +162,9 @@ services:
       - mikrom
 
 volumes:
-  postgres_data:
+  postgres_api_data:
+  postgres_scheduler_data:
+  postgres_router_data:
   certs:
 
 networks:

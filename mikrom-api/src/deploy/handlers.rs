@@ -417,10 +417,7 @@ pub async fn activate_deployment_handler(
     state.deployment_events.send(app.id).ok();
 
     // Notify router
-    let _ = state
-        .nats_client
-        .publish("mikrom.router.config_updated", "refresh".into())
-        .await;
+    let _ = state.notify_router(app.id).await;
 
     Ok(StatusCode::OK)
 }
