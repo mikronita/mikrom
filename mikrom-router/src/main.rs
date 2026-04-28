@@ -34,12 +34,6 @@ async fn main() -> anyhow::Result<()> {
     let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
         .build(HttpConnector::new());
 
-    // NATS client for cache invalidation and updates
-    info!("Connecting to NATS at {}...", config.nats_url);
-    let nats_client = async_nats::connect(&config.nats_url)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to connect to NATS: {}", e))?;
-
     let state = AppState {
         db: db.clone(),
         cache,
@@ -49,45 +43,67 @@ async fn main() -> anyhow::Result<()> {
     // Background task to listen for router configuration updates
     let cache_clone = state.cache.clone();
     let db_clone = state.db.clone();
-    let mut nats_sub = nats_client
-        .subscribe("mikrom.router.config_updated")
-        .await?;
+    let nats_url = config.nats_url.clone();
 
     tokio::spawn(async move {
-        info!("Listening for router config updates via NATS...");
-        while let Some(msg) = nats_sub.next().await {
-            if let Ok(update) = serde_json::from_slice::<RouterConfig>(&msg.payload) {
-                info!(
-                    "Received router update for {}: {:?}",
-                    update.hostname, update.target_url
-                );
+        loop {
+            info!("Connecting to NATS for updates at {}...", nats_url);
+            let nats_client = match async_nats::connect(&nats_url).await {
+                Ok(client) => client,
+                Err(e) => {
+                    error!("Failed to connect to NATS, retrying in 5s: {}", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                },
+            };
 
-                let result = if let Some(target) = update.target_url {
-                    sqlx::query("INSERT INTO routes (hostname, target_url, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = NOW()")
-                        .bind(&update.hostname)
-                        .bind(&target)
-                        .execute(&db_clone)
-                        .await
-                } else {
-                    sqlx::query("DELETE FROM routes WHERE hostname = $1")
-                        .bind(&update.hostname)
-                        .execute(&db_clone)
-                        .await
-                };
+            let mut nats_sub = match nats_client.subscribe("mikrom.router.config_updated").await {
+                Ok(sub) => sub,
+                Err(e) => {
+                    error!("Failed to subscribe to NATS, retrying in 5s: {}", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                },
+            };
 
-                if let Err(e) = result {
-                    error!("Failed to update local routes table: {}", e);
+            info!("Listening for router config updates via NATS...");
+            while let Some(msg) = nats_sub.next().await {
+                if let Ok(update) = serde_json::from_slice::<RouterConfig>(&msg.payload) {
+                    info!(
+                        "Received router update for {}: {:?}",
+                        update.hostname, update.target_url
+                    );
+
+                    let result = if let Some(target) = update.target_url {
+                        sqlx::query("INSERT INTO routes (hostname, target_url, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = NOW()")
+                            .bind(&update.hostname)
+                            .bind(&target)
+                            .execute(&db_clone)
+                            .await
+                    } else {
+                        sqlx::query("DELETE FROM routes WHERE hostname = $1")
+                            .bind(&update.hostname)
+                            .execute(&db_clone)
+                            .await
+                    };
+
+                    if let Err(e) = result {
+                        error!("Failed to update local routes table: {}", e);
+                    } else {
+                        cache_clone.invalidate(&update.hostname).await;
+                    }
                 } else {
-                    cache_clone.invalidate(&update.hostname).await;
+                    // Invalid message: log it but don't clear everything to avoid performance spikes
+                    error!(
+                        "Received invalid router update payload: {}",
+                        String::from_utf8_lossy(&msg.payload)
+                    );
                 }
-            } else {
-                // Legacy or invalid message: clear everything to be safe
-                info!("Received invalid or legacy update, clearing router cache");
-                cache_clone.invalidate_all();
             }
+            error!("NATS subscription closed, reconnecting in 5s...");
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     });
-
     let app = Router::new()
         .route("/health", any(health_handler))
         .fallback(any(proxy_handler))
