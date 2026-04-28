@@ -271,29 +271,77 @@ pub async fn watch_deployments(
                 },
                 // 3. Periodic refresh (Brute force fallback)
                 _ = interval.tick() => {
-                    if let Ok(apps) = state_clone.app_repo.list_apps_by_user(&auth_user_id).await {
-                        for app in apps {
-                            if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
-                                for dep in deps {
-                                    if ["RUNNING", "BUILDING", "SCHEDULED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
-                                        let data = serde_json::json!({
-                                            "job_id": dep.job_id.clone().unwrap_or_default(),
-                                            "deployment_id": dep.id.to_string(),
-                                            "app_id": dep.app_id.to_string(),
-                                            "app_name": app.name.clone(),
-                                            "image": dep.image_tag.clone().unwrap_or_default(),
-                                            "status": dep.status,
-                                            "host_id": String::new(),
-                                            "vm_id": String::new(),
-                                            "cpu_usage": 0.0,
-                                            "ram_used_bytes": 0,
-                                            "scheduled_at": 0,
-                                            "started_at": 0,
-                                            "stopped_at": 0,
-                                            "error_message": "",
-                                        });
-                                        if let Ok(json) = serde_json::to_string(&data) {
-                                            yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
+                    use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
+                    use prost::Message;
+
+                    let nats_req = ListAppsRequest {
+                        user_id: auth_user_id.clone(),
+                        status: None,
+                    };
+
+                    let mut buf = Vec::new();
+                    let scheduler_apps = if nats_req.encode(&mut buf).is_ok() {
+                        if let Ok(response) = state_clone
+                            .nats_client
+                            .request("mikrom.scheduler.list_apps", buf.into())
+                            .await
+                        {
+                            ListAppsResponse::decode(&response.payload[..]).ok().map(|r| r.apps).unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        Vec::new()
+                    };
+
+                    if !scheduler_apps.is_empty() {
+                        for job in scheduler_apps {
+                             let data = serde_json::json!({
+                                "job_id": job.job_id,
+                                "deployment_id": job.deployment_id,
+                                "app_id": job.app_id,
+                                "app_name": job.app_name,
+                                "image": job.image,
+                                "status": crate::scheduler::status_name(job.status),
+                                "host_id": job.host_id,
+                                "vm_id": job.vm_id,
+                                "cpu_usage": job.cpu_usage,
+                                "ram_used_bytes": job.ram_used_bytes,
+                                "scheduled_at": 0,
+                                "started_at": 0,
+                                "stopped_at": 0,
+                                "error_message": "",
+                            });
+                            if let Ok(json) = serde_json::to_string(&data) {
+                                yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
+                            }
+                        }
+                    } else {
+                        // Fallback to DB if scheduler is unreachable or returns nothing
+                        if let Ok(apps) = state_clone.app_repo.list_apps_by_user(&auth_user_id).await {
+                            for app in apps {
+                                if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
+                                    for dep in deps {
+                                        if ["RUNNING", "BUILDING", "SCHEDULED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                                            let data = serde_json::json!({
+                                                "job_id": dep.job_id.clone().unwrap_or_default(),
+                                                "deployment_id": dep.id.to_string(),
+                                                "app_id": dep.app_id.to_string(),
+                                                "app_name": app.name.clone(),
+                                                "image": dep.image_tag.clone().unwrap_or_default(),
+                                                "status": dep.status,
+                                                "host_id": String::new(),
+                                                "vm_id": String::new(),
+                                                "cpu_usage": 0.0,
+                                                "ram_used_bytes": 0,
+                                                "scheduled_at": 0,
+                                                "started_at": 0,
+                                                "stopped_at": 0,
+                                                "error_message": "",
+                                            });
+                                            if let Ok(json) = serde_json::to_string(&data) {
+                                                yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
+                                            }
                                         }
                                     }
                                 }

@@ -218,7 +218,36 @@ impl AgentServer {
                         metrics.disk_total_bytes,
                     );
 
-                    use mikrom_proto::scheduler::{ReportMetricsRequest, WorkerHeartbeat};
+                    use mikrom_proto::scheduler::{
+                        ReportMetricsRequest, VmMetrics as ProtoVmMetrics,
+                        VmStatus as ProtoVmStatus, WorkerHeartbeat,
+                    };
+
+                    let vms_metrics: std::collections::HashMap<String, ProtoVmMetrics> = metrics
+                        .vms
+                        .iter()
+                        .map(|(id, vm)| {
+                            let proto_status = match vm.status {
+                                crate::firecracker::VmStatus::Starting => ProtoVmStatus::Starting,
+                                crate::firecracker::VmStatus::Running => ProtoVmStatus::Running,
+                                crate::firecracker::VmStatus::Paused => ProtoVmStatus::Paused,
+                                crate::firecracker::VmStatus::Stopping => ProtoVmStatus::Stopping,
+                                crate::firecracker::VmStatus::Stopped => ProtoVmStatus::Stopped,
+                                crate::firecracker::VmStatus::Failed => ProtoVmStatus::Failed,
+                            };
+
+                            (
+                                id.clone(),
+                                ProtoVmMetrics {
+                                    cpu_usage: vm.cpu_usage,
+                                    ram_used_bytes: vm.ram_used_bytes,
+                                    status: proto_status as i32,
+                                    error_message: vm.error_message.clone().unwrap_or_default(),
+                                    ip_address: vm.ip_address.clone().unwrap_or_default(),
+                                },
+                            )
+                        })
+                        .collect();
 
                     let heartbeat = WorkerHeartbeat {
                         host_id: host_id.clone(),
@@ -233,12 +262,12 @@ impl AgentServer {
                             ram_total_bytes: metrics.ram_total_bytes,
                             disk_used_bytes: metrics.disk_used_bytes,
                             disk_total_bytes: metrics.disk_total_bytes,
-                            apps_count: 0, // TODO: Count running VMs
+                            apps_count: metrics.apps_count,
                             timestamp: chrono::Utc::now().timestamp(),
-                            load_avg_1: 0.0,
-                            load_avg_5: 0.0,
-                            load_avg_15: 0.0,
-                            vms: std::collections::HashMap::new(), // TODO: Map VM metrics
+                            load_avg_1: metrics.load_avg_1,
+                            load_avg_5: metrics.load_avg_5,
+                            load_avg_15: metrics.load_avg_15,
+                            vms: vms_metrics,
                         }),
                     };
 
