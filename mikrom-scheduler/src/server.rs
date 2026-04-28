@@ -426,12 +426,18 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
         let mut payload = Vec::new();
         let _ = resume_cmd.encode(&mut payload);
 
-        let (success, message) = match self.nats_client.request(subject, payload.into()).await {
-            Ok(resp) => match AgentCommandResponse::decode(&resp.payload[..]) {
+        let (success, message) = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.nats_client.request(subject, payload.into()),
+        )
+        .await
+        {
+            Ok(Ok(resp)) => match AgentCommandResponse::decode(&resp.payload[..]) {
                 Ok(inner) => (inner.success, inner.message),
                 Err(e) => (false, format!("Failed to decode agent response: {}", e)),
             },
-            Err(e) => (false, e.to_string()),
+            Ok(Err(e)) => (false, e.to_string()),
+            Err(_) => (false, "Agent request timed out".to_string()),
         };
 
         if success {
@@ -694,16 +700,18 @@ impl SchedulerServer {
             .encode(&mut payload)
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        let (mut success, mut message) = match self
-            .nats_client
-            .request(subject.clone(), payload.into())
-            .await
+        let (mut success, mut message) = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.nats_client.request(subject.clone(), payload.into()),
+        )
+        .await
         {
-            Ok(resp) => match AgentCommandResponse::decode(&resp.payload[..]) {
+            Ok(Ok(resp)) => match AgentCommandResponse::decode(&resp.payload[..]) {
                 Ok(inner) => (inner.success, inner.message),
                 Err(e) => (false, format!("Failed to decode agent response: {}", e)),
             },
-            Err(e) => (false, e.to_string()),
+            Ok(Err(e)) => (false, e.to_string()),
+            Err(_) => (false, "Agent request timed out".to_string()),
         };
 
         if !success {
@@ -722,8 +730,13 @@ impl SchedulerServer {
             let mut stop_payload = Vec::new();
             let _ = stop_cmd.encode(&mut stop_payload);
 
-            match self.nats_client.request(subject, stop_payload.into()).await {
-                Ok(resp) => match AgentCommandResponse::decode(&resp.payload[..]) {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                self.nats_client.request(subject, stop_payload.into()),
+            )
+            .await
+            {
+                Ok(Ok(resp)) => match AgentCommandResponse::decode(&resp.payload[..]) {
                     Ok(inner) => {
                         if inner.success {
                             success = true;
@@ -738,8 +751,11 @@ impl SchedulerServer {
                         message = format!("Pause failed and fallback decode failed: {}", e);
                     },
                 },
-                Err(e) => {
+                Ok(Err(e)) => {
                     message = format!("Pause failed and fallback NATS request failed: {}", e);
+                },
+                Err(_) => {
+                    message = "Pause failed and fallback request timed out".to_string();
                 },
             }
         }
@@ -774,8 +790,13 @@ impl SchedulerServer {
         let mut payload = Vec::new();
         let _ = cmd.encode(&mut payload);
 
-        match self.nats_client.request(subject, payload.into()).await {
-            Ok(resp) => match AgentCommandResponse::decode(&resp.payload[..]) {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.nats_client.request(subject, payload.into()),
+        )
+        .await
+        {
+            Ok(Ok(resp)) => match AgentCommandResponse::decode(&resp.payload[..]) {
                 Ok(inner) => {
                     if inner.success {
                         tracing::info!("VM {} resources purged on host {}", vm_id, host_id);
@@ -787,12 +808,19 @@ impl SchedulerServer {
                     tracing::warn!("Failed to decode agent delete response: {}", e);
                 },
             },
-            Err(e) => {
+            Ok(Err(e)) => {
                 tracing::warn!(
                     "Failed to send delete command to agent {} for VM {}: {}",
                     host_id,
                     vm_id,
                     e
+                );
+            },
+            Err(_) => {
+                tracing::warn!(
+                    "Delete command to agent {} for VM {} timed out",
+                    host_id,
+                    vm_id
                 );
             },
         }

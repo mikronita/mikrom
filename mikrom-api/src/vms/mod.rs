@@ -87,11 +87,15 @@ pub async fn list_active_deployments(
         if nats_req.encode(&mut buf).is_err() {
             return None;
         }
-        let response = state
-            .nats_client
-            .request("mikrom.scheduler.list_apps", buf.into())
-            .await
-            .ok()?;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            state
+                .nats_client
+                .request("mikrom.scheduler.list_apps", buf.into()),
+        )
+        .await
+        .ok()?
+        .ok()?;
         ListAppsResponse::decode(&response.payload[..]).ok()
     }
     .await

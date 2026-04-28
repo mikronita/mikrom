@@ -71,11 +71,14 @@ impl BuilderClient for RealBuilderClient {
         }
         .encode(&mut buf)?;
 
-        let response = self
-            .nats_client
-            .request("mikrom.builder.get_status", buf.into())
-            .await
-            .map_err(|e| anyhow::anyhow!("NATS build status request failed: {}", e))?;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.nats_client
+                .request("mikrom.builder.get_status", buf.into()),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("NATS build status request timed out"))?
+        .map_err(|e| anyhow::anyhow!("NATS build status request failed: {}", e))?;
 
         let resp = GetBuildStatusResponse::decode(&response.payload[..])?;
 
@@ -116,12 +119,15 @@ impl SchedulerClient for RealSchedulerClient {
         let mut payload = Vec::new();
         req.encode(&mut payload)?;
 
-        let response = self
-            .state
-            .nats_client
-            .request("mikrom.scheduler.deploy", payload.into())
-            .await
-            .map_err(|e| anyhow::anyhow!("NATS deployment failed: {}", e))?;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.state
+                .nats_client
+                .request("mikrom.scheduler.deploy", payload.into()),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("NATS deployment request timed out"))?
+        .map_err(|e| anyhow::anyhow!("NATS deployment failed: {}", e))?;
 
         let inner = mikrom_proto::scheduler::DeployResponse::decode(&response.payload[..])?;
 
@@ -134,12 +140,15 @@ impl SchedulerClient for RealSchedulerClient {
     ) -> anyhow::Result<mikrom_proto::scheduler::DeleteAppResponse> {
         let mut payload = Vec::new();
         req.encode(&mut payload)?;
-        let response = self
-            .state
-            .nats_client
-            .request("mikrom.scheduler.delete_app", payload.into())
-            .await
-            .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.state
+                .nats_client
+                .request("mikrom.scheduler.delete_app", payload.into()),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("NATS request timed out"))?
+        .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
         let inner = mikrom_proto::scheduler::DeleteAppResponse::decode(&response.payload[..])?;
         Ok(inner)
     }
@@ -150,12 +159,15 @@ impl SchedulerClient for RealSchedulerClient {
     ) -> anyhow::Result<mikrom_proto::scheduler::PauseResponse> {
         let mut payload = Vec::new();
         req.encode(&mut payload)?;
-        let response = self
-            .state
-            .nats_client
-            .request("mikrom.scheduler.pause_app", payload.into())
-            .await
-            .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.state
+                .nats_client
+                .request("mikrom.scheduler.pause_app", payload.into()),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("NATS request timed out"))?
+        .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
         let inner = mikrom_proto::scheduler::PauseResponse::decode(&response.payload[..])?;
         Ok(inner)
     }
@@ -166,12 +178,15 @@ impl SchedulerClient for RealSchedulerClient {
     ) -> anyhow::Result<mikrom_proto::scheduler::ResumeResponse> {
         let mut payload = Vec::new();
         req.encode(&mut payload)?;
-        let response = self
-            .state
-            .nats_client
-            .request("mikrom.scheduler.resume_app", payload.into())
-            .await
-            .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.state
+                .nats_client
+                .request("mikrom.scheduler.resume_app", payload.into()),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("NATS request timed out"))?
+        .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
         let inner = mikrom_proto::scheduler::ResumeResponse::decode(&response.payload[..])?;
         Ok(inner)
     }
