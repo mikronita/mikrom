@@ -8,54 +8,19 @@ services:
     volumes:
       - certs:/certs
 
-  postgres-api:
+  postgres:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: mikrom
       POSTGRES_PASSWORD: mikrom_password
-      POSTGRES_DB: mikrom_api
+      POSTGRES_DB: mikrom_default
     ports:
       - "5432:5432"
     volumes:
-      - postgres_api_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mikrom -d mikrom_api"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    networks:
-      - mikrom
-
-  postgres-scheduler:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: mikrom
-      POSTGRES_PASSWORD: mikrom_password
-      POSTGRES_DB: mikrom_scheduler
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres_scheduler_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mikrom -d mikrom_scheduler"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    networks:
-      - mikrom
-
-  postgres-router:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: mikrom
-      POSTGRES_PASSWORD: mikrom_password
-      POSTGRES_DB: mikrom_router
-    ports:
-      - "5434:5432"
-    volumes:
-      - postgres_router_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mikrom -d mikrom_router"]
+      test: ["CMD-SHELL", "pg_isready -U mikrom -d mikrom_default"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -76,7 +41,7 @@ services:
       dockerfile: mikrom-scheduler/Dockerfile
     environment:
       NATS_URL: nats://nats:4222
-      DATABASE_URL: postgres://mikrom:mikrom_password@postgres-scheduler:5432/mikrom_scheduler
+      DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_scheduler
       USE_TLS: "true"
       CERTS_DIR: /certs/scheduler
     ports:
@@ -86,7 +51,7 @@ services:
     depends_on:
       cert-gen:
         condition: service_completed_successfully
-      postgres-scheduler:
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 5002"]
@@ -102,7 +67,7 @@ services:
       dockerfile: mikrom-api/Dockerfile
     environment:
       NATS_URL: nats://nats:4222
-      DATABASE_URL: postgres://mikrom:mikrom_password@postgres-api:5432/mikrom_api
+      DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_api
       SCHEDULER_ADDR: https://mikrom-scheduler:5002
       JWT_SECRET: ${JWT_SECRET:-change_me_in_production}
       USE_TLS: "true"
@@ -114,7 +79,7 @@ services:
     depends_on:
       cert-gen:
         condition: service_completed_successfully
-      postgres-api:
+      postgres:
         condition: service_healthy
       mikrom-scheduler:
         condition: service_started
@@ -127,13 +92,17 @@ services:
       dockerfile: mikrom-router/Dockerfile
     environment:
       NATS_URL: nats://nats:4222
-      DATABASE_URL: postgres://mikrom:mikrom_password@postgres-router:5432/mikrom_router
+      DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_router
       PORT: "8080"
     ports:
       - "8080:8080"
     depends_on:
-      - nats
-      - postgres-router
+      cert-gen:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
     networks:
       - mikrom
 
@@ -162,9 +131,7 @@ services:
       - mikrom
 
 volumes:
-  postgres_api_data:
-  postgres_scheduler_data:
-  postgres_router_data:
+  postgres_data:
   certs:
 
 networks:

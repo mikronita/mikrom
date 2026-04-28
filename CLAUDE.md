@@ -58,7 +58,7 @@ pnpm lint     # eslint
 | Variable | Default | Used by |
 |---|---|---|
 | `DATABASE_URL` | — | mikrom-api (runtime) |
-| `TEST_DATABASE_URL` | `postgres://mikrom:mikrom_password@localhost:5432/mikrom_api` | mikrom-api integration tests |
+| `TEST_DATABASE_URL` | `postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test` | mikrom-api integration tests |
 | `JWT_SECRET` | — | mikrom-api |
 | `NATS_URL` | `nats://127.0.0.1:4222` | mikrom-api, mikrom-agent, mikrom-scheduler |
 | `HOST_ID` | random UUID | mikrom-agent |
