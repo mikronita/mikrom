@@ -251,7 +251,7 @@ mod tests {
 
     async fn get_test_pool() -> PgPool {
         let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
         });
         PgPool::connect(&url)
             .await

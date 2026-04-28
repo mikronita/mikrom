@@ -167,7 +167,7 @@ mod tests {
     use super::*;
 
     fn lazy_pool() -> PgPool {
-        PgPool::connect_lazy("postgres://mikrom:mikrom_password@localhost:5432/mikrom_api")
+        PgPool::connect_lazy("postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test")
             .expect("invalid pool URL")
     }
 
@@ -180,7 +180,7 @@ mod tests {
     #[ignore = "requires PostgreSQL"]
     async fn test_find_by_email_returns_none_for_unknown_email() {
         let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
         }))
         .await
         .expect("failed to connect");
@@ -195,7 +195,7 @@ mod tests {
     #[ignore = "requires PostgreSQL"]
     async fn test_create_and_find_roundtrip() {
         let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
         }))
         .await
         .expect("failed to connect");
@@ -226,7 +226,7 @@ mod tests {
     #[ignore = "requires PostgreSQL"]
     async fn test_count_by_email_returns_zero_for_unknown() {
         let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
         }))
         .await
         .expect("failed to connect");
@@ -242,7 +242,7 @@ mod tests {
     #[ignore = "requires PostgreSQL"]
     async fn test_count_by_email_returns_one_after_create() {
         let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api".to_string()
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
         }))
         .await
         .expect("failed to connect");

@@ -55,12 +55,9 @@ test-cli: ## Run mikrom-cli unit tests
 	cargo nextest run --lib -p mikrom-cli
 
 .PHONY: test-integration
-test-integration: ## Run integration tests (starts PostgreSQL via Docker)
+test-integration: ## Run integration tests
 	$(call check_nextest)
-	docker compose up -d postgres-api postgres-scheduler postgres-router && \
-	  sleep 5 && \
-	  cargo nextest run --test integration; \
-	  docker compose stop postgres-api postgres-scheduler postgres-router
+	  cargo nextest run --test integration
 
 .PHONY: test-all-crates
 test-all-crates: ## Run unit tests for all crates
@@ -179,14 +176,14 @@ logs-agent: ## Follow mikrom-agent logs
 	docker compose logs -f mikrom-agent
 
 .PHONY: db-start
-db-start: ## Start all PostgreSQL instances (for local development)
-	docker compose up -d postgres-api postgres-scheduler postgres-router
-	@echo "Waiting for PostgreSQL instances to be ready..."
+db-start: ## Start PostgreSQL instance (for local development)
+	docker compose up -d postgres
+	@echo "Waiting for PostgreSQL to be ready..."
 	@sleep 5
 
 .PHONY: db-stop
-db-stop: ## Stop all PostgreSQL instances
-	docker compose stop postgres-api postgres-scheduler postgres-router
+db-stop: ## Stop PostgreSQL instance
+	docker compose stop postgres
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 

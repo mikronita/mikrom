@@ -9,7 +9,7 @@ mod tests {
 
     async fn get_test_pool() -> PgPool {
         let connection_string = env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5434/mikrom_router".to_string()
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_router_test".to_string()
         });
 
         let pool = sqlx::postgres::PgPoolOptions::new()

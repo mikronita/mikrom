@@ -30,9 +30,10 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_run_migrations() {
-        let pool = connect_to_url("postgres://mikrom:mikrom_password@localhost:5432/mikrom_api")
-            .await
-            .unwrap();
+        let pool =
+            connect_to_url("postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test")
+                .await
+                .unwrap();
         let result = run_migrations(&pool).await;
         assert!(result.is_ok());
     }
