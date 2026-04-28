@@ -515,7 +515,28 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
         &self,
         _request: tonic::Request<ListWorkersRequest>,
     ) -> Result<Response<ListWorkersResponse>, Status> {
-        Err(Status::unimplemented("Not implemented in gRPC"))
+        let workers = self
+            .scheduler
+            .worker_registry()
+            .get_available_workers()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let worker_infos = workers
+            .into_iter()
+            .map(|w| mikrom_proto::scheduler::WorkerInfo {
+                host_id: w.host_id,
+                hostname: w.hostname,
+                ip_address: w.ip_address,
+                agent_port: w.agent_port as u32,
+                bridge_ip: w.bridge_ip,
+                last_heartbeat: w.last_heartbeat,
+            })
+            .collect();
+
+        Ok(Response::new(ListWorkersResponse {
+            workers: worker_infos,
+        }))
     }
 
     type WatchAppsStream =

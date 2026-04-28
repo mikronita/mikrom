@@ -195,16 +195,71 @@ async fn get_system_health(state: &AppState) -> HashMap<String, String> {
     )
     .await;
 
-    match scheduler_res {
-        Ok(Ok(_)) => {
-            services.insert("Scheduler".to_string(), "ONLINE".to_string());
-            // In a real system, we'd check the worker registry for active agents
-            services.insert("Agents".to_string(), "ONLINE".to_string());
+    if let Ok(Ok(_)) = scheduler_res {
+        services.insert("Scheduler".to_string(), "ONLINE".to_string());
+    } else {
+        services.insert("Scheduler".to_string(), "OFFLINE".to_string());
+    }
+
+    // Check Agents via NATS
+    use mikrom_proto::scheduler::{ListWorkersRequest, ListWorkersResponse};
+    let agents_req = ListWorkersRequest {};
+    let mut buf = Vec::new();
+    let payload = if agents_req.encode(&mut buf).is_ok() {
+        buf
+    } else {
+        vec![]
+    };
+
+    let agents_res = tokio::time::timeout(
+        Duration::from_secs(2),
+        state
+            .nats_client
+            .request("mikrom.scheduler.list_workers", payload.into()),
+    )
+    .await;
+
+    match agents_res {
+        Ok(Ok(resp)) => {
+            if let Ok(workers_resp) = ListWorkersResponse::decode(&resp.payload[..]) {
+                if workers_resp.workers.is_empty() {
+                    services.insert("Agents".to_string(), "OFFLINE".to_string());
+                } else {
+                    services.insert("Agents".to_string(), "ONLINE".to_string());
+                }
+            } else {
+                services.insert("Agents".to_string(), "OFFLINE".to_string());
+            }
         },
         _ => {
-            services.insert("Scheduler".to_string(), "OFFLINE".to_string());
             services.insert("Agents".to_string(), "OFFLINE".to_string());
         },
+    }
+
+    // Check Builder via NATS
+    use mikrom_proto::builder::GetBuildStatusRequest;
+    let builder_req = GetBuildStatusRequest {
+        build_id: "health-check".to_string(),
+    };
+    let mut buf = Vec::new();
+    let payload = if builder_req.encode(&mut buf).is_ok() {
+        buf
+    } else {
+        vec![]
+    };
+
+    let builder_res = tokio::time::timeout(
+        Duration::from_secs(2),
+        state
+            .nats_client
+            .request("mikrom.builder.get_status", payload.into()),
+    )
+    .await;
+
+    if let Ok(Ok(_)) = builder_res {
+        services.insert("Builder".to_string(), "ONLINE".to_string());
+    } else {
+        services.insert("Builder".to_string(), "OFFLINE".to_string());
     }
 
     // Helper function for TCP reachability check

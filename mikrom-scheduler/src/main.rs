@@ -96,6 +96,17 @@ async fn main() -> anyhow::Result<()> {
                         },
                     };
 
+                    let mut list_workers_subscription = match client
+                        .queue_subscribe("mikrom.scheduler.list_workers", "schedulers".to_string())
+                        .await
+                    {
+                        Ok(sub) => sub,
+                        Err(e) => {
+                            tracing::error!("Failed to subscribe to list_workers: {}", e);
+                            return;
+                        },
+                    };
+
                     let mut pause_subscription = match client
                         .queue_subscribe("mikrom.scheduler.pause_app", "schedulers".to_string())
                         .await
@@ -242,6 +253,26 @@ async fn main() -> anyhow::Result<()> {
                                     use mikrom_proto::scheduler::ListAppsRequest;
                                     if let Ok(req) = ListAppsRequest::decode(&message.payload[..]) {
                                         let result = server.list_apps(tonic::Request::new(req)).await;
+                                        if let Some(reply) = message.reply {
+                                            if let Ok(resp) = result {
+                                                let mut buf = Vec::new();
+                                                if resp.into_inner().encode(&mut buf).is_ok() {
+                                                    let _ = client_clone.publish(reply, buf.into()).await;
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            },
+                            // Handle List Workers
+                            Some(message) = list_workers_subscription.next() => {
+                                let server = server_for_nats.clone();
+                                let client_clone = client.clone();
+                                tokio::spawn(async move {
+                                    use prost::Message;
+                                    use mikrom_proto::scheduler::ListWorkersRequest;
+                                    if let Ok(req) = ListWorkersRequest::decode(&message.payload[..]) {
+                                        let result = server.list_workers(tonic::Request::new(req)).await;
                                         if let Some(reply) = message.reply {
                                             if let Ok(resp) = result {
                                                 let mut buf = Vec::new();
