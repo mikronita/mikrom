@@ -73,7 +73,12 @@ impl AppState {
         let target_url = if let Some(dep_id) = app.active_deployment_id {
             if let Some(dep) = self.app_repo.get_deployment(dep_id).await? {
                 if let Some(ip) = dep.ip_address {
-                    Some(format!("http://{}:{}", ip, app.port))
+                    let formatted_ip = if ip.contains(':') && !ip.contains('[') {
+                        format!("[{}]", ip)
+                    } else {
+                        ip.to_string()
+                    };
+                    Some(format!("http://{}:{}", formatted_ip, app.port))
                 } else {
                     None
                 }
