@@ -84,7 +84,7 @@ impl UserRepository for PostgresUserRepository {
             UserRole::Admin => "admin",
             UserRole::User => "user",
         };
-        sqlx::query("INSERT INTO users (id, email, password_hash, role, first_name, last_name) VALUES ($1, $2, $3, $4, $5, $6)")
+        let result = sqlx::query("INSERT INTO users (id, email, password_hash, role, first_name, last_name) VALUES ($1, $2, $3, $4, $5, $6)")
             .bind(id)
             .bind(&user.email)
             .bind(&user.password_hash)
@@ -92,9 +92,22 @@ impl UserRepository for PostgresUserRepository {
             .bind(&user.first_name)
             .bind(&user.last_name)
             .execute(&self.pool)
-            .await?;
+            .await;
 
-        Ok(id)
+        match result {
+            Ok(_) => Ok(id),
+            Err(e) => {
+                if let Some(db_err) = e.as_database_error()
+                    && db_err.code().as_deref() == Some("23505")
+                {
+                    return Err(DbError::Conflict(format!(
+                        "Email '{}' is already registered",
+                        user.email
+                    )));
+                }
+                Err(DbError::from(e))
+            },
+        }
     }
 
     async fn count_by_email(&self, email: &str) -> Result<i64, DbError> {

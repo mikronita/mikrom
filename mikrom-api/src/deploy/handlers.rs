@@ -327,11 +327,52 @@ pub async fn activate_deployment_handler(
     let deployment = state
         .app_repo
         .get_deployment(deployment_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .await?
         .ok_or(ApiError::NotFound("Deployment not found".into()))?;
 
-    // 1. Update active pointer in DB
+    // 1. Find currently active deployment to stop it if necessary
+    let all_deps = state
+        .app_repo
+        .list_deployments_by_app(deployment.app_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let app = state
+        .app_repo
+        .get_app(deployment.app_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Application not found".into()))?;
+
+    if let Some(active_id) = app.active_deployment_id
+        && active_id != deployment_id
+        && let Some(active_dep) = all_deps.iter().find(|d| d.id == active_id)
+        && let Some(job_id) = &active_dep.job_id
+    {
+        info!(job_id = %job_id, "Stopping previously active deployment...");
+        let _ = state
+            .scheduler
+            .pause_app(job_id.clone(), auth.user_id.clone())
+            .await;
+
+        // Mark old as STOPPED
+        let _ = state
+            .app_repo
+            .update_deployment_status(
+                active_id,
+                "STOPPED",
+                Some(job_id.clone()),
+                active_dep.image_tag.clone(),
+                active_dep.build_id.clone(),
+                active_dep.ip_address.clone(),
+                active_dep.git_commit_hash.clone(),
+                active_dep.git_commit_message.clone(),
+                active_dep.git_branch.clone(),
+            )
+            .await;
+    }
+
+    // 2. Update active pointer in DB
     state
         .app_repo
         .set_active_deployment(deployment.app_id, deployment_id)
@@ -341,10 +382,29 @@ pub async fn activate_deployment_handler(
     // Give the DB a moment to ensure the update is committed before notifying other systems
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    // 2. If it has a job_id, ensure it's running
+    // 3. If it has a job_id, ensure it's running
     if let Some(job_id) = deployment.job_id {
         info!(job_id = %job_id, "Activating deployment, ensuring it's running in the cluster...");
-        let _ = state.scheduler.resume_app(job_id, auth.user_id).await;
+        let _ = state
+            .scheduler
+            .resume_app(job_id.clone(), auth.user_id)
+            .await;
+
+        // Mark new as RUNNING
+        let _ = state
+            .app_repo
+            .update_deployment_status(
+                deployment.id,
+                "RUNNING",
+                Some(job_id),
+                deployment.image_tag.clone(),
+                deployment.build_id.clone(),
+                deployment.ip_address.clone(),
+                deployment.git_commit_hash.clone(),
+                deployment.git_commit_message.clone(),
+                deployment.git_branch.clone(),
+            )
+            .await;
     }
 
     state.deployment_events.send(deployment.app_id).ok();

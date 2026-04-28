@@ -16,7 +16,7 @@ cargo fmt --all -- --check
 echo "   Clippy..."
 cargo clippy --workspace --all-targets -- -D warnings
 
-echo "   Unit tests..."
-cargo test --workspace --lib
+echo "   Unit and Integration tests..."
+cargo test --workspace
 
 echo "✅ All checks passed!"

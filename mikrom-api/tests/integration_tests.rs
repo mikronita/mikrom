@@ -339,7 +339,7 @@ async fn test_all_auth_integration_flows() {
             )
             .await
             .unwrap();
-        assert_eq!(create_resp.status(), StatusCode::OK);
+        assert_eq!(create_resp.status(), StatusCode::CREATED);
 
         // 3. List Apps
         let list_resp = app
