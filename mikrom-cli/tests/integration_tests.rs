@@ -88,6 +88,34 @@ async fn test_client_whoami() {
 }
 
 #[tokio::test]
+async fn test_client_update_profile() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("PUT"))
+        .and(path("/auth/me"))
+        .and(body_json(
+            json!({ "first_name": "New", "last_name": "Name" }),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "user-123",
+            "email": "test@example.com",
+            "role": "User",
+            "first_name": "New",
+            "last_name": "Name"
+        })))
+        .mount(&server)
+        .await;
+
+    let res = client
+        .update_profile(Some("New".into()), Some("Name".into()))
+        .await
+        .unwrap();
+    assert_eq!(res.first_name.as_deref(), Some("New"));
+    assert_eq!(res.last_name.as_deref(), Some("Name"));
+}
+
+#[tokio::test]
 async fn test_client_create_app() {
     let server = MockServer::start().await;
     let client = MikromClient::new(server.uri(), Some("token".into()));
