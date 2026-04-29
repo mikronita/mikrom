@@ -11,7 +11,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 use tokio_stream::StreamExt;
 use utoipa::ToSchema;
-use uuid::Uuid;
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LiveDeploymentInfo {
@@ -365,6 +364,50 @@ pub async fn watch_deployments(
     ))
 }
 
+pub async fn validate_app_deployment(
+    state: &crate::AppState,
+    auth: &crate::auth::AuthUser,
+    app_name: &str,
+    job_id: &str,
+) -> ApiResult<(crate::models::app::App, crate::models::app::Deployment)> {
+    let app = state
+        .app_repo
+        .get_app_by_name(app_name)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Application not found".into()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    let deployment = if let Some(stripped) = job_id.strip_prefix("temp-") {
+        let dep_id = uuid::Uuid::parse_str(stripped)
+            .map_err(|_| ApiError::BadRequest("Invalid temp ID".into()))?;
+        state
+            .app_repo
+            .get_deployment(dep_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::NotFound("Deployment not found".into()))?
+    } else {
+        state
+            .app_repo
+            .get_deployment_by_job_id(job_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::NotFound("Deployment not found".into()))?
+    };
+
+    if deployment.app_id != app.id {
+        return Err(ApiError::BadRequest(
+            "Deployment does not belong to this application".into(),
+        ));
+    }
+
+    Ok((app, deployment))
+}
+
 #[utoipa::path(
     get,
     path = "/apps/{app_name}/deployments/{job_id}",
@@ -391,35 +434,10 @@ pub async fn get_deployment_status(
     use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse};
     use prost::Message;
 
-    // Validate app ownership
-    let app = state
-        .app_repo
-        .get_app_by_name(&app_name)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Application not found".into()))?;
+    let (app, dep) = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
 
-    if app.user_id.to_string() != auth.user_id {
-        return Err(ApiError::Forbidden);
-    }
-
-    // If it's a temporary ID from BUILDING phase
-    if let Some(stripped) = job_id.strip_prefix("temp-") {
-        let dep_id = Uuid::parse_str(stripped)
-            .map_err(|_| ApiError::BadRequest("Invalid temp ID".into()))?;
-        let dep = state
-            .app_repo
-            .get_deployment(dep_id)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?
-            .ok_or(ApiError::NotFound("Deployment not found".into()))?;
-
-        if dep.app_id != app.id {
-            return Err(ApiError::BadRequest(
-                "Deployment does not belong to this application".into(),
-            ));
-        }
-
+    // If it's a temporary ID from BUILDING/SCHEDULED phase
+    if job_id.starts_with("temp-") {
         return Ok(Json(LiveDeploymentStatus {
             job_id: job_id.clone(),
             deployment_id: dep.id.to_string(),
@@ -459,28 +477,12 @@ pub async fn get_deployment_status(
     let inner = AppStatusResponse::decode(&response.payload[..])
         .map_err(|e| ApiError::Internal(format!("Failed to parse NATS response: {}", e)))?;
 
-    // Fetch deployment to get app_id, image, vcpus, memory
-    let deployment = state
-        .app_repo
-        .get_deployment_by_job_id(&job_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound(
-            "Deployment record not found".to_string(),
-        ))?;
-
-    if deployment.app_id != app.id {
-        return Err(ApiError::BadRequest(
-            "Deployment does not belong to this application".into(),
-        ));
-    }
-
     let deployment_status = LiveDeploymentStatus {
         job_id: inner.job_id,
-        deployment_id: deployment.id.to_string(),
-        app_id: deployment.app_id.to_string(),
+        deployment_id: dep.id.to_string(),
+        app_id: dep.app_id.to_string(),
         app_name: app.name,
-        image: deployment.image_tag.unwrap_or_default(),
+        image: dep.image_tag.unwrap_or_default(),
         status: crate::scheduler::status_name(inner.status).to_string(),
         host_id: inner.host_id,
         vm_id: inner.vm_id,
@@ -490,8 +492,8 @@ pub async fn get_deployment_status(
         error_message: inner.error_message,
         cpu_usage: inner.cpu_usage,
         ram_used_bytes: inner.ram_used_bytes,
-        vcpus: deployment.vcpus,
-        memory_mib: deployment.memory_mib,
+        vcpus: dep.vcpus,
+        memory_mib: dep.memory_mib,
     };
 
     Ok(Json(deployment_status))
@@ -520,29 +522,7 @@ pub async fn get_deployment_logs(
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<impl IntoResponse> {
     // 1. Validate app ownership and deployment connection
-    let app = state
-        .app_repo
-        .get_app_by_name(&app_name)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Application not found".into()))?;
-
-    if app.user_id.to_string() != auth.user_id {
-        return Err(ApiError::Forbidden);
-    }
-
-    let deployment = state
-        .app_repo
-        .get_deployment_by_job_id(&job_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Deployment not found".into()))?;
-
-    if deployment.app_id != app.id {
-        return Err(ApiError::BadRequest(
-            "Deployment does not belong to this application".into(),
-        ));
-    }
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
 
     // 2. Get VM ID from scheduler via NATS
     use mikrom_proto::scheduler::AppStatusRequest;
@@ -617,29 +597,7 @@ pub async fn pause_deployment(
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Validate app ownership and deployment connection
-    let app = state
-        .app_repo
-        .get_app_by_name(&app_name)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Application not found".into()))?;
-
-    if app.user_id.to_string() != auth.user_id {
-        return Err(ApiError::Forbidden);
-    }
-
-    let deployment = state
-        .app_repo
-        .get_deployment_by_job_id(&job_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Deployment not found".into()))?;
-
-    if deployment.app_id != app.id {
-        return Err(ApiError::BadRequest(
-            "Deployment does not belong to this application".into(),
-        ));
-    }
+    let (app, deployment) = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
 
     let success = state
         .scheduler
@@ -697,29 +655,7 @@ pub async fn resume_deployment(
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Validate app ownership and deployment connection
-    let app = state
-        .app_repo
-        .get_app_by_name(&app_name)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Application not found".into()))?;
-
-    if app.user_id.to_string() != auth.user_id {
-        return Err(ApiError::Forbidden);
-    }
-
-    let deployment = state
-        .app_repo
-        .get_deployment_by_job_id(&job_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Deployment not found".into()))?;
-
-    if deployment.app_id != app.id {
-        return Err(ApiError::BadRequest(
-            "Deployment does not belong to this application".into(),
-        ));
-    }
+    let (app, deployment) = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
 
     let success = state
         .scheduler
@@ -777,29 +713,7 @@ pub async fn stop_deployment(
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Validate app ownership and deployment connection
-    let app = state
-        .app_repo
-        .get_app_by_name(&app_name)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Application not found".into()))?;
-
-    if app.user_id.to_string() != auth.user_id {
-        return Err(ApiError::Forbidden);
-    }
-
-    let deployment = state
-        .app_repo
-        .get_deployment_by_job_id(&job_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Deployment not found".into()))?;
-
-    if deployment.app_id != app.id {
-        return Err(ApiError::BadRequest(
-            "Deployment does not belong to this application".into(),
-        ));
-    }
+    let (app, deployment) = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
 
     use mikrom_proto::scheduler::CancelRequest;
     use prost::Message;
@@ -824,6 +738,22 @@ pub async fn stop_deployment(
         .map_err(|e| ApiError::Internal(format!("Failed to parse NATS response: {}", e)))?;
 
     if inner.success {
+        // Update database status
+        let _ = state
+            .app_repo
+            .update_deployment_status(
+                deployment.id,
+                "STOPPED",
+                Some(job_id),
+                deployment.image_tag,
+                deployment.build_id,
+                None,
+                deployment.git_commit_hash,
+                deployment.git_commit_message,
+                deployment.git_branch,
+            )
+            .await;
+
         state.deployment_events.send(app.id).ok();
         Ok(Json(
             serde_json::json!({ "success": true, "message": inner.message }),
@@ -857,29 +787,7 @@ pub async fn delete_deployment_record(
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Validate app ownership and deployment connection
-    let app = state
-        .app_repo
-        .get_app_by_name(&app_name)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Application not found".into()))?;
-
-    if app.user_id.to_string() != auth.user_id {
-        return Err(ApiError::Forbidden);
-    }
-
-    let deployment = state
-        .app_repo
-        .get_deployment_by_job_id(&job_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("Deployment not found".into()))?;
-
-    if deployment.app_id != app.id {
-        return Err(ApiError::BadRequest(
-            "Deployment does not belong to this application".into(),
-        ));
-    }
+    let (app, _) = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
 
     state
         .app_repo

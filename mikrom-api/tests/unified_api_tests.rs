@@ -37,6 +37,7 @@ async fn setup_test_context() -> (String, Uuid, Uuid, MockAppRepository) {
 async fn test_hierarchical_deployment_status_success() {
     let (token, user_id, app_id, mut mock_app_repo) = setup_test_context().await;
     let app_name = "test-app";
+    // Using a temp- ID bypasses the NATS call to the scheduler in the handler
     let job_id = "temp-66504281-4065-4f43-9f6e-b9146647f084";
     let dep_id = Uuid::parse_str("66504281-4065-4f43-9f6e-b9146647f084").unwrap();
 
@@ -87,11 +88,10 @@ async fn test_hierarchical_deployment_status_success() {
             }))
         });
 
-    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
-    // No scheduler call should happen if NATS mock is used correctly or if we mock the NATS response
-    // Actually the handler calls state.nats_client.request directly for some things.
-    // Let's use a dummy NATS client and mock the Scheduler trait where used.
+    let mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
 
+    // We still need a NATS client to satisfy AppState, but it won't be used
+    // because we are using a temp- ID.
     let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
@@ -107,11 +107,6 @@ async fn test_hierarchical_deployment_status_success() {
 
     let router = create_app(state);
 
-    // This test will likely still fail if it tries to hit real NATS.
-    // In mikrom-api, some handlers use state.nats_client.request("mikrom.scheduler.get_job", ...)
-    // To truly unit test this without NATS, we'd need to mock the NATS client or avoid direct calls.
-    // For now, let's assume NATS is running or the timeout will trigger.
-
     let response = router
         .oneshot(
             Request::builder()
@@ -124,12 +119,7 @@ async fn test_hierarchical_deployment_status_success() {
         .await
         .unwrap();
 
-    // If NATS is not running, this might return 500.
-    // But the important thing is that the route exists and validates the app.
-    assert!(
-        response.status() == StatusCode::OK
-            || response.status() == StatusCode::INTERNAL_SERVER_ERROR
-    );
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
