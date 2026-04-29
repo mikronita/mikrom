@@ -12,6 +12,7 @@ pub struct MikromClient {
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
+    pub services: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,7 +45,7 @@ pub struct AppInfo {
     pub port: i32,
     pub hostname: Option<String>,
     pub active_deployment_id: Option<String>,
-    pub created_at: String,
+    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,7 +84,7 @@ pub struct DeploymentInfo {
     pub image_tag: Option<String>,
     pub job_id: Option<String>,
     pub status: String,
-    pub created_at: String,
+    pub created_at: Option<String>,
     pub updated_at: String,
 }
 
@@ -105,9 +106,13 @@ pub struct VmMetricsResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct WhoamiResponse {
+    #[serde(alias = "id")]
     pub user_id: String,
     pub email: String,
-    pub created_at: String,
+    pub role: Option<String>,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub created_at: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -473,6 +478,36 @@ impl MikromClient {
 
     pub async fn whoami(&self) -> anyhow::Result<WhoamiResponse> {
         let mut req = self.http.get(format!("{}/auth/me", self.base_url));
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        if resp.status().is_success() {
+            Ok(resp.json().await?)
+        } else {
+            let status = resp.status().as_u16();
+            let err: ErrorResponse = resp.json().await?;
+            bail!("{} (HTTP {})", err.error, status);
+        }
+    }
+
+    pub async fn update_profile(
+        &self,
+        email: Option<String>,
+        password: Option<String>,
+    ) -> anyhow::Result<WhoamiResponse> {
+        let mut body = serde_json::json!({});
+        if let Some(e) = email {
+            body["email"] = serde_json::json!(e);
+        }
+        if let Some(p) = password {
+            body["password"] = serde_json::json!(p);
+        }
+
+        let mut req = self
+            .http
+            .put(format!("{}/auth/me", self.base_url))
+            .json(&body);
         if let Some(token) = &self.token {
             req = req.bearer_auth(token);
         }

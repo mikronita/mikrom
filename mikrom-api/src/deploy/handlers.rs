@@ -30,6 +30,7 @@ pub struct AppResponse {
     pub name: String,
     pub git_url: String,
     pub port: u32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -86,6 +87,7 @@ pub async fn create_app_handler(
             name: app.name,
             git_url: app.git_url,
             port: app.port as u32,
+            created_at: app.created_at,
         }),
     ))
 }
@@ -119,6 +121,7 @@ pub async fn list_apps_handler(
                 name: a.name,
                 git_url: a.git_url,
                 port: a.port as u32,
+                created_at: a.created_at,
             })
             .collect(),
     ))
