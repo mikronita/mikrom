@@ -173,10 +173,11 @@ pub async fn delete_app_handler(
         }
     }
 
+    #[allow(clippy::collapsible_if)]
     if let Some(hostname) = &app.hostname {
-        let _ = state.remove_route(hostname).await.map_err(|e| {
+        if let Err(e) = state.remove_route(hostname).await {
             tracing::error!("Failed to remove route for app in router: {}", e);
-        });
+        }
     }
 
     state
