@@ -119,6 +119,12 @@ services:
     networks:
       - mikrom
 
+  buildkit:
+    image: moby/buildkit
+    privileged: true
+    networks:
+      - mikrom
+
   mikrom-app:
     build:
       context: mikrom-app
