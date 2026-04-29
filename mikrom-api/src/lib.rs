@@ -101,6 +101,20 @@ impl AppState {
 
         Ok(())
     }
+
+    pub async fn remove_route(&self, hostname: &str) -> anyhow::Result<()> {
+        let config = RouterConfig {
+            hostname: hostname.to_string(),
+            target_url: None,
+        };
+
+        let payload = serde_json::to_vec(&config)?;
+        self.nats_client
+            .publish("mikrom.router.config_updated", payload.into())
+            .await?;
+
+        Ok(())
+    }
 }
 
 pub fn create_app(state: AppState) -> Router {

@@ -173,6 +173,12 @@ pub async fn delete_app_handler(
         }
     }
 
+    if let Some(hostname) = &app.hostname {
+        let _ = state.remove_route(hostname).await.map_err(|e| {
+            tracing::error!("Failed to remove route for app in router: {}", e);
+        });
+    }
+
     state
         .app_repo
         .delete_app(app.id)
