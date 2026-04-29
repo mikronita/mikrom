@@ -514,18 +514,47 @@ pub async fn deploy_app_version_handler(
             .encode(&mut payload_bytes)
             .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            state
-                .nats_client
-                .request("mikrom.scheduler.deploy", payload_bytes.into()),
-        )
-        .await
-        .map_err(|_| ApiError::Internal("Scheduler request timed out".into()))?
-        .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
+        let nats_result = async {
+            let response = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                state
+                    .nats_client
+                    .request("mikrom.scheduler.deploy", payload_bytes.into()),
+            )
+            .await
+            .map_err(|_| ApiError::Internal("Scheduler request timed out".into()))?
+            .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
 
-        let inner = mikrom_proto::scheduler::DeployResponse::decode(&response.payload[..])
-            .map_err(|e| ApiError::Internal(format!("Failed to decode NATS response: {}", e)))?;
+            let inner = mikrom_proto::scheduler::DeployResponse::decode(&response.payload[..])
+                .map_err(|e| {
+                    ApiError::Internal(format!("Failed to decode NATS response: {}", e))
+                })?;
+
+            Ok::<_, ApiError>(inner)
+        }
+        .await;
+
+        let inner = match nats_result {
+            Ok(inner) => inner,
+            Err(e) => {
+                let _ = state
+                    .app_repo
+                    .update_deployment_status(
+                        deployment.id,
+                        "FAILED",
+                        None,
+                        Some(image_tag.clone()),
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some(e.to_string()),
+                    )
+                    .await;
+                state.deployment_events.send(app.id).ok();
+                return Err(e);
+            },
+        };
 
         state
             .app_repo

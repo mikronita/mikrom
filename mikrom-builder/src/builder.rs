@@ -101,7 +101,11 @@ impl AppBuilder {
                 .arg("--name")
                 .arg(&full_image_tag)
                 .current_dir(repo_path)
-                .env("BUILDKIT_HOST", "docker-container://mikromrust-buildkit-1")
+                .env(
+                    "BUILDKIT_HOST",
+                    std::env::var("BUILDKIT_HOST")
+                        .unwrap_or_else(|_| "docker-container://mikromrust-buildkit-1".to_string()),
+                )
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
