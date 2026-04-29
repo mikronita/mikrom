@@ -43,25 +43,29 @@ pub enum Commands {
     /// List all active deployments
     Deployments,
     /// Get status of a specific deployment
-    Status { job_id: String },
+    Status { app: String, job_id: String },
     /// Stop a running deployment
-    Stop { job_id: String },
+    Stop { app: String, job_id: String },
     /// Get logs for a deployment
     Logs {
+        app: String,
         job_id: String,
         #[arg(long, short)]
         follow: bool,
     },
     /// Pause a running deployment
-    Pause { job_id: String },
+    Pause { app: String, job_id: String },
     /// Resume a paused deployment
-    Resume { job_id: String },
+    Resume { app: String, job_id: String },
     /// Delete a deployment record
-    Delete { job_id: String },
+    Delete { app: String, job_id: String },
     /// Restart a deployment
-    Restart { job_id: String },
+    Restart { app: String, job_id: String },
     /// Get metrics for a deployment or the entire cluster
-    Metrics { job_id: Option<String> },
+    Metrics {
+        app: Option<String>,
+        job_id: Option<String>,
+    },
     /// Show information about the current user
     Whoami,
     /// Manage applications
@@ -136,14 +140,18 @@ async fn main() -> anyhow::Result<()> {
             env,
         } => handle_deploy(&client, app, image, vcpus, memory, disk, env).await?,
         Commands::Deployments => handle_list_deployments(&client).await?,
-        Commands::Status { job_id } => handle_get_status(&client, job_id).await?,
-        Commands::Stop { job_id } => handle_stop_instance(&client, job_id).await?,
-        Commands::Logs { job_id, follow } => handle_logs(&client, job_id, follow).await?,
-        Commands::Pause { job_id } => handle_pause_instance(&client, job_id).await?,
-        Commands::Resume { job_id } => handle_resume_instance(&client, job_id).await?,
-        Commands::Delete { job_id } => handle_delete_instance(&client, job_id).await?,
-        Commands::Restart { job_id } => handle_restart_instance(&client, job_id).await?,
-        Commands::Metrics { job_id } => handle_metrics(&client, job_id).await?,
+        Commands::Status { app, job_id } => handle_get_status(&client, app, job_id).await?,
+        Commands::Stop { app, job_id } => handle_stop_instance(&client, app, job_id).await?,
+        Commands::Logs {
+            app,
+            job_id,
+            follow,
+        } => handle_logs(&client, app, job_id, follow).await?,
+        Commands::Pause { app, job_id } => handle_pause_instance(&client, app, job_id).await?,
+        Commands::Resume { app, job_id } => handle_resume_instance(&client, app, job_id).await?,
+        Commands::Delete { app, job_id } => handle_delete_instance(&client, app, job_id).await?,
+        Commands::Restart { app, job_id } => handle_restart_instance(&client, app, job_id).await?,
+        Commands::Metrics { app, job_id } => handle_metrics(&client, app, job_id).await?,
         Commands::Whoami => handle_whoami(&client).await?,
         Commands::Apps(app_cmd) => handle_apps(&client, app_cmd).await?,
         Commands::Config => {
@@ -297,14 +305,14 @@ mod tests {
         let test_cases: Vec<(&str, &str)> = vec![
             ("health", "health"),
             ("deployments", "deployments"),
-            ("status", "status j-1"),
-            ("stop", "stop j-1"),
-            ("logs", "logs j-1"),
-            ("pause", "pause j-1"),
-            ("resume", "resume j-1"),
-            ("delete", "delete j-1"),
-            ("restart", "restart j-1"),
-            ("metrics", "metrics j-1"),
+            ("status", "status app-1 j-1"),
+            ("stop", "stop app-1 j-1"),
+            ("logs", "logs app-1 j-1"),
+            ("pause", "pause app-1 j-1"),
+            ("resume", "resume app-1 j-1"),
+            ("delete", "delete app-1 j-1"),
+            ("restart", "restart app-1 j-1"),
+            ("metrics", "metrics app-1 j-1"),
             ("whoami", "whoami"),
             ("config", "config"),
         ];

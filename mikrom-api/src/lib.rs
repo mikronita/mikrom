@@ -124,7 +124,6 @@ pub fn create_app(state: AppState) -> Router {
         )
         .route("/auth/me", get(get_profile))
         .route("/auth/me", axum::routing::put(update_profile))
-        .route("/deploy", axum::routing::post(deploy_app))
         .route(
             "/apps",
             axum::routing::post(crate::deploy::create_app_handler),
@@ -150,26 +149,32 @@ pub fn create_app(state: AppState) -> Router {
             "/apps/:app_name/deployments/:deployment_id/activate",
             axum::routing::post(crate::deploy::activate_deployment_handler),
         )
-        .route("/deployments/active", get(list_active_deployments))
-        .route("/deployments/events", get(watch_deployments))
-        .route("/deployments/:job_id", get(get_deployment_status))
-        .route("/deployments/:job_id/logs", get(get_deployment_logs))
         .route(
-            "/deployments/:job_id/pause",
+            "/apps/:app_name/deployments/:job_id",
+            get(get_deployment_status),
+        )
+        .route(
+            "/apps/:app_name/deployments/:job_id/logs",
+            get(get_deployment_logs),
+        )
+        .route(
+            "/apps/:app_name/deployments/:job_id/pause",
             axum::routing::post(pause_deployment),
         )
         .route(
-            "/deployments/:job_id/resume",
+            "/apps/:app_name/deployments/:job_id/resume",
             axum::routing::post(resume_deployment),
         )
         .route(
-            "/deployments/:job_id",
+            "/apps/:app_name/deployments/:job_id",
             axum::routing::delete(stop_deployment),
         )
         .route(
-            "/deployments/:job_id/delete",
+            "/apps/:app_name/deployments/:job_id/delete",
             axum::routing::delete(delete_deployment_record),
         )
+        .route("/deployments/active", get(list_active_deployments))
+        .route("/deployments/events", get(watch_deployments))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &axum::http::Request<_>| {

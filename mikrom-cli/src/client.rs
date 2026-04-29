@@ -235,11 +235,13 @@ impl MikromClient {
 
     pub async fn get_deployment_status(
         &self,
+        app_name: &str,
         job_id: &str,
     ) -> anyhow::Result<LiveDeploymentStatus> {
-        let mut req = self
-            .http
-            .get(format!("{}/deployments/{}", self.base_url, job_id));
+        let mut req = self.http.get(format!(
+            "{}/apps/{}/deployments/{}",
+            self.base_url, app_name, job_id
+        ));
         if let Some(token) = &self.token {
             req = req.bearer_auth(token);
         }
@@ -253,10 +255,15 @@ impl MikromClient {
         }
     }
 
-    pub async fn stop_deployment(&self, job_id: &str) -> anyhow::Result<serde_json::Value> {
-        let mut req = self
-            .http
-            .delete(format!("{}/deployments/{}", self.base_url, job_id));
+    pub async fn stop_deployment(
+        &self,
+        app_name: &str,
+        job_id: &str,
+    ) -> anyhow::Result<serde_json::Value> {
+        let mut req = self.http.delete(format!(
+            "{}/apps/{}/deployments/{}",
+            self.base_url, app_name, job_id
+        ));
         if let Some(token) = &self.token {
             req = req.bearer_auth(token);
         }
@@ -272,11 +279,13 @@ impl MikromClient {
 
     pub async fn delete_deployment_record(
         &self,
+        app_name: &str,
         job_id: &str,
     ) -> anyhow::Result<serde_json::Value> {
-        let mut req = self
-            .http
-            .delete(format!("{}/deployments/{}/delete", self.base_url, job_id));
+        let mut req = self.http.delete(format!(
+            "{}/apps/{}/deployments/{}/delete",
+            self.base_url, app_name, job_id
+        ));
         if let Some(token) = &self.token {
             req = req.bearer_auth(token);
         }
@@ -290,10 +299,15 @@ impl MikromClient {
         }
     }
 
-    pub async fn pause_deployment(&self, job_id: &str) -> anyhow::Result<serde_json::Value> {
-        let mut req = self
-            .http
-            .post(format!("{}/deployments/{}/pause", self.base_url, job_id));
+    pub async fn pause_deployment(
+        &self,
+        app_name: &str,
+        job_id: &str,
+    ) -> anyhow::Result<serde_json::Value> {
+        let mut req = self.http.post(format!(
+            "{}/apps/{}/deployments/{}/pause",
+            self.base_url, app_name, job_id
+        ));
         if let Some(token) = &self.token {
             req = req.bearer_auth(token);
         }
@@ -307,10 +321,15 @@ impl MikromClient {
         }
     }
 
-    pub async fn resume_deployment(&self, job_id: &str) -> anyhow::Result<serde_json::Value> {
-        let mut req = self
-            .http
-            .post(format!("{}/deployments/{}/resume", self.base_url, job_id));
+    pub async fn resume_deployment(
+        &self,
+        app_name: &str,
+        job_id: &str,
+    ) -> anyhow::Result<serde_json::Value> {
+        let mut req = self.http.post(format!(
+            "{}/apps/{}/deployments/{}/resume",
+            self.base_url, app_name, job_id
+        ));
         if let Some(token) = &self.token {
             req = req.bearer_auth(token);
         }

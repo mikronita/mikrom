@@ -17,7 +17,6 @@ use utoipa::{
         login,
         get_profile,
         update_profile,
-        crate::deploy::deploy_app,
         create_app_handler,
         list_apps_handler,
         delete_app_handler,

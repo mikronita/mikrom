@@ -73,18 +73,18 @@ export function useWatchVms() {
   }, [token, queryClient]);
 }
 
-export function useVm(jobId: string) {
+export function useVm(appName: string, jobId: string) {
   const token = getToken();
 
   return useQuery({
     queryKey: vmsKeys.detail(jobId),
     queryFn: async () => {
       if (!token) throw new Error("No token found");
-      const result = await getVm(token, jobId);
+      const result = await getVm(token, appName, jobId);
       if (result.error) throw new Error(result.error);
       return result.data;
     },
-    enabled: !!token && !!jobId,
+    enabled: !!token && !!jobId && !!appName,
   });
 }
 
@@ -95,7 +95,14 @@ export function useDeployApp() {
   return useMutation({
     mutationFn: async (data: DeployRequest) => {
       if (!token) throw new Error("No token found");
-      const result = await deployApp(token, data);
+      // Use the application-specific deploy handler
+      const result = await deployApp(token, data.app_name, {
+        vcpus: data.vcpus,
+        memory_mib: data.memory_mib,
+        disk_mib: data.disk_mib,
+        env: data.env,
+        image: data.image
+      });
       if (result.error) throw new Error(result.error);
       return result.data;
     },
@@ -111,15 +118,15 @@ export function useStopVm() {
   const token = getToken();
 
   return useMutation({
-    mutationFn: async (jobId: string) => {
+    mutationFn: async ({ appName, jobId }: { appName: string, jobId: string }) => {
       if (!token) throw new Error("No token found");
-      const result = await stopVm(token, jobId);
+      const result = await stopVm(token, appName, jobId);
       if (result.error) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: (_, jobId) => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: vmsKeys.list() });
-      queryClient.invalidateQueries({ queryKey: vmsKeys.detail(jobId) });
+      queryClient.invalidateQueries({ queryKey: vmsKeys.detail(variables.jobId) });
     },
   });
 }
@@ -129,9 +136,9 @@ export function useDeleteVm() {
   const token = getToken();
 
   return useMutation({
-    mutationFn: async (jobId: string) => {
+    mutationFn: async ({ appName, jobId }: { appName: string, jobId: string }) => {
       if (!token) throw new Error("No token found");
-      const result = await deleteVm(token, jobId);
+      const result = await deleteVm(token, appName, jobId);
       if (result.error) throw new Error(result.error);
       return result.success;
     },

@@ -127,9 +127,13 @@ pub async fn handle_list_deployments(client: &MikromClient) -> Result<()> {
     Ok(())
 }
 
-pub async fn handle_get_status(client: &MikromClient, job_id: String) -> Result<()> {
+pub async fn handle_get_status(
+    client: &MikromClient,
+    app_name: String,
+    job_id: String,
+) -> Result<()> {
     let status = client
-        .get_deployment_status(&job_id)
+        .get_deployment_status(&app_name, &job_id)
         .await
         .context("Failed to get deployment status")?;
     println!("{}", bold_cyan("Live Deployment Detail"));
@@ -163,9 +167,13 @@ pub async fn handle_get_status(client: &MikromClient, job_id: String) -> Result<
     Ok(())
 }
 
-pub async fn handle_stop_instance(client: &MikromClient, job_id: String) -> Result<()> {
+pub async fn handle_stop_instance(
+    client: &MikromClient,
+    app_name: String,
+    job_id: String,
+) -> Result<()> {
     let _ = client
-        .stop_deployment(&job_id)
+        .stop_deployment(&app_name, &job_id)
         .await
         .context("Failed to stop deployment")?;
     println!(
@@ -176,7 +184,12 @@ pub async fn handle_stop_instance(client: &MikromClient, job_id: String) -> Resu
     Ok(())
 }
 
-pub async fn handle_logs(_client: &MikromClient, job_id: String, follow: bool) -> Result<()> {
+pub async fn handle_logs(
+    _client: &MikromClient,
+    app_name: String,
+    job_id: String,
+    follow: bool,
+) -> Result<()> {
     if follow {
         // SSE follow is not implemented in MikromClient for CLI yet in a clean way,
         // but we'll use the existing stream logic if available or just a placeholder for now
@@ -186,17 +199,21 @@ pub async fn handle_logs(_client: &MikromClient, job_id: String, follow: bool) -
         );
         // For now, CLI log streaming needs MikromClient to support it via reqwest::Response::bytes_stream()
         // We'll just print a message since the refactor focus is terminology
-        println!("Streaming logs for {}...", job_id);
+        println!("Streaming logs for {} in app {}...", job_id, app_name);
     } else {
         // Just fetch once
-        println!("Fetching logs for {}...", job_id);
+        println!("Fetching logs for {} in app {}...", job_id, app_name);
     }
     Ok(())
 }
 
-pub async fn handle_pause_instance(client: &MikromClient, job_id: String) -> Result<()> {
+pub async fn handle_pause_instance(
+    client: &MikromClient,
+    app_name: String,
+    job_id: String,
+) -> Result<()> {
     let _ = client
-        .pause_deployment(&job_id)
+        .pause_deployment(&app_name, &job_id)
         .await
         .context("Failed to pause deployment")?;
     println!(
@@ -207,9 +224,13 @@ pub async fn handle_pause_instance(client: &MikromClient, job_id: String) -> Res
     Ok(())
 }
 
-pub async fn handle_resume_instance(client: &MikromClient, job_id: String) -> Result<()> {
+pub async fn handle_resume_instance(
+    client: &MikromClient,
+    app_name: String,
+    job_id: String,
+) -> Result<()> {
     let _ = client
-        .resume_deployment(&job_id)
+        .resume_deployment(&app_name, &job_id)
         .await
         .context("Failed to resume deployment")?;
     println!(
@@ -220,9 +241,13 @@ pub async fn handle_resume_instance(client: &MikromClient, job_id: String) -> Re
     Ok(())
 }
 
-pub async fn handle_delete_instance(client: &MikromClient, job_id: String) -> Result<()> {
+pub async fn handle_delete_instance(
+    client: &MikromClient,
+    app_name: String,
+    job_id: String,
+) -> Result<()> {
     let _ = client
-        .delete_deployment_record(&job_id)
+        .delete_deployment_record(&app_name, &job_id)
         .await
         .context("Failed to delete deployment record")?;
     println!(
@@ -233,12 +258,20 @@ pub async fn handle_delete_instance(client: &MikromClient, job_id: String) -> Re
     Ok(())
 }
 
-pub async fn handle_restart_instance(_client: &MikromClient, _job_id: String) -> Result<()> {
+pub async fn handle_restart_instance(
+    _client: &MikromClient,
+    _app_name: String,
+    _job_id: String,
+) -> Result<()> {
     println!("Restarting deployment is not directly supported. Please stop and deploy again.");
     Ok(())
 }
 
-pub async fn handle_metrics(_client: &MikromClient, _job_id: Option<String>) -> Result<()> {
+pub async fn handle_metrics(
+    _client: &MikromClient,
+    _app_name: Option<String>,
+    _job_id: Option<String>,
+) -> Result<()> {
     println!("Metrics visualization in CLI is coming soon.");
     Ok(())
 }

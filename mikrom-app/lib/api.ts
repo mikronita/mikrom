@@ -270,9 +270,9 @@ export async function listActiveDeployments(token: string): Promise<{ data?: Liv
   }
 }
 
-export async function getLiveDeploymentStatus(token: string, jobId: string): Promise<{ data?: LiveDeploymentStatus; error?: string }> {
+export async function getLiveDeploymentStatus(token: string, appName: string, jobId: string): Promise<{ data?: LiveDeploymentStatus; error?: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/deployments/${jobId}`, {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/deployments/${jobId}`, {
       headers: authHeaders(token),
     });
     const result = await parseJson<LiveDeploymentStatus>(response);
@@ -285,6 +285,7 @@ export async function getLiveDeploymentStatus(token: string, jobId: string): Pro
 
 export function getDeploymentLogsSSE(
   token: string,
+  appName: string,
   jobId: string,
   onMessage: (log: LogLine) => void,
   onError: (err: string) => void
@@ -295,7 +296,7 @@ export function getDeploymentLogsSSE(
   const connect = async () => {
     while (!isAborted) {
       try {
-        const response = await fetch(`${API_BASE_URL}/deployments/${jobId}/logs?follow=true`, {
+        const response = await fetch(`${API_BASE_URL}/apps/${appName}/deployments/${jobId}/logs?follow=true`, {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -380,9 +381,9 @@ export function watchDeploymentsSSE(
   };
 }
 
-export async function pauseDeployment(token: string, jobId: string): Promise<{ data?: PauseDeploymentResponse; error?: string }> {
+export async function pauseDeployment(token: string, appName: string, jobId: string): Promise<{ data?: PauseDeploymentResponse; error?: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/deployments/${jobId}/pause`, {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/deployments/${jobId}/pause`, {
       method: "POST",
       headers: authHeaders(token),
     });
@@ -394,9 +395,9 @@ export async function pauseDeployment(token: string, jobId: string): Promise<{ d
   }
 }
 
-export async function resumeDeployment(token: string, jobId: string): Promise<{ data?: ResumeDeploymentResponse; error?: string }> {
+export async function resumeDeployment(token: string, appName: string, jobId: string): Promise<{ data?: ResumeDeploymentResponse; error?: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/deployments/${jobId}/resume`, {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/deployments/${jobId}/resume`, {
       method: "POST",
       headers: authHeaders(token),
     });
@@ -408,9 +409,9 @@ export async function resumeDeployment(token: string, jobId: string): Promise<{ 
   }
 }
 
-export async function stopDeployment(token: string, jobId: string): Promise<{ data?: StopDeploymentResponse; error?: string }> {
+export async function stopDeployment(token: string, appName: string, jobId: string): Promise<{ data?: StopDeploymentResponse; error?: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/deployments/${jobId}`, {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/deployments/${jobId}`, {
       method: "DELETE",
       headers: authHeaders(token),
     });
@@ -422,9 +423,9 @@ export async function stopDeployment(token: string, jobId: string): Promise<{ da
   }
 }
 
-export async function deleteDeploymentRecord(token: string, jobId: string): Promise<{ success: boolean; error?: string }> {
+export async function deleteDeploymentRecord(token: string, appName: string, jobId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/deployments/${jobId}/delete`, {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/deployments/${jobId}/delete`, {
       method: "DELETE",
       headers: authHeaders(token),
     });
@@ -436,9 +437,9 @@ export async function deleteDeploymentRecord(token: string, jobId: string): Prom
   }
 }
 
-export async function getVmMetrics(token: string, jobId: string): Promise<{ data?: VmMetricsResponse; error?: string }> {
+export async function getVmMetrics(token: string, appName: string, jobId: string): Promise<{ data?: VmMetricsResponse; error?: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/deployments/${jobId}/metrics`, {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/deployments/${jobId}/metrics`, {
       headers: authHeaders(token),
     });
     const result = await parseJson<VmMetricsResponse>(response);
@@ -448,6 +449,7 @@ export async function getVmMetrics(token: string, jobId: string): Promise<{ data
     return { error: err instanceof Error ? err.message : "Network error" };
   }
 }
+
 
 export async function listApps(token: string): Promise<{ data?: AppInfo[]; error?: string }> {
   try {
