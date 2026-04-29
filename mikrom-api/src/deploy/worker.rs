@@ -296,12 +296,13 @@ async fn poll_and_deploy(
 
                 let final_port = if port > 0 { port } else { task.port };
 
-                // Update DB with image, metadata and detected port
-                state
-                    .app_repo
-                    .update_deployment_port(task.deployment_id, final_port as i32)
-                    .await?;
-
+                // Update DB with detected port only if it differs from default to avoid unnecessary writes
+                if final_port != task.port {
+                    state
+                        .app_repo
+                        .update_deployment_port(task.deployment_id, final_port as i32)
+                        .await?;
+                }
                 state
                     .app_repo
                     .update_deployment_status(
