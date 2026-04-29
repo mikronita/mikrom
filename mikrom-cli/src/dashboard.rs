@@ -67,7 +67,11 @@ impl App {
             let mut updated_vms = Vec::new();
             for basic_vm in vms {
                 // Fetch full status including metrics for each deployment
-                if let Ok(full_status) = self.client.get_deployment_status(&basic_vm.job_id).await {
+                if let Ok(full_status) = self
+                    .client
+                    .get_deployment_status(&basic_vm.app_name, &basic_vm.job_id)
+                    .await
+                {
                     updated_vms.push(full_status);
                 } else {
                     // Fallback to basic info if full status fails

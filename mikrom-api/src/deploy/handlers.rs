@@ -38,6 +38,7 @@ pub struct ManualDeployRequest {
     pub memory_mib: Option<u32>,
     pub disk_mib: Option<u32>,
     pub env: Option<std::collections::HashMap<String, String>>,
+    pub image: Option<String>,
 }
 
 #[utoipa::path(
@@ -451,6 +452,7 @@ pub async fn deploy_app_version_handler(
     let memory_mib = payload.memory_mib.unwrap_or(256);
     let disk_mib = payload.disk_mib.unwrap_or(1024);
     let env_vars = payload.env.clone().unwrap_or_default();
+    let image = payload.image.clone();
 
     let deployment = state
         .app_repo
@@ -467,6 +469,94 @@ pub async fn deploy_app_version_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    // If an image is provided directly, skip the build phase and deploy immediately
+    if let Some(image_tag) = image {
+        info!(app = %app.name, image = %image_tag, "Direct image deployment requested, skipping build");
+
+        state
+            .app_repo
+            .update_deployment_status(
+                deployment.id,
+                "SCHEDULED",
+                None,
+                Some(image_tag.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        let nats_req = mikrom_proto::scheduler::DeployRequest {
+            app_id: app.id.to_string(),
+            app_name: app.name.clone(),
+            image: image_tag.clone(),
+            user_id: auth.user_id.clone(),
+            config: Some(mikrom_proto::scheduler::AppConfig {
+                vcpus,
+                memory_mib,
+                disk_mib,
+                port: app.port as u32,
+                env: env_vars.clone(),
+                ip_address: String::new(),
+                gateway: String::new(),
+                mac_address: String::new(),
+                volumes: vec![],
+            }),
+            deployment_id: deployment.id.to_string(),
+        };
+
+        use prost::Message;
+        let mut payload_bytes = Vec::new();
+        nats_req
+            .encode(&mut payload_bytes)
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            state
+                .nats_client
+                .request("mikrom.scheduler.deploy", payload_bytes.into()),
+        )
+        .await
+        .map_err(|_| ApiError::Internal("Scheduler request timed out".into()))?
+        .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
+
+        let inner = mikrom_proto::scheduler::DeployResponse::decode(&response.payload[..])
+            .map_err(|e| ApiError::Internal(format!("Failed to decode NATS response: {}", e)))?;
+
+        state
+            .app_repo
+            .update_deployment_status(
+                deployment.id,
+                crate::scheduler::status_name(inner.status),
+                Some(inner.job_id.clone()),
+                Some(image_tag.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        state.deployment_events.send(app.id).ok();
+
+        return Ok(Json(crate::deploy::DeployResponseBody {
+            job_id: Some(inner.job_id),
+            deployment_id: Some(deployment.id.to_string()),
+            status: crate::scheduler::status_name(inner.status).to_string(),
+            host_id: Some(inner.host_id),
+            vm_id: Some(inner.vm_id),
+            image_tag: Some(image_tag),
+            message: inner.message,
+        }));
+    }
+
+    // Default: Trigger build
     state
         .app_repo
         .update_deployment_status(

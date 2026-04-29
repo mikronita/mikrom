@@ -57,11 +57,7 @@ export function DeployModal({ onClose }: DeployModalProps) {
       onSuccess: (data) => {
         toast.success(`App ${form.app_name} deployment initiated`);
         onClose();
-        if (data?.job_id) {
-          router.push(`/deployments/${data.job_id}`);
-        } else {
-          router.push("/deployments");
-        }
+        router.push(`/apps/${form.app_name}`);
       },
       onError: (error) => {
         toast.error(error instanceof Error ? error.message : "Deploy failed");

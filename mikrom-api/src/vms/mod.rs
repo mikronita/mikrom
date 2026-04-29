@@ -367,8 +367,9 @@ pub async fn watch_deployments(
 
 #[utoipa::path(
     get,
-    path = "/deployments/{job_id}",
+    path = "/apps/{app_name}/deployments/{job_id}",
     params(
+        ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")
     ),
     responses(
@@ -381,14 +382,26 @@ pub async fn watch_deployments(
         ("jwt" = [])
     )
 )]
-#[tracing::instrument(skip(state), fields(job_id = %job_id))]
+#[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn get_deployment_status(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
-    Path(job_id): Path<String>,
+    Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<LiveDeploymentStatus>> {
     use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse};
     use prost::Message;
+
+    // Validate app ownership
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Application not found".into()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
 
     // If it's a temporary ID from BUILDING phase
     if let Some(stripped) = job_id.strip_prefix("temp-") {
@@ -401,17 +414,17 @@ pub async fn get_deployment_status(
             .map_err(|e| ApiError::Internal(e.to_string()))?
             .ok_or(ApiError::NotFound("Deployment not found".into()))?;
 
-        let app_name = if let Ok(Some(app)) = state.app_repo.get_app(dep.app_id).await {
-            app.name
-        } else {
-            "Unknown".to_string()
-        };
+        if dep.app_id != app.id {
+            return Err(ApiError::BadRequest(
+                "Deployment does not belong to this application".into(),
+            ));
+        }
 
         return Ok(Json(LiveDeploymentStatus {
             job_id: job_id.clone(),
             deployment_id: dep.id.to_string(),
             app_id: dep.app_id.to_string(),
-            app_name,
+            app_name: app.name,
             image: dep.image_tag.unwrap_or_default(),
             status: dep.status,
             host_id: String::new(),
@@ -456,17 +469,17 @@ pub async fn get_deployment_status(
             "Deployment record not found".to_string(),
         ))?;
 
-    let app_name = if let Ok(Some(app)) = state.app_repo.get_app(deployment.app_id).await {
-        app.name
-    } else {
-        "Unknown".to_string()
-    };
+    if deployment.app_id != app.id {
+        return Err(ApiError::BadRequest(
+            "Deployment does not belong to this application".into(),
+        ));
+    }
 
     let deployment_status = LiveDeploymentStatus {
         job_id: inner.job_id,
         deployment_id: deployment.id.to_string(),
         app_id: deployment.app_id.to_string(),
-        app_name,
+        app_name: app.name,
         image: deployment.image_tag.unwrap_or_default(),
         status: crate::scheduler::status_name(inner.status).to_string(),
         host_id: inner.host_id,
@@ -486,8 +499,9 @@ pub async fn get_deployment_status(
 
 #[utoipa::path(
     get,
-    path = "/deployments/{job_id}/logs",
+    path = "/apps/{app_name}/deployments/{job_id}/logs",
     params(
+        ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")
     ),
     responses(
@@ -503,9 +517,34 @@ pub async fn get_deployment_status(
 pub async fn get_deployment_logs(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
-    Path(job_id): Path<String>,
+    Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<impl IntoResponse> {
-    // 1. Get VM ID from scheduler via NATS
+    // 1. Validate app ownership and deployment connection
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Application not found".into()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    let deployment = state
+        .app_repo
+        .get_deployment_by_job_id(&job_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Deployment not found".into()))?;
+
+    if deployment.app_id != app.id {
+        return Err(ApiError::BadRequest(
+            "Deployment does not belong to this application".into(),
+        ));
+    }
+
+    // 2. Get VM ID from scheduler via NATS
     use mikrom_proto::scheduler::AppStatusRequest;
     use prost::Message;
 
@@ -556,25 +595,52 @@ pub async fn get_deployment_logs(
 
 #[utoipa::path(
     post,
-    path = "/deployments/{job_id}/pause",
+    path = "/apps/{app_name}/deployments/{job_id}/pause",
     params(
+        ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")
     ),
     responses(
         (status = 200, description = "Deployment paused"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Application/Deployment not found", body = crate::error::ErrorResponse)
     ),
     tag = "deployment",
     security(
         ("jwt" = [])
     )
 )]
-#[tracing::instrument(skip(state), fields(job_id = %job_id))]
+#[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn pause_deployment(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
-    Path(job_id): Path<String>,
+    Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // Validate app ownership and deployment connection
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Application not found".into()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    let deployment = state
+        .app_repo
+        .get_deployment_by_job_id(&job_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Deployment not found".into()))?;
+
+    if deployment.app_id != app.id {
+        return Err(ApiError::BadRequest(
+            "Deployment does not belong to this application".into(),
+        ));
+    }
+
     let success = state
         .scheduler
         .pause_app(job_id.clone(), auth.user_id.clone())
@@ -583,24 +649,21 @@ pub async fn pause_deployment(
 
     if success {
         // Update database status
-        if let Ok(Some(dep)) = state.app_repo.get_deployment_by_job_id(&job_id).await {
-            let app_id = dep.app_id;
-            let _ = state
-                .app_repo
-                .update_deployment_status(
-                    dep.id,
-                    "STOPPED",
-                    Some(job_id),
-                    dep.image_tag,
-                    dep.build_id,
-                    None,
-                    dep.git_commit_hash,
-                    dep.git_commit_message,
-                    dep.git_branch,
-                )
-                .await;
-            state.deployment_events.send(app_id).ok();
-        }
+        let _ = state
+            .app_repo
+            .update_deployment_status(
+                deployment.id,
+                "STOPPED",
+                Some(job_id),
+                deployment.image_tag,
+                deployment.build_id,
+                None,
+                deployment.git_commit_hash,
+                deployment.git_commit_message,
+                deployment.git_branch,
+            )
+            .await;
+        state.deployment_events.send(app.id).ok();
 
         Ok(Json(
             serde_json::json!({ "success": true, "message": "Paused" }),
@@ -612,25 +675,52 @@ pub async fn pause_deployment(
 
 #[utoipa::path(
     post,
-    path = "/deployments/{job_id}/resume",
+    path = "/apps/{app_name}/deployments/{job_id}/resume",
     params(
+        ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")
     ),
     responses(
         (status = 200, description = "Deployment resumed"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Application/Deployment not found", body = crate::error::ErrorResponse)
     ),
     tag = "deployment",
     security(
         ("jwt" = [])
     )
 )]
-#[tracing::instrument(skip(state), fields(job_id = %job_id))]
+#[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn resume_deployment(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
-    Path(job_id): Path<String>,
+    Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // Validate app ownership and deployment connection
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Application not found".into()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    let deployment = state
+        .app_repo
+        .get_deployment_by_job_id(&job_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Deployment not found".into()))?;
+
+    if deployment.app_id != app.id {
+        return Err(ApiError::BadRequest(
+            "Deployment does not belong to this application".into(),
+        ));
+    }
+
     let success = state
         .scheduler
         .resume_app(job_id.clone(), auth.user_id.clone())
@@ -639,24 +729,21 @@ pub async fn resume_deployment(
 
     if success {
         // Update database status
-        if let Ok(Some(dep)) = state.app_repo.get_deployment_by_job_id(&job_id).await {
-            let app_id = dep.app_id;
-            let _ = state
-                .app_repo
-                .update_deployment_status(
-                    dep.id,
-                    "RUNNING",
-                    Some(job_id),
-                    dep.image_tag,
-                    dep.build_id,
-                    None,
-                    dep.git_commit_hash,
-                    dep.git_commit_message,
-                    dep.git_branch,
-                )
-                .await;
-            state.deployment_events.send(app_id).ok();
-        }
+        let _ = state
+            .app_repo
+            .update_deployment_status(
+                deployment.id,
+                "RUNNING",
+                Some(job_id),
+                deployment.image_tag,
+                deployment.build_id,
+                None,
+                deployment.git_commit_hash,
+                deployment.git_commit_message,
+                deployment.git_branch,
+            )
+            .await;
+        state.deployment_events.send(app.id).ok();
 
         Ok(Json(
             serde_json::json!({ "success": true, "message": "Resumed" }),
@@ -668,26 +755,52 @@ pub async fn resume_deployment(
 
 #[utoipa::path(
     delete,
-    path = "/deployments/{job_id}",
+    path = "/apps/{app_name}/deployments/{job_id}",
     params(
+        ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")
     ),
     responses(
         (status = 200, description = "Deployment stopped"),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Deployment not found", body = crate::error::ErrorResponse)
+        (status = 404, description = "Application/Deployment not found", body = crate::error::ErrorResponse)
     ),
     tag = "deployment",
     security(
         ("jwt" = [])
     )
 )]
-#[tracing::instrument(skip(state), fields(job_id = %job_id))]
+#[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn stop_deployment(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
-    Path(job_id): Path<String>,
+    Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // Validate app ownership and deployment connection
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Application not found".into()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    let deployment = state
+        .app_repo
+        .get_deployment_by_job_id(&job_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Deployment not found".into()))?;
+
+    if deployment.app_id != app.id {
+        return Err(ApiError::BadRequest(
+            "Deployment does not belong to this application".into(),
+        ));
+    }
+
     use mikrom_proto::scheduler::CancelRequest;
     use prost::Message;
 
@@ -711,9 +824,7 @@ pub async fn stop_deployment(
         .map_err(|e| ApiError::Internal(format!("Failed to parse NATS response: {}", e)))?;
 
     if inner.success {
-        if let Ok(Some(dep)) = state.app_repo.get_deployment_by_job_id(&job_id).await {
-            state.deployment_events.send(dep.app_id).ok();
-        }
+        state.deployment_events.send(app.id).ok();
         Ok(Json(
             serde_json::json!({ "success": true, "message": inner.message }),
         ))
@@ -724,33 +835,51 @@ pub async fn stop_deployment(
 
 #[utoipa::path(
     delete,
-    path = "/deployments/{job_id}/delete",
+    path = "/apps/{app_name}/deployments/{job_id}/delete",
     params(
+        ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")
     ),
     responses(
         (status = 200, description = "Deployment record deleted"),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Deployment not found", body = crate::error::ErrorResponse)
+        (status = 404, description = "Application/Deployment not found", body = crate::error::ErrorResponse)
     ),
     tag = "deployment",
     security(
         ("jwt" = [])
     )
 )]
-#[tracing::instrument(skip(state), fields(job_id = %job_id))]
+#[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn delete_deployment_record(
-    _auth: crate::auth::AuthUser,
+    auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
-    Path(job_id): Path<String>,
+    Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // Validate app ownership and deployment connection
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Application not found".into()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
     let deployment = state
         .app_repo
         .get_deployment_by_job_id(&job_id)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("Deployment not found".into()))?;
 
-    let app_id = deployment.as_ref().map(|d| d.app_id);
+    if deployment.app_id != app.id {
+        return Err(ApiError::BadRequest(
+            "Deployment does not belong to this application".into(),
+        ));
+    }
 
     state
         .app_repo
@@ -758,9 +887,7 @@ pub async fn delete_deployment_record(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    if let Some(aid) = app_id {
-        state.deployment_events.send(aid).ok();
-    }
+    state.deployment_events.send(app.id).ok();
 
     Ok(Json(serde_json::json!({ "success": true })))
 }

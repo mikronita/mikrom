@@ -126,7 +126,7 @@ export default function AppDetailPage() {
   const activeJobId = activeDeployment?.job_id;
 
   // Active Instance Logic
-  const { data: vm, dataUpdatedAt } = useVm(activeJobId || "");
+  const { data: vm, dataUpdatedAt } = useVm(decodedName, activeJobId || "");
   const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>([]);
 
   useEffect(() => {

@@ -48,24 +48,7 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         deployment_events: tokio::sync::broadcast::channel(1).0,
         build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
-    axum::Router::new()
-        .route("/auth/register", axum::routing::post(register))
-        .route("/auth/login", axum::routing::post(login))
-        .route("/auth/me", axum::routing::get(get_profile))
-        .route("/auth/me", axum::routing::put(update_profile))
-        .route(
-            "/apps",
-            axum::routing::post(mikrom_api::deploy::create_app_handler),
-        )
-        .route(
-            "/apps",
-            axum::routing::get(mikrom_api::deploy::list_apps_handler),
-        )
-        .route(
-            "/apps/:app_id",
-            axum::routing::delete(mikrom_api::deploy::delete_app_handler),
-        )
-        .with_state(state)
+    mikrom_api::create_app(state)
 }
 
 #[tokio::test]
