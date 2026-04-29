@@ -294,7 +294,14 @@ async fn poll_and_deploy(
                     current_status.5,
                 );
 
-                // Update DB with image and metadata
+                let final_port = if port > 0 { port } else { task.port };
+
+                // Update DB with image, metadata and detected port
+                state
+                    .app_repo
+                    .update_deployment_port(task.deployment_id, final_port as i32)
+                    .await?;
+
                 state
                     .app_repo
                     .update_deployment_status(
@@ -320,7 +327,7 @@ async fn poll_and_deploy(
                         vcpus: task.vcpus,
                         memory_mib: task.memory_mib as u32,
                         disk_mib: task.disk_mib as u32,
-                        port: if port > 0 { port } else { task.port },
+                        port: final_port,
                         env: task.env.clone(),
                         ..Default::default()
                     }),

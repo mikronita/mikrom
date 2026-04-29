@@ -78,7 +78,7 @@ impl AppState {
                     } else {
                         ip.to_string()
                     };
-                    Some(format!("http://{}:{}", formatted_ip, app.port))
+                    Some(format!("http://{}:{}", formatted_ip, dep.port))
                 } else {
                     None
                 }
