@@ -88,10 +88,13 @@ pub async fn handle_auth(
                 user.created_at.as_deref().unwrap_or("N/A")
             );
         },
-        crate::commands::AuthCommands::Update { email, password } => {
+        crate::commands::AuthCommands::Update {
+            first_name,
+            last_name,
+        } => {
             println!("{} {} Updating profile...", WAIT, SYS);
             let user = client
-                .update_profile(email, password)
+                .update_profile(first_name, last_name)
                 .await
                 .context("Failed to update profile")?;
             println!(
@@ -100,6 +103,9 @@ pub async fn handle_auth(
                 green_label("Success:")
             );
             println!("  {} Email:   {}", INFO, user.email);
+            if let (Some(f), Some(l)) = (user.first_name.as_ref(), user.last_name.as_ref()) {
+                println!("  {} Name:    {} {}", INFO, f, l);
+            }
         },
     }
     Ok(())
@@ -220,8 +226,12 @@ pub async fn handle_app(client: &MikromClient, cmd: crate::commands::AppCommands
         },
         crate::commands::AppCommands::Watch { name } => {
             println!(
-                "{} {} Watching deployments for app {} (Not implemented)...",
+                "{} {} Real-time deployment monitoring for {} is planned for a future update.",
                 WATCH, INFO, name
+            );
+            println!(
+                "     Use 'mikrom app deployments {}' to poll manually.",
+                name
             );
         },
     }
@@ -295,8 +305,10 @@ pub async fn handle_deployment(
         } => {
             if follow {
                 println!("{} {} Tailing logs for {}/{}...", WATCH, INFO, app, job_id);
+                println!("     (Log streaming via SSE is currently under development)");
             } else {
                 println!("{} {} Fetching logs for {}/{}...", INFO, INFO, app, job_id);
+                println!("     (Log retrieval is currently under development)");
             }
         },
         crate::commands::DeploymentCommands::Stop { app, job_id } => {
@@ -333,7 +345,7 @@ pub async fn handle_deployment(
         },
         crate::commands::DeploymentCommands::Watch => {
             println!(
-                "{} {} Watching all cluster deployment events (Not implemented)...",
+                "{} {} Global cluster event monitoring is planned for a future update.",
                 WATCH, INFO
             );
         },
@@ -408,7 +420,7 @@ pub async fn handle_system(
         },
         crate::commands::SystemCommands::Watch => {
             println!(
-                "{} {} Watching system health (Not implemented)...",
+                "{} {} Real-time system health dashboard is planned for a future update.",
                 WATCH, INFO
             );
         },

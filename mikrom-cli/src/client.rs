@@ -493,15 +493,15 @@ impl MikromClient {
 
     pub async fn update_profile(
         &self,
-        email: Option<String>,
-        password: Option<String>,
+        first_name: Option<String>,
+        last_name: Option<String>,
     ) -> anyhow::Result<WhoamiResponse> {
         let mut body = serde_json::json!({});
-        if let Some(e) = email {
-            body["email"] = serde_json::json!(e);
+        if let Some(f) = first_name {
+            body["first_name"] = serde_json::json!(f);
         }
-        if let Some(p) = password {
-            body["password"] = serde_json::json!(p);
+        if let Some(l) = last_name {
+            body["last_name"] = serde_json::json!(l);
         }
 
         let mut req = self

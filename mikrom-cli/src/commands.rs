@@ -39,10 +39,10 @@ pub enum AuthCommands {
     Whoami,
     /// Update user profile details
     Update {
-        #[arg(long, short, help = "New email address")]
-        email: Option<String>,
-        #[arg(long, short, help = "New password")]
-        password: Option<String>,
+        #[arg(long, help = "New first name")]
+        first_name: Option<String>,
+        #[arg(long, help = "New last name")]
+        last_name: Option<String>,
     },
 }
 
