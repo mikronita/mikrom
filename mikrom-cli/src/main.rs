@@ -1,120 +1,14 @@
-mod client;
-mod config;
-mod dashboard;
-mod handlers;
-
-use clap::{Parser, Subcommand};
-use client::MikromClient;
-use config::Config;
-use handlers::*;
+use clap::Parser;
+use mikrom_cli::client::MikromClient;
+use mikrom_cli::commands::Commands;
+use mikrom_cli::config::Config;
+use mikrom_cli::handlers::*;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    #[arg(long, global = true)]
-    pub api_url: Option<String>,
-
     #[command(subcommand)]
     pub command: Commands,
-}
-
-#[derive(Subcommand)]
-pub enum Commands {
-    /// Check the health of the Mikrom API
-    Health,
-    /// Authentication commands
-    #[command(subcommand)]
-    Auth(AuthCommands),
-    /// Deploy a new application
-    Deploy {
-        #[arg(long)]
-        app: String,
-        #[arg(long)]
-        image: String,
-        #[arg(long)]
-        vcpus: Option<u32>,
-        #[arg(long)]
-        memory: Option<u64>,
-        #[arg(long)]
-        disk: Option<u64>,
-        #[arg(long)]
-        env: Vec<String>,
-    },
-    /// List all active deployments
-    Deployments,
-    /// Get status of a specific deployment
-    Status { app: String, job_id: String },
-    /// Stop a running deployment
-    Stop { app: String, job_id: String },
-    /// Get logs for a deployment
-    Logs {
-        app: String,
-        job_id: String,
-        #[arg(long, short)]
-        follow: bool,
-    },
-    /// Pause a running deployment
-    Pause { app: String, job_id: String },
-    /// Resume a paused deployment
-    Resume { app: String, job_id: String },
-    /// Delete a deployment record
-    Delete { app: String, job_id: String },
-    /// Restart a deployment
-    Restart { app: String, job_id: String },
-    /// Get metrics for a deployment or the entire cluster
-    Metrics {
-        app: Option<String>,
-        job_id: Option<String>,
-    },
-    /// Show information about the current user
-    Whoami,
-    /// Manage applications
-    #[command(subcommand)]
-    Apps(AppCommands),
-    /// Show current CLI configuration
-    Config,
-    /// Launch the interactive dashboard
-    Dashboard,
-}
-
-#[derive(Subcommand)]
-pub enum AuthCommands {
-    /// Register a new user
-    Register {
-        #[arg(long, short)]
-        email: String,
-        #[arg(long, short)]
-        password: String,
-    },
-    /// Login with existing credentials
-    Login {
-        #[arg(long, short)]
-        email: String,
-        #[arg(long, short)]
-        password: String,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum AppCommands {
-    /// List all applications
-    List,
-    /// Create a new application
-    Create {
-        #[arg(long)]
-        name: String,
-        #[arg(long)]
-        git_url: String,
-    },
-    /// Delete an application
-    Delete { app_id: String },
-    /// Deploy an application
-    Deploy { app_id: String },
-    /// Activate a specific deployment for an application (Rollback/Promotion)
-    Activate {
-        app_id: String,
-        deployment_id: String,
-    },
 }
 
 #[tokio::main]
@@ -122,49 +16,14 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let mut cfg = Config::load();
 
-    if let Some(url) = cli.api_url {
-        cfg.api_url = Some(url);
-    }
-
     let client = MikromClient::new(cfg.api_url().to_string(), cfg.token.clone());
 
     match cli.command {
-        Commands::Health => handle_health(&client).await?,
         Commands::Auth(auth_cmd) => handle_auth(&client, auth_cmd, &mut cfg).await?,
-        Commands::Deploy {
-            app,
-            image,
-            vcpus,
-            memory,
-            disk,
-            env,
-        } => handle_deploy(&client, app, image, vcpus, memory, disk, env).await?,
-        Commands::Deployments => handle_list_deployments(&client).await?,
-        Commands::Status { app, job_id } => handle_get_status(&client, app, job_id).await?,
-        Commands::Stop { app, job_id } => handle_stop_instance(&client, app, job_id).await?,
-        Commands::Logs {
-            app,
-            job_id,
-            follow,
-        } => handle_logs(&client, app, job_id, follow).await?,
-        Commands::Pause { app, job_id } => handle_pause_instance(&client, app, job_id).await?,
-        Commands::Resume { app, job_id } => handle_resume_instance(&client, app, job_id).await?,
-        Commands::Delete { app, job_id } => handle_delete_instance(&client, app, job_id).await?,
-        Commands::Restart { app, job_id } => handle_restart_instance(&client, app, job_id).await?,
-        Commands::Metrics { app, job_id } => handle_metrics(&client, app, job_id).await?,
-        Commands::Whoami => handle_whoami(&client).await?,
-        Commands::Apps(app_cmd) => handle_apps(&client, app_cmd).await?,
-        Commands::Config => {
-            println!("api_url: {}", cfg.api_url());
-            if cfg.token.is_some() {
-                println!("token:    [configured]");
-            } else {
-                println!("token:    [not configured]");
-            }
-        },
-        Commands::Dashboard => {
-            dashboard::run(client).await?;
-        },
+        Commands::App(app_cmd) => handle_app(&client, app_cmd).await?,
+        Commands::Deployment(dep_cmd) => handle_deployment(&client, dep_cmd).await?,
+        Commands::Config(cfg_cmd) => handle_config(cfg_cmd, &mut cfg).await?,
+        Commands::System(sys_cmd) => handle_system(&client, sys_cmd).await?,
     }
 
     Ok(())
@@ -174,50 +33,15 @@ async fn main() -> anyhow::Result<()> {
 #[allow(clippy::unwrap_used, clippy::get_unwrap)]
 mod tests {
     use super::*;
+    use mikrom_cli::commands::{AppCommands, AuthCommands, DeploymentCommands, SystemCommands};
 
     #[test]
-    fn test_parse_env_vars_empty() {
-        assert!(parse_env_vars(&[]).unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_parse_env_vars_single_pair() {
-        let result = parse_env_vars(&["KEY=VALUE".to_string()]).unwrap();
-        assert_eq!(result.get("KEY").map(String::as_str), Some("VALUE"));
-    }
-
-    #[test]
-    fn test_parse_env_vars_multiple_pairs() {
-        let result = parse_env_vars(&["PORT=8080".to_string(), "ENV=prod".to_string()]).unwrap();
-        assert_eq!(result.get("PORT").map(String::as_str), Some("8080"));
-        assert_eq!(result.get("ENV").map(String::as_str), Some("prod"));
-    }
-
-    #[test]
-    fn test_parse_env_vars_value_with_equals() {
-        let result = parse_env_vars(&["URL=http://host/path?a=1&b=2".to_string()]).unwrap();
-        assert_eq!(
-            result.get("URL").map(String::as_str),
-            Some("http://host/path?a=1&b=2")
-        );
-    }
-
-    #[test]
-    fn test_parse_env_vars_missing_equals_returns_err() {
-        assert!(parse_env_vars(&["NO_EQUALS".to_string()]).is_err());
-    }
-
-    #[test]
-    fn test_cli_health_command() {
-        let cli = Cli::try_parse_from(["mikrom", "health"]).unwrap();
-        assert!(matches!(cli.command, Commands::Health));
-    }
-
-    #[test]
-    fn test_cli_api_url_flag_before_subcommand() {
-        let cli =
-            Cli::try_parse_from(["mikrom", "--api-url", "http://remote:5001", "health"]).unwrap();
-        assert_eq!(cli.api_url.as_deref(), Some("http://remote:5001"));
+    fn test_cli_system_health_command() {
+        let cli = Cli::try_parse_from(["mikrom", "system", "health"]).unwrap();
+        match cli.command {
+            Commands::System(SystemCommands::Health) => {},
+            _ => panic!("expected system health"),
+        }
     }
 
     #[test]
@@ -242,89 +66,44 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_deploy_minimal_flags() {
+    fn test_cli_app_create() {
         let cli = Cli::try_parse_from([
             "mikrom",
-            "deploy",
-            "--app",
+            "app",
+            "create",
+            "--name",
             "my-service",
-            "--image",
-            "nginx:latest",
+            "--git-url",
+            "https://github.com/user/repo",
         ])
         .unwrap();
         match cli.command {
-            Commands::Deploy { app, image, .. } => {
-                assert_eq!(app, "my-service");
-                assert_eq!(image, "nginx:latest");
+            Commands::App(AppCommands::Create { name, git_url }) => {
+                assert_eq!(name, "my-service");
+                assert_eq!(git_url, "https://github.com/user/repo");
             },
-            _ => panic!("expected deploy"),
+            _ => panic!("expected app create"),
         }
     }
 
     #[test]
-    fn test_cli_deploy_all_options() {
+    fn test_cli_deployment_status() {
         let cli = Cli::try_parse_from([
             "mikrom",
-            "deploy",
+            "deployment",
+            "status",
             "--app",
             "svc",
-            "--image",
-            "alpine:3",
-            "--vcpus",
-            "4",
-            "--memory",
-            "1024",
-            "--disk",
-            "2048",
-            "--env",
-            "PORT=8080",
-            "--env",
-            "X=y",
+            "--job-id",
+            "job-123",
         ])
         .unwrap();
         match cli.command {
-            Commands::Deploy {
-                vcpus,
-                memory,
-                disk,
-                env,
-                ..
-            } => {
-                assert_eq!(vcpus, Some(4));
-                assert_eq!(memory, Some(1024));
-                assert_eq!(disk, Some(2048));
-                assert_eq!(env, vec!["PORT=8080", "X=y"]);
+            Commands::Deployment(DeploymentCommands::Status { app, job_id }) => {
+                assert_eq!(app, "svc");
+                assert_eq!(job_id, "job-123");
             },
-            _ => panic!("expected deploy"),
-        }
-    }
-
-    #[test]
-    fn test_api_url_flag_works_for_all_commands() {
-        let url = "http://test:9999";
-        let test_cases: Vec<(&str, &str)> = vec![
-            ("health", "health"),
-            ("deployments", "deployments"),
-            ("status", "status app-1 j-1"),
-            ("stop", "stop app-1 j-1"),
-            ("logs", "logs app-1 j-1"),
-            ("pause", "pause app-1 j-1"),
-            ("resume", "resume app-1 j-1"),
-            ("delete", "delete app-1 j-1"),
-            ("restart", "restart app-1 j-1"),
-            ("metrics", "metrics app-1 j-1"),
-            ("whoami", "whoami"),
-            ("config", "config"),
-        ];
-        for (_, cmd_str) in test_cases {
-            let mut args = vec!["mikrom", "--api-url", url];
-            args.extend(cmd_str.split_whitespace());
-            let cli = Cli::try_parse_from(&args).unwrap();
-            assert_eq!(
-                cli.api_url.as_deref(),
-                Some(url),
-                "failed for cmd: {cmd_str}"
-            );
+            _ => panic!("expected deployment status"),
         }
     }
 }
