@@ -22,5 +22,6 @@ pub mod router {
     include!("mikrom.router.v1.rs");
 }
 
+pub mod subjects;
 pub mod telemetry;
 pub mod tls;

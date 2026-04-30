@@ -53,7 +53,7 @@ pub async fn start_ip_sync_task(state: AppState) {
 
                         let status_res = state
                             .nats_client
-                            .request("mikrom.scheduler.get_job", buf.into())
+                            .request(mikrom_proto::subjects::SCHEDULER_GET_JOB, buf.into())
                             .await;
 
                         if let Some(inner) = status_res
@@ -78,7 +78,7 @@ pub async fn start_nats_job_listener(state: AppState) {
     info!("Starting instant NATS job update listener...");
     let mut sub = match state
         .nats_client
-        .subscribe("mikrom.scheduler.job_updates")
+        .subscribe(mikrom_proto::subjects::SCHEDULER_JOB_UPDATES)
         .await
     {
         Ok(s) => s,

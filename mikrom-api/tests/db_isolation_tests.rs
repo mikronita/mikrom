@@ -1,35 +1,17 @@
+mod common;
+
 #[cfg(test)]
 mod tests {
+    use super::common;
     use mikrom_api::AppState;
     use mikrom_api::repositories::PostgresAppRepository;
     use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
-    use sqlx::PgPool;
-    use std::env;
     use std::sync::Arc;
-
-    async fn get_test_pool() -> PgPool {
-        let connection_string = env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-        });
-
-        let pool = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(5)
-            .connect(&connection_string)
-            .await
-            .expect("Failed to connect to test db");
-
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await
-            .expect("Failed to run migrations");
-
-        pool
-    }
 
     #[tokio::test]
     #[ignore = "requires a running postgres at localhost:5432 and NATS"]
     async fn test_api_db_isolation() {
-        let pool = get_test_pool().await;
+        let pool = common::get_test_pool().await;
 
         // Verify scheduler tables are NOT present in API database
         let tables = sqlx::query(
@@ -56,9 +38,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires a running postgres at localhost:5432 and NATS"]
     async fn test_notify_router_sends_nats_message() {
-        let pool = get_test_pool().await;
-        let nats_url = env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
-        let nats_client = async_nats::connect(nats_url).await.unwrap();
+        let pool = common::get_test_pool().await;
+        let nats_client = common::get_nats_client().await;
 
         let state = AppState {
             user_repo: Arc::new(PostgresUserRepository::new(pool.clone())),
@@ -74,7 +55,7 @@ mod tests {
 
         // Subscribe to router updates
         let _sub = nats_client
-            .subscribe("mikrom.router.config_updated")
+            .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
             .await
             .unwrap();
 

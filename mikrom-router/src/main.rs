@@ -59,7 +59,10 @@ async fn main() -> anyhow::Result<()> {
                 },
             };
 
-            let mut nats_sub = match nats_client.subscribe("mikrom.router.config_updated").await {
+            let mut nats_sub = match nats_client
+                .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
+                .await
+            {
                 Ok(sub) => sub,
                 Err(e) => {
                     error!("Failed to subscribe to NATS, retrying in 5s: {}", e);
@@ -77,14 +80,16 @@ async fn main() -> anyhow::Result<()> {
                     );
 
                     let result = if let Some(target) = update.target_url {
-                        sqlx::query("INSERT INTO routes (hostname, target_url, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = NOW()")
+                        sqlx::query("INSERT INTO routes (hostname, target_url, updated_at) VALUES ($1, $2, TO_TIMESTAMP($3)) ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = EXCLUDED.updated_at WHERE EXCLUDED.updated_at > routes.updated_at")
                             .bind(&update.hostname)
                             .bind(&target)
+                            .bind(update.timestamp)
                             .execute(&db_clone)
                             .await
                     } else {
-                        sqlx::query("DELETE FROM routes WHERE hostname = $1")
+                        sqlx::query("DELETE FROM routes WHERE hostname = $1 AND updated_at <= TO_TIMESTAMP($2)")
                             .bind(&update.hostname)
+                            .bind(update.timestamp)
                             .execute(&db_clone)
                             .await
                     };

@@ -7,4 +7,5 @@ option go_package = "mikrom/router/v1";
 message RouterConfigUpdate {
   string hostname = 1;
   optional string target_url = 2;
+  int64 timestamp = 3;
 }

@@ -89,11 +89,12 @@ impl AppState {
         let config = RouterConfigUpdate {
             hostname: hostname.clone(),
             target_url,
+            timestamp: chrono::Utc::now().timestamp(),
         };
 
         self.nats_client
             .publish(
-                "mikrom.router.config_updated",
+                mikrom_proto::subjects::ROUTER_CONFIG_UPDATED,
                 config.encode_to_vec().into(),
             )
             .await?;
@@ -105,11 +106,12 @@ impl AppState {
         let config = RouterConfigUpdate {
             hostname: hostname.to_string(),
             target_url: None,
+            timestamp: chrono::Utc::now().timestamp(),
         };
 
         self.nats_client
             .publish(
-                "mikrom.router.config_updated",
+                mikrom_proto::subjects::ROUTER_CONFIG_UPDATED,
                 config.encode_to_vec().into(),
             )
             .await?;

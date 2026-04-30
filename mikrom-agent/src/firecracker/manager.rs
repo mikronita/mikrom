@@ -452,12 +452,15 @@ impl FirecrackerManager {
 
                     // 2. Publish to NATS (new)
                     if let Some(nats) = nats_clone.read().await.as_ref() {
-                        let subject = format!("mikrom.logs.{}", vm_id_clone);
+                        let subject = mikrom_proto::subjects::vm_logs(&vm_id_clone);
                         let payload = VmLogPayload {
                             line: l,
                             timestamp: chrono::Utc::now().timestamp(),
                         };
-                        let _ = nats.publish(subject, payload.encode_to_vec().into()).await;
+                        if let Err(e) = nats.publish(subject, payload.encode_to_vec().into()).await
+                        {
+                            tracing::error!(vm_id = %vm_id_clone, error = %e, "Failed to publish log to NATS");
+                        }
                     }
                 } else {
                     break;
