@@ -265,6 +265,13 @@ pub struct GetVmStatusResponse {
     #[prost(string, tag = "4")]
     pub error_message: ::prost::alloc::string::String,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VmLogPayload {
+    #[prost(string, tag = "1")]
+    pub line: ::prost::alloc::string::String,
+    #[prost(int64, tag = "2")]
+    pub timestamp: i64,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum VmStatus {

@@ -22,9 +22,11 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 [build-dependencies]
 tonic-build = { workspace = true }
 
-[[bin]]
-name = "cert-gen"
-path = "src/bin/cert_gen.rs"
+[dev-dependencies]
+tokio = { workspace = true }
+async-nats = { workspace = true }
+futures = "0.3"
+chrono = "0.4"
 
 [features]
 default = ["build"]
