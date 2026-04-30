@@ -6,11 +6,31 @@ use uuid::Uuid;
 
 pub struct PostgresAppRepository {
     pool: PgPool,
+    master_key: String,
 }
 
 impl PostgresAppRepository {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, master_key: String) -> Self {
+        Self { pool, master_key }
+    }
+
+    fn decrypt_app(&self, mut app: App) -> App {
+        if let Some(ref encrypted) = app.github_webhook_secret
+            && let Ok(decrypted) = crate::crypto::decrypt(encrypted, &self.master_key)
+        {
+            app.github_webhook_secret = Some(decrypted);
+        }
+        app
+    }
+
+    fn decrypt_deployment(&self, mut deployment: Deployment) -> Deployment {
+        if let serde_json::Value::String(ref encrypted) = deployment.env_vars
+            && let Ok(decrypted_raw) = crate::crypto::decrypt(encrypted, &self.master_key)
+            && let Ok(parsed) = serde_json::from_str(&decrypted_raw)
+        {
+            deployment.env_vars = parsed;
+        }
+        deployment
     }
 }
 
@@ -26,6 +46,13 @@ impl AppRepository for PostgresAppRepository {
         github_webhook_secret: Option<String>,
     ) -> anyhow::Result<App> {
         let uid = Uuid::parse_str(user_id)?;
+
+        let encrypted_secret = if let Some(secret) = github_webhook_secret {
+            Some(crate::crypto::encrypt(&secret, &self.master_key)?)
+        } else {
+            None
+        };
+
         let result = sqlx::query_as::<_, App>(
             "INSERT INTO apps (name, git_url, port, hostname, user_id, github_webhook_secret) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *"
         )
@@ -34,12 +61,12 @@ impl AppRepository for PostgresAppRepository {
         .bind(port)
         .bind(hostname)
         .bind(uid)
-        .bind(github_webhook_secret)
+        .bind(encrypted_secret)
         .fetch_one(&self.pool)
         .await;
 
         match result {
-            Ok(app) => Ok(app),
+            Ok(app) => Ok(self.decrypt_app(app)),
             Err(e) => {
                 if let Some(db_err) = e.as_database_error()
                     && db_err.code().as_deref() == Some("23505")
@@ -60,7 +87,7 @@ impl AppRepository for PostgresAppRepository {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(app)
+        Ok(app.map(|a| self.decrypt_app(a)))
     }
 
     async fn get_app_by_name(&self, name: &str) -> anyhow::Result<Option<App>> {
@@ -69,7 +96,7 @@ impl AppRepository for PostgresAppRepository {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(app)
+        Ok(app.map(|a| self.decrypt_app(a)))
     }
 
     async fn delete_app(&self, id: Uuid) -> anyhow::Result<()> {
@@ -96,7 +123,7 @@ impl AppRepository for PostgresAppRepository {
             .await?
         };
 
-        Ok(apps)
+        Ok(apps.into_iter().map(|a| self.decrypt_app(a)).collect())
     }
 
     async fn set_active_deployment(&self, app_id: Uuid, deployment_id: Uuid) -> anyhow::Result<()> {
@@ -120,7 +147,11 @@ impl AppRepository for PostgresAppRepository {
 
     async fn create_deployment(&self, data: NewDeployment) -> anyhow::Result<Deployment> {
         let uid = Uuid::parse_str(&data.user_id)?;
-        let env_json = serde_json::to_value(data.env_vars)?;
+
+        // Encrypt env_vars
+        let env_raw = serde_json::to_string(&data.env_vars)?;
+        let encrypted_env = crate::crypto::encrypt(&env_raw, &self.master_key)?;
+        let env_json = serde_json::Value::String(encrypted_env);
 
         let deployment = sqlx::query_as::<_, Deployment>(
             r#"
@@ -140,7 +171,7 @@ impl AppRepository for PostgresAppRepository {
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(deployment)
+        Ok(self.decrypt_deployment(deployment))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -189,7 +220,7 @@ impl AppRepository for PostgresAppRepository {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(deployment)
+        Ok(deployment.map(|d| self.decrypt_deployment(d)))
     }
 
     async fn get_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<Option<Deployment>> {
@@ -199,7 +230,7 @@ impl AppRepository for PostgresAppRepository {
                 .fetch_optional(&self.pool)
                 .await?;
 
-        Ok(deployment)
+        Ok(deployment.map(|d| self.decrypt_deployment(d)))
     }
 
     async fn list_deployments_by_app(&self, app_id: Uuid) -> anyhow::Result<Vec<Deployment>> {
@@ -210,7 +241,10 @@ impl AppRepository for PostgresAppRepository {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(deployments)
+        Ok(deployments
+            .into_iter()
+            .map(|d| self.decrypt_deployment(d))
+            .collect())
     }
 
     async fn list_deployments_by_user(&self, user_id: &str) -> anyhow::Result<Vec<Deployment>> {
@@ -228,7 +262,10 @@ impl AppRepository for PostgresAppRepository {
             .await?
         };
 
-        Ok(deployments)
+        Ok(deployments
+            .into_iter()
+            .map(|d| self.decrypt_deployment(d))
+            .collect())
     }
 
     async fn delete_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<()> {
@@ -263,7 +300,7 @@ mod tests {
     async fn test_app_lifecycle() {
         let pool = get_test_pool().await;
         let user_repo = PostgresUserRepository::new(pool.clone());
-        let app_repo = PostgresAppRepository::new(pool.clone());
+        let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".into());
 
         // 1. Create a user first
         let email = format!("app_test_{}@example.com", Uuid::new_v4());
@@ -343,7 +380,7 @@ mod tests {
     #[ignore = "requires PostgreSQL"]
     async fn test_get_app_by_name() {
         let pool = get_test_pool().await;
-        let app_repo = PostgresAppRepository::new(pool.clone());
+        let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".into());
         let user_id = Uuid::new_v4();
         let name = format!("name-test-{}", Uuid::new_v4());
 

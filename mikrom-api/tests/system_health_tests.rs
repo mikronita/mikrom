@@ -13,7 +13,10 @@ async fn test_health_endpoint_structure() {
         "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
     });
     let db_pool = sqlx::PgPool::connect_lazy(&db_url).unwrap();
-    let app_repo = Arc::new(repositories::PostgresAppRepository::new(db_pool));
+    let app_repo = Arc::new(repositories::PostgresAppRepository::new(
+        db_pool,
+        "test-key".to_string(),
+    ));
 
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
@@ -27,7 +30,6 @@ async fn test_health_endpoint_structure() {
         jwt_secret: "test".to_string(),
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        build_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
     };
     let app = create_app(state);
 
@@ -61,7 +63,10 @@ async fn test_health_stream_endpoint() {
         "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
     });
     let db_pool = sqlx::PgPool::connect_lazy(&db_url).unwrap();
-    let app_repo = Arc::new(repositories::PostgresAppRepository::new(db_pool));
+    let app_repo = Arc::new(repositories::PostgresAppRepository::new(
+        db_pool,
+        "test-key".to_string(),
+    ));
 
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
@@ -75,7 +80,6 @@ async fn test_health_stream_endpoint() {
         jwt_secret: "test".to_string(),
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        build_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
     };
     let app = create_app(state);
 

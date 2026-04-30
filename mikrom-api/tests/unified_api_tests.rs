@@ -104,7 +104,6 @@ async fn test_hierarchical_deployment_status_success() {
         jwt_secret: "test-secret".into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
 
     let router = create_app(state);
@@ -190,7 +189,6 @@ async fn test_hierarchical_security_cross_app_prevention() {
         jwt_secret: "test-secret".into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
 
     let router = create_app(state);

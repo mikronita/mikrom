@@ -111,7 +111,6 @@ mod tests {
             jwt_secret,
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         let request = Request::builder()

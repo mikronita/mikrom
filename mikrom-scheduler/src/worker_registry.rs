@@ -1,6 +1,5 @@
 use crate::scheduler::ipam::Ipam;
 use sqlx::PgPool;
-use tonic::transport::Channel;
 
 pub use crate::metrics::HostMetrics;
 
@@ -12,7 +11,6 @@ pub struct Worker {
     pub agent_port: u16,
     pub bridge_ip: String,
     pub ipam: Ipam,
-    pub channel: Option<Channel>,
     pub metrics: Option<HostMetrics>,
     pub registered_at: i64,
     pub last_heartbeat: i64,
@@ -123,7 +121,6 @@ impl WorkerRegistry {
                 agent_port: r.get::<i32, _>("agent_port") as u16,
                 bridge_ip: r.get::<String, _>("bridge_ip").clone(),
                 ipam: Ipam::new(self.pool.clone(), r.get("id"), r.get("bridge_ip")),
-                channel: None,
                 metrics,
                 registered_at: r.get("registered_at"),
                 last_heartbeat: r.get("last_heartbeat"),
@@ -154,7 +151,6 @@ impl WorkerRegistry {
                     agent_port: r.get::<i32, _>("agent_port") as u16,
                     bridge_ip: r.get::<String, _>("bridge_ip").clone(),
                     ipam: Ipam::new(self.pool.clone(), r.get("id"), r.get("bridge_ip")),
-                    channel: None,
                     metrics,
                     registered_at: r.get("registered_at"),
                     last_heartbeat: r.get("last_heartbeat"),
@@ -194,7 +190,6 @@ impl WorkerRegistry {
                     agent_port: r.get::<i32, _>("agent_port") as u16,
                     bridge_ip: r.get::<String, _>("bridge_ip").clone(),
                     ipam: Ipam::new(self.pool.clone(), r.get("id"), r.get("bridge_ip")),
-                    channel: None,
                     metrics,
                     registered_at: r.get("registered_at"),
                     last_heartbeat: r.get("last_heartbeat"),

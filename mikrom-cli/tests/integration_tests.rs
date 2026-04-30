@@ -162,7 +162,7 @@ async fn test_client_list_apps() {
 
     let res = client.list_apps().await.unwrap();
     assert_eq!(res.len(), 1);
-    assert_eq!(res[0].name, "test-app");
+    assert_eq!(res[0].name, "app-one");
 }
 
 #[tokio::test]

@@ -52,7 +52,6 @@ pub struct AppState {
     pub jwt_secret: String,
     pub master_key: String,
     pub deployment_events: tokio::sync::broadcast::Sender<uuid::Uuid>,
-    pub build_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {

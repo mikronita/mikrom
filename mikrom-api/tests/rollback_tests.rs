@@ -123,7 +123,6 @@ async fn test_activate_deployment_endpoint() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
 
     let router = create_app(state);
@@ -193,7 +192,6 @@ async fn test_activate_deployment_wrong_owner() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
 
     let response = create_app(state)
@@ -293,7 +291,6 @@ async fn test_activate_deployment_not_running() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
 
     let response = create_app(state)

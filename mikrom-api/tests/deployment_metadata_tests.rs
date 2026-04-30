@@ -19,7 +19,7 @@ async fn get_test_pool() -> PgPool {
 async fn test_deployment_metadata_persistence() {
     let pool = get_test_pool().await;
     let user_repo = PostgresUserRepository::new(pool.clone());
-    let app_repo = PostgresAppRepository::new(pool.clone());
+    let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".to_string());
 
     // 1. Create a user
     let email = format!("metadata_test_{}@example.com", Uuid::new_v4());
