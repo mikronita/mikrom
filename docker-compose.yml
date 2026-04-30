@@ -35,6 +35,14 @@ services:
     networks:
       - mikrom
 
+  nats-test:
+    image: nats:2.10-alpine
+    ports:
+      - "4223:4222"
+      - "8223:8222"
+    networks:
+      - mikrom
+
   mikrom-scheduler:
     build:
       context: .

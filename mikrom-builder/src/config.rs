@@ -20,7 +20,7 @@ pub struct Config {
 }
 
 fn default_nats_url() -> String {
-    "nats://localhost:4222".to_string()
+    std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string())
 }
 
 fn default_host() -> String {

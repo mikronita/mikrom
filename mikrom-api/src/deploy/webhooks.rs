@@ -132,7 +132,9 @@ mod tests {
     use std::sync::Arc;
     use uuid::Uuid;
     async fn create_test_state(app_repo: MockAppRepository) -> AppState {
-        let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let nats_client = async_nats::connect(nats_url).await.unwrap();
         AppState {
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(app_repo),

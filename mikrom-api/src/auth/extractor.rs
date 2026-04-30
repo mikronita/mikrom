@@ -99,7 +99,9 @@ mod tests {
         let token =
             crate::auth::jwt::create_token(&user_id, &email, &UserRole::User, &jwt_secret).unwrap();
 
-        let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let nats_client = async_nats::connect(nats_url).await.unwrap();
         let state = AppState {
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(MockAppRepository::new()),
