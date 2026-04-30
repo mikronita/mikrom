@@ -209,7 +209,6 @@ mod tests {
             jwt_secret: "secret".into(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         let payload = RegisterRequest {
@@ -252,7 +251,6 @@ mod tests {
             jwt_secret: "secret".into(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         let payload = LoginRequest { email, password };

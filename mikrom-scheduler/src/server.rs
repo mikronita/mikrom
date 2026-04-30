@@ -7,26 +7,15 @@ use mikrom_proto::scheduler::{
 };
 
 use mikrom_proto::tls::ServiceCerts;
-use parking_lot::RwLock;
 use sqlx::PgPool;
-use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tonic::{Response, Status};
 use uuid::Uuid;
 
 pub struct SchedulerServer {
     scheduler: AppScheduler,
-    agent_clients: Arc<RwLock<HashMap<String, AgentClient>>>,
     nats_client: async_nats::Client,
     certs: Option<ServiceCerts>,
-}
-
-#[derive(Clone)]
-#[allow(dead_code)]
-struct AgentClient {
-    host_id: String,
-    channel: tonic::transport::Channel,
 }
 
 impl SchedulerServer {
@@ -41,7 +30,6 @@ impl SchedulerServer {
 
         Ok(Self {
             scheduler,
-            agent_clients: Arc::new(RwLock::new(HashMap::new())),
             nats_client,
             certs,
         })
@@ -850,7 +838,6 @@ impl Clone for SchedulerServer {
     fn clone(&self) -> Self {
         Self {
             scheduler: self.scheduler.clone(),
-            agent_clients: self.agent_clients.clone(),
             nats_client: self.nats_client.clone(),
             certs: self.certs.clone(),
         }

@@ -17,10 +17,12 @@ async fn main() -> anyhow::Result<()> {
     db::run_migrations(&db_pool).await?;
 
     let user_repo = PostgresUserRepository::new(db_pool.clone());
-    let app_repo = mikrom_api::repositories::PostgresAppRepository::new(db_pool.clone());
+    let app_repo = mikrom_api::repositories::PostgresAppRepository::new(
+        db_pool.clone(),
+        config.master_key.clone(),
+    );
 
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
-    let build_semaphore = Arc::new(tokio::sync::Semaphore::new(5)); // Limit to 5 concurrent builds
 
     tracing::info!("Connecting to NATS at {}...", config.nats_url);
     let nats_client = async_nats::connect(&config.nats_url)
@@ -40,7 +42,6 @@ async fn main() -> anyhow::Result<()> {
         jwt_secret: config.jwt_secret,
         master_key: config.master_key,
         deployment_events,
-        build_semaphore,
     };
 
     mikrom_api::start_background_tasks(state.clone());

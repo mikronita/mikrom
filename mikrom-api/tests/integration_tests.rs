@@ -9,7 +9,6 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 
 use mikrom_api::AppState;
-use mikrom_api::auth::{get_profile, login, register, update_profile};
 use mikrom_api::repositories::PostgresAppRepository;
 use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 
@@ -35,7 +34,7 @@ async fn get_test_pool() -> PgPool {
 
 async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
     let user_repo = PostgresUserRepository::new(pool.clone());
-    let app_repo = PostgresAppRepository::new(pool.clone());
+    let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".to_string());
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
@@ -48,7 +47,6 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         jwt_secret: jwt_secret.to_string(),
         master_key: "integration-master-key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
     mikrom_api::create_app(state)
 }

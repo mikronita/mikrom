@@ -31,7 +31,6 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
         jwt_secret: JWT_SECRET.into(),
         master_key: "key".into(),
         deployment_events: deployment_events.clone(),
-        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
 
     create_app(state)
@@ -245,7 +244,6 @@ async fn test_sse_deployments_stream_updates() {
         jwt_secret: JWT_SECRET.into(),
         master_key: "key".into(),
         deployment_events: deployment_events.clone(),
-        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
     };
 
     let mut router = create_app(state);

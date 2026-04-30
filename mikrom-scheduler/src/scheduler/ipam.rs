@@ -56,6 +56,12 @@ impl Ipam {
         // Use a transaction for atomic allocation
         let mut tx = self.pool.begin().await?;
 
+        // Lock the worker record to serialize allocations for this worker
+        sqlx::query("SELECT id FROM workers WHERE id = $1 FOR UPDATE")
+            .bind(&self.worker_id)
+            .execute(&mut *tx)
+            .await?;
+
         // Get currently allocated IPs for this worker
         let allocated_ips: std::collections::HashSet<String> =
             sqlx::query("SELECT ip_address FROM ip_allocations WHERE worker_id = $1")

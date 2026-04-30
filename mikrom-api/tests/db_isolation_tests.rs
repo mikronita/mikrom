@@ -43,14 +43,16 @@ mod tests {
 
         let state = AppState {
             user_repo: Arc::new(PostgresUserRepository::new(pool.clone())),
-            app_repo: Arc::new(PostgresAppRepository::new(pool.clone())),
+            app_repo: Arc::new(PostgresAppRepository::new(
+                pool.clone(),
+                "test-key".to_string(),
+            )),
             scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
             nats_client: nats_client.clone(),
             router_addr: "http://localhost:8080".to_string(),
             jwt_secret: "secret".into(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
-            build_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         // Subscribe to router updates
