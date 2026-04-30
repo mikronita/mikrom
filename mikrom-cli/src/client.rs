@@ -44,6 +44,7 @@ pub struct AppInfo {
     pub git_url: String,
     pub port: i32,
     pub hostname: Option<String>,
+    pub github_webhook_secret: Option<String>,
     pub active_deployment_id: Option<String>,
     pub created_at: Option<String>,
 }

@@ -30,6 +30,9 @@ pub struct AppResponse {
     pub name: String,
     pub git_url: String,
     pub port: u32,
+    pub hostname: Option<String>,
+    pub github_webhook_secret: Option<String>,
+    pub active_deployment_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -67,6 +70,8 @@ pub async fn create_app_handler(
         payload.name.to_lowercase().replace(' ', "-")
     );
 
+    let webhook_secret = Uuid::new_v4().to_string().replace('-', "");
+
     let app = state
         .app_repo
         .create_app(
@@ -75,7 +80,7 @@ pub async fn create_app_handler(
             port as i32,
             Some(hostname),
             &auth.user_id,
-            None,
+            Some(webhook_secret),
         )
         .await
         .map_err(ApiError::from)?;
@@ -87,6 +92,9 @@ pub async fn create_app_handler(
             name: app.name,
             git_url: app.git_url,
             port: app.port as u32,
+            hostname: app.hostname,
+            github_webhook_secret: app.github_webhook_secret,
+            active_deployment_id: app.active_deployment_id,
             created_at: app.created_at,
         }),
     ))
@@ -121,6 +129,9 @@ pub async fn list_apps_handler(
                 name: a.name,
                 git_url: a.git_url,
                 port: a.port as u32,
+                hostname: a.hostname,
+                github_webhook_secret: a.github_webhook_secret,
+                active_deployment_id: a.active_deployment_id,
                 created_at: a.created_at,
             })
             .collect(),
