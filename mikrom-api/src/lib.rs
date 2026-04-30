@@ -35,6 +35,9 @@ pub use vms::{
     pause_deployment, resume_deployment, stop_deployment, watch_deployments,
 };
 
+use mikrom_proto::router::RouterConfigUpdate;
+use prost::Message;
+
 use auth::{get_profile, login, register, update_profile};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -50,12 +53,6 @@ pub struct AppState {
     pub master_key: String,
     pub deployment_events: tokio::sync::broadcast::Sender<uuid::Uuid>,
     pub build_semaphore: Arc<tokio::sync::Semaphore>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct RouterConfig {
-    pub hostname: String,
-    pub target_url: Option<String>,
 }
 
 impl AppState {
@@ -89,28 +86,32 @@ impl AppState {
             None
         };
 
-        let config = RouterConfig {
+        let config = RouterConfigUpdate {
             hostname: hostname.clone(),
             target_url,
         };
 
-        let payload = serde_json::to_vec(&config)?;
         self.nats_client
-            .publish("mikrom.router.config_updated", payload.into())
+            .publish(
+                "mikrom.router.config_updated",
+                config.encode_to_vec().into(),
+            )
             .await?;
 
         Ok(())
     }
 
     pub async fn remove_route(&self, hostname: &str) -> anyhow::Result<()> {
-        let config = RouterConfig {
+        let config = RouterConfigUpdate {
             hostname: hostname.to_string(),
             target_url: None,
         };
 
-        let payload = serde_json::to_vec(&config)?;
         self.nats_client
-            .publish("mikrom.router.config_updated", payload.into())
+            .publish(
+                "mikrom.router.config_updated",
+                config.encode_to_vec().into(),
+            )
             .await?;
 
         Ok(())

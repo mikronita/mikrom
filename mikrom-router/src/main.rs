@@ -8,8 +8,10 @@ use axum::{
 };
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
-use mikrom_router::{AppState, RouterConfig, resolve_target};
+use mikrom_proto::router::RouterConfigUpdate;
+use mikrom_router::{AppState, resolve_target};
 use moka::future::Cache;
+use prost::Message;
 use sqlx::PgPool;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
@@ -68,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
 
             info!("Listening for router config updates via NATS...");
             while let Some(msg) = nats_sub.next().await {
-                if let Ok(update) = serde_json::from_slice::<RouterConfig>(&msg.payload) {
+                if let Ok(update) = RouterConfigUpdate::decode(&msg.payload[..]) {
                     info!(
                         "Received router update for {}: {:?}",
                         update.hostname, update.target_url
@@ -94,10 +96,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 } else {
                     // Invalid message: log it but don't clear everything to avoid performance spikes
-                    error!(
-                        "Received invalid router update payload: {}",
-                        String::from_utf8_lossy(&msg.payload)
-                    );
+                    error!("Received invalid router update payload (failed to decode Protobuf)");
                 }
             }
             error!("NATS subscription closed, reconnecting in 5s...");

@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use mikrom_api::AppState;
-    use mikrom_api::RouterConfig;
     use mikrom_api::repositories::PostgresAppRepository;
     use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
     use sqlx::PgPool;
@@ -74,7 +73,7 @@ mod tests {
         };
 
         // Subscribe to router updates
-        let mut sub = nats_client
+        let _sub = nats_client
             .subscribe("mikrom.router.config_updated")
             .await
             .unwrap();

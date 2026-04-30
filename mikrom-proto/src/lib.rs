@@ -18,5 +18,9 @@ pub mod builder {
     pub use builder_service_server::{BuilderService, BuilderServiceServer};
 }
 
+pub mod router {
+    include!("mikrom.router.v1.rs");
+}
+
 pub mod telemetry;
 pub mod tls;

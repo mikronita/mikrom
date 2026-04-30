@@ -4,6 +4,8 @@ use crate::firecracker::process::{
     CommandExecutor, RealCommandExecutor, VmDetailedInfo, VmProcess,
 };
 
+use mikrom_proto::agent::VmLogPayload;
+use prost::Message;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -451,16 +453,11 @@ impl FirecrackerManager {
                     // 2. Publish to NATS (new)
                     if let Some(nats) = nats_clone.read().await.as_ref() {
                         let subject = format!("mikrom.logs.{}", vm_id_clone);
-                        let payload = serde_json::json!({
-                            "line": l,
-                            "timestamp": chrono::Utc::now().timestamp(),
-                        });
-                        let _ = nats
-                            .publish(
-                                subject,
-                                serde_json::to_vec(&payload).unwrap_or_default().into(),
-                            )
-                            .await;
+                        let payload = VmLogPayload {
+                            line: l,
+                            timestamp: chrono::Utc::now().timestamp(),
+                        };
+                        let _ = nats.publish(subject, payload.encode_to_vec().into()).await;
                     }
                 } else {
                     break;
