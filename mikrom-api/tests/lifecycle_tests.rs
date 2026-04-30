@@ -142,7 +142,9 @@ async fn test_promotion_back_and_forth() {
         .times(1)
         .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
 
-    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
@@ -301,7 +303,9 @@ async fn test_promotion_pauses_previous_active() {
         .times(1)
         .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
 
-    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
@@ -431,7 +435,9 @@ async fn test_activate_stopped_deployment_resumes_it() {
         .times(1)
         .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
 
-    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
@@ -532,7 +538,9 @@ async fn test_delete_app_cleans_up_resources() {
         .times(1)
         .returning(|_| Ok(()));
 
-    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),

@@ -111,7 +111,9 @@ async fn test_activate_deployment_endpoint() {
         .times(1)
         .returning(move |_| Ok(vec![]));
 
-    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
@@ -179,7 +181,9 @@ async fn test_activate_deployment_wrong_owner() {
         .expect_get_app_by_name()
         .returning(move |_| Ok(Some(app.clone())));
 
-    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
@@ -277,7 +281,9 @@ async fn test_activate_deployment_not_running() {
         .expect_set_active_deployment()
         .returning(|_, _| Ok(()));
 
-    let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),

@@ -197,7 +197,9 @@ mod tests {
         let email = "test@example.com".to_string();
         mock_repo.expect_create().returning(|_| Ok(Uuid::new_v4()));
 
-        let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let nats_client = async_nats::connect(nats_url).await.unwrap();
         let state = AppState {
             user_repo: Arc::new(mock_repo),
             app_repo: Arc::new(crate::repositories::app_repository::MockAppRepository::new()),
@@ -238,7 +240,9 @@ mod tests {
             .expect_find_by_email()
             .returning(move |_| Ok(Some(user.clone())));
 
-        let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let nats_client = async_nats::connect(nats_url).await.unwrap();
         let state = AppState {
             user_repo: Arc::new(mock_repo),
             app_repo: Arc::new(crate::repositories::app_repository::MockAppRepository::new()),
