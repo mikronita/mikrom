@@ -104,6 +104,14 @@ async fn test_create_app_endpoint() {
     assert_eq!(app_resp["name"], app_name);
     assert_eq!(app_resp["git_url"], git_url);
     assert_eq!(app_resp["port"], 8080);
+    assert!(app_resp["github_webhook_secret"].is_string());
+    assert!(
+        !app_resp["github_webhook_secret"]
+            .as_str()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(app_resp["hostname"], "test-app.apps.mikrom.es");
 }
 
 #[tokio::test]
@@ -179,4 +187,84 @@ async fn test_create_app_duplicate_name() {
             .unwrap()
             .contains("already taken")
     );
+}
+
+#[tokio::test]
+async fn test_list_apps_includes_secret() {
+    let mock_user_repo = MockUserRepository::new();
+    let mut mock_app_repo = MockAppRepository::new();
+
+    let user_id = Uuid::new_v4();
+    let app_id = Uuid::new_v4();
+    let jwt_secret = "test-secret";
+
+    let token = mikrom_api::auth::jwt::create_token(
+        &user_id.to_string(),
+        "test@example.com",
+        &mikrom_api::repositories::user_repository::UserRole::User,
+        jwt_secret,
+    )
+    .unwrap();
+
+    let secret = "test-webhook-secret-123".to_string();
+
+    mock_app_repo
+        .expect_list_apps_by_user()
+        .with(eq(user_id.to_string()))
+        .times(1)
+        .returning(move |_| {
+            Ok(vec![App {
+                id: app_id,
+                name: "test-app".to_string(),
+                git_url: "git".to_string(),
+                port: 8080,
+                hostname: Some("test-app.apps.mikrom.es".to_string()),
+                user_id,
+                github_webhook_secret: Some(secret.clone()),
+                active_deployment_id: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }])
+        });
+
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let state = AppState {
+        user_repo: Arc::new(mock_user_repo),
+        app_repo: Arc::new(mock_app_repo),
+        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        nats_client,
+        router_addr: "http://localhost:8080".to_string(),
+        jwt_secret: jwt_secret.into(),
+        master_key: "key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
+        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+    };
+
+    let router = create_app(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/apps")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let apps_resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert!(apps_resp.is_array());
+    let app = &apps_resp[0];
+    assert_eq!(app["github_webhook_secret"], "test-webhook-secret-123");
+    assert_eq!(app["hostname"], "test-app.apps.mikrom.es");
 }
