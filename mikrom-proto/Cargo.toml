@@ -19,6 +19,10 @@ opentelemetry-semantic-conventions = "0.31.0"
 anyhow = "1.0.102"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 
+[[bin]]
+name = "cert-gen"
+path = "src/bin/cert_gen.rs"
+
 [build-dependencies]
 tonic-build = { workspace = true }
 

@@ -18,6 +18,7 @@ async fn test_nats_protobuf_serialization_router() {
     let update = RouterConfigUpdate {
         hostname: "example.com".to_string(),
         target_url: Some("http://10.0.0.1:8080".to_string()),
+        timestamp: chrono::Utc::now().timestamp(),
     };
 
     let payload = update.encode_to_vec();

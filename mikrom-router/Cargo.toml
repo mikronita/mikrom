@@ -29,3 +29,7 @@ url = "2.5"
 axum-extra = { version = "0.10", features = ["typed-header"] }
 
 mikrom-proto = { path = "../mikrom-proto" }
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }
+

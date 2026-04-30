@@ -5,4 +5,6 @@ pub struct RouterConfigUpdate {
     pub hostname: ::prost::alloc::string::String,
     #[prost(string, optional, tag = "2")]
     pub target_url: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(int64, tag = "3")]
+    pub timestamp: i64,
 }

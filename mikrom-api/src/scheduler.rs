@@ -83,7 +83,7 @@ impl Scheduler for NatsScheduler {
 
         let response = self
             .client
-            .request("mikrom.scheduler.pause_app", buf.into())
+            .request(mikrom_proto::subjects::SCHEDULER_PAUSE_APP, buf.into())
             .await
             .map_err(|e| e.to_string())?;
 
@@ -101,7 +101,7 @@ impl Scheduler for NatsScheduler {
 
         let response = self
             .client
-            .request("mikrom.scheduler.resume_app", buf.into())
+            .request(mikrom_proto::subjects::SCHEDULER_RESUME_APP, buf.into())
             .await
             .map_err(|e| e.to_string())?;
 
@@ -119,7 +119,7 @@ impl Scheduler for NatsScheduler {
 
         let response = self
             .client
-            .request("mikrom.scheduler.delete_app", buf.into())
+            .request(mikrom_proto::subjects::SCHEDULER_DELETE_APP, buf.into())
             .await
             .map_err(|e| e.to_string())?;
 
