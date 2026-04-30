@@ -120,14 +120,10 @@ async fn test_encryption_at_rest() {
 
     // 4. Test decryption with wrong key (simulated by creating a new repo instance)
     let app_repo_wrong_key = PostgresAppRepository::new(pool.clone(), "wrong-key".to_string());
-    let app_wrong = app_repo_wrong_key
-        .get_app(app.id)
-        .await
-        .expect("query should succeed");
+    let result = app_repo_wrong_key.get_app(app.id).await;
 
-    // In our implementation, if decryption fails, it currently returns the original (encrypted) string or None
-    // Let's verify that the secret returned is NOT the original readable secret
-    if let Some(a) = app_wrong {
-        assert_ne!(a.github_webhook_secret.as_deref(), Some(webhook_secret));
-    }
+    // Now it should return an error as per code review feedback
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("Failed to decrypt") || err_msg.contains("Decryption failed"));
 }
