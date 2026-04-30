@@ -14,23 +14,61 @@ impl PostgresAppRepository {
         Self { pool, master_key }
     }
 
-    fn decrypt_app(&self, mut app: App) -> App {
-        if let Some(ref encrypted) = app.github_webhook_secret
-            && let Ok(decrypted) = crate::crypto::decrypt(encrypted, &self.master_key)
-        {
-            app.github_webhook_secret = Some(decrypted);
+    fn decrypt_app(&self, mut app: App) -> anyhow::Result<App> {
+        if let Some(ref encrypted) = app.github_webhook_secret {
+            match crate::crypto::decrypt(encrypted, &self.master_key) {
+                Ok(decrypted) => {
+                    app.github_webhook_secret = Some(decrypted);
+                },
+                Err(e) => {
+                    tracing::error!(
+                        app_id = %app.id,
+                        error = ?e,
+                        "Failed to decrypt github_webhook_secret. Data might be corrupted or MASTER_KEY is incorrect."
+                    );
+                    return Err(anyhow::anyhow!(
+                        "Failed to decrypt application secret: {}",
+                        e
+                    ));
+                },
+            }
         }
-        app
+        Ok(app)
     }
 
-    fn decrypt_deployment(&self, mut deployment: Deployment) -> Deployment {
-        if let serde_json::Value::String(ref encrypted) = deployment.env_vars
-            && let Ok(decrypted_raw) = crate::crypto::decrypt(encrypted, &self.master_key)
-            && let Ok(parsed) = serde_json::from_str(&decrypted_raw)
-        {
-            deployment.env_vars = parsed;
+    fn decrypt_deployment(&self, mut deployment: Deployment) -> anyhow::Result<Deployment> {
+        if let serde_json::Value::String(ref encrypted) = deployment.env_vars {
+            match crate::crypto::decrypt(encrypted, &self.master_key) {
+                Ok(decrypted_raw) => match serde_json::from_str(&decrypted_raw) {
+                    Ok(parsed) => {
+                        deployment.env_vars = parsed;
+                    },
+                    Err(e) => {
+                        tracing::error!(
+                            deployment_id = %deployment.id,
+                            error = ?e,
+                            "Failed to parse decrypted env_vars JSON."
+                        );
+                        return Err(anyhow::anyhow!(
+                            "Failed to parse decrypted environment variables: {}",
+                            e
+                        ));
+                    },
+                },
+                Err(e) => {
+                    tracing::error!(
+                        deployment_id = %deployment.id,
+                        error = ?e,
+                        "Failed to decrypt env_vars. Data might be corrupted or MASTER_KEY is incorrect."
+                    );
+                    return Err(anyhow::anyhow!(
+                        "Failed to decrypt deployment environment variables: {}",
+                        e
+                    ));
+                },
+            }
         }
-        deployment
+        Ok(deployment)
     }
 }
 
@@ -66,7 +104,7 @@ impl AppRepository for PostgresAppRepository {
         .await;
 
         match result {
-            Ok(app) => Ok(self.decrypt_app(app)),
+            Ok(app) => self.decrypt_app(app),
             Err(e) => {
                 if let Some(db_err) = e.as_database_error()
                     && db_err.code().as_deref() == Some("23505")
@@ -87,7 +125,10 @@ impl AppRepository for PostgresAppRepository {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(app.map(|a| self.decrypt_app(a)))
+        match app {
+            Some(a) => Ok(Some(self.decrypt_app(a)?)),
+            None => Ok(None),
+        }
     }
 
     async fn get_app_by_name(&self, name: &str) -> anyhow::Result<Option<App>> {
@@ -96,7 +137,10 @@ impl AppRepository for PostgresAppRepository {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(app.map(|a| self.decrypt_app(a)))
+        match app {
+            Some(a) => Ok(Some(self.decrypt_app(a)?)),
+            None => Ok(None),
+        }
     }
 
     async fn delete_app(&self, id: Uuid) -> anyhow::Result<()> {
@@ -123,7 +167,11 @@ impl AppRepository for PostgresAppRepository {
             .await?
         };
 
-        Ok(apps.into_iter().map(|a| self.decrypt_app(a)).collect())
+        let mut decrypted_apps = Vec::with_capacity(apps.len());
+        for app in apps {
+            decrypted_apps.push(self.decrypt_app(app)?);
+        }
+        Ok(decrypted_apps)
     }
 
     async fn set_active_deployment(&self, app_id: Uuid, deployment_id: Uuid) -> anyhow::Result<()> {
@@ -171,7 +219,7 @@ impl AppRepository for PostgresAppRepository {
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(self.decrypt_deployment(deployment))
+        self.decrypt_deployment(deployment)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -220,7 +268,10 @@ impl AppRepository for PostgresAppRepository {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(deployment.map(|d| self.decrypt_deployment(d)))
+        match deployment {
+            Some(d) => Ok(Some(self.decrypt_deployment(d)?)),
+            None => Ok(None),
+        }
     }
 
     async fn get_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<Option<Deployment>> {
@@ -230,7 +281,10 @@ impl AppRepository for PostgresAppRepository {
                 .fetch_optional(&self.pool)
                 .await?;
 
-        Ok(deployment.map(|d| self.decrypt_deployment(d)))
+        match deployment {
+            Some(d) => Ok(Some(self.decrypt_deployment(d)?)),
+            None => Ok(None),
+        }
     }
 
     async fn list_deployments_by_app(&self, app_id: Uuid) -> anyhow::Result<Vec<Deployment>> {
@@ -241,10 +295,11 @@ impl AppRepository for PostgresAppRepository {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(deployments
-            .into_iter()
-            .map(|d| self.decrypt_deployment(d))
-            .collect())
+        let mut decrypted_deps = Vec::with_capacity(deployments.len());
+        for dep in deployments {
+            decrypted_deps.push(self.decrypt_deployment(dep)?);
+        }
+        Ok(decrypted_deps)
     }
 
     async fn list_deployments_by_user(&self, user_id: &str) -> anyhow::Result<Vec<Deployment>> {
@@ -262,10 +317,11 @@ impl AppRepository for PostgresAppRepository {
             .await?
         };
 
-        Ok(deployments
-            .into_iter()
-            .map(|d| self.decrypt_deployment(d))
-            .collect())
+        let mut decrypted_deps = Vec::with_capacity(deployments.len());
+        for dep in deployments {
+            decrypted_deps.push(self.decrypt_deployment(dep)?);
+        }
+        Ok(decrypted_deps)
     }
 
     async fn delete_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<()> {
