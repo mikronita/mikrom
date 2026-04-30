@@ -20,7 +20,7 @@ import { Rocket, GitBranch, Zap, User } from "lucide-react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { useApps, useDeployments, useActivateDeployment, useDeployAppVersion, useDeleteApp } from "@/lib/hooks/use-apps";
+import { useApps, useDeployments, useActivateDeployment, useDeployAppVersion, useDeleteApp, useAppSecret } from "@/lib/hooks/use-apps";
 import { useVm } from "@/lib/hooks/use-vms";
 import { API_BASE_URL } from "@/lib/api";
 import { 
@@ -113,6 +113,7 @@ export default function AppDetailPage() {
   const activateMutation = useActivateDeployment();
   const deployAppVersionMutation = useDeployAppVersion();
   const deleteAppMutation = useDeleteApp();
+  const { data: realSecret } = useAppSecret(decodedName);
 
   const [showSecret, setShowSecret] = useState(false);
   const [activeChart, setActiveChart] = useState<"cpu" | "ram">("cpu");
@@ -629,7 +630,7 @@ export default function AppDetailPage() {
                       <div className="relative flex-1">
                         <Input
                           type={showSecret ? "text" : "password"}
-                          value={app?.github_webhook_secret || ""}
+                          value={realSecret || ""}
                           readOnly
                           className="font-mono text-xs w-full h-9 pr-10"
                         />
@@ -640,7 +641,7 @@ export default function AppDetailPage() {
                           {showSecret ? <HiEyeOff className="w-4 h-4" /> : <HiEye className="w-4 h-4" />}
                         </button>
                       </div>
-                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={(e) => copyToClipboard(app?.github_webhook_secret || "", e)}>
+                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={(e) => copyToClipboard(realSecret || "", e)}>
                         <HiClipboard className="w-4 h-4" />
                       </Button>
                     </div>

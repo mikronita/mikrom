@@ -84,6 +84,11 @@ pub enum AppCommands {
         #[arg(long, short, help = "Name of the application")]
         name: String,
     },
+    /// Show the GitHub webhook secret for an application
+    Secret {
+        #[arg(long, short, help = "Name of the application")]
+        name: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

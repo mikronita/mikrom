@@ -401,6 +401,27 @@ impl MikromClient {
         }
     }
 
+    pub async fn get_app_secret(&self, app_name: &str) -> anyhow::Result<String> {
+        let mut req = self
+            .http
+            .get(format!("{}/apps/{}/secret", self.base_url, app_name));
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp.json().await?;
+            Ok(body["github_webhook_secret"]
+                .as_str()
+                .unwrap_or("")
+                .to_string())
+        } else {
+            let status = resp.status().as_u16();
+            let err: ErrorResponse = resp.json().await?;
+            bail!("{} (HTTP {})", err.error, status);
+        }
+    }
+
     pub async fn deploy_app_version(&self, app_id: &str) -> anyhow::Result<DeployResponse> {
         let mut req = self
             .http

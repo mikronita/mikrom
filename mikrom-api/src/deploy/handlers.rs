@@ -26,6 +26,39 @@ pub struct CreateAppRequest {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+pub struct AppSecretResponse {
+    pub github_webhook_secret: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/apps/{app_name}/secret",
+    params(
+        ("app_name" = String, Path, description = "Application name")
+    ),
+    responses(
+        (status = 200, description = "Get application secret", body = AppSecretResponse),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "apps",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn get_app_secret_handler(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(app_name): Path<String>,
+) -> ApiResult<Json<AppSecretResponse>> {
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+
+    Ok(Json(AppSecretResponse {
+        github_webhook_secret: app.github_webhook_secret,
+    }))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AppResponse {
     pub id: Uuid,
     pub name: String,

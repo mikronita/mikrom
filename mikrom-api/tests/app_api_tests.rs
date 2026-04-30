@@ -268,3 +268,80 @@ async fn test_list_apps_includes_secret() {
     assert_eq!(app["github_webhook_secret"], "********");
     assert_eq!(app["hostname"], "test-app.apps.mikrom.es");
 }
+
+#[tokio::test]
+async fn test_get_app_secret_endpoint() {
+    let mock_user_repo = MockUserRepository::new();
+    let mut mock_app_repo = MockAppRepository::new();
+
+    let user_id = Uuid::new_v4();
+    let app_id = Uuid::new_v4();
+    let app_name = "secret-app";
+    let jwt_secret = "test-secret";
+    let webhook_secret = "real-secret-123";
+
+    let token = mikrom_api::auth::jwt::create_token(
+        &user_id.to_string(),
+        "test@example.com",
+        &mikrom_api::repositories::user_repository::UserRole::User,
+        jwt_secret,
+    )
+    .unwrap();
+
+    mock_app_repo
+        .expect_get_app_by_name()
+        .with(eq(app_name))
+        .times(1)
+        .returning(move |name| {
+            Ok(Some(App {
+                id: app_id,
+                name: name.to_string(),
+                git_url: "git".to_string(),
+                port: 8080,
+                hostname: None,
+                user_id,
+                github_webhook_secret: Some(webhook_secret.to_string()),
+                active_deployment_id: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }))
+        });
+
+    let nats_url =
+        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let state = AppState {
+        user_repo: Arc::new(mock_user_repo),
+        app_repo: Arc::new(mock_app_repo),
+        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        nats_client,
+        router_addr: "http://localhost:8080".to_string(),
+        jwt_secret: jwt_secret.into(),
+        master_key: "key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
+        build_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+    };
+
+    let router = create_app(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/apps/{}/secret", app_name))
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let secret_resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(secret_resp["github_webhook_secret"], "real-secret-123");
+}

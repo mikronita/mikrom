@@ -465,6 +465,19 @@ export async function listApps(token: string): Promise<{ data?: AppInfo[]; error
   }
 }
 
+export async function getAppSecret(token: string, appName: string): Promise<{ data?: { github_webhook_secret: string | null }; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/secret`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<{ github_webhook_secret: string | null }>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch app secret") };
+    return { data: result as { github_webhook_secret: string | null } };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
 export async function createApp(token: string, data: CreateAppRequest): Promise<{ data?: AppInfo; error?: string }> {
   try {
     const response = await fetch(`${API_BASE_URL}/apps`, {

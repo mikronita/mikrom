@@ -162,7 +162,24 @@ async fn test_client_list_apps() {
 
     let res = client.list_apps().await.unwrap();
     assert_eq!(res.len(), 1);
-    assert_eq!(res[0].name, "app-one");
+    assert_eq!(res[0].name, "test-app");
+}
+
+#[tokio::test]
+async fn test_client_get_app_secret() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("GET"))
+        .and(path("/apps/test-app/secret"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "github_webhook_secret": "real-secret-456"
+        })))
+        .mount(&server)
+        .await;
+
+    let res = client.get_app_secret("test-app").await.unwrap();
+    assert_eq!(res, "real-secret-456");
 }
 
 #[tokio::test]

@@ -151,6 +151,10 @@ pub fn create_app(state: AppState) -> Router {
             axum::routing::delete(crate::deploy::delete_app_handler),
         )
         .route(
+            "/apps/:app_name/secret",
+            get(crate::deploy::get_app_secret_handler),
+        )
+        .route(
             "/apps/:app_name/deploy",
             axum::routing::post(crate::deploy::deploy_app_version_handler),
         )

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   listApps, 
+  getAppSecret,
   createApp, 
   deleteApp,
   deployAppVersion, 
@@ -19,6 +20,7 @@ export const appsKeys = {
   all: ["apps"] as const,
   list: () => [...appsKeys.all, "list"] as const,
   detail: (id: string) => [...appsKeys.all, "detail", id] as const,
+  secret: (appName: string) => [...appsKeys.all, "secret", appName] as const,
   deployments: (appName: string) => [...appsKeys.all, "deployments", appName] as const,
   vms: ["vms"] as const,
 };
@@ -152,5 +154,21 @@ export function useActivateDeployment() {
       queryClient.invalidateQueries({ queryKey: appsKeys.list() });
       queryClient.invalidateQueries({ queryKey: appsKeys.deployments(variables.appName) });
     },
+  });
+}
+
+export function useAppSecret(appName: string) {
+  const token = getToken();
+
+  return useQuery({
+    queryKey: appsKeys.secret(appName),
+    queryFn: async () => {
+      if (!token) throw new Error("No token found");
+      const result = await getAppSecret(token, appName);
+      if (result.error) throw new Error(result.error);
+      return result.data?.github_webhook_secret ?? null;
+    },
+    enabled: !!token && !!appName,
+    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }

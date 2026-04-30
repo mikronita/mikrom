@@ -234,6 +234,24 @@ pub async fn handle_app(client: &MikromClient, cmd: crate::commands::AppCommands
                 name
             );
         },
+        crate::commands::AppCommands::Secret { name } => {
+            let secret = client.get_app_secret(&name).await?;
+            if secret.is_empty() {
+                println!(
+                    "{} No webhook secret configured for app {}.",
+                    INFO,
+                    bold_cyan(&name)
+                );
+            } else {
+                println!(
+                    "{} {} GitHub Webhook Secret for {}:",
+                    SUCCESS,
+                    green_label("Secret:"),
+                    bold_cyan(&name)
+                );
+                println!("  {}", secret);
+            }
+        },
     }
     Ok(())
 }
