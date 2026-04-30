@@ -265,6 +265,6 @@ async fn test_list_apps_includes_secret() {
 
     assert!(apps_resp.is_array());
     let app = &apps_resp[0];
-    assert_eq!(app["github_webhook_secret"], "test-webhook-secret-123");
+    assert_eq!(app["github_webhook_secret"], "********");
     assert_eq!(app["hostname"], "test-app.apps.mikrom.es");
 }

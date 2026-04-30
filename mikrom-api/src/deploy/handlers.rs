@@ -9,6 +9,7 @@ use axum::{
     response::sse::{Event, Sse},
 };
 use futures::stream::Stream;
+use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use tokio_stream::StreamExt;
@@ -70,7 +71,7 @@ pub async fn create_app_handler(
         payload.name.to_lowercase().replace(' ', "-")
     );
 
-    let webhook_secret = Uuid::new_v4().to_string().replace('-', "");
+    let webhook_secret = Alphanumeric.sample_string(&mut rand::rng(), 32);
 
     let app = state
         .app_repo
@@ -130,7 +131,10 @@ pub async fn list_apps_handler(
                 git_url: a.git_url,
                 port: a.port as u32,
                 hostname: a.hostname,
-                github_webhook_secret: a.github_webhook_secret,
+                github_webhook_secret: a
+                    .github_webhook_secret
+                    .as_ref()
+                    .map(|_| "********".to_string()),
                 active_deployment_id: a.active_deployment_id,
                 created_at: a.created_at,
             })
