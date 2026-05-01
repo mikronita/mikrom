@@ -1,5 +1,7 @@
 use crate::firecracker::api::{fc_patch, fc_put, wait_for_socket};
 use crate::firecracker::config::{FirecrackerConfig, FirecrackerError, VmConfig, VmInfo, VmStatus};
+use crate::firecracker::guard::VmStartupGuard;
+use crate::firecracker::paths::VmPaths;
 use crate::firecracker::process::{
     CommandExecutor, RealCommandExecutor, VmDetailedInfo, VmProcess,
 };
@@ -7,6 +9,7 @@ use crate::firecracker::process::{
 use mikrom_proto::agent::VmLogPayload;
 use prost::Message;
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -293,35 +296,18 @@ impl FirecrackerManager {
         vm_id: String,
         app_id: String,
         image: String,
-        config: VmConfig,
+        mut config: VmConfig,
     ) -> Result<(), FirecrackerError> {
         tracing::info!(vm_id = %vm_id, "Background VM startup initiated");
 
-        // ── Exclusivity: ensure only one VM per app runs on this agent ────────
-        let other_vms: Vec<String> = {
-            let vms = self.vms.read().await;
-            vms.values()
-                .filter(|v| v.app_id == app_id && v.vm_id != vm_id && v.status != VmStatus::Stopped)
-                .map(|v| v.vm_id.clone())
-                .collect()
-        };
+        let paths = VmPaths::new(&self.fc_config.data_dir, &self.agent_id, &vm_id);
 
-        for other_id in other_vms {
-            tracing::info!(
-                new_vm_id = %vm_id,
-                old_vm_id = %other_id,
-                app_id = %app_id,
-                "Stopping existing VM for the same application to ensure exclusivity"
-            );
-            // We use stop_vm instead of pause_vm here to be faster and simpler for this failsafe.
-            let _ = self.stop_vm(&other_id).await;
-        }
+        // 1. Exclusivity check
+        self.ensure_app_exclusivity(&app_id, &vm_id).await;
 
-        let kernel_path = if let Some(p) = self.fc_config.kernel_path.clone() {
-            p
-        } else {
+        // 2. Kernel check (Stub mode check)
+        let Some(kernel_path) = self.fc_config.kernel_path.clone() else {
             tracing::info!(vm_id = %vm_id, "Stub mode: marking as running");
-            // Stub mode
             let mut vms = self.vms.write().await;
             if let Some(vm) = vms.get_mut(&vm_id) {
                 vm.status = VmStatus::Running;
@@ -330,103 +316,150 @@ impl FirecrackerManager {
             return Ok(());
         };
 
-        let rootfs_path = std::path::Path::new(&self.fc_config.data_dir)
-            .join(format!("fc-{}-{}-rootfs.ext4", self.agent_id, vm_id))
-            .to_string_lossy()
-            .to_string();
-        self.prepare_rootfs(&vm_id, &image, &rootfs_path, config.port)
+        // 3. Prepare RootFS
+        let rootfs_path = paths.rootfs_path();
+        self.prepare_rootfs(&vm_id, &image, &rootfs_path.to_string_lossy(), config.port)
             .await?;
 
-        // Resolve networking: if scheduler didn't assign an IP, allocate from bridge subnet.
-        let config = if config.ip_address.as_deref().unwrap_or("").is_empty() {
-            match self.allocate_vm_network().await {
-                Some((ip, gw, mac)) => {
-                    tracing::info!(vm_id = %vm_id, ip = %ip, "Allocated IP from agent bridge subnet");
-                    VmConfig {
-                        ip_address: Some(ip),
-                        gateway: Some(gw),
-                        mac_address: Some(mac),
-                        ..config
-                    }
-                },
-                None => {
-                    tracing::warn!(vm_id = %vm_id, "No available IPs in bridge subnet, starting without networking");
-                    config
-                },
+        // 4. Resolve Networking
+        if config.ip_address.as_deref().unwrap_or("").is_empty() {
+            if let Some((ip, gw, mac)) = self.allocate_vm_network().await {
+                tracing::info!(vm_id = %vm_id, ip = %ip, "Allocated IP from agent bridge subnet");
+                config.ip_address = Some(ip);
+                config.gateway = Some(gw);
+                config.mac_address = Some(mac);
+            } else {
+                tracing::warn!(vm_id = %vm_id, "No available IPs in bridge subnet, starting without networking");
             }
-        } else {
-            config
-        };
+        }
 
-        // ── Networking setup ───────────────────────────────────────────────────
         let tap_name = if config.ip_address.is_some() {
             Some(self.setup_tap(&vm_id).await?)
         } else {
             None
         };
 
-        // ── Jailer setup (if enabled) ──────────────────────────────────────────
-        let fc_binary = &self.fc_config.binary;
-        let (exec_binary, exec_args, socket_path, chroot_dir) = if self.fc_config.use_jailer {
-            self.setup_jailer(&vm_id, &kernel_path, &rootfs_path)
-                .await?
+        // 5. Initialize Startup Guard
+        let mut guard = VmStartupGuard::new(vm_id.clone(), paths.socket_path());
+        guard.tap_name = tap_name.clone();
+
+        // 6. Jailer or Direct Spawn
+        let (exec_binary, exec_args, chroot_dir) = if self.fc_config.use_jailer {
+            let (bin, args, _, chroot) = self
+                .setup_jailer(&vm_id, &kernel_path, &rootfs_path.to_string_lossy())
+                .await?;
+            guard.chroot_dir = chroot.clone().map(PathBuf::from);
+            (bin, args, chroot)
         } else {
-            let socket_path = std::path::Path::new(&self.fc_config.data_dir)
-                .join(format!("fc-{}-{}.sock", self.agent_id, vm_id))
-                .to_string_lossy()
-                .to_string();
-            // Remove any stale socket from a previous run.
+            let socket_path = paths.socket_path();
             if let Err(e) = tokio::fs::remove_file(&socket_path).await
                 && e.kind() != std::io::ErrorKind::NotFound
             {
-                tracing::debug!("Failed to remove stale socket {}: {}", socket_path, e);
+                tracing::debug!(
+                    "Failed to remove stale socket {}: {}",
+                    socket_path.display(),
+                    e
+                );
             }
-
             (
-                fc_binary.clone(),
-                vec!["--api-sock".to_string(), socket_path.clone()],
-                socket_path,
+                self.fc_config.binary.clone(),
+                vec![
+                    "--api-sock".to_string(),
+                    socket_path.to_string_lossy().to_string(),
+                ],
                 None,
             )
         };
 
-        // Spawn the Firecracker process.
-        let mut child = match tokio::process::Command::new(&exec_binary)
+        // 7. Spawn Firecracker
+        let mut child = tokio::process::Command::new(&exec_binary)
             .args(&exec_args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                let err_msg =
+            .map_err(|e| {
+                let msg =
                     format!("Failed to spawn firecracker process (binary: {exec_binary}): {e}");
-                tracing::error!("{}", err_msg);
-                if let Some(tap) = &tap_name {
-                    self.cleanup_tap(tap).await;
-                }
-                if let Some(chroot) = chroot_dir
-                    && let Err(e) = tokio::fs::remove_dir_all(&chroot).await
-                {
-                    tracing::error!(
-                        "Failed to remove chroot directory {} on failure: {}",
-                        chroot,
-                        e
-                    );
-                }
-                self.set_failed(&vm_id, err_msg.clone()).await;
-                return Err(FirecrackerError::ProcessError(err_msg));
-            },
+                tracing::error!("{}", msg);
+                FirecrackerError::ProcessError(msg)
+            })?;
+
+        // 8. Capture logs
+        guard.log_task = Some(self.spawn_log_task(&vm_id, &mut child));
+        guard.child = Some(child);
+
+        // 9. Wait for socket
+        let wait_timeout = if chroot_dir.is_some() {
+            Duration::from_secs(10)
+        } else {
+            Duration::from_secs(5)
         };
 
-        // Capture logs in a background task
+        wait_for_socket(&paths.socket_path().to_string_lossy(), wait_timeout).await?;
+
+        // 10. Configure Metrics
+        let metrics_host_path = self.setup_metrics(&vm_id, &chroot_dir, &paths).await?;
+        guard.metrics_path = Some(metrics_host_path.clone());
+
+        // 11. Snapshot Restoration
+        if self
+            .try_restore_snapshot(&vm_id, &chroot_dir, &paths)
+            .await?
+        {
+            self.finalize_startup(guard).await?;
+            return Ok(());
+        }
+
+        // 12. Standard Boot API Calls
+        self.configure_vm_api(
+            &config,
+            &kernel_path,
+            &rootfs_path,
+            &chroot_dir,
+            &paths,
+            tap_name.as_deref(),
+        )
+        .await?;
+
+        // 13. Finalize
+        self.finalize_startup(guard).await?;
+        Ok(())
+    }
+
+    async fn ensure_app_exclusivity(&self, app_id: &str, current_vm_id: &str) {
+        let other_vms: Vec<String> = {
+            let vms = self.vms.read().await;
+            vms.values()
+                .filter(|v| {
+                    v.app_id == app_id && v.vm_id != current_vm_id && v.status != VmStatus::Stopped
+                })
+                .map(|v| v.vm_id.clone())
+                .collect()
+        };
+
+        for other_id in other_vms {
+            tracing::info!(
+                new_vm_id = %current_vm_id,
+                old_vm_id = %other_id,
+                app_id = %app_id,
+                "Stopping existing VM for the same application to ensure exclusivity"
+            );
+            let _ = self.stop_vm(&other_id).await;
+        }
+    }
+
+    fn spawn_log_task(
+        &self,
+        vm_id: &str,
+        child: &mut tokio::process::Child,
+    ) -> tokio::task::JoinHandle<()> {
         let stdout = child.stdout.take().expect("Failed to take stdout");
         let stderr = child.stderr.take().expect("Failed to take stderr");
-        let vm_id_clone = vm_id.clone();
+        let vm_id = vm_id.to_string();
         let logs_clone = self.logs.clone();
         let nats_clone = self.nats_client.clone();
 
-        let log_task = tokio::spawn(async move {
+        tokio::spawn(async move {
             let mut stdout_lines = BufReader::new(stdout).lines();
             let mut stderr_lines = BufReader::new(stderr).lines();
 
@@ -437,171 +470,143 @@ impl FirecrackerManager {
                     else => None,
                 };
 
-                if let Some(l) = line {
-                    // 1. In-memory buffer (existing)
-                    {
-                        let mut logs = logs_clone.write().await;
-                        let vm_logs = logs
-                            .entry(vm_id_clone.clone())
-                            .or_insert_with(|| VecDeque::with_capacity(1000));
-                        if vm_logs.len() >= 1000 {
-                            vm_logs.pop_front();
-                        }
-                        vm_logs.push_back(l.clone());
-                    }
+                let Some(l) = line else { break };
 
-                    // 2. Publish to NATS (new)
-                    if let Some(nats) = nats_clone.read().await.as_ref() {
-                        let subject = mikrom_proto::subjects::vm_logs(&vm_id_clone);
-                        let payload = VmLogPayload {
-                            line: l,
-                            timestamp: chrono::Utc::now().timestamp(),
-                        };
-                        if let Err(e) = nats.publish(subject, payload.encode_to_vec().into()).await
-                        {
-                            tracing::error!(vm_id = %vm_id_clone, error = %e, "Failed to publish log to NATS");
-                        }
+                // In-memory buffer
+                {
+                    let mut logs = logs_clone.write().await;
+                    let vm_logs = logs
+                        .entry(vm_id.clone())
+                        .or_insert_with(|| VecDeque::with_capacity(1000));
+                    if vm_logs.len() >= 1000 {
+                        vm_logs.pop_front();
                     }
-                } else {
-                    break;
+                    vm_logs.push_back(l.clone());
+                }
+
+                // Publish to NATS
+                if let Some(nats) = nats_clone.read().await.as_ref() {
+                    let subject = mikrom_proto::subjects::vm_logs(&vm_id);
+                    let payload = VmLogPayload {
+                        line: l,
+                        timestamp: chrono::Utc::now().timestamp(),
+                    };
+                    let _ = nats.publish(subject, payload.encode_to_vec().into()).await;
                 }
             }
-        });
+        })
+    }
 
-        // Wait for the API socket to appear (up to 10 s if using jailer as it takes longer).
-        let wait_timeout = if chroot_dir.is_some() {
-            Duration::from_secs(10)
-        } else {
-            Duration::from_secs(5)
-        };
-
-        if let Err(e) = wait_for_socket(&socket_path, wait_timeout).await {
-            let _ = child.kill().await;
-            if let Some(tap) = &tap_name {
-                self.cleanup_tap(tap).await;
-            }
-            if let Some(chroot) = chroot_dir
-                && let Err(e) = tokio::fs::remove_dir_all(&chroot).await
-            {
-                tracing::error!(
-                    "Failed to clean up chroot directory {} on failure: {}",
-                    chroot,
-                    e
-                );
-            }
-            self.set_failed(&vm_id, e.to_string()).await;
-            return Err(e);
-        }
-
-        // ── Metrics setup ──────────────────────────────────────────────────────
-        let (metrics_host_path, metrics_api_path) = if let Some(chroot) = &chroot_dir {
-            let host_path = format!("{chroot}/root/metrics.json");
-            // Create empty file and set permissions for jailer
-            tokio::fs::write(&host_path, b"").await.map_err(|e| {
+    async fn setup_metrics(
+        &self,
+        vm_id: &str,
+        chroot_dir: &Option<String>,
+        paths: &VmPaths,
+    ) -> Result<String, FirecrackerError> {
+        let (host_path, api_path) = if let Some(chroot) = chroot_dir {
+            let h_path = format!("{chroot}/root/metrics.json");
+            tokio::fs::write(&h_path, b"").await.map_err(|e| {
                 FirecrackerError::ProcessError(format!("Failed to create metrics file: {e}"))
             })?;
             self.recursive_chown(
-                &host_path,
+                &h_path,
                 self.fc_config.jailer_uid,
                 self.fc_config.jailer_gid,
             )
             .await?;
-            (Some(host_path), "/metrics.json".to_string())
+            (h_path, "/metrics.json".to_string())
         } else {
-            let host_path = std::path::Path::new(&self.fc_config.data_dir)
-                .join(format!("fc-{}-{}-metrics.json", self.agent_id, vm_id))
-                .to_string_lossy()
-                .to_string();
-            (Some(host_path.clone()), host_path)
+            let h_path = paths.metrics_path().to_string_lossy().to_string();
+            (h_path.clone(), h_path)
         };
 
-        let metrics_config = serde_json::json!({
-            "metrics_path": metrics_api_path
+        let metrics_config = serde_json::json!({ "metrics_path": api_path }).to_string();
+        if let Err(e) = fc_put(
+            &paths.socket_path().to_string_lossy(),
+            "/metrics",
+            &metrics_config,
+        )
+        .await
+        {
+            tracing::warn!(vm_id = %vm_id, "Failed to configure metrics: {e}");
+        }
+        Ok(host_path)
+    }
+
+    async fn try_restore_snapshot(
+        &self,
+        vm_id: &str,
+        chroot_dir: &Option<String>,
+        paths: &VmPaths,
+    ) -> Result<bool, FirecrackerError> {
+        let snapshot_path = paths.snapshot_file();
+        let mem_path = paths.memory_file();
+
+        if tokio::fs::metadata(&snapshot_path).await.is_err()
+            || tokio::fs::metadata(&mem_path).await.is_err()
+        {
+            return Ok(false);
+        }
+
+        tracing::info!(vm_id = %vm_id, "Found snapshot, restoring VM...");
+
+        let (load_snap, load_mem) = if let Some(chroot) = chroot_dir {
+            let c_snap = format!("{chroot}/root/vm.snapshot");
+            let c_mem = format!("{chroot}/root/vm.mem");
+            self.ensure_file_at(&snapshot_path.to_string_lossy(), &c_snap)
+                .await?;
+            self.ensure_file_at(&mem_path.to_string_lossy(), &c_mem)
+                .await?;
+            self.recursive_chown(
+                &c_snap,
+                self.fc_config.jailer_uid,
+                self.fc_config.jailer_gid,
+            )
+            .await?;
+            self.recursive_chown(&c_mem, self.fc_config.jailer_uid, self.fc_config.jailer_gid)
+                .await?;
+            ("/vm.snapshot".to_string(), "/vm.mem".to_string())
+        } else {
+            (
+                snapshot_path.to_string_lossy().to_string(),
+                mem_path.to_string_lossy().to_string(),
+            )
+        };
+
+        let body = serde_json::json!({
+            "snapshot_path": load_snap,
+            "mem_file_path": load_mem,
+            "resume": true
         })
         .to_string();
 
-        // Configure metrics API
-        if let Err(e) = fc_put(&socket_path, "/metrics", &metrics_config).await {
-            tracing::warn!(vm_id = %vm_id, "Failed to configure metrics: {e}");
+        if let Err(e) = fc_put(
+            &paths.socket_path().to_string_lossy(),
+            "/snapshot/load",
+            &body,
+        )
+        .await
+        {
+            tracing::error!(vm_id = %vm_id, "Failed to load snapshot: {}. Falling back to normal boot.", e);
+            Ok(false)
+        } else {
+            Ok(true)
         }
+    }
 
-        // Check if we have a snapshot to restore from
-        let snapshot_dir = std::path::Path::new(&self.fc_config.data_dir).join("snapshots");
-        let snapshot_path = format!("{}/{vm_id}.snapshot", snapshot_dir.display());
-        let mem_path = format!("{}/{vm_id}.mem", snapshot_dir.display());
-        let has_snapshot = tokio::fs::metadata(&snapshot_path).await.is_ok()
-            && tokio::fs::metadata(&mem_path).await.is_ok();
+    async fn configure_vm_api(
+        &self,
+        config: &VmConfig,
+        kernel_path: &str,
+        rootfs_path: &std::path::Path,
+        chroot_dir: &Option<String>,
+        paths: &VmPaths,
+        tap_name: Option<&str>,
+    ) -> Result<(), FirecrackerError> {
+        let socket_path = paths.socket_path();
+        let socket = socket_path.to_string_lossy();
 
-        if has_snapshot {
-            tracing::info!(vm_id = %vm_id, "Found snapshot, restoring VM...");
-
-            // 1. Prepare snapshot paths for API
-            let (load_snapshot_path, load_mem_path) = if let Some(chroot) = &chroot_dir {
-                let chroot_snap_path = format!("{chroot}/root/vm.snapshot");
-                let chroot_mem_path = format!("{chroot}/root/vm.mem");
-
-                self.ensure_file_at(&snapshot_path, &chroot_snap_path)
-                    .await?;
-                self.ensure_file_at(&mem_path, &chroot_mem_path).await?;
-
-                self.recursive_chown(
-                    &chroot_snap_path,
-                    self.fc_config.jailer_uid,
-                    self.fc_config.jailer_gid,
-                )
-                .await?;
-                self.recursive_chown(
-                    &chroot_mem_path,
-                    self.fc_config.jailer_uid,
-                    self.fc_config.jailer_gid,
-                )
-                .await?;
-
-                ("/vm.snapshot".to_string(), "/vm.mem".to_string())
-            } else {
-                (snapshot_path, mem_path)
-            };
-
-            // 2. Load snapshot
-            let load_body = serde_json::json!({
-                "snapshot_path": load_snapshot_path,
-                "mem_file_path": load_mem_path,
-                "resume": true
-            })
-            .to_string();
-
-            // Note: Networking and drives must be configured similarly or via snapshot.
-            // For now, we assume simple restoration.
-            if let Err(e) = fc_put(&socket_path, "/snapshot/load", &load_body).await {
-                tracing::error!(
-                    vm_id = %vm_id,
-                    "Failed to load snapshot: {}. Falling back to normal boot.",
-                    e
-                );
-            } else {
-                let mut processes = self.processes.lock().await;
-                processes.insert(
-                    vm_id.clone(),
-                    VmProcess {
-                        vm_id: vm_id.clone(),
-                        child,
-                        socket_path: socket_path.to_string(),
-                        metrics_path: metrics_host_path.clone(),
-                        tap_name,
-                        log_task,
-                        chroot_dir,
-                    },
-                );
-
-                let mut vms = self.vms.write().await;
-                if let Some(vm) = vms.get_mut(&vm_id) {
-                    vm.status = VmStatus::Running;
-                }
-                return Ok(());
-            }
-        }
-        // ── Normal Boot Sequence (if no snapshot or restoration failed) ────────
-        // Configure machine resources.
+        // 1. Machine Config
         let machine_config = serde_json::json!({
             "vcpu_count": config.vcpus,
             "mem_size_mib": config.memory_mib,
@@ -609,11 +614,12 @@ impl FirecrackerManager {
             "track_dirty_pages": false
         })
         .to_string();
+        fc_put(&socket, "/machine-config", &machine_config).await?;
 
+        // 2. Boot Source
         let mut boot_args =
             "console=ttyS0 reboot=k panic=1 pci=off nomodules rw root=/dev/vda init=/mikrom-init"
                 .to_string();
-
         if let (Some(ip), Some(gw)) = (&config.ip_address, &config.gateway) {
             let mask = config.netmask.as_deref().unwrap_or("255.255.255.0");
             boot_args.push_str(&format!(" ip={ip}::{gw}:{mask}::eth0:off"));
@@ -622,143 +628,87 @@ impl FirecrackerManager {
         let kernel_api_path = if chroot_dir.is_some() {
             "/vmlinux.bin".to_string()
         } else {
-            kernel_path.clone()
+            kernel_path.to_string()
         };
+        let boot_source =
+            serde_json::json!({ "kernel_image_path": kernel_api_path, "boot_args": boot_args })
+                .to_string();
+        fc_put(&socket, "/boot-source", &boot_source).await?;
 
-        let boot_source = serde_json::json!({
-            "kernel_image_path": kernel_api_path,
-            "boot_args": boot_args
-        })
-        .to_string();
-
+        // 3. Root Drive
         let rootfs_api_path = if chroot_dir.is_some() {
             "/rootfs.ext4".to_string()
         } else {
-            rootfs_path.clone()
+            rootfs_path.to_string_lossy().to_string()
         };
+        let drive_json = serde_json::json!({ "drive_id": "rootfs", "path_on_host": rootfs_api_path, "is_root_device": true, "is_read_only": false }).to_string();
+        fc_put(&socket, "/drives/rootfs", &drive_json).await?;
 
-        let drives = serde_json::json!({
-            "drive_id": "rootfs",
-            "path_on_host": rootfs_api_path,
-            "is_root_device": true,
-            "is_read_only": false
-        })
-        .to_string();
-
-        let network_interface = if let Some(tap) = &tap_name {
-            Some(
-                serde_json::json!({
-                    "iface_id": "eth0",
-                    "guest_mac": config.mac_address.as_deref().unwrap_or("AA:BB:CC:DD:EE:01"),
-                    "host_dev_name": tap
-                })
-                .to_string(),
-            )
-        } else {
-            None
-        };
-
-        let instance_start = serde_json::json!({
-            "action_type": "InstanceStart"
-        })
-        .to_string();
-
-        // ── API calls ──────────────────────────────────────────────────────────
-        let chroot_dir_clone = chroot_dir.clone();
-        let socket_path_clone = socket_path.clone();
-
-        let res = (async {
-            fc_put(&socket_path_clone, "/machine-config", &machine_config).await?;
-            fc_put(&socket_path_clone, "/boot-source", &boot_source).await?;
-            fc_put(&socket_path_clone, "/drives/rootfs", &drives).await?;
-
-            if let Some(net_json) = &network_interface {
-                fc_put(&socket_path_clone, "/network-interfaces/eth0", net_json).await?;
-            }
-
-            // ── Attach additional volumes ──────────────────────────────────────────
-            for vol in &config.volumes {
-                let vol_path = self.ensure_volume(&vol.volume_id, vol.size_mib).await?;
-
-                let vol_api_path = if let Some(chroot) = &chroot_dir_clone {
-                    let vol_filename = format!("{}.ext4", vol.volume_id);
-                    let chroot_vol_path = format!("{chroot}/root/{vol_filename}");
-                    self.ensure_file_at(&vol_path, &chroot_vol_path).await?;
-                    self.recursive_chown(
-                        &chroot_vol_path,
-                        self.fc_config.jailer_uid,
-                        self.fc_config.jailer_gid,
-                    )
-                    .await?;
-                    format!("/{vol_filename}")
-                } else {
-                    vol_path
-                };
-
-                let drive_json = serde_json::json!({
-                    "drive_id": vol.volume_id,
-                    "path_on_host": vol_api_path,
-                    "is_root_device": false,
-                    "is_read_only": vol.read_only
-                })
-                .to_string();
-                fc_put(
-                    &socket_path,
-                    &format!("/drives/{}", vol.volume_id),
-                    &drive_json,
-                )
-                .await?;
-            }
-
-            fc_put(&socket_path, "/actions", &instance_start).await?;
-            Ok::<(), FirecrackerError>(())
-        })
-        .await;
-
-        if let Err(e) = res {
-            tracing::error!(vm_id = %vm_id, "Firecracker API configuration failed: {}", e);
-            let _ = child.kill().await;
-            if let Some(tap) = &tap_name {
-                self.cleanup_tap(tap).await;
-            }
-            if let Some(chroot) = chroot_dir
-                && let Err(e) = tokio::fs::remove_dir_all(&chroot).await
-            {
-                tracing::error!(
-                    "Failed to clean up chroot directory {} on failure: {}",
-                    chroot,
-                    e
-                );
-            }
-            self.set_failed(&vm_id, e.to_string()).await;
-            return Err(e);
+        // 4. Network
+        if let Some(tap) = tap_name {
+            let net_json = serde_json::json!({
+                "iface_id": "eth0",
+                "guest_mac": config.mac_address.as_deref().unwrap_or("AA:BB:CC:DD:EE:01"),
+                "host_dev_name": tap
+            })
+            .to_string();
+            fc_put(&socket, "/network-interfaces/eth0", &net_json).await?;
         }
 
-        // VM is booting — mark as Running and store the process handle.
+        // 5. Additional Volumes
+        for vol in &config.volumes {
+            let vol_host_path = self.ensure_volume(&vol.volume_id, vol.size_mib).await?;
+            let vol_api_path = if let Some(chroot) = chroot_dir {
+                let filename = format!("{}.ext4", vol.volume_id);
+                let c_path = format!("{chroot}/root/{filename}");
+                self.ensure_file_at(&vol_host_path, &c_path).await?;
+                self.recursive_chown(
+                    &c_path,
+                    self.fc_config.jailer_uid,
+                    self.fc_config.jailer_gid,
+                )
+                .await?;
+                format!("/{filename}")
+            } else {
+                vol_host_path
+            };
+
+            let vol_json = serde_json::json!({
+                "drive_id": vol.volume_id,
+                "path_on_host": vol_api_path,
+                "is_root_device": false,
+                "is_read_only": vol.read_only
+            })
+            .to_string();
+            fc_put(&socket, &format!("/drives/{}", vol.volume_id), &vol_json).await?;
+        }
+
+        // 6. Start Instance
+        fc_put(
+            &socket,
+            "/actions",
+            &serde_json::json!({ "action_type": "InstanceStart" }).to_string(),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn finalize_startup(&self, guard: VmStartupGuard) -> Result<(), FirecrackerError> {
+        let vm_id = guard.vm_id.clone();
+        let vm_process = guard.commit();
+
         {
             let mut vms = self.vms.write().await;
             if let Some(vm) = vms.get_mut(&vm_id) {
                 vm.status = VmStatus::Running;
-                vm.started_at = Some(
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_or(0, |d| d.as_secs() as i64),
-                );
+                vm.started_at = Some(chrono::Utc::now().timestamp());
             }
         }
-        self.processes.lock().await.insert(
-            vm_id.clone(),
-            VmProcess {
-                vm_id: vm_id.clone(),
-                child,
-                socket_path: socket_path.to_string(),
-                metrics_path: metrics_host_path,
-                tap_name,
-                log_task,
-                chroot_dir,
-            },
-        );
 
+        self.processes
+            .lock()
+            .await
+            .insert(vm_id.clone(), vm_process);
         tracing::info!(vm_id = %vm_id, "Firecracker VM successfully started");
         Ok(())
     }
