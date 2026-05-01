@@ -227,9 +227,15 @@ mod tests {
     #[tokio::test]
     async fn test_acme_challenge_handler_not_found() {
         let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_router".to_string()
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_route_test".to_string()
         });
         let db = PgPool::connect(&db_url).await.unwrap();
+
+        // Run migrations for tests
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("Failed to run migrations");
 
         let state = AppState {
             db,
