@@ -1,4 +1,4 @@
-use mikrom_scheduler::scheduler::ipam::Ipam;
+use mikrom_scheduler::infrastructure::db::ipam::Ipam;
 use std::collections::HashSet;
 
 #[path = "common_utils.rs"]
