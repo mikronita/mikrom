@@ -4,14 +4,13 @@ use instant_acme::{
 };
 use mikrom_proto::router::{AcmeChallengeUpdate, TlsCertificateUpdate};
 use mikrom_proto::subjects;
-use prost::Message;
 use sqlx::{PgPool, Row};
 use std::time::Duration;
 use tracing::{error, info};
 
 pub async fn start_acme_worker(
     api_db: PgPool,
-    nats_client: async_nats::Client,
+    nats: crate::nats::TypedNatsClient,
     email: String,
     staging: bool,
     master_key: String,
@@ -29,8 +28,7 @@ pub async fn start_acme_worker(
     };
 
     loop {
-        if let Err(e) =
-            run_acme_iteration(&api_db, &nats_client, &email, url, staging, &master_key).await
+        if let Err(e) = run_acme_iteration(&api_db, &nats, &email, url, staging, &master_key).await
         {
             error!("ACME iteration failed: {}", e);
         }
@@ -40,7 +38,7 @@ pub async fn start_acme_worker(
 
 pub async fn run_acme_iteration(
     api_db: &PgPool,
-    nats_client: &async_nats::Client,
+    nats: &crate::nats::TypedNatsClient,
     email: &str,
     acme_url: &str,
     is_staging: bool,
@@ -70,7 +68,7 @@ pub async fn run_acme_iteration(
 
         info!("Processing certificate renewal for {}", hostname);
 
-        if let Err(e) = certify_domain(api_db, nats_client, &account, &hostname, master_key).await {
+        if let Err(e) = certify_domain(api_db, nats, &account, &hostname, master_key).await {
             error!("Failed to certify domain {}: {}", hostname, e);
         }
     }
@@ -132,7 +130,7 @@ pub async fn get_or_create_acme_account(
 
 async fn certify_domain(
     api_db: &PgPool,
-    nats_client: &async_nats::Client,
+    nats: &crate::nats::TypedNatsClient,
     account: &Account,
     hostname: &str,
     master_key: &str,
@@ -159,11 +157,7 @@ async fn certify_domain(
                 is_delete: false,
             };
 
-            nats_client
-                .publish(
-                    subjects::ROUTER_ACME_CHALLENGE_UPDATED,
-                    update.encode_to_vec().into(),
-                )
+            nats.publish(subjects::ROUTER_ACME_CHALLENGE_UPDATED, update)
                 .await?;
 
             // Trigger challenge
@@ -195,11 +189,8 @@ async fn certify_domain(
             hostname: "".into(),
             is_delete: true,
         };
-        if let Err(e) = nats_client
-            .publish(
-                subjects::ROUTER_ACME_CHALLENGE_UPDATED,
-                update.encode_to_vec().into(),
-            )
+        if let Err(e) = nats
+            .publish(subjects::ROUTER_ACME_CHALLENGE_UPDATED, update)
             .await
         {
             error!(
@@ -264,11 +255,7 @@ async fn certify_domain(
         expires_at: expires_at.timestamp(),
     };
 
-    nats_client
-        .publish(
-            subjects::ROUTER_TLS_CERT_UPDATED,
-            update.encode_to_vec().into(),
-        )
+    nats.publish(subjects::ROUTER_TLS_CERT_UPDATED, update)
         .await?;
 
     info!(

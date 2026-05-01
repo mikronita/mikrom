@@ -14,6 +14,18 @@ pub struct NewDeployment {
     pub trigger_source: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct UpdateDeploymentParams {
+    pub status: Option<String>,
+    pub job_id: Option<String>,
+    pub image_tag: Option<String>,
+    pub build_id: Option<String>,
+    pub ip_address: Option<String>,
+    pub git_commit_hash: Option<String>,
+    pub git_commit_message: Option<String>,
+    pub git_branch: Option<String>,
+}
+
 #[mockall::automock]
 #[async_trait]
 pub trait AppRepository: Send + Sync {
@@ -34,18 +46,10 @@ pub trait AppRepository: Send + Sync {
     async fn update_app_port(&self, id: Uuid, port: i32) -> anyhow::Result<()>;
 
     async fn create_deployment(&self, data: NewDeployment) -> anyhow::Result<Deployment>;
-    #[allow(clippy::too_many_arguments)]
-    async fn update_deployment_status(
+    async fn update_deployment(
         &self,
         id: Uuid,
-        status: &str,
-        job_id: Option<String>,
-        image_tag: Option<String>,
-        build_id: Option<String>,
-        ip_address: Option<String>,
-        git_commit_hash: Option<String>,
-        git_commit_message: Option<String>,
-        git_branch: Option<String>,
+        params: UpdateDeploymentParams,
     ) -> anyhow::Result<()>;
     async fn update_deployment_port(&self, id: Uuid, port: i32) -> anyhow::Result<()>;
     async fn get_deployment(&self, id: Uuid) -> anyhow::Result<Option<Deployment>>;

@@ -19,6 +19,7 @@ pub mod db;
 pub mod deploy;
 pub mod error;
 pub mod models;
+pub mod nats;
 pub mod openapi;
 pub mod repositories;
 pub mod scheduler;
@@ -40,7 +41,6 @@ pub use vms::{
 };
 
 use mikrom_proto::router::RouterConfigUpdate;
-use prost::Message;
 
 use auth::{get_profile, login, register, update_profile};
 use utoipa::OpenApi;
@@ -51,7 +51,7 @@ pub struct AppState {
     pub user_repo: Arc<dyn UserRepository>,
     pub app_repo: Arc<dyn AppRepository>,
     pub scheduler: Arc<dyn Scheduler>,
-    pub nats_client: async_nats::Client,
+    pub nats: crate::nats::TypedNatsClient,
     pub router_addr: String,
     pub api_db: sqlx::PgPool,
     pub jwt_secret: String,
@@ -99,11 +99,8 @@ impl AppState {
             timestamp: chrono::Utc::now().timestamp(),
         };
 
-        self.nats_client
-            .publish(
-                mikrom_proto::subjects::ROUTER_CONFIG_UPDATED,
-                config.encode_to_vec().into(),
-            )
+        self.nats
+            .publish(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
             .await?;
 
         Ok(())
@@ -116,11 +113,8 @@ impl AppState {
             timestamp: chrono::Utc::now().timestamp(),
         };
 
-        self.nats_client
-            .publish(
-                mikrom_proto::subjects::ROUTER_CONFIG_UPDATED,
-                config.encode_to_vec().into(),
-            )
+        self.nats
+            .publish(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
             .await?;
 
         Ok(())
@@ -239,7 +233,7 @@ pub fn start_background_tasks(state: AppState) {
     tokio::spawn(async move {
         crate::acme::start_acme_worker(
             state_for_acme.api_db.clone(),
-            state_for_acme.nats_client.clone(),
+            state_for_acme.nats.clone(),
             state_for_acme.acme_email.clone(),
             state_for_acme.acme_staging,
             state_for_acme.master_key.clone(),
@@ -269,29 +263,20 @@ async fn get_system_health(state: &AppState) -> HashMap<String, String> {
     services.insert("API".to_string(), "ONLINE".to_string());
 
     // Check Scheduler & Agents via NATS
-    use mikrom_proto::scheduler::ListAppsRequest;
-    use prost::Message;
+    use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
 
     let nats_req = ListAppsRequest {
         user_id: "system".to_string(),
         status: None,
     };
-    let mut buf = Vec::new();
-    let payload = if nats_req.encode(&mut buf).is_ok() {
-        buf
-    } else {
-        vec![]
-    };
 
-    let scheduler_res = tokio::time::timeout(
-        Duration::from_secs(2),
-        state
-            .nats_client
-            .request("mikrom.scheduler.list_apps", payload.into()),
-    )
-    .await;
+    let scheduler_res: anyhow::Result<ListAppsResponse> = state
+        .nats
+        .with_timeout(Duration::from_secs(2))
+        .request("mikrom.scheduler.list_apps", nats_req)
+        .await;
 
-    if let Ok(Ok(_)) = scheduler_res {
+    if scheduler_res.is_ok() {
         services.insert("Scheduler".to_string(), "ONLINE".to_string());
     } else {
         services.insert("Scheduler".to_string(), "OFFLINE".to_string());
@@ -300,31 +285,19 @@ async fn get_system_health(state: &AppState) -> HashMap<String, String> {
     // Check Agents via NATS
     use mikrom_proto::scheduler::{ListWorkersRequest, ListWorkersResponse};
     let agents_req = ListWorkersRequest {};
-    let mut buf = Vec::new();
-    let payload = if agents_req.encode(&mut buf).is_ok() {
-        buf
-    } else {
-        vec![]
-    };
 
-    let agents_res = tokio::time::timeout(
-        Duration::from_secs(2),
-        state
-            .nats_client
-            .request("mikrom.scheduler.list_workers", payload.into()),
-    )
-    .await;
+    let agents_res: anyhow::Result<ListWorkersResponse> = state
+        .nats
+        .with_timeout(Duration::from_secs(2))
+        .request("mikrom.scheduler.list_workers", agents_req)
+        .await;
 
     match agents_res {
-        Ok(Ok(resp)) => {
-            if let Ok(workers_resp) = ListWorkersResponse::decode(&resp.payload[..]) {
-                if workers_resp.workers.is_empty() {
-                    services.insert("Agents".to_string(), "OFFLINE".to_string());
-                } else {
-                    services.insert("Agents".to_string(), "ONLINE".to_string());
-                }
-            } else {
+        Ok(workers_resp) => {
+            if workers_resp.workers.is_empty() {
                 services.insert("Agents".to_string(), "OFFLINE".to_string());
+            } else {
+                services.insert("Agents".to_string(), "ONLINE".to_string());
             }
         },
         _ => {
@@ -333,26 +306,18 @@ async fn get_system_health(state: &AppState) -> HashMap<String, String> {
     }
 
     // Check Builder via NATS
-    use mikrom_proto::builder::GetBuildStatusRequest;
+    use mikrom_proto::builder::{GetBuildStatusRequest, GetBuildStatusResponse};
     let builder_req = GetBuildStatusRequest {
         build_id: "health-check".to_string(),
     };
-    let mut buf = Vec::new();
-    let payload = if builder_req.encode(&mut buf).is_ok() {
-        buf
-    } else {
-        vec![]
-    };
 
-    let builder_res = tokio::time::timeout(
-        Duration::from_secs(2),
-        state
-            .nats_client
-            .request("mikrom.builder.get_status", payload.into()),
-    )
-    .await;
+    let builder_res: anyhow::Result<GetBuildStatusResponse> = state
+        .nats
+        .with_timeout(Duration::from_secs(2))
+        .request("mikrom.builder.get_status", builder_req)
+        .await;
 
-    if let Ok(Ok(_)) = builder_res {
+    if builder_res.is_ok() {
         services.insert("Builder".to_string(), "ONLINE".to_string());
     } else {
         services.insert("Builder".to_string(), "OFFLINE".to_string());

@@ -1,8 +1,10 @@
 use crate::AppState;
+use crate::deploy::service::{DeployParams, DeploymentService};
+use crate::repositories::app_repository::UpdateDeploymentParams;
 use async_trait::async_trait;
 use futures::StreamExt;
 use mikrom_proto::builder::{BuildStatus, GetBuildStatusRequest, GetBuildStatusResponse};
-use mikrom_proto::scheduler::{AppConfig, DeployRequest};
+use mikrom_proto::scheduler::DeployRequest;
 use prost::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -49,7 +51,7 @@ pub trait SchedulerClient: Send + Sync {
 }
 
 pub struct RealBuilderClient {
-    pub nats_client: async_nats::Client,
+    pub nats: crate::nats::TypedNatsClient,
 }
 
 #[async_trait]
@@ -65,22 +67,16 @@ impl BuilderClient for RealBuilderClient {
         Option<String>,
         Option<String>,
     )> {
-        let mut buf = Vec::new();
-        GetBuildStatusRequest {
-            build_id: build_id.clone(),
-        }
-        .encode(&mut buf)?;
-
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            self.nats_client
-                .request("mikrom.builder.get_status", buf.into()),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("NATS build status request timed out"))?
-        .map_err(|e| anyhow::anyhow!("NATS build status request failed: {}", e))?;
-
-        let resp = GetBuildStatusResponse::decode(&response.payload[..])?;
+        let resp: GetBuildStatusResponse = self
+            .nats
+            .with_timeout(std::time::Duration::from_secs(5))
+            .request(
+                "mikrom.builder.get_status",
+                GetBuildStatusRequest {
+                    build_id: build_id.clone(),
+                },
+            )
+            .await?;
 
         let status = BuildStatus::try_from(resp.status).unwrap_or(BuildStatus::Unspecified);
         Ok((
@@ -116,20 +112,12 @@ impl SchedulerClient for RealSchedulerClient {
         &self,
         req: DeployRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::DeployResponse> {
-        let mut payload = Vec::new();
-        req.encode(&mut payload)?;
-
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            self.state
-                .nats_client
-                .request("mikrom.scheduler.deploy", payload.into()),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("NATS deployment request timed out"))?
-        .map_err(|e| anyhow::anyhow!("NATS deployment failed: {}", e))?;
-
-        let inner = mikrom_proto::scheduler::DeployResponse::decode(&response.payload[..])?;
+        let inner = self
+            .state
+            .nats
+            .with_timeout(std::time::Duration::from_secs(5))
+            .request("mikrom.scheduler.deploy", req)
+            .await?;
 
         Ok(inner)
     }
@@ -138,18 +126,12 @@ impl SchedulerClient for RealSchedulerClient {
         &self,
         req: mikrom_proto::scheduler::DeleteAppRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::DeleteAppResponse> {
-        let mut payload = Vec::new();
-        req.encode(&mut payload)?;
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            self.state
-                .nats_client
-                .request("mikrom.scheduler.delete_app", payload.into()),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("NATS request timed out"))?
-        .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
-        let inner = mikrom_proto::scheduler::DeleteAppResponse::decode(&response.payload[..])?;
+        let inner = self
+            .state
+            .nats
+            .with_timeout(std::time::Duration::from_secs(5))
+            .request("mikrom.scheduler.delete_app", req)
+            .await?;
         Ok(inner)
     }
 
@@ -157,18 +139,12 @@ impl SchedulerClient for RealSchedulerClient {
         &self,
         req: mikrom_proto::scheduler::PauseRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::PauseResponse> {
-        let mut payload = Vec::new();
-        req.encode(&mut payload)?;
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            self.state
-                .nats_client
-                .request("mikrom.scheduler.pause_app", payload.into()),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("NATS request timed out"))?
-        .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
-        let inner = mikrom_proto::scheduler::PauseResponse::decode(&response.payload[..])?;
+        let inner = self
+            .state
+            .nats
+            .with_timeout(std::time::Duration::from_secs(5))
+            .request("mikrom.scheduler.pause_app", req)
+            .await?;
         Ok(inner)
     }
 
@@ -176,18 +152,12 @@ impl SchedulerClient for RealSchedulerClient {
         &self,
         req: mikrom_proto::scheduler::ResumeRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::ResumeResponse> {
-        let mut payload = Vec::new();
-        req.encode(&mut payload)?;
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            self.state
-                .nats_client
-                .request("mikrom.scheduler.resume_app", payload.into()),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("NATS request timed out"))?
-        .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
-        let inner = mikrom_proto::scheduler::ResumeResponse::decode(&response.payload[..])?;
+        let inner = self
+            .state
+            .nats
+            .with_timeout(std::time::Duration::from_secs(5))
+            .request("mikrom.scheduler.resume_app", req)
+            .await?;
         Ok(inner)
     }
 }
@@ -208,7 +178,7 @@ pub struct BuildTask {
 
 pub async fn start_build_polling(state: AppState, task: BuildTask) {
     let builder = Arc::new(RealBuilderClient {
-        nats_client: state.nats_client.clone(),
+        nats: state.nats.clone(),
     });
     let scheduler = Arc::new(RealSchedulerClient {
         state: state.clone(),
@@ -262,12 +232,12 @@ async fn poll_and_deploy(
     state: AppState,
     task: BuildTask,
     builder: Arc<dyn BuilderClient>,
-    scheduler: Arc<dyn SchedulerClient>,
+    _scheduler: Arc<dyn SchedulerClient>,
 ) -> anyhow::Result<()> {
     info!(build_id = %task.build_id, "Starting build status monitoring for deployment {}", task.deployment_id);
 
     let subject = format!("mikrom.builder.{}.status", task.build_id);
-    let mut subscription = state.nats_client.subscribe(subject).await?;
+    let mut subscription = state.nats.subscribe(subject).await?;
 
     // Initial check in case it's already done
     let mut current_status = match builder.get_build_status(task.build_id.clone()).await {
@@ -286,7 +256,7 @@ async fn poll_and_deploy(
             BuildStatus::Success => {
                 info!(build_id = %task.build_id, "Build successful, triggering deployment...");
 
-                let (image_tag, port, hash, msg, branch) = (
+                let (image_tag, port, _hash, _msg, _branch) = (
                     current_status.1,
                     current_status.2,
                     current_status.3,
@@ -296,130 +266,67 @@ async fn poll_and_deploy(
 
                 let final_port = if port > 0 { port } else { task.port };
 
-                // Update DB with detected port only if it differs from default to avoid unnecessary writes
+                // Fetch app and deployment to satisfy service requirements
+                let app = state
+                    .app_repo
+                    .get_app(task.app_id)
+                    .await?
+                    .ok_or(anyhow::anyhow!("App not found"))?;
+                let deployment = state
+                    .app_repo
+                    .get_deployment(task.deployment_id)
+                    .await?
+                    .ok_or(anyhow::anyhow!("Deployment not found"))?;
+
                 if final_port != task.port {
                     state
                         .app_repo
                         .update_deployment_port(task.deployment_id, final_port as i32)
                         .await?;
                 }
-                state
-                    .app_repo
-                    .update_deployment_status(
-                        task.deployment_id,
-                        "SCHEDULED",
-                        None,
-                        Some(image_tag.clone()),
-                        None,
-                        None,
-                        hash,
-                        msg,
-                        branch,
-                    )
-                    .await?;
-                state.deployment_events.send(task.app_id).ok();
 
-                let deploy_req = DeployRequest {
-                    app_id: task.app_id.to_string(),
-                    app_name: task.app_name.clone(),
-                    image: image_tag,
-                    user_id: task.user_id.clone(),
-                    config: Some(AppConfig {
+                DeploymentService::deploy_to_scheduler(
+                    &state,
+                    &app,
+                    &deployment,
+                    DeployParams {
+                        image_tag,
                         vcpus: task.vcpus,
                         memory_mib: task.memory_mib as u32,
                         disk_mib: task.disk_mib as u32,
-                        port: final_port,
                         env: task.env.clone(),
-                        ..Default::default()
-                    }),
-                    deployment_id: task.deployment_id.to_string(),
-                };
-
-                match scheduler.deploy_app(deploy_req).await {
-                    Ok(resp) => {
-                        if resp.job_id.is_empty() {
-                            error!(message = %resp.message, "Scheduler returned success but job_id is empty. Error: {}", resp.message);
-                            state
-                                .app_repo
-                                .update_deployment_status(
-                                    task.deployment_id,
-                                    "FAILED",
-                                    None,
-                                    None,
-                                    None,
-                                    None,
-                                    None,
-                                    None,
-                                    None,
-                                )
-                                .await?;
-                        } else {
-                            info!(job_id = %resp.job_id, "Deployment successfully triggered by scheduler");
-                            let db_status = crate::scheduler::status_name(resp.status);
-                            state
-                                .app_repo
-                                .update_deployment_status(
-                                    task.deployment_id,
-                                    db_status,
-                                    Some(resp.job_id),
-                                    None,
-                                    None,
-                                    Some(resp.ip_address),
-                                    None,
-                                    None,
-                                    None,
-                                )
-                                .await?;
-
-                            // Promote this deployment to be the active one for the app
-                            info!(app = %task.app_name, deployment_id = %task.deployment_id, "Promoting new deployment to active");
-                            let _ = state
-                                .app_repo
-                                .set_active_deployment(task.app_id, task.deployment_id)
-                                .await;
-
-                            // Give the DB a moment to ensure the update is committed
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-                            // Notify router
-                            let _ = state.notify_router(task.app_id).await;
-                        }
-                        state.deployment_events.send(task.app_id).ok();
                     },
-                    Err(e) => {
-                        error!("Scheduler failed to deploy app (gRPC/NATS error): {}", e);
-                        state
-                            .app_repo
-                            .update_deployment_status(
-                                task.deployment_id,
-                                "FAILED",
-                                None,
-                                None,
-                                None,
-                                None,
-                                None,
-                                None,
-                                None,
-                            )
-                            .await?;
-                    },
-                }
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+
+                // Promote this deployment to be the active one for the app
+                info!(app = %task.app_name, deployment_id = %task.deployment_id, "Promoting new deployment to active");
+                let _ = state
+                    .app_repo
+                    .set_active_deployment(task.app_id, task.deployment_id)
+                    .await;
+
+                // Give the DB a moment to ensure the update is committed
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                // Notify router
+                let _ = state.notify_router(task.app_id).await;
+
+                state.deployment_events.send(task.app_id).ok();
+
                 break;
             },
             BuildStatus::Failed => {
                 error!(build_id = %task.build_id, "Build failed, aborting deployment");
                 state
                     .app_repo
-                    .update_deployment_status(
+                    .update_deployment(
                         task.deployment_id,
-                        "FAILED",
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
+                        UpdateDeploymentParams {
+                            status: Some("FAILED".to_string()),
+                            ..Default::default()
+                        },
                     )
                     .await?;
                 state.deployment_events.send(task.app_id).ok();
@@ -468,11 +375,12 @@ mod tests {
         let nats_url =
             std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
         let nats_client = async_nats::connect(nats_url).await.unwrap();
+        let nats = crate::nats::TypedNatsClient::new(nats_client);
         AppState {
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(MockAppRepository::new()),
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            nats_client,
+            nats,
             router_addr: "http://localhost:8080".to_string(),
             api_db: sqlx::postgres::PgPoolOptions::new()
                 .connect_lazy("postgres://localhost/dummy")

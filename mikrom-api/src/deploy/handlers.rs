@@ -1,7 +1,9 @@
 use crate::AppState;
 use crate::auth::AuthUser;
+use crate::deploy::service::{DeployParams, DeploymentService};
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::Deployment;
+use crate::repositories::app_repository::UpdateDeploymentParams;
 use axum::{
     Json,
     extract::{Path, State},
@@ -292,7 +294,7 @@ pub async fn deployments_stream_handler(
 
     // Subscribe to NATS for instant cluster-wide updates
     let nats_sub = state
-        .nats_client
+        .nats
         .subscribe("mikrom.scheduler.job_updates")
         .await
         .map_err(|e| ApiError::Internal(format!("NATS sub error: {}", e)))?;
@@ -424,16 +426,18 @@ pub async fn activate_deployment_handler(
         // Mark old as STOPPED
         let _ = state
             .app_repo
-            .update_deployment_status(
+            .update_deployment(
                 active_id,
-                "STOPPED",
-                Some(job_id.clone()),
-                active_dep.image_tag.clone(),
-                active_dep.build_id.clone(),
-                active_dep.ip_address.clone(),
-                active_dep.git_commit_hash.clone(),
-                active_dep.git_commit_message.clone(),
-                active_dep.git_branch.clone(),
+                UpdateDeploymentParams {
+                    status: Some("STOPPED".to_string()),
+                    job_id: Some(job_id.clone()),
+                    image_tag: active_dep.image_tag.clone(),
+                    build_id: active_dep.build_id.clone(),
+                    ip_address: active_dep.ip_address.clone(),
+                    git_commit_hash: active_dep.git_commit_hash.clone(),
+                    git_commit_message: active_dep.git_commit_message.clone(),
+                    git_branch: active_dep.git_branch.clone(),
+                },
             )
             .await;
     }
@@ -459,16 +463,18 @@ pub async fn activate_deployment_handler(
         // Mark new as RUNNING
         let _ = state
             .app_repo
-            .update_deployment_status(
+            .update_deployment(
                 deployment.id,
-                "RUNNING",
-                Some(job_id),
-                deployment.image_tag.clone(),
-                deployment.build_id.clone(),
-                deployment.ip_address.clone(),
-                deployment.git_commit_hash.clone(),
-                deployment.git_commit_message.clone(),
-                deployment.git_branch.clone(),
+                UpdateDeploymentParams {
+                    status: Some("RUNNING".to_string()),
+                    job_id: Some(job_id),
+                    image_tag: deployment.image_tag.clone(),
+                    build_id: deployment.build_id.clone(),
+                    ip_address: deployment.ip_address.clone(),
+                    git_commit_hash: deployment.git_commit_hash.clone(),
+                    git_commit_message: deployment.git_commit_message.clone(),
+                    git_branch: deployment.git_branch.clone(),
+                },
             )
             .await;
     }
@@ -531,106 +537,19 @@ pub async fn deploy_app_version_handler(
     if let Some(image_tag) = image {
         info!(app = %app.name, image = %image_tag, "Direct image deployment requested, skipping build");
 
-        state
-            .app_repo
-            .update_deployment_status(
-                deployment.id,
-                "SCHEDULED",
-                None,
-                Some(image_tag.clone()),
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-        let nats_req = mikrom_proto::scheduler::DeployRequest {
-            app_id: app.id.to_string(),
-            app_name: app.name.clone(),
-            image: image_tag.clone(),
-            user_id: auth.user_id.clone(),
-            config: Some(mikrom_proto::scheduler::AppConfig {
+        let inner = DeploymentService::deploy_to_scheduler(
+            &state,
+            &app,
+            &deployment,
+            DeployParams {
+                image_tag: image_tag.clone(),
                 vcpus,
                 memory_mib,
                 disk_mib,
-                port: app.port as u32,
                 env: env_vars.clone(),
-                ip_address: String::new(),
-                gateway: String::new(),
-                mac_address: String::new(),
-                volumes: vec![],
-            }),
-            deployment_id: deployment.id.to_string(),
-        };
-
-        use prost::Message;
-        let mut payload_bytes = Vec::new();
-        nats_req
-            .encode(&mut payload_bytes)
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-        let nats_result = async {
-            let response = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                state
-                    .nats_client
-                    .request("mikrom.scheduler.deploy", payload_bytes.into()),
-            )
-            .await
-            .map_err(|_| ApiError::Internal("Scheduler request timed out".into()))?
-            .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
-
-            let inner = mikrom_proto::scheduler::DeployResponse::decode(&response.payload[..])
-                .map_err(|e| {
-                    ApiError::Internal(format!("Failed to decode NATS response: {}", e))
-                })?;
-
-            Ok::<_, ApiError>(inner)
-        }
-        .await;
-
-        let inner = match nats_result {
-            Ok(inner) => inner,
-            Err(e) => {
-                let _ = state
-                    .app_repo
-                    .update_deployment_status(
-                        deployment.id,
-                        "FAILED",
-                        None,
-                        Some(image_tag.clone()),
-                        None,
-                        None,
-                        None,
-                        None,
-                        Some(e.to_string()),
-                    )
-                    .await;
-                state.deployment_events.send(app.id).ok();
-                return Err(e);
             },
-        };
-
-        state
-            .app_repo
-            .update_deployment_status(
-                deployment.id,
-                crate::scheduler::status_name(inner.status),
-                Some(inner.job_id.clone()),
-                Some(image_tag.clone()),
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-        state.deployment_events.send(app.id).ok();
+        )
+        .await?;
 
         return Ok(Json(crate::deploy::DeployResponseBody {
             job_id: Some(inner.job_id),
@@ -644,104 +563,16 @@ pub async fn deploy_app_version_handler(
     }
 
     // Default: Trigger build
-    state
-        .app_repo
-        .update_deployment_status(
-            deployment.id,
-            "BUILDING",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // Notify cluster via NATS for BUILDING phase
-    {
-        use mikrom_proto::scheduler::AppInfo;
-        use prost::Message;
-        let info = AppInfo {
-            job_id: format!("temp-{}", deployment.id),
-            app_id: app.id.to_string(),
-            app_name: app.name.clone(),
-            image: String::new(),
-            status: 1, // Pending/Building
-            user_id: auth.user_id.clone(),
-            deployment_id: deployment.id.to_string(),
-            ..Default::default()
-        };
-        let mut buf = Vec::new();
-        if info.encode(&mut buf).is_ok() {
-            let _ = state
-                .nats_client
-                .publish("mikrom.scheduler.job_updates", buf.into())
-                .await;
-        }
-    }
-
-    state.deployment_events.send(app.id).ok();
-
-    use prost::Message;
-    let build_req = mikrom_proto::builder::BuildRequest {
-        app_id: app.id.to_string(),
-        git_url: app.git_url.clone(),
-        image_name: app.name.to_lowercase().replace(' ', "-"),
-        tag: deployment.id.to_string(),
-    };
-
-    let mut buf = Vec::new();
-    build_req
-        .encode(&mut buf)
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let response = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        state
-            .nats_client
-            .request("mikrom.builder.build", buf.into()),
-    )
-    .await
-    .map_err(|_| ApiError::Internal("Builder request timed out".into()))?
-    .map_err(|e| ApiError::Internal(format!("Failed to trigger build via NATS: {}", e)))?;
-
-    let build_resp = mikrom_proto::builder::BuildResponse::decode(&response.payload[..])
-        .map_err(|e| ApiError::Internal(format!("Failed to decode builder response: {}", e)))?;
-
-    let build_id = build_resp.build_id;
-    state
-        .app_repo
-        .update_deployment_status(
-            deployment.id,
-            "BUILDING",
-            None,
-            None,
-            Some(build_id.clone()),
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let task = crate::deploy::worker::BuildTask {
-        deployment_id: deployment.id,
-        app_id: app.id,
-        app_name: app.name.clone(),
-        user_id: auth.user_id.clone(),
-        build_id: build_id.clone(),
+    DeploymentService::trigger_build(
+        &state,
+        &app,
+        &deployment,
         vcpus,
-        memory_mib: memory_mib as u64,
-        disk_mib: disk_mib as u64,
-        port: app.port as u32,
-        env: env_vars,
-    };
-
-    crate::deploy::worker::start_build_polling(state.clone(), task).await;
+        memory_mib as u64,
+        disk_mib as u64,
+        env_vars,
+    )
+    .await?;
 
     Ok(Json(crate::deploy::DeployResponseBody {
         job_id: None,
@@ -778,104 +609,16 @@ pub async fn trigger_app_build(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    state
-        .app_repo
-        .update_deployment_status(
-            deployment.id,
-            "BUILDING",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // Notify cluster via NATS for BUILDING phase
-    {
-        use mikrom_proto::scheduler::AppInfo;
-        use prost::Message;
-        let info = AppInfo {
-            job_id: format!("temp-{}", deployment.id),
-            app_id: app.id.to_string(),
-            app_name: app.name.clone(),
-            image: String::new(),
-            status: 1, // Pending/Building
-            user_id: app.user_id.to_string(),
-            deployment_id: deployment.id.to_string(),
-            ..Default::default()
-        };
-        let mut buf = Vec::new();
-        if info.encode(&mut buf).is_ok() {
-            let _ = state
-                .nats_client
-                .publish("mikrom.scheduler.job_updates", buf.into())
-                .await;
-        }
-    }
-
-    state.deployment_events.send(app.id).ok();
-
-    use prost::Message;
-    let build_req = mikrom_proto::builder::BuildRequest {
-        app_id: app.id.to_string(),
-        git_url: app.git_url.clone(),
-        image_name: app.name.to_lowercase().replace(' ', "-"),
-        tag: deployment.id.to_string(),
-    };
-
-    let mut buf = Vec::new();
-    build_req
-        .encode(&mut buf)
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let response = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        state
-            .nats_client
-            .request("mikrom.builder.build", buf.into()),
+    DeploymentService::trigger_build(
+        &state,
+        &app,
+        &deployment,
+        vcpus as u32,
+        memory_mib as u64,
+        disk_mib as u64,
+        env_vars,
     )
-    .await
-    .map_err(|_| ApiError::Internal("Builder request timed out".into()))?
-    .map_err(|e| ApiError::Internal(format!("Failed to trigger build via NATS: {}", e)))?;
-
-    let build_resp = mikrom_proto::builder::BuildResponse::decode(&response.payload[..])
-        .map_err(|e| ApiError::Internal(format!("Failed to decode builder response: {}", e)))?;
-
-    let build_id = build_resp.build_id;
-    state
-        .app_repo
-        .update_deployment_status(
-            deployment.id,
-            "BUILDING",
-            None,
-            None,
-            Some(build_id.clone()),
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let task = crate::deploy::worker::BuildTask {
-        deployment_id: deployment.id,
-        app_id: app.id,
-        app_name: app.name.clone(),
-        user_id: app.user_id.to_string(),
-        build_id: build_id.clone(),
-        vcpus: vcpus as u32,
-        memory_mib: memory_mib as u64,
-        disk_mib: disk_mib as u64,
-        port: app.port as u32,
-        env: env_vars,
-    };
-
-    crate::deploy::worker::start_build_polling(state.clone(), task).await;
+    .await?;
 
     Ok(deployment.id)
 }

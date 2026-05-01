@@ -3,7 +3,7 @@ use axum::{
     http::{Request, StatusCode},
 };
 use chrono::Utc;
-use mockall::predicate::*;
+use mockall::predicate::{self, *};
 use std::sync::Arc;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -11,6 +11,7 @@ use uuid::Uuid;
 use mikrom_api::AppState;
 use mikrom_api::create_app;
 use mikrom_api::models::app::{App, Deployment};
+use mikrom_api::repositories::app_repository::UpdateDeploymentParams;
 use mikrom_api::repositories::{MockAppRepository, MockUserRepository};
 use mikrom_api::scheduler::MockScheduler;
 
@@ -103,20 +104,16 @@ async fn test_promotion_back_and_forth() {
 
     // Expect dep1 status update to STOPPED
     mock_app_repo
-        .expect_update_deployment_status()
+        .expect_update_deployment()
         .with(
             eq(dep1_id),
-            eq("STOPPED"),
-            eq(Some("job-1".to_string())),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
+            predicate::function(|params: &UpdateDeploymentParams| {
+                params.status == Some("STOPPED".to_string())
+                    && params.job_id == Some("job-1".to_string())
+            }),
         )
         .times(1)
-        .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
+        .returning(|_, _| Ok(()));
 
     // Expect dep2 to be resumed
     mock_scheduler
@@ -127,20 +124,16 @@ async fn test_promotion_back_and_forth() {
 
     // Expect dep2 status update to RUNNING
     mock_app_repo
-        .expect_update_deployment_status()
+        .expect_update_deployment()
         .with(
             eq(dep2_id),
-            eq("RUNNING"),
-            eq(Some("job-2".to_string())),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
+            predicate::function(|params: &UpdateDeploymentParams| {
+                params.status == Some("RUNNING".to_string())
+                    && params.job_id == Some("job-2".to_string())
+            }),
         )
         .times(1)
-        .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
+        .returning(|_, _| Ok(()));
 
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
@@ -274,39 +267,29 @@ async fn test_promotion_pauses_previous_active() {
         .times(1)
         .returning(|_, _| Ok(true));
 
-    // 5. Mock update_deployment_status for the old deployment (marking it STOPPED)
+    // 5. Mock update_deployment for the old deployment (marking it STOPPED)
     mock_app_repo
-        .expect_update_deployment_status()
+        .expect_update_deployment()
         .with(
             eq(old_dep_id),
-            eq("STOPPED"),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
+            predicate::function(|params: &UpdateDeploymentParams| {
+                params.status == Some("STOPPED".to_string())
+            }),
         )
         .times(1)
-        .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
+        .returning(|_, _| Ok(()));
 
     // Expect update for the new deployment (marking it RUNNING)
     mock_app_repo
-        .expect_update_deployment_status()
+        .expect_update_deployment()
         .with(
             eq(new_dep_id),
-            eq("RUNNING"),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
+            predicate::function(|params: &UpdateDeploymentParams| {
+                params.status == Some("RUNNING".to_string())
+            }),
         )
         .times(1)
-        .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
+        .returning(|_, _| Ok(()));
 
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
@@ -428,22 +411,18 @@ async fn test_activate_stopped_deployment_resumes_it() {
         .times(1)
         .returning(|_, _| Ok(true));
 
-    // 5. Mock update_deployment_status for resuming (marking it RUNNING)
+    // 5. Mock update_deployment for resuming (marking it RUNNING)
     mock_app_repo
-        .expect_update_deployment_status()
+        .expect_update_deployment()
         .with(
             eq(dep_id),
-            eq("RUNNING"),
-            eq(Some("job-stopped".to_string())),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
-            always(),
+            predicate::function(|params: &UpdateDeploymentParams| {
+                params.status == Some("RUNNING".to_string())
+                    && params.job_id == Some("job-stopped".to_string())
+            }),
         )
         .times(1)
-        .returning(|_, _, _, _, _, _, _, _, _| Ok(()));
+        .returning(|_, _| Ok(()));
 
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());

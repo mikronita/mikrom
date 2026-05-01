@@ -1,4 +1,5 @@
 use crate::error::{ApiError, ApiResult};
+use crate::repositories::app_repository::UpdateDeploymentParams;
 use axum::{
     Json,
     extract::{Path, State},
@@ -74,31 +75,19 @@ pub async fn list_active_deployments(
     let mut scheduler_apps = HashMap::new();
 
     use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
-    use prost::Message;
 
     let nats_req = ListAppsRequest {
         user_id: auth.user_id.clone(),
         status: None,
     };
 
-    let mut buf = Vec::new();
-    if let Some(inner) = async {
-        if nats_req.encode(&mut buf).is_err() {
-            return None;
-        }
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            state
-                .nats_client
-                .request("mikrom.scheduler.list_apps", buf.into()),
-        )
-        .await
-        .ok()?
-        .ok()?;
-        ListAppsResponse::decode(&response.payload[..]).ok()
-    }
-    .await
-    {
+    let scheduler_res: anyhow::Result<ListAppsResponse> = state
+        .nats
+        .with_timeout(std::time::Duration::from_secs(2))
+        .request("mikrom.scheduler.list_apps", nats_req)
+        .await;
+
+    if let Ok(inner) = scheduler_res {
         for app in inner.apps {
             scheduler_apps.insert(app.job_id.clone(), app);
         }
@@ -166,7 +155,7 @@ pub async fn watch_deployments(
     State(state): State<crate::AppState>,
 ) -> ApiResult<impl IntoResponse> {
     let nats_sub = state
-        .nats_client
+        .nats
         .subscribe("mikrom.scheduler.job_updates")
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to subscribe to job updates: {}", e)))?;
@@ -275,27 +264,20 @@ pub async fn watch_deployments(
                 // 3. Periodic refresh (Brute force fallback)
                 _ = interval.tick() => {
                     use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
-                    use prost::Message;
 
                     let nats_req = ListAppsRequest {
                         user_id: auth_user_id.clone(),
                         status: None,
                     };
 
-                    let mut buf = Vec::new();
-                    let scheduler_apps = if nats_req.encode(&mut buf).is_ok() {
-                        if let Ok(response) = state_clone
-                            .nats_client
-                            .request("mikrom.scheduler.list_apps", buf.into())
-                            .await
-                        {
-                            ListAppsResponse::decode(&response.payload[..]).ok().map(|r| r.apps).unwrap_or_default()
-                        } else {
-                            Vec::new()
-                        }
-                    } else {
-                        Vec::new()
-                    };
+                    let scheduler_apps = state_clone
+                        .nats
+                        .with_timeout(std::time::Duration::from_secs(2))
+                        .request::<ListAppsRequest, ListAppsResponse>("mikrom.scheduler.list_apps", nats_req)
+                        .await
+                        .ok()
+                        .map(|r| r.apps)
+                        .unwrap_or_default();
 
                     if !scheduler_apps.is_empty() {
                         for job in scheduler_apps {
@@ -432,7 +414,6 @@ pub async fn get_deployment_status(
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<LiveDeploymentStatus>> {
     use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse};
-    use prost::Message;
 
     let (app, dep) = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
 
@@ -463,19 +444,11 @@ pub async fn get_deployment_status(
         user_id: auth.user_id.clone(),
     };
 
-    let mut buf = Vec::new();
-    nats_req
-        .encode(&mut buf)
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let response = state
-        .nats_client
-        .request("mikrom.scheduler.get_job", buf.into())
+    let inner: AppStatusResponse = state
+        .nats
+        .request("mikrom.scheduler.get_job", nats_req)
         .await
         .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
-
-    let inner = AppStatusResponse::decode(&response.payload[..])
-        .map_err(|e| ApiError::Internal(format!("Failed to parse NATS response: {}", e)))?;
 
     let deployment_status = LiveDeploymentStatus {
         job_id: inner.job_id,
@@ -525,27 +498,18 @@ pub async fn get_deployment_logs(
     let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
 
     // 2. Get VM ID from scheduler via NATS
-    use mikrom_proto::scheduler::AppStatusRequest;
-    use prost::Message;
+    use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse};
 
     let nats_req = AppStatusRequest {
         job_id: job_id.clone(),
         user_id: auth.user_id.clone(),
     };
 
-    let mut buf = Vec::new();
-    nats_req
-        .encode(&mut buf)
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let response = state
-        .nats_client
-        .request("mikrom.scheduler.get_job", buf.into())
+    let inner: AppStatusResponse = state
+        .nats
+        .request("mikrom.scheduler.get_job", nats_req)
         .await
         .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
-
-    let inner = mikrom_proto::scheduler::AppStatusResponse::decode(&response.payload[..])
-        .map_err(|e| ApiError::Internal(format!("Failed to parse NATS response: {}", e)))?;
 
     let vm_id = inner.vm_id;
     if vm_id.is_empty() {
@@ -556,7 +520,7 @@ pub async fn get_deployment_logs(
 
     let subject = format!("mikrom.logs.{}", vm_id);
     let subscription = state
-        .nats_client
+        .nats
         .subscribe(subject)
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to subscribe to logs: {}", e)))?;
@@ -609,16 +573,18 @@ pub async fn pause_deployment(
         // Update database status
         let _ = state
             .app_repo
-            .update_deployment_status(
+            .update_deployment(
                 deployment.id,
-                "STOPPED",
-                Some(job_id),
-                deployment.image_tag,
-                deployment.build_id,
-                None,
-                deployment.git_commit_hash,
-                deployment.git_commit_message,
-                deployment.git_branch,
+                UpdateDeploymentParams {
+                    status: Some("STOPPED".to_string()),
+                    job_id: Some(job_id),
+                    image_tag: deployment.image_tag,
+                    build_id: deployment.build_id,
+                    git_commit_hash: deployment.git_commit_hash,
+                    git_commit_message: deployment.git_commit_message,
+                    git_branch: deployment.git_branch,
+                    ..Default::default()
+                },
             )
             .await;
         state.deployment_events.send(app.id).ok();
@@ -667,16 +633,18 @@ pub async fn resume_deployment(
         // Update database status
         let _ = state
             .app_repo
-            .update_deployment_status(
+            .update_deployment(
                 deployment.id,
-                "RUNNING",
-                Some(job_id),
-                deployment.image_tag,
-                deployment.build_id,
-                None,
-                deployment.git_commit_hash,
-                deployment.git_commit_message,
-                deployment.git_branch,
+                UpdateDeploymentParams {
+                    status: Some("RUNNING".to_string()),
+                    job_id: Some(job_id),
+                    image_tag: deployment.image_tag,
+                    build_id: deployment.build_id,
+                    git_commit_hash: deployment.git_commit_hash,
+                    git_commit_message: deployment.git_commit_message,
+                    git_branch: deployment.git_branch,
+                    ..Default::default()
+                },
             )
             .await;
         state.deployment_events.send(app.id).ok();
@@ -715,42 +683,35 @@ pub async fn stop_deployment(
     // Validate app ownership and deployment connection
     let (app, deployment) = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
 
-    use mikrom_proto::scheduler::CancelRequest;
-    use prost::Message;
+    use mikrom_proto::scheduler::{CancelRequest, CancelResponse};
 
     let nats_req = CancelRequest {
         job_id: job_id.clone(),
         user_id: auth.user_id.clone(),
     };
 
-    let mut buf = Vec::new();
-    nats_req
-        .encode(&mut buf)
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let response = state
-        .nats_client
-        .request("mikrom.scheduler.cancel_app", buf.into())
+    let inner: CancelResponse = state
+        .nats
+        .request("mikrom.scheduler.cancel_app", nats_req)
         .await
         .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
-
-    let inner = mikrom_proto::scheduler::CancelResponse::decode(&response.payload[..])
-        .map_err(|e| ApiError::Internal(format!("Failed to parse NATS response: {}", e)))?;
 
     if inner.success {
         // Update database status
         let _ = state
             .app_repo
-            .update_deployment_status(
+            .update_deployment(
                 deployment.id,
-                "STOPPED",
-                Some(job_id),
-                deployment.image_tag,
-                deployment.build_id,
-                None,
-                deployment.git_commit_hash,
-                deployment.git_commit_message,
-                deployment.git_branch,
+                UpdateDeploymentParams {
+                    status: Some("STOPPED".to_string()),
+                    job_id: Some(job_id),
+                    image_tag: deployment.image_tag,
+                    build_id: deployment.build_id,
+                    git_commit_hash: deployment.git_commit_hash,
+                    git_commit_message: deployment.git_commit_message,
+                    git_branch: deployment.git_branch,
+                    ..Default::default()
+                },
             )
             .await;
 

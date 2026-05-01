@@ -1,4 +1,6 @@
-use mikrom_api::repositories::app_repository::{AppRepository, NewDeployment};
+use mikrom_api::repositories::app_repository::{
+    AppRepository, NewDeployment, UpdateDeploymentParams,
+};
 use mikrom_api::repositories::postgres_app_repository::PostgresAppRepository;
 use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 use mikrom_api::repositories::user_repository::{NewUser, UserRepository, UserRole};
@@ -66,16 +68,18 @@ async fn test_deployment_metadata_roundtrip() {
     let branch = "feature/metadata";
 
     app_repo
-        .update_deployment_status(
+        .update_deployment(
             deployment.id,
-            "SUCCESS",
-            Some("job-abc".to_string()),
-            Some("img:v2".to_string()),
-            Some("build-xyz".to_string()),
-            Some("192.168.1.100".to_string()),
-            Some(commit_hash.to_string()),
-            Some(commit_msg.to_string()),
-            Some(branch.to_string()),
+            UpdateDeploymentParams {
+                status: Some("SUCCESS".to_string()),
+                job_id: Some("job-abc".to_string()),
+                image_tag: Some("img:v2".to_string()),
+                build_id: Some("build-xyz".to_string()),
+                ip_address: Some("192.168.1.100".to_string()),
+                git_commit_hash: Some(commit_hash.to_string()),
+                git_commit_message: Some(commit_msg.to_string()),
+                git_branch: Some(branch.to_string()),
+            },
         )
         .await
         .expect("failed to update deployment status with metadata");
