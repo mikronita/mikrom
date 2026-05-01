@@ -95,6 +95,31 @@ path = "tests/acme_tests.rs"
 required-features = ["test-utils"]
 
 [[test]]
+name = "app_api_tests"
+path = "tests/app_api_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
 name = "db_isolation_tests"
 path = "tests/db_isolation_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "lifecycle_tests"
+path = "tests/lifecycle_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "rollback_tests"
+path = "tests/rollback_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "sse_deployments_tests"
+path = "tests/sse_deployments_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "unified_api_tests"
+path = "tests/unified_api_tests.rs"
 required-features = ["test-utils"]

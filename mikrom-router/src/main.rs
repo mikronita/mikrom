@@ -69,18 +69,25 @@ async fn main() -> anyhow::Result<()> {
             };
 
             // Subscribe to all router-related updates
-            let mut config_sub = nats_client
+            let config_sub = nats_client
                 .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
-                .await
-                .unwrap();
-            let mut tls_sub = nats_client
+                .await;
+            let tls_sub = nats_client
                 .subscribe(mikrom_proto::subjects::ROUTER_TLS_CERT_UPDATED)
-                .await
-                .unwrap();
-            let mut acme_sub = nats_client
+                .await;
+            let acme_sub = nats_client
                 .subscribe(mikrom_proto::subjects::ROUTER_ACME_CHALLENGE_UPDATED)
-                .await
-                .unwrap();
+                .await;
+
+            let (mut config_sub, mut tls_sub, mut acme_sub) = match (config_sub, tls_sub, acme_sub)
+            {
+                (Ok(c), Ok(t), Ok(a)) => (c, t, a),
+                _ => {
+                    error!("Failed to subscribe to one or more NATS subjects, retrying in 5s");
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                },
+            };
 
             info!("Listening for router config, TLS, and ACME updates via NATS...");
 
