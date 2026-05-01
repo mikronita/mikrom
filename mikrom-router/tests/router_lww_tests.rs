@@ -7,7 +7,6 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[tokio::test]
-    #[ignore = "requires a running postgres"]
     async fn test_last_write_wins_logic() {
         let test_db = common_utils::TestDb::new().await;
         let pool = test_db.pool().clone();

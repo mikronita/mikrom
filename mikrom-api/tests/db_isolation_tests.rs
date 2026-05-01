@@ -9,7 +9,6 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test]
-    #[ignore = "requires a running postgres at localhost:5432 and NATS"]
     async fn test_api_db_isolation() {
         let test_db = mikrom_api::test_utils::TestDb::new().await;
         let pool = test_db.pool().clone();
@@ -37,7 +36,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires a running postgres at localhost:5432 and NATS"]
     async fn test_notify_router_sends_nats_message() {
         let test_db = mikrom_api::test_utils::TestDb::new().await;
         let pool = test_db.pool().clone();

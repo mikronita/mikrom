@@ -21,14 +21,12 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_connect_with_invalid_url() {
         let result = connect_to_url("invalid://url").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_run_migrations() {
         let pool =
             connect_to_url("postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test")

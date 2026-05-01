@@ -10,7 +10,6 @@ mod tests {
     use moka::future::Cache;
 
     #[tokio::test]
-    #[ignore = "requires a running postgres"]
     async fn test_router_migrations_and_resolve() {
         let test_db = common_utils::TestDb::new().await;
         let pool = test_db.pool().clone();

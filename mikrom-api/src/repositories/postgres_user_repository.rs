@@ -180,7 +180,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires PostgreSQL"]
     async fn test_find_by_email_returns_none_for_unknown_email() {
         let db = TestDb::new().await;
         let repo = PostgresUserRepository::new(db.pool().clone());
@@ -191,7 +190,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires PostgreSQL"]
     async fn test_create_and_find_roundtrip() {
         let db = TestDb::new().await;
         let repo = PostgresUserRepository::new(db.pool().clone());
@@ -218,7 +216,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires PostgreSQL"]
     async fn test_count_by_email_returns_zero_for_unknown() {
         let db = TestDb::new().await;
         let repo = PostgresUserRepository::new(db.pool().clone());
@@ -230,7 +227,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires PostgreSQL"]
     async fn test_count_by_email_returns_one_after_create() {
         let db = TestDb::new().await;
         let repo = PostgresUserRepository::new(db.pool().clone());
