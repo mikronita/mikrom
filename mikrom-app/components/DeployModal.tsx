@@ -54,7 +54,7 @@ export function DeployModal({ onClose }: DeployModalProps) {
     if (form.disk_mib) payload.disk_mib = parseInt(form.disk_mib, 10);
 
     deployMutation.mutate(payload, {
-      onSuccess: (data) => {
+      onSuccess: () => {
         toast.success(`App ${form.app_name} deployment initiated`);
         onClose();
         router.push(`/apps/${form.app_name}`);

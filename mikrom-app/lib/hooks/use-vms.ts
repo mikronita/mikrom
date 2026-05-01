@@ -96,13 +96,7 @@ export function useDeployApp() {
     mutationFn: async (data: DeployRequest) => {
       if (!token) throw new Error("No token found");
       // Use the application-specific deploy handler
-      const result = await deployApp(token, data.app_name, {
-        vcpus: data.vcpus,
-        memory_mib: data.memory_mib,
-        disk_mib: data.disk_mib,
-        env: data.env,
-        image: data.image
-      });
+      const result = await deployApp(token, data);
       if (result.error) throw new Error(result.error);
       return result.data;
     },
