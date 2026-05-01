@@ -3,14 +3,23 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     #[serde(default = "default_log_level")]
-    #[allow(dead_code)]
     pub log_level: String,
+
     #[serde(default = "default_registry")]
     pub registry: String,
+
     #[serde(default = "default_buildpack_builder")]
     pub buildpack_builder: String,
+
     #[serde(default = "default_nats_url")]
     pub nats_url: String,
+}
+
+impl Config {
+    pub fn from_env() -> Result<Self, envy::Error> {
+        dotenvy::dotenv().ok();
+        envy::from_env()
+    }
 }
 
 fn default_nats_url() -> String {
@@ -27,11 +36,4 @@ fn default_registry() -> String {
 
 fn default_buildpack_builder() -> String {
     "paketobuildpacks/ubuntu-noble-builder".to_string()
-}
-
-impl Config {
-    pub fn from_env() -> Result<Self, envy::Error> {
-        dotenvy::dotenv().ok();
-        envy::from_env()
-    }
 }

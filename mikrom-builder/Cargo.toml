@@ -17,6 +17,7 @@ async-nats.workspace = true
 futures = "0.3"
 envy.workspace = true
 dotenvy = "0.15"
+dashmap = "6.0"
 parking_lot = "0.12"
 
 mikrom-proto = { path = "../mikrom-proto" }
