@@ -38,7 +38,13 @@ pub async fn acme_challenge_handler(
     }
 }
 
-pub async fn start_acme_worker(db: PgPool, email: String, staging: bool) {
+pub async fn start_acme_worker(
+    db: PgPool,
+    email: String,
+    staging: bool,
+    master_key: String,
+    interval_secs: u64,
+) {
     info!("Starting ACME worker (staging: {})", staging);
 
     let url = if staging {
@@ -48,14 +54,19 @@ pub async fn start_acme_worker(db: PgPool, email: String, staging: bool) {
     };
 
     loop {
-        if let Err(e) = run_acme_iteration(&db, &email, url).await {
+        if let Err(e) = run_acme_iteration(&db, &email, url, &master_key).await {
             error!("ACME iteration failed: {}", e);
         }
-        tokio::time::sleep(Duration::from_secs(3600)).await; // Check every hour
+        tokio::time::sleep(Duration::from_secs(interval_secs)).await;
     }
 }
 
-async fn run_acme_iteration(db: &PgPool, email: &str, acme_url: &str) -> anyhow::Result<()> {
+async fn run_acme_iteration(
+    db: &PgPool,
+    email: &str,
+    acme_url: &str,
+    master_key: &str,
+) -> anyhow::Result<()> {
     // 1. Find domains that need certificates
     let domains_to_certify = sqlx::query(
         r#"
@@ -72,7 +83,7 @@ async fn run_acme_iteration(db: &PgPool, email: &str, acme_url: &str) -> anyhow:
         let hostname: String = row.get("hostname");
         info!("Processing certificate for {}", hostname);
 
-        if let Err(e) = certify_domain(db, email, acme_url, &hostname).await {
+        if let Err(e) = certify_domain(db, email, acme_url, &hostname, master_key).await {
             error!("Failed to certify domain {}: {}", hostname, e);
         }
     }
@@ -85,6 +96,7 @@ async fn certify_domain(
     email: &str,
     acme_url: &str,
     hostname: &str,
+    master_key: &str,
 ) -> anyhow::Result<()> {
     let contact_url = format!("mailto:{}", email);
     let contacts = [contact_url.as_str()];
@@ -100,7 +112,6 @@ async fn certify_domain(
             None,
         )
         .await?;
-
     let mut order = account
         .new_order(&NewOrder::new(&[Identifier::Dns(hostname.to_string())]))
         .await?;
@@ -173,11 +184,15 @@ async fn certify_domain(
     // Parse expiry
     let expires_at = parse_expiry(&cert_chain_pem)?;
 
+    // Encrypt private key for storage
+    let encrypted_key = crate::crypto::encrypt(&private_key_pem, master_key)
+        .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
+
     // Save to DB
     sqlx::query("INSERT INTO tls_certificates (hostname, cert_chain, private_key, expires_at) VALUES ($1, $2, $3, $4) ON CONFLICT (hostname) DO UPDATE SET cert_chain = EXCLUDED.cert_chain, private_key = EXCLUDED.private_key, expires_at = EXCLUDED.expires_at, updated_at = NOW()")
         .bind(hostname)
         .bind(&cert_chain_pem)
-        .bind(&private_key_pem)
+        .bind(&encrypted_key)
         .bind(expires_at)
         .execute(db)
         .await?;

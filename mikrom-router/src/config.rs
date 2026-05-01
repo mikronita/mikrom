@@ -19,6 +19,11 @@ pub struct Config {
     pub acme_email: String,
     #[serde(default = "default_acme_staging")]
     pub acme_staging: bool,
+    pub master_key: String,
+    #[serde(default = "default_acme_check_interval")]
+    pub acme_check_interval: u64,
+    #[serde(default = "default_cache_ttl")]
+    pub cache_ttl: u64,
 }
 
 fn default_host() -> String {
@@ -43,6 +48,14 @@ fn default_base_domain() -> String {
 
 fn default_acme_staging() -> bool {
     true
+}
+
+fn default_acme_check_interval() -> u64 {
+    3600 // 1 hour
+}
+
+fn default_cache_ttl() -> u64 {
+    3600 // 1 hour
 }
 
 impl Config {
