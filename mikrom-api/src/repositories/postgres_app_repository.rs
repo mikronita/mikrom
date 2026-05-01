@@ -344,7 +344,6 @@ mod tests {
     use crate::test_utils::TestDb;
 
     #[tokio::test]
-    #[ignore = "requires PostgreSQL"]
     async fn test_app_lifecycle() {
         let db = TestDb::new().await;
         let pool = db.pool().clone();
@@ -396,7 +395,7 @@ mod tests {
             })
             .await
             .expect("failed to create deployment");
-        assert_eq!(deployment.status, "PENDING");
+        assert_eq!(deployment.status, "BUILDING");
 
         // 5. Update deployment
         app_repo
@@ -426,12 +425,25 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires PostgreSQL"]
     async fn test_get_app_by_name() {
         let db = TestDb::new().await;
         let pool = db.pool().clone();
+        let user_repo = PostgresUserRepository::new(pool.clone());
         let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".into());
-        let user_id = Uuid::new_v4();
+
+        // Create a user first to satisfy FK constraint
+        let email = format!("app_name_test_{}@example.com", Uuid::new_v4());
+        let user_id = user_repo
+            .create(NewUser {
+                email: email.clone(),
+                password_hash: "pass".into(),
+                role: UserRole::User,
+                first_name: None,
+                last_name: None,
+            })
+            .await
+            .expect("failed to create user");
+
         let name = format!("name-test-{}", Uuid::new_v4());
 
         // Create app

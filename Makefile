@@ -58,7 +58,7 @@ test-cli: ## Run mikrom-cli unit tests
 test-integration: ## Run integration tests (starts PostgreSQL via Docker)
 	$(call check_nextest)
 	docker compose up -d --wait postgres nats-test
-	NATS_URL=nats://localhost:4223 cargo nextest run --test integration
+	NATS_URL=nats://localhost:4223 cargo nextest run --test integration -p mikrom-api --features test-utils
 
 .PHONY: test-all-crates
 test-all-crates: ## Run unit tests for all crates
