@@ -62,7 +62,7 @@ async fn test_create_app_endpoint() {
         });
 
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -142,7 +142,7 @@ async fn test_create_app_duplicate_name() {
         });
 
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -226,7 +226,7 @@ async fn test_list_apps_includes_secret() {
         });
 
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -305,7 +305,7 @@ async fn test_get_app_secret_endpoint() {
         });
 
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),

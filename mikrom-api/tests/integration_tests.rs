@@ -18,7 +18,7 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
     let user_repo = PostgresUserRepository::new(pool.clone());
     let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".to_string());
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(user_repo),
