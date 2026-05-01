@@ -9,12 +9,6 @@ pub struct Config {
     #[serde(rename = "router_https_port", default = "default_https_port")]
     pub https_port: u16,
     pub database_url: String,
-    #[serde(default = "default_log_level")]
-    #[allow(dead_code)]
-    pub log_level: String,
-    #[serde(default = "default_base_domain")]
-    #[allow(dead_code)]
-    pub base_domain: String,
     pub nats_url: String,
     pub master_key: String,
     #[serde(default = "default_cache_ttl")]
@@ -31,14 +25,6 @@ fn default_http_port() -> u16 {
 
 fn default_https_port() -> u16 {
     4343
-}
-
-fn default_log_level() -> String {
-    "info".to_string()
-}
-
-fn default_base_domain() -> String {
-    "apps.mikrom.es".to_string()
 }
 
 fn default_cache_ttl() -> u64 {
