@@ -23,5 +23,5 @@ WORKDIR /app
 # mikrom-builder needs docker to build images
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates docker.io git && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/mikrom-builder /usr/local/bin/
-EXPOSE 5004
+# No ports needed for NATS-based builder
 CMD ["mikrom-builder"]
