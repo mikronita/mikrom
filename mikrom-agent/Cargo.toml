@@ -6,7 +6,6 @@ edition = "2024"
 
 [dependencies]
 tokio.workspace = true
-tonic.workspace = true
 prost.workspace = true
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -54,9 +53,6 @@ assets = [
     ["debian/agent.env", "/etc/mikrom/agent.env", "644"],
 ]
 systemd-units = { unit-name = "mikrom-agent" }
-
-[build-dependencies]
-tonic-build.workspace = true
 
 [features]
 default = ["build"]

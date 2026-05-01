@@ -205,12 +205,12 @@ async fn main() -> anyhow::Result<()> {
                                     if let Ok(req) = DeployRequest::decode(&message.payload[..]) {
                                         tracing::info!(app_id = %req.app_id, "Received deployment request via NATS (Protobuf)");
 
-                                        let result = server.deploy_app(tonic::Request::new(req)).await;
+                                        let result = server.deploy_app(req).await;
                                         if let Some(reply) = message.reply {
                                             let response = match result {
-                                                Ok(resp) => resp.into_inner(),
-                                                Err(status) => DeployResponse {
-                                                    message: status.message().to_string(),
+                                                Ok(resp) => resp,
+                                                Err(e) => DeployResponse {
+                                                    message: e.to_string(),
                                                     ..Default::default()
                                                 }
                                             };
@@ -230,11 +230,11 @@ async fn main() -> anyhow::Result<()> {
                                     use prost::Message;
                                     use mikrom_proto::scheduler::AppStatusRequest;
                                     if let Ok(req) = AppStatusRequest::decode(&message.payload[..]) {
-                                        let result = server.get_app_status(tonic::Request::new(req)).await;
+                                        let result = server.get_app_status(req).await;
                                         if let Some(reply) = message.reply {
                                             if let Ok(resp) = result {
                                                 let mut buf = Vec::new();
-                                                if resp.into_inner().encode(&mut buf).is_ok() {
+                                                if resp.encode(&mut buf).is_ok() {
                                                     let _ = client_clone.publish(reply, buf.into()).await;
                                                 }
                                             }
@@ -250,11 +250,11 @@ async fn main() -> anyhow::Result<()> {
                                     use prost::Message;
                                     use mikrom_proto::scheduler::ListAppsRequest;
                                     if let Ok(req) = ListAppsRequest::decode(&message.payload[..]) {
-                                        let result = server.list_apps(tonic::Request::new(req)).await;
+                                        let result = server.list_apps(req).await;
                                         if let Some(reply) = message.reply {
                                             if let Ok(resp) = result {
                                                 let mut buf = Vec::new();
-                                                if resp.into_inner().encode(&mut buf).is_ok() {
+                                                if resp.encode(&mut buf).is_ok() {
                                                     let _ = client_clone.publish(reply, buf.into()).await;
                                                 }
                                             }
@@ -270,11 +270,11 @@ async fn main() -> anyhow::Result<()> {
                                     use prost::Message;
                                     use mikrom_proto::scheduler::ListWorkersRequest;
                                     if let Ok(req) = ListWorkersRequest::decode(&message.payload[..]) {
-                                        let result = server.list_workers(tonic::Request::new(req)).await;
+                                        let result = server.list_workers(req).await;
                                         if let Some(reply) = message.reply {
                                             if let Ok(resp) = result {
                                                 let mut buf = Vec::new();
-                                                if resp.into_inner().encode(&mut buf).is_ok() {
+                                                if resp.encode(&mut buf).is_ok() {
                                                     let _ = client_clone.publish(reply, buf.into()).await;
                                                 }
                                             }
@@ -290,11 +290,11 @@ async fn main() -> anyhow::Result<()> {
                                     use prost::Message;
                                     use mikrom_proto::scheduler::PauseRequest;
                                     if let Ok(req) = PauseRequest::decode(&message.payload[..]) {
-                                        let result = server.pause_app(tonic::Request::new(req)).await;
+                                        let result = server.pause_app(req).await;
                                         if let Some(reply) = message.reply {
                                             if let Ok(resp) = result {
                                                 let mut buf = Vec::new();
-                                                if resp.into_inner().encode(&mut buf).is_ok() {
+                                                if resp.encode(&mut buf).is_ok() {
                                                     let _ = client_clone.publish(reply, buf.into()).await;
                                                 }
                                             }
@@ -310,11 +310,11 @@ async fn main() -> anyhow::Result<()> {
                                     use prost::Message;
                                     use mikrom_proto::scheduler::ResumeRequest;
                                     if let Ok(req) = ResumeRequest::decode(&message.payload[..]) {
-                                        let result = server.resume_app(tonic::Request::new(req)).await;
+                                        let result = server.resume_app(req).await;
                                         if let Some(reply) = message.reply {
                                             if let Ok(resp) = result {
                                                 let mut buf = Vec::new();
-                                                if resp.into_inner().encode(&mut buf).is_ok() {
+                                                if resp.encode(&mut buf).is_ok() {
                                                     let _ = client_clone.publish(reply, buf.into()).await;
                                                 }
                                             }
@@ -330,11 +330,11 @@ async fn main() -> anyhow::Result<()> {
                                     use prost::Message;
                                     use mikrom_proto::scheduler::CancelRequest;
                                     if let Ok(req) = CancelRequest::decode(&message.payload[..]) {
-                                        let result = server.cancel_app(tonic::Request::new(req)).await;
+                                        let result = server.cancel_app(req).await;
                                         if let Some(reply) = message.reply {
                                             if let Ok(resp) = result {
                                                 let mut buf = Vec::new();
-                                                if resp.into_inner().encode(&mut buf).is_ok() {
+                                                if resp.encode(&mut buf).is_ok() {
                                                     let _ = client_clone.publish(reply, buf.into()).await;
                                                 }
                                             }
@@ -350,11 +350,11 @@ async fn main() -> anyhow::Result<()> {
                                     use prost::Message;
                                     use mikrom_proto::scheduler::DeleteAppRequest;
                                     if let Ok(req) = DeleteAppRequest::decode(&message.payload[..]) {
-                                        let result = server.delete_app(tonic::Request::new(req)).await;
+                                        let result = server.delete_app(req).await;
                                         if let Some(reply) = message.reply {
                                             if let Ok(resp) = result {
                                                 let mut buf = Vec::new();
-                                                if resp.into_inner().encode(&mut buf).is_ok() {
+                                                if resp.encode(&mut buf).is_ok() {
                                                     let _ = client_clone.publish(reply, buf.into()).await;
                                                 }
                                             }
