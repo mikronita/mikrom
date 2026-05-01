@@ -94,7 +94,7 @@ run-agent: ## Run mikrom-agent with watch (port 5003)
 	cd mikrom-agent && cargo watch -x run
 
 .PHONY: run-builder
-run-builder: ## Run mikrom-builder with watch (port 5004)
+run-builder: ## Run mikrom-builder with watch
 	cd mikrom-builder && cargo watch -x run
 
 .PHONY: run-router

@@ -2,12 +2,6 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
-    #[serde(default = "default_host")]
-    #[allow(dead_code)]
-    pub host: String,
-    #[serde(default = "default_port")]
-    #[allow(dead_code)]
-    pub port: u16,
     #[serde(default = "default_log_level")]
     #[allow(dead_code)]
     pub log_level: String,
@@ -21,14 +15,6 @@ pub struct Config {
 
 fn default_nats_url() -> String {
     std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string())
-}
-
-fn default_host() -> String {
-    "0.0.0.0".to_string()
-}
-
-fn default_port() -> u16 {
-    5004
 }
 
 fn default_log_level() -> String {
