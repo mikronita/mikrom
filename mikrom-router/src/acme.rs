@@ -216,14 +216,10 @@ fn parse_expiry(cert_pem: &str) -> anyhow::Result<DateTime<Utc>> {
 }
 
 #[cfg(test)]
-#[path = "../tests/common_utils.rs"]
-mod common_utils;
-
-#[cfg(test)]
 mod tests {
-    use super::common_utils;
     use super::*;
     use crate::AppState;
+    use crate::common_utils;
     use axum::extract::Path;
     use hyper_util::client::legacy::connect::HttpConnector;
     use hyper_util::rt::TokioExecutor;

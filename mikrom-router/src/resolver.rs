@@ -38,13 +38,9 @@ pub async fn resolve_target(state: &AppState, host: &str) -> anyhow::Result<Stri
 }
 
 #[cfg(test)]
-#[path = "../tests/common_utils.rs"]
-mod common_utils;
-
-#[cfg(test)]
 mod tests {
-    use super::common_utils;
     use super::*;
+    use crate::common_utils;
     use moka::future::Cache;
 
     #[tokio::test]

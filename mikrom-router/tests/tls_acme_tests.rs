@@ -8,7 +8,6 @@ use mikrom_router::AppState;
 use mikrom_router::acme::acme_challenge_handler;
 use mikrom_router::tls::DatabaseCertResolver;
 use moka::future::Cache;
-use sqlx::PgPool;
 use tower::ServiceExt;
 
 #[path = "common_utils.rs"]

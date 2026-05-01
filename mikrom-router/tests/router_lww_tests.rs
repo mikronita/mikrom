@@ -4,8 +4,6 @@ mod common_utils;
 #[cfg(test)]
 mod tests {
     use super::common_utils;
-    use sqlx::PgPool;
-    use std::env;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[tokio::test]

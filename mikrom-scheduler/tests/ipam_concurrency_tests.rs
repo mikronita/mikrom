@@ -1,5 +1,4 @@
 use mikrom_scheduler::scheduler::ipam::Ipam;
-use sqlx::PgPool;
 use std::collections::HashSet;
 
 #[path = "common_utils.rs"]

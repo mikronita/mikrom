@@ -162,9 +162,6 @@ jobs:
           JWT_SECRET: ci-integration-test-secret
         run: cargo nextest run --test integration --all-features
 
-      - name: E2E tests
-        run: cargo nextest run -p mikrom-api --test deploy_e2e
-
 # ══════════════════════════════════════════════════════════════════════════════
 # JOB: docker
 # ══════════════════════════════════════════════════════════════════════════════

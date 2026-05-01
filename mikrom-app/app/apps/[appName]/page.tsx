@@ -371,9 +371,8 @@ export default function AppDetailPage() {
                         // Single source of truth for what we consider "Production" in the UI
                         const productionDepId = app?.active_deployment_id || sortedDeps.find(d => d.status === "RUNNING")?.id;
 
-                        return sortedDeps.map((dep, index) => {
+                        return sortedDeps.map((dep) => {
                           const isProduction = productionDepId === dep.id && dep.status === "RUNNING";
-                          const isLatest = index === 0;
                           
                           // A deployment is "Currently in Prod" if it's the designated production one 
                           const isCurrentlyInProd = isProduction;

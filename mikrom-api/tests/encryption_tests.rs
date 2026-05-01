@@ -3,7 +3,6 @@ use mikrom_api::repositories::postgres_app_repository::PostgresAppRepository;
 use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 use mikrom_api::repositories::user_repository::{NewUser, UserRepository, UserRole};
 use mikrom_api::test_utils::TestDb;
-use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
 

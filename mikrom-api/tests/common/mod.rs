@@ -1,9 +1,8 @@
 use async_nats::Client;
-use mikrom_api::test_utils::TestDb;
-use sqlx::PgPool;
 use std::env;
 
 /// Returns a connected NATS client for testing.
+#[allow(dead_code)]
 pub async fn get_nats_client() -> Client {
     dotenvy::dotenv().ok();
     let nats_url = env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
