@@ -42,9 +42,13 @@ async fn main() -> anyhow::Result<()> {
         scheduler,
         nats_client,
         router_addr: config.router_addr,
+        api_db: db_pool,
         jwt_secret: config.jwt_secret,
         master_key: config.master_key,
-        deployment_events,
+        deployment_events: deployment_events.clone(),
+        acme_email: config.acme_email,
+        acme_staging: config.acme_staging,
+        acme_check_interval: config.acme_check_interval,
     };
 
     mikrom_api::start_background_tasks(state.clone());

@@ -28,9 +28,15 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats_client,
         router_addr: "http://localhost:8080".to_string(),
+        api_db: sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/dummy")
+            .unwrap(),
         jwt_secret: JWT_SECRET.into(),
         master_key: "key".into(),
         deployment_events: deployment_events.clone(),
+        acme_email: "admin@mikrom.es".into(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     create_app(state)
@@ -241,9 +247,15 @@ async fn test_sse_deployments_stream_updates() {
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats_client,
         router_addr: "http://localhost:8080".to_string(),
+        api_db: sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/dummy")
+            .unwrap(),
         jwt_secret: JWT_SECRET.into(),
         master_key: "key".into(),
         deployment_events: deployment_events.clone(),
+        acme_email: "admin@mikrom.es".into(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let mut router = create_app(state);

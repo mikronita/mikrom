@@ -8,3 +8,25 @@ pub struct RouterConfigUpdate {
     #[prost(int64, tag = "3")]
     pub timestamp: i64,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TlsCertificateUpdate {
+    #[prost(string, tag = "1")]
+    pub hostname: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub cert_chain: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub private_key: ::prost::alloc::string::String,
+    #[prost(int64, tag = "4")]
+    pub expires_at: i64,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AcmeChallengeUpdate {
+    #[prost(string, tag = "1")]
+    pub token: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub key_auth: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub hostname: ::prost::alloc::string::String,
+    #[prost(bool, tag = "4")]
+    pub is_delete: bool,
+}

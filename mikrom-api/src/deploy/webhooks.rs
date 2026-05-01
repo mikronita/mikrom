@@ -141,9 +141,15 @@ mod tests {
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             nats_client,
             router_addr: "http://localhost:8080".into(),
+            api_db: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/dummy")
+                .unwrap(),
             jwt_secret: "secret".into(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            acme_email: "admin@mikrom.es".into(),
+            acme_staging: true,
+            acme_check_interval: 3600,
         }
     }
 
