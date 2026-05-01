@@ -46,19 +46,13 @@ pub async fn run_acme_iteration(
     is_staging: bool,
     master_key: &str,
 ) -> anyhow::Result<()> {
-    // 1. Find domains that need certificates
-    // Since we don't have direct access to the router DB anymore,
-    // we should query the local apps table for hostnames.
-    // If we need to know expiration, we might need to store cert info in API DB too,
-    // or assume we certify all hostnames that lack a cert record (we should probably
-    // add a 'last_certified_at' to the apps table or have a local copy of certificates).
-
-    // For now, let's query the apps table.
+    // 1. Find domains that need certificates (expired or expiring in < 30 days)
     let domains_to_certify = sqlx::query(
         r#"
         SELECT hostname
         FROM apps
         WHERE hostname IS NOT NULL
+          AND (cert_expires_at IS NULL OR cert_expires_at < NOW() + INTERVAL '30 days')
         "#,
     )
     .fetch_all(api_db)
@@ -74,12 +68,9 @@ pub async fn run_acme_iteration(
     for row in domains_to_certify {
         let hostname: String = row.get("hostname");
 
-        // Check if we should renew (logic to be refined based on API DB state)
-        // For now, we'll implement the certification logic.
-        // In a real system, we'd check expiration dates stored in the API DB.
         info!("Processing certificate renewal for {}", hostname);
 
-        if let Err(e) = certify_domain(nats_client, &account, &hostname, master_key).await {
+        if let Err(e) = certify_domain(api_db, nats_client, &account, &hostname, master_key).await {
             error!("Failed to certify domain {}: {}", hostname, e);
         }
     }
@@ -140,6 +131,7 @@ pub async fn get_or_create_acme_account(
 }
 
 async fn certify_domain(
+    api_db: &PgPool,
     nats_client: &async_nats::Client,
     account: &Account,
     hostname: &str,
@@ -150,12 +142,14 @@ async fn certify_domain(
         .await?;
 
     let mut auths = order.authorizations();
+    let mut tokens = Vec::new();
 
     while let Some(auth_result) = auths.next().await {
         let mut auth_handle = auth_result?;
         if let Some(mut challenge_handle) = auth_handle.challenge(ChallengeType::Http01) {
             let key_auth = challenge_handle.key_authorization().as_str().to_string();
             let token = challenge_handle.token.clone();
+            tokens.push(token.clone());
 
             // Publish challenge to NATS
             let update = AcmeChallengeUpdate {
@@ -193,6 +187,28 @@ async fn certify_domain(
         attempts += 1;
     }
 
+    // Cleanup challenges from router
+    for token in tokens {
+        let update = AcmeChallengeUpdate {
+            token,
+            key_auth: "".into(),
+            hostname: "".into(),
+            is_delete: true,
+        };
+        if let Err(e) = nats_client
+            .publish(
+                subjects::ROUTER_ACME_CHALLENGE_UPDATED,
+                update.encode_to_vec().into(),
+            )
+            .await
+        {
+            error!(
+                "Failed to publish challenge cleanup for {}: {}",
+                hostname, e
+            );
+        }
+    }
+
     if state.status != OrderStatus::Ready {
         return Err(anyhow::anyhow!(
             "ACME order failed with status: {:?} after {} attempts",
@@ -228,6 +244,13 @@ async fn certify_domain(
 
     // Parse expiry
     let expires_at = parse_expiry(&cert_chain_pem)?;
+
+    // Update expiry in API database
+    sqlx::query("UPDATE apps SET cert_expires_at = $1 WHERE hostname = $2")
+        .bind(expires_at)
+        .bind(hostname)
+        .execute(api_db)
+        .await?;
 
     // Encrypt private key for storage
     let encrypted_key = crate::crypto::encrypt(&private_key_pem, master_key)
