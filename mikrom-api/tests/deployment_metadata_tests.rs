@@ -2,22 +2,18 @@ use mikrom_api::repositories::app_repository::{AppRepository, NewDeployment};
 use mikrom_api::repositories::postgres_app_repository::PostgresAppRepository;
 use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 use mikrom_api::repositories::user_repository::{NewUser, UserRepository, UserRole};
+use mikrom_api::test_utils::TestDb;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-async fn get_test_pool() -> PgPool {
-    let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-    });
-    PgPool::connect(&url)
-        .await
-        .expect("failed to connect to test db")
-}
+#[path = "common/mod.rs"]
+mod common;
 
 #[tokio::test]
-#[ignore = "requires PostgreSQL"]
-async fn test_deployment_metadata_persistence() {
-    let pool = get_test_pool().await;
+async fn test_deployment_metadata_roundtrip() {
+    let db = TestDb::new().await;
+    let pool = db.pool().clone();
+
     let user_repo = PostgresUserRepository::new(pool.clone());
     let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".to_string());
 

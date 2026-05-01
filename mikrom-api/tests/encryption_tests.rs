@@ -2,30 +2,18 @@ use mikrom_api::repositories::app_repository::{AppRepository, NewDeployment};
 use mikrom_api::repositories::postgres_app_repository::PostgresAppRepository;
 use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 use mikrom_api::repositories::user_repository::{NewUser, UserRepository, UserRole};
+use mikrom_api::test_utils::TestDb;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-async fn get_test_pool() -> PgPool {
-    let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-    });
-    let pool = PgPool::connect(&url)
-        .await
-        .expect("failed to connect to test db");
-
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("failed to run migrations");
-
-    pool
-}
+#[path = "common/mod.rs"]
+mod common;
 
 #[tokio::test]
-#[ignore = "requires PostgreSQL"]
 async fn test_encryption_at_rest() {
-    let pool = get_test_pool().await;
+    let db = TestDb::new().await;
+    let pool = db.pool().clone();
     let master_key = "test-master-key-123";
     let app_repo = PostgresAppRepository::new(pool.clone(), master_key.to_string());
     let user_repo = PostgresUserRepository::new(pool.clone());

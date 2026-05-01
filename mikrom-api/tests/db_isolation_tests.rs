@@ -11,7 +11,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires a running postgres at localhost:5432 and NATS"]
     async fn test_api_db_isolation() {
-        let pool = common::get_test_pool().await;
+        let test_db = mikrom_api::test_utils::TestDb::new().await;
+        let pool = test_db.pool().clone();
 
         // Verify scheduler tables are NOT present in API database
         let tables = sqlx::query(
@@ -38,7 +39,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires a running postgres at localhost:5432 and NATS"]
     async fn test_notify_router_sends_nats_message() {
-        let pool = common::get_test_pool().await;
+        let test_db = mikrom_api::test_utils::TestDb::new().await;
+        let pool = test_db.pool().clone();
         let nats_client = common::get_nats_client().await;
 
         let state = AppState {

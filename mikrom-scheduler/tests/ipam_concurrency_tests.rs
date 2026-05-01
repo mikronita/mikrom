@@ -2,25 +2,13 @@ use mikrom_scheduler::scheduler::ipam::Ipam;
 use sqlx::PgPool;
 use std::collections::HashSet;
 
-async fn get_test_pool() -> PgPool {
-    let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://mikrom:mikrom_password@localhost:5432/mikrom_scheduler_test".to_string()
-    });
-    PgPool::connect(&url)
-        .await
-        .expect("failed to connect to test db")
-}
+#[path = "common_utils.rs"]
+mod common_utils;
 
 #[tokio::test]
-#[ignore = "requires PostgreSQL"]
 async fn test_concurrent_ip_allocation() {
-    let pool = get_test_pool().await;
-
-    // Run migrations
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("failed to run migrations");
+    let db = common_utils::TestDb::new().await;
+    let pool = db.pool().clone();
 
     let worker_id = format!("worker-{}", uuid::Uuid::new_v4());
     let bridge_ip = "10.0.0.1/24";

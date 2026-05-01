@@ -24,6 +24,9 @@ pub mod scheduler;
 pub mod sync;
 pub mod vms;
 
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
+
 pub use deploy::deploy_app;
 use deploy::webhooks::github_webhook_handler;
 pub use error::{ApiError, ApiResult};

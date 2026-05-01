@@ -65,3 +65,29 @@ mikrom-agent = { path = "../mikrom-agent" }
 name = "integration"
 path = "tests/integration_tests.rs"
 test = true
+required-features = ["test-utils"]
+
+[[test]]
+name = "openapi_tests"
+path = "tests/openapi_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "system_health_tests"
+path = "tests/system_health_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "encryption_tests"
+path = "tests/encryption_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "deployment_metadata_tests"
+path = "tests/deployment_metadata_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "db_isolation_tests"
+path = "tests/db_isolation_tests.rs"
+required-features = ["test-utils"]

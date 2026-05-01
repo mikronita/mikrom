@@ -2,6 +2,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use mikrom_api::test_utils::TestDb;
 use mikrom_api::{AppState, create_app, repositories, scheduler};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -9,10 +10,8 @@ use tower::ServiceExt;
 #[tokio::test]
 async fn test_health_endpoint_structure() {
     let mock_repo = repositories::user_repository::MockUserRepository::new();
-    let db_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-    });
-    let db_pool = sqlx::PgPool::connect_lazy(&db_url).unwrap();
+    let db = TestDb::new().await;
+    let db_pool = db.pool().clone();
     let app_repo = Arc::new(repositories::PostgresAppRepository::new(
         db_pool,
         "test-key".to_string(),
@@ -59,10 +58,8 @@ async fn test_health_endpoint_structure() {
 #[tokio::test]
 async fn test_health_stream_endpoint() {
     let mock_repo = repositories::user_repository::MockUserRepository::new();
-    let db_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-    });
-    let db_pool = sqlx::PgPool::connect_lazy(&db_url).unwrap();
+    let db = TestDb::new().await;
+    let db_pool = db.pool().clone();
     let app_repo = Arc::new(repositories::PostgresAppRepository::new(
         db_pool,
         "test-key".to_string(),
