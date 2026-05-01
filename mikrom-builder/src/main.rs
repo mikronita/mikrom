@@ -12,6 +12,13 @@ use crate::server::BuilderServer;
 async fn main() -> anyhow::Result<()> {
     let config = Config::from_env().expect("Failed to load configuration");
 
+    // Override RUST_LOG with config value if not already set
+    if std::env::var("RUST_LOG").is_err() {
+        unsafe {
+            std::env::set_var("RUST_LOG", &config.log_level);
+        }
+    }
+
     mikrom_proto::telemetry::init_telemetry("mikrom-builder", "0.1.0")?;
 
     info!("Connecting to NATS at {}...", config.nats_url);
