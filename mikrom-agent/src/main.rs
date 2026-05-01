@@ -13,10 +13,9 @@ async fn main() -> anyhow::Result<()> {
     let ip_address = get_local_ip();
 
     tracing::info!(
-        "Starting agent {} on {} (scheduler: {}, hostname: {}, mtls: {})",
+        "Starting agent {} on {} (hostname: {}, mtls: {})",
         config.host_id,
         addr,
-        config.scheduler_addr,
         hostname,
         config.use_tls
     );

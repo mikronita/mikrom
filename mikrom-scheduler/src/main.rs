@@ -1,10 +1,8 @@
 #![allow(clippy::collapsible_if)]
 
-use mikrom_proto::scheduler::SchedulerService;
 use mikrom_scheduler::config::SchedulerConfig;
 use mikrom_scheduler::server::SchedulerServer;
 use sqlx::postgres::PgPoolOptions;
-use std::net::SocketAddr;
 use std::time::Duration;
 
 #[tokio::main]
@@ -29,9 +27,6 @@ async fn main() -> anyhow::Result<()> {
     } else {
         None
     };
-
-    let addr: SocketAddr = format!("0.0.0.0:{}", config.scheduler_port).parse()?;
-    tracing::info!("Starting scheduler on {} (mtls: {})", addr, config.use_tls);
 
     tracing::info!("Connecting to NATS at {} for server...", config.nats_url);
     let nats_client = async_nats::connect(&config.nats_url)
@@ -408,7 +403,8 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    server.serve(addr).await?;
+    // Keep the main process alive for the NATS listeners
+    std::future::pending::<()>().await;
 
     Ok(())
 }

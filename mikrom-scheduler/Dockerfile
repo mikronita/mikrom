@@ -22,5 +22,6 @@ FROM debian:trixie-slim AS runner
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/mikrom-scheduler /usr/local/bin/
-EXPOSE 5002
+# No ports needed for NATS-based scheduler
 CMD ["mikrom-scheduler"]
+

@@ -8,9 +8,6 @@ pub struct AgentConfig {
     #[serde(default = "default_host_id")]
     pub host_id: String,
 
-    #[serde(default = "default_scheduler_addr")]
-    pub scheduler_addr: String,
-
     #[serde(default = "default_use_tls")]
     pub use_tls: bool,
 
@@ -36,10 +33,6 @@ fn default_bridge_ip() -> String {
 
 fn default_host_id() -> String {
     Uuid::new_v4().to_string()
-}
-
-fn default_scheduler_addr() -> String {
-    "http://127.0.0.1:5002".to_string()
 }
 
 fn default_use_tls() -> bool {

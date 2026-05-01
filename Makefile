@@ -86,7 +86,7 @@ run-api: ## Run mikrom-api with watch (port 5001)
 	cd mikrom-api && cargo watch -x run
 
 .PHONY: run-scheduler
-run-scheduler: ## Run mikrom-scheduler with watch (port 5002)
+run-scheduler: ## Run mikrom-scheduler with watch
 	cd mikrom-scheduler && cargo watch -x run
 
 .PHONY: run-agent

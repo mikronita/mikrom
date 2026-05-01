@@ -8,19 +8,12 @@ pub struct SchedulerConfig {
     #[serde(default = "default_use_tls")]
     pub use_tls: bool,
 
-    #[serde(default = "default_scheduler_port")]
-    pub scheduler_port: u16,
-
     #[serde(default = "default_certs_dir")]
     pub certs_dir: String,
 }
 
 fn default_use_tls() -> bool {
     false
-}
-
-fn default_scheduler_port() -> u16 {
-    5002
 }
 
 fn default_certs_dir() -> String {
