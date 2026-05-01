@@ -52,8 +52,6 @@ services:
       DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_scheduler
       USE_TLS: "true"
       CERTS_DIR: /certs/scheduler
-    ports:
-      - "5002:5002"
     volumes:
       - certs:/certs
     depends_on:
@@ -61,11 +59,6 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 5002"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
     networks:
       - mikrom
 
@@ -76,7 +69,6 @@ services:
     environment:
       NATS_URL: nats://nats:4222
       DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_api
-      SCHEDULER_ADDR: https://mikrom-scheduler:5002
       JWT_SECRET: ${JWT_SECRET:-change_me_in_production}
       USE_TLS: "true"
       CERTS_DIR: /certs/api

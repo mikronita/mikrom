@@ -58,7 +58,7 @@ make db-start
 
 # 2. Run the core services (separate terminals)
 make run-api        # port 5001
-make run-scheduler  # port 5002
+make run-scheduler  # Internal NATS
 make run-builder    # port 5004
 make run-agent      # port 5003
 make run-router     # port 8080

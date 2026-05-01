@@ -14,9 +14,6 @@ pub struct ApiConfig {
     #[serde(default = "default_api_port")]
     pub api_port: u16,
 
-    #[serde(default = "default_scheduler_addr")]
-    pub scheduler_addr: String,
-
     #[serde(default = "default_router_addr")]
     pub router_addr: String,
 
@@ -59,10 +56,6 @@ fn default_api_port() -> u16 {
     5001
 }
 
-fn default_scheduler_addr() -> String {
-    "http://127.0.0.1:5002".to_string()
-}
-
 fn default_router_addr() -> String {
     "http://127.0.0.1:8080".to_string()
 }
@@ -75,14 +68,5 @@ impl ApiConfig {
     pub fn load() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
         envy::from_env::<Self>().map_err(anyhow::Error::from)
-    }
-
-    #[must_use]
-    pub fn scheduler_config(&self) -> crate::scheduler::SchedulerConfig {
-        crate::scheduler::SchedulerConfig {
-            addr: self.scheduler_addr.clone(),
-            use_tls: self.use_tls,
-            certs_dir: self.certs_dir.clone(),
-        }
     }
 }

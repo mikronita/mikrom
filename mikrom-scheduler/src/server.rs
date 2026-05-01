@@ -1,14 +1,11 @@
 use crate::scheduler::AppScheduler;
 use crate::worker_registry::WorkerRegistry;
 use mikrom_proto::scheduler::{
-    AppStatusResponse, DeployResponse, GetLogsRequest, GetLogsResponse, ListWorkersRequest,
-    ListWorkersResponse, RegisterWorkerRequest, RegisterWorkerResponse, ReportMetricsRequest,
-    ReportMetricsResponse, WatchAppsRequest, WatchAppsResponse,
+    AppStatusResponse, DeployResponse, ListWorkersRequest, ListWorkersResponse,
 };
 
 use mikrom_proto::tls::ServiceCerts;
 use sqlx::PgPool;
-use std::net::SocketAddr;
 use tonic::{Response, Status};
 use uuid::Uuid;
 
@@ -41,10 +38,9 @@ impl SchedulerServer {
     }
 }
 
-#[tonic::async_trait]
-impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for SchedulerServer {
+impl SchedulerServer {
     #[tracing::instrument(skip(self, request), fields(app_id = %request.get_ref().app_id))]
-    async fn deploy_app(
+    pub async fn deploy_app(
         &self,
         request: tonic::Request<mikrom_proto::scheduler::DeployRequest>,
     ) -> Result<Response<DeployResponse>, Status> {
@@ -220,7 +216,7 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
         }
     }
 
-    async fn get_app_status(
+    pub async fn get_app_status(
         &self,
         request: tonic::Request<mikrom_proto::scheduler::AppStatusRequest>,
     ) -> Result<Response<AppStatusResponse>, Status> {
@@ -280,7 +276,7 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
         }
     }
 
-    async fn list_apps(
+    pub async fn list_apps(
         &self,
         request: tonic::Request<mikrom_proto::scheduler::ListAppsRequest>,
     ) -> Result<Response<mikrom_proto::scheduler::ListAppsResponse>, Status> {
@@ -337,7 +333,7 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
         }))
     }
 
-    async fn pause_app(
+    pub async fn pause_app(
         &self,
         request: tonic::Request<mikrom_proto::scheduler::PauseRequest>,
     ) -> Result<Response<mikrom_proto::scheduler::PauseResponse>, Status> {
@@ -350,7 +346,7 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
         }))
     }
 
-    async fn resume_app(
+    pub async fn resume_app(
         &self,
         request: tonic::Request<mikrom_proto::scheduler::ResumeRequest>,
     ) -> Result<Response<mikrom_proto::scheduler::ResumeResponse>, Status> {
@@ -441,7 +437,7 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
         }))
     }
 
-    async fn cancel_app(
+    pub async fn cancel_app(
         &self,
         request: tonic::Request<mikrom_proto::scheduler::CancelRequest>,
     ) -> Result<Response<mikrom_proto::scheduler::CancelResponse>, Status> {
@@ -457,7 +453,7 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
         }))
     }
 
-    async fn delete_app(
+    pub async fn delete_app(
         &self,
         request: tonic::Request<mikrom_proto::scheduler::DeleteAppRequest>,
     ) -> Result<Response<mikrom_proto::scheduler::DeleteAppResponse>, Status> {
@@ -491,21 +487,7 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
         }))
     }
 
-    async fn register_worker(
-        &self,
-        _request: tonic::Request<RegisterWorkerRequest>,
-    ) -> Result<Response<RegisterWorkerResponse>, Status> {
-        Err(Status::unimplemented("Use NATS for worker registration"))
-    }
-
-    async fn report_metrics(
-        &self,
-        _request: tonic::Request<ReportMetricsRequest>,
-    ) -> Result<Response<ReportMetricsResponse>, Status> {
-        Err(Status::unimplemented("Use NATS for metrics reporting"))
-    }
-
-    async fn list_workers(
+    pub async fn list_workers(
         &self,
         _request: tonic::Request<ListWorkersRequest>,
     ) -> Result<Response<ListWorkersResponse>, Status> {
@@ -533,25 +515,6 @@ impl mikrom_proto::scheduler::scheduler_service_server::SchedulerService for Sch
         }))
     }
 
-    type WatchAppsStream =
-        tokio_stream::wrappers::ReceiverStream<Result<WatchAppsResponse, Status>>;
-    async fn watch_apps(
-        &self,
-        _request: tonic::Request<WatchAppsRequest>,
-    ) -> Result<Response<Self::WatchAppsStream>, Status> {
-        Err(Status::unimplemented("Use NATS for app updates"))
-    }
-
-    type GetAppLogsStream = tokio_stream::wrappers::ReceiverStream<Result<GetLogsResponse, Status>>;
-    async fn get_app_logs(
-        &self,
-        _request: tonic::Request<GetLogsRequest>,
-    ) -> Result<Response<Self::GetAppLogsStream>, Status> {
-        Err(Status::unimplemented("Use NATS for logs"))
-    }
-}
-
-impl SchedulerServer {
     async fn forward_deploy_to_agent(
         &self,
         host_id: &str,
@@ -814,23 +777,6 @@ impl SchedulerServer {
         }
 
         Ok(())
-    }
-
-    pub async fn serve(&self, addr: SocketAddr) -> anyhow::Result<()> {
-        use mikrom_proto::scheduler::scheduler_service_server::SchedulerServiceServer;
-        use tonic::transport::Server;
-
-        let mut builder = Server::builder();
-
-        if let Some(certs) = &self.certs {
-            builder = builder.tls_config(certs.server_tls_config()?)?;
-        }
-
-        builder
-            .add_service(SchedulerServiceServer::new(self.clone()))
-            .serve(addr)
-            .await
-            .map_err(Into::into)
     }
 }
 
