@@ -232,11 +232,17 @@ async fn main() -> anyhow::Result<()> {
                                     if let Ok(req) = AppStatusRequest::decode(&message.payload[..]) {
                                         let result = server.get_app_status(req).await;
                                         if let Some(reply) = message.reply {
-                                            if let Ok(resp) = result {
-                                                let mut buf = Vec::new();
-                                                if resp.encode(&mut buf).is_ok() {
-                                                    let _ = client_clone.publish(reply, buf.into()).await;
+                                            use mikrom_proto::scheduler::AppStatusResponse;
+                                            let response = match result {
+                                                Ok(resp) => resp,
+                                                Err(e) => AppStatusResponse {
+                                                    error_message: e.to_string(),
+                                                    ..Default::default()
                                                 }
+                                            };
+                                            let mut buf = Vec::new();
+                                            if response.encode(&mut buf).is_ok() {
+                                                let _ = client_clone.publish(reply, buf.into()).await;
                                             }
                                         }
                                     }
@@ -252,11 +258,14 @@ async fn main() -> anyhow::Result<()> {
                                     if let Ok(req) = ListAppsRequest::decode(&message.payload[..]) {
                                         let result = server.list_apps(req).await;
                                         if let Some(reply) = message.reply {
-                                            if let Ok(resp) = result {
-                                                let mut buf = Vec::new();
-                                                if resp.encode(&mut buf).is_ok() {
-                                                    let _ = client_clone.publish(reply, buf.into()).await;
-                                                }
+                                            use mikrom_proto::scheduler::ListAppsResponse;
+                                            let response = match result {
+                                                Ok(resp) => resp,
+                                                Err(_) => ListAppsResponse { apps: vec![] },
+                                            };
+                                            let mut buf = Vec::new();
+                                            if response.encode(&mut buf).is_ok() {
+                                                let _ = client_clone.publish(reply, buf.into()).await;
                                             }
                                         }
                                     }
@@ -272,11 +281,16 @@ async fn main() -> anyhow::Result<()> {
                                     if let Ok(req) = ListWorkersRequest::decode(&message.payload[..]) {
                                         let result = server.list_workers(req).await;
                                         if let Some(reply) = message.reply {
-                                            if let Ok(resp) = result {
-                                                let mut buf = Vec::new();
-                                                if resp.encode(&mut buf).is_ok() {
-                                                    let _ = client_clone.publish(reply, buf.into()).await;
-                                                }
+                                            use mikrom_proto::scheduler::ListWorkersResponse;
+                                            let response = match result {
+                                                Ok(resp) => resp,
+                                                Err(_) => ListWorkersResponse {
+                                                    workers: vec![],
+                                                },
+                                            };
+                                            let mut buf = Vec::new();
+                                            if response.encode(&mut buf).is_ok() {
+                                                let _ = client_clone.publish(reply, buf.into()).await;
                                             }
                                         }
                                     }
@@ -292,11 +306,17 @@ async fn main() -> anyhow::Result<()> {
                                     if let Ok(req) = PauseRequest::decode(&message.payload[..]) {
                                         let result = server.pause_app(req).await;
                                         if let Some(reply) = message.reply {
-                                            if let Ok(resp) = result {
-                                                let mut buf = Vec::new();
-                                                if resp.encode(&mut buf).is_ok() {
-                                                    let _ = client_clone.publish(reply, buf.into()).await;
-                                                }
+                                            use mikrom_proto::scheduler::PauseResponse;
+                                            let response = match result {
+                                                Ok(resp) => resp,
+                                                Err(e) => PauseResponse {
+                                                    success: false,
+                                                    message: e.to_string(),
+                                                },
+                                            };
+                                            let mut buf = Vec::new();
+                                            if response.encode(&mut buf).is_ok() {
+                                                let _ = client_clone.publish(reply, buf.into()).await;
                                             }
                                         }
                                     }
@@ -312,11 +332,17 @@ async fn main() -> anyhow::Result<()> {
                                     if let Ok(req) = ResumeRequest::decode(&message.payload[..]) {
                                         let result = server.resume_app(req).await;
                                         if let Some(reply) = message.reply {
-                                            if let Ok(resp) = result {
-                                                let mut buf = Vec::new();
-                                                if resp.encode(&mut buf).is_ok() {
-                                                    let _ = client_clone.publish(reply, buf.into()).await;
-                                                }
+                                            use mikrom_proto::scheduler::ResumeResponse;
+                                            let response = match result {
+                                                Ok(resp) => resp,
+                                                Err(e) => ResumeResponse {
+                                                    success: false,
+                                                    message: e.to_string(),
+                                                },
+                                            };
+                                            let mut buf = Vec::new();
+                                            if response.encode(&mut buf).is_ok() {
+                                                let _ = client_clone.publish(reply, buf.into()).await;
                                             }
                                         }
                                     }
@@ -332,11 +358,17 @@ async fn main() -> anyhow::Result<()> {
                                     if let Ok(req) = CancelRequest::decode(&message.payload[..]) {
                                         let result = server.cancel_app(req).await;
                                         if let Some(reply) = message.reply {
-                                            if let Ok(resp) = result {
-                                                let mut buf = Vec::new();
-                                                if resp.encode(&mut buf).is_ok() {
-                                                    let _ = client_clone.publish(reply, buf.into()).await;
-                                                }
+                                            use mikrom_proto::scheduler::CancelResponse;
+                                            let response = match result {
+                                                Ok(resp) => resp,
+                                                Err(e) => CancelResponse {
+                                                    success: false,
+                                                    message: e.to_string(),
+                                                },
+                                            };
+                                            let mut buf = Vec::new();
+                                            if response.encode(&mut buf).is_ok() {
+                                                let _ = client_clone.publish(reply, buf.into()).await;
                                             }
                                         }
                                     }
@@ -352,11 +384,17 @@ async fn main() -> anyhow::Result<()> {
                                     if let Ok(req) = DeleteAppRequest::decode(&message.payload[..]) {
                                         let result = server.delete_app(req).await;
                                         if let Some(reply) = message.reply {
-                                            if let Ok(resp) = result {
-                                                let mut buf = Vec::new();
-                                                if resp.encode(&mut buf).is_ok() {
-                                                    let _ = client_clone.publish(reply, buf.into()).await;
-                                                }
+                                            use mikrom_proto::scheduler::DeleteAppResponse;
+                                            let response = match result {
+                                                Ok(resp) => resp,
+                                                Err(e) => DeleteAppResponse {
+                                                    success: false,
+                                                    message: e.to_string(),
+                                                },
+                                            };
+                                            let mut buf = Vec::new();
+                                            if response.encode(&mut buf).is_ok() {
+                                                let _ = client_clone.publish(reply, buf.into()).await;
                                             }
                                         }
                                     }
