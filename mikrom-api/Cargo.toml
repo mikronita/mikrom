@@ -51,6 +51,7 @@ opentelemetry-semantic-conventions = "0.31.0"
 utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
 utoipa-swagger-ui = { version = "8", features = ["axum"] }
 rand = "0.10.1"
+rustls = { version = "0.23", features = ["ring"] }
 
 [dev-dependencies]
 axum-test = "15"

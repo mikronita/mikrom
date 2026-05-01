@@ -4,8 +4,10 @@ use serde::Deserialize;
 pub struct Config {
     #[serde(default = "default_host")]
     pub host: String,
-    #[serde(rename = "router_port", default = "default_port")]
-    pub port: u16,
+    #[serde(rename = "router_http_port", default = "default_http_port")]
+    pub http_port: u16,
+    #[serde(rename = "router_https_port", default = "default_https_port")]
+    pub https_port: u16,
     pub database_url: String,
     #[serde(default = "default_log_level")]
     #[allow(dead_code)]
@@ -14,14 +16,21 @@ pub struct Config {
     #[allow(dead_code)]
     pub base_domain: String,
     pub nats_url: String,
+    pub acme_email: String,
+    #[serde(default = "default_acme_staging")]
+    pub acme_staging: bool,
 }
 
 fn default_host() -> String {
     "0.0.0.0".to_string()
 }
 
-fn default_port() -> u16 {
-    80
+fn default_http_port() -> u16 {
+    8080
+}
+
+fn default_https_port() -> u16 {
+    4343
 }
 
 fn default_log_level() -> String {
@@ -30,6 +39,10 @@ fn default_log_level() -> String {
 
 fn default_base_domain() -> String {
     "apps.mikrom.es".to_string()
+}
+
+fn default_acme_staging() -> bool {
+    true
 }
 
 impl Config {

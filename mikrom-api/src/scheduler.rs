@@ -226,6 +226,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_tls_returns_error() {
+        // Install the default crypto provider for Rustls 0.23
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         // With use_tls=true the endpoint is rewritten to https:// and a TLS
         // handshake is attempted. With nothing listening the connection must fail.
         let config = SchedulerConfig {
