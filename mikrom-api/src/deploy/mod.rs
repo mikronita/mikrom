@@ -5,6 +5,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub mod handlers;
+pub mod service;
 pub mod webhooks;
 pub mod worker;
 pub use handlers::*;
@@ -62,7 +63,6 @@ pub async fn deploy_app(
     if let Some(git_url) = &payload.git_url {
         tracing::info!(git_url = %git_url, "Triggering build for Git repository via NATS");
 
-        use prost::Message;
         let app_id = Uuid::new_v4();
         let build_req = mikrom_proto::builder::BuildRequest {
             app_id: app_id.to_string(),
@@ -71,23 +71,12 @@ pub async fn deploy_app(
             tag: "latest".to_string(),
         };
 
-        let mut buf = Vec::new();
-        build_req
-            .encode(&mut buf)
+        let build_resp: mikrom_proto::builder::BuildResponse = state
+            .nats
+            .with_timeout(std::time::Duration::from_secs(5))
+            .request("mikrom.builder.build", build_req)
+            .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            state
-                .nats_client
-                .request("mikrom.builder.build", buf.into()),
-        )
-        .await
-        .map_err(|_| ApiError::Internal("Builder request timed out".into()))?
-        .map_err(|e| ApiError::Internal(format!("Failed to trigger build via NATS: {}", e)))?;
-
-        let build_resp = mikrom_proto::builder::BuildResponse::decode(&response.payload[..])
-            .map_err(|e| ApiError::Internal(format!("Failed to decode builder response: {}", e)))?;
 
         let build_id = build_resp.build_id;
         tracing::info!(build_id = %build_id, "Build initiated via NATS, starting background polling");
@@ -137,25 +126,13 @@ pub async fn deploy_app(
         deployment_id: String::new(), // Not applicable for one-off deploy
     };
 
-    use prost::Message;
-    let mut payload_bytes = Vec::new();
-    nats_req
-        .encode(&mut payload_bytes)
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
     tracing::info!("Sending deployment request via NATS (Protobuf)...");
-    let response = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        state
-            .nats_client
-            .request("mikrom.scheduler.deploy", payload_bytes.into()),
-    )
-    .await
-    .map_err(|_| ApiError::Internal("Scheduler request timed out".into()))?
-    .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
-
-    let inner = mikrom_proto::scheduler::DeployResponse::decode(&response.payload[..])
-        .map_err(|e| ApiError::Internal(format!("Failed to decode NATS response: {}", e)))?;
+    let inner: mikrom_proto::scheduler::DeployResponse = state
+        .nats
+        .with_timeout(std::time::Duration::from_secs(5))
+        .request("mikrom.scheduler.deploy", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     let result = DeployResponseBody {
         job_id: Some(inner.job_id),

@@ -135,11 +135,12 @@ mod tests {
         let nats_url =
             std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
         let nats_client = async_nats::connect(nats_url).await.unwrap();
+        let nats = crate::nats::TypedNatsClient::new(nats_client);
         AppState {
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(app_repo),
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            nats_client,
+            nats,
             router_addr: "http://localhost:8080".into(),
             api_db: sqlx::postgres::PgPoolOptions::new()
                 .connect_lazy("postgres://localhost/dummy")

@@ -31,16 +31,17 @@ async fn main() -> anyhow::Result<()> {
     let nats_client = async_nats::connect(&config.nats_url)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to NATS: {}", e))?;
+    let nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone());
 
     let scheduler = Arc::new(mikrom_api::scheduler::NatsScheduler {
-        client: nats_client.clone(),
+        client: nats_client,
     });
 
     let state = AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
         scheduler,
-        nats_client,
+        nats,
         router_addr: config.router_addr,
         api_db: db_pool,
         jwt_secret: config.jwt_secret,

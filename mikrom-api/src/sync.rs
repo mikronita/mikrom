@@ -1,70 +1,54 @@
 use crate::AppState;
+use crate::repositories::app_repository::UpdateDeploymentParams;
 use futures::stream::{FuturesUnordered, StreamExt};
 use mikrom_proto::scheduler::{AppInfo, AppStatusRequest, AppStatusResponse};
-use prost::Message;
 use tokio::time::{Duration, interval};
 use tracing::{error, info};
 
 pub async fn start_ip_sync_task(state: AppState) {
-    let mut interval = interval(Duration::from_millis(1000));
-    info!("Starting IP/Status sync background task (NATS/Protobuf)");
+    let mut interval = interval(Duration::from_millis(5000)); // Poll every 5 seconds
+    info!("Starting IP/Status sync background task (Optimized)");
 
     loop {
         interval.tick().await;
 
-        // 1. Get all applications
-        let apps = match state.app_repo.list_apps_by_user("all").await {
-            Ok(apps) => apps,
+        // 1. Get all active deployments directly (status: RUNNING, STARTING)
+        let deployments = match state.app_repo.list_deployments_by_user("all").await {
+            Ok(deps) => deps
+                .into_iter()
+                .filter(|d| ["RUNNING", "STARTING"].contains(&d.status.as_str()))
+                .collect::<Vec<_>>(),
             Err(_) => continue,
         };
 
+        if deployments.is_empty() {
+            continue;
+        }
+
         let mut workers = FuturesUnordered::new();
 
-        for app in apps {
-            let app_id = app.id;
+        for dep in deployments {
             let state = state.clone();
-
             workers.push(async move {
-                let deployments = state
-                    .app_repo
-                    .list_deployments_by_app(app_id)
-                    .await
-                    .unwrap_or_default();
+                if let Some(job_id) = &dep.job_id {
+                    let nats_req = AppStatusRequest {
+                        job_id: job_id.clone(),
+                        user_id: dep.user_id.to_string(),
+                    };
 
-                let active_deps: Vec<_> = deployments
-                    .into_iter()
-                    .filter(|d| {
-                        ["RUNNING", "STOPPED", "STARTING", "SCHEDULED", "BUILDING"]
-                            .contains(&d.status.as_str())
-                    })
-                    .collect();
+                    if let Ok(inner) = state
+                        .nats
+                        .with_timeout(Duration::from_secs(2))
+                        .request::<_, AppStatusResponse>(
+                            mikrom_proto::subjects::SCHEDULER_GET_JOB,
+                            nats_req,
+                        )
+                        .await
+                    {
+                        let db_status = crate::scheduler::status_name(inner.status);
+                        let ip_address = inner.ip_address;
 
-                for dep in active_deps {
-                    if let Some(job_id) = &dep.job_id {
-                        let nats_req = AppStatusRequest {
-                            job_id: job_id.clone(),
-                            user_id: dep.user_id.to_string(),
-                        };
-
-                        let mut buf = Vec::new();
-                        if nats_req.encode(&mut buf).is_err() {
-                            continue;
-                        }
-
-                        let status_res = state
-                            .nats_client
-                            .request(mikrom_proto::subjects::SCHEDULER_GET_JOB, buf.into())
-                            .await;
-
-                        if let Some(inner) = status_res
-                            .ok()
-                            .and_then(|r| AppStatusResponse::decode(&r.payload[..]).ok())
-                        {
-                            let db_status = crate::scheduler::status_name(inner.status);
-                            let ip_address = inner.ip_address;
-
-                            sync_deployment_state(&state, &dep, db_status, &ip_address).await;
-                        }
+                        sync_deployment_state(&state, &dep, db_status, &ip_address).await;
                     }
                 }
             });
@@ -77,7 +61,7 @@ pub async fn start_ip_sync_task(state: AppState) {
 pub async fn start_nats_job_listener(state: AppState) {
     info!("Starting instant NATS job update listener...");
     let mut sub = match state
-        .nats_client
+        .nats
         .subscribe(mikrom_proto::subjects::SCHEDULER_JOB_UPDATES)
         .await
     {
@@ -89,6 +73,7 @@ pub async fn start_nats_job_listener(state: AppState) {
     };
 
     while let Some(msg) = sub.next().await {
+        use prost::Message;
         if let Ok(info) = AppInfo::decode(&msg.payload[..]) {
             let state = state.clone();
             tokio::spawn(async move {
@@ -147,24 +132,26 @@ async fn sync_deployment_state(
     if status_changed || has_new_ip {
         let _ = state
             .app_repo
-            .update_deployment_status(
+            .update_deployment(
                 dep.id,
-                if status_changed {
-                    db_status
-                } else {
-                    &dep.status
+                UpdateDeploymentParams {
+                    status: if status_changed {
+                        Some(db_status.to_string())
+                    } else {
+                        None
+                    },
+                    job_id: dep.job_id.clone(),
+                    image_tag: dep.image_tag.clone(),
+                    build_id: dep.build_id.clone(),
+                    ip_address: if !ip_address.is_empty() {
+                        Some(ip_address.to_string())
+                    } else {
+                        None
+                    },
+                    git_commit_hash: dep.git_commit_hash.clone(),
+                    git_commit_message: dep.git_commit_message.clone(),
+                    git_branch: dep.git_branch.clone(),
                 },
-                dep.job_id.clone(),
-                dep.image_tag.clone(),
-                dep.build_id.clone(),
-                if !ip_address.is_empty() {
-                    Some(ip_address.to_string())
-                } else {
-                    dep.ip_address.clone()
-                },
-                dep.git_commit_hash.clone(),
-                dep.git_commit_message.clone(),
-                dep.git_branch.clone(),
             )
             .await;
         state.deployment_events.send(dep.app_id).ok();

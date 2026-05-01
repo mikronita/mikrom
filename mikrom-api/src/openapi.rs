@@ -39,7 +39,7 @@ use utoipa::{
             AuthResponse,
             LoginRequest,
             UpdateProfileRequest,
-            UserProfileResponse,
+            UserResponse,
             crate::deploy::DeployResponseBody,
             CreateAppRequest, AppResponse, AppSecretResponse,
             ManualDeployRequest,

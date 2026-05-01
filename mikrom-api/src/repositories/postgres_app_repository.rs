@@ -222,30 +222,22 @@ impl AppRepository for PostgresAppRepository {
         self.decrypt_deployment(deployment)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn update_deployment_status(
+    async fn update_deployment(
         &self,
         id: Uuid,
-        status: &str,
-        job_id: Option<String>,
-        image_tag: Option<String>,
-        build_id: Option<String>,
-        ip_address: Option<String>,
-        git_commit_hash: Option<String>,
-        git_commit_message: Option<String>,
-        git_branch: Option<String>,
+        params: crate::repositories::app_repository::UpdateDeploymentParams,
     ) -> anyhow::Result<()> {
         sqlx::query(
-            "UPDATE deployments SET status = $1, job_id = COALESCE($2, job_id), image_tag = COALESCE($3, image_tag), build_id = COALESCE($4, build_id), ip_address = COALESCE($5, ip_address), git_commit_hash = COALESCE($6, git_commit_hash), git_commit_message = COALESCE($7, git_commit_message), git_branch = COALESCE($8, git_branch), updated_at = NOW() WHERE id = $9"
+            "UPDATE deployments SET status = COALESCE($1, status), job_id = COALESCE($2, job_id), image_tag = COALESCE($3, image_tag), build_id = COALESCE($4, build_id), ip_address = COALESCE($5, ip_address), git_commit_hash = COALESCE($6, git_commit_hash), git_commit_message = COALESCE($7, git_commit_message), git_branch = COALESCE($8, git_branch), updated_at = NOW() WHERE id = $9"
         )
-        .bind(status)
-        .bind(job_id)
-        .bind(image_tag)
-        .bind(build_id)
-        .bind(ip_address)
-        .bind(git_commit_hash)
-        .bind(git_commit_message)
-        .bind(git_branch)
+        .bind(params.status)
+        .bind(params.job_id)
+        .bind(params.image_tag)
+        .bind(params.build_id)
+        .bind(params.ip_address)
+        .bind(params.git_commit_hash)
+        .bind(params.git_commit_message)
+        .bind(params.git_branch)
         .bind(id)
         .execute(&self.pool)
         .await?;
@@ -399,16 +391,16 @@ mod tests {
 
         // 5. Update deployment
         app_repo
-            .update_deployment_status(
+            .update_deployment(
                 deployment.id,
-                "RUNNING",
-                Some("job-123".to_string()),
-                Some("img:v1".to_string()),
-                Some("build-abc".to_string()),
-                Some("10.0.0.1".to_string()),
-                None,
-                None,
-                None,
+                crate::repositories::app_repository::UpdateDeploymentParams {
+                    status: Some("RUNNING".to_string()),
+                    job_id: Some("job-123".to_string()),
+                    image_tag: Some("img:v1".to_string()),
+                    build_id: Some("build-abc".to_string()),
+                    ip_address: Some("10.0.0.1".to_string()),
+                    ..Default::default()
+                },
             )
             .await
             .expect("failed to update deployment");
