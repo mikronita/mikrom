@@ -1,14 +1,7 @@
-use mikrom_api::AppState;
-use mikrom_api::acme::start_acme_worker;
-use mikrom_api::repositories::app_repository::AppRepository;
-use mikrom_api::repositories::postgres_app_repository::PostgresAppRepository;
-use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
-use mikrom_api::repositories::user_repository::{NewUser, UserRepository, UserRole};
 use mikrom_api::test_utils::TestDb;
-use mikrom_proto::router::{AcmeChallengeUpdate, TlsCertificateUpdate};
+use mikrom_proto::router::TlsCertificateUpdate;
 use mikrom_proto::subjects;
 use prost::Message;
-use std::sync::Arc;
 use tokio::time::{Duration, sleep};
 use tokio_stream::StreamExt;
 
@@ -96,17 +89,20 @@ async fn test_router_handles_nats_updates() {
         .unwrap();
 
     tokio::spawn(async move {
-        if let Some(msg) = tls_sub.next().await {
-            if let Ok(update) = TlsCertificateUpdate::decode(&msg.payload[..]) {
-                sqlx::query("INSERT INTO tls_certificates (hostname, cert_chain, private_key, expires_at) VALUES ($1, $2, $3, TO_TIMESTAMP($4))")
-                    .bind(&update.hostname)
-                    .bind(&update.cert_chain)
-                    .bind(&update.private_key)
-                    .bind(update.expires_at)
-                    .execute(&db_clone)
-                    .await
-                    .unwrap();
-            }
+        let msg = match tls_sub.next().await {
+            Some(m) => m,
+            None => return,
+        };
+
+        if let Ok(update) = TlsCertificateUpdate::decode(&msg.payload[..]) {
+            sqlx::query("INSERT INTO tls_certificates (hostname, cert_chain, private_key, expires_at) VALUES ($1, $2, $3, TO_TIMESTAMP($4))")
+                .bind(&update.hostname)
+                .bind(&update.cert_chain)
+                .bind(&update.private_key)
+                .bind(update.expires_at)
+                .execute(&db_clone)
+                .await
+                .unwrap();
         }
     });
 
