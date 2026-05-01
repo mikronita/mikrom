@@ -58,6 +58,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
         with:
+          version: 9
           run_install: false
 
       - name: Setup Node.js
@@ -127,6 +128,9 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Unit tests
+        env:
+          TEST_DATABASE_URL: postgres://mikrom:mikrom_password@localhost:5432/mikrom_api
+          JWT_SECRET: ci-integration-test-secret
         run: cargo nextest run
 
       - name: Integration tests
