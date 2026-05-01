@@ -9,6 +9,9 @@ use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install the default crypto provider for Rustls 0.23
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let config = ApiConfig::load()?;
 
     mikrom_proto::telemetry::init_telemetry("mikrom-api", env!("CARGO_PKG_VERSION"))?;

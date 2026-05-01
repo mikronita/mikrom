@@ -24,9 +24,16 @@ envy.workspace = true
 dotenvy = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-moka = { version = "0.12", features = ["future"] } 
+moka = { version = "0.12", features = ["future", "sync"] } 
 url = "2.5"
 axum-extra = { version = "0.10", features = ["typed-header"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+tokio-rustls = { version = "0.26", features = ["ring"] }
+rustls-pemfile = "2.1"
+instant-acme = { version = "0.8.5", features = ["rcgen"] }
+rcgen = "0.13"
+x509-parser = "0.16"
+chrono = { version = "0.4", features = ["serde"] }
 
 mikrom-proto = { path = "../mikrom-proto" }
 

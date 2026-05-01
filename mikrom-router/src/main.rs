@@ -3,21 +3,30 @@ use axum::{
     body::Body,
     extract::State,
     http::{HeaderMap, Request, StatusCode},
-    response::IntoResponse,
-    routing::any,
+    response::{IntoResponse, Redirect},
+    routing::{any, get},
 };
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use mikrom_proto::router::RouterConfigUpdate;
+use mikrom_router::acme::{acme_challenge_handler, start_acme_worker};
+use mikrom_router::tls::DatabaseCertResolver;
 use mikrom_router::{AppState, resolve_target};
 use moka::future::Cache;
 use prost::Message;
 use sqlx::PgPool;
+use std::sync::Arc;
+use tokio_rustls::rustls;
 use tokio_stream::StreamExt;
 use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install the default crypto provider for Rustls 0.23
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     let config = mikrom_router::config::Config::from_env().expect("Failed to load config");
 
     mikrom_proto::telemetry::init_telemetry("mikrom-router", "0.1.0")?;
@@ -42,7 +51,14 @@ async fn main() -> anyhow::Result<()> {
         client,
     };
 
-    // Background task to listen for router configuration updates
+    // 1. Start ACME worker
+    tokio::spawn(start_acme_worker(
+        db.clone(),
+        config.acme_email.clone(),
+        config.acme_staging,
+    ));
+
+    // 2. Background task for router updates
     let cache_clone = state.cache.clone();
     let db_clone = state.db.clone();
     let nats_url = config.nats_url.clone();
@@ -99,25 +115,68 @@ async fn main() -> anyhow::Result<()> {
                     } else {
                         cache_clone.invalidate(&update.hostname).await;
                     }
-                } else {
-                    // Invalid message: log it but don't clear everything to avoid performance spikes
-                    error!("Received invalid router update payload (failed to decode Protobuf)");
                 }
             }
-            error!("NATS subscription closed, reconnecting in 5s...");
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     });
-    let app = Router::new()
+
+    // 3. HTTP Server (Redirects to HTTPS + ACME Challenges)
+    let http_state = state.clone();
+    let https_port = config.https_port;
+    let http_app = Router::new()
+        .route(
+            "/.well-known/acme-challenge/{token}",
+            get(acme_challenge_handler),
+        )
+        .fallback(move |headers: HeaderMap| async move {
+            let host = headers
+                .get("host")
+                .and_then(|h| h.to_str().ok())
+                .map(|h| h.split(':').next().unwrap_or(h))
+                .unwrap_or("localhost");
+
+            let redirect_url = format!("https://{}:{}/", host, https_port);
+            Redirect::permanent(&redirect_url)
+        })
+        .with_state(http_state);
+
+    let http_addr = format!("{}:{}", config.host, config.http_port);
+    info!("HTTP Router listening on {}", http_addr);
+    let http_listener = std::net::TcpListener::bind(&http_addr)?;
+    tokio::spawn(async move {
+        if let Err(e) = axum_server::from_tcp(http_listener)
+            .serve(http_app.into_make_service())
+            .await
+        {
+            error!("HTTP server error: {}", e);
+        }
+    });
+
+    // 4. HTTPS Server (Main Proxy)
+    let https_app = Router::new()
         .route("/health", any(health_handler))
         .fallback(any(proxy_handler))
         .with_state(state);
 
-    let addr = format!("{}:{}", config.host, config.port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let resolver = Arc::new(DatabaseCertResolver::new(db.clone()));
+    let mut server_config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_cert_resolver(resolver);
 
-    info!("Mikrom Router listening on {}", addr);
-    axum::serve(listener, app).await?;
+    // Support HTTP/2 and HTTP/1.1
+    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+    let https_addr = format!("{}:{}", config.host, config.https_port);
+    info!("HTTPS Router listening on {}", https_addr);
+    let https_listener = std::net::TcpListener::bind(&https_addr)?;
+
+    let tls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config));
+
+    axum_server::from_tcp(https_listener)
+        .acceptor(axum_server::tls_rustls::RustlsAcceptor::new(tls_config))
+        .serve(https_app.into_make_service())
+        .await?;
 
     Ok(())
 }
