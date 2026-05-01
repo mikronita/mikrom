@@ -2603,11 +2603,13 @@ dependencies = [
 name = "mikrom-router"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "async-nats",
  "axum 0.8.9",
  "axum-extra",
  "axum-server",
+ "base64 0.22.1",
  "chrono",
  "dotenvy",
  "envy",
@@ -2623,7 +2625,9 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "tokio-stream",
