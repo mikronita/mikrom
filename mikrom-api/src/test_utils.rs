@@ -11,9 +11,8 @@ pub struct TestDb {
 impl TestDb {
     pub async fn new() -> Self {
         dotenvy::dotenv().ok();
-        let test_url = env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-        });
+        let test_url = env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must be set for integration tests");
 
         let (server_url, base_db_name) = split_url(&test_url);
         // Use a unique name per test process to avoid conflicts during parallel execution
