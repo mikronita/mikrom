@@ -101,9 +101,15 @@ async fn test_hierarchical_deployment_status_success() {
         scheduler: Arc::new(mock_scheduler),
         nats_client,
         router_addr: "http://localhost:8080".to_string(),
+        api_db: sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/dummy")
+            .unwrap(),
         jwt_secret: "test-secret".into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        acme_email: "admin@mikrom.es".into(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let router = create_app(state);
@@ -186,9 +192,15 @@ async fn test_hierarchical_security_cross_app_prevention() {
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats_client,
         router_addr: "http://localhost:8080".to_string(),
+        api_db: sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/dummy")
+            .unwrap(),
         jwt_secret: "test-secret".into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        acme_email: "admin@mikrom.es".into(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let router = create_app(state);

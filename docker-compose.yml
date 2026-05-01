@@ -80,6 +80,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change_me_in_production}
       USE_TLS: "true"
       CERTS_DIR: /certs/api
+      ACME_EMAIL: ${ACME_EMAIL:-admin@mikrom.es}
+      ACME_STAGING: "true"
     ports:
       - "5001:5001"
     volumes:

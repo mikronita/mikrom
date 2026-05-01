@@ -13,8 +13,8 @@ async fn test_health_endpoint_structure() {
     let db = TestDb::new().await;
     let db_pool = db.pool().clone();
     let app_repo = Arc::new(repositories::PostgresAppRepository::new(
-        db_pool,
-        "test-key".to_string(),
+        db_pool.clone(),
+        "key".to_string(),
     ));
 
     let nats_url =
@@ -29,6 +29,10 @@ async fn test_health_endpoint_structure() {
         jwt_secret: "test".to_string(),
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        api_db: db_pool,
+        acme_email: "admin@mikrom.es".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
     let app = create_app(state);
 
@@ -61,8 +65,8 @@ async fn test_health_stream_endpoint() {
     let db = TestDb::new().await;
     let db_pool = db.pool().clone();
     let app_repo = Arc::new(repositories::PostgresAppRepository::new(
-        db_pool,
-        "test-key".to_string(),
+        db_pool.clone(),
+        "key".to_string(),
     ));
 
     let nats_url =
@@ -77,6 +81,10 @@ async fn test_health_stream_endpoint() {
         jwt_secret: "test".to_string(),
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        api_db: db_pool,
+        acme_email: "admin@mikrom.es".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
     let app = create_app(state);
 

@@ -16,12 +16,7 @@ pub struct Config {
     #[allow(dead_code)]
     pub base_domain: String,
     pub nats_url: String,
-    pub acme_email: String,
-    #[serde(default = "default_acme_staging")]
-    pub acme_staging: bool,
     pub master_key: String,
-    #[serde(default = "default_acme_check_interval")]
-    pub acme_check_interval: u64,
     #[serde(default = "default_cache_ttl")]
     pub cache_ttl: u64,
 }
@@ -44,14 +39,6 @@ fn default_log_level() -> String {
 
 fn default_base_domain() -> String {
     "apps.mikrom.es".to_string()
-}
-
-fn default_acme_staging() -> bool {
-    true
-}
-
-fn default_acme_check_interval() -> u64 {
-    3600 // 1 hour
 }
 
 fn default_cache_ttl() -> u64 {

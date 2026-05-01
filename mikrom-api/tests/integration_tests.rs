@@ -29,6 +29,10 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         jwt_secret: jwt_secret.to_string(),
         master_key: "integration-master-key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        api_db: pool,
+        acme_email: "admin@mikrom.es".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
     mikrom_api::create_app(state)
 }

@@ -11,6 +11,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
+pub mod acme;
 pub mod auth;
 pub mod config;
 pub mod crypto;
@@ -52,9 +53,13 @@ pub struct AppState {
     pub scheduler: Arc<dyn Scheduler>,
     pub nats_client: async_nats::Client,
     pub router_addr: String,
+    pub api_db: sqlx::PgPool,
     pub jwt_secret: String,
     pub master_key: String,
     pub deployment_events: tokio::sync::broadcast::Sender<uuid::Uuid>,
+    pub acme_email: String,
+    pub acme_staging: bool,
+    pub acme_check_interval: u64,
 }
 
 impl AppState {
@@ -228,6 +233,20 @@ pub fn start_background_tasks(state: AppState) {
 
     // Start instant NATS job updates listener
     tokio::spawn(crate::sync::start_nats_job_listener(state.clone()));
+
+    // Start ACME certificate renewal worker
+    let state_for_acme = state.clone();
+    tokio::spawn(async move {
+        crate::acme::start_acme_worker(
+            state_for_acme.api_db.clone(),
+            state_for_acme.nats_client.clone(),
+            state_for_acme.acme_email.clone(),
+            state_for_acme.acme_staging,
+            state_for_acme.master_key.clone(),
+            state_for_acme.acme_check_interval,
+        )
+        .await;
+    });
 
     // Resume builds that were in progress
     let state_for_builds = state;

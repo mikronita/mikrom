@@ -9,3 +9,17 @@ message RouterConfigUpdate {
   optional string target_url = 2;
   int64 timestamp = 3;
 }
+
+message TlsCertificateUpdate {
+  string hostname = 1;
+  string cert_chain = 2;
+  string private_key = 3;
+  int64 expires_at = 4;
+}
+
+message AcmeChallengeUpdate {
+  string token = 1;
+  string key_auth = 2;
+  string hostname = 3;
+  bool is_delete = 4;
+}

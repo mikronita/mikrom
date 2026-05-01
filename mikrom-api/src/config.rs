@@ -23,7 +23,28 @@ pub struct ApiConfig {
     #[serde(default = "default_use_tls")]
     pub use_tls: bool,
 
+    #[serde(default = "default_acme_email")]
+    pub acme_email: String,
+
+    #[serde(default = "default_acme_staging")]
+    pub acme_staging: bool,
+
+    #[serde(default = "default_acme_check_interval")]
+    pub acme_check_interval: u64,
+
     pub certs_dir: Option<String>,
+}
+
+fn default_acme_email() -> String {
+    "admin@mikrom.es".to_string()
+}
+
+fn default_acme_staging() -> bool {
+    true
+}
+
+fn default_acme_check_interval() -> u64 {
+    3600 // 1 hour
 }
 
 fn default_jwt_secret() -> String {

@@ -151,9 +151,15 @@ async fn test_promotion_back_and_forth() {
         scheduler: Arc::new(mock_scheduler),
         nats_client,
         router_addr: "http://localhost:8080".to_string(),
+        api_db: sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/dummy")
+            .unwrap(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        acme_email: "admin@mikrom.es".into(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let router = create_app(state);
@@ -311,9 +317,15 @@ async fn test_promotion_pauses_previous_active() {
         scheduler: Arc::new(mock_scheduler),
         nats_client,
         router_addr: "http://localhost:8080".to_string(),
+        api_db: sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/dummy")
+            .unwrap(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        acme_email: "admin@mikrom.es".into(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let router = create_app(state);
@@ -442,9 +454,15 @@ async fn test_activate_stopped_deployment_resumes_it() {
         scheduler: Arc::new(mock_scheduler),
         nats_client,
         router_addr: "http://localhost:8080".to_string(),
+        api_db: sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/dummy")
+            .unwrap(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        acme_email: "admin@mikrom.es".into(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let router = create_app(state);
@@ -544,9 +562,15 @@ async fn test_delete_app_cleans_up_resources() {
         scheduler: Arc::new(mock_scheduler),
         nats_client,
         router_addr: "http://localhost:8080".to_string(),
+        api_db: sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/dummy")
+            .unwrap(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        acme_email: "admin@mikrom.es".into(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let router = create_app(state);

@@ -38,6 +38,8 @@ prost.workspace = true
 envy.workspace = true
 
 mikrom-proto = { path = "../mikrom-proto" }
+instant-acme = { version = "0.8.5", features = ["rcgen"] }
+x509-parser = "0.16"
 aes-gcm = "0.10.3"
 base64 = "0.22.1"
 sha2 = "0.10.8"
@@ -85,6 +87,11 @@ required-features = ["test-utils"]
 [[test]]
 name = "deployment_metadata_tests"
 path = "tests/deployment_metadata_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "acme_tests"
+path = "tests/acme_tests.rs"
 required-features = ["test-utils"]
 
 [[test]]

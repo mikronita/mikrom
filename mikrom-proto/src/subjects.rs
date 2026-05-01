@@ -3,6 +3,12 @@
 /// Router configuration update subject.
 pub const ROUTER_CONFIG_UPDATED: &str = "mikrom.router.config_updated";
 
+/// Router TLS certificate update subject.
+pub const ROUTER_TLS_CERT_UPDATED: &str = "mikrom.router.tls_cert_updated";
+
+/// Router ACME challenge update subject.
+pub const ROUTER_ACME_CHALLENGE_UPDATED: &str = "mikrom.router.acme_challenge_updated";
+
 /// Scheduler job updates subject.
 pub const SCHEDULER_JOB_UPDATES: &str = "mikrom.scheduler.job_updates";
 

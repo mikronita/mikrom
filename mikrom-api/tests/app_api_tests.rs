@@ -12,6 +12,7 @@ use mikrom_api::AppState;
 use mikrom_api::create_app;
 use mikrom_api::models::app::App;
 use mikrom_api::repositories::{MockAppRepository, MockUserRepository};
+use mikrom_api::test_utils::TestDb;
 
 #[tokio::test]
 async fn test_create_app_endpoint() {
@@ -61,6 +62,9 @@ async fn test_create_app_endpoint() {
             })
         });
 
+    let db = TestDb::new().await;
+    let db_pool = db.pool().clone();
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
@@ -73,6 +77,10 @@ async fn test_create_app_endpoint() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        api_db: db_pool,
+        acme_email: "admin@mikrom.es".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let router = create_app(state);
@@ -141,6 +149,9 @@ async fn test_create_app_duplicate_name() {
             ))
         });
 
+    let db = TestDb::new().await;
+    let db_pool = db.pool().clone();
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
@@ -153,6 +164,10 @@ async fn test_create_app_duplicate_name() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        api_db: db_pool,
+        acme_email: "admin@mikrom.es".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let router = create_app(state);
@@ -225,6 +240,9 @@ async fn test_list_apps_includes_secret() {
             }])
         });
 
+    let db = TestDb::new().await;
+    let db_pool = db.pool().clone();
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
@@ -237,6 +255,10 @@ async fn test_list_apps_includes_secret() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        api_db: db_pool,
+        acme_email: "admin@mikrom.es".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let router = create_app(state);
@@ -304,6 +326,9 @@ async fn test_get_app_secret_endpoint() {
             }))
         });
 
+    let db = TestDb::new().await;
+    let db_pool = db.pool().clone();
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
@@ -316,6 +341,10 @@ async fn test_get_app_secret_endpoint() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        api_db: db_pool,
+        acme_email: "admin@mikrom.es".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let router = create_app(state);

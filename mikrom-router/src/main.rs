@@ -9,7 +9,7 @@ use axum::{
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use mikrom_proto::router::RouterConfigUpdate;
-use mikrom_router::acme::{acme_challenge_handler, start_acme_worker};
+use mikrom_router::acme::acme_challenge_handler;
 use mikrom_router::tls::DatabaseCertResolver;
 use mikrom_router::{AppState, resolve_target};
 use moka::future::Cache;
@@ -51,16 +51,7 @@ async fn main() -> anyhow::Result<()> {
         client,
     };
 
-    // 1. Start ACME worker
-    tokio::spawn(start_acme_worker(
-        db.clone(),
-        config.acme_email.clone(),
-        config.acme_staging,
-        config.master_key.clone(),
-        config.acme_check_interval,
-    ));
-
-    // 2. Background task for router updates
+    // 2. Background task for router updates (Routes, TLS, ACME)
     let cache_clone = state.cache.clone();
     let db_clone = state.db.clone();
     let nats_url = config.nats_url.clone();
@@ -77,48 +68,92 @@ async fn main() -> anyhow::Result<()> {
                 },
             };
 
-            let mut nats_sub = match nats_client
+            // Subscribe to all router-related updates
+            let mut config_sub = nats_client
                 .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
                 .await
-            {
-                Ok(sub) => sub,
-                Err(e) => {
-                    error!("Failed to subscribe to NATS, retrying in 5s: {}", e);
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    continue;
-                },
-            };
+                .unwrap();
+            let mut tls_sub = nats_client
+                .subscribe(mikrom_proto::subjects::ROUTER_TLS_CERT_UPDATED)
+                .await
+                .unwrap();
+            let mut acme_sub = nats_client
+                .subscribe(mikrom_proto::subjects::ROUTER_ACME_CHALLENGE_UPDATED)
+                .await
+                .unwrap();
 
-            info!("Listening for router config updates via NATS...");
-            while let Some(msg) = nats_sub.next().await {
-                if let Ok(update) = RouterConfigUpdate::decode(&msg.payload[..]) {
-                    info!(
-                        "Received router update for {}: {:?}",
-                        update.hostname, update.target_url
-                    );
+            info!("Listening for router config, TLS, and ACME updates via NATS...");
 
-                    let result = if let Some(target) = update.target_url {
-                        sqlx::query("INSERT INTO routes (hostname, target_url, updated_at) VALUES ($1, $2, TO_TIMESTAMP($3)) ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = EXCLUDED.updated_at WHERE EXCLUDED.updated_at > routes.updated_at")
-                            .bind(&update.hostname)
-                            .bind(&target)
-                            .bind(update.timestamp)
-                            .execute(&db_clone)
-                            .await
-                    } else {
-                        sqlx::query("DELETE FROM routes WHERE hostname = $1 AND updated_at <= TO_TIMESTAMP($2)")
-                            .bind(&update.hostname)
-                            .bind(update.timestamp)
-                            .execute(&db_clone)
-                            .await
-                    };
+            loop {
+                tokio::select! {
+                    Some(msg) = config_sub.next() => {
+                        if let Ok(update) = RouterConfigUpdate::decode(&msg.payload[..]) {
+                            info!("Received router update for {}: {:?}", update.hostname, update.target_url);
+                            let result = if let Some(target) = update.target_url {
+                                sqlx::query("INSERT INTO routes (hostname, target_url, updated_at) VALUES ($1, $2, TO_TIMESTAMP($3)) ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = EXCLUDED.updated_at WHERE EXCLUDED.updated_at > routes.updated_at")
+                                    .bind(&update.hostname)
+                                    .bind(&target)
+                                    .bind(update.timestamp)
+                                    .execute(&db_clone)
+                                    .await
+                            } else {
+                                sqlx::query("DELETE FROM routes WHERE hostname = $1 AND updated_at <= TO_TIMESTAMP($2)")
+                                    .bind(&update.hostname)
+                                    .bind(update.timestamp)
+                                    .execute(&db_clone)
+                                    .await
+                            };
 
-                    if let Err(e) = result {
-                        error!("Failed to update local routes table: {}", e);
-                    } else {
-                        cache_clone.invalidate(&update.hostname).await;
-                    }
-                } else {
-                    error!("Received invalid router update payload (failed to decode Protobuf)");
+                            if let Err(e) = result {
+                                error!("Failed to update local routes table: {}", e);
+                            } else {
+                                cache_clone.invalidate(&update.hostname).await;
+                            }
+                        }
+                    },
+                    Some(msg) = tls_sub.next() => {
+                        use mikrom_proto::router::TlsCertificateUpdate;
+                        if let Ok(update) = TlsCertificateUpdate::decode(&msg.payload[..]) {
+                            info!("Received TLS certificate update for {}", update.hostname);
+                            let result = sqlx::query("INSERT INTO tls_certificates (hostname, cert_chain, private_key, expires_at) VALUES ($1, $2, $3, TO_TIMESTAMP($4)) ON CONFLICT (hostname) DO UPDATE SET cert_chain = EXCLUDED.cert_chain, private_key = EXCLUDED.private_key, expires_at = EXCLUDED.expires_at, updated_at = NOW()")
+                                .bind(&update.hostname)
+                                .bind(&update.cert_chain)
+                                .bind(&update.private_key)
+                                .bind(update.expires_at)
+                                .execute(&db_clone)
+                                .await;
+
+                            if let Err(e) = result {
+                                error!("Failed to update local tls_certificates table: {}", e);
+                            } else {
+                                cache_clone.invalidate(&update.hostname).await;
+                            }
+                        }
+                    },
+                    Some(msg) = acme_sub.next() => {
+                        use mikrom_proto::router::AcmeChallengeUpdate;
+                        if let Ok(update) = AcmeChallengeUpdate::decode(&msg.payload[..]) {
+                            info!("Received ACME challenge update for token: {}", update.token);
+                            let result = if update.is_delete {
+                                sqlx::query("DELETE FROM acme_challenges WHERE token = $1")
+                                    .bind(&update.token)
+                                    .execute(&db_clone)
+                                    .await
+                            } else {
+                                sqlx::query("INSERT INTO acme_challenges (token, key_auth, hostname) VALUES ($1, $2, $3) ON CONFLICT (token) DO UPDATE SET key_auth = EXCLUDED.key_auth, hostname = EXCLUDED.hostname")
+                                    .bind(&update.token)
+                                    .bind(&update.key_auth)
+                                    .bind(&update.hostname)
+                                    .execute(&db_clone)
+                                    .await
+                            };
+
+                            if let Err(e) = result {
+                                error!("Failed to update local acme_challenges table: {}", e);
+                            }
+                        }
+                    },
+                    else => break,
                 }
             }
             error!("NATS subscription closed, reconnecting in 5s...");

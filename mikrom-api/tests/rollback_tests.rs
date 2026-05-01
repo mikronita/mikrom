@@ -12,11 +12,14 @@ use mikrom_api::AppState;
 use mikrom_api::create_app;
 use mikrom_api::models::app::{App, Deployment};
 use mikrom_api::repositories::{MockAppRepository, MockUserRepository};
+use mikrom_api::test_utils::TestDb;
 
 #[tokio::test]
 async fn test_activate_deployment_endpoint() {
     let mock_user_repo = MockUserRepository::new();
     let mut mock_app_repo = MockAppRepository::new();
+    let db = TestDb::new().await;
+    let db_pool = db.pool().clone();
 
     let user_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
@@ -31,6 +34,7 @@ async fn test_activate_deployment_endpoint() {
     )
     .unwrap();
 
+    // ... (rest of the test)
     // 1. Mock get_app_by_name
     let app_for_get = App {
         id: app_id,
@@ -123,6 +127,10 @@ async fn test_activate_deployment_endpoint() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        api_db: db_pool,
+        acme_email: "admin@mikrom.es".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let router = create_app(state);
@@ -180,6 +188,9 @@ async fn test_activate_deployment_wrong_owner() {
         .expect_get_app_by_name()
         .returning(move |_| Ok(Some(app.clone())));
 
+    let db = TestDb::new().await;
+    let db_pool = db.pool().clone();
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
@@ -192,6 +203,10 @@ async fn test_activate_deployment_wrong_owner() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        api_db: db_pool,
+        acme_email: "admin@mikrom.es".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let response = create_app(state)
@@ -279,6 +294,9 @@ async fn test_activate_deployment_not_running() {
         .expect_set_active_deployment()
         .returning(|_, _| Ok(()));
 
+    let db = TestDb::new().await;
+    let db_pool = db.pool().clone();
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
@@ -291,6 +309,10 @@ async fn test_activate_deployment_not_running() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
+        api_db: db_pool,
+        acme_email: "admin@mikrom.es".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
     };
 
     let response = create_app(state)
