@@ -5,7 +5,7 @@ use prost::Message;
 #[tokio::test]
 async fn test_agent_nats_command_handler() {
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let client = async_nats::connect(&nats_url)
         .await
         .expect("Failed to connect to NATS");

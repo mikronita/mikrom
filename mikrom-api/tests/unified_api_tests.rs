@@ -93,7 +93,7 @@ async fn test_hierarchical_deployment_status_success() {
     // We still need a NATS client to satisfy AppState, but it won't be used
     // because we are using a temp- ID.
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
@@ -178,7 +178,7 @@ async fn test_hierarchical_security_cross_app_prevention() {
         });
 
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),

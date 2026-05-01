@@ -6,7 +6,8 @@ use std::env;
 
 #[tokio::test]
 async fn test_nats_protobuf_serialization_router() {
-    let nats_url = env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url =
+        env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let client = async_nats::connect(&nats_url)
         .await
         .expect("Failed to connect to NATS");
@@ -40,7 +41,8 @@ async fn test_nats_protobuf_serialization_router() {
 
 #[tokio::test]
 async fn test_nats_protobuf_serialization_logs() {
-    let nats_url = env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url =
+        env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let client = async_nats::connect(&nats_url)
         .await
         .expect("Failed to connect to NATS");

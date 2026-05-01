@@ -6,7 +6,7 @@ use std::time::Duration;
 #[tokio::test]
 async fn test_builder_nats_flow() {
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let client = async_nats::connect(&nats_url)
         .await
         .expect("Failed to connect to NATS");
@@ -99,7 +99,7 @@ async fn test_builder_nats_flow() {
 #[tokio::test]
 async fn test_builder_progress_streaming() {
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let client = async_nats::connect(&nats_url)
         .await
         .expect("Failed to connect to NATS");

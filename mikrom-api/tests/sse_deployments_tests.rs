@@ -19,7 +19,7 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
     let mock_user_repo = MockUserRepository::new();
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
 
     let state = AppState {
@@ -232,7 +232,7 @@ async fn test_sse_deployments_stream_updates() {
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
     let tx = deployment_events.clone();
     let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
 
     let state = AppState {

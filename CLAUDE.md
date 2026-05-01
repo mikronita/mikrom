@@ -61,6 +61,7 @@ pnpm lint     # eslint
 | `TEST_DATABASE_URL` | `postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test` | mikrom-api integration tests |
 | `JWT_SECRET` | — | mikrom-api |
 | `NATS_URL` | `nats://127.0.0.1:4222` | mikrom-api, mikrom-agent, mikrom-scheduler |
+| `TEST_NATS_URL` | `nats://localhost:4223` | all crates (for tests) |
 | `HOST_ID` | random UUID | mikrom-agent |
 | `USE_TLS` | `false` | mikrom-agent, mikrom-scheduler, mikrom-api |
 
