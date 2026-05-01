@@ -12,15 +12,20 @@ use tracing::{error, info, warn};
 pub struct DatabaseCertResolver {
     db: PgPool,
     cache: Cache<String, Arc<CertifiedKey>>,
+    master_key: String,
 }
 
 impl DatabaseCertResolver {
-    pub fn new(db: PgPool) -> Self {
+    pub fn new(db: PgPool, master_key: String, cache_ttl: u64) -> Self {
         let cache = Cache::builder()
             .max_capacity(1000)
-            .time_to_live(std::time::Duration::from_secs(3600))
+            .time_to_live(std::time::Duration::from_secs(cache_ttl))
             .build();
-        Self { db, cache }
+        Self {
+            db,
+            cache,
+            master_key,
+        }
     }
 
     pub fn load_cert_from_db(&self, sni: &str) -> Option<Arc<CertifiedKey>> {
@@ -42,7 +47,17 @@ impl DatabaseCertResolver {
                 Ok(Some(row)) => {
                     info!("Found certificate in DB for '{}'", sni);
                     let cert_chain_pem: String = row.get("cert_chain");
-                    let private_key_pem: String = row.get("private_key");
+                    let encrypted_key: String = row.get("private_key");
+
+                    // Decrypt private key
+                    let private_key_pem =
+                        match crate::crypto::decrypt(&encrypted_key, &self.master_key) {
+                            Ok(key) => key,
+                            Err(e) => {
+                                error!("Failed to decrypt private key for '{}': {}", sni, e);
+                                return None;
+                            },
+                        };
 
                     match parse_and_sign_cert(&cert_chain_pem, &private_key_pem) {
                         Ok(key) => {

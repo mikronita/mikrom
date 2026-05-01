@@ -10,7 +10,7 @@ ON DELETE CASCADE;
 -- 2. For acme_challenges: We need to associate them with a hostname to allow cascading.
 -- First, let's add a hostname column to acme_challenges.
 ALTER TABLE acme_challenges
-ADD COLUMN hostname VARCHAR;
+ADD COLUMN hostname VARCHAR NOT NULL;
 
 -- Update existing challenges if any (though unlikely to be many)
 -- This is a bit tricky as we don't have the hostname in acme_challenges yet.

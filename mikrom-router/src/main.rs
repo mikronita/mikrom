@@ -56,6 +56,8 @@ async fn main() -> anyhow::Result<()> {
         db.clone(),
         config.acme_email.clone(),
         config.acme_staging,
+        config.master_key.clone(),
+        config.acme_check_interval,
     ));
 
     // 2. Background task for router updates
@@ -115,8 +117,11 @@ async fn main() -> anyhow::Result<()> {
                     } else {
                         cache_clone.invalidate(&update.hostname).await;
                     }
+                } else {
+                    error!("Received invalid router update payload (failed to decode Protobuf)");
                 }
             }
+            error!("NATS subscription closed, reconnecting in 5s...");
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     });
@@ -159,7 +164,11 @@ async fn main() -> anyhow::Result<()> {
         .fallback(any(proxy_handler))
         .with_state(state);
 
-    let resolver = Arc::new(DatabaseCertResolver::new(db.clone()));
+    let resolver = Arc::new(DatabaseCertResolver::new(
+        db.clone(),
+        config.master_key.clone(),
+        config.cache_ttl,
+    ));
     let mut server_config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_cert_resolver(resolver);

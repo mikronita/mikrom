@@ -97,7 +97,8 @@ async fn test_database_cert_resolver() {
         Some(db) => db,
         None => return,
     };
-    let resolver = DatabaseCertResolver::new(db.clone());
+    let master_key = "test-master-key".to_string();
+    let resolver = DatabaseCertResolver::new(db.clone(), master_key.clone(), 3600);
 
     // 1. Initially, no cert found
     let sni = "resolver.test.example.com";
@@ -130,15 +131,17 @@ AwEHoUQDQgAE4Afzn1IIrIgyu8S5dTEpuOxSP4RvyDhZoPjO6Jz/QnqnzzVuN1Sg
 uO1N+/Utrw0Uf29nZC6T7B5kTc5pMktdRg==
 -----END EC PRIVATE KEY-----";
 
+    let encrypted_key = mikrom_router::crypto::encrypt(key_pem, &master_key).unwrap();
+
     sqlx::query("INSERT INTO tls_certificates (hostname, cert_chain, private_key, expires_at) VALUES ($1, $2, $3, NOW() + INTERVAL '1 year')")
         .bind(sni)
         .bind(cert_pem)
-        .bind(key_pem)
+        .bind(encrypted_key)
         .execute(&db)
         .await
         .unwrap();
 
-    // 3. Now it should be found
+    // 4. Now it should be found
     let cert_key = resolver
         .load_cert_from_db(sni)
         .expect("Should find cert in DB");
