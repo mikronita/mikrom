@@ -6,7 +6,6 @@ use mikrom_proto::scheduler::{
 
 use mikrom_proto::tls::ServiceCerts;
 use sqlx::PgPool;
-use tonic::{Response, Status};
 use uuid::Uuid;
 
 pub struct SchedulerServer {
@@ -39,12 +38,11 @@ impl SchedulerServer {
 }
 
 impl SchedulerServer {
-    #[tracing::instrument(skip(self, request), fields(app_id = %request.get_ref().app_id))]
+    #[tracing::instrument(skip(self, req), fields(app_id = %req.app_id))]
     pub async fn deploy_app(
         &self,
-        request: tonic::Request<mikrom_proto::scheduler::DeployRequest>,
-    ) -> Result<Response<DeployResponse>, Status> {
-        let req = request.into_inner();
+        req: mikrom_proto::scheduler::DeployRequest,
+    ) -> anyhow::Result<DeployResponse> {
         let job_id = Uuid::new_v4().to_string();
         let vm_id = Uuid::new_v4().to_string();
 
@@ -89,10 +87,10 @@ impl SchedulerServer {
                     Ok(a) => a,
                     Err(e) => {
                         tracing::error!(host_id = %host_id, error = %e, "Failed to allocate IP");
-                        return Ok(Response::new(DeployResponse {
+                        return Ok(DeployResponse {
                             message: format!("IPAM error: {}", e),
                             ..Default::default()
-                        }));
+                        });
                     },
                 };
 
@@ -102,10 +100,10 @@ impl SchedulerServer {
                     (Some(a.ip), Some(a.gateway), Some(a.mac))
                 } else {
                     tracing::warn!("No IP allocated (pool exhausted?)");
-                    return Ok(Response::new(DeployResponse {
+                    return Ok(DeployResponse {
                         message: "IP address pool exhausted".to_string(),
                         ..Default::default()
-                    }));
+                    });
                 };
 
                 let job_config = crate::job::VmConfig {
@@ -149,10 +147,10 @@ impl SchedulerServer {
                         .collect(),
                     Err(e) => {
                         tracing::error!(error = %e, "Failed to list jobs for exclusivity check");
-                        return Ok(Response::new(DeployResponse {
+                        return Ok(DeployResponse {
                             message: format!("Database error listing jobs: {}", e),
                             ..Default::default()
-                        }));
+                        });
                     },
                 };
 
@@ -163,12 +161,11 @@ impl SchedulerServer {
 
                 if let Err(e) = self.scheduler.add_job(job).await {
                     tracing::error!(error = %e, "Failed to add job to database");
-                    return Ok(Response::new(DeployResponse {
+                    return Ok(DeployResponse {
                         message: format!("Database error adding job: {}", e),
                         ..Default::default()
-                    }));
+                    });
                 }
-
                 tracing::info!(
                     job_id = %job_id,
                     host_id = %host_id,
@@ -188,49 +185,47 @@ impl SchedulerServer {
                 {
                     tracing::error!(job_id = %job_id, error = %e, "Failed to deploy to agent");
                     self.scheduler.fail_job(&job_id, e.to_string()).await.ok();
-                    return Ok(Response::new(DeployResponse {
-                        message: format!("Agent error: {}", e.message()),
+                    return Ok(DeployResponse {
+                        message: format!("Agent error: {}", e),
                         ..Default::default()
-                    }));
+                    });
                 }
-
                 // Mark as running
                 self.scheduler.start_job(&job_id).await.ok();
 
-                Ok(Response::new(DeployResponse {
+                Ok(DeployResponse {
                     job_id,
                     status: mikrom_proto::scheduler::DeployStatus::Running as i32,
                     host_id,
                     vm_id,
                     message: "Deployment successful".to_string(),
                     ip_address: job_config.ip_address.unwrap_or_default(),
-                }))
+                })
             },
             Err(e) => {
                 tracing::error!(error = %e, "No viable workers found for deployment");
-                Ok(Response::new(DeployResponse {
+                Ok(DeployResponse {
                     message: format!("No viable workers found: {}", e),
                     ..Default::default()
-                }))
+                })
             },
         }
     }
 
     pub async fn get_app_status(
         &self,
-        request: tonic::Request<mikrom_proto::scheduler::AppStatusRequest>,
-    ) -> Result<Response<AppStatusResponse>, Status> {
-        let req = request.into_inner();
+        req: mikrom_proto::scheduler::AppStatusRequest,
+    ) -> anyhow::Result<AppStatusResponse> {
         let job = self
             .scheduler
             .get_job(&req.job_id)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
         match job {
             Some(j) => {
                 if j.user_id != req.user_id && req.user_id != "system" {
-                    return Err(Status::permission_denied("Unauthorized"));
+                    return Err(anyhow::anyhow!("Unauthorized"));
                 }
 
                 let (cpu_usage, ram_used_bytes) = if let Some(host_id) = &j.host_id {
@@ -239,7 +234,7 @@ impl SchedulerServer {
                         .worker_registry()
                         .get_metrics(host_id)
                         .await
-                        .map_err(|e| Status::internal(e.to_string()))?
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?
                     {
                         if let Some(vm_id) = &j.vm_id {
                             if let Some(vm_m) = metrics.vms.get(vm_id) {
@@ -270,22 +265,21 @@ impl SchedulerServer {
                     ram_used_bytes,
                     ip_address: j.config.ip_address.unwrap_or_default(),
                 };
-                Ok(Response::new(response))
+                Ok(response)
             },
-            None => Err(Status::not_found("Job not found")),
+            None => Err(anyhow::anyhow!("Job not found")),
         }
     }
 
     pub async fn list_apps(
         &self,
-        request: tonic::Request<mikrom_proto::scheduler::ListAppsRequest>,
-    ) -> Result<Response<mikrom_proto::scheduler::ListAppsResponse>, Status> {
-        let req = request.into_inner();
+        req: mikrom_proto::scheduler::ListAppsRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::ListAppsResponse> {
         let jobs = self
             .scheduler
             .list_jobs(Some(&req.user_id), None)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
         let mut apps = Vec::new();
         for j in jobs {
@@ -295,7 +289,7 @@ impl SchedulerServer {
                     .worker_registry()
                     .get_metrics(host_id)
                     .await
-                    .map_err(|e| Status::internal(e.to_string()))?
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?
                 {
                     if let Some(vm_id) = &j.vm_id {
                         if let Some(vm_m) = metrics.vms.get(vm_id) {
@@ -328,38 +322,31 @@ impl SchedulerServer {
             });
         }
 
-        Ok(Response::new(mikrom_proto::scheduler::ListAppsResponse {
-            apps,
-        }))
+        Ok(mikrom_proto::scheduler::ListAppsResponse { apps })
     }
 
     pub async fn pause_app(
         &self,
-        request: tonic::Request<mikrom_proto::scheduler::PauseRequest>,
-    ) -> Result<Response<mikrom_proto::scheduler::PauseResponse>, Status> {
-        let req = request.into_inner();
+        req: mikrom_proto::scheduler::PauseRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::PauseResponse> {
         let (success, message) = self.pause_job_internal(&req.job_id, &req.user_id).await?;
 
-        Ok(Response::new(mikrom_proto::scheduler::PauseResponse {
-            success,
-            message,
-        }))
+        Ok(mikrom_proto::scheduler::PauseResponse { success, message })
     }
 
     pub async fn resume_app(
         &self,
-        request: tonic::Request<mikrom_proto::scheduler::ResumeRequest>,
-    ) -> Result<Response<mikrom_proto::scheduler::ResumeResponse>, Status> {
-        let req = request.into_inner();
+        req: mikrom_proto::scheduler::ResumeRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::ResumeResponse> {
         let job = self
             .scheduler
             .get_job(&req.job_id)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("Job not found"))?;
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            .ok_or_else(|| anyhow::anyhow!("Job not found"))?;
 
         if job.user_id != req.user_id {
-            return Err(Status::permission_denied("Unauthorized"));
+            return Err(anyhow::anyhow!("Unauthorized"));
         }
 
         // ── Exclusivity Cluster-wide ──────────────────────────────────
@@ -378,7 +365,7 @@ impl SchedulerServer {
                 .collect(),
             Err(e) => {
                 tracing::error!(error = %e, "Failed to list jobs for exclusivity check during resume");
-                return Err(Status::internal(e.to_string()));
+                return Err(anyhow::anyhow!(e.to_string()));
             },
         };
 
@@ -391,7 +378,7 @@ impl SchedulerServer {
         let vm_id = job.vm_id.as_deref().unwrap_or("");
 
         if host_id.is_empty() || vm_id.is_empty() {
-            return Err(Status::failed_precondition("Job not scheduled"));
+            return Err(anyhow::anyhow!("Job not scheduled"));
         }
 
         let subject = format!("mikrom.agent.{}.cmd", host_id);
@@ -428,45 +415,40 @@ impl SchedulerServer {
             self.scheduler
                 .update_job_status(&req.job_id, crate::job::JobStatus::Running)
                 .await
-                .map_err(|e| Status::internal(e.to_string()))?;
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
 
-        Ok(Response::new(mikrom_proto::scheduler::ResumeResponse {
-            success,
-            message,
-        }))
+        Ok(mikrom_proto::scheduler::ResumeResponse { success, message })
     }
 
     pub async fn cancel_app(
         &self,
-        request: tonic::Request<mikrom_proto::scheduler::CancelRequest>,
-    ) -> Result<Response<mikrom_proto::scheduler::CancelResponse>, Status> {
-        let req = request.into_inner();
+        req: mikrom_proto::scheduler::CancelRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::CancelResponse> {
         self.scheduler
             .cancel_job(&req.job_id)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
-        Ok(Response::new(mikrom_proto::scheduler::CancelResponse {
+        Ok(mikrom_proto::scheduler::CancelResponse {
             success: true,
             message: "Cancelled".to_string(),
-        }))
+        })
     }
 
     pub async fn delete_app(
         &self,
-        request: tonic::Request<mikrom_proto::scheduler::DeleteAppRequest>,
-    ) -> Result<Response<mikrom_proto::scheduler::DeleteAppResponse>, Status> {
-        let req = request.into_inner();
+        req: mikrom_proto::scheduler::DeleteAppRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::DeleteAppResponse> {
         let job = self
             .scheduler
             .get_job(&req.job_id)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("Job not found"))?;
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            .ok_or_else(|| anyhow::anyhow!("Job not found"))?;
 
         if job.user_id != req.user_id {
-            return Err(Status::permission_denied("Unauthorized"));
+            return Err(anyhow::anyhow!("Unauthorized"));
         }
 
         let host_id = job.host_id.as_deref().unwrap_or("");
@@ -479,24 +461,24 @@ impl SchedulerServer {
         self.scheduler
             .remove_job(&req.job_id)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
-        Ok(Response::new(mikrom_proto::scheduler::DeleteAppResponse {
+        Ok(mikrom_proto::scheduler::DeleteAppResponse {
             success: true,
             message: "Deleted".to_string(),
-        }))
+        })
     }
 
     pub async fn list_workers(
         &self,
-        _request: tonic::Request<ListWorkersRequest>,
-    ) -> Result<Response<ListWorkersResponse>, Status> {
+        _req: ListWorkersRequest,
+    ) -> anyhow::Result<ListWorkersResponse> {
         let workers = self
             .scheduler
             .worker_registry()
             .get_available_workers()
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
         let worker_infos = workers
             .into_iter()
@@ -510,9 +492,9 @@ impl SchedulerServer {
             })
             .collect();
 
-        Ok(Response::new(ListWorkersResponse {
+        Ok(ListWorkersResponse {
             workers: worker_infos,
-        }))
+        })
     }
 
     async fn forward_deploy_to_agent(
@@ -522,7 +504,7 @@ impl SchedulerServer {
         image: &str,
         vm_id: &str,
         config: &crate::job::VmConfig,
-    ) -> Result<(), Status> {
+    ) -> anyhow::Result<()> {
         let subject = format!("mikrom.agent.{}.cmd", host_id);
         tracing::info!(host_id = %host_id, subject = %subject, "Attempting to send StartVm command via NATS");
 
@@ -554,7 +536,7 @@ impl SchedulerServer {
         let mut payload = Vec::new();
         cmd.encode(&mut payload).map_err(|e| {
             tracing::error!("Failed to encode AgentCommand: {}", e);
-            Status::internal(e.to_string())
+            anyhow::anyhow!(e.to_string())
         })?;
 
         tracing::debug!("Encoded payload size: {} bytes", payload.len());
@@ -574,27 +556,22 @@ impl SchedulerServer {
                             Ok(())
                         } else {
                             tracing::error!(host_id = %host_id, error = %inner.message, "Agent failed to start VM");
-                            Err(Status::internal(inner.message))
+                            Err(anyhow::anyhow!(inner.message))
                         }
                     },
                     Err(e) => {
                         tracing::error!(host_id = %host_id, error = %e, "Failed to decode agent response");
-                        Err(Status::internal(format!(
-                            "Failed to decode agent response: {}",
-                            e
-                        )))
+                        Err(anyhow::anyhow!("Failed to decode agent response: {}", e))
                     },
                 }
             },
             Ok(Err(e)) => {
                 tracing::error!(host_id = %host_id, error = %e, "NATS request failed");
-                Err(Status::internal(format!("NATS command failed: {}", e)))
+                Err(anyhow::anyhow!("NATS command failed: {}", e))
             },
             Err(_) => {
                 tracing::error!(host_id = %host_id, subject = %subject, "Timeout waiting for agent response (15s)");
-                Err(Status::deadline_exceeded(
-                    "Timeout waiting for agent response",
-                ))
+                Err(anyhow::anyhow!("Timeout waiting for agent response"))
             },
         }
     }
@@ -603,20 +580,20 @@ impl SchedulerServer {
         &self,
         job_id: &str,
         user_id: &str,
-    ) -> Result<(bool, String), Status> {
+    ) -> anyhow::Result<(bool, String)> {
         let job = self
             .scheduler
             .get_job(job_id)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
             .ok_or_else(|| {
                 tracing::warn!("Job {} not found", job_id);
-                Status::not_found("Job not found")
+                anyhow::anyhow!("Job not found")
             })?;
 
         if job.user_id != user_id {
             tracing::warn!("User {} unauthorized for job {}", user_id, job_id);
-            return Err(Status::permission_denied("You do not own this job"));
+            return Err(anyhow::anyhow!("You do not own this job"));
         }
 
         // If it's already stopped, just return success
@@ -649,7 +626,7 @@ impl SchedulerServer {
         let mut payload = Vec::new();
         pause_cmd
             .encode(&mut payload)
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
         let (mut success, mut message) = match tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -715,13 +692,13 @@ impl SchedulerServer {
             self.scheduler
                 .update_job_status(job_id, crate::job::JobStatus::Stopped)
                 .await
-                .map_err(|e| Status::internal(e.to_string()))?;
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
 
         Ok((success, message))
     }
 
-    async fn delete_vm_on_agent(&self, host_id: &str, vm_id: &str) -> Result<(), Status> {
+    async fn delete_vm_on_agent(&self, host_id: &str, vm_id: &str) -> anyhow::Result<()> {
         if host_id.is_empty() {
             return Ok(());
         }
