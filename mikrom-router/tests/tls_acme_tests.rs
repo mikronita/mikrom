@@ -11,33 +11,27 @@ use moka::future::Cache;
 use sqlx::PgPool;
 use tower::ServiceExt;
 
-async fn setup_test_db() -> Option<PgPool> {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://mikrom:mikrom_password@localhost:5432/mikrom_router".to_string()
-    });
+#[path = "common_utils.rs"]
+mod common_utils;
 
-    match PgPool::connect(&db_url).await {
-        Ok(pool) => {
-            // Clean up
-            let _ = sqlx::query("DELETE FROM acme_challenges")
-                .execute(&pool)
-                .await;
-            let _ = sqlx::query("DELETE FROM tls_certificates")
-                .execute(&pool)
-                .await;
-            let _ = sqlx::query("DELETE FROM routes").execute(&pool).await;
-            Some(pool)
-        },
-        Err(_) => None,
-    }
+async fn setup_test_db() -> common_utils::TestDb {
+    let db = common_utils::TestDb::new().await;
+    let pool = db.pool();
+    // Clean up
+    let _ = sqlx::query("DELETE FROM acme_challenges")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM tls_certificates")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM routes").execute(pool).await;
+    db
 }
 
 #[tokio::test]
 async fn test_acme_challenge_flow() {
-    let db = match setup_test_db().await {
-        Some(db) => db,
-        None => return,
-    };
+    let test_db = setup_test_db().await;
+    let db = test_db.pool().clone();
     let state = AppState {
         db: db.clone(),
         cache: Cache::builder().build(),
@@ -93,10 +87,8 @@ async fn test_acme_challenge_flow() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_database_cert_resolver() {
-    let db = match setup_test_db().await {
-        Some(db) => db,
-        None => return,
-    };
+    let test_db = setup_test_db().await;
+    let db = test_db.pool().clone();
     let master_key = "test-master-key".to_string();
     let resolver = DatabaseCertResolver::new(db.clone(), master_key.clone(), 3600);
 

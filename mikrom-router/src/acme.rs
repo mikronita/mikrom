@@ -70,7 +70,7 @@ async fn run_acme_iteration(
     // 1. Find domains that need certificates
     let domains_to_certify = sqlx::query(
         r#"
-        SELECT r.hostname 
+        SELECT r.hostname
         FROM routes r
         LEFT JOIN tls_certificates c ON r.hostname = c.hostname
         WHERE c.hostname IS NULL OR c.expires_at < NOW() + INTERVAL '30 days'
@@ -216,7 +216,12 @@ fn parse_expiry(cert_pem: &str) -> anyhow::Result<DateTime<Utc>> {
 }
 
 #[cfg(test)]
+#[path = "../tests/common_utils.rs"]
+mod common_utils;
+
+#[cfg(test)]
 mod tests {
+    use super::common_utils;
     use super::*;
     use crate::AppState;
     use axum::extract::Path;
@@ -226,16 +231,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_acme_challenge_handler_not_found() {
-        let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_route_test".to_string()
-        });
-        let db = PgPool::connect(&db_url).await.unwrap();
-
-        // Run migrations for tests
-        sqlx::migrate!("./migrations")
-            .run(&db)
-            .await
-            .expect("Failed to run migrations");
+        let test_db = common_utils::TestDb::new().await;
+        let db = test_db.pool().clone();
 
         let state = AppState {
             db,

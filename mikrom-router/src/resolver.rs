@@ -38,7 +38,12 @@ pub async fn resolve_target(state: &AppState, host: &str) -> anyhow::Result<Stri
 }
 
 #[cfg(test)]
+#[path = "../tests/common_utils.rs"]
+mod common_utils;
+
+#[cfg(test)]
 mod tests {
+    use super::common_utils;
     use super::*;
     use moka::future::Cache;
 
@@ -49,11 +54,9 @@ mod tests {
         let target = "http://1.2.3.4:8080";
         cache.insert(host.to_string(), target.to_string()).await;
 
-        let db_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_router_test".to_string()
-        });
+        let test_db = common_utils::TestDb::new().await;
         let state = AppState {
-            db: PgPool::connect_lazy(&db_url).unwrap(),
+            db: test_db.pool().clone(),
             cache,
             client: hyper_util::client::legacy::Client::builder(
                 hyper_util::rt::TokioExecutor::new(),

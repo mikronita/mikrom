@@ -165,6 +165,7 @@ impl UserRepository for PostgresUserRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::TestDb;
 
     fn lazy_pool() -> PgPool {
         let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
@@ -181,12 +182,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires PostgreSQL"]
     async fn test_find_by_email_returns_none_for_unknown_email() {
-        let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-        }))
-        .await
-        .expect("failed to connect");
-        let repo = PostgresUserRepository::new(pool);
+        let db = TestDb::new().await;
+        let repo = PostgresUserRepository::new(db.pool().clone());
         let result: Result<Option<User>, DbError> =
             repo.find_by_email("nonexistent@example.com").await;
         assert!(result.is_ok());
@@ -196,12 +193,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires PostgreSQL"]
     async fn test_create_and_find_roundtrip() {
-        let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-        }))
-        .await
-        .expect("failed to connect");
-        let repo = PostgresUserRepository::new(pool);
+        let db = TestDb::new().await;
+        let repo = PostgresUserRepository::new(db.pool().clone());
         let email = format!("repo_test_{}@example.com", uuid::Uuid::new_v4());
         let id = repo
             .create(NewUser {
@@ -227,12 +220,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires PostgreSQL"]
     async fn test_count_by_email_returns_zero_for_unknown() {
-        let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-        }))
-        .await
-        .expect("failed to connect");
-        let repo = PostgresUserRepository::new(pool);
+        let db = TestDb::new().await;
+        let repo = PostgresUserRepository::new(db.pool().clone());
         let count: i64 = repo
             .count_by_email("nobody_ever@example.com")
             .await
@@ -243,12 +232,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires PostgreSQL"]
     async fn test_count_by_email_returns_one_after_create() {
-        let pool = PgPool::connect(&std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-        }))
-        .await
-        .expect("failed to connect");
-        let repo = PostgresUserRepository::new(pool);
+        let db = TestDb::new().await;
+        let repo = PostgresUserRepository::new(db.pool().clone());
         let email = format!("count_test_{}@example.com", uuid::Uuid::new_v4());
         repo.create(NewUser {
             email: email.clone(),

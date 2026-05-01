@@ -40,3 +40,4 @@ tonic-build.workspace = true
 [features]
 default = ["build"]
 build = []
+test-utils = []

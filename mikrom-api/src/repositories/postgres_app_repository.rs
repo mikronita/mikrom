@@ -341,20 +341,13 @@ mod tests {
     use crate::repositories::user_repository::NewUser;
     use crate::repositories::user_repository::UserRepository;
     use crate::repositories::user_repository::UserRole;
-
-    async fn get_test_pool() -> PgPool {
-        let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-        });
-        PgPool::connect(&url)
-            .await
-            .expect("failed to connect to test db")
-    }
+    use crate::test_utils::TestDb;
 
     #[tokio::test]
     #[ignore = "requires PostgreSQL"]
     async fn test_app_lifecycle() {
-        let pool = get_test_pool().await;
+        let db = TestDb::new().await;
+        let pool = db.pool().clone();
         let user_repo = PostgresUserRepository::new(pool.clone());
         let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".into());
 
@@ -435,7 +428,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires PostgreSQL"]
     async fn test_get_app_by_name() {
-        let pool = get_test_pool().await;
+        let db = TestDb::new().await;
+        let pool = db.pool().clone();
         let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".into());
         let user_id = Uuid::new_v4();
         let name = format!("name-test-{}", Uuid::new_v4());

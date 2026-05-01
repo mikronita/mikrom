@@ -12,25 +12,8 @@ use mikrom_api::AppState;
 use mikrom_api::repositories::PostgresAppRepository;
 use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 
-async fn get_test_pool() -> PgPool {
-    let connection_string = env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test".to_string()
-    });
-
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(20)
-        .acquire_timeout(std::time::Duration::from_secs(10))
-        .connect(&connection_string)
-        .await
-        .expect("Failed to connect to test db");
-
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
+#[path = "common/mod.rs"]
+mod common;
 
 async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
     let user_repo = PostgresUserRepository::new(pool.clone());
@@ -53,7 +36,8 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
 
 #[tokio::test]
 async fn test_all_auth_integration_flows() {
-    let pool = get_test_pool().await;
+    let test_db = mikrom_api::test_utils::TestDb::new().await;
+    let pool = test_db.pool().clone();
     let jwt_secret = "integration-test-secret";
 
     // Test 1: Register and Login Workflow
