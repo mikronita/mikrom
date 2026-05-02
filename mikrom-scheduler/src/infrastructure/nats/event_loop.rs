@@ -72,6 +72,7 @@ impl NatsEventLoop {
         let server = self.server.clone();
         tokio::spawn(async move {
             if let Ok(heartbeat) = WorkerHeartbeat::decode(&message.payload[..]) {
+                tracing::info!("Received heartbeat from worker {}", heartbeat.host_id);
                 let worker = crate::domain::Worker {
                     host_id: heartbeat.host_id.clone(),
                     hostname: heartbeat.hostname.clone(),
