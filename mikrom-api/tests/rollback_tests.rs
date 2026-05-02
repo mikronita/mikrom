@@ -128,7 +128,7 @@ async fn test_activate_deployment_endpoint() {
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: db_pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -204,7 +204,7 @@ async fn test_activate_deployment_wrong_owner() {
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: db_pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -310,7 +310,7 @@ async fn test_activate_deployment_not_running() {
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: db_pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };

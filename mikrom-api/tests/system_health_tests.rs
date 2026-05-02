@@ -30,7 +30,7 @@ async fn test_health_endpoint_structure() {
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: db_pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -82,7 +82,7 @@ async fn test_health_stream_endpoint() {
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: db_pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };

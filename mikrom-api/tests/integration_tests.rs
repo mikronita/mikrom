@@ -30,7 +30,7 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         master_key: "integration-master-key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };

@@ -54,7 +54,7 @@ mod tests {
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
             api_db: pool.clone(),
-            acme_email: "admin@mikrom.es".to_string(),
+            acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
         };

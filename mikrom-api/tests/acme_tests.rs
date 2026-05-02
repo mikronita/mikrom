@@ -11,7 +11,7 @@ async fn test_acme_account_persistence() {
     let db = TestDb::new().await;
     let pool = db.pool().clone();
 
-    let email = "test-persistence@mikrom.es";
+    let email = "test-persistence@mikrom.spluca.org";
     let acme_url = "https://acme-staging-v02.api.letsencrypt.org/directory";
 
     // 1. First call should create account
@@ -55,7 +55,7 @@ async fn test_acme_worker_iteration_skips_if_no_domains() {
     let result = mikrom_api::acme::run_acme_iteration(
         &pool,
         &nats_client,
-        "test@mikrom.es",
+        "test@mikrom.spluca.org",
         "http://invalid-url",
         true,
         "master-key",
@@ -108,7 +108,7 @@ async fn test_router_handles_nats_updates() {
 
     // 3. Publish update from "API"
     let update = TlsCertificateUpdate {
-        hostname: "test-sni.mikrom.es".into(),
+        hostname: "test-sni.mikrom.spluca.org".into(),
         cert_chain: "CHAIN".into(),
         private_key: "KEY".into(),
         expires_at: 123456789,
@@ -124,7 +124,7 @@ async fn test_router_handles_nats_updates() {
     // 4. Verify DB update
     sleep(Duration::from_millis(200)).await;
     let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM tls_certificates WHERE hostname = 'test-sni.mikrom.es')",
+        "SELECT EXISTS(SELECT 1 FROM tls_certificates WHERE hostname = 'test-sni.mikrom.spluca.org')",
     )
     .fetch_one(&pool)
     .await

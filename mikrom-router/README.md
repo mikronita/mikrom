@@ -6,7 +6,7 @@ A high-performance dynamic ingress router for the Mikrom PaaS. It automatically 
 
 ## Key Responsibilities
 
-- **Dynamic Routing**: Resolves hostnames (e.g., `whoami.apps.mikrom.es`) to internal microVM IP addresses in real-time.
+- **Dynamic Routing**: Resolves hostnames (e.g., `whoami.apps.mikrom.spluca.org`) to internal microVM IP addresses in real-time.
 - **Zero-Latency Lookups**: Utilizes an in-memory [Moka](https://github.com/moka-rs/moka) cache to avoid database bottlenecks on every request.
 - **Reverse Proxying**: Proxies full HTTP requests (including headers, paths, and bodies) to backend applications using [Hyper](https://github.com/hyperium/hyper).
 - **Auto-Discovery**: Queries the `apps` and `deployments` tables to find the latest `RUNNING` instance for any given host.
@@ -40,7 +40,7 @@ A high-performance dynamic ingress router for the Mikrom PaaS. It automatically 
 cargo run -p mikrom-router
 
 # Test a route (assuming app is running)
-curl -H "Host: my-app.apps.mikrom.es" http://localhost:8080
+curl -H "Host: my-app.apps.mikrom.spluca.org" http://localhost:8080
 ```
 
 ## Internal Architecture

@@ -33,7 +33,7 @@ pub struct ApiConfig {
 }
 
 fn default_acme_email() -> String {
-    "admin@mikrom.es".to_string()
+    "admin@mikrom.spluca.org".to_string()
 }
 
 fn default_acme_staging() -> bool {

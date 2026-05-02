@@ -18,14 +18,14 @@ The automated build engine for the Mikrom PaaS. It turns Git repositories into o
 3.  **Build**: 
     - **Railpack**: Fast, cache-efficient building using industry-standard patterns.
     - **Docker**: Custom builds for specialized applications.
-4.  **Push**: Pushes the resulting image to `registry.mikrom.es/mikrom/<app_name>:<tag>`.
+4.  **Push**: Pushes the resulting image to `registry.mikrom.spluca.org/mikrom/<app_name>:<tag>`.
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
 | `NATS_URL` | `nats://127.0.0.1:4222` | URL of the NATS server |
-| `REGISTRY_URL` | `registry.mikrom.es` | Target OCI registry |
+| `REGISTRY_URL` | `registry.mikrom.spluca.org` | Target OCI registry |
 | `REGISTRY_USER` | — | Registry username |
 | `REGISTRY_PASS` | — | Registry password |
 | `BUILDKIT_HOST` | `docker-daemon://` | Build backend (local Docker or buildkitd) |

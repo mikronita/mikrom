@@ -30,7 +30,7 @@ async fn test_openapi_json_endpoint() {
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: db_pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -74,7 +74,7 @@ async fn test_swagger_ui_endpoint() {
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: db_pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
