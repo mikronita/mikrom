@@ -54,7 +54,7 @@ async fn test_acme_worker_iteration_skips_if_no_domains() {
     // Run iteration - should finish quickly as there are no apps
     let result = mikrom_api::acme::run_acme_iteration(
         &pool,
-        &nats_client,
+        &mikrom_api::nats::TypedNatsClient::new(nats_client),
         "test@mikrom.spluca.org",
         "http://invalid-url",
         true,

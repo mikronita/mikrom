@@ -1,7 +1,7 @@
 use crate::AppState;
 use crate::error::{ApiError, ApiResult};
 use crate::repositories::user_repository::NewUser;
-use axum::{Json, extract::State};
+use axum::{Json, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use utoipa::ToSchema;
@@ -55,7 +55,7 @@ pub struct UpdateProfileRequest {
 pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
-) -> ApiResult<Json<AuthResponse>> {
+) -> ApiResult<(StatusCode, Json<AuthResponse>)> {
     info!(email = %payload.email, "Registering new user");
 
     // Check if user already exists
@@ -102,16 +102,19 @@ pub async fn register(
     )
     .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    Ok(Json(AuthResponse {
-        user: UserResponse {
-            id: user.id.to_string(),
-            email: user.email,
-            role: user.role,
-            first_name: user.first_name,
-            last_name: user.last_name,
-        },
-        token,
-    }))
+    Ok((
+        StatusCode::CREATED,
+        Json(AuthResponse {
+            user: UserResponse {
+                id: user.id.to_string(),
+                email: user.email,
+                role: user.role,
+                first_name: user.first_name,
+                last_name: user.last_name,
+            },
+            token,
+        }),
+    ))
 }
 
 #[utoipa::path(
