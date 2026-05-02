@@ -1,3 +1,4 @@
+use anyhow::{Context, Result, anyhow};
 use nix::mount::{MsFlags, mount};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -5,6 +6,9 @@ use std::fs;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
+
+const CONFIG_PATH: &str = "/etc/mikrom/init.json";
+const FALLBACK_SHELL: &str = "/bin/sh";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct InitConfig {
@@ -21,74 +25,107 @@ fn default_workdir() -> String {
     "/app".to_string()
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     println!("[mikrom-init] Initializing microVM environment...");
 
+    if let Err(e) = setup_mounts() {
+        eprintln!("[mikrom-init] Warning: Mount setup encountered errors: {e}");
+    }
+
+    if let Err(e) = setup_system() {
+        eprintln!("[mikrom-init] Warning: System setup encountered errors: {e}");
+    }
+
+    let config = match load_config(CONFIG_PATH) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("[mikrom-init] Error loading configuration: {e}");
+            fallback_to_shell();
+        },
+    };
+
+    println!(
+        "[mikrom-init] Starting application: {:?}",
+        config.entrypoint
+    );
+
+    let mut cmd = build_command(config)?;
+
+    // EXECUTE (Replacing mikrom-init as PID 1)
+    let err = cmd.exec();
+
+    // If exec() returns, it failed
+    eprintln!("[mikrom-init] Failed to execute application: {err}");
+
+    fallback_to_shell();
+}
+
+fn setup_mounts() -> Result<()> {
     // 1. Mount essential filesystems
     mount_fs("proc", "/proc", "proc", MsFlags::empty())?;
     mount_fs("sysfs", "/sys", "sysfs", MsFlags::empty())?;
 
-    // devtmpfs might fail if not supported by kernel, so we try and ignore error
-    let _ = mount_fs("devtmpfs", "/dev", "devtmpfs", MsFlags::empty());
+    // devtmpfs might fail if not supported by kernel
+    if let Err(e) = mount_fs("devtmpfs", "/dev", "devtmpfs", MsFlags::empty()) {
+        eprintln!("[mikrom-init] Warning: Failed to mount /dev: {e}");
+    }
 
-    // Create mount points if they don't exist
-    let dirs = ["/run", "/tmp", "/dev/pts", "/dev/shm"];
-    for dir in &dirs {
+    // Create mount points and mount tmpfs
+    let tmp_dirs = ["/run", "/tmp", "/dev/pts", "/dev/shm"];
+    for dir in &tmp_dirs {
         let _ = fs::create_dir_all(dir);
     }
 
     mount_fs("tmpfs", "/run", "tmpfs", MsFlags::empty())?;
     mount_fs("tmpfs", "/tmp", "tmpfs", MsFlags::empty())?;
     mount_fs("tmpfs", "/dev/shm", "tmpfs", MsFlags::empty())?;
-    let _ = mount_fs("devpts", "/dev/pts", "devpts", MsFlags::empty());
 
-    // 2. Set hostname
+    if let Err(e) = mount_fs("devpts", "/dev/pts", "devpts", MsFlags::empty()) {
+        eprintln!("[mikrom-init] Warning: Failed to mount /dev/pts: {e}");
+    }
+
+    Ok(())
+}
+
+fn setup_system() -> Result<()> {
+    // Set hostname
     let _ = nix::unistd::sethostname("localhost");
 
-    // 3. Bring up loopback interface (optional but good practice)
-    let _ = Command::new("ip")
+    // Bring up loopback interface
+    let status = Command::new("ip")
         .args(["link", "set", "lo", "up"])
         .status();
 
-    // 4. Load configuration
-    let config_path = "/etc/mikrom/init.json";
-    if !Path::new(config_path).exists() {
-        println!(
-            "[mikrom-init] Error: Configuration file not found at {}",
-            config_path
-        );
-        // Fallback to a shell if it exists, otherwise panic
-        if Path::new("/bin/sh").exists() {
-            println!("[mikrom-init] Falling back to /bin/sh");
-            let _ = Command::new("/bin/sh").exec();
-        }
-        panic!("Initialization failed: No config and no fallback shell");
+    if let Err(e) = status {
+        eprintln!("[mikrom-init] Warning: Failed to bring up loopback: {e}");
     }
 
-    let config_str = fs::read_to_string(config_path)?;
-    let config: InitConfig = serde_json::from_str(&config_str)?;
+    Ok(())
+}
 
-    // 5. Prepare execution
-    println!(
-        "[mikrom-init] Starting application: {:?}",
-        config.entrypoint
-    );
+fn load_config(path: &str) -> Result<InitConfig> {
+    let config_str = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read config file at {path}"))?;
 
-    let mut cmd = if !config.entrypoint.is_empty() {
-        let mut c = Command::new(&config.entrypoint[0]);
-        if config.entrypoint.len() > 1 {
-            c.args(&config.entrypoint[1..]);
-        }
-        c.args(&config.cmd);
-        c
-    } else if !config.cmd.is_empty() {
-        let mut c = Command::new(&config.cmd[0]);
-        if config.cmd.len() > 1 {
-            c.args(&config.cmd[1..]);
-        }
-        c
-    } else {
-        panic!("No entrypoint or cmd provided in config");
+    serde_json::from_str(&config_str).with_context(|| "Failed to parse configuration JSON")
+}
+
+fn build_command(config: InitConfig) -> Result<Command> {
+    let mut cmd = match config.entrypoint.split_first() {
+        Some((prog, args)) => {
+            let mut c = Command::new(prog);
+            c.args(args);
+            c.args(&config.cmd);
+            c
+        },
+        None => match config.cmd.split_first() {
+            Some((prog, args)) => {
+                let mut c = Command::new(prog);
+                c.args(args);
+                c
+            },
+            None => return Err(anyhow!("No entrypoint or cmd provided in config")),
+        },
     };
 
     // Set environment variables
@@ -97,41 +134,39 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Set working directory
-    if Path::new(&config.workdir).exists() {
-        cmd.current_dir(&config.workdir);
-    } else {
-        let _ = fs::create_dir_all(&config.workdir);
-        cmd.current_dir(&config.workdir);
+    let workdir = Path::new(&config.workdir);
+    if !workdir.exists() {
+        let _ = fs::create_dir_all(workdir);
+    }
+    cmd.current_dir(workdir);
+
+    Ok(cmd)
+}
+
+fn fallback_to_shell() -> ! {
+    if Path::new(FALLBACK_SHELL).exists() {
+        println!("[mikrom-init] Falling back to {FALLBACK_SHELL}...");
+        let _ = Command::new(FALLBACK_SHELL).exec();
     }
 
-    // 6. EXECUTE (Replacing mikrom-init as PID 1)
-    let err = cmd.exec();
+    eprintln!("[mikrom-init] CRITICAL: All execution attempts failed. Halting.");
+    halt_pid1()
+}
 
-    // If exec() returns, it failed
-    println!("[mikrom-init] Failed to execute application: {}", err);
-
-    // 7. Fallback to shell
-    if Path::new("/bin/sh").exists() {
-        println!("[mikrom-init] Falling back to /bin/sh...");
-        let _ = Command::new("/bin/sh").exec();
-    }
-
-    // 8. Final safety: if everything fails, do NOT exit (avoid kernel panic)
-    println!(
-        "[mikrom-init] CRITICAL: All execution attempts failed. Entering infinite sleep to prevent kernel panic."
-    );
+fn halt_pid1() -> ! {
     loop {
-        std::thread::sleep(std::time::Duration::from_secs(3600));
+        std::thread::park();
     }
 }
 
-fn mount_fs(source: &str, target: &str, fstype: &str, flags: MsFlags) -> anyhow::Result<()> {
+fn mount_fs(source: &str, target: &str, fstype: &str, flags: MsFlags) -> Result<()> {
     if !Path::new(target).exists() {
-        fs::create_dir_all(target)?;
+        fs::create_dir_all(target)
+            .with_context(|| format!("Failed to create mount point: {target}"))?;
     }
 
     mount(Some(source), target, Some(fstype), flags, None::<&str>)
-        .map_err(|e| anyhow::anyhow!("Failed to mount {}: {}", target, e))?;
+        .map_err(|e| anyhow!("Failed to mount {source} on {target} ({fstype}): {e}"))?;
 
     Ok(())
 }
@@ -163,5 +198,16 @@ mod tests {
         assert!(config.env.is_empty());
         assert_eq!(config.entrypoint[0], "ls");
         assert!(config.cmd.is_empty());
+    }
+
+    #[test]
+    fn test_build_command_entrypoint() {
+        let config = InitConfig {
+            env: HashMap::new(),
+            workdir: "/app".to_string(),
+            entrypoint: vec!["/bin/sh".to_string(), "-c".to_string()],
+            cmd: vec!["echo hello".to_string()],
+        };
+        let _cmd = build_command(config).unwrap();
     }
 }
