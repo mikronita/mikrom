@@ -11,7 +11,7 @@ use std::time::Duration;
 async fn main() -> anyhow::Result<()> {
     let config = SchedulerConfig::load()?;
 
-    mikrom_proto::telemetry::init_telemetry("mikrom-scheduler", env!("CARGO_PKG_VERSION"))?;
+    mikrom_proto::telemetry::init_telemetry("mikrom-scheduler", env!("CARGO_PKG_VERSION"), None)?;
 
     tracing::info!("Connecting to database...");
     let pool = PgPoolOptions::new()

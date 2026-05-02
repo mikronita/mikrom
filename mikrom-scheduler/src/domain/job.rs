@@ -13,6 +13,19 @@ pub enum JobStatus {
     Cancelled,
 }
 
+impl JobStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Scheduled => "scheduled",
+            Self::Running => "running",
+            Self::Stopped => "stopped",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Volume {
     pub volume_id: String,

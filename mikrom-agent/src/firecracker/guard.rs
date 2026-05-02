@@ -70,10 +70,11 @@ impl Drop for VmStartupGuard {
                     handle.abort();
                 }
 
-                if let Some(chroot) = chroot_dir
-                    && let Err(e) = tokio::fs::remove_dir_all(&chroot).await
-                {
-                    tracing::error!(vm_id = %vm_id, path = ?chroot, error = %e, "Failed to cleanup chroot directory");
+                if let Some(chroot) = chroot_dir {
+                    #[allow(clippy::collapsible_if)]
+                    if let Err(e) = tokio::fs::remove_dir_all(&chroot).await {
+                        tracing::error!(vm_id = %vm_id, path = ?chroot, error = %e, "Failed to cleanup chroot directory");
+                    }
                 }
 
                 // Note: cleanup_tap is not easily accessible here without a manager reference.

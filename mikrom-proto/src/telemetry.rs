@@ -17,9 +17,13 @@ const DEFAULT_OTLP_ENDPOINT: &str = "http://localhost:4317";
 /// - `LOG_FORMAT`: set to `json` for structured logging.
 /// - `ENABLE_TELEMETRY`: set to `true` to enable OTLP tracing.
 /// - `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP collector endpoint (default: http://localhost:4317).
-pub fn init_telemetry(service_name: &str, service_version: &str) -> anyhow::Result<()> {
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_LEVEL));
+pub fn init_telemetry(
+    service_name: &str,
+    service_version: &str,
+    default_level: Option<&str>,
+) -> anyhow::Result<()> {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(default_level.unwrap_or(DEFAULT_LOG_LEVEL)));
 
     let is_json = std::env::var("LOG_FORMAT").as_deref() == Ok("json");
     let enable_telemetry = std::env::var("ENABLE_TELEMETRY").as_deref() == Ok("true");
