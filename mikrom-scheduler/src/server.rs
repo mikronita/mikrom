@@ -206,7 +206,6 @@ impl SchedulerServer {
                 host_id: w.host_id,
                 hostname: w.hostname,
                 ip_address: w.ip_address,
-                agent_port: w.agent_port as u32,
                 bridge_ip: w.bridge_ip,
                 last_heartbeat: w.last_heartbeat,
             })

@@ -2,7 +2,6 @@ use crate::firecracker::FirecrackerManager;
 use crate::metrics::MetricsCollector;
 use parking_lot::RwLock;
 use prost::Message;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 pub struct AgentServer {
@@ -35,7 +34,7 @@ impl AgentServer {
         }
     }
 
-    pub async fn serve(&self, addr: SocketAddr) -> anyhow::Result<()> {
+    pub async fn serve(&self) -> anyhow::Result<()> {
         // Initialize global networking (bridge, forwarding, NAT)
         if let Err(e) = self.firecracker.init_network().await {
             tracing::error!("Failed to initialize host networking: {e}");
@@ -75,7 +74,7 @@ impl AgentServer {
 
                 // Spawn command listener and heartbeat tasks
                 let cmd_handle = self_clone.start_command_listener(client.clone());
-                let heartbeat_handle = self_clone.start_heartbeat_loop(client.clone(), addr.port());
+                let heartbeat_handle = self_clone.start_heartbeat_loop(client.clone());
 
                 tokio::select! {
                     _ = cmd_handle => tracing::warn!("Command listener exited"),
@@ -190,11 +189,7 @@ impl AgentServer {
         }
     }
 
-    fn start_heartbeat_loop(
-        &self,
-        client: async_nats::Client,
-        agent_port: u16,
-    ) -> tokio::task::JoinHandle<()> {
+    fn start_heartbeat_loop(&self, client: async_nats::Client) -> tokio::task::JoinHandle<()> {
         let host_id = self.config.host_id.clone();
         let hostname = self.config.hostname();
         let ip_address = self.ip_address.clone();
@@ -243,7 +238,6 @@ impl AgentServer {
                     host_id: host_id.clone(),
                     hostname: hostname.clone(),
                     ip_address: ip_address.clone(),
-                    agent_port: u32::from(agent_port),
                     bridge_ip: bridge_ip.clone(),
                     metrics: Some(ReportMetricsRequest {
                         host_id: host_id.clone(),

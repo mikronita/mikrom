@@ -4,7 +4,6 @@ CREATE TABLE IF NOT EXISTS workers (
     id VARCHAR PRIMARY KEY,
     hostname VARCHAR NOT NULL,
     ip_address VARCHAR NOT NULL,
-    agent_port INTEGER NOT NULL,
     bridge_ip VARCHAR NOT NULL,
     status VARCHAR NOT NULL DEFAULT 'Online',
     metrics JSONB,

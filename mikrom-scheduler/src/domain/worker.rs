@@ -51,7 +51,6 @@ pub struct Worker {
     pub host_id: String,
     pub hostname: String,
     pub ip_address: String,
-    pub agent_port: u16,
     pub bridge_ip: String,
     pub metrics: Option<HostMetrics>,
     pub registered_at: i64,

@@ -11,9 +11,6 @@ pub struct AgentConfig {
     #[serde(default = "default_use_tls")]
     pub use_tls: bool,
 
-    #[serde(default = "default_agent_port")]
-    pub agent_port: u16,
-
     #[serde(default = "default_bridge_ip")]
     pub bridge_ip: String,
 
@@ -37,10 +34,6 @@ fn default_host_id() -> String {
 
 fn default_use_tls() -> bool {
     false
-}
-
-fn default_agent_port() -> u16 {
-    5003
 }
 
 impl AgentConfig {

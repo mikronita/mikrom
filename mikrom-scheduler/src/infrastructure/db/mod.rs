@@ -178,20 +178,18 @@ impl WorkerRepository for PgWorkerRepository {
         // Upsert the worker
         sqlx::query(
             r#"
-            INSERT INTO workers (id, hostname, ip_address, agent_port, bridge_ip, last_heartbeat, registered_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO workers (id, hostname, ip_address, bridge_ip, last_heartbeat, registered_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (id) DO UPDATE SET
                 hostname = EXCLUDED.hostname,
                 ip_address = EXCLUDED.ip_address,
-                agent_port = EXCLUDED.agent_port,
                 bridge_ip = EXCLUDED.bridge_ip,
                 last_heartbeat = EXCLUDED.last_heartbeat
-            "#
+            "#,
         )
         .bind(&worker.host_id)
         .bind(&worker.hostname)
         .bind(&worker.ip_address)
-        .bind(worker.agent_port as i32)
         .bind(&worker.bridge_ip)
         .bind(now)
         .bind(now)
@@ -231,7 +229,7 @@ impl WorkerRepository for PgWorkerRepository {
 
     async fn get_worker(&self, host_id: &str) -> DomainResult<Option<Worker>> {
         let row = sqlx::query(
-            "SELECT id, hostname, ip_address, agent_port, bridge_ip, metrics, registered_at, last_heartbeat FROM workers WHERE id = $1"
+            "SELECT id, hostname, ip_address, bridge_ip, metrics, registered_at, last_heartbeat FROM workers WHERE id = $1"
         )
         .bind(host_id)
         .fetch_optional(&self.pool)
@@ -246,7 +244,7 @@ impl WorkerRepository for PgWorkerRepository {
 
     async fn list_workers(&self) -> DomainResult<Vec<Worker>> {
         let rows = sqlx::query(
-            "SELECT id, hostname, ip_address, agent_port, bridge_ip, metrics, registered_at, last_heartbeat FROM workers"
+            "SELECT id, hostname, ip_address, bridge_ip, metrics, registered_at, last_heartbeat FROM workers"
         )
         .fetch_all(&self.pool)
         .await?;
@@ -260,10 +258,10 @@ impl WorkerRepository for PgWorkerRepository {
 
         let rows = sqlx::query(
             r#"
-            SELECT id, hostname, ip_address, agent_port, bridge_ip, metrics, registered_at, last_heartbeat
+            SELECT id, hostname, ip_address, bridge_ip, metrics, registered_at, last_heartbeat
             FROM workers
             WHERE metrics IS NOT NULL AND last_heartbeat > $1 AND status = 'Online'
-            "#
+            "#,
         )
         .bind(threshold)
         .fetch_all(&self.pool)
@@ -324,7 +322,6 @@ fn map_row_to_worker(r: &sqlx::postgres::PgRow) -> Worker {
         host_id: r.get("id"),
         hostname: r.get("hostname"),
         ip_address: r.get("ip_address"),
-        agent_port: r.get::<i32, _>("agent_port") as u16,
         bridge_ip: r.get::<String, _>("bridge_ip").clone(),
         metrics,
         registered_at: r.get("registered_at"),

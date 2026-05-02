@@ -1,6 +1,5 @@
 use mikrom_agent::config::AgentConfig;
 use mikrom_agent::server::AgentServer;
-use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -8,20 +7,18 @@ async fn main() -> anyhow::Result<()> {
 
     mikrom_proto::telemetry::init_telemetry("mikrom-agent", env!("CARGO_PKG_VERSION"), None)?;
 
-    let addr: SocketAddr = format!("0.0.0.0:{}", config.agent_port).parse()?;
     let hostname = config.hostname();
     let ip_address = get_local_ip();
 
     tracing::info!(
-        "Starting agent {} on {} (hostname: {}, mtls: {})",
+        "Starting agent {} (hostname: {}, mtls: {})",
         config.host_id,
-        addr,
         hostname,
         config.use_tls
     );
 
     let server = AgentServer::new(config, ip_address);
-    server.serve(addr).await?;
+    server.serve().await?;
 
     Ok(())
 }
