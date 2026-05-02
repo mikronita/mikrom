@@ -142,7 +142,7 @@ async fn test_promotion_back_and_forth() {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         scheduler: Arc::new(mock_scheduler),
-        nats_client,
+        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
@@ -298,7 +298,7 @@ async fn test_promotion_pauses_previous_active() {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         scheduler: Arc::new(mock_scheduler),
-        nats_client,
+        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
@@ -431,7 +431,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         scheduler: Arc::new(mock_scheduler),
-        nats_client,
+        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
@@ -539,7 +539,7 @@ async fn test_delete_app_cleans_up_resources() {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         scheduler: Arc::new(mock_scheduler),
-        nats_client,
+        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")

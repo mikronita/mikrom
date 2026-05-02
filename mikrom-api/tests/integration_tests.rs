@@ -24,7 +24,7 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-        nats_client,
+        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         jwt_secret: jwt_secret.to_string(),
         master_key: "integration-master-key".into(),

@@ -48,7 +48,7 @@ mod tests {
                 "test-key".to_string(),
             )),
             scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-            nats_client: nats_client.clone(),
+            nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
             router_addr: "http://localhost:8080".to_string(),
             jwt_secret: "secret".into(),
             master_key: "key".into(),

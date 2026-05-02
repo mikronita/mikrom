@@ -26,7 +26,7 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-        nats_client,
+        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
@@ -245,7 +245,7 @@ async fn test_sse_deployments_stream_updates() {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-        nats_client,
+        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
