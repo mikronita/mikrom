@@ -268,10 +268,10 @@ export default function AppDetailPage() {
               <div>
                 <div className="flex items-center gap-3">
                   <h1 className="text-2xl font-bold tracking-tight">
-                    {app?.name || decodedName}.apps.mikrom.es
+                    {app?.name || decodedName}.apps.mikrom.spluca.org
                   </h1>
                   <a 
-                    href={`https://${app?.name || decodedName}.apps.mikrom.es`} 
+                    href={`https://${app?.name || decodedName}.apps.mikrom.spluca.org`} 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="text-sm font-medium text-indigo-500 hover:underline flex items-center gap-1"

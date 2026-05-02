@@ -107,7 +107,7 @@ async fn test_hierarchical_deployment_status_success() {
         jwt_secret: "test-secret".into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        acme_email: "admin@mikrom.es".into(),
+        acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -198,7 +198,7 @@ async fn test_hierarchical_security_cross_app_prevention() {
         jwt_secret: "test-secret".into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        acme_email: "admin@mikrom.es".into(),
+        acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
     };

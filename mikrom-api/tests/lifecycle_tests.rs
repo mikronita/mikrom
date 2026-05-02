@@ -150,7 +150,7 @@ async fn test_promotion_back_and_forth() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        acme_email: "admin@mikrom.es".into(),
+        acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -306,7 +306,7 @@ async fn test_promotion_pauses_previous_active() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        acme_email: "admin@mikrom.es".into(),
+        acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -439,7 +439,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        acme_email: "admin@mikrom.es".into(),
+        acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -547,7 +547,7 @@ async fn test_delete_app_cleans_up_resources() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        acme_email: "admin@mikrom.es".into(),
+        acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
     };

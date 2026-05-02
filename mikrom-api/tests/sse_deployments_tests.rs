@@ -34,7 +34,7 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
         jwt_secret: JWT_SECRET.into(),
         master_key: "key".into(),
         deployment_events: deployment_events.clone(),
-        acme_email: "admin@mikrom.es".into(),
+        acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -253,7 +253,7 @@ async fn test_sse_deployments_stream_updates() {
         jwt_secret: JWT_SECRET.into(),
         master_key: "key".into(),
         deployment_events: deployment_events.clone(),
-        acme_email: "admin@mikrom.es".into(),
+        acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
     };

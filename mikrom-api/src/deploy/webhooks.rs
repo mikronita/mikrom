@@ -148,7 +148,7 @@ mod tests {
             jwt_secret: "secret".into(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
-            acme_email: "admin@mikrom.es".into(),
+            acme_email: "admin@mikrom.spluca.org".into(),
             acme_staging: true,
             acme_check_interval: 3600,
         }

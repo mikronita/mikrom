@@ -8,7 +8,7 @@ Mikrom is a modern **Platform-as-a-Service (PaaS)** that deploys containerized w
 
 - **🚀 Zero-Config**: Automatic language detection and building via [Railpack](https://railpack.com/).
 - **⚡ MicroVM Isolation**: Every application runs in its own dedicated Firecracker microVM for maximum security and performance.
-- **🌐 Dynamic Routing**: Built-in ingress router with automatic hostname assignment (`app.apps.mikrom.es`).
+- **🌐 Dynamic Routing**: Built-in ingress router with automatic hostname assignment (`app.apps.mikrom.spluca.org`).
 - **🦀 Built with Rust**: High-performance, memory-safe backend services.
 - **📊 Real-time Dashboard**: Modern web interface built with Next.js and Tailwind CSS.
 - **🛠️ Power CLI**: Full control over your apps and deployments from your terminal.

@@ -42,7 +42,7 @@ async fn test_create_app_endpoint() {
             eq(app_name),
             eq(git_url),
             eq(8080),
-            eq(Some("test-app.apps.mikrom.es".to_string())),
+            eq(Some("test-app.apps.mikrom.spluca.org".to_string())),
             eq(user_id.to_string()),
             always(),
         )
@@ -78,7 +78,7 @@ async fn test_create_app_endpoint() {
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: db_pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -118,7 +118,7 @@ async fn test_create_app_endpoint() {
             .unwrap()
             .is_empty()
     );
-    assert_eq!(app_resp["hostname"], "test-app.apps.mikrom.es");
+    assert_eq!(app_resp["hostname"], "test-app.apps.mikrom.spluca.org");
 }
 
 #[tokio::test]
@@ -165,7 +165,7 @@ async fn test_create_app_duplicate_name() {
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: db_pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -231,7 +231,7 @@ async fn test_list_apps_includes_secret() {
                 name: "test-app".to_string(),
                 git_url: "git".to_string(),
                 port: 8080,
-                hostname: Some("test-app.apps.mikrom.es".to_string()),
+                hostname: Some("test-app.apps.mikrom.spluca.org".to_string()),
                 user_id,
                 github_webhook_secret: Some(secret.clone()),
                 active_deployment_id: None,
@@ -256,7 +256,7 @@ async fn test_list_apps_includes_secret() {
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: db_pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };
@@ -285,7 +285,7 @@ async fn test_list_apps_includes_secret() {
     assert!(apps_resp.is_array());
     let app = &apps_resp[0];
     assert_eq!(app["github_webhook_secret"], "********");
-    assert_eq!(app["hostname"], "test-app.apps.mikrom.es");
+    assert_eq!(app["hostname"], "test-app.apps.mikrom.spluca.org");
 }
 
 #[tokio::test]
@@ -342,7 +342,7 @@ async fn test_get_app_secret_endpoint() {
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
         api_db: db_pool,
-        acme_email: "admin@mikrom.es".to_string(),
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
     };

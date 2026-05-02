@@ -102,7 +102,7 @@ pub async fn create_app_handler(
 ) -> ApiResult<(StatusCode, Json<AppResponse>)> {
     let port = payload.port.unwrap_or(8080);
     let hostname = format!(
-        "{}.apps.mikrom.es",
+        "{}.apps.mikrom.spluca.org",
         payload.name.to_lowercase().replace(' ', "-")
     );
 
