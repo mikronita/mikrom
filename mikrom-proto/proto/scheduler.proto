@@ -28,6 +28,7 @@ message WatchAppsResponse {
 }
 
 message WorkerHeartbeat {
+  reserved 4;
   string host_id = 1;
   string hostname = 2;
   string ip_address = 3;
@@ -42,6 +43,7 @@ message ListWorkersResponse {
 }
 
 message WorkerInfo {
+  reserved 4;
   string host_id = 1;
   string hostname = 2;
   string ip_address = 3;
@@ -93,6 +95,7 @@ message DeleteAppResponse {
 }
 
 message RegisterWorkerRequest {
+  reserved 4;
   string host_id = 1;
   string hostname = 2;
   string ip_address = 3;
