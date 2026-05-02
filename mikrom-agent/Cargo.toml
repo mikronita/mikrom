@@ -8,16 +8,12 @@ edition = "2024"
 tokio.workspace = true
 prost.workspace = true
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tower = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
-async-trait = "0.1"
 parking_lot = "0.12"
-tokio-stream = "0.1"
 sysinfo = "0.32"
 hostname = "0.4"
 envy.workspace = true
@@ -27,13 +23,7 @@ dotenvy = "0.15"
 shlex = "1.3"
 anyhow.workspace = true
 async-nats.workspace = true
-tokio-util = { version = "0.7.18", features = ["io", "codec"] }
 futures = "0.3.32"
-opentelemetry = "0.31.0"
-opentelemetry_sdk = "0.31.0"
-opentelemetry-otlp = "0.31.1"
-tracing-opentelemetry = "0.32.1"
-opentelemetry-semantic-conventions = "0.31.0"
 
 [package.metadata.deb]
 maintainer = "Antonio Pardo <apardo@spluca.org>"
