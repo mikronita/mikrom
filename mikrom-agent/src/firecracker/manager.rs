@@ -339,17 +339,13 @@ impl FirecrackerManager {
             None
         };
 
-        // 5. Initialize Startup Guard
-        let mut guard = VmStartupGuard::new(vm_id.clone(), paths.socket_path());
-        guard.tap_name = tap_name.clone();
-
-        // 6. Jailer or Direct Spawn
-        let (exec_binary, exec_args, chroot_dir) = if self.fc_config.use_jailer {
-            let (bin, args, _, chroot) = self
+        // 5. Jailer or Direct Spawn
+        let (exec_binary, exec_args, active_socket_path, chroot_dir) = if self.fc_config.use_jailer
+        {
+            let (bin, args, host_socket, chroot) = self
                 .setup_jailer(&vm_id, &kernel_path, &rootfs_path.to_string_lossy())
                 .await?;
-            guard.chroot_dir = chroot.clone().map(PathBuf::from);
-            (bin, args, chroot)
+            (bin, args, host_socket, chroot)
         } else {
             let socket_path = paths.socket_path();
             if let Err(e) = tokio::fs::remove_file(&socket_path).await
@@ -367,9 +363,15 @@ impl FirecrackerManager {
                     "--api-sock".to_string(),
                     socket_path.to_string_lossy().to_string(),
                 ],
+                socket_path.to_string_lossy().to_string(),
                 None,
             )
         };
+
+        // 6. Initialize Startup Guard
+        let mut guard = VmStartupGuard::new(vm_id.clone(), PathBuf::from(&active_socket_path));
+        guard.tap_name = tap_name.clone();
+        guard.chroot_dir = chroot_dir.clone().map(PathBuf::from);
 
         // 7. Spawn Firecracker
         let mut child = tokio::process::Command::new(&exec_binary)
@@ -395,15 +397,17 @@ impl FirecrackerManager {
             Duration::from_secs(5)
         };
 
-        wait_for_socket(&paths.socket_path().to_string_lossy(), wait_timeout).await?;
+        wait_for_socket(&active_socket_path, wait_timeout).await?;
 
         // 10. Configure Metrics
-        let metrics_host_path = self.setup_metrics(&vm_id, &chroot_dir, &paths).await?;
+        let metrics_host_path = self
+            .setup_metrics(&vm_id, &chroot_dir, &active_socket_path, &paths)
+            .await?;
         guard.metrics_path = Some(metrics_host_path.clone());
 
         // 11. Snapshot Restoration
         if self
-            .try_restore_snapshot(&vm_id, &chroot_dir, &paths)
+            .try_restore_snapshot(&vm_id, &chroot_dir, &active_socket_path, &paths)
             .await?
         {
             self.finalize_startup(guard).await?;
@@ -416,7 +420,7 @@ impl FirecrackerManager {
             &kernel_path,
             &rootfs_path,
             &chroot_dir,
-            &paths,
+            &active_socket_path,
             tap_name.as_deref(),
         )
         .await?;
@@ -501,6 +505,7 @@ impl FirecrackerManager {
         &self,
         vm_id: &str,
         chroot_dir: &Option<String>,
+        active_socket_path: &str,
         paths: &VmPaths,
     ) -> Result<String, FirecrackerError> {
         let (host_path, api_path) = if let Some(chroot) = chroot_dir {
@@ -521,13 +526,7 @@ impl FirecrackerManager {
         };
 
         let metrics_config = serde_json::json!({ "metrics_path": api_path }).to_string();
-        if let Err(e) = fc_put(
-            &paths.socket_path().to_string_lossy(),
-            "/metrics",
-            &metrics_config,
-        )
-        .await
-        {
+        if let Err(e) = fc_put(active_socket_path, "/metrics", &metrics_config).await {
             tracing::warn!(vm_id = %vm_id, "Failed to configure metrics: {e}");
         }
         Ok(host_path)
@@ -537,6 +536,7 @@ impl FirecrackerManager {
         &self,
         vm_id: &str,
         chroot_dir: &Option<String>,
+        active_socket_path: &str,
         paths: &VmPaths,
     ) -> Result<bool, FirecrackerError> {
         let snapshot_path = paths.snapshot_file();
@@ -580,13 +580,7 @@ impl FirecrackerManager {
         })
         .to_string();
 
-        if let Err(e) = fc_put(
-            &paths.socket_path().to_string_lossy(),
-            "/snapshot/load",
-            &body,
-        )
-        .await
-        {
+        if let Err(e) = fc_put(active_socket_path, "/snapshot/load", &body).await {
             tracing::error!(vm_id = %vm_id, "Failed to load snapshot: {}. Falling back to normal boot.", e);
             Ok(false)
         } else {
@@ -600,11 +594,10 @@ impl FirecrackerManager {
         kernel_path: &str,
         rootfs_path: &std::path::Path,
         chroot_dir: &Option<String>,
-        paths: &VmPaths,
+        active_socket_path: &str,
         tap_name: Option<&str>,
     ) -> Result<(), FirecrackerError> {
-        let socket_path = paths.socket_path();
-        let socket = socket_path.to_string_lossy();
+        let socket = active_socket_path;
 
         // 1. Machine Config
         let machine_config = serde_json::json!({
@@ -614,7 +607,7 @@ impl FirecrackerManager {
             "track_dirty_pages": false
         })
         .to_string();
-        fc_put(&socket, "/machine-config", &machine_config).await?;
+        fc_put(socket, "/machine-config", &machine_config).await?;
 
         // 2. Boot Source
         let mut boot_args =
@@ -633,7 +626,7 @@ impl FirecrackerManager {
         let boot_source =
             serde_json::json!({ "kernel_image_path": kernel_api_path, "boot_args": boot_args })
                 .to_string();
-        fc_put(&socket, "/boot-source", &boot_source).await?;
+        fc_put(socket, "/boot-source", &boot_source).await?;
 
         // 3. Root Drive
         let rootfs_api_path = if chroot_dir.is_some() {
@@ -642,7 +635,7 @@ impl FirecrackerManager {
             rootfs_path.to_string_lossy().to_string()
         };
         let drive_json = serde_json::json!({ "drive_id": "rootfs", "path_on_host": rootfs_api_path, "is_root_device": true, "is_read_only": false }).to_string();
-        fc_put(&socket, "/drives/rootfs", &drive_json).await?;
+        fc_put(socket, "/drives/rootfs", &drive_json).await?;
 
         // 4. Network
         if let Some(tap) = tap_name {
@@ -652,7 +645,7 @@ impl FirecrackerManager {
                 "host_dev_name": tap
             })
             .to_string();
-            fc_put(&socket, "/network-interfaces/eth0", &net_json).await?;
+            fc_put(socket, "/network-interfaces/eth0", &net_json).await?;
         }
 
         // 5. Additional Volumes
@@ -680,12 +673,12 @@ impl FirecrackerManager {
                 "is_read_only": vol.read_only
             })
             .to_string();
-            fc_put(&socket, &format!("/drives/{}", vol.volume_id), &vol_json).await?;
+            fc_put(socket, &format!("/drives/{}", vol.volume_id), &vol_json).await?;
         }
 
         // 6. Start Instance
         fc_put(
-            &socket,
+            socket,
             "/actions",
             &serde_json::json!({ "action_type": "InstanceStart" }).to_string(),
         )
