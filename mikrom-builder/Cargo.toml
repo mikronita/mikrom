@@ -15,8 +15,8 @@ async-nats.workspace = true
 futures = "0.3"
 envy.workspace = true
 dotenvy = "0.15"
-dashmap = "6.0"
+dashmap = "6.1"
 
 mikrom-proto = { path = "../mikrom-proto" }
 git2 = "0.19"
-tempfile = "3.10"
+tempfile = "3.27"
