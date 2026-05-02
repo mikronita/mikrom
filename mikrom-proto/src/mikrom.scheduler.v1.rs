@@ -17,8 +17,6 @@ pub struct WorkerHeartbeat {
     pub hostname: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub ip_address: ::prost::alloc::string::String,
-    #[prost(uint32, tag = "4")]
-    pub agent_port: u32,
     #[prost(string, tag = "5")]
     pub bridge_ip: ::prost::alloc::string::String,
     #[prost(message, optional, tag = "6")]
@@ -39,8 +37,6 @@ pub struct WorkerInfo {
     pub hostname: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub ip_address: ::prost::alloc::string::String,
-    #[prost(uint32, tag = "4")]
-    pub agent_port: u32,
     #[prost(string, tag = "5")]
     pub bridge_ip: ::prost::alloc::string::String,
     #[prost(int64, tag = "6")]
@@ -112,8 +108,6 @@ pub struct RegisterWorkerRequest {
     pub hostname: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub ip_address: ::prost::alloc::string::String,
-    #[prost(uint32, tag = "4")]
-    pub agent_port: u32,
     #[prost(string, tag = "5")]
     pub bridge_ip: ::prost::alloc::string::String,
 }

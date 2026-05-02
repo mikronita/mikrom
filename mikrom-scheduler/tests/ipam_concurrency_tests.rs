@@ -13,11 +13,10 @@ async fn test_concurrent_ip_allocation() {
     let bridge_ip = "10.0.0.1/24";
 
     // Register worker first (needed for foreign key)
-    sqlx::query("INSERT INTO workers (id, hostname, ip_address, agent_port, bridge_ip, last_heartbeat, registered_at) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+    sqlx::query("INSERT INTO workers (id, hostname, ip_address, bridge_ip, last_heartbeat, registered_at) VALUES ($1, $2, $3, $4, $5, $6)")
         .bind(&worker_id)
         .bind("test-host")
         .bind("1.2.3.4")
-        .bind(5000)
         .bind(bridge_ip)
         .bind(chrono::Utc::now().timestamp())
         .bind(chrono::Utc::now().timestamp())

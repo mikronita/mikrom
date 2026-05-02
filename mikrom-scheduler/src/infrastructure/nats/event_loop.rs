@@ -76,7 +76,6 @@ impl NatsEventLoop {
                     host_id: heartbeat.host_id.clone(),
                     hostname: heartbeat.hostname.clone(),
                     ip_address: heartbeat.ip_address.clone(),
-                    agent_port: heartbeat.agent_port as u16,
                     bridge_ip: heartbeat.bridge_ip.clone(),
                     metrics: None, // Will update below
                     registered_at: chrono::Utc::now().timestamp(),

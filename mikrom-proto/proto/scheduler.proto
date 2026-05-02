@@ -31,7 +31,6 @@ message WorkerHeartbeat {
   string host_id = 1;
   string hostname = 2;
   string ip_address = 3;
-  uint32 agent_port = 4;
   string bridge_ip = 5;
   ReportMetricsRequest metrics = 6;
 }
@@ -46,7 +45,6 @@ message WorkerInfo {
   string host_id = 1;
   string hostname = 2;
   string ip_address = 3;
-  uint32 agent_port = 4;
   string bridge_ip = 5;
   int64 last_heartbeat = 6;
 }
@@ -98,7 +96,6 @@ message RegisterWorkerRequest {
   string host_id = 1;
   string hostname = 2;
   string ip_address = 3;
-  uint32 agent_port = 4;
   string bridge_ip = 5;
 }
 
