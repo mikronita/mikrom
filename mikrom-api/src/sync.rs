@@ -12,11 +12,11 @@ pub async fn start_ip_sync_task(state: AppState) {
     loop {
         interval.tick().await;
 
-        // 1. Get all active deployments directly (status: RUNNING, STARTING)
+        // 1. Get all active deployments directly (non-terminal states)
         let deployments = match state.app_repo.list_deployments_by_user("all").await {
             Ok(deps) => deps
                 .into_iter()
-                .filter(|d| ["RUNNING", "STARTING"].contains(&d.status.as_str()))
+                .filter(|d| !["STOPPED", "FAILED", "CANCELLED"].contains(&d.status.as_str()))
                 .collect::<Vec<_>>(),
             Err(_) => continue,
         };

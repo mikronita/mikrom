@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 async fn main() -> anyhow::Result<()> {
     let config = AgentConfig::load()?;
 
-    mikrom_proto::telemetry::init_telemetry("mikrom-agent", env!("CARGO_PKG_VERSION"))?;
+    mikrom_proto::telemetry::init_telemetry("mikrom-agent", env!("CARGO_PKG_VERSION"), None)?;
 
     let addr: SocketAddr = format!("0.0.0.0:{}", config.agent_port).parse()?;
     let hostname = config.hostname();

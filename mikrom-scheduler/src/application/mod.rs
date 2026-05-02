@@ -57,9 +57,7 @@ impl AppService {
             return Ok(());
         }
 
-        if let Some(host_id) = &job.host_id
-            && let Some(vm_id) = &job.vm_id
-        {
+        if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
             if let Err(e) = self.agent_client.pause_vm(host_id, vm_id).await {
                 tracing::warn!(
                     "Pause failed for {}, attempting stop fallback: {}",
@@ -93,9 +91,7 @@ impl AppService {
             .await
             .ok(); // This is a bit hacky for now, ideally exclusivity is its own service
 
-        if let Some(host_id) = &job.host_id
-            && let Some(vm_id) = &job.vm_id
-        {
+        if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
             self.agent_client.resume_vm(host_id, vm_id).await?;
             self.job_repo
                 .update_job_status(job_id, JobStatus::Running)
@@ -107,9 +103,7 @@ impl AppService {
     pub async fn delete_app(&self, job_id: &str, user_id: &str) -> DomainResult<()> {
         let job = self.get_app_status(job_id, user_id).await?;
 
-        if let Some(host_id) = &job.host_id
-            && let Some(vm_id) = &job.vm_id
-        {
+        if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
             let _ = self.agent_client.delete_vm(host_id, vm_id).await;
         }
 
@@ -118,14 +112,18 @@ impl AppService {
     }
 
     pub async fn get_job_metrics(&self, job: &Job) -> (f32, u64) {
-        if let Some(host_id) = &job.host_id
-            && let Ok(Some(worker)) = self.worker_repo.get_worker(host_id).await
-            && let Some(metrics) = worker.metrics
-            && let Some(vm_id) = &job.vm_id
-            && let Some(vm_m) = metrics.vms.get(vm_id)
-        {
-            return (vm_m.cpu_usage, vm_m.ram_used_bytes);
+        let metrics = async {
+            let host_id = job.host_id.as_ref()?;
+            let worker = self.worker_repo.get_worker(host_id).await.ok()??;
+            let metrics = worker.metrics.as_ref()?;
+            let vm_id = job.vm_id.as_ref()?;
+            metrics
+                .vms
+                .get(vm_id)
+                .map(|m| (m.cpu_usage, m.ram_used_bytes))
         }
-        (0.0, 0)
+        .await;
+
+        metrics.unwrap_or((0.0, 0))
     }
 }

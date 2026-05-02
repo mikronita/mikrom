@@ -15,7 +15,12 @@ use std::sync::Arc;
 use tokio_rustls::rustls;
 use tracing::{error, info};
 
-pub async fn start_http_server(state: AppState, host: String, port: u16, https_port: u16) {
+pub async fn start_http_server(
+    state: AppState,
+    host: String,
+    port: u16,
+    https_port: u16,
+) -> anyhow::Result<()> {
     let http_app = Router::new()
         .route(
             "/.well-known/acme-challenge/{token}",
@@ -35,7 +40,7 @@ pub async fn start_http_server(state: AppState, host: String, port: u16, https_p
 
     let http_addr = format!("{}:{}", host, port);
     info!("HTTP Router listening on {}", http_addr);
-    let http_listener = std::net::TcpListener::bind(&http_addr).expect("Failed to bind HTTP port");
+    let http_listener = std::net::TcpListener::bind(&http_addr)?;
 
     tokio::spawn(async move {
         if let Err(e) = axum_server::from_tcp(http_listener)
@@ -45,6 +50,8 @@ pub async fn start_http_server(state: AppState, host: String, port: u16, https_p
             error!("HTTP server error: {}", e);
         }
     });
+
+    Ok(())
 }
 
 pub async fn start_https_server(

@@ -136,7 +136,9 @@ fn build_command(config: InitConfig) -> Result<Command> {
     // Set working directory
     let workdir = Path::new(&config.workdir);
     if !workdir.exists() {
-        let _ = fs::create_dir_all(workdir);
+        fs::create_dir_all(workdir).with_context(|| {
+            format!("Failed to create working directory: {}", workdir.display())
+        })?;
     }
     cmd.current_dir(workdir);
 
@@ -204,10 +206,11 @@ mod tests {
     fn test_build_command_entrypoint() {
         let config = InitConfig {
             env: HashMap::new(),
-            workdir: "/app".to_string(),
+            workdir: "./target/test-app".to_string(),
             entrypoint: vec!["/bin/sh".to_string(), "-c".to_string()],
             cmd: vec!["echo hello".to_string()],
         };
         let _cmd = build_command(config).unwrap();
+        let _ = fs::remove_dir_all("./target/test-app");
     }
 }

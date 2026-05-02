@@ -21,10 +21,7 @@ impl PgJobRepository {
 impl JobRepository for PgJobRepository {
     async fn add_job(&self, job: Job) -> DomainResult<()> {
         let env_json = serde_json::to_value(&job.config.env).unwrap_or_default();
-        let status_str = serde_json::to_string(&job.status)
-            .unwrap_or_else(|_| "\"pending\"".to_string())
-            .trim_matches('"')
-            .to_string();
+        let status_str = job.status.as_str();
 
         sqlx::query(
             r#"
@@ -74,10 +71,7 @@ impl JobRepository for PgJobRepository {
     }
 
     async fn update_job_status(&self, job_id: &str, status: JobStatus) -> DomainResult<()> {
-        let status_str = serde_json::to_string(&status)
-            .unwrap_or_else(|_| "\"pending\"".to_string())
-            .trim_matches('"')
-            .to_string();
+        let status_str = status.as_str();
 
         sqlx::query("UPDATE jobs SET status = $1 WHERE job_id = $2")
             .bind(status_str)
@@ -281,8 +275,15 @@ impl WorkerRepository for PgWorkerRepository {
 
 fn map_row_to_job(r: &sqlx::postgres::PgRow) -> Job {
     let status_str: String = r.get("status");
-    let status: JobStatus =
-        serde_json::from_str(&format!("\"{}\"", status_str)).unwrap_or_default();
+    let status = match status_str.as_str() {
+        "pending" => JobStatus::Pending,
+        "scheduled" => JobStatus::Scheduled,
+        "running" => JobStatus::Running,
+        "stopped" => JobStatus::Stopped,
+        "failed" => JobStatus::Failed,
+        "cancelled" => JobStatus::Cancelled,
+        _ => JobStatus::default(),
+    };
     let env_vars: serde_json::Value = r.get("env_vars");
     let env: HashMap<String, String> = serde_json::from_value(env_vars).unwrap_or_default();
 

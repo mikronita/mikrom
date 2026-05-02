@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config = mikrom_router::config::Config::from_env().expect("Failed to load config");
 
-    mikrom_proto::telemetry::init_telemetry("mikrom-router", "0.1.0")?;
+    mikrom_proto::telemetry::init_telemetry("mikrom-router", "0.1.0", None)?;
 
     info!("Connecting to database...");
     let db = PgPool::connect(&config.database_url).await?;
@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
         config.http_port,
         config.https_port,
     )
-    .await;
+    .await?;
 
     // 3. Start HTTPS server (Main Proxy)
     start_https_server(
