@@ -345,6 +345,18 @@ impl FirecrackerManager {
             let (bin, args, host_socket, chroot) = self
                 .setup_jailer(&vm_id, &kernel_path, &rootfs_path.to_string_lossy())
                 .await?;
+
+            // Cleanup stale socket on host for jailer
+            if let Err(e) = tokio::fs::remove_file(&host_socket).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::debug!(
+                    "Failed to remove stale jailer socket {}: {}",
+                    host_socket,
+                    e
+                );
+            }
+
             (bin, args, host_socket, chroot)
         } else {
             let socket_path = paths.socket_path();
