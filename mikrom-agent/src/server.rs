@@ -72,9 +72,19 @@ impl AgentServer {
 
                 let client = nats_client.as_ref().unwrap();
 
-                // Spawn command listener and heartbeat tasks
+                // 1. Initialize FirecrackerExporter
+                let exporter = crate::metrics::FirecrackerExporter::new(
+                    client.clone(),
+                    self_clone.metrics_collector.clone(),
+                    self_clone.firecracker.clone(),
+                );
+
+                // 2. Spawn command listener, heartbeat and exporter tasks
                 let cmd_handle = self_clone.start_command_listener(client.clone());
                 let heartbeat_handle = self_clone.start_heartbeat_loop(client.clone());
+                let exporter_handle = tokio::spawn(async move {
+                    exporter.start_export_loop().await;
+                });
 
                 tokio::select! {
                     _ = cmd_handle => tracing::warn!("Command listener exited"),
@@ -82,6 +92,7 @@ impl AgentServer {
                         tracing::warn!("Heartbeat loop exited, forcing NATS reconnect");
                         nats_client = None;
                     }
+                    _ = exporter_handle => tracing::warn!("Exporter loop exited"),
                 }
             }
         });

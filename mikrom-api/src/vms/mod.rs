@@ -27,6 +27,71 @@ pub struct LiveDeploymentInfo {
     pub ram_used_bytes: u64,
 }
 
+use futures::Stream;
+use std::convert::Infallible;
+
+pub async fn app_logs_stream_handler(
+    State(state): State<crate::AppState>,
+    Path(app_name): Path<String>,
+) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    // 1. Verify app exists
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
+
+    // 2. Subscribe to NATS for all logs of this app
+    // Subject pattern: mikrom.logs.<app_id>.>
+    let nats_sub = state
+        .nats
+        .subscribe(format!("mikrom.logs.{}.>", app.id))
+        .await
+        .map_err(|e| ApiError::Internal(format!("NATS subscription failed: {e}")))?;
+
+    let stream = async_stream::stream! {
+        let mut nats_stream = nats_sub;
+        while let Some(msg) = nats_stream.next().await {
+             if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&msg.payload) {
+                 yield Ok(Event::default().data(json.to_string()));
+             }
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new()))
+}
+
+pub async fn app_metrics_stream_handler(
+    State(state): State<crate::AppState>,
+    Path(app_name): Path<String>,
+) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    // 1. Verify app exists
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
+
+    // 2. Subscribe to NATS for all metrics of this app
+    // Subject pattern: mikrom.metrics.<app_id>.>
+    let nats_sub = state
+        .nats
+        .subscribe(format!("mikrom.metrics.{}.>", app.id))
+        .await
+        .map_err(|e| ApiError::Internal(format!("NATS subscription failed: {e}")))?;
+
+    let stream = async_stream::stream! {
+        let mut nats_stream = nats_sub;
+        while let Some(msg) = nats_stream.next().await {
+             if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&msg.payload) {
+                 yield Ok(Event::default().data(json.to_string()));
+             }
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new()))
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LiveDeploymentStatus {
     pub job_id: String,

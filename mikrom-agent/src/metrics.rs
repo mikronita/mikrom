@@ -7,11 +7,13 @@ use sysinfo::System;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VmMetrics {
+    pub app_id: String,
     pub cpu_usage: f32,
     pub ram_used_bytes: u64,
     pub status: crate::firecracker::VmStatus,
     pub error_message: Option<String>,
     pub ip_address: Option<String>,
+    pub firecracker_metrics: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -157,21 +159,25 @@ impl MetricsCollector {
             }
 
             // Secondary: Try to read Firecracker internal metrics if available
+            let mut fc_metrics = None;
             if let Some(metrics_path) = &vm.metrics_path
                 && let Ok(content) = tokio::fs::read_to_string(metrics_path).await
-                && let Ok(_json) = serde_json::from_str::<serde_json::Value>(&content)
+                && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
             {
                 tracing::debug!(vm_id = %vm.vm_id, "Read Firecracker metrics successfully");
+                fc_metrics = Some(json);
             }
 
             vms.insert(
-                vm.vm_id,
+                vm.vm_id.clone(),
                 VmMetrics {
+                    app_id: vm.app_id.clone(),
                     cpu_usage: cpu,
                     ram_used_bytes: ram,
                     status: vm.status,
                     error_message: vm.error_message,
                     ip_address: vm.ip_address,
+                    firecracker_metrics: fc_metrics,
                 },
             );
         }
@@ -206,6 +212,76 @@ impl MetricsCollector {
     pub fn decrement_app_count(&self) {
         let mut count = self.apps_count.write();
         *count = count.saturating_sub(1);
+    }
+}
+
+pub struct FirecrackerExporter {
+    nats_client: async_nats::Client,
+    metrics_collector: MetricsCollector,
+    firecracker: FirecrackerManager,
+}
+
+impl FirecrackerExporter {
+    pub fn new(
+        nats_client: async_nats::Client,
+        metrics_collector: MetricsCollector,
+        firecracker: FirecrackerManager,
+    ) -> Self {
+        Self {
+            nats_client,
+            metrics_collector,
+            firecracker,
+        }
+    }
+
+    pub async fn start_export_loop(&self) {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            let metrics = self.metrics_collector.collect().await;
+
+            // 1. Evaluate health & resiliency triggers
+            self.evaluate_health(&metrics).await;
+
+            // 2. Publish VM metrics to NATS for mikrom-telemetry and SSE
+            for (vm_id, vm_metrics) in &metrics.vms {
+                let topic = format!("mikrom.metrics.{}.{}", vm_metrics.app_id, vm_id);
+                match serde_json::to_vec(vm_metrics) {
+                    Ok(payload) => {
+                        if let Err(e) = self.nats_client.publish(topic, payload.into()).await {
+                            tracing::error!(vm_id = %vm_id, "Failed to publish metrics to NATS: {e}");
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(vm_id = %vm_id, "Failed to serialize VM metrics: {e}");
+                    },
+                }
+            }
+
+            // 3. Publish System metrics
+            let topic = "mikrom.agent.system.metrics";
+            if let Ok(payload) = serde_json::to_vec(&metrics) {
+                let _ = self.nats_client.publish(topic, payload.into()).await;
+            }
+        }
+    }
+
+    async fn evaluate_health(&self, metrics: &SystemMetrics) {
+        for (vm_id, vm) in &metrics.vms {
+            tracing::debug!(vm_id = %vm_id, status = ?vm.status, "Evaluating VM health");
+            // Auto-restart logic: if VM is supposed to be running but process died (Stopped/Failed)
+            if vm.status == crate::firecracker::VmStatus::Failed
+                || vm.status == crate::firecracker::VmStatus::Stopped
+            {
+                tracing::warn!(vm_id = %vm_id, status = ?vm.status, "Detected unhealthy or dead VM. Triggering auto-restart...");
+                let _ = self.firecracker.restart_vm(vm_id).await;
+            }
+
+            // Resource-based triggers
+            if vm.cpu_usage > 0.98 {
+                tracing::warn!(vm_id = %vm_id, "VM CPU usage at critical level: {:.2}%", vm.cpu_usage * 100.0);
+            }
+        }
     }
 }
 

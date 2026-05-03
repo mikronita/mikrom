@@ -168,6 +168,14 @@ pub fn create_app(state: AppState) -> Router {
             get(crate::deploy::deployments_stream_handler),
         )
         .route(
+            "/apps/:app_name/logs/stream",
+            get(crate::vms::app_logs_stream_handler),
+        )
+        .route(
+            "/apps/:app_name/metrics/stream",
+            get(crate::vms::app_metrics_stream_handler),
+        )
+        .route(
             "/apps/:app_name/deployments/:deployment_id/activate",
             axum::routing::post(crate::deploy::activate_deployment_handler),
         )

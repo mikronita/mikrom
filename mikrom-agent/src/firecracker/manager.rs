@@ -5,14 +5,12 @@ use crate::firecracker::paths::VmPaths;
 use crate::firecracker::process::{
     CommandExecutor, RealCommandExecutor, VmDetailedInfo, VmProcess,
 };
+use crate::logger::LogShipper;
 
-use mikrom_proto::agent::VmLogPayload;
-use prost::Message;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{Mutex, RwLock};
 
 /// Orchestrator for managing the lifecycle of Firecracker microVMs on a single host.
@@ -56,6 +54,7 @@ impl FirecrackerManager {
 
                 VmDetailedInfo {
                     vm_id: vm.vm_id.clone(),
+                    app_id: vm.app_id.clone(),
                     status: vm.status,
                     error_message: vm.error_message.clone(),
                     pid,
@@ -143,7 +142,7 @@ impl FirecrackerManager {
     pub fn start_background_tasks(&self) {
         let self_clone = self.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
             loop {
                 interval.tick().await;
                 self_clone.run_gc().await;
@@ -174,7 +173,7 @@ impl FirecrackerManager {
         }
 
         for vm_id in to_remove {
-            if let Some(proc) = processes.remove(&vm_id) {
+            let restart_data = if let Some(proc) = processes.remove(&vm_id) {
                 if let Err(e) = tokio::fs::remove_file(&proc.socket_path).await
                     && e.kind() != std::io::ErrorKind::NotFound
                 {
@@ -185,14 +184,43 @@ impl FirecrackerManager {
                 }
 
                 let mut vms = self.vms.write().await;
-                if let Some(vm) = vms.get_mut(&vm_id)
-                    && vm.status == VmStatus::Running
-                {
-                    if let Some(ip) = &vm.config.ip_address {
-                        self.release_vm_ip(ip).await;
-                    }
+                if let Some(vm) = vms.get_mut(&vm_id) {
+                    tracing::info!(vm_id = %vm_id, current_status = ?vm.status, "Checking if VM needs auto-restart");
+                    let eligibility = if vm.status == VmStatus::Running {
+                        tracing::warn!(vm_id = %vm_id, "VM process exited unexpectedly, preparing for auto-restart");
+                        if let Some(ip) = &vm.config.ip_address {
+                            self.release_vm_ip(ip).await;
+                        }
+                        Some((
+                            vm_id.clone(),
+                            vm.app_id.clone(),
+                            vm.image.clone(),
+                            vm.config.clone(),
+                        ))
+                    } else {
+                        tracing::info!(vm_id = %vm_id, status = ?vm.status, "VM was not in Running state, skipping auto-restart");
+                        None
+                    };
+
                     vm.status = VmStatus::Stopped;
+                    eligibility
+                } else {
+                    tracing::error!(vm_id = %vm_id, "VM not found in memory during GC cleanup");
+                    None
                 }
+            } else {
+                None
+            };
+
+            // Trigger restart outside of the processes lock
+            if let Some((vid, aid, img, cfg)) = restart_data {
+                let self_clone = self.clone();
+                tokio::spawn(async move {
+                    tracing::info!(vm_id = %vid, "Executing auto-restart after unexpected exit");
+                    if let Err(e) = self_clone.start_vm(vid, aid, img, cfg).await {
+                        tracing::error!(error = %e, "Auto-restart failed");
+                    }
+                });
             }
         }
 
@@ -399,7 +427,7 @@ impl FirecrackerManager {
             })?;
 
         // 8. Capture logs
-        guard.log_task = Some(self.spawn_log_task(&vm_id, &mut child));
+        guard.log_task = Some(self.spawn_log_task(&vm_id, &app_id, &mut child).await);
         guard.child = Some(child);
 
         // 9. Wait for socket
@@ -464,53 +492,23 @@ impl FirecrackerManager {
         }
     }
 
-    fn spawn_log_task(
+    async fn spawn_log_task(
         &self,
         vm_id: &str,
+        app_id: &str,
         child: &mut tokio::process::Child,
     ) -> tokio::task::JoinHandle<()> {
         let stdout = child.stdout.take().expect("Failed to take stdout");
         let stderr = child.stderr.take().expect("Failed to take stderr");
-        let vm_id = vm_id.to_string();
-        let logs_clone = self.logs.clone();
-        let nats_clone = self.nats_client.clone();
 
-        tokio::spawn(async move {
-            let mut stdout_lines = BufReader::new(stdout).lines();
-            let mut stderr_lines = BufReader::new(stderr).lines();
+        let shipper = LogShipper::new(
+            vm_id.to_string(),
+            app_id.to_string(),
+            self.nats_client.read().await.clone(),
+            self.logs.clone(),
+        );
 
-            loop {
-                let line = tokio::select! {
-                    Ok(Some(line)) = stdout_lines.next_line() => Some(line),
-                    Ok(Some(line)) = stderr_lines.next_line() => Some(format!("[stderr] {line}")),
-                    else => None,
-                };
-
-                let Some(l) = line else { break };
-
-                // In-memory buffer
-                {
-                    let mut logs = logs_clone.write().await;
-                    let vm_logs = logs
-                        .entry(vm_id.clone())
-                        .or_insert_with(|| VecDeque::with_capacity(1000));
-                    if vm_logs.len() >= 1000 {
-                        vm_logs.pop_front();
-                    }
-                    vm_logs.push_back(l.clone());
-                }
-
-                // Publish to NATS
-                if let Some(nats) = nats_clone.read().await.as_ref() {
-                    let subject = mikrom_proto::subjects::vm_logs(&vm_id);
-                    let payload = VmLogPayload {
-                        line: l,
-                        timestamp: chrono::Utc::now().timestamp(),
-                    };
-                    let _ = nats.publish(subject, payload.encode_to_vec().into()).await;
-                }
-            }
-        })
+        shipper.spawn(stdout, stderr).await
     }
 
     async fn setup_metrics(
@@ -756,6 +754,22 @@ impl FirecrackerManager {
                     FirecrackerError::ProcessError(format!("Image builder failed: {e}"))
                 })?;
         }
+        Ok(())
+    }
+
+    pub async fn restart_vm(&self, vm_id: &str) -> Result<(), FirecrackerError> {
+        let (app_id, image, config) = {
+            let vms = self.vms.read().await;
+            let vm = vms
+                .get(vm_id)
+                .ok_or_else(|| FirecrackerError::VmNotFound(vm_id.to_string()))?;
+            (vm.app_id.clone(), vm.image.clone(), vm.config.clone())
+        };
+
+        tracing::info!(vm_id = %vm_id, "Restarting VM...");
+        let _ = self.stop_vm(vm_id).await; // Best effort stop
+        self.start_vm(vm_id.to_string(), app_id, image, config)
+            .await?;
         Ok(())
     }
 
@@ -2315,6 +2329,7 @@ mod tests {
 
         mgr.insert_process_for_test(vm_id, child, socket.to_string_lossy().to_string())
             .await;
+        mgr.set_status_for_test(vm_id, VmStatus::Stopping).await;
 
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 

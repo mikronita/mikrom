@@ -4,7 +4,7 @@ members = [
     "mikrom-scheduler",
     "mikrom-agent",
     "mikrom-api",
-    "mikrom-cli", "mikrom-builder", "mikrom-router", "mikrom-init",
+    "mikrom-cli", "mikrom-builder", "mikrom-router", "mikrom-init", "mikrom-telemetry"
 ]
 resolver = "2"
 
