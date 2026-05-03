@@ -27,6 +27,7 @@ impl CommandExecutor for RealCommandExecutor {
 
 pub struct VmDetailedInfo {
     pub vm_id: String,
+    pub app_id: String,
     pub status: VmStatus,
     pub error_message: Option<String>,
     pub pid: Option<u32>,

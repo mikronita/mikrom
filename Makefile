@@ -69,7 +69,8 @@ test-all-crates: ## Run unit tests for all crates
 	cargo nextest run -p mikrom-builder && \
 	cargo nextest run -p mikrom-api && \
 	cargo nextest run -p mikrom-init && \
-	cargo nextest run -p mikrom-router
+	cargo nextest run -p mikrom-router && \
+	cargo nextest run -p mikrom-telemetry
 
 .PHONY: test-all
 test-all: test-all-crates test-integration ## Run unit + integration tests
@@ -101,6 +102,10 @@ run-builder: ## Run mikrom-builder with watch
 run-router: ## Run mikrom-router (configurable via .env)
 	cd mikrom-router && cargo watch -x run
 
+.PHONY: run-telemetry
+run-telemetry: ## Run mikrom-telemetry with watch
+	cd mikrom-telemetry && cargo watch -x run
+
 .PHONY: build-init
 build-init: ## Build mikrom-init as a static binary (musl)
 	rustup target add x86_64-unknown-linux-musl >/dev/null 2>&1 || true
@@ -117,6 +122,7 @@ dev: ## Launch all services in tmux windows
 	@tmux new-window -t mikrom -n scheduler 'make run-scheduler'
 	@tmux new-window -t mikrom -n builder 'make run-builder'
 	@tmux new-window -t mikrom -n router 'make run-router'
+	@tmux new-window -t mikrom -n telemetry 'make run-telemetry'
 	@tmux new-window -t mikrom -n app 'make run-app'
 	@tmux select-window -t mikrom:api
 	@tmux attach-session -t mikrom

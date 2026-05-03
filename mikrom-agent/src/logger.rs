@@ -1,0 +1,208 @@
+use async_nats::Client;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::RwLock;
+use tokio::time::{Duration, interval};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub vm_id: String,
+    pub app_id: String,
+    pub source: String, // "stdout" or "stderr"
+    pub message: String,
+    pub timestamp: i64,
+}
+
+pub struct LogShipper {
+    vm_id: String,
+    app_id: String,
+    nats_client: Option<Client>,
+    batch_size: usize,
+    flush_interval: Duration,
+    /// Local cache for the API to query via SSE if needed, or for debugging
+    logs_map: std::sync::Arc<RwLock<HashMap<String, VecDeque<String>>>>,
+}
+
+impl LogShipper {
+    pub fn new(
+        vm_id: String,
+        app_id: String,
+        nats_client: Option<Client>,
+        logs_map: std::sync::Arc<RwLock<HashMap<String, VecDeque<String>>>>,
+    ) -> Self {
+        Self {
+            vm_id,
+            app_id,
+            nats_client,
+            batch_size: 50,
+            flush_interval: Duration::from_millis(500),
+            logs_map,
+        }
+    }
+
+    pub async fn spawn<R1, R2>(self, stdout: R1, stderr: R2) -> tokio::task::JoinHandle<()>
+    where
+        R1: tokio::io::AsyncRead + Unpin + Send + 'static,
+        R2: tokio::io::AsyncRead + Unpin + Send + 'static,
+    {
+        tokio::spawn(async move {
+            let mut stdout_reader = BufReader::new(stdout).lines();
+            let mut stderr_reader = BufReader::new(stderr).lines();
+            let mut batch = Vec::new();
+            let mut timer = interval(self.flush_interval);
+
+            loop {
+                tokio::select! {
+                    result = stdout_reader.next_line() => {
+                        match result {
+                            Ok(Some(line)) => {
+                                self.process_line("stdout", line, &mut batch).await;
+                                if batch.len() >= self.batch_size {
+                                    self.flush(&mut batch).await;
+                                }
+                            }
+                            _ => break, // Stream closed or error
+                        }
+                    }
+                    result = stderr_reader.next_line() => {
+                        match result {
+                            Ok(Some(line)) => {
+                                self.process_line("stderr", line, &mut batch).await;
+                                if batch.len() >= self.batch_size {
+                                    self.flush(&mut batch).await;
+                                }
+                            }
+                            _ => break, // Stream closed or error
+                        }
+                    }
+                    _ = timer.tick() => {
+                        if !batch.is_empty() {
+                            self.flush(&mut batch).await;
+                        }
+                    }
+                }
+            }
+
+            // Final flush before exiting
+            if !batch.is_empty() {
+                self.flush(&mut batch).await;
+            }
+        })
+    }
+
+    async fn process_line(&self, source: &str, message: String, batch: &mut Vec<LogEntry>) {
+        // 1. Update local buffer (shared with FirecrackerManager)
+        {
+            let mut logs = self.logs_map.write().await;
+            let buffer = logs
+                .entry(self.vm_id.clone())
+                .or_insert_with(|| VecDeque::with_capacity(1000));
+
+            if buffer.len() >= 1000 {
+                buffer.pop_front();
+            }
+            let formatted = if source == "stderr" {
+                format!("[stderr] {message}")
+            } else {
+                message.clone()
+            };
+            buffer.push_back(formatted);
+        }
+
+        // 2. Add to NATS batch
+        batch.push(LogEntry {
+            vm_id: self.vm_id.clone(),
+            app_id: self.app_id.clone(),
+            source: source.to_string(),
+            message,
+            timestamp: Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        });
+    }
+
+    async fn flush(&self, batch: &mut Vec<LogEntry>) {
+        if let Some(nats) = &self.nats_client {
+            let topic = format!("mikrom.logs.{}.{}", self.app_id, self.vm_id);
+            match serde_json::to_vec(&batch) {
+                Ok(payload) => {
+                    if let Err(e) = nats.publish(topic, payload.into()).await {
+                        tracing::error!("Failed to publish logs to NATS: {e}");
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Failed to serialize log batch: {e}");
+                },
+            }
+        }
+        batch.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn test_log_shipper_local_buffer() {
+        let logs_map = Arc::new(RwLock::new(HashMap::new()));
+        let vm_id = "test-vm".to_string();
+        let app_id = "test-app".to_string();
+
+        let shipper = LogShipper::new(vm_id.clone(), app_id.clone(), None, logs_map.clone());
+        let mut batch = Vec::new();
+
+        shipper
+            .process_line("stdout", "Hello World".to_string(), &mut batch)
+            .await;
+        shipper
+            .process_line("stderr", "Error Occurred".to_string(), &mut batch)
+            .await;
+
+        let logs = logs_map.read().await;
+        let buffer = logs.get(&vm_id).unwrap();
+
+        assert_eq!(buffer.len(), 2);
+        assert_eq!(buffer[0], "Hello World");
+        assert_eq!(buffer[1], "[stderr] Error Occurred");
+
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch[0].message, "Hello World");
+        assert_eq!(batch[1].source, "stderr");
+    }
+
+    #[tokio::test]
+    async fn test_log_shipper_spawn() {
+        let logs_map = Arc::new(RwLock::new(HashMap::new()));
+        let vm_id = "test-vm".to_string();
+        let app_id = "test-app".to_string();
+
+        let shipper = LogShipper::new(vm_id.clone(), app_id.clone(), None, logs_map.clone());
+
+        let (mut stdout_tx, stdout_rx) = tokio::io::duplex(1024);
+        let (mut stderr_tx, stderr_rx) = tokio::io::duplex(1024);
+
+        let handle = shipper.spawn(stdout_rx, stderr_rx).await;
+
+        stdout_tx.write_all(b"line 1\n").await.unwrap();
+        stderr_tx.write_all(b"error 1\n").await.unwrap();
+
+        // Wait a bit for processing
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        {
+            let logs = logs_map.read().await;
+            let buffer = logs.get(&vm_id).unwrap();
+            assert!(buffer.contains(&"line 1".to_string()));
+            assert!(buffer.contains(&"[stderr] error 1".to_string()));
+        }
+
+        // Close streams
+        drop(stdout_tx);
+        drop(stderr_tx);
+
+        handle.await.unwrap();
+    }
+}

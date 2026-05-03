@@ -1,0 +1,27 @@
+[package]
+name = "mikrom-telemetry"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio.workspace = true
+async-nats.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow.workspace = true
+axum = "0.8"
+prometheus = "0.13"
+reqwest = { version = "0.12", features = ["json"] }
+chrono = "0.4"
+futures = "0.3"
+envy.workspace = true
+
+[package.metadata.deb]
+maintainer = "Antonio Pardo <apardo@spluca.org>"
+section = "admin"
+priority = "optional"
+assets = [
+    ["target/release/mikrom-telemetry", "/usr/bin/mikrom-telemetry", "755"],
+]
