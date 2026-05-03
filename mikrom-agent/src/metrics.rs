@@ -269,11 +269,10 @@ impl FirecrackerExporter {
     async fn evaluate_health(&self, metrics: &SystemMetrics) {
         for (vm_id, vm) in &metrics.vms {
             tracing::debug!(vm_id = %vm_id, status = ?vm.status, "Evaluating VM health");
-            // Auto-restart logic: if VM is supposed to be running but process died (Stopped/Failed)
-            if vm.status == crate::firecracker::VmStatus::Failed
-                || vm.status == crate::firecracker::VmStatus::Stopped
-            {
-                tracing::warn!(vm_id = %vm_id, status = ?vm.status, "Detected unhealthy or dead VM. Triggering auto-restart...");
+            // Auto-restart logic: only trigger for Failed VMs.
+            // Dead VMs (Stopped) are handled by GC in manager.rs if they were Running.
+            if vm.status == crate::firecracker::VmStatus::Failed {
+                tracing::warn!(vm_id = %vm_id, status = ?vm.status, "Detected failed VM. Triggering auto-restart...");
                 let _ = self.firecracker.restart_vm(vm_id).await;
             }
 

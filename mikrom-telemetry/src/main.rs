@@ -1,5 +1,5 @@
 use anyhow::Result;
-use axum::{Router, routing::get};
+use axum::{routing::get, Router};
 use futures::StreamExt;
 use prometheus::{Encoder, GaugeVec, Opts, Registry, TextEncoder};
 use serde::{Deserialize, Serialize};
@@ -146,25 +146,24 @@ impl TelemetryService {
         let mut streams = std::collections::HashMap::new();
 
         for entry in entries {
-            let key = format!("{}-{}", entry.app_id, entry.vm_id);
+            let key = format!("{}-{}-{}", entry.app_id, entry.vm_id, entry.source);
             let stream = streams.entry(key).or_insert_with(|| {
                 serde_json::json!({
                     "stream": {
-                        "app_id": entry.app_id,
-                        "vm_id": entry.vm_id,
-                        "source": entry.source
+                        "app_id": entry.app_id.clone(),
+                        "vm_id": entry.vm_id.clone(),
+                        "source": entry.source.clone()
                     },
                     "values": []
                 })
             });
 
-            stream["values"]
-                .as_array_mut()
-                .unwrap()
-                .push(serde_json::json!([
+            if let Some(values) = stream["values"].as_array_mut() {
+                values.push(serde_json::json!([
                     entry.timestamp.to_string(),
                     entry.message
                 ]));
+            }
         }
 
         let body = serde_json::json!({
@@ -189,8 +188,14 @@ impl TelemetryService {
                     let mut buffer = Vec::new();
                     let encoder = TextEncoder::new();
                     let metric_families = self_clone.registry.gather();
-                    encoder.encode(&metric_families, &mut buffer).unwrap();
-                    String::from_utf8(buffer).unwrap()
+                    if let Err(e) = encoder.encode(&metric_families, &mut buffer) {
+                        tracing::error!("Failed to encode prometheus metrics: {}", e);
+                        return String::new();
+                    }
+                    String::from_utf8(buffer).unwrap_or_else(|e| {
+                        tracing::error!("Prometheus metrics not valid UTF-8: {}", e);
+                        String::new()
+                    })
                 }
             }),
         );

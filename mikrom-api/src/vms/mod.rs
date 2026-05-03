@@ -31,15 +31,20 @@ use futures::Stream;
 use std::convert::Infallible;
 
 pub async fn app_logs_stream_handler(
+    auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    // 1. Verify app exists
+    // 1. Verify app exists and user has access
     let app = state
         .app_repo
         .get_app_by_name(&app_name)
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
 
     // 2. Subscribe to NATS for all logs of this app
     // Subject pattern: mikrom.logs.<app_id>.>
@@ -62,15 +67,20 @@ pub async fn app_logs_stream_handler(
 }
 
 pub async fn app_metrics_stream_handler(
+    auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    // 1. Verify app exists
+    // 1. Verify app exists and user has access
     let app = state
         .app_repo
         .get_app_by_name(&app_name)
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
 
     // 2. Subscribe to NATS for all metrics of this app
     // Subject pattern: mikrom.metrics.<app_id>.>
