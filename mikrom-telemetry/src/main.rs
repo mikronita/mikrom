@@ -208,6 +208,14 @@ impl TelemetryService {
     }
 }
 
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+    let config = Config::from_env();
+    let service = Arc::new(TelemetryService::new(config).await?);
+    service.run().await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,12 +236,4 @@ mod tests {
         let json = serde_json::to_string(&vec![entry]).unwrap();
         assert!(json.contains("test log"));
     }
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
-    let config = Config::from_env();
-    let service = Arc::new(TelemetryService::new(config).await?);
-    service.run().await
 }
