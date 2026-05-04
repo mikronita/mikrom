@@ -16,6 +16,22 @@ deb-agent: build-init ## Build Debian package for mikrom-agent
 	cargo build --release -p mikrom-agent
 	cd mikrom-agent && cargo deb --no-build
 
+.PHONY: deb-router
+deb-router: ## Build Debian package for mikrom-router-nginx (for Debian trixie/NGINX 1.26.3)
+	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
+	@# Ensure NGINX source is on the correct version
+	cd nginx && git checkout release-1.26.3
+	@# Build the release binary with correct environment
+	cd mikrom-router-nginx && \
+		NGX_VERSION=1.26.3 \
+		NGINX_SOURCE_DIR=$(PWD)/nginx \
+		cargo build --release
+	@# Create the .deb package
+	cd mikrom-router-nginx && \
+		NGX_VERSION=1.26.3 \
+		NGINX_SOURCE_DIR=$(PWD)/nginx \
+		cargo deb --no-build
+
 .PHONY: fmt
 fmt: ## Format Rust code
 	cargo fmt
@@ -69,7 +85,6 @@ test-all-crates: ## Run unit tests for all crates
 	cargo nextest run -p mikrom-builder && \
 	cargo nextest run -p mikrom-api && \
 	cargo nextest run -p mikrom-init && \
-	cargo nextest run -p mikrom-router && \
 	cargo nextest run -p mikrom-telemetry
 
 .PHONY: test-all
@@ -98,10 +113,6 @@ run-agent: ## Run mikrom-agent with watch (port 5003)
 run-builder: ## Run mikrom-builder with watch
 	cd mikrom-builder && cargo watch -x run
 
-.PHONY: run-router
-run-router: ## Run mikrom-router (configurable via .env)
-	cd mikrom-router && cargo watch -x run
-
 .PHONY: run-telemetry
 run-telemetry: ## Run mikrom-telemetry with watch
 	cd mikrom-telemetry && cargo watch -x run
@@ -121,7 +132,6 @@ dev: ## Launch all services in tmux windows
 	@tmux new-session -d -s mikrom -n api 'make run-api'
 	@tmux new-window -t mikrom -n scheduler 'make run-scheduler'
 	@tmux new-window -t mikrom -n builder 'make run-builder'
-	@tmux new-window -t mikrom -n router 'make run-router'
 	@tmux new-window -t mikrom -n telemetry 'make run-telemetry'
 	@tmux new-window -t mikrom -n app 'make run-app'
 	@tmux select-window -t mikrom:api

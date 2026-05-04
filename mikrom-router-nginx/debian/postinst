@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+if [ "$1" = "configure" ]; then
+    echo "Enabling Mikrom NGINX Module..."
+    mkdir -p /etc/nginx/modules-enabled
+    # Link the module loader
+    if [ -f /etc/nginx/modules-available/mikrom-router.conf ]; then
+        ln -sf /etc/nginx/modules-available/mikrom-router.conf /etc/nginx/modules-enabled/50-mikrom-router.conf
+    fi
+    # Link the site configuration
+    if [ -f /etc/nginx/sites-available/mikrom-router ]; then
+        ln -sf /etc/nginx/sites-available/mikrom-router /etc/nginx/sites-enabled/mikrom-router
+    fi
+fi
+exit 0
