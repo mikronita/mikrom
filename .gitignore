@@ -2,4 +2,5 @@ target
 .idea
 /firecracker
 /ngx-rust
+/nginx
 db_activity.log
