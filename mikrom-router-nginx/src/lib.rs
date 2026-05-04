@@ -30,6 +30,12 @@ pub static ROUTE_CACHE: Lazy<Cache<String, String>> = Lazy::new(|| {
         .build()
 });
 
+pub static ACME_CACHE: Lazy<Cache<String, String>> = Lazy::new(|| {
+    Cache::builder()
+        .max_capacity(1000)
+        .build()
+});
+
 static DB_POOL: Lazy<parking_lot::RwLock<Option<PgPool>>> = Lazy::new(|| {
     parking_lot::RwLock::new(None)
 });
@@ -106,27 +112,31 @@ static mut NGX_HTTP_MIKROM_ROUTER_VARS: [ngx_http_variable_t; 2] = [
     },
 ];
 
-fn get_header<'a>(request: &'a http::Request, key: &str) -> Option<&'a str> {
-    request.headers_in_iterator()
-        .find(|(k, _v)| k.to_str().map(|s| s.eq_ignore_ascii_case(key)).unwrap_or(false))
-        .map(|(_k, v)| v.to_str().unwrap_or(""))
+fn get_host_header(request: &http::Request) -> Option<&str> {
+    let r: &ngx_http_request_t = request.as_ref();
+    let host = r.headers_in.host;
+    if host.is_null() {
+        return None;
+    }
+    
+    let host_ngx = unsafe { &*host };
+    let s = unsafe { core::slice::from_raw_parts(host_ngx.value.data, host_ngx.value.len) };
+    core::str::from_utf8(s).ok()
 }
 
 http_variable_get!(
     ngx_http_mikrom_target_variable,
     |request: &mut http::Request, v: *mut ngx_variable_value_t, _: usize| {
-        let host = match get_header(request, "Host") {
+        let host = match get_host_header(request) {
             Some(h) => h,
             None => return Status::NGX_DECLINED,
         };
 
-        let target = if let Some(cached) = ROUTE_CACHE.get(host) {
-            cached
-        } else if let Some(db_target) = resolve_target_from_db(host) {
-            ROUTE_CACHE.insert(host.to_string(), db_target.clone());
-            db_target
-        } else {
-            return Status::NGX_DECLINED;
+        let target = match ROUTE_CACHE.get(host) {
+            Some(cached) => cached,
+            None => {
+                return Status::NGX_DECLINED;
+            }
         };
 
         let target_host = target.trim_start_matches("http://").trim_start_matches("https://");
@@ -158,7 +168,7 @@ http_variable_get!(
             None => return Status::NGX_DECLINED,
         };
 
-        let auth = match resolve_acme_challenge(token) {
+        let auth = match ACME_CACHE.get(token) {
             Some(a) => a,
             None => return Status::NGX_DECLINED,
         };
@@ -231,7 +241,7 @@ impl HttpRequestHandler for MikromRequestHandler {
             return Status::NGX_DECLINED;
         }
 
-        let host = get_header(request, "Host").unwrap_or("");
+        let host = get_host_header(request).unwrap_or("");
         if !host.is_empty() {
              ngx_log_debug_http!(request, "mikrom-router: processing request for host: {}", host);
         }
@@ -253,7 +263,7 @@ impl HttpRequestHandler for AcmeChallengeHandler {
             None => return Status::NGX_DECLINED,
         };
 
-        let auth = match resolve_acme_challenge(token) {
+        let auth = match ACME_CACHE.get(token) {
             Some(a) => a,
             None => return HTTPStatus::NOT_FOUND.into(),
         };
@@ -412,9 +422,9 @@ unsafe extern "C" fn ngx_http_mikrom_router_init_process(_cycle: *mut ngx::ffi::
                 
                 eprintln!("Mikrom NGINX Module: Slot 0 performing initial sync...");
                 
-                // Dump existing certificates to disk on startup
-                if let Err(e) = dump_certificates_to_disk(&pool).await {
-                    eprintln!("Mikrom NGINX Module: Failed to dump certificates to disk: {}", e);
+                // Initial sync from DB to Cache and Disk
+                if let Err(e) = sync_all_from_db(&pool).await {
+                    eprintln!("Mikrom NGINX Module: Failed to perform initial sync: {}", e);
                 }
 
                 // Start NATS listener
@@ -439,7 +449,12 @@ unsafe extern "C" fn ngx_http_mikrom_router_init_process(_cycle: *mut ngx::ffi::
                     }
                 }
             } else {
-                // Keep the runtime alive for other workers to allow resolving via DB
+                // Non-zero slots just sync from DB to their local cache once
+                if let Err(e) = sync_cache_only_from_db(&pool).await {
+                    eprintln!("Mikrom NGINX Module: Worker {} failed to sync cache: {}", slot, e);
+                }
+                
+                // Keep the runtime alive
                 loop {
                     tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
                 }
@@ -447,6 +462,34 @@ unsafe extern "C" fn ngx_http_mikrom_router_init_process(_cycle: *mut ngx::ffi::
         });
     });
     Status::NGX_OK.into()
+}
+
+async fn sync_cache_only_from_db(db: &PgPool) -> anyhow::Result<()> {
+    // Sync Routes
+    let routes = sqlx::query("SELECT hostname, target_url FROM routes").fetch_all(db).await?;
+    for route in routes {
+        use sqlx::Row;
+        let hostname: String = route.get("hostname");
+        let target_url: String = route.get("target_url");
+        ROUTE_CACHE.insert(hostname, target_url);
+    }
+
+    // Sync ACME Challenges
+    let challenges = sqlx::query("SELECT token, key_auth FROM acme_challenges").fetch_all(db).await?;
+    for challenge in challenges {
+        use sqlx::Row;
+        let token: String = challenge.get("token");
+        let key_auth: String = challenge.get("key_auth");
+        ACME_CACHE.insert(token, key_auth);
+    }
+
+    Ok(())
+}
+
+async fn sync_all_from_db(db: &PgPool) -> anyhow::Result<()> {
+    sync_cache_only_from_db(db).await?;
+    dump_certificates_to_disk(db).await?;
+    Ok(())
 }
 
 async fn handle_nats_message(
@@ -461,7 +504,12 @@ async fn handle_nats_message(
         if let Ok(update) = RouterConfigUpdate::decode(payload) {
             sqlx::query("INSERT INTO routes (hostname, target_url, updated_at) VALUES ($1, $2, TO_TIMESTAMP($3)) ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = EXCLUDED.updated_at")
                 .bind(&update.hostname).bind(&update.target_url).bind(update.timestamp).execute(db).await?;
-            ROUTE_CACHE.invalidate(&update.hostname);
+            
+            if let Some(target) = update.target_url {
+                ROUTE_CACHE.insert(update.hostname, target);
+            } else {
+                ROUTE_CACHE.invalidate(&update.hostname);
+            }
         }
     } else if subject == mikrom_proto::subjects::ROUTER_TLS_CERT_UPDATED {
         if let Ok(update) = TlsCertificateUpdate::decode(payload) {
@@ -478,7 +526,16 @@ async fn handle_nats_message(
                         let key_path = format!("{}/{}.key", tls_dir, update.hostname);
                         
                         let _ = tokio::fs::write(&crt_path, &update.cert_chain).await;
+                        // Use more restrictive permissions for the private key
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let _ = tokio::fs::write(&key_path, &decrypted_key).await;
+                            let _ = tokio::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).await;
+                        }
+                        #[cfg(not(unix))]
                         let _ = tokio::fs::write(&key_path, &decrypted_key).await;
+
                         eprintln!("Mikrom NGINX Module: Updated TLS files for {}", update.hostname);
                     },
                     Err(e) => eprintln!("Mikrom NGINX Module: Failed to decrypt private key for {}: {}", update.hostname, e),
@@ -491,9 +548,11 @@ async fn handle_nats_message(
         if let Ok(update) = AcmeChallengeUpdate::decode(payload) {
             if update.is_delete {
                 sqlx::query("DELETE FROM acme_challenges WHERE token = $1").bind(&update.token).execute(db).await?;
+                ACME_CACHE.invalidate(&update.token);
             } else {
                 sqlx::query("INSERT INTO acme_challenges (token, key_auth, hostname) VALUES ($1, $2, $3) ON CONFLICT (token) DO UPDATE SET key_auth = EXCLUDED.key_auth, hostname = EXCLUDED.hostname")
                     .bind(&update.token).bind(&update.key_auth).bind(&update.hostname).execute(db).await?;
+                ACME_CACHE.insert(update.token, update.key_auth);
             }
         }
     }
@@ -527,6 +586,14 @@ async fn dump_certificates_to_disk(db: &PgPool) -> anyhow::Result<()> {
                 let key_path = format!("{}/{}.key", tls_dir, hostname);
                 
                 let _ = tokio::fs::write(&crt_path, &cert_chain).await;
+                // Use more restrictive permissions for the private key
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = tokio::fs::write(&key_path, &decrypted_key).await;
+                    let _ = tokio::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).await;
+                }
+                #[cfg(not(unix))]
                 let _ = tokio::fs::write(&key_path, &decrypted_key).await;
             },
             Err(e) => eprintln!("Mikrom NGINX Module: Failed to decrypt private key for {}: {}", hostname, e),
@@ -536,6 +603,7 @@ async fn dump_certificates_to_disk(db: &PgPool) -> anyhow::Result<()> {
     eprintln!("Mikrom NGINX Module: Dumped {} certificates to disk", rows.len());
     Ok(())
 }
+
 
 pub async fn listen_for_updates(
     nats_client: async_nats::Client,
@@ -562,6 +630,7 @@ pub async fn listen_for_updates(
     Ok(())
 }
 
+#[cfg(test)]
 pub async fn resolve_acme_challenge_async(token: &str) -> Option<String> {
     let pool_guard = DB_POOL.read();
     let pool = pool_guard.as_ref()?;
@@ -574,12 +643,7 @@ pub async fn resolve_acme_challenge_async(token: &str) -> Option<String> {
         .flatten()
 }
 
-pub fn resolve_acme_challenge(token: &str) -> Option<String> {
-    let handle_guard = TOKIO_HANDLE.read();
-    let handle = handle_guard.as_ref()?;
-    handle.block_on(resolve_acme_challenge_async(token))
-}
-
+#[cfg(test)]
 pub async fn resolve_target_from_db_async(host: &str) -> Option<String> {
     let pool_guard = DB_POOL.read();
     let pool = pool_guard.as_ref()?;
@@ -592,11 +656,6 @@ pub async fn resolve_target_from_db_async(host: &str) -> Option<String> {
         .flatten()
 }
 
-pub fn resolve_target_from_db(host: &str) -> Option<String> {
-    let handle_guard = TOKIO_HANDLE.read();
-    let handle = handle_guard.as_ref()?;
-    handle.block_on(resolve_target_from_db_async(host))
-}
 
 #[cfg(test)]
 pub async fn test_handle_nats_message(subject: &str, payload: &[u8], db: &PgPool) -> anyhow::Result<()> {
