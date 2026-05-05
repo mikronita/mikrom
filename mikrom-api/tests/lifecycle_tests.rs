@@ -520,8 +520,8 @@ async fn test_delete_app_cleans_up_resources() {
 
     // Expect deletion in scheduler
     mock_scheduler
-        .expect_delete_app()
-        .with(eq("job-to-delete".to_string()), eq(user_id.to_string()))
+        .expect_delete_all_by_app()
+        .with(eq(app_id.to_string()), eq(user_id.to_string()))
         .times(1)
         .returning(|_, _| Ok(true));
 

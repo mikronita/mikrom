@@ -20,10 +20,16 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
+
+    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    mock_scheduler
+        .expect_delete_all_by_app()
+        .returning(|_, _| Ok(true));
+
     let state = AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         jwt_secret: jwt_secret.to_string(),
