@@ -1,0 +1,47 @@
+{
+    # Global default: Let's Encrypt Staging for dynamic Mikrom domains
+    acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+    # email {$ACME_EMAIL}
+
+    order mikrom_router before reverse_proxy
+
+    mikrom_app {
+        nats_url "nats://192.168.122.128:4222"
+        db_url "postgres://mikrom:mikrom_password@192.168.122.128:5432/mikrom_router"
+        master_key "{$MASTER_KEY}"
+    }
+
+    on_demand_tls {
+        ask http://localhost/.mikrom/check-domain
+    }
+}
+
+# Servidor de imágenes Docker (PRODUCCIÓN TLS)
+registry.mikrom.spluca.org {
+    # Override global CA to use Production Let's Encrypt
+    tls {
+        issuer acme {
+            dir https://acme-v02.api.letsencrypt.org/directory
+        }
+    }
+
+    request_body {
+        max_size 300MB
+    }
+
+    reverse_proxy https://192.168.122.67 {
+        header_up Host {host}
+        transport http {
+            tls_server_name registry.mikrom.es
+        }
+    }
+}
+
+# Mikrom Router (Dinámico / STAGING TLS por defecto global)
+:80, :443 {
+    mikrom_router
+    reverse_proxy {vars.mikrom_target}
+    tls {
+        on_demand
+    }
+}

@@ -32,6 +32,11 @@ deb-router: ## Build Debian package for mikrom-router-nginx (for Debian trixie/N
 		NGINX_SOURCE_DIR=$(PWD)/nginx \
 		cargo deb --no-build
 
+.PHONY: deb-router-caddy
+deb-router-caddy: ## Build Debian package for mikrom-router-caddy (Caddy 2.11)
+	docker build --no-cache -t mikrom-deb-builder -f mikrom-router-caddy/Dockerfile.deb .
+	docker run --rm -v $(PWD):/out mikrom-deb-builder
+
 .PHONY: fmt
 fmt: ## Format Rust code
 	cargo fmt
@@ -203,12 +208,28 @@ db-stop: ## Stop PostgreSQL instance
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 
+.PHONY: fmt-go
+fmt-go: ## Format Go code
+	cd mikrom-router-caddy && go fmt ./...
+
+.PHONY: fmt-check-go
+fmt-check-go: ## Check Go formatting
+	cd mikrom-router-caddy && [ -z "$$(gofmt -l .)" ] || (echo "Go files not formatted:" && gofmt -l . && exit 1)
+
+.PHONY: vet-go
+vet-go: ## Run go vet
+	cd mikrom-router-caddy && go vet ./...
+
+.PHONY: test-go
+test-go: ## Run Go tests
+	cd mikrom-router-caddy && go test ./...
+
 .PHONY: clean
 clean: ## Remove Rust build artefacts
 	cargo clean
 
 .PHONY: check
-check: fmt-check clippy test ## fmt-check + clippy + unit tests
+check: fmt-check clippy test fmt-check-go vet-go test-go ## Run all checks (Rust + Go)
 
 .PHONY: help
 help: ## Show this help

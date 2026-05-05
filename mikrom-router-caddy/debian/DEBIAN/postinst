@@ -1,0 +1,24 @@
+#!/bin/bash
+set -e
+
+if [ "$1" = "configure" ]; then
+    # Add caddy user and group if they don't exist
+    if ! getent group caddy >/dev/null; then
+        groupadd --system caddy
+    fi
+    if ! getent passwd caddy >/dev/null; then
+        useradd --system \
+            --gid caddy \
+            --create-home \
+            --home-dir /var/lib/caddy \
+            --shell /usr/sbin/nologin \
+            --comment "Caddy web server" \
+            caddy
+    fi
+
+    # Set permissions
+    chown -R caddy:caddy /etc/caddy
+    chown -R caddy:caddy /var/lib/caddy
+fi
+
+exit 0
