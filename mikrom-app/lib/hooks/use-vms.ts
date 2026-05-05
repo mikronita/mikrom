@@ -13,7 +13,9 @@ import {
   watchAppLogs,
   LiveDeploymentInfo, 
   LiveDeploymentStatus,
-  VmMetrics
+  VmMetrics,
+  VmMetricsResponse,
+  LogLine
 } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { useEffect, useState } from "react";
@@ -157,7 +159,7 @@ export function useDeleteVm() {
 
 export function useAppMetrics(appName: string) {
   const token = getToken();
-  const [metrics, setMetrics] = useState<VmMetrics | null>(null);
+  const [metrics, setMetrics] = useState<VmMetricsResponse | null>(null);
 
   useEffect(() => {
     if (!token || !appName) return;
@@ -173,7 +175,7 @@ export function useAppMetrics(appName: string) {
 
 export function useAppLogs(appName: string) {
   const token = getToken();
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<LogLine[]>([]);
 
   useEffect(() => {
     if (!token || !appName) return;
