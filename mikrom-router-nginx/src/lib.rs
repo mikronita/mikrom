@@ -159,6 +159,35 @@ http_variable_get!(
     }
 );
 
+fn resolve_acme_challenge_with_fallback(token: &str) -> Option<String> {
+    if let Some(auth) = ACME_CACHE.get(token) {
+        return Some(auth);
+    }
+
+    // Fallback to DB if not in cache
+    let handle = TOKIO_HANDLE.read();
+    let db = DB_POOL.read();
+    
+    if let (Some(h), Some(p)) = (handle.as_ref(), db.as_ref()) {
+        // block_on is used here because Nginx variables and handlers are synchronous.
+        // We mitigate the performance impact by caching the result immediately.
+        let db_auth = h.block_on(async {
+            sqlx::query_scalar::<_, String>("SELECT key_auth FROM acme_challenges WHERE token = $1")
+                .bind(token)
+                .fetch_optional(p)
+                .await
+                .ok()
+                .flatten()
+        });
+
+        if let Some(a) = db_auth {
+            ACME_CACHE.insert(token.to_string(), a.clone());
+            return Some(a);
+        }
+    }
+    None
+}
+
 http_variable_get!(
     ngx_http_mikrom_acme_auth_variable,
     |request: &mut http::Request, v: *mut ngx_variable_value_t, _: usize| {
@@ -168,34 +197,7 @@ http_variable_get!(
             None => return Status::NGX_DECLINED,
         };
 
-        let mut auth = ACME_CACHE.get(token);
-
-        if auth.is_none() {
-            let handle = TOKIO_HANDLE.read();
-            let db = DB_POOL.read();
-            if let (Some(h), Some(p)) = (handle.as_ref(), db.as_ref()) {
-                let token_clone = token.to_string();
-                let pool = p.clone();
-                let db_auth = h.block_on(async move {
-                    sqlx::query("SELECT key_auth FROM acme_challenges WHERE token = $1")
-                        .bind(&token_clone)
-                        .fetch_optional(&pool)
-                        .await
-                        .ok()
-                        .flatten()
-                        .map(|row| {
-                            use sqlx::Row;
-                            row.get::<String, _>("key_auth")
-                        })
-                });
-                if let Some(a) = db_auth {
-                    ACME_CACHE.insert(token.to_string(), a.clone());
-                    auth = Some(a);
-                }
-            }
-        }
-
-        let auth = match auth {
+        let auth = match resolve_acme_challenge_with_fallback(token) {
             Some(a) => a,
             None => return Status::NGX_DECLINED,
         };
@@ -290,34 +292,7 @@ impl HttpRequestHandler for AcmeChallengeHandler {
             None => return Status::NGX_DECLINED,
         };
 
-        let mut auth = ACME_CACHE.get(token);
-
-        if auth.is_none() {
-            let handle = TOKIO_HANDLE.read();
-            let db = DB_POOL.read();
-            if let (Some(h), Some(p)) = (handle.as_ref(), db.as_ref()) {
-                let token_clone = token.to_string();
-                let pool = p.clone();
-                let db_auth = h.block_on(async move {
-                    sqlx::query("SELECT key_auth FROM acme_challenges WHERE token = $1")
-                        .bind(&token_clone)
-                        .fetch_optional(&pool)
-                        .await
-                        .ok()
-                        .flatten()
-                        .map(|row| {
-                            use sqlx::Row;
-                            row.get::<String, _>("key_auth")
-                        })
-                });
-                if let Some(a) = db_auth {
-                    ACME_CACHE.insert(token.to_string(), a.clone());
-                    auth = Some(a);
-                }
-            }
-        }
-
-        let auth = match auth {
+        let auth = match resolve_acme_challenge_with_fallback(token) {
             Some(a) => a,
             None => return HTTPStatus::NOT_FOUND.into(),
         };
