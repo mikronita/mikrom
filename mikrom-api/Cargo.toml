@@ -117,3 +117,8 @@ required-features = ["test-utils"]
 name = "unified_api_tests"
 path = "tests/unified_api_tests.rs"
 required-features = ["test-utils"]
+
+[[test]]
+name = "reconciliation_tests"
+path = "tests/reconciliation_tests.rs"
+required-features = ["test-utils"]

@@ -5,12 +5,12 @@ use std::collections::HashMap;
 #[serde(rename_all = "lowercase")]
 pub enum JobStatus {
     #[default]
-    Pending,
-    Scheduled,
-    Running,
-    Stopped,
-    Failed,
-    Cancelled,
+    Pending = 1,
+    Scheduled = 2,
+    Running = 3,
+    Failed = 4,
+    Cancelled = 5,
+    Stopped = 6,
 }
 
 impl JobStatus {

@@ -106,6 +106,25 @@ impl AppState {
         Ok(())
     }
 
+    pub async fn reconcile_routes(&self) -> anyhow::Result<()> {
+        tracing::info!("Starting route reconciliation with router...");
+        let apps = self.app_repo.list_apps_by_user("all").await?;
+        let mut count = 0;
+
+        for app in apps {
+            if app.active_deployment_id.is_some() {
+                if let Err(e) = self.notify_router(app.id).await {
+                    tracing::error!(app_id = %app.id, error = %e, "Failed to reconcile route");
+                } else {
+                    count += 1;
+                }
+            }
+        }
+
+        tracing::info!(reconciled = count, "Route reconciliation complete");
+        Ok(())
+    }
+
     pub async fn remove_route(&self, hostname: &str) -> anyhow::Result<()> {
         let config = RouterConfigUpdate {
             hostname: hostname.to_string(),
@@ -235,6 +254,14 @@ pub fn start_background_tasks(state: AppState) {
 
     // Start instant NATS job updates listener
     tokio::spawn(crate::sync::start_nats_job_listener(state.clone()));
+
+    // Reconcile routes with router
+    let state_for_router = state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = state_for_router.reconcile_routes().await {
+            tracing::error!("Route reconciliation failed: {}", e);
+        }
+    });
 
     // Start ACME certificate renewal worker
     let state_for_acme = state.clone();
