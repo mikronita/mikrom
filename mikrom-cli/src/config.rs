@@ -13,6 +13,7 @@ impl Config {
     }
 
     pub fn load() -> Self {
+        dotenvy::dotenv().ok();
         let Some(path) = Self::path() else {
             return Self::default();
         };
@@ -41,9 +42,9 @@ impl Config {
     }
 
     pub fn api_url(&self) -> &str {
-        if let Ok(url) = std::env::var("MIKROM_API_URL") {
-            // Leak it to return a &str, which is fine for a CLI tool
-            return Box::leak(url.into_boxed_str());
+        static OVERRIDE_URL: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+        if let Some(url) = OVERRIDE_URL.get_or_init(|| std::env::var("MIKROM_API_URL").ok()) {
+            return url;
         }
         self.api_url.as_deref().unwrap_or("http://localhost:5001")
     }
