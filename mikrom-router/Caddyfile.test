@@ -2,8 +2,8 @@
     order mikrom_router before reverse_proxy
 
     mikrom_app {
-        nats_url "nats://127.0.0.1:4223"
-        db_url "postgres://mikrom:pass@127.0.0.1:5433/mikrom"
+        nats_url "{$TEST_NATS_URL:nats://127.0.0.1:4223}"
+        db_url "{$ROUTER_DATABASE_URL:postgres://mikrom:pass@127.0.0.1:5433/mikrom}"
     }
 }
 

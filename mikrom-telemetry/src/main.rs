@@ -16,6 +16,7 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
+        dotenvy::dotenv().ok();
         Self {
             nats_url: std::env::var("NATS_URL")
                 .unwrap_or_else(|_| "nats://localhost:4222".to_string()),
