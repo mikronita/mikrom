@@ -1,0 +1,13 @@
+{
+    order mikrom_router before reverse_proxy
+
+    mikrom_app {
+        nats_url "nats://127.0.0.1:4223"
+        db_url "postgres://mikrom:pass@127.0.0.1:5433/mikrom"
+    }
+}
+
+:8081 {
+    mikrom_router
+    reverse_proxy {vars.mikrom_target}
+}

@@ -1,3 +1,7 @@
+mikrom-router-caddy/tmp
+target
+.git
+node_modules
 target/
 node_modules/
 .next/

@@ -1,0 +1,24 @@
+FROM caddy:2.11-builder AS builder
+
+WORKDIR /src
+COPY mikrom-router-caddy ./mikrom-router-caddy
+WORKDIR /src/mikrom-router-caddy
+
+# xcaddy output file is ./caddy by default if no path is provided
+RUN xcaddy build \
+    --with github.com/mikrom/mikrom-router-caddy=. \
+    --output /src/caddy
+
+FROM debian:trixie-slim
+
+RUN apt-get update && apt-get install -y binutils && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /pkg
+# Copy from current directory of builder stage
+COPY --from=builder /src/caddy /pkg/usr/bin/caddy
+COPY mikrom-router-caddy/debian /pkg/
+
+RUN chmod 755 /pkg/DEBIAN/postinst
+RUN dpkg-deb --build /pkg /mikrom-router-caddy.deb
+
+CMD ["cp", "/mikrom-router-caddy.deb", "/out/"]
