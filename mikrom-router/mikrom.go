@@ -10,6 +10,7 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func init() {
@@ -40,6 +41,18 @@ func (m *MikromRouter) Provision(ctx caddy.Context) error {
 		return fmt.Errorf("failed to get mikrom app: %v", err)
 	}
 	m.app = appModule.(*MikromApp)
+
+	// Add a hook to send logs to NATS
+	if m.app.logChan != nil {
+		m.logger = m.logger.WithOptions(zap.Hooks(func(entry zapcore.Entry) error {
+			select {
+			case m.app.logChan <- entry.Message:
+			default:
+				// Drop if channel is full
+			}
+			return nil
+		}))
+	}
 
 	return nil
 }

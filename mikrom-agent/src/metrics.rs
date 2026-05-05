@@ -259,7 +259,7 @@ impl FirecrackerExporter {
             }
 
             // 3. Publish System metrics
-            let topic = "mikrom.agent.system.metrics";
+            let topic = format!("mikrom.agent.{}.metrics", self.firecracker.agent_id);
             if let Ok(payload) = serde_json::to_vec(&metrics) {
                 let _ = self.nats_client.publish(topic, payload.into()).await;
             }

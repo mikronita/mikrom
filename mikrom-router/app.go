@@ -77,6 +77,46 @@ type MikromApp struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	logger *zap.Logger
+
+	logChan chan string
+}
+
+type LogEntry struct {
+	VmID      string `json:"vm_id"`
+	AppID     string `json:"app_id"`
+	Source    string `json:"source"`
+	Message   string `json:"message"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+func (m *MikromApp) runNatsLogger() {
+	subject := "mikrom.logs.mikrom-router.system"
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case msg := <-m.logChan:
+			if m.nc == nil || !m.nc.IsConnected() {
+				continue
+			}
+
+			entry := LogEntry{
+				VmID:      "system",
+				AppID:     "mikrom-router",
+				Source:    "stdout",
+				Message:   msg,
+				Timestamp: time.Now().UnixNano(),
+			}
+
+			payload, err := json.Marshal([]LogEntry{entry})
+			if err != nil {
+				m.logger.Error("failed to marshal log entry", zap.Error(err))
+				continue
+			}
+			_ = m.nc.Publish(subject, payload)
+
+		}
+	}
 }
 
 // CaddyModule returns the Caddy module information.
@@ -91,6 +131,7 @@ func (*MikromApp) CaddyModule() caddy.ModuleInfo {
 func (m *MikromApp) Provision(ctx caddy.Context) error {
 	m.logger = ctx.Logger()
 	m.ctx, m.cancel = context.WithCancel(ctx)
+	m.logChan = make(chan string, 1000)
 
 	if m.NatsURL == "" {
 		m.NatsURL = nats.DefaultURL
@@ -102,6 +143,8 @@ func (m *MikromApp) Provision(ctx caddy.Context) error {
 // Start begins the background synchronization.
 func (m *MikromApp) Start() error {
 	m.logger.Info("starting mikrom app module")
+
+	go m.runNatsLogger()
 
 	go func() {
 		var err error
