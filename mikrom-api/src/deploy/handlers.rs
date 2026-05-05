@@ -152,9 +152,11 @@ pub async fn list_apps_handler(
     auth: AuthUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<AppResponse>>> {
+    let user_id =
+        uuid::Uuid::parse_str(&auth.user_id).map_err(|e| ApiError::Internal(e.to_string()))?;
     let apps = state
         .app_repo
-        .list_apps_by_user(&auth.user_id)
+        .list_apps_by_user(Some(user_id))
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -482,7 +484,7 @@ pub async fn activate_deployment_handler(
     state.deployment_events.send(app.id).ok();
 
     // Notify router
-    let _ = state.notify_router(app.id).await;
+    let _ = state.notify_router(&app).await;
 
     Ok(StatusCode::OK)
 }

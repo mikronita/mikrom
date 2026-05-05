@@ -139,10 +139,13 @@ pub async fn list_active_deployments(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
 ) -> ApiResult<Json<Vec<LiveDeploymentInfo>>> {
+    let user_id =
+        uuid::Uuid::parse_str(&auth.user_id).map_err(|e| ApiError::Internal(e.to_string()))?;
+
     // 1. Get all deployments for this user from DB
     let deployments = state
         .app_repo
-        .list_deployments_by_user(&auth.user_id)
+        .list_deployments_by_user(Some(user_id))
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -247,7 +250,8 @@ pub async fn watch_deployments(
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
 
         // 0. Initial yield: send current state of all active deployments for the user
-        if let Ok(apps) = state_clone.app_repo.list_apps_by_user(&auth_user_id).await {
+        let auth_user_uuid = uuid::Uuid::parse_str(&auth_user_id).ok();
+        if let Ok(apps) = state_clone.app_repo.list_apps_by_user(auth_user_uuid).await {
             for app in apps {
                 if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
                     for dep in deps {
@@ -378,7 +382,7 @@ pub async fn watch_deployments(
                         }
                     } else {
                         // Fallback to DB if scheduler is unreachable or returns nothing
-                        if let Ok(apps) = state_clone.app_repo.list_apps_by_user(&auth_user_id).await {
+                        if let Ok(apps) = state_clone.app_repo.list_apps_by_user(auth_user_uuid).await {
                             for app in apps {
                                 if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
                                     for dep in deps {

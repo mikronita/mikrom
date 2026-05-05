@@ -13,7 +13,7 @@ pub async fn start_ip_sync_task(state: AppState) {
         interval.tick().await;
 
         // 1. Get all active deployments directly (non-terminal states)
-        let deployments = match state.app_repo.list_deployments_by_user("all").await {
+        let deployments = match state.app_repo.list_deployments_by_user(None).await {
             Ok(deps) => deps
                 .into_iter()
                 .filter(|d| !["STOPPED", "FAILED", "CANCELLED"].contains(&d.status.as_str()))
@@ -155,6 +155,9 @@ async fn sync_deployment_state(
             )
             .await;
         state.deployment_events.send(dep.app_id).ok();
-        let _ = state.notify_router(dep.app_id).await;
+
+        if let Ok(Some(app)) = state.app_repo.get_app(dep.app_id).await {
+            let _ = state.notify_router(&app).await;
+        }
     }
 }

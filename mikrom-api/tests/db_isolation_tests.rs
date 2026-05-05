@@ -67,7 +67,9 @@ mod tests {
 
         // Trigger notification (even if app doesn't exist, it shouldn't crash)
         let app_id = uuid::Uuid::new_v4();
-        let _ = state.notify_router(app_id).await;
+        if let Ok(Some(app)) = state.app_repo.get_app(app_id).await {
+            let _ = state.notify_router(&app).await;
+        }
 
         // In a real test we'd create an app and verify the payload
     }

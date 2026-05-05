@@ -41,7 +41,7 @@ pub trait AppRepository: Send + Sync {
     async fn get_app(&self, id: Uuid) -> anyhow::Result<Option<App>>;
     async fn get_app_by_name(&self, name: &str) -> anyhow::Result<Option<App>>;
     async fn delete_app(&self, id: Uuid) -> anyhow::Result<()>;
-    async fn list_apps_by_user(&self, user_id: &str) -> anyhow::Result<Vec<App>>;
+    async fn list_apps_by_user(&self, user_id: Option<Uuid>) -> anyhow::Result<Vec<App>>;
     async fn set_active_deployment(&self, app_id: Uuid, deployment_id: Uuid) -> anyhow::Result<()>;
     async fn update_app_port(&self, id: Uuid, port: i32) -> anyhow::Result<()>;
 
@@ -55,6 +55,9 @@ pub trait AppRepository: Send + Sync {
     async fn get_deployment(&self, id: Uuid) -> anyhow::Result<Option<Deployment>>;
     async fn get_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<Option<Deployment>>;
     async fn list_deployments_by_app(&self, app_id: Uuid) -> anyhow::Result<Vec<Deployment>>;
-    async fn list_deployments_by_user(&self, user_id: &str) -> anyhow::Result<Vec<Deployment>>;
+    async fn list_deployments_by_user(
+        &self,
+        user_id: Option<Uuid>,
+    ) -> anyhow::Result<Vec<Deployment>>;
     async fn delete_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<()>;
 }

@@ -152,19 +152,21 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn list_apps_by_user(&self, user_id: &str) -> anyhow::Result<Vec<App>> {
-        let apps = if user_id == "all" {
-            sqlx::query_as::<_, App>("SELECT * FROM apps ORDER BY created_at DESC")
+    async fn list_apps_by_user(&self, user_id: Option<Uuid>) -> anyhow::Result<Vec<App>> {
+        let apps = match user_id {
+            None => {
+                sqlx::query_as::<_, App>("SELECT * FROM apps ORDER BY created_at DESC")
+                    .fetch_all(&self.pool)
+                    .await?
+            },
+            Some(uid) => {
+                sqlx::query_as::<_, App>(
+                    "SELECT * FROM apps WHERE user_id = $1 ORDER BY created_at DESC",
+                )
+                .bind(uid)
                 .fetch_all(&self.pool)
                 .await?
-        } else {
-            let uid = Uuid::parse_str(user_id)?;
-            sqlx::query_as::<_, App>(
-                "SELECT * FROM apps WHERE user_id = $1 ORDER BY created_at DESC",
-            )
-            .bind(uid)
-            .fetch_all(&self.pool)
-            .await?
+            },
         };
 
         let mut decrypted_apps = Vec::with_capacity(apps.len());
@@ -294,19 +296,26 @@ impl AppRepository for PostgresAppRepository {
         Ok(decrypted_deps)
     }
 
-    async fn list_deployments_by_user(&self, user_id: &str) -> anyhow::Result<Vec<Deployment>> {
-        let deployments = if user_id == "all" {
-            sqlx::query_as::<_, Deployment>("SELECT * FROM deployments ORDER BY created_at DESC")
+    async fn list_deployments_by_user(
+        &self,
+        user_id: Option<Uuid>,
+    ) -> anyhow::Result<Vec<Deployment>> {
+        let deployments = match user_id {
+            None => {
+                sqlx::query_as::<_, Deployment>(
+                    "SELECT * FROM deployments ORDER BY created_at DESC",
+                )
                 .fetch_all(&self.pool)
                 .await?
-        } else {
-            let uid = Uuid::parse_str(user_id)?;
-            sqlx::query_as::<_, Deployment>(
-                "SELECT * FROM deployments WHERE user_id = $1 ORDER BY created_at DESC",
-            )
-            .bind(uid)
-            .fetch_all(&self.pool)
-            .await?
+            },
+            Some(uid) => {
+                sqlx::query_as::<_, Deployment>(
+                    "SELECT * FROM deployments WHERE user_id = $1 ORDER BY created_at DESC",
+                )
+                .bind(uid)
+                .fetch_all(&self.pool)
+                .await?
+            },
         };
 
         let mut decrypted_deps = Vec::with_capacity(deployments.len());
@@ -368,7 +377,7 @@ mod tests {
 
         // 3. List apps
         let apps = app_repo
-            .list_apps_by_user(&user_id.to_string())
+            .list_apps_by_user(Some(user_id))
             .await
             .expect("failed to list apps");
         assert!(apps.iter().any(|a| a.id == app.id));

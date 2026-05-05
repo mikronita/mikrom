@@ -193,7 +193,7 @@ pub async fn start_build_polling(state: AppState, task: BuildTask) {
 
 pub async fn resume_pending_builds(state: AppState) {
     info!("Resuming pending builds from database...");
-    let deployments = match state.app_repo.list_deployments_by_user("all").await {
+    let deployments = match state.app_repo.list_deployments_by_user(None).await {
         Ok(deps) => deps
             .into_iter()
             .filter(|d| d.status == "BUILDING" && d.build_id.is_some())
@@ -311,7 +311,9 @@ async fn poll_and_deploy(
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
                 // Notify router
-                let _ = state.notify_router(task.app_id).await;
+                if let Ok(Some(app)) = state.app_repo.get_app(task.app_id).await {
+                    let _ = state.notify_router(&app).await;
+                }
 
                 state.deployment_events.send(task.app_id).ok();
 

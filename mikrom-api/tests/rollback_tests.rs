@@ -102,11 +102,11 @@ async fn test_activate_deployment_endpoint() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
+    let app_for_notify_clone = app_for_notify.clone();
     mock_app_repo
         .expect_get_app()
         .with(eq(app_id))
-        .times(1)
-        .returning(move |_| Ok(Some(app_for_notify.clone())));
+        .returning(move |_| Ok(Some(app_for_notify_clone.clone())));
 
     // 5. Mock list_deployments_by_app for cleanup logic
     mock_app_repo
