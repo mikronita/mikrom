@@ -186,6 +186,10 @@ logs-scheduler: ## Follow mikrom-scheduler logs
 logs-agent: ## Follow mikrom-agent logs
 	docker compose logs -f mikrom-agent
 
+.PHONY: logs-telemetry
+logs-telemetry: ## Follow mikrom-telemetry logs
+	docker compose logs -f mikrom-telemetry
+
 .PHONY: db-start
 db-start: ## Start PostgreSQL instance (for local development)
 	docker compose up -d --wait postgres

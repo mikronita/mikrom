@@ -2,4 +2,4 @@ target
 .idea
 /firecracker
 db_activity.log
-mikrom-router-caddy.deb
+mikrom-router.deb

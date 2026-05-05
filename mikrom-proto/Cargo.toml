@@ -15,6 +15,11 @@ tracing-opentelemetry = "0.32.1"
 opentelemetry-semantic-conventions = "0.31.0"
 anyhow = "1.0.102"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+async-nats = { workspace = true }
+tokio = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
 
 [[bin]]
 name = "cert-gen"
@@ -24,10 +29,7 @@ path = "src/bin/cert_gen.rs"
 tonic-build = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
-async-nats = { workspace = true }
 futures = "0.3"
-chrono = "0.4"
 
 [features]
 default = ["build"]
