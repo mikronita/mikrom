@@ -4,9 +4,9 @@ members = [
     "mikrom-scheduler",
     "mikrom-agent",
     "mikrom-api",
-    "mikrom-cli", "mikrom-builder", "mikrom-router", "mikrom-init", "mikrom-telemetry"
+    "mikrom-cli", "mikrom-builder", "mikrom-init", "mikrom-telemetry"
 ]
-exclude = ["mikrom-router-nginx", "ngx-rust"]
+exclude = ["ngx-rust"]
 resolver = "2"
 
 [workspace.dependencies]

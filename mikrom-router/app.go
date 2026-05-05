@@ -128,6 +128,11 @@ func (m *MikromApp) Start() error {
 		}
 		m.logger.Info("connected to database")
 
+		// Run migrations
+		if err := m.runMigrations(); err != nil {
+			m.logger.Error("failed to run migrations", zap.Error(err))
+		}
+
 		// Connect to NATS with retries
 		m.logger.Info("connecting to NATS", zap.String("url", m.NatsURL))
 		for {

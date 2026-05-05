@@ -1,9 +1,10 @@
-module github.com/mikrom/mikrom-router-caddy
+module github.com/antpard/mikrom/mikrom-router
 
 go 1.26.2
 
 require (
 	github.com/caddyserver/caddy/v2 v2.11.2
+	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/nats-io/nats.go v1.51.0
 	go.uber.org/zap v1.27.1
@@ -71,6 +72,7 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/lib/pq v1.10.9 // indirect
 	github.com/libdns/libdns v1.1.1 // indirect
 	github.com/manifoldco/promptui v0.9.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
