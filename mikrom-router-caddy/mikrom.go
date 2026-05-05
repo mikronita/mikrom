@@ -45,7 +45,12 @@ func (m *MikromRouter) Provision(ctx caddy.Context) error {
 }
 
 // ServeHTTP handles the routing and ACME challenges.
-func (m MikromRouter) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+func (m *MikromRouter) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	if m.app == nil {
+		m.logger.Error("mikrom app not provisioned")
+		return next.ServeHTTP(w, r)
+	}
+
 	// Handle internal domain check for On-Demand TLS
 	if r.URL.Path == "/.mikrom/check-domain" {
 		domain := r.URL.Query().Get("domain")
@@ -107,7 +112,7 @@ func (m MikromRouter) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 
 // parseCaddyfile unmarshals tokens from h to a new MikromRouter.
 func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error) {
-	var m MikromRouter
+	m := new(MikromRouter)
 	err := m.UnmarshalCaddyfile(h.Dispenser)
 	return m, err
 }

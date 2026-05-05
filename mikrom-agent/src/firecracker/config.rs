@@ -20,13 +20,13 @@ pub enum FirecrackerError {
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum VmStatus {
-    Starting,
-    Running,
-    Paused,
-    Stopping,
+    Starting = 1,
+    Running = 2,
+    Stopping = 3,
     #[default]
-    Stopped,
-    Failed,
+    Stopped = 4,
+    Failed = 5,
+    Paused = 6,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

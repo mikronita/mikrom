@@ -57,7 +57,7 @@ fn default_api_port() -> u16 {
 }
 
 fn default_router_addr() -> String {
-    "http://127.0.0.1:8080".to_string()
+    "http://192.168.122.1:80".to_string()
 }
 
 fn default_use_tls() -> bool {
