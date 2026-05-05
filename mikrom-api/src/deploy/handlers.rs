@@ -373,7 +373,7 @@ pub async fn activate_deployment_handler(
     State(state): State<AppState>,
     Path((app_name, deployment_id)): Path<(String, Uuid)>,
 ) -> ApiResult<StatusCode> {
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+    let mut app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
     let deployment = state
         .app_repo
@@ -468,6 +468,9 @@ pub async fn activate_deployment_handler(
     }
 
     state.deployment_events.send(app.id).ok();
+
+    // Update the local app object so notify_router gets the new deployment ID
+    app.active_deployment_id = Some(deployment_id);
 
     // Notify router
     let _ = state.notify_router(&app).await;
