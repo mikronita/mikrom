@@ -39,6 +39,11 @@ pub trait SchedulerClient: Send + Sync {
         req: mikrom_proto::scheduler::DeleteAppRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::DeleteAppResponse>;
 
+    async fn delete_all_by_app(
+        &self,
+        req: mikrom_proto::scheduler::DeleteAllByAppRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::DeleteAllByAppResponse>;
+
     async fn pause_app(
         &self,
         req: mikrom_proto::scheduler::PauseRequest,
@@ -131,6 +136,19 @@ impl SchedulerClient for RealSchedulerClient {
             .nats
             .with_timeout(std::time::Duration::from_secs(5))
             .request("mikrom.scheduler.delete_app", req)
+            .await?;
+        Ok(inner)
+    }
+
+    async fn delete_all_by_app(
+        &self,
+        req: mikrom_proto::scheduler::DeleteAllByAppRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::DeleteAllByAppResponse> {
+        let inner = self
+            .state
+            .nats
+            .with_timeout(std::time::Duration::from_secs(5))
+            .request("mikrom.scheduler.delete_all_by_app", req)
             .await?;
         Ok(inner)
     }

@@ -50,7 +50,10 @@ impl DeploymentService {
 
         // 2. Allocate IP
         let ipam = Ipam::new(self.pool.clone(), host_id.clone(), worker.bridge_ip.clone());
-        let allocation = ipam.allocate().await?.ok_or(DomainError::IpPoolExhausted)?;
+        let allocation = ipam
+            .allocate(&job_id)
+            .await?
+            .ok_or(DomainError::IpPoolExhausted)?;
 
         let mut job_config = config.clone();
         job_config.ip_address = Some(allocation.ip);

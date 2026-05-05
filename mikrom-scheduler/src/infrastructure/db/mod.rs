@@ -119,6 +119,14 @@ impl JobRepository for PgJobRepository {
         Ok(())
     }
 
+    async fn remove_jobs_by_app(&self, app_id: &str) -> DomainResult<()> {
+        sqlx::query("DELETE FROM jobs WHERE app_id = $1")
+            .bind(app_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn list_jobs(
         &self,
         user_id: Option<&str>,

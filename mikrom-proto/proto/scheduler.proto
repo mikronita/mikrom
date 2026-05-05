@@ -14,6 +14,7 @@ service SchedulerService {
   rpc PauseApp(PauseRequest) returns (PauseResponse);
   rpc ResumeApp(ResumeRequest) returns (ResumeResponse);
   rpc DeleteApp(DeleteAppRequest) returns (DeleteAppResponse);
+  rpc DeleteAllByApp(DeleteAllByAppRequest) returns (DeleteAllByAppResponse);
   rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
   rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse);
   rpc WatchApps(WatchAppsRequest) returns (stream WatchAppsResponse);
@@ -90,6 +91,16 @@ message DeleteAppRequest {
 }
 
 message DeleteAppResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DeleteAllByAppRequest {
+  string app_id = 1;
+  string user_id = 2;
+}
+
+message DeleteAllByAppResponse {
   bool success = 1;
   string message = 2;
 }

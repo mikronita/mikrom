@@ -1,9 +1,10 @@
 use crate::application::AppService;
 use crate::domain::{VmConfig, Volume};
 use mikrom_proto::scheduler::{
-    AppInfo, AppStatusResponse, CancelRequest, CancelResponse, DeleteAppRequest, DeleteAppResponse,
-    DeployRequest, DeployResponse, ListAppsRequest, ListAppsResponse, ListWorkersRequest,
-    ListWorkersResponse, PauseRequest, PauseResponse, ResumeRequest, ResumeResponse,
+    AppInfo, AppStatusResponse, CancelRequest, CancelResponse, DeleteAllByAppRequest,
+    DeleteAllByAppResponse, DeleteAppRequest, DeleteAppResponse, DeployRequest, DeployResponse,
+    ListAppsRequest, ListAppsResponse, ListWorkersRequest, ListWorkersResponse, PauseRequest,
+    PauseResponse, ResumeRequest, ResumeResponse,
 };
 use mikrom_proto::tls::ServiceCerts;
 use std::sync::Arc;
@@ -183,6 +184,26 @@ impl SchedulerServer {
                 message: "Deleted".to_string(),
             }),
             Err(e) => Ok(DeleteAppResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn delete_all_by_app(
+        &self,
+        req: DeleteAllByAppRequest,
+    ) -> anyhow::Result<DeleteAllByAppResponse> {
+        match self
+            .app_service
+            .delete_all_by_app(&req.app_id, &req.user_id)
+            .await
+        {
+            Ok(_) => Ok(DeleteAllByAppResponse {
+                success: true,
+                message: "All app jobs deleted successfully".to_string(),
+            }),
+            Err(e) => Ok(DeleteAllByAppResponse {
                 success: false,
                 message: e.to_string(),
             }),
