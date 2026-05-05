@@ -41,6 +41,10 @@ impl Config {
     }
 
     pub fn api_url(&self) -> &str {
+        if let Ok(url) = std::env::var("MIKROM_API_URL") {
+            // Leak it to return a &str, which is fine for a CLI tool
+            return Box::leak(url.into_boxed_str());
+        }
         self.api_url.as_deref().unwrap_or("http://localhost:5001")
     }
 }
