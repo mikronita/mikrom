@@ -99,6 +99,7 @@ pub trait JobRepository: Send + Sync {
     async fn fail_job(&self, job_id: &str, message: String, timestamp: i64) -> DomainResult<()>;
     async fn cancel_job(&self, job_id: &str, timestamp: i64) -> DomainResult<()>;
     async fn remove_job(&self, job_id: &str) -> DomainResult<()>;
+    async fn remove_jobs_by_app(&self, app_id: &str) -> DomainResult<()>;
     async fn list_jobs(
         &self,
         user_id: Option<&str>,

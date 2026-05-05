@@ -111,6 +111,20 @@ impl AppService {
         Ok(())
     }
 
+    pub async fn delete_all_by_app(&self, app_id: &str, user_id: &str) -> DomainResult<()> {
+        let jobs = self.job_repo.list_jobs(Some(user_id), None).await?;
+        let app_jobs: Vec<_> = jobs.into_iter().filter(|j| j.app_id == app_id).collect();
+
+        for job in app_jobs {
+            if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
+                let _ = self.agent_client.delete_vm(host_id, vm_id).await;
+            }
+        }
+
+        self.job_repo.remove_jobs_by_app(app_id).await?;
+        Ok(())
+    }
+
     pub async fn get_job_metrics(&self, job: &Job) -> (f32, u64) {
         let metrics = async {
             let host_id = job.host_id.as_ref()?;

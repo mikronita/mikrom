@@ -3,6 +3,7 @@ pub trait Scheduler: Send + Sync {
     async fn pause_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
     async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
     async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
+    async fn delete_all_by_app(&self, app_id: String, user_id: String) -> Result<bool, String>;
 }
 
 pub struct NatsScheduler {
@@ -64,6 +65,25 @@ impl Scheduler for NatsScheduler {
 
         Ok(inner.success)
     }
+
+    async fn delete_all_by_app(&self, app_id: String, user_id: String) -> Result<bool, String> {
+        use mikrom_proto::scheduler::{DeleteAllByAppRequest, DeleteAllByAppResponse};
+        use prost::Message;
+        let nats_req = DeleteAllByAppRequest { app_id, user_id };
+        let mut buf = Vec::new();
+        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
+
+        let response = self
+            .client
+            .request("mikrom.scheduler.delete_all_by_app", buf.into())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let inner =
+            DeleteAllByAppResponse::decode(&response.payload[..]).map_err(|e| e.to_string())?;
+
+        Ok(inner.success)
+    }
 }
 
 mockall::mock! {
@@ -73,6 +93,7 @@ mockall::mock! {
         async fn pause_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
         async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
         async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
+        async fn delete_all_by_app(&self, app_id: String, user_id: String) -> Result<bool, String>;
     }
 }
 

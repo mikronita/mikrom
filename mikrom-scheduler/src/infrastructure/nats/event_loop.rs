@@ -2,8 +2,8 @@ use crate::domain::HostMetrics;
 use crate::server::SchedulerServer;
 use futures::StreamExt;
 use mikrom_proto::scheduler::{
-    AppStatusRequest, CancelRequest, DeleteAppRequest, DeployRequest, ListAppsRequest,
-    ListWorkersRequest, PauseRequest, ResumeRequest, WorkerHeartbeat,
+    AppStatusRequest, CancelRequest, DeleteAllByAppRequest, DeleteAppRequest, DeployRequest,
+    ListAppsRequest, ListWorkersRequest, PauseRequest, ResumeRequest, WorkerHeartbeat,
 };
 use prost::Message;
 
@@ -50,6 +50,12 @@ impl NatsEventLoop {
         let mut delete_sub = client
             .queue_subscribe("mikrom.scheduler.delete_app", "schedulers".to_string())
             .await?;
+        let mut delete_all_sub = client
+            .queue_subscribe(
+                "mikrom.scheduler.delete_all_by_app",
+                "schedulers".to_string(),
+            )
+            .await?;
 
         tracing::info!("NATS Event Loop started, listening for messages...");
 
@@ -64,6 +70,7 @@ impl NatsEventLoop {
                 Some(msg) = resume_sub.next() => self.handle_resume(msg).await,
                 Some(msg) = cancel_sub.next() => self.handle_cancel(msg).await,
                 Some(msg) = delete_sub.next() => self.handle_delete(msg).await,
+                Some(msg) = delete_all_sub.next() => self.handle_delete_all(msg).await,
             }
         }
     }
@@ -292,6 +299,29 @@ impl NatsEventLoop {
                     let response = match result {
                         Ok(resp) => resp,
                         Err(e) => mikrom_proto::scheduler::DeleteAppResponse {
+                            success: false,
+                            message: e.to_string(),
+                        },
+                    };
+                    let mut buf = Vec::new();
+                    if response.encode(&mut buf).is_ok() {
+                        let _ = client.publish(reply, buf.into()).await;
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_delete_all(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            if let Ok(req) = DeleteAllByAppRequest::decode(&message.payload[..]) {
+                let result = server.delete_all_by_app(req).await;
+                if let Some(reply) = message.reply {
+                    let response = match result {
+                        Ok(resp) => resp,
+                        Err(e) => mikrom_proto::scheduler::DeleteAllByAppResponse {
                             success: false,
                             message: e.to_string(),
                         },

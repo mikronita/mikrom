@@ -25,7 +25,7 @@ impl Ipam {
         }
     }
 
-    pub async fn allocate(&self) -> Result<Option<Allocation>, sqlx::Error> {
+    pub async fn allocate(&self, job_id: &str) -> Result<Option<Allocation>, sqlx::Error> {
         let (ip_str, prefix_str) = self
             .bridge_ip
             .split_once('/')
@@ -89,11 +89,12 @@ impl Ipam {
 
                 // Insert the allocation
                 sqlx::query(
-                    "INSERT INTO ip_allocations (ip_address, worker_id, mac_address) VALUES ($1, $2, $3)"
+                    "INSERT INTO ip_allocations (ip_address, worker_id, mac_address, job_id) VALUES ($1, $2, $3, $4)"
                 )
                 .bind(&candidate_str)
                 .bind(&self.worker_id)
                 .bind(&mac)
+                .bind(job_id)
                 .execute(&mut *tx)
                 .await?;
 

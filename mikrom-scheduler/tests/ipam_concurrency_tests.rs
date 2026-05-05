@@ -28,9 +28,32 @@ async fn test_concurrent_ip_allocation() {
 
     // Try to allocate 50 IPs concurrently
     let mut tasks = Vec::new();
-    for _ in 0..50 {
+    for i in 0..50 {
         let ipam_clone = ipam.clone();
-        tasks.push(tokio::spawn(async move { ipam_clone.allocate().await }));
+        let job_id = format!("job-{}", i);
+        // Ensure job exists for FK constraint
+        let pool_clone = pool.clone();
+        let job_id_clone = job_id.clone();
+        tokio::spawn(async move {
+            sqlx::query("INSERT INTO jobs (job_id, app_id, app_name, image, user_id, status, created_at, vcpus, memory_mib, disk_mib, port) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)")
+                .bind(&job_id_clone)
+                .bind("app-1")
+                .bind("test")
+                .bind("img")
+                .bind("user-1")
+                .bind("pending")
+                .bind(0)
+                .bind(1)
+                .bind(128)
+                .bind(512)
+                .bind(80)
+                .execute(&pool_clone)
+                .await.unwrap();
+        }).await.unwrap();
+
+        tasks.push(tokio::spawn(
+            async move { ipam_clone.allocate(&job_id).await },
+        ));
     }
 
     let mut allocated_ips = HashSet::new();
