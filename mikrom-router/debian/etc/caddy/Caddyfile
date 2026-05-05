@@ -7,7 +7,7 @@
 
     mikrom_app {
         nats_url "nats://192.168.122.128:4222"
-        db_url "postgres://mikrom:mikrom_password@192.168.122.128:5432/mikrom_router"
+        db_url "postgres://mikrom:mikrom_password@192.168.122.128:5432/mikrom_router?sslmode=disable"
         master_key "{$MASTER_KEY}"
     }
 

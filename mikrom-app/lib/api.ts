@@ -578,9 +578,53 @@ export async function activateDeployment(
   }
 }
 
+export function watchAppMetricsSSE(
+  token: string,
+  appName: string,
+  onMessage: (metrics: any) => void
+): () => void {
+  const eventSource = new EventSource(`${API_BASE_URL}/apps/${appName}/metrics/stream?token=${token}`);
+
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onMessage(data);
+    } catch (e) {
+      console.error("Failed to parse app metrics event", e);
+    }
+  };
+
+  return () => {
+    eventSource.close();
+  };
+}
+
+export function watchAppLogsSSE(
+  token: string,
+  appName: string,
+  onMessage: (logs: any) => void
+): () => void {
+  const eventSource = new EventSource(`${API_BASE_URL}/apps/${appName}/logs/stream?token=${token}`);
+
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onMessage(data);
+    } catch (e) {
+      console.error("Failed to parse app logs event", e);
+    }
+  };
+
+  return () => {
+    eventSource.close();
+  };
+}
+
 // Transitional aliases
 export const listVms = listActiveDeployments;
 export const watchVmsSSE = watchDeploymentsSSE;
+export const watchAppMetrics = watchAppMetricsSSE;
+export const watchAppLogs = watchAppLogsSSE;
 export const getVmStatus = getLiveDeploymentStatus;
 export const getVm = getVmStatus;
 export const getVmLogsSSE = getDeploymentLogsSSE;

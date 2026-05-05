@@ -52,13 +52,19 @@ impl LogShipper {
             let mut stderr_reader = BufReader::new(stderr).lines();
             let mut batch = Vec::new();
             let mut timer = interval(self.flush_interval);
+            let mut app_started = false;
 
             loop {
                 tokio::select! {
                     result = stdout_reader.next_line() => {
                         match result {
                             Ok(Some(line)) => {
-                                self.process_line("stdout", line, &mut batch).await;
+                                if !app_started && line == "__MIKROM_APP_START__" {
+                                    app_started = true;
+                                    tracing::info!(app_id = %self.app_id, vm_id = %self.vm_id, "Application started marker received");
+                                    continue;
+                                }
+                                self.process_line("stdout", line, &mut batch, app_started).await;
                                 if batch.len() >= self.batch_size {
                                     self.flush(&mut batch).await;
                                 }
@@ -69,7 +75,7 @@ impl LogShipper {
                     result = stderr_reader.next_line() => {
                         match result {
                             Ok(Some(line)) => {
-                                self.process_line("stderr", line, &mut batch).await;
+                                self.process_line("stderr", line, &mut batch, app_started).await;
                                 if batch.len() >= self.batch_size {
                                     self.flush(&mut batch).await;
                                 }
@@ -92,8 +98,15 @@ impl LogShipper {
         })
     }
 
-    async fn process_line(&self, source: &str, message: String, batch: &mut Vec<LogEntry>) {
+    async fn process_line(
+        &self,
+        source: &str,
+        message: String,
+        batch: &mut Vec<LogEntry>,
+        is_app_log: bool,
+    ) {
         // 1. Update local buffer (shared with FirecrackerManager)
+        // We ALWAYS update the local buffer for troubleshooting
         {
             let mut logs = self.logs_map.write().await;
             let buffer = logs
@@ -105,20 +118,24 @@ impl LogShipper {
             }
             let formatted = if source == "stderr" {
                 format!("[stderr] {message}")
+            } else if !is_app_log {
+                format!("[system] {message}")
             } else {
                 message.clone()
             };
             buffer.push_back(formatted);
         }
 
-        // 2. Add to NATS batch
-        batch.push(LogEntry {
-            vm_id: self.vm_id.clone(),
-            app_id: self.app_id.clone(),
-            source: source.to_string(),
-            message,
-            timestamp: Utc::now().timestamp_nanos_opt().unwrap_or(0),
-        });
+        // 2. Add to NATS batch ONLY if it's an application log
+        if is_app_log {
+            batch.push(LogEntry {
+                vm_id: self.vm_id.clone(),
+                app_id: self.app_id.clone(),
+                source: source.to_string(),
+                message,
+                timestamp: Utc::now().timestamp_nanos_opt().unwrap_or(0),
+            });
+        }
     }
 
     async fn flush(&self, batch: &mut Vec<LogEntry>) {
@@ -155,10 +172,10 @@ mod tests {
         let mut batch = Vec::new();
 
         shipper
-            .process_line("stdout", "Hello World".to_string(), &mut batch)
+            .process_line("stdout", "Hello World".to_string(), &mut batch, true)
             .await;
         shipper
-            .process_line("stderr", "Error Occurred".to_string(), &mut batch)
+            .process_line("stderr", "Error Occurred".to_string(), &mut batch, true)
             .await;
 
         let logs = logs_map.read().await;
@@ -171,6 +188,37 @@ mod tests {
         assert_eq!(batch.len(), 2);
         assert_eq!(batch[0].message, "Hello World");
         assert_eq!(batch[1].source, "stderr");
+    }
+
+    #[tokio::test]
+    async fn test_log_shipper_system_filtering() {
+        let logs_map = Arc::new(RwLock::new(HashMap::new()));
+        let vm_id = "test-vm".to_string();
+        let app_id = "test-app".to_string();
+
+        let shipper = LogShipper::new(vm_id.clone(), app_id.clone(), None, logs_map.clone());
+        let mut batch = Vec::new();
+
+        // System logs (before marker)
+        shipper
+            .process_line("stdout", "Booting kernel...".to_string(), &mut batch, false)
+            .await;
+
+        // App logs (after marker)
+        shipper
+            .process_line("stdout", "App started".to_string(), &mut batch, true)
+            .await;
+
+        let logs = logs_map.read().await;
+        let buffer = logs.get(&vm_id).unwrap();
+
+        assert_eq!(buffer.len(), 2);
+        assert_eq!(buffer[0], "[system] Booting kernel...");
+        assert_eq!(buffer[1], "App started");
+
+        // ONLY "App started" should be in the batch (to be sent to NATS)
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch[0].message, "App started");
     }
 
     #[tokio::test]
@@ -195,7 +243,7 @@ mod tests {
         {
             let logs = logs_map.read().await;
             let buffer = logs.get(&vm_id).unwrap();
-            assert!(buffer.contains(&"line 1".to_string()));
+            assert!(buffer.contains(&"[system] line 1".to_string()));
             assert!(buffer.contains(&"[stderr] error 1".to_string()));
         }
 

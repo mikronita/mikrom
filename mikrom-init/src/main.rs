@@ -49,6 +49,9 @@ fn main() -> Result<()> {
         config.entrypoint
     );
 
+    // Marker to let mikrom-agent know that subsequent logs are from the application
+    println!("__MIKROM_APP_START__");
+
     let mut cmd = build_command(config)?;
 
     // EXECUTE (Replacing mikrom-init as PID 1)

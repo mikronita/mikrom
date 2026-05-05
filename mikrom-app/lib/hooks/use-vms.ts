@@ -1,9 +1,22 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listVms, deployApp, getVm, stopVm, deleteVm, DeployRequest, watchVmsSSE, LiveDeploymentInfo, LiveDeploymentStatus } from "@/lib/api";
+import { 
+  listVms, 
+  deployApp, 
+  getVm, 
+  stopVm, 
+  deleteVm, 
+  DeployRequest, 
+  watchVmsSSE, 
+  watchAppMetrics,
+  watchAppLogs,
+  LiveDeploymentInfo, 
+  LiveDeploymentStatus,
+  VmMetrics
+} from "@/lib/api";
 import { getToken } from "@/lib/auth";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export const vmsKeys = {
   all: ["vms"] as const,
@@ -140,4 +153,41 @@ export function useDeleteVm() {
       queryClient.invalidateQueries({ queryKey: vmsKeys.list() });
     },
   });
+}
+
+export function useAppMetrics(appName: string) {
+  const token = getToken();
+  const [metrics, setMetrics] = useState<VmMetrics | null>(null);
+
+  useEffect(() => {
+    if (!token || !appName) return;
+    
+    const cleanup = watchAppMetrics(token, appName, (data) => {
+      setMetrics(data);
+    });
+    return () => cleanup();
+  }, [token, appName]);
+
+  return metrics;
+}
+
+export function useAppLogs(appName: string) {
+  const token = getToken();
+  const [logs, setLogs] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!token || !appName) return;
+    
+    const cleanup = watchAppLogs(token, appName, (data) => {
+      // data can be a single log line or a batch
+      if (Array.isArray(data)) {
+        setLogs((prev) => [...prev, ...data].slice(-500)); // Keep last 500 lines
+      } else {
+        setLogs((prev) => [...prev, data].slice(-500));
+      }
+    });
+    return () => cleanup();
+  }, [token, appName]);
+
+  return logs;
 }
