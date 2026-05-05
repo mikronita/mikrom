@@ -168,7 +168,34 @@ http_variable_get!(
             None => return Status::NGX_DECLINED,
         };
 
-        let auth = match ACME_CACHE.get(token) {
+        let mut auth = ACME_CACHE.get(token);
+
+        if auth.is_none() {
+            let handle = TOKIO_HANDLE.read();
+            let db = DB_POOL.read();
+            if let (Some(h), Some(p)) = (handle.as_ref(), db.as_ref()) {
+                let token_clone = token.to_string();
+                let pool = p.clone();
+                let db_auth = h.block_on(async move {
+                    sqlx::query("SELECT key_auth FROM acme_challenges WHERE token = $1")
+                        .bind(&token_clone)
+                        .fetch_optional(&pool)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|row| {
+                            use sqlx::Row;
+                            row.get::<String, _>("key_auth")
+                        })
+                });
+                if let Some(a) = db_auth {
+                    ACME_CACHE.insert(token.to_string(), a.clone());
+                    auth = Some(a);
+                }
+            }
+        }
+
+        let auth = match auth {
             Some(a) => a,
             None => return Status::NGX_DECLINED,
         };
@@ -263,7 +290,34 @@ impl HttpRequestHandler for AcmeChallengeHandler {
             None => return Status::NGX_DECLINED,
         };
 
-        let auth = match ACME_CACHE.get(token) {
+        let mut auth = ACME_CACHE.get(token);
+
+        if auth.is_none() {
+            let handle = TOKIO_HANDLE.read();
+            let db = DB_POOL.read();
+            if let (Some(h), Some(p)) = (handle.as_ref(), db.as_ref()) {
+                let token_clone = token.to_string();
+                let pool = p.clone();
+                let db_auth = h.block_on(async move {
+                    sqlx::query("SELECT key_auth FROM acme_challenges WHERE token = $1")
+                        .bind(&token_clone)
+                        .fetch_optional(&pool)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|row| {
+                            use sqlx::Row;
+                            row.get::<String, _>("key_auth")
+                        })
+                });
+                if let Some(a) = db_auth {
+                    ACME_CACHE.insert(token.to_string(), a.clone());
+                    auth = Some(a);
+                }
+            }
+        }
+
+        let auth = match auth {
             Some(a) => a,
             None => return HTTPStatus::NOT_FOUND.into(),
         };
