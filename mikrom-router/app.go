@@ -130,7 +130,8 @@ func (m *MikromApp) Start() error {
 
 		// Run migrations
 		if err := m.runMigrations(); err != nil {
-			m.logger.Error("failed to run migrations", zap.Error(err))
+			m.logger.Fatal("failed to run migrations, failing fast", zap.Error(err))
+			return
 		}
 
 		// Connect to NATS with retries
