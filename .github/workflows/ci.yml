@@ -85,6 +85,25 @@ jobs:
         working-directory: mikrom-app
         run: pnpm lint
 
+  lint-go:
+    name: Lint Go
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: mikrom-router-caddy/go.sum
+
+      - name: Go fmt check
+        run: make fmt-check-go
+
+      - name: Go vet
+        run: make vet-go
+
 # ══════════════════════════════════════════════════════════════════════════════
 # JOB: test
 # ══════════════════════════════════════════════════════════════════════════════
@@ -117,6 +136,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: mikrom-router-caddy/go.sum
 
       - name: Install protoc
         uses: arduino/setup-protoc@v3
@@ -158,6 +183,9 @@ jobs:
           TEST_DATABASE_URL: postgres://mikrom:mikrom_password@localhost:5432/mikrom_scheduler_test
           TEST_NATS_URL: nats://localhost:4223
         run: cargo nextest run -p mikrom-scheduler --all-features
+
+      - name: Test Go components
+        run: make test-go
 
       - name: Test other components
         env:
