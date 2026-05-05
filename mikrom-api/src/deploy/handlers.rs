@@ -203,16 +203,13 @@ pub async fn delete_app_handler(
     let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
     // Tell the scheduler to clean up ALL resources for this app
-    if let Err(e) = state
+    state
         .scheduler
         .delete_all_by_app(app.id.to_string(), app.user_id.to_string())
         .await
-    {
-        tracing::error!(
-            "Failed to clean up application resources in scheduler: {}",
-            e
-        );
-    }
+        .map_err(|e| {
+            ApiError::Internal(format!("Failed to clean up scheduler resources: {}", e))
+        })?;
 
     #[allow(clippy::collapsible_if)]
     if let Some(hostname) = &app.hostname {
