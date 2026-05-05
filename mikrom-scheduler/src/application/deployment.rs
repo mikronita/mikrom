@@ -53,7 +53,7 @@ impl DeploymentService {
             app_id.clone(),
             app_name,
             image.clone(),
-            config.clone(),
+            config, // Move config instead of cloning
             user_id.clone(),
             Some(deployment_id),
         );
@@ -66,7 +66,10 @@ impl DeploymentService {
         let ipam = Ipam::new(self.pool.clone(), host_id.clone(), worker.bridge_ip.clone());
         let allocation = match ipam.allocate(&job_id).await {
             Ok(Some(a)) => a,
-            Ok(None) => return Err(DomainError::IpPoolExhausted),
+            Ok(None) => {
+                let _ = self.job_repo.remove_job(&job_id).await;
+                return Err(DomainError::IpPoolExhausted);
+            },
             Err(e) => {
                 // Cleanup job if IP allocation fails
                 let _ = self.job_repo.remove_job(&job_id).await;
@@ -74,14 +77,14 @@ impl DeploymentService {
             },
         };
 
-        let mut job_config = config.clone();
-        job_config.ip_address = Some(allocation.ip.clone());
-        job_config.gateway = Some(allocation.gateway.clone());
-        job_config.mac_address = Some(allocation.mac.clone());
-        job_config.netmask = Some(ipam.netmask());
-
         // Update job with IP info
-        self.job_repo
+        job.config.ip_address = Some(allocation.ip.clone());
+        job.config.gateway = Some(allocation.gateway.clone());
+        job.config.mac_address = Some(allocation.mac.clone());
+        job.config.netmask = Some(ipam.netmask());
+
+        if let Err(e) = self
+            .job_repo
             .update_job_ip(
                 &job_id,
                 &allocation.ip,
@@ -89,25 +92,29 @@ impl DeploymentService {
                 &allocation.mac,
                 &ipam.netmask(),
             )
-            .await?;
-        job.config = job_config.clone();
+            .await
+        {
+            let _ = self.job_repo.remove_job(&job_id).await;
+            return Err(e);
+        }
 
         // 4. Ensure exclusivity
-        self.ensure_exclusivity(&app_id, &job_id, &user_id).await?;
+        if let Err(e) = self.ensure_exclusivity(&app_id, &job_id, &user_id).await {
+            let _ = self.job_repo.remove_job(&job_id).await;
+            return Err(e);
+        }
 
         tracing::info!(job_id = %job_id, host_id = %host_id, "Dispatching job to agent");
 
         // 5. Forward to agent
         if let Err(e) = self
             .agent_client
-            .start_vm(&host_id, &app_id, &image, &vm_id, &job_config)
+            .start_vm(&host_id, &app_id, &image, &vm_id, &job.config)
             .await
         {
             tracing::error!(job_id = %job_id, error = %e, "Failed to deploy to agent");
-            let _ = self
-                .job_repo
-                .fail_job(&job_id, e.to_string(), chrono::Utc::now().timestamp())
-                .await;
+            // Remove job and release IP if we failed to start it
+            let _ = self.job_repo.remove_job(&job_id).await;
             return Err(e);
         }
 
