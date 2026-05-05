@@ -21,7 +21,7 @@ import { Rocket, GitBranch, Zap, User } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps, useDeployments, useActivateDeployment, useDeployAppVersion, useDeleteApp, useAppSecret } from "@/lib/hooks/use-apps";
-import { useVm } from "@/lib/hooks/use-vms";
+import { useVm, useAppMetrics } from "@/lib/hooks/use-vms";
 import { API_BASE_URL } from "@/lib/api";
 import { 
   Badge 
@@ -127,28 +127,26 @@ export default function AppDetailPage() {
   const activeJobId = activeDeployment?.job_id;
 
   // Active Instance Logic
-  const { data: vm, dataUpdatedAt } = useVm(decodedName, activeJobId || "");
+  const liveMetrics = useAppMetrics(decodedName);
   const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>([]);
 
   useEffect(() => {
-    if (!vm) return;
+    if (!liveMetrics) return;
 
-    const timeoutId = setTimeout(() => {
-      setMetricsHistory(prev => {
-          const newCpu = (vm.cpu_usage || 0) * 100;
-          const newRam = (vm.ram_used_bytes || 0) / (1024 * 1024);
-          
-          // Keep up to 30 points (approx 1.5 min at 3s polling)
-          return [...prev.slice(-29), {
-              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-              cpu: newCpu,
-              ram: newRam
-          }];
-      });
-    }, 0);
+    setMetricsHistory(prev => {
+        const newCpu = (liveMetrics.cpu_usage || 0) * 100;
+        const newRam = (liveMetrics.ram_used_bytes || 0) / (1024 * 1024);
+        
+        const newPoint = {
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            cpu: newCpu,
+            ram: newRam
+        };
 
-    return () => clearTimeout(timeoutId);
-  }, [dataUpdatedAt, vm]);
+        // Limit to last 30 points
+        return [...prev.slice(-29), newPoint];
+    });
+  }, [liveMetrics]);
 
   const copyToClipboard = async (text: string, e?: React.MouseEvent) => {
     if (!text) {
@@ -252,13 +250,12 @@ export default function AppDetailPage() {
     );
   }
 
-  const latestMetrics = metricsHistory.length > 0 
-    ? metricsHistory[metricsHistory.length - 1] 
-    : (vm ? { 
-        cpu: (vm.cpu_usage || 0) * 100, 
-        ram: (vm.ram_used_bytes || 0) / (1024 * 1024) 
+  const latestMetrics = metricsHistory.length > 0
+    ? metricsHistory[metricsHistory.length - 1]
+    : (liveMetrics ? {
+        cpu: (liveMetrics.cpu_usage || 0) * 100,
+        ram: (liveMetrics.ram_used_bytes || 0) / (1024 * 1024)
       } : { cpu: 0, ram: 0 });
-
   return (
     <AuthGuard>
       <DashboardLayout>
@@ -483,7 +480,7 @@ export default function AppDetailPage() {
                 Live Performance
               </h2>
               <div className="space-y-6">
-                {!vm ? (
+                {!liveMetrics ? (
                   <Card className="p-12 flex flex-col items-center justify-center text-center space-y-4">
                     <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
                     <p className="text-muted-foreground">Connecting to instance metrics...</p>
@@ -561,7 +558,8 @@ export default function AppDetailPage() {
                                     labelFormatter={(value) => value}
                                   />
                                 }
-                              />                              <Line
+                              />
+                              <Line
                                 dataKey={activeChart}
                                 type="monotone"
                                 stroke={`var(--color-${activeChart})`}
@@ -575,12 +573,12 @@ export default function AppDetailPage() {
                       </CardContent>
                     </Card>
 
-                    {vm.error_message && (
+                    {liveMetrics.error_message && (
                       <Alert variant="destructive">
                         <HiExclamationCircle className="h-4 w-4" />
                         <AlertTitle className="text-xs font-bold">Termination Error</AlertTitle>
                         <AlertDescription className="text-[10px] break-words">
-                          {vm.error_message}
+                          {liveMetrics.error_message}
                         </AlertDescription>
                       </Alert>
                     )}

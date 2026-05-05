@@ -94,7 +94,7 @@ services:
       dockerfile: mikrom-router/Dockerfile
     environment:
       NATS_URL: nats://nats:4222
-      DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_router
+      DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_router?sslmode=disable
       MASTER_KEY: ${MASTER_KEY:-default_master_key}
     ports:
       - "80:80"

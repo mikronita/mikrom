@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
-//go:embed migrations/*.sql
+//go:embed migrations
 var migrationsFS embed.FS
 
 func (m *MikromApp) runMigrations() error {
