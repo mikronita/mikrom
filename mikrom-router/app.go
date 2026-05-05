@@ -3,6 +3,7 @@ package mikrom
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,11 +83,11 @@ type MikromApp struct {
 }
 
 type LogEntry struct {
-	VmID      string `json:"vm_id"`
-	AppID     string `json:"app_id"`
-	Source    string `json:"source"`
-	Message   string `json:"message"`
-	Timestamp int64  `json:"timestamp"`
+	VmID      string      `json:"vm_id"`
+	AppID     string      `json:"app_id"`
+	Source    string      `json:"source"`
+	Message   interface{} `json:"message"`
+	Timestamp int64       `json:"timestamp"`
 }
 
 func (m *MikromApp) runNatsLogger() {
@@ -100,11 +101,21 @@ func (m *MikromApp) runNatsLogger() {
 				continue
 			}
 
+			var message interface{} = msg
+			// If msg is JSON, unmarshal it to avoid double-encoding
+			trimmed := strings.TrimSpace(msg)
+			if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+				var jsonMsg interface{}
+				if err := json.Unmarshal([]byte(trimmed), &jsonMsg); err == nil {
+					message = jsonMsg
+				}
+			}
+
 			entry := LogEntry{
 				VmID:      "system",
 				AppID:     "mikrom-router",
 				Source:    "stdout",
-				Message:   msg,
+				Message:   message,
 				Timestamp: time.Now().UnixNano(),
 			}
 

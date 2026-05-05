@@ -21,7 +21,7 @@ pub struct LogEntry {
     pub vm_id: String,
     pub app_id: String,
     pub source: String,
-    pub message: String,
+    pub message: serde_json::Value,
     pub timestamp: i64,
 }
 
@@ -125,10 +125,13 @@ async fn run_nats_logger(
     let subject = format!("mikrom.logs.{}.system", service_name);
 
     while let Some(data) = rx.recv().await {
-        let message = String::from_utf8_lossy(&data).trim().to_string();
-        if message.is_empty() {
+        let message_str = String::from_utf8_lossy(&data).trim().to_string();
+        if message_str.is_empty() {
             continue;
         }
+
+        let message =
+            serde_json::from_str(&message_str).unwrap_or(serde_json::Value::String(message_str));
 
         let entry = LogEntry {
             vm_id: "system".to_string(),
@@ -186,7 +189,7 @@ mod tests {
             vm_id: "system".to_string(),
             app_id: "test-service".to_string(),
             source: "stdout".to_string(),
-            message: "test message".to_string(),
+            message: serde_json::json!("test message"),
             timestamp: 123456789,
         };
 

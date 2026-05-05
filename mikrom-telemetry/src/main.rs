@@ -45,7 +45,7 @@ pub struct LogEntry {
     pub vm_id: String,
     pub app_id: String,
     pub source: String,
-    pub message: String,
+    pub message: serde_json::Value,
     pub timestamp: i64,
 }
 
@@ -158,17 +158,36 @@ impl TelemetryService {
     }
 
     pub async fn run(self: Arc<Self>) -> Result<()> {
-        let vm_metrics_task = self.clone().listen_vm_metrics();
-        let sys_metrics_task = self.clone().listen_sys_metrics();
-        let logs_task = self.clone().listen_logs();
-        let server_task = self.clone().run_metrics_server();
+        let vm_metrics_handle = tokio::spawn(self.clone().listen_vm_metrics());
+        let sys_metrics_handle = tokio::spawn(self.clone().listen_sys_metrics());
+        let logs_handle = tokio::spawn(self.clone().listen_logs());
+        let server_handle = tokio::spawn(self.clone().run_metrics_server());
 
-        tokio::select! {
-            res = vm_metrics_task => res,
-            res = sys_metrics_task => res,
-            res = logs_task => res,
-            res = server_task => res,
+        let res = tokio::select! {
+            res = vm_metrics_handle => {
+                tracing::error!("VM metrics task exited");
+                res
+            },
+            res = sys_metrics_handle => {
+                tracing::error!("System metrics task exited");
+                res
+            },
+            res = logs_handle => {
+                tracing::error!("Logs task exited");
+                res
+            },
+            res = server_handle => {
+                tracing::error!("Metrics server task exited");
+                res
+            },
+        };
+
+        match res {
+            Ok(inner_res) => inner_res?,
+            Err(e) => return Err(anyhow::anyhow!("Task panicked: {}", e)),
         }
+
+        Ok(())
     }
 
     async fn listen_vm_metrics(self: Arc<Self>) -> Result<()> {
@@ -358,14 +377,14 @@ mod tests {
             vm_id: "vm-1".to_string(),
             app_id: "app-1".to_string(),
             source: "stdout".to_string(),
-            message: "msg 1".to_string(),
+            message: serde_json::json!("msg 1"),
             timestamp: 1000,
         };
         let entry2 = LogEntry {
             vm_id: "vm-1".to_string(),
             app_id: "app-1".to_string(),
             source: "stdout".to_string(),
-            message: "msg 2".to_string(),
+            message: serde_json::json!("msg 2"),
             timestamp: 2000,
         };
 
@@ -383,7 +402,7 @@ mod tests {
             vm_id: "vm-1".to_string(),
             app_id: "app-1".to_string(),
             source: "stdout".to_string(),
-            message: "test message".to_string(),
+            message: serde_json::json!("test message"),
             timestamp: 123456789,
         };
         assert_eq!(entry.app_id, "app-1");

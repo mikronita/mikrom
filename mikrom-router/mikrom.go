@@ -42,19 +42,51 @@ func (m *MikromRouter) Provision(ctx caddy.Context) error {
 	}
 	m.app = appModule.(*MikromApp)
 
-	// Add a hook to send logs to NATS
+	// Wrap core to capture structured logs
 	if m.app.logChan != nil {
-		m.logger = m.logger.WithOptions(zap.Hooks(func(entry zapcore.Entry) error {
-			select {
-			case m.app.logChan <- entry.Message:
-			default:
-				// Drop if channel is full
+		m.logger = m.logger.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
+			return &natsCore{
+				Core:    core,
+				logChan: m.app.logChan,
+				enc:     zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
 			}
-			return nil
 		}))
 	}
 
 	return nil
+}
+
+type natsCore struct {
+	zapcore.Core
+	logChan chan string
+	enc     zapcore.Encoder
+}
+
+func (c *natsCore) Check(entry zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+	if c.Enabled(entry.Level) {
+		return ce.AddCore(entry, c)
+	}
+	return ce
+}
+
+func (c *natsCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
+	buf, err := c.enc.EncodeEntry(entry, fields)
+	if err == nil {
+		select {
+		case c.logChan <- buf.String():
+		default:
+		}
+		buf.Free()
+	}
+	return c.Core.Write(entry, fields)
+}
+
+func (c *natsCore) With(fields []zapcore.Field) zapcore.Core {
+	return &natsCore{
+		Core:    c.Core.With(fields),
+		logChan: c.logChan,
+		enc:     c.enc.Clone(),
+	}
 }
 
 // ServeHTTP handles the routing and ACME challenges.
