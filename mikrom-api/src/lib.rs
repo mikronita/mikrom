@@ -63,12 +63,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub async fn notify_router(&self, app_id: uuid::Uuid) -> anyhow::Result<()> {
-        let app = match self.app_repo.get_app(app_id).await? {
-            Some(a) => a,
-            None => return Ok(()),
-        };
-
+    pub async fn notify_router(&self, app: &crate::models::app::App) -> anyhow::Result<()> {
         let hostname = match &app.hostname {
             Some(h) => h,
             None => return Ok(()),
@@ -108,16 +103,14 @@ impl AppState {
 
     pub async fn reconcile_routes(&self) -> anyhow::Result<()> {
         tracing::info!("Starting route reconciliation with router...");
-        let apps = self.app_repo.list_apps_by_user("all").await?;
+        let apps = self.app_repo.list_apps_by_user(None).await?;
         let mut count = 0;
 
         for app in apps {
-            if app.active_deployment_id.is_some() {
-                if let Err(e) = self.notify_router(app.id).await {
-                    tracing::error!(app_id = %app.id, error = %e, "Failed to reconcile route");
-                } else {
-                    count += 1;
-                }
+            if let Err(e) = self.notify_router(&app).await {
+                tracing::error!(app_id = %app.id, error = %e, "Failed to reconcile route");
+            } else {
+                count += 1;
             }
         }
 

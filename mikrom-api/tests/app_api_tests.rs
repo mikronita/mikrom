@@ -223,7 +223,7 @@ async fn test_list_apps_includes_secret() {
 
     mock_app_repo
         .expect_list_apps_by_user()
-        .with(eq(user_id.to_string()))
+        .with(eq(Some(user_id)))
         .times(1)
         .returning(move |_| {
             Ok(vec![App {
