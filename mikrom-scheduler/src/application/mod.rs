@@ -117,7 +117,9 @@ impl AppService {
 
         for job in app_jobs {
             if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
-                let _ = self.agent_client.delete_vm(host_id, vm_id).await;
+                if let Err(e) = self.agent_client.delete_vm(host_id, vm_id).await {
+                    tracing::error!("Failed to delete VM {} on host {}: {}", vm_id, host_id, e);
+                }
             }
         }
 
