@@ -111,16 +111,19 @@ func (m *MikromApp) Start() error {
 		for {
 			m.pool, err = pgxpool.New(m.ctx, m.DBURL)
 			if err == nil {
-				// Ping to ensure connection is actually alive
 				if err = m.pool.Ping(m.ctx); err == nil {
 					break
 				}
+				m.pool.Close()
 			}
 			m.logger.Warn("failed to connect to database, retrying in 5s", zap.Error(err))
+
+			timer := time.NewTimer(5 * time.Second)
 			select {
 			case <-m.ctx.Done():
+				timer.Stop()
 				return
-			case <-time.After(5 * time.Second):
+			case <-timer.C:
 			}
 		}
 		m.logger.Info("connected to database")
@@ -142,10 +145,13 @@ func (m *MikromApp) Start() error {
 				break
 			}
 			m.logger.Warn("failed to initiate NATS connection, retrying in 5s", zap.Error(err))
+
+			timer := time.NewTimer(5 * time.Second)
 			select {
 			case <-m.ctx.Done():
+				timer.Stop()
 				return
-			case <-time.After(5 * time.Second):
+			case <-timer.C:
 			}
 		}
 		m.logger.Info("connected to NATS")
