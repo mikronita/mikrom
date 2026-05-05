@@ -9,24 +9,34 @@ use tokio::net::TcpListener;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
+    #[serde(default = "default_nats_url")]
     pub nats_url: String,
+    #[serde(default = "default_loki_url")]
     pub loki_url: String,
+    #[serde(default = "default_metrics_port")]
     pub metrics_port: u16,
+}
+
+fn default_nats_url() -> String {
+    "nats://localhost:4222".to_string()
+}
+
+fn default_loki_url() -> String {
+    "http://localhost:3100".to_string()
+}
+
+fn default_metrics_port() -> u16 {
+    9090
 }
 
 impl Config {
     pub fn from_env() -> Self {
         dotenvy::dotenv().ok();
-        Self {
-            nats_url: std::env::var("NATS_URL")
-                .unwrap_or_else(|_| "nats://localhost:4222".to_string()),
-            loki_url: std::env::var("LOKI_URL")
-                .unwrap_or_else(|_| "http://localhost:3100".to_string()),
-            metrics_port: std::env::var("METRICS_PORT")
-                .unwrap_or_else(|_| "9090".to_string())
-                .parse()
-                .unwrap_or(9090),
-        }
+        envy::from_env::<Config>().unwrap_or_else(|_| Config {
+            nats_url: default_nats_url(),
+            loki_url: default_loki_url(),
+            metrics_port: default_metrics_port(),
+        })
     }
 }
 
