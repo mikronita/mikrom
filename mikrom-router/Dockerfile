@@ -1,26 +1,30 @@
-# 1. Planner stage
-FROM lukemathwalker/cargo-chef:latest-rust-1.95-trixie AS chef
-WORKDIR /app
+FROM caddy:2.11-builder AS builder
 
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
+WORKDIR /src
+COPY . /src/mikrom-router
 
-# 2. Builder stage
-FROM chef AS builder
-RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
-COPY --from=planner /app/recipe.json recipe.json
-# Build dependencies - this is the caching layer
-RUN cargo chef cook --release --recipe-path recipe.json
-# Build application
-COPY . .
-RUN cargo build --release -p mikrom-router && \
-    strip target/release/mikrom-router
+RUN xcaddy build \
+    --with github.com/antpard/mikrom/mikrom-router=/src/mikrom-router
 
-# 3. Runtime stage
-FROM debian:trixie-slim AS runner
-WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/mikrom-router /usr/local/bin/
-EXPOSE 80
-CMD ["mikrom-router"]
+FROM caddy:2.11
+
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+
+# Default Caddyfile
+COPY <<EOF /etc/caddy/Caddyfile
+{
+    order mikrom_router before reverse_proxy
+    mikrom_app {
+        nats_url {$NATS_URL}
+        db_url {$DATABASE_URL}
+        master_key {$MASTER_KEY}
+    }
+}
+
+:80 {
+    mikrom_router
+    reverse_proxy {vars.mikrom_target}
+}
+EOF
+
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

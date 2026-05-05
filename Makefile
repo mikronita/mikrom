@@ -17,24 +17,8 @@ deb-agent: build-init ## Build Debian package for mikrom-agent
 	cd mikrom-agent && cargo deb --no-build
 
 .PHONY: deb-router
-deb-router: ## Build Debian package for mikrom-router-nginx (for Debian trixie/NGINX 1.26.3)
-	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
-	@# Ensure NGINX source is on the correct version
-	cd nginx && git checkout release-1.26.3
-	@# Build the release binary with correct environment
-	cd mikrom-router-nginx && \
-		NGX_VERSION=1.26.3 \
-		NGINX_SOURCE_DIR=$(PWD)/nginx \
-		cargo build --release
-	@# Create the .deb package
-	cd mikrom-router-nginx && \
-		NGX_VERSION=1.26.3 \
-		NGINX_SOURCE_DIR=$(PWD)/nginx \
-		cargo deb --no-build
-
-.PHONY: deb-router-caddy
-deb-router-caddy: ## Build Debian package for mikrom-router-caddy (Caddy 2.11)
-	docker build --no-cache -t mikrom-deb-builder -f mikrom-router-caddy/Dockerfile.deb .
+deb-router: ## Build Debian package for mikrom-router (Caddy 2.11)
+	docker build --no-cache -t mikrom-deb-builder -f mikrom-router/Dockerfile.deb .
 	docker run --rm -v $(PWD):/out mikrom-deb-builder
 
 .PHONY: fmt
@@ -121,6 +105,10 @@ run-builder: ## Run mikrom-builder with watch
 .PHONY: run-telemetry
 run-telemetry: ## Run mikrom-telemetry with watch
 	cd mikrom-telemetry && cargo watch -x run
+
+.PHONY: run-router
+run-router: ## Run mikrom-router
+	cd mikrom-router && go run ./cmd/mikrom-caddy run --config Caddyfile.test --adapter caddyfile
 
 .PHONY: build-init
 build-init: ## Build mikrom-init as a static binary (musl)
@@ -210,19 +198,19 @@ db-stop: ## Stop PostgreSQL instance
 
 .PHONY: fmt-go
 fmt-go: ## Format Go code
-	cd mikrom-router-caddy && go fmt ./...
+	cd mikrom-router && go fmt ./...
 
 .PHONY: fmt-check-go
 fmt-check-go: ## Check Go formatting
-	cd mikrom-router-caddy && [ -z "$$(gofmt -l .)" ] || (echo "Go files not formatted:" && gofmt -l . && exit 1)
+	cd mikrom-router && [ -z "$$(gofmt -l .)" ] || (echo "Go files not formatted:" && gofmt -l . && exit 1)
 
 .PHONY: vet-go
 vet-go: ## Run go vet
-	cd mikrom-router-caddy && go vet ./...
+	cd mikrom-router && go vet ./...
 
 .PHONY: test-go
 test-go: ## Run Go tests
-	cd mikrom-router-caddy && go test ./...
+	cd mikrom-router && go test ./...
 
 .PHONY: clean
 clean: ## Remove Rust build artefacts

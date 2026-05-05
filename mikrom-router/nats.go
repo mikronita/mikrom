@@ -1,7 +1,7 @@
 package mikrom
 
 import (
-	"github.com/mikrom/mikrom-router-caddy/proto/router/v1"
+	"github.com/antpard/mikrom/mikrom-router/proto/router/v1"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"

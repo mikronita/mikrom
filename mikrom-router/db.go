@@ -1,8 +1,39 @@
 package mikrom
 
 import (
+	"embed"
+	"fmt"
+
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"go.uber.org/zap"
 )
+
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
+
+func (m *MikromApp) runMigrations() error {
+	m.logger.Info("running database migrations...", zap.String("url", m.DBURL))
+
+	d, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create migration source: %w", err)
+	}
+
+	migrator, err := migrate.NewWithSourceInstance("iofs", d, m.DBURL)
+	if err != nil {
+		return fmt.Errorf("failed to create migrator: %w", err)
+	}
+	defer migrator.Close()
+
+	if err := migrator.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	m.logger.Info("database migrations completed successfully")
+	return nil
+}
 
 func (m *MikromApp) syncFromDB() error {
 	m.logger.Info("syncing from database...")
