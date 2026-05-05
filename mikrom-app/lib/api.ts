@@ -581,7 +581,7 @@ export async function activateDeployment(
 export function watchAppMetricsSSE(
   token: string,
   appName: string,
-  onMessage: (metrics: any) => void
+  onMessage: (metrics: VmMetricsResponse) => void
 ): () => void {
   const eventSource = new EventSource(`${API_BASE_URL}/apps/${appName}/metrics/stream?token=${token}`);
 
@@ -602,7 +602,7 @@ export function watchAppMetricsSSE(
 export function watchAppLogsSSE(
   token: string,
   appName: string,
-  onMessage: (logs: any) => void
+  onMessage: (logs: LogLine | LogLine[]) => void
 ): () => void {
   const eventSource = new EventSource(`${API_BASE_URL}/apps/${appName}/logs/stream?token=${token}`);
 

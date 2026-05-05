@@ -21,7 +21,7 @@ import { Rocket, GitBranch, Zap, User } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps, useDeployments, useActivateDeployment, useDeployAppVersion, useDeleteApp, useAppSecret } from "@/lib/hooks/use-apps";
-import { useVm, useAppMetrics } from "@/lib/hooks/use-vms";
+import { useAppMetrics } from "@/lib/hooks/use-vms";
 import { API_BASE_URL } from "@/lib/api";
 import { 
   Badge 
@@ -124,7 +124,6 @@ export default function AppDetailPage() {
   // Prefer the active (promoted) deployment, but fallback to the latest running one if none is active
   const activeDeployment = deployments.find(d => d.id === app?.active_deployment_id) 
     || [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).find(d => d.status === "RUNNING");
-  const activeJobId = activeDeployment?.job_id;
 
   // Active Instance Logic
   const liveMetrics = useAppMetrics(decodedName);
@@ -134,8 +133,8 @@ export default function AppDetailPage() {
     if (!liveMetrics) return;
 
     setMetricsHistory(prev => {
-        const newCpu = (liveMetrics.cpu_usage || 0) * 100;
-        const newRam = (liveMetrics.ram_used_bytes || 0) / (1024 * 1024);
+        const newCpu = (liveMetrics.metrics.cpu_usage || 0) * 100;
+        const newRam = (liveMetrics.metrics.memory_usage || 0) / (1024 * 1024);
         
         const newPoint = {
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -253,8 +252,8 @@ export default function AppDetailPage() {
   const latestMetrics = metricsHistory.length > 0
     ? metricsHistory[metricsHistory.length - 1]
     : (liveMetrics ? {
-        cpu: (liveMetrics.cpu_usage || 0) * 100,
-        ram: (liveMetrics.ram_used_bytes || 0) / (1024 * 1024)
+        cpu: (liveMetrics.metrics.cpu_usage || 0) * 100,
+        ram: (liveMetrics.metrics.memory_usage || 0) / (1024 * 1024)
       } : { cpu: 0, ram: 0 });
   return (
     <AuthGuard>
