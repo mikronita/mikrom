@@ -51,7 +51,7 @@ impl SchedulerServer {
             .app_service
             .deployment
             .deploy_app(
-                req.app_id,
+                req.app_id.clone(),
                 req.app_name,
                 req.image,
                 req.user_id,
@@ -69,10 +69,14 @@ impl SchedulerServer {
                 message: "Deployment successful".to_string(),
                 ip_address: job.config.ip_address.unwrap_or_default(),
             }),
-            Err(e) => Ok(DeployResponse {
-                message: format!("Deployment failed: {}", e),
-                ..Default::default()
-            }),
+            Err(e) => {
+                tracing::error!("Deployment failed for app {}: {}", req.app_id, e);
+                Ok(DeployResponse {
+                    status: mikrom_proto::scheduler::DeployStatus::Failed as i32,
+                    message: format!("Deployment failed: {}", e),
+                    ..Default::default()
+                })
+            },
         }
     }
 

@@ -48,35 +48,54 @@ impl DeploymentService {
         let worker = self.select_best_worker(&config, &app_id, strategy).await?;
         let host_id = worker.host_id.clone();
 
-        // 2. Allocate IP
-        let ipam = Ipam::new(self.pool.clone(), host_id.clone(), worker.bridge_ip.clone());
-        let allocation = ipam
-            .allocate(&job_id)
-            .await?
-            .ok_or(DomainError::IpPoolExhausted)?;
-
-        let mut job_config = config.clone();
-        job_config.ip_address = Some(allocation.ip);
-        job_config.gateway = Some(allocation.gateway);
-        job_config.mac_address = Some(allocation.mac);
-        job_config.netmask = Some(ipam.netmask());
-
         let mut job = Job::new(
             job_id.clone(),
             app_id.clone(),
             app_name,
             image.clone(),
-            job_config.clone(),
+            config.clone(),
             user_id.clone(),
             Some(deployment_id),
         );
         job.schedule(host_id.clone(), vm_id.clone());
 
-        // 3. Ensure exclusivity
+        // 2. Persist job (needed for IP allocation foreign key)
+        self.job_repo.add_job(job.clone()).await?;
+
+        // 3. Allocate IP
+        let ipam = Ipam::new(self.pool.clone(), host_id.clone(), worker.bridge_ip.clone());
+        let allocation = match ipam.allocate(&job_id).await {
+            Ok(Some(a)) => a,
+            Ok(None) => return Err(DomainError::IpPoolExhausted),
+            Err(e) => {
+                // Cleanup job if IP allocation fails
+                let _ = self.job_repo.remove_job(&job_id).await;
+                return Err(DomainError::Infrastructure(e.to_string()));
+            },
+        };
+
+        let mut job_config = config.clone();
+        job_config.ip_address = Some(allocation.ip.clone());
+        job_config.gateway = Some(allocation.gateway.clone());
+        job_config.mac_address = Some(allocation.mac.clone());
+        job_config.netmask = Some(ipam.netmask());
+
+        // Update job with IP info
+        self.job_repo
+            .update_job_ip(
+                &job_id,
+                &allocation.ip,
+                &allocation.gateway,
+                &allocation.mac,
+                &ipam.netmask(),
+            )
+            .await?;
+        job.config = job_config.clone();
+
+        // 4. Ensure exclusivity
         self.ensure_exclusivity(&app_id, &job_id, &user_id).await?;
 
-        // 4. Persist job
-        self.job_repo.add_job(job.clone()).await?;
+        tracing::info!(job_id = %job_id, host_id = %host_id, "Dispatching job to agent");
 
         // 5. Forward to agent
         if let Err(e) = self

@@ -102,6 +102,27 @@ impl JobRepository for PgJobRepository {
         Ok(())
     }
 
+    async fn update_job_ip(
+        &self,
+        job_id: &str,
+        ip: &str,
+        gateway: &str,
+        mac: &str,
+        netmask: &str,
+    ) -> DomainResult<()> {
+        sqlx::query(
+            "UPDATE jobs SET ip_address = $1, gateway = $2, mac_address = $3, netmask = $4 WHERE job_id = $5"
+        )
+        .bind(ip)
+        .bind(gateway)
+        .bind(mac)
+        .bind(netmask)
+        .bind(job_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn cancel_job(&self, job_id: &str, timestamp: i64) -> DomainResult<()> {
         sqlx::query("UPDATE jobs SET status = 'cancelled', stopped_at = $1 WHERE job_id = $2")
             .bind(timestamp)
