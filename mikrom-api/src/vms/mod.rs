@@ -30,6 +30,22 @@ pub struct LiveDeploymentInfo {
 use futures::Stream;
 use std::convert::Infallible;
 
+#[utoipa::path(
+    get,
+    path = "/apps/{app_name}/logs/stream",
+    params(
+        ("app_name" = String, Path, description = "Application name")
+    ),
+    responses(
+        (status = 200, description = "SSE stream of application logs"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "apps",
+    security(
+        ("jwt" = [])
+    )
+)]
 pub async fn app_logs_stream_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
@@ -66,6 +82,22 @@ pub async fn app_logs_stream_handler(
     Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/apps/{app_name}/metrics/stream",
+    params(
+        ("app_name" = String, Path, description = "Application name")
+    ),
+    responses(
+        (status = 200, description = "SSE stream of application metrics"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "apps",
+    security(
+        ("jwt" = [])
+    )
+)]
 pub async fn app_metrics_stream_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,

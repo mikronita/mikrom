@@ -13,10 +13,15 @@ use utoipa::{
 #[openapi(
     paths(
         crate::health,
+        crate::health_stream,
         register,
         login,
         get_profile,
         update_profile,
+        crate::github::handlers::github_install,
+        crate::github::handlers::github_callback,
+        crate::github::handlers::list_repos,
+        crate::github::handlers::list_accounts,
         create_app_handler,
         list_apps_handler,
         get_app_secret_handler,
@@ -29,8 +34,13 @@ use utoipa::{
         watch_deployments,
         get_deployment_status,
         get_deployment_logs,
+        pause_deployment,
+        resume_deployment,
         stop_deployment,
-        github_webhook_handler
+        delete_deployment_record,
+        github_webhook_handler,
+        app_logs_stream_handler,
+        app_metrics_stream_handler
     ),
     components(
         schemas(
@@ -47,6 +57,8 @@ use utoipa::{
             LiveDeploymentInfo,
             LiveDeploymentStatus,
             crate::repositories::user_repository::UserRole,
+            crate::github::GithubRepo,
+            crate::models::github::UserGithubAccount,
             ErrorResponse
         )
     ),
