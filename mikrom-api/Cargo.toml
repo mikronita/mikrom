@@ -48,6 +48,7 @@ utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
 utoipa-swagger-ui = { version = "8", features = ["axum"] }
 rand = "0.10.1"
 rustls = { version = "0.23", features = ["ring"] }
+reqwest = { version = "0.13.3", features = ["json"] }
 
 [dev-dependencies]
 axum-test = "15"
@@ -116,6 +117,11 @@ required-features = ["test-utils"]
 [[test]]
 name = "unified_api_tests"
 path = "tests/unified_api_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "observability_api_tests"
+path = "tests/observability_api_tests.rs"
 required-features = ["test-utils"]
 
 [[test]]

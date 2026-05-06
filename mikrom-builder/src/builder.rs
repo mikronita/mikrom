@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use git2::Repository;
+use git2::{FetchOptions, RemoteCallbacks, Repository};
 use std::path::Path;
 use std::process::Stdio;
 use tempfile::TempDir;
@@ -37,6 +37,7 @@ impl AppBuilder {
         &self,
         app_id: &str,
         git_url: &str,
+        git_auth_token: Option<String>,
         image_name: &str,
         tag: &str,
         metadata_tx: Option<tokio::sync::mpsc::Sender<GitMetadata>>,
@@ -46,7 +47,23 @@ impl AppBuilder {
 
         // 1. Git Clone & Metadata
         info!(app_id = %app_id, git_url = %git_url, "Cloning repository");
-        let repo = Repository::clone(git_url, repo_path).context("Failed to clone repository")?;
+        let repo = if let Some(token) = git_auth_token {
+            let mut callbacks = RemoteCallbacks::new();
+            callbacks.credentials(move |_url, _username_from_url, _allowed_types| {
+                git2::Cred::userpass_plaintext("x-access-token", &token)
+            });
+
+            let mut fetch_options = FetchOptions::new();
+            fetch_options.remote_callbacks(callbacks);
+
+            let mut builder = git2::build::RepoBuilder::new();
+            builder.fetch_options(fetch_options);
+            builder
+                .clone(git_url, repo_path)
+                .context("Failed to clone private repository")?
+        } else {
+            Repository::clone(git_url, repo_path).context("Failed to clone repository")?
+        };
         let metadata = Self::extract_git_metadata(&repo)?;
 
         if let Some(tx) = metadata_tx {

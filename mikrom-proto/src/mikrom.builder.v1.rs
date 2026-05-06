@@ -9,6 +9,8 @@ pub struct BuildRequest {
     pub image_name: ::prost::alloc::string::String,
     #[prost(string, tag = "4")]
     pub tag: ::prost::alloc::string::String,
+    #[prost(string, optional, tag = "5")]
+    pub git_auth_token: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BuildResponse {

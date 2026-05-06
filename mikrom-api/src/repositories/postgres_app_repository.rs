@@ -76,30 +76,26 @@ impl PostgresAppRepository {
 impl AppRepository for PostgresAppRepository {
     async fn create_app(
         &self,
-        name: &str,
-        git_url: &str,
-        port: i32,
-        hostname: Option<String>,
-        user_id: &str,
-        github_webhook_secret: Option<String>,
+        params: crate::repositories::app_repository::CreateAppParams,
     ) -> anyhow::Result<App> {
-        let uid = Uuid::parse_str(user_id)?;
-
-        let encrypted_secret = if let Some(secret) = github_webhook_secret {
+        let encrypted_secret = if let Some(secret) = params.github_webhook_secret {
             Some(crate::crypto::encrypt(&secret, &self.master_key)?)
         } else {
             None
         };
 
         let result = sqlx::query_as::<_, App>(
-            "INSERT INTO apps (name, git_url, port, hostname, user_id, github_webhook_secret) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *"
+            "INSERT INTO apps (name, git_url, port, hostname, user_id, github_webhook_secret, github_installation_id, github_repo_id, github_repo_full_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *"
         )
-        .bind(name)
-        .bind(git_url)
-        .bind(port)
-        .bind(hostname)
-        .bind(uid)
+        .bind(&params.name)
+        .bind(&params.git_url)
+        .bind(params.port)
+        .bind(&params.hostname)
+        .bind(params.user_id)
         .bind(encrypted_secret)
+        .bind(params.github_installation_id)
+        .bind(params.github_repo_id)
+        .bind(&params.github_repo_full_name)
         .fetch_one(&self.pool)
         .await;
 
@@ -111,7 +107,7 @@ impl AppRepository for PostgresAppRepository {
                 {
                     return Err(anyhow::anyhow!(
                         "Application name '{}' is already taken",
-                        name
+                        params.name
                     ));
                 }
                 Err(e.into())
@@ -325,6 +321,20 @@ impl AppRepository for PostgresAppRepository {
         Ok(decrypted_deps)
     }
 
+    async fn get_active_deployment(&self, app_id: Uuid) -> anyhow::Result<Option<Deployment>> {
+        let deployment = sqlx::query_as::<_, Deployment>(
+            "SELECT d.* FROM deployments d JOIN apps a ON d.id = a.active_deployment_id WHERE a.id = $1"
+        )
+        .bind(app_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        match deployment {
+            Some(d) => Ok(Some(self.decrypt_deployment(d)?)),
+            None => Ok(None),
+        }
+    }
+
     async fn delete_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM deployments WHERE job_id = $1")
             .bind(job_id)
@@ -368,7 +378,17 @@ mod tests {
         let app_name = "test-app";
         let git_url = "https://github.com/test/repo";
         let app = app_repo
-            .create_app(app_name, git_url, 80, None, &user_id.to_string(), None)
+            .create_app(crate::repositories::app_repository::CreateAppParams {
+                name: app_name.to_string(),
+                git_url: git_url.to_string(),
+                port: 80,
+                hostname: None,
+                user_id,
+                github_webhook_secret: None,
+                github_installation_id: None,
+                github_repo_id: None,
+                github_repo_full_name: None,
+            })
             .await
             .expect("failed to create app");
         assert_eq!(app.name, app_name);
@@ -449,7 +469,17 @@ mod tests {
 
         // Create app
         app_repo
-            .create_app(&name, "git", 8080, None, &user_id.to_string(), None)
+            .create_app(crate::repositories::app_repository::CreateAppParams {
+                name: name.clone(),
+                git_url: "git".to_string(),
+                port: 8080,
+                hostname: None,
+                user_id,
+                github_webhook_secret: None,
+                github_installation_id: None,
+                github_repo_id: None,
+                github_repo_full_name: None,
+            })
             .await
             .unwrap();
 

@@ -282,6 +282,7 @@ mod tests {
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             nats,
             router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
             api_db: sqlx::postgres::PgPoolOptions::new()
                 .connect_lazy("postgres://localhost/dummy")
                 .unwrap(),
@@ -291,6 +292,10 @@ mod tests {
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
+            github_repo: Arc::new(crate::repositories::MockGithubRepository::default()),
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
         };
 
         let payload = RegisterRequest {
@@ -333,6 +338,7 @@ mod tests {
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             nats,
             router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
             api_db: sqlx::postgres::PgPoolOptions::new()
                 .connect_lazy("postgres://localhost/dummy")
                 .unwrap(),
@@ -342,6 +348,10 @@ mod tests {
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
+            github_repo: Arc::new(crate::repositories::MockGithubRepository::default()),
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
         };
 
         let payload = LoginRequest {

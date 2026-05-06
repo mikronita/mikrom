@@ -129,6 +129,7 @@ impl BuilderServer {
             .build_image(
                 &req.app_id,
                 &req.git_url,
+                req.git_auth_token,
                 &req.image_name,
                 &req.tag,
                 Some(tx),

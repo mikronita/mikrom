@@ -35,9 +35,11 @@ async fn test_route_reconciliation_on_startup() {
                 pool.clone(),
             ),
         ),
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: "test-secret".to_string(),
         master_key: "test-key".into(),
         api_db: pool.clone(),
@@ -45,6 +47,9 @@ async fn test_route_reconciliation_on_startup() {
         acme_email: "test@example.com".into(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     // 2. Create test data: an app with an active deployment
@@ -60,14 +65,17 @@ async fn test_route_reconciliation_on_startup() {
         .unwrap();
 
     let app = app_repo
-        .create_app(
-            "reconcile-app",
-            "https://github.com/test/reconcile",
-            8080,
-            Some("reconcile.mikrom.local".into()),
-            &user_id.to_string(),
-            None,
-        )
+        .create_app(mikrom_api::repositories::app_repository::CreateAppParams {
+            name: "reconcile-app".to_string(),
+            git_url: "https://github.com/test/reconcile".to_string(),
+            port: 8080,
+            hostname: Some("reconcile.mikrom.local".into()),
+            user_id,
+            github_webhook_secret: None,
+            github_installation_id: None,
+            github_repo_id: None,
+            github_repo_full_name: None,
+        })
         .await
         .unwrap();
 

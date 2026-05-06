@@ -22,8 +22,25 @@ export const appsKeys = {
   detail: (id: string) => [...appsKeys.all, "detail", id] as const,
   secret: (appName: string) => [...appsKeys.all, "secret", appName] as const,
   deployments: (appName: string) => [...appsKeys.all, "deployments", appName] as const,
+  githubRepos: ["github", "repos"] as const,
   vms: ["vms"] as const,
 };
+
+export function useGithubRepos() {
+  const token = getToken();
+
+  return useQuery({
+    queryKey: appsKeys.githubRepos,
+    queryFn: async () => {
+      if (!token) throw new Error("No token found");
+      const result = await (await import("@/lib/api")).listGithubRepos(token);
+      if (result.error) throw new Error(result.error);
+      return result.data ?? [];
+    },
+    enabled: !!token,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
 
 export function useApps() {
   const token = getToken();

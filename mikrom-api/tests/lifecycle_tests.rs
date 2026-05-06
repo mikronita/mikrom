@@ -43,6 +43,9 @@ async fn test_promotion_back_and_forth() {
         hostname: None,
         user_id,
         github_webhook_secret: None,
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
         active_deployment_id: Some(dep1_id),
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -141,9 +144,11 @@ async fn test_promotion_back_and_forth() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
             .unwrap(),
@@ -153,6 +158,9 @@ async fn test_promotion_back_and_forth() {
         acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);
@@ -202,6 +210,9 @@ async fn test_promotion_pauses_previous_active() {
         hostname: None,
         user_id,
         github_webhook_secret: None,
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
         active_deployment_id: Some(old_dep_id),
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -297,9 +308,11 @@ async fn test_promotion_pauses_previous_active() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
             .unwrap(),
@@ -309,6 +322,9 @@ async fn test_promotion_pauses_previous_active() {
         acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);
@@ -362,6 +378,9 @@ async fn test_activate_stopped_deployment_resumes_it() {
         hostname: None,
         user_id,
         github_webhook_secret: None,
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
         active_deployment_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -430,9 +449,11 @@ async fn test_activate_stopped_deployment_resumes_it() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
             .unwrap(),
@@ -442,6 +463,9 @@ async fn test_activate_stopped_deployment_resumes_it() {
         acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);
@@ -495,6 +519,9 @@ async fn test_delete_app_cleans_up_resources() {
         hostname: None,
         user_id,
         github_webhook_secret: None,
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
         active_deployment_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -538,9 +565,11 @@ async fn test_delete_app_cleans_up_resources() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
             .unwrap(),
@@ -550,6 +579,9 @@ async fn test_delete_app_cleans_up_resources() {
         acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);

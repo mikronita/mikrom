@@ -24,6 +24,7 @@ async fn main() -> anyhow::Result<()> {
         db_pool.clone(),
         config.master_key.clone(),
     );
+    let github_repo = mikrom_api::repositories::PostgresGithubRepository::new(db_pool.clone());
 
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
 
@@ -40,9 +41,11 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
+        github_repo: Arc::new(github_repo),
         scheduler,
         nats,
         router_addr: config.router_addr,
+        frontend_url: config.frontend_url,
         api_db: db_pool,
         jwt_secret: config.jwt_secret,
         master_key: config.master_key,
@@ -50,6 +53,9 @@ async fn main() -> anyhow::Result<()> {
         acme_email: config.acme_email,
         acme_staging: config.acme_staging,
         acme_check_interval: config.acme_check_interval,
+        github_app_id: config.github_app_id,
+        github_private_key: config.github_private_key,
+        github_app_slug: config.github_app_slug,
     };
 
     mikrom_api::start_background_tasks(state.clone());

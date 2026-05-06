@@ -23,9 +23,11 @@ async fn test_openapi_json_endpoint() {
     let state = AppState {
         user_repo: Arc::new(mock_repo),
         app_repo,
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: "test".to_string(),
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -33,6 +35,9 @@ async fn test_openapi_json_endpoint() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
     let app = create_app(state);
 
@@ -67,9 +72,11 @@ async fn test_swagger_ui_endpoint() {
     let state = AppState {
         user_repo: Arc::new(mock_repo),
         app_repo,
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: "test".to_string(),
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -77,6 +84,9 @@ async fn test_swagger_ui_endpoint() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
     let app = create_app(state);
 

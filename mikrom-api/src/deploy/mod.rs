@@ -69,6 +69,7 @@ pub async fn deploy_app(
             git_url: git_url.clone(),
             image_name: payload.app_name.to_lowercase().replace(' ', "-"),
             tag: "latest".to_string(),
+            git_auth_token: None,
         };
 
         let build_resp: mikrom_proto::builder::BuildResponse = state

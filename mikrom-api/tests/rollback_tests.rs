@@ -44,6 +44,9 @@ async fn test_activate_deployment_endpoint() {
         hostname: None,
         user_id,
         github_webhook_secret: None,
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
         active_deployment_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -98,6 +101,9 @@ async fn test_activate_deployment_endpoint() {
         hostname: None,
         user_id,
         github_webhook_secret: None,
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
         active_deployment_id: Some(deployment_id),
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -124,6 +130,7 @@ async fn test_activate_deployment_endpoint() {
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -131,6 +138,10 @@ async fn test_activate_deployment_endpoint() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);
@@ -180,6 +191,9 @@ async fn test_activate_deployment_wrong_owner() {
         hostname: None,
         user_id: other_user_id, // Owned by someone else
         github_webhook_secret: None,
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
         active_deployment_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -200,6 +214,7 @@ async fn test_activate_deployment_wrong_owner() {
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -207,6 +222,10 @@ async fn test_activate_deployment_wrong_owner() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let response = create_app(state)
@@ -253,6 +272,9 @@ async fn test_activate_deployment_not_running() {
         hostname: None,
         user_id,
         github_webhook_secret: None,
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
         active_deployment_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -306,6 +328,7 @@ async fn test_activate_deployment_not_running() {
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -313,6 +336,10 @@ async fn test_activate_deployment_not_running() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let response = create_app(state)

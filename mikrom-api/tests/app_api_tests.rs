@@ -11,7 +11,9 @@ use chrono::Utc;
 use mikrom_api::AppState;
 use mikrom_api::create_app;
 use mikrom_api::models::app::App;
-use mikrom_api::repositories::{MockAppRepository, MockUserRepository};
+use mikrom_api::repositories::{
+    MockAppRepository, MockUserRepository, app_repository::CreateAppParams,
+};
 use mikrom_api::test_utils::TestDb;
 
 #[tokio::test]
@@ -38,24 +40,22 @@ async fn test_create_app_endpoint() {
     // Expectation: repo should be called with specific params
     mock_app_repo
         .expect_create_app()
-        .with(
-            eq(app_name),
-            eq(git_url),
-            eq(8080),
-            eq(Some("test-app.apps.mikrom.spluca.org".to_string())),
-            eq(user_id.to_string()),
-            always(),
-        )
+        .with(mockall::predicate::function(move |p: &CreateAppParams| {
+            p.name == "test-app" && p.git_url == "https://github.com/test/repo"
+        }))
         .times(1)
-        .returning(move |name, url, port, hostname, uid, secret| {
+        .returning(move |params| {
             Ok(App {
                 id: app_id,
-                name: name.to_string(),
-                git_url: url.to_string(),
-                port,
-                hostname: hostname.map(|s| s.to_string()),
-                user_id: Uuid::parse_str(uid).unwrap(),
-                github_webhook_secret: secret,
+                name: params.name,
+                git_url: params.git_url,
+                port: params.port,
+                hostname: params.hostname,
+                user_id: params.user_id,
+                github_webhook_secret: params.github_webhook_secret,
+                github_installation_id: params.github_installation_id,
+                github_repo_id: params.github_repo_id,
+                github_repo_full_name: params.github_repo_full_name,
                 active_deployment_id: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
@@ -71,9 +71,11 @@ async fn test_create_app_endpoint() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -81,6 +83,9 @@ async fn test_create_app_endpoint() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);
@@ -142,10 +147,10 @@ async fn test_create_app_duplicate_name() {
     mock_app_repo
         .expect_create_app()
         .times(1)
-        .returning(move |name, _, _, _, _, _| {
+        .returning(move |params| {
             Err(anyhow::anyhow!(
                 "Application name '{}' is already taken",
-                name
+                params.name
             ))
         });
 
@@ -158,9 +163,11 @@ async fn test_create_app_duplicate_name() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -168,6 +175,9 @@ async fn test_create_app_duplicate_name() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);
@@ -234,6 +244,9 @@ async fn test_list_apps_includes_secret() {
                 hostname: Some("test-app.apps.mikrom.spluca.org".to_string()),
                 user_id,
                 github_webhook_secret: Some(secret.clone()),
+                github_installation_id: None,
+                github_repo_id: None,
+                github_repo_full_name: None,
                 active_deployment_id: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
@@ -249,9 +262,11 @@ async fn test_list_apps_includes_secret() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -259,6 +274,9 @@ async fn test_list_apps_includes_secret() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);
@@ -320,6 +338,9 @@ async fn test_get_app_secret_endpoint() {
                 hostname: None,
                 user_id,
                 github_webhook_secret: Some(webhook_secret.to_string()),
+                github_installation_id: None,
+                github_repo_id: None,
+                github_repo_full_name: None,
                 active_deployment_id: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
@@ -335,9 +356,11 @@ async fn test_get_app_secret_endpoint() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -345,6 +368,9 @@ async fn test_get_app_secret_endpoint() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);

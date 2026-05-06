@@ -28,6 +28,7 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
             .unwrap(),
@@ -37,6 +38,10 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
         acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     create_app(state)
@@ -63,6 +68,9 @@ async fn test_sse_deployments_stream_initial_data() {
                     hostname: None,
                     user_id,
                     github_webhook_secret: None,
+                    github_installation_id: None,
+                    github_repo_id: None,
+                    github_repo_full_name: None,
                     active_deployment_id: None,
                     created_at: chrono::Utc::now(),
                     updated_at: chrono::Utc::now(),
@@ -144,6 +152,9 @@ async fn test_sse_deployments_auth_via_query_param() {
             hostname: None,
             user_id,
             github_webhook_secret: None,
+            github_installation_id: None,
+            github_repo_id: None,
+            github_repo_full_name: None,
             active_deployment_id: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -193,6 +204,9 @@ async fn test_sse_deployments_stream_updates() {
             hostname: None,
             user_id,
             github_webhook_secret: None,
+            github_installation_id: None,
+            github_repo_id: None,
+            github_repo_full_name: None,
             active_deployment_id: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -247,6 +261,7 @@ async fn test_sse_deployments_stream_updates() {
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
             .unwrap(),
@@ -256,6 +271,10 @@ async fn test_sse_deployments_stream_updates() {
         acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let mut router = create_app(state);

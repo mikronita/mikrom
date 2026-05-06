@@ -47,9 +47,11 @@ mod tests {
                 pool.clone(),
                 "test-key".to_string(),
             )),
+            github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
             scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
             nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
             router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
             jwt_secret: "secret".into(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -57,6 +59,9 @@ mod tests {
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
         };
 
         // Subscribe to router updates
