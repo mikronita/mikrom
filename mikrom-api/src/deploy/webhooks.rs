@@ -32,7 +32,7 @@ pub struct GitHubCommit {
 
 #[utoipa::path(
     post,
-    path = "/webhooks/github/{app_name}",
+    path = "/v1/webhooks/github/{app_name}",
     request_body(content = String, description = "GitHub Webhook Payload", content_type = "application/json"),
     params(
         ("app_name" = String, Path, description = "Application Name")
@@ -58,7 +58,7 @@ pub async fn github_webhook_handler(
 
 #[utoipa::path(
     post,
-    path = "/webhooks/github",
+    path = "/v1/webhooks/github",
     request_body(content = String, description = "GitHub Webhook Payload", content_type = "application/json"),
     responses(
         (status = 200, description = "Webhook ignored or processed successfully without deployment"),

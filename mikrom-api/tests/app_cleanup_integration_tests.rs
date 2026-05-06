@@ -104,7 +104,7 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         .oneshot(
             Request::builder()
                 .method("DELETE")
-                .uri(format!("/apps/{}", app_name))
+                .uri(format!("/v1/apps/{}", app_name))
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
                 .unwrap(),

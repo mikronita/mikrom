@@ -82,7 +82,7 @@ async fn test_app_logs_stream_auth() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(format!("/apps/{}/logs/stream", app_name))
+        .uri(format!("/v1/apps/{}/logs/stream", app_name))
         .header("Authorization", format!("Bearer {}", token))
         .body(Body::empty())
         .unwrap();
@@ -128,7 +128,7 @@ async fn test_app_metrics_stream_auth() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(format!("/apps/{}/metrics/stream", app_name))
+        .uri(format!("/v1/apps/{}/metrics/stream", app_name))
         .header("Authorization", format!("Bearer {}", token))
         .body(Body::empty())
         .unwrap();

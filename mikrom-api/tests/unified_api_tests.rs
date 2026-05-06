@@ -127,7 +127,7 @@ async fn test_hierarchical_deployment_status_success() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("/apps/{}/deployments/{}", app_name, job_id))
+                .uri(format!("/v1/apps/{}/deployments/{}", app_name, job_id))
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
                 .unwrap(),
@@ -227,7 +227,7 @@ async fn test_hierarchical_security_cross_app_prevention() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("/apps/{}/deployments/{}", app_a_name, job_id))
+                .uri(format!("/v1/apps/{}/deployments/{}", app_a_name, job_id))
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
                 .unwrap(),

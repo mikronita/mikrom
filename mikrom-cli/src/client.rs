@@ -109,7 +109,7 @@ impl MikromClient {
         body: Option<B>,
     ) -> anyhow::Result<T> {
         let url = format!(
-            "{}/{}",
+            "{}/v1/{}",
             self.base_url.trim_end_matches('/'),
             endpoint.trim_start_matches('/')
         );

@@ -1,6 +1,7 @@
 import { logout } from "@/lib/auth";
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
+const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001").replace(/\/+$/, "");
+export const API_BASE_URL = `${BASE}/v1`;
 
 export interface RegisterRequest {
   email: string;

@@ -97,7 +97,7 @@ func (m *MikromRouter) ServeHTTP(w http.ResponseWriter, r *http.Request, next ca
 	}
 
 	// Handle internal domain check for On-Demand TLS
-	if r.URL.Path == "/.mikrom/check-domain" {
+	if r.URL.Path == "/v1/.mikrom/check-domain" {
 		domain := r.URL.Query().Get("domain")
 		if domain == "" {
 			w.WriteHeader(http.StatusBadRequest)

@@ -66,7 +66,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/auth/register")
+                    .uri("/v1/auth/register")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
                         serde_json::json!({"email": email, "password": password}).to_string(),
@@ -81,7 +81,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/auth/login")
+                    .uri("/v1/auth/login")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
                         serde_json::json!({"email": email, "password": password}).to_string(),
@@ -105,7 +105,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/auth/register")
+                    .uri("/v1/auth/register")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
                         serde_json::json!({"email": email, "password": password}).to_string(),
@@ -121,7 +121,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/auth/login")
+                    .uri("/v1/auth/login")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
                         serde_json::json!({"email": email, "password": password}).to_string(),
@@ -142,7 +142,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/auth/me")
+                    .uri("/v1/auth/me")
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::empty())
                     .unwrap(),
@@ -156,7 +156,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("PUT")
-                    .uri("/auth/me")
+                    .uri("/v1/auth/me")
                     .header("Content-Type", "application/json")
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::from(
@@ -180,7 +180,7 @@ async fn test_all_auth_integration_flows() {
                 .oneshot(
                     Request::builder()
                         .method("POST")
-                        .uri("/auth/register")
+                        .uri("/v1/auth/register")
                         .header("Content-Type", "application/json")
                         .body(Body::from(
                             serde_json::json!({"email": email, "password": "password123"})
@@ -208,7 +208,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/auth/register")
+                    .uri("/v1/auth/register")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
                         serde_json::json!({"email": email, "password": "a".repeat(100)})
@@ -232,7 +232,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/auth/register")
+                    .uri("/v1/auth/register")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
                         serde_json::json!({"email": email, "password": password}).to_string(),
@@ -246,7 +246,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/auth/login")
+                    .uri("/v1/auth/login")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
                         serde_json::json!({"email": email, "password": password}).to_string(),
@@ -270,7 +270,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/auth/register")
+                    .uri("/v1/auth/register")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
                         serde_json::json!({"email": email, "password": password}).to_string(),
@@ -285,7 +285,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/auth/login")
+                    .uri("/v1/auth/login")
                     .header("Content-Type", "application/json")
                     .body(Body::from(
                         serde_json::json!({"email": email, "password": password}).to_string(),
@@ -307,7 +307,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/apps")
+                    .uri("/v1/apps")
                     .header("Authorization", format!("Bearer {}", token))
                     .header("Content-Type", "application/json")
                     .body(Body::from(
@@ -329,7 +329,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/apps")
+                    .uri("/v1/apps")
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::empty())
                     .unwrap(),
@@ -343,7 +343,7 @@ async fn test_all_auth_integration_flows() {
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri(format!("/apps/{}", app_name))
+                    .uri(format!("/v1/apps/{}", app_name))
                     .header("Authorization", format!("Bearer {}", token))
                     .body(Body::empty())
                     .unwrap(),
