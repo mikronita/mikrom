@@ -8,6 +8,7 @@ use crate::firecracker::process::{
 use crate::logger::LogShipper;
 
 use std::collections::{HashMap, VecDeque};
+use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -161,7 +162,7 @@ impl FirecrackerManager {
             match proc.child.try_wait() {
                 Ok(Some(status)) => {
                     tracing::info!(vm_id = %vm_id, status = ?status, "Detected Firecracker process exit via GC");
-                    to_remove.push(vm_id.clone());
+                    to_remove.push((vm_id.clone(), status));
                 },
                 Ok(None) => {
                     // Still running
@@ -172,7 +173,7 @@ impl FirecrackerManager {
             }
         }
 
-        for vm_id in to_remove {
+        for (vm_id, exit_status) in to_remove {
             let restart_data = if let Some(proc) = processes.remove(&vm_id) {
                 if let Err(e) = tokio::fs::remove_file(&proc.socket_path).await
                     && e.kind() != std::io::ErrorKind::NotFound
@@ -187,7 +188,15 @@ impl FirecrackerManager {
                 if let Some(vm) = vms.get_mut(&vm_id) {
                     tracing::info!(vm_id = %vm_id, current_status = ?vm.status, "Checking if VM needs auto-restart");
                     let eligibility = if vm.status == VmStatus::Running {
-                        tracing::warn!(vm_id = %vm_id, "VM process exited unexpectedly, preparing for auto-restart");
+                        let exit_code = exit_status.code();
+                        let signal = exit_status.signal();
+
+                        tracing::error!(
+                            vm_id = %vm_id,
+                            exit_code = ?exit_code,
+                            signal = ?signal,
+                            "VM process exited unexpectedly, preparing for auto-restart"
+                        );
                         if let Some(ip) = &vm.config.ip_address {
                             self.release_vm_ip(ip).await;
                         }
@@ -2336,6 +2345,117 @@ mod tests {
         assert!(!mgr.processes.lock().await.contains_key(vm_id));
         assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
         assert!(!socket.exists(), "Socket should be cleaned up by GC");
+
+        if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+            tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gc_handles_unexpected_exit() {
+        let temp_uuid = uuid::Uuid::new_v4();
+        let temp_dir = std::env::temp_dir().join(format!("mikrom-test-gc-unexp-{}", temp_uuid));
+        let mut cfg = FirecrackerConfig::stub();
+        cfg.data_dir = temp_dir.to_string_lossy().to_string();
+
+        let mgr = FirecrackerManager::with_config(cfg);
+        let vm_id = "gc-test-unexp";
+
+        // Spawn a process that will exit quickly
+        let child = tokio::process::Command::new("true").spawn().unwrap();
+
+        let socket = std::path::Path::new(&mgr.fc_config.data_dir)
+            .join(format!("fc-{}-gc-unexp.sock", mgr.agent_id));
+        tokio::fs::write(&socket, b"").await.unwrap();
+
+        mgr.insert_process_for_test(vm_id, child, socket.to_string_lossy().to_string())
+            .await;
+
+        // Use Stopping to avoid auto-restart and its race conditions in this test
+        mgr.set_status_for_test(vm_id, VmStatus::Stopping).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        mgr.run_gc().await;
+
+        // Verify cleanup
+        assert!(!mgr.processes.lock().await.contains_key(vm_id));
+        assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
+        assert!(!socket.exists(), "Socket should be cleaned up by GC");
+
+        if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+            tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gc_handles_nonzero_exit() {
+        let temp_uuid = uuid::Uuid::new_v4();
+        let temp_dir = std::env::temp_dir().join(format!("mikrom-test-gc-nonzero-{}", temp_uuid));
+        let mut cfg = FirecrackerConfig::stub();
+        cfg.data_dir = temp_dir.to_string_lossy().to_string();
+
+        let mgr = FirecrackerManager::with_config(cfg);
+        let vm_id = "gc-test-nonzero";
+
+        // Spawn a process that exits with code 1
+        let child = tokio::process::Command::new("false").spawn().unwrap();
+
+        let socket = std::path::Path::new(&mgr.fc_config.data_dir)
+            .join(format!("fc-{}-gc-nonzero.sock", mgr.agent_id));
+        tokio::fs::write(&socket, b"").await.unwrap();
+
+        mgr.insert_process_for_test(vm_id, child, socket.to_string_lossy().to_string())
+            .await;
+        mgr.set_status_for_test(vm_id, VmStatus::Stopping).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        mgr.run_gc().await;
+
+        assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
+        assert!(!mgr.processes.lock().await.contains_key(vm_id));
+
+        if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+            tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gc_handles_signal_exit() {
+        let temp_uuid = uuid::Uuid::new_v4();
+        let temp_dir = std::env::temp_dir().join(format!("mikrom-test-gc-signal-{}", temp_uuid));
+        let mut cfg = FirecrackerConfig::stub();
+        cfg.data_dir = temp_dir.to_string_lossy().to_string();
+
+        let mgr = FirecrackerManager::with_config(cfg);
+        let vm_id = "gc-test-signal";
+
+        // Spawn a process that we will kill
+        let child = tokio::process::Command::new("sleep")
+            .arg("10")
+            .spawn()
+            .unwrap();
+
+        let socket = std::path::Path::new(&mgr.fc_config.data_dir)
+            .join(format!("fc-{}-gc-signal.sock", mgr.agent_id));
+        tokio::fs::write(&socket, b"").await.unwrap();
+
+        mgr.insert_process_for_test(vm_id, child, socket.to_string_lossy().to_string())
+            .await;
+        mgr.set_status_for_test(vm_id, VmStatus::Stopping).await;
+
+        // Kill it with SIGKILL
+        {
+            let mut processes = mgr.processes.lock().await;
+            let proc = processes.get_mut(vm_id).unwrap();
+            proc.child.kill().await.unwrap();
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        mgr.run_gc().await;
+
+        assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
+        assert!(!mgr.processes.lock().await.contains_key(vm_id));
 
         if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
             tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
