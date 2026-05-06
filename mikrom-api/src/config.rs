@@ -39,6 +39,7 @@ pub struct ApiConfig {
     pub github_client_secret: Option<String>,
     pub github_private_key: Option<String>,
     pub github_app_slug: Option<String>,
+    pub github_webhook_url_base: Option<String>,
 }
 
 fn default_acme_email() -> String {

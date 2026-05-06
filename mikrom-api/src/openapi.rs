@@ -39,6 +39,7 @@ use utoipa::{
         stop_deployment,
         delete_deployment_record,
         github_webhook_handler,
+        github_webhook_handler_generic,
         app_logs_stream_handler,
         app_metrics_stream_handler
     ),

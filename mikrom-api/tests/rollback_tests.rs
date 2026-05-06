@@ -142,6 +142,7 @@ async fn test_activate_deployment_endpoint() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     let router = create_app(state);
@@ -226,6 +227,7 @@ async fn test_activate_deployment_wrong_owner() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     let response = create_app(state)
@@ -340,6 +342,7 @@ async fn test_activate_deployment_not_running() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     let response = create_app(state)

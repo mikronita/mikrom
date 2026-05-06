@@ -356,10 +356,8 @@ export default function SettingsPage() {
                           </div>
                           <div className="flex gap-2">
                             <Button variant="outline" size="sm" asChild>
-                              <a 
-                                href={`https://github.com/settings/installations/${account.installation_id}`} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
+                              <a
+                                href={`https://github.com/settings/installations/${account.installation_id}`}
                               >
                                 Configure
                               </a>

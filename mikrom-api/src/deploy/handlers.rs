@@ -120,17 +120,78 @@ pub async fn create_app_handler(
     let app = state
         .app_repo
         .create_app(crate::repositories::app_repository::CreateAppParams {
-            name: payload.name,
+            name: payload.name.clone(),
             git_url: payload.git_url,
             port: port as i32,
             hostname: Some(hostname),
             user_id,
-            github_webhook_secret: Some(webhook_secret),
+            github_webhook_secret: Some(webhook_secret.clone()),
             github_installation_id: payload.github_installation_id,
             github_repo_id: payload.github_repo_id,
-            github_repo_full_name: payload.github_repo_full_name,
+            github_repo_full_name: payload.github_repo_full_name.clone(),
         })
         .await?;
+
+    // Automatically create GitHub Webhook if repo is connected
+    tracing::info!(
+        app_name = %app.name,
+        has_inst = app.github_installation_id.is_some(),
+        has_repo = app.github_repo_full_name.is_some(),
+        has_app_id = state.github_app_id.is_some(),
+        has_key = state.github_private_key.is_some(),
+        "Checking if automatic GitHub webhook should be created"
+    );
+
+    if let Some(installation_id) = app.github_installation_id
+        && let Some(repo_full_name) = &app.github_repo_full_name
+        && let Some(github_app_id) = &state.github_app_id
+        && let Some(github_private_key) = &state.github_private_key
+    {
+        tracing::info!(app_name = %app.name, "Initiating automatic GitHub webhook creation");
+        let webhook_url = if let Some(base) = &state.github_webhook_url_base {
+            if base.contains("smee.io") {
+                // Smee.io doesn't support subpaths on the public URL
+                base.to_string()
+            } else {
+                format!(
+                    "{}/webhooks/github/{}",
+                    base.trim_end_matches('/'),
+                    app.name
+                )
+            }
+        } else {
+            // Fallback: Try to guess the API URL from the frontend URL
+            format!(
+                "{}/webhooks/github/{}",
+                state.frontend_url.replace("3000", "5001"),
+                app.name
+            )
+        };
+
+        // Use a background task to not block the response
+        let github_app_id = github_app_id.clone();
+        let github_private_key = github_private_key.clone();
+        let repo_full_name = repo_full_name.clone();
+        let webhook_secret = webhook_secret.clone();
+
+        let app_id = app.id;
+        tokio::spawn(async move {
+            if let Err(e) = crate::github::create_repository_webhook(
+                &github_app_id,
+                &github_private_key,
+                installation_id,
+                &repo_full_name,
+                &webhook_url,
+                &webhook_secret,
+            )
+            .await
+            {
+                tracing::error!(%app_id, error = %e, "Failed to automatically create GitHub webhook");
+            } else {
+                tracing::info!(app_name = %payload.name, "Successfully created automatic GitHub webhook");
+            }
+        });
+    }
 
     Ok((
         StatusCode::CREATED,
@@ -526,6 +587,47 @@ pub async fn deploy_app_version_handler(
     let env_vars = payload.env.clone().unwrap_or_default();
     let image = payload.image.clone();
 
+    // Try to fetch latest git metadata if linked to GitHub
+    let mut git_metadata = None;
+    if let Some(installation_id) = app.github_installation_id
+        && let Some(repo_full_name) = &app.github_repo_full_name
+    {
+        match (&state.github_app_id, &state.github_private_key) {
+            (Some(github_app_id), Some(github_private_key)) => {
+                // Default to main/master, or ideally we'd know the target branch
+                // For now, let's try main then master
+                match crate::github::get_repo_latest_commit(
+                    github_app_id,
+                    github_private_key,
+                    installation_id,
+                    repo_full_name,
+                    "main",
+                )
+                .await
+                {
+                    Ok(meta) => git_metadata = Some(meta),
+                    Err(_) => {
+                        // Try master if main fails
+                        if let Ok(meta) = crate::github::get_repo_latest_commit(
+                            github_app_id,
+                            github_private_key,
+                            installation_id,
+                            repo_full_name,
+                            "master",
+                        )
+                        .await
+                        {
+                            git_metadata = Some(meta);
+                        }
+                    },
+                }
+            },
+            _ => {
+                tracing::warn!(app_id = %app.id, "GitHub linked but API credentials missing in state")
+            },
+        }
+    }
+
     let deployment = state
         .app_repo
         .create_deployment(crate::repositories::app_repository::NewDeployment {
@@ -537,6 +639,13 @@ pub async fn deploy_app_version_handler(
             port: app.port,
             env_vars: env_vars.clone(),
             trigger_source: "manual".to_string(),
+            git_commit_hash: git_metadata
+                .as_ref()
+                .and_then(|m| m.git_commit_hash.clone()),
+            git_commit_message: git_metadata
+                .as_ref()
+                .and_then(|m| m.git_commit_message.clone()),
+            git_branch: git_metadata.as_ref().and_then(|m| m.git_branch.clone()),
         })
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -596,6 +705,7 @@ pub async fn deploy_app_version_handler(
 pub async fn trigger_app_build(
     state: crate::AppState,
     app: crate::models::app::App,
+    git_metadata: Option<crate::repositories::app_repository::GitMetadata>,
 ) -> ApiResult<Uuid> {
     let vcpus = 1;
     let memory_mib = 256;
@@ -613,6 +723,13 @@ pub async fn trigger_app_build(
             port: app.port,
             env_vars: env_vars.clone(),
             trigger_source: "github_webhook".to_string(),
+            git_commit_hash: git_metadata
+                .as_ref()
+                .and_then(|m| m.git_commit_hash.clone()),
+            git_commit_message: git_metadata
+                .as_ref()
+                .and_then(|m| m.git_commit_message.clone()),
+            git_branch: git_metadata.as_ref().and_then(|m| m.git_branch.clone()),
         })
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
