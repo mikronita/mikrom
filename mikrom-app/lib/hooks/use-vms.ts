@@ -13,7 +13,6 @@ import {
   watchAppLogs,
   LiveDeploymentInfo, 
   LiveDeploymentStatus,
-  VmMetrics,
   VmMetricsResponse,
   LogLine
 } from "@/lib/api";
