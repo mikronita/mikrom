@@ -49,6 +49,33 @@ export default function SettingsPage() {
   const queryClient = useQueryClient();
   const token = getToken();
 
+  const handleConnectGithub = async () => {
+    const t = getToken();
+    if (!t) {
+      toast.error("You must be logged in to connect GitHub");
+      return;
+    }
+
+    const toastId = toast.loading("Redirecting to GitHub...");
+    try {
+      const { data, error } = await getGithubInstallUrl(t);
+      if (error) {
+        toast.dismiss(toastId);
+        toast.error(error);
+        return;
+      }
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        toast.dismiss(toastId);
+        toast.error("Failed to get installation URL");
+      }
+    } catch (err) {
+      toast.dismiss(toastId);
+      toast.error("Failed to start GitHub installation");
+    }
+  };
+
   const { data: profile, isLoading } = useQuery({
     queryKey: ["profile"],
     queryFn: () => getUserProfile(token!).then(res => {
@@ -306,11 +333,11 @@ export default function SettingsPage() {
               </TabsContent>
 
               <TabsContent value="integrations" className="p-6 space-y-6">
-                <div>
-                  <h3 className="text-lg font-bold">Source Control</h3>
-                  <p className="text-sm text-muted-foreground mb-6">Connect your GitHub account to deploy private repositories.</p>
+                <FieldSet>
+                  <FieldLegend>Source Control</FieldLegend>
+                  <FieldDescription>Connect your GitHub account to deploy private repositories.</FieldDescription>
                   
-                  <div className="space-y-4">
+                  <FieldGroup className="mt-6">
                     {isLoadingGithub ? (
                       <div className="flex justify-center p-4">
                         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -353,14 +380,7 @@ export default function SettingsPage() {
                         </div>
                         <Button 
                           size="sm" 
-                          onClick={() => {
-                            const t = getToken();
-                            if (t) {
-                              window.location.href = getGithubInstallUrl(t);
-                            } else {
-                              toast.error("You must be logged in to connect GitHub");
-                            }
-                          }}
+                          onClick={handleConnectGithub}
                         >
                           Connect GitHub
                         </Button>
@@ -372,20 +392,15 @@ export default function SettingsPage() {
                         <Button 
                           variant="outline" 
                           size="sm"
-                          onClick={() => {
-                            const t = getToken();
-                            if (t) {
-                              window.location.href = getGithubInstallUrl(t);
-                            }
-                          }}
+                          onClick={handleConnectGithub}
                         >
                           <HiPlus className="mr-2 h-4 w-4" />
-                          Add another account
+                          Connect Another Account
                         </Button>
                       </div>
                     )}
-                  </div>
-                </div>
+                  </FieldGroup>
+                </FieldSet>
               </TabsContent>
 
               <TabsContent value="notifications" className="p-6 space-y-6">

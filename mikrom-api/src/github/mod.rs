@@ -34,6 +34,15 @@ struct GithubReposResponse {
     repositories: Vec<GithubRepo>,
 }
 
+use std::sync::LazyLock;
+
+pub(crate) static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .user_agent("mikrom-api")
+        .build()
+        .expect("Failed to create reqwest client")
+});
+
 pub fn generate_jwt(app_id: &str, private_key_pem: &str) -> ApiResult<String> {
     let iat = Utc::now().timestamp() - 60; // 60 seconds leeway
     let exp = (Utc::now() + Duration::minutes(10)).timestamp();
@@ -58,15 +67,13 @@ pub async fn get_installation_token(
 ) -> ApiResult<String> {
     let jwt = generate_jwt(app_id, private_key_pem)?;
 
-    let client = reqwest::Client::new();
-    let response = client
+    let response = HTTP_CLIENT
         .post(format!(
             "https://api.github.com/app/installations/{}/access_tokens",
             installation_id
         ))
         .header("Authorization", format!("Bearer {}", jwt))
         .header("Accept", "application/vnd.github.v3+json")
-        .header("User-Agent", "mikrom-api")
         .send()
         .await
         .map_err(|e| ApiError::Internal(format!("GitHub API request failed: {}", e)))?;
@@ -94,7 +101,6 @@ pub async fn list_installation_repos(
     installation_id: i64,
 ) -> ApiResult<Vec<GithubRepo>> {
     let token = get_installation_token(app_id, private_key_pem, installation_id).await?;
-    let client = reqwest::Client::new();
     let mut all_repos = Vec::new();
     let mut page = 1;
 
@@ -103,11 +109,10 @@ pub async fn list_installation_repos(
             "https://api.github.com/installation/repositories?per_page=100&page={}",
             page
         );
-        let response = client
+        let response = HTTP_CLIENT
             .get(&url)
             .header("Authorization", format!("token {}", token))
             .header("Accept", "application/vnd.github.v3+json")
-            .header("User-Agent", "mikrom-api")
             .send()
             .await
             .map_err(|e| ApiError::Internal(format!("GitHub API request failed: {}", e)))?;
