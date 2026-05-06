@@ -25,6 +25,9 @@ pub struct CreateAppRequest {
     pub name: String,
     pub git_url: String,
     pub port: Option<u32>,
+    pub github_installation_id: Option<i64>,
+    pub github_repo_id: Option<i64>,
+    pub github_repo_full_name: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -68,6 +71,9 @@ pub struct AppResponse {
     pub port: u32,
     pub hostname: Option<String>,
     pub github_webhook_secret: Option<String>,
+    pub github_installation_id: Option<i64>,
+    pub github_repo_id: Option<i64>,
+    pub github_repo_full_name: Option<String>,
     pub active_deployment_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -108,18 +114,23 @@ pub async fn create_app_handler(
 
     let webhook_secret = Alphanumeric.sample_string(&mut rand::rng(), 32);
 
+    let user_id =
+        uuid::Uuid::parse_str(&auth.user_id).map_err(|e| ApiError::Internal(e.to_string()))?;
+
     let app = state
         .app_repo
-        .create_app(
-            &payload.name,
-            &payload.git_url,
-            port as i32,
-            Some(hostname),
-            &auth.user_id,
-            Some(webhook_secret),
-        )
-        .await
-        .map_err(ApiError::from)?;
+        .create_app(crate::repositories::app_repository::CreateAppParams {
+            name: payload.name,
+            git_url: payload.git_url,
+            port: port as i32,
+            hostname: Some(hostname),
+            user_id,
+            github_webhook_secret: Some(webhook_secret),
+            github_installation_id: payload.github_installation_id,
+            github_repo_id: payload.github_repo_id,
+            github_repo_full_name: payload.github_repo_full_name,
+        })
+        .await?;
 
     Ok((
         StatusCode::CREATED,
@@ -130,6 +141,9 @@ pub async fn create_app_handler(
             port: app.port as u32,
             hostname: app.hostname,
             github_webhook_secret: app.github_webhook_secret,
+            github_installation_id: app.github_installation_id,
+            github_repo_id: app.github_repo_id,
+            github_repo_full_name: app.github_repo_full_name,
             active_deployment_id: app.active_deployment_id,
             created_at: app.created_at,
         }),
@@ -172,6 +186,9 @@ pub async fn list_apps_handler(
                     .github_webhook_secret
                     .as_ref()
                     .map(|_| "********".to_string()),
+                github_installation_id: a.github_installation_id,
+                github_repo_id: a.github_repo_id,
+                github_repo_full_name: a.github_repo_full_name,
                 active_deployment_id: a.active_deployment_id,
                 created_at: a.created_at,
             })

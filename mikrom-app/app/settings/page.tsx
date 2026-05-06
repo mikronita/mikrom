@@ -33,10 +33,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getUserProfile, updateUserProfile } from "@/lib/api";
+import { getUserProfile, updateUserProfile, listGithubAccounts } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
+import { FaGithub } from "react-icons/fa";
+import { getGithubInstallUrl } from "@/lib/api";
 
 export default function SettingsPage() {
   const [emailNotifications, setEmailNotifications] = useState(true);
@@ -50,6 +52,15 @@ export default function SettingsPage() {
   const { data: profile, isLoading } = useQuery({
     queryKey: ["profile"],
     queryFn: () => getUserProfile(token!).then(res => {
+      if (res.error) throw new Error(res.error);
+      return res.data;
+    }),
+    enabled: !!token,
+  });
+
+  const { data: githubAccounts, isLoading: isLoadingGithub } = useQuery({
+    queryKey: ["github-accounts"],
+    queryFn: () => listGithubAccounts(token!).then(res => {
       if (res.error) throw new Error(res.error);
       return res.data;
     }),
@@ -110,6 +121,9 @@ export default function SettingsPage() {
                 </TabsTrigger>
                 <TabsTrigger value="billing">
                   <HiCreditCard data-icon="inline-start" /> Billing
+                </TabsTrigger>
+                <TabsTrigger value="integrations">
+                  <HiPlus data-icon="inline-start" /> Integrations
                 </TabsTrigger>
                 <TabsTrigger value="notifications">
                   <HiBell data-icon="inline-start" /> Notifications
@@ -287,6 +301,89 @@ export default function SettingsPage() {
                       <p className="text-xs text-muted-foreground">Expires 12/28</p>
                     </div>
                     <Button variant="outline" size="sm">Edit</Button>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="integrations" className="p-6 space-y-6">
+                <div>
+                  <h3 className="text-lg font-bold">Source Control</h3>
+                  <p className="text-sm text-muted-foreground mb-6">Connect your GitHub account to deploy private repositories.</p>
+                  
+                  <div className="space-y-4">
+                    {isLoadingGithub ? (
+                      <div className="flex justify-center p-4">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : githubAccounts && githubAccounts.length > 0 ? (
+                      githubAccounts.map((account) => (
+                        <div key={account.id} className="p-4 rounded-xl border flex items-center justify-between bg-muted/30">
+                          <div className="flex items-center gap-4">
+                            <div className="h-10 w-10 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                              <FaGithub className="h-6 w-6" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold">@{account.github_username}</p>
+                              <p className="text-xs text-muted-foreground">Connected on {new Date(account.created_at).toLocaleDateString()}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button variant="outline" size="sm" asChild>
+                              <a 
+                                href={`https://github.com/settings/installations/${account.installation_id}`} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                              >
+                                Configure
+                              </a>
+                            </Button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-4 rounded-xl border flex items-center justify-between bg-muted/30">
+                        <div className="flex items-center gap-4">
+                          <div className="h-10 w-10 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                            <FaGithub className="h-6 w-6" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold">GitHub App Integration</p>
+                            <p className="text-xs text-muted-foreground">Deploy from any repository you have access to.</p>
+                          </div>
+                        </div>
+                        <Button 
+                          size="sm" 
+                          onClick={() => {
+                            const t = getToken();
+                            if (t) {
+                              window.location.href = getGithubInstallUrl(t);
+                            } else {
+                              toast.error("You must be logged in to connect GitHub");
+                            }
+                          }}
+                        >
+                          Connect GitHub
+                        </Button>
+                      </div>
+                    )}
+
+                    {githubAccounts && githubAccounts.length > 0 && (
+                      <div className="flex justify-start">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => {
+                            const t = getToken();
+                            if (t) {
+                              window.location.href = getGithubInstallUrl(t);
+                            }
+                          }}
+                        >
+                          <HiPlus className="mr-2 h-4 w-4" />
+                          Add another account
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </TabsContent>

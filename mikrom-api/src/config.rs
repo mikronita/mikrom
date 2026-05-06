@@ -17,6 +17,9 @@ pub struct ApiConfig {
     #[serde(default = "default_router_addr")]
     pub router_addr: String,
 
+    #[serde(default = "default_frontend_url")]
+    pub frontend_url: String,
+
     #[serde(default = "default_use_tls")]
     pub use_tls: bool,
 
@@ -30,6 +33,12 @@ pub struct ApiConfig {
     pub acme_check_interval: u64,
 
     pub certs_dir: Option<String>,
+
+    pub github_app_id: Option<String>,
+    pub github_client_id: Option<String>,
+    pub github_client_secret: Option<String>,
+    pub github_private_key: Option<String>,
+    pub github_app_slug: Option<String>,
 }
 
 fn default_acme_email() -> String {
@@ -58,6 +67,10 @@ fn default_api_port() -> u16 {
 
 fn default_router_addr() -> String {
     "http://192.168.122.1:80".to_string()
+}
+
+fn default_frontend_url() -> String {
+    "http://localhost:3000".to_string()
 }
 
 fn default_use_tls() -> bool {

@@ -26,6 +26,7 @@ async fn test_health_endpoint_structure() {
         scheduler: Arc::new(scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://127.0.0.1:8080".to_string(),
+        frontend_url: "http://127.0.0.1:3000".to_string(),
         jwt_secret: "test".to_string(),
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -33,6 +34,10 @@ async fn test_health_endpoint_structure() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
     let app = create_app(state);
 
@@ -78,6 +83,7 @@ async fn test_health_stream_endpoint() {
         scheduler: Arc::new(scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://127.0.0.1:8080".to_string(),
+        frontend_url: "http://127.0.0.1:3000".to_string(),
         jwt_secret: "test".to_string(),
         master_key: "test".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -85,6 +91,10 @@ async fn test_health_stream_endpoint() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
     let app = create_app(state);
 

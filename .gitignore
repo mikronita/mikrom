@@ -3,3 +3,4 @@ target
 /firecracker
 db_activity.log
 mikrom-router.deb
+.env

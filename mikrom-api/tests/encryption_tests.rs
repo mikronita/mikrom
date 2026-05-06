@@ -32,14 +32,17 @@ async fn test_encryption_at_rest() {
     // 2. Create an app with a secret webhook
     let webhook_secret = "super-secret-webhook-key";
     let app = app_repo
-        .create_app(
-            &format!("test-app-{}", Uuid::new_v4()),
-            "https://github.com/test/repo",
-            8080,
-            None,
-            &user_id.to_string(),
-            Some(webhook_secret.to_string()),
-        )
+        .create_app(mikrom_api::repositories::app_repository::CreateAppParams {
+            name: format!("test-app-{}", Uuid::new_v4()),
+            git_url: "https://github.com/test/repo".to_string(),
+            port: 8080,
+            hostname: None,
+            user_id,
+            github_webhook_secret: Some(webhook_secret.to_string()),
+            github_installation_id: None,
+            github_repo_id: None,
+            github_repo_full_name: None,
+        })
         .await
         .expect("failed to create app");
 

@@ -33,14 +33,17 @@ async fn test_deployment_metadata_roundtrip() {
 
     // 2. Create an app
     let app = app_repo
-        .create_app(
-            "metadata-app",
-            "https://github.com/test/repo",
-            80,
-            None,
-            &user_id.to_string(),
-            None,
-        )
+        .create_app(mikrom_api::repositories::app_repository::CreateAppParams {
+            name: "metadata-app".to_string(),
+            git_url: "https://github.com/test/repo".to_string(),
+            port: 80,
+            hostname: None,
+            user_id,
+            github_webhook_secret: None,
+            github_installation_id: None,
+            github_repo_id: None,
+            github_repo_full_name: None,
+        })
         .await
         .expect("failed to create app");
 

@@ -72,6 +72,7 @@ async fn test_builder_nats_flow() {
         git_url: "https://github.com/test/repo".to_string(),
         image_name: "test-app".to_string(),
         tag: "latest".to_string(),
+        git_auth_token: None,
     };
     let mut buf = Vec::new();
     req.encode(&mut buf).unwrap();

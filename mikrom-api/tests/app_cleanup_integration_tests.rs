@@ -42,6 +42,9 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         hostname: Some("test.example.com".to_string()),
         user_id,
         github_webhook_secret: None,
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
         active_deployment_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -77,9 +80,11 @@ async fn test_delete_app_triggers_bulk_cleanup() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -87,6 +92,9 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);

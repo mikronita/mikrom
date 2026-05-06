@@ -116,6 +116,9 @@ export interface AppInfo {
   port: number;
   hostname: string | null;
   github_webhook_secret?: string;
+  github_installation_id?: number;
+  github_repo_id?: number;
+  github_repo_full_name?: string;
   active_deployment_id: string | null;
   created_at: string;
 }
@@ -123,6 +126,19 @@ export interface AppInfo {
 export interface CreateAppRequest {
   name: string;
   git_url: string;
+  github_installation_id?: number;
+  github_repo_id?: number;
+  github_repo_full_name?: string;
+}
+
+export interface GithubRepo {
+  id: number;
+  name: string;
+  full_name: string;
+  private: boolean;
+  html_url: string;
+  description: string | null;
+  installation_id?: number;
 }
 
 export interface DeploymentInfo {
@@ -574,6 +590,44 @@ export async function activateDeployment(
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Network error" };
   }
+}
+
+export interface GithubAccount {
+  id: string;
+  user_id: string;
+  installation_id: number;
+  github_username: string;
+  created_at: string;
+}
+
+export async function listGithubAccounts(token: string): Promise<{ data?: GithubAccount[]; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/github/accounts`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<GithubAccount[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch GitHub accounts") };
+    return { data: result as GithubAccount[] };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function listGithubRepos(token: string): Promise<{ data?: GithubRepo[]; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/github/repos`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<GithubRepo[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch GitHub repositories") };
+    return { data: result as GithubRepo[] };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export function getGithubInstallUrl(token: string): string {
+  return `${API_BASE_URL}/github/install?token=${token}`;
 }
 
 export function watchAppMetricsSSE(

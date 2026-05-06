@@ -14,6 +14,7 @@ message BuildRequest {
   string git_url = 2;
   string image_name = 3;
   string tag = 4;
+  optional string git_auth_token = 5;
 }
 
 message BuildResponse {

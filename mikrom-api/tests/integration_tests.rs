@@ -29,9 +29,11 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
     let state = AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         jwt_secret: jwt_secret.to_string(),
         master_key: "integration-master-key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
@@ -39,6 +41,9 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
     mikrom_api::create_app(state)
 }

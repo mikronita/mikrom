@@ -142,6 +142,7 @@ mod tests {
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             nats,
             router_addr: "http://localhost:8080".into(),
+            frontend_url: "http://localhost:3000".into(),
             api_db: sqlx::postgres::PgPoolOptions::new()
                 .connect_lazy("postgres://localhost/dummy")
                 .unwrap(),
@@ -151,6 +152,10 @@ mod tests {
             acme_email: "admin@mikrom.spluca.org".into(),
             acme_staging: true,
             acme_check_interval: 3600,
+            github_repo: Arc::new(crate::repositories::MockGithubRepository::default()),
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
         }
     }
 
@@ -175,6 +180,9 @@ mod tests {
             hostname: None,
             user_id: Uuid::new_v4(),
             github_webhook_secret: Some(secret.to_string()),
+            github_installation_id: None,
+            github_repo_id: None,
+            github_repo_full_name: None,
             active_deployment_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -244,6 +252,9 @@ mod tests {
             hostname: None,
             user_id: Uuid::new_v4(),
             github_webhook_secret: Some(secret.to_string()),
+            github_installation_id: None,
+            github_repo_id: None,
+            github_repo_full_name: None,
             active_deployment_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -286,6 +297,9 @@ mod tests {
             hostname: None,
             user_id: Uuid::new_v4(),
             github_webhook_secret: Some(secret.to_string()),
+            github_installation_id: None,
+            github_repo_id: None,
+            github_repo_full_name: None,
             active_deployment_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),

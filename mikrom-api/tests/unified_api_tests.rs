@@ -54,6 +54,9 @@ async fn test_hierarchical_deployment_status_success() {
                 hostname: None,
                 user_id,
                 github_webhook_secret: None,
+                github_installation_id: None,
+                github_repo_id: None,
+                github_repo_full_name: None,
                 active_deployment_id: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
@@ -101,6 +104,7 @@ async fn test_hierarchical_deployment_status_success() {
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
             .unwrap(),
@@ -110,6 +114,10 @@ async fn test_hierarchical_deployment_status_success() {
         acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);
@@ -149,6 +157,9 @@ async fn test_hierarchical_security_cross_app_prevention() {
                 hostname: None,
                 user_id,
                 github_webhook_secret: None,
+                github_installation_id: None,
+                github_repo_id: None,
+                github_repo_full_name: None,
                 active_deployment_id: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
@@ -192,6 +203,7 @@ async fn test_hierarchical_security_cross_app_prevention() {
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://localhost/dummy")
             .unwrap(),
@@ -201,6 +213,10 @@ async fn test_hierarchical_security_cross_app_prevention() {
         acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
+        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
     };
 
     let router = create_app(state);

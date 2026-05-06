@@ -58,11 +58,25 @@ impl DeploymentService {
 
         state.deployment_events.send(app.id).ok();
 
+        let mut git_auth_token = None;
+        if let (Some(installation_id), Some(app_id), Some(private_key)) = (
+            app.github_installation_id,
+            &state.github_app_id,
+            &state.github_private_key,
+        ) {
+            match crate::github::get_installation_token(app_id, private_key, installation_id).await
+            {
+                Ok(token) => git_auth_token = Some(token),
+                Err(e) => tracing::error!("Failed to get GitHub installation token: {}", e),
+            }
+        }
+
         let build_req = mikrom_proto::builder::BuildRequest {
             app_id: app.id.to_string(),
             git_url: app.git_url.clone(),
             image_name: app.name.to_lowercase().replace(' ', "-"),
             tag: deployment.id.to_string(),
+            git_auth_token,
         };
 
         let build_resp: mikrom_proto::builder::BuildResponse = state

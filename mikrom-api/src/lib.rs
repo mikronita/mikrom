@@ -18,6 +18,7 @@ pub mod crypto;
 pub mod db;
 pub mod deploy;
 pub mod error;
+pub mod github;
 pub mod models;
 pub mod nats;
 pub mod openapi;
@@ -33,6 +34,7 @@ pub use deploy::deploy_app;
 use deploy::webhooks::github_webhook_handler;
 pub use error::{ApiError, ApiResult};
 pub use repositories::app_repository::AppRepository;
+pub use repositories::github_repository::GithubRepository;
 pub use repositories::user_repository::UserRepository;
 pub use scheduler::Scheduler;
 pub use vms::{
@@ -43,6 +45,7 @@ pub use vms::{
 use mikrom_proto::router::RouterConfigUpdate;
 
 use auth::{get_profile, login, register, update_profile};
+use github::handlers::{github_callback, github_install, list_repos};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -50,9 +53,11 @@ use utoipa_swagger_ui::SwaggerUi;
 pub struct AppState {
     pub user_repo: Arc<dyn UserRepository>,
     pub app_repo: Arc<dyn AppRepository>,
+    pub github_repo: Arc<dyn GithubRepository>,
     pub scheduler: Arc<dyn Scheduler>,
     pub nats: crate::nats::TypedNatsClient,
     pub router_addr: String,
+    pub frontend_url: String,
     pub api_db: sqlx::PgPool,
     pub jwt_secret: String,
     pub master_key: String,
@@ -60,6 +65,9 @@ pub struct AppState {
     pub acme_email: String,
     pub acme_staging: bool,
     pub acme_check_interval: u64,
+    pub github_app_id: Option<String>,
+    pub github_private_key: Option<String>,
+    pub github_app_slug: Option<String>,
 }
 
 impl AppState {
@@ -154,6 +162,13 @@ pub fn create_app(state: AppState) -> Router {
         )
         .route("/auth/me", get(get_profile))
         .route("/auth/me", axum::routing::put(update_profile))
+        .route("/github/install", get(github_install))
+        .route("/github/callback", get(github_callback))
+        .route("/github/repos", get(list_repos))
+        .route(
+            "/github/accounts",
+            get(crate::github::handlers::list_accounts),
+        )
         .route(
             "/apps",
             axum::routing::post(crate::deploy::create_app_handler),
