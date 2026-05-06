@@ -581,7 +581,7 @@ export function watchAppMetricsSSE(
   appName: string,
   onMessage: (metrics: VmMetricsResponse) => void
 ): () => void {
-  const eventSource = new EventSource(`${API_BASE_URL}/apps/${appName}/metrics/stream?token=${token}`);
+  const eventSource = new EventSource(`${API_BASE_URL}/apps/${encodeURIComponent(appName)}/metrics/stream?token=${encodeURIComponent(token)}`);
 
   eventSource.onmessage = (event) => {
     try {
@@ -593,6 +593,8 @@ export function watchAppMetricsSSE(
   };
 
   return () => {
+    eventSource.onmessage = null;
+    eventSource.onerror = null;
     eventSource.close();
   };
 }
@@ -602,7 +604,7 @@ export function watchAppLogsSSE(
   appName: string,
   onMessage: (logs: LogLine | LogLine[]) => void
 ): () => void {
-  const eventSource = new EventSource(`${API_BASE_URL}/apps/${appName}/logs/stream?token=${token}`);
+  const eventSource = new EventSource(`${API_BASE_URL}/apps/${encodeURIComponent(appName)}/logs/stream?token=${encodeURIComponent(token)}`);
 
   eventSource.onmessage = (event) => {
     try {
@@ -614,6 +616,8 @@ export function watchAppLogsSSE(
   };
 
   return () => {
+    eventSource.onmessage = null;
+    eventSource.onerror = null;
     eventSource.close();
   };
 }
