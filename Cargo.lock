@@ -2307,6 +2307,7 @@ dependencies = [
  "anyhow",
  "async-nats",
  "chrono",
+ "dashmap",
  "dotenvy",
  "envy",
  "futures",

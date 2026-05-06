@@ -1,9 +1,8 @@
 use async_nats::Client;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::RwLock;
 use tokio::time::{Duration, interval};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,7 +21,7 @@ pub struct LogShipper {
     batch_size: usize,
     flush_interval: Duration,
     /// Local cache for the API to query via SSE if needed, or for debugging
-    logs_map: std::sync::Arc<RwLock<HashMap<String, VecDeque<String>>>>,
+    logs_map: std::sync::Arc<dashmap::DashMap<String, VecDeque<String>>>,
 }
 
 impl LogShipper {
@@ -30,7 +29,7 @@ impl LogShipper {
         vm_id: String,
         app_id: String,
         nats_client: Option<Client>,
-        logs_map: std::sync::Arc<RwLock<HashMap<String, VecDeque<String>>>>,
+        logs_map: std::sync::Arc<dashmap::DashMap<String, VecDeque<String>>>,
     ) -> Self {
         Self {
             vm_id,
@@ -108,20 +107,20 @@ impl LogShipper {
         // 1. Update local buffer (shared with FirecrackerManager)
         // We ALWAYS update the local buffer for troubleshooting
         {
-            let mut logs = self.logs_map.write().await;
-            let buffer = logs
+            let mut buffer = self
+                .logs_map
                 .entry(self.vm_id.clone())
                 .or_insert_with(|| VecDeque::with_capacity(1000));
 
             if buffer.len() >= 1000 {
                 buffer.pop_front();
             }
-            let formatted = if source == "stderr" {
-                format!("[stderr] {message}")
-            } else if !is_app_log {
-                format!("[system] {message}")
-            } else {
-                message.clone()
+
+            let formatted = match (source, is_app_log) {
+                ("stderr", true) => format!("[stderr] {message}"),
+                ("stderr", false) => format!("[system-err] {message}"),
+                ("stdout", false) => format!("[system] {message}"),
+                _ => message.clone(),
             };
             buffer.push_back(formatted);
         }
@@ -164,7 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_shipper_local_buffer() {
-        let logs_map = Arc::new(RwLock::new(HashMap::new()));
+        let logs_map = Arc::new(dashmap::DashMap::new());
         let vm_id = "test-vm".to_string();
         let app_id = "test-app".to_string();
 
@@ -178,8 +177,7 @@ mod tests {
             .process_line("stderr", "Error Occurred".to_string(), &mut batch, true)
             .await;
 
-        let logs = logs_map.read().await;
-        let buffer = logs.get(&vm_id).unwrap();
+        let buffer = logs_map.get(&vm_id).unwrap();
 
         assert_eq!(buffer.len(), 2);
         assert_eq!(buffer[0], "Hello World");
@@ -192,7 +190,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_shipper_system_filtering() {
-        let logs_map = Arc::new(RwLock::new(HashMap::new()));
+        let logs_map = Arc::new(dashmap::DashMap::new());
         let vm_id = "test-vm".to_string();
         let app_id = "test-app".to_string();
 
@@ -209,8 +207,7 @@ mod tests {
             .process_line("stdout", "App started".to_string(), &mut batch, true)
             .await;
 
-        let logs = logs_map.read().await;
-        let buffer = logs.get(&vm_id).unwrap();
+        let buffer = logs_map.get(&vm_id).unwrap();
 
         assert_eq!(buffer.len(), 2);
         assert_eq!(buffer[0], "[system] Booting kernel...");
@@ -223,7 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_shipper_spawn() {
-        let logs_map = Arc::new(RwLock::new(HashMap::new()));
+        let logs_map = Arc::new(dashmap::DashMap::new());
         let vm_id = "test-vm".to_string();
         let app_id = "test-app".to_string();
 
@@ -241,10 +238,9 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         {
-            let logs = logs_map.read().await;
-            let buffer = logs.get(&vm_id).unwrap();
+            let buffer = logs_map.get(&vm_id).unwrap();
             assert!(buffer.contains(&"[system] line 1".to_string()));
-            assert!(buffer.contains(&"[stderr] error 1".to_string()));
+            assert!(buffer.contains(&"[system-err] error 1".to_string()));
         }
 
         // Close streams

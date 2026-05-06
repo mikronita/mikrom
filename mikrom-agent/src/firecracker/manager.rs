@@ -28,7 +28,7 @@ pub struct FirecrackerManager {
     /// Configuration for Firecracker and Jailer.
     pub fc_config: FirecrackerConfig,
     /// In-memory ring buffer of logs for each VM.
-    pub logs: Arc<RwLock<HashMap<String, VecDeque<String>>>>,
+    pub logs: Arc<dashmap::DashMap<String, VecDeque<String>>>,
     /// Image builder for converting OCI images to Firecracker-compatible rootfs.
     pub builder: Arc<crate::builder::ImageBuilder>,
     /// Interface for executing system commands.
@@ -121,7 +121,7 @@ impl FirecrackerManager {
             vms: Arc::new(RwLock::new(HashMap::new())),
             processes: Arc::new(Mutex::new(HashMap::new())),
             fc_config,
-            logs: Arc::new(RwLock::new(HashMap::new())),
+            logs: Arc::new(dashmap::DashMap::new()),
             builder: Arc::new(builder),
             executor: Arc::new(RealCommandExecutor),
             allocated_ips: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
@@ -278,8 +278,8 @@ impl FirecrackerManager {
 
         // 2. Add initial log entry
         {
-            let mut l = self.logs.write().await;
-            l.entry(vm_id.clone())
+            self.logs
+                .entry(vm_id.clone())
                 .or_default()
                 .push_back(format!("[agent] Initializing VM {vm_id}..."));
         }
@@ -783,7 +783,7 @@ impl FirecrackerManager {
             }
         }
 
-        self.logs.write().await.remove(vm_id);
+        self.logs.remove(vm_id);
 
         if let Some(mut proc) = self.processes.lock().await.remove(vm_id) {
             proc.log_task.abort();
@@ -1002,10 +1002,8 @@ impl FirecrackerManager {
         self.vms.read().await.get(vm_id).cloned()
     }
 
-    pub async fn get_logs(&self, vm_id: &str) -> Vec<String> {
+    pub fn get_logs(&self, vm_id: &str) -> Vec<String> {
         self.logs
-            .read()
-            .await
             .get(vm_id)
             .map(|logs| logs.iter().cloned().collect())
             .unwrap_or_default()
@@ -2378,7 +2376,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        let logs = mgr.get_logs(vm_id).await;
+        let logs = mgr.get_logs(vm_id);
         assert!(
             !logs.is_empty(),
             "Logs should not be empty after initialization"
@@ -2482,17 +2480,17 @@ mod tests {
         .unwrap();
 
         {
-            let mut l = mgr.logs.write().await;
-            l.entry(vm_id.to_string())
+            mgr.logs
+                .entry(vm_id.to_string())
                 .or_default()
                 .push_back("test log".to_string());
         }
 
-        assert!(mgr.logs.read().await.contains_key(vm_id));
+        assert!(mgr.logs.contains_key(vm_id));
 
         mgr.stop_vm(vm_id).await.unwrap();
 
-        assert!(!mgr.logs.read().await.contains_key(vm_id));
+        assert!(!mgr.logs.contains_key(vm_id));
     }
 
     #[test]
