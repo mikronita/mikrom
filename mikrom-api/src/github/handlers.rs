@@ -14,16 +14,26 @@ pub struct InstallCallbackQuery {
     pub state: Option<String>,
 }
 
-pub async fn github_install(auth: AuthUser, State(state): State<AppState>) -> ApiResult<Redirect> {
+pub async fn github_install(
+    auth: AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<serde_json::Value>> {
     let slug = state
         .github_app_slug
         .ok_or_else(|| ApiError::Internal("GITHUB_APP_SLUG not configured".to_string()))?;
 
-    // Pass the user_id in the state parameter so we can identify them in the public callback
-    Ok(Redirect::to(&format!(
-        "https://github.com/apps/{}/installations/new?state={}",
-        slug, auth.user_id
-    )))
+    // Create a short-lived state token for CSRF protection
+    let state_token = crate::auth::jwt::create_token(
+        &auth.user_id,
+        &auth.email,
+        &crate::repositories::user_repository::UserRole::User,
+        &state.jwt_secret,
+    )
+    .map_err(|e| ApiError::Internal(format!("Failed to create state token: {}", e)))?;
+
+    Ok(Json(serde_json::json!({
+        "url": format!("https://github.com/apps/{}/installations/new?state={}", slug, state_token)
+    })))
 }
 
 pub async fn github_callback(
@@ -39,24 +49,26 @@ pub async fn github_callback(
         .as_ref()
         .ok_or_else(|| ApiError::Internal("GITHUB_PRIVATE_KEY not configured".to_string()))?;
 
-    let user_id_str = query
+    let state_token = query
         .state
         .ok_or_else(|| ApiError::BadRequest("Missing state parameter from GitHub".to_string()))?;
-    let user_id = uuid::Uuid::parse_str(&user_id_str)
-        .map_err(|_| ApiError::BadRequest("Invalid state parameter".to_string()))?;
+
+    let claims = crate::auth::jwt::verify_token(&state_token, &state.jwt_secret)
+        .map_err(|_| ApiError::BadRequest("Invalid or expired state parameter".to_string()))?;
+
+    let user_id = uuid::Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::BadRequest("Invalid user ID in state".to_string()))?;
 
     // Verify installation and get username
     let jwt = crate::github::generate_jwt(app_id, private_key)?;
 
-    let client = reqwest::Client::new();
-    let response = client
+    let response = crate::github::HTTP_CLIENT
         .get(format!(
             "https://api.github.com/app/installations/{}",
             query.installation_id
         ))
         .header("Authorization", format!("Bearer {}", jwt))
         .header("Accept", "application/vnd.github.v3+json")
-        .header("User-Agent", "mikrom-api")
         .send()
         .await
         .map_err(|e| ApiError::Internal(format!("GitHub API request failed: {}", e)))?;
@@ -112,27 +124,31 @@ pub async fn list_repos(
 ) -> ApiResult<Json<Vec<GithubRepo>>> {
     let app_id = state
         .github_app_id
-        .as_ref()
+        .clone()
         .ok_or_else(|| ApiError::Internal("GITHUB_APP_ID not configured".to_string()))?;
     let private_key = state
         .github_private_key
-        .as_ref()
+        .clone()
         .ok_or_else(|| ApiError::Internal("GITHUB_PRIVATE_KEY not configured".to_string()))?;
 
     let user_id =
         uuid::Uuid::parse_str(&auth.user_id).map_err(|e| ApiError::Internal(e.to_string()))?;
 
     let accounts = state.github_repo.get_accounts_by_user_id(user_id).await?;
+
+    let futures = accounts.into_iter().map(|account| {
+        let app_id = app_id.clone();
+        let private_key = private_key.clone();
+        async move { list_installation_repos(&app_id, &private_key, account.installation_id).await }
+    });
+
+    let results = futures::future::join_all(futures).await;
     let mut all_repos = Vec::new();
 
-    for account in accounts {
-        match list_installation_repos(app_id, private_key, account.installation_id).await {
+    for res in results {
+        match res {
             Ok(repos) => all_repos.extend(repos),
-            Err(e) => tracing::error!(
-                "Failed to list repos for installation {}: {}",
-                account.installation_id,
-                e
-            ),
+            Err(e) => tracing::error!("Failed to list repos: {}", e),
         }
     }
 

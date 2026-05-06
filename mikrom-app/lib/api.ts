@@ -626,8 +626,17 @@ export async function listGithubRepos(token: string): Promise<{ data?: GithubRep
   }
 }
 
-export function getGithubInstallUrl(token: string): string {
-  return `${API_BASE_URL}/github/install?token=${token}`;
+export async function getGithubInstallUrl(token: string): Promise<{ data?: { url: string }; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/github/install`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<{ url: string }>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to get GitHub installation URL") };
+    return { data: result as { url: string } };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
 }
 
 export function watchAppMetricsSSE(

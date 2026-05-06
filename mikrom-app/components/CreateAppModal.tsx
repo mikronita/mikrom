@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldLabel, FieldGroup, FieldDescription } from "@/components/ui/field";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   Select, 
@@ -84,6 +84,33 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
     }
   };
 
+  const handleConnectGithub = async () => {
+    const t = getToken();
+    if (!t) {
+      toast.error("You must be logged in to connect GitHub");
+      return;
+    }
+
+    const toastId = toast.loading("Redirecting to GitHub...");
+    try {
+      const { data, error } = await getGithubInstallUrl(t);
+      if (error) {
+        toast.dismiss(toastId);
+        toast.error(error);
+        return;
+      }
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        toast.dismiss(toastId);
+        toast.error("Failed to get installation URL");
+      }
+    } catch (err) {
+      toast.dismiss(toastId);
+      toast.error("Failed to start GitHub installation");
+    }
+  };
+
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-[425px]" aria-describedby={undefined}>
@@ -91,9 +118,9 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
           <DialogTitle>Create New Application</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-6 pt-4">
-          <div className="space-y-4">
-            <div className="grid w-full items-center gap-1.5">
-              <Label htmlFor="app_name">App Name</Label>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="app_name">App Name</FieldLabel>
               <Input
                 id="app_name"
                 required
@@ -101,7 +128,7 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="my-cool-project"
               />
-            </div>
+            </Field>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="grid w-full grid-cols-2">
@@ -116,8 +143,8 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
               </TabsList>
               
               <TabsContent value="manual" className="pt-4">
-                <div className="grid w-full items-center gap-1.5">
-                  <Label htmlFor="git_url">Git Repository URL</Label>
+                <Field>
+                  <FieldLabel htmlFor="git_url">Git Repository URL</FieldLabel>
                   <Input
                     id="git_url"
                     required={activeTab === "manual"}
@@ -125,15 +152,15 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
                     onChange={(e) => setGitUrl(e.target.value)}
                     placeholder="https://github.com/user/repo"
                   />
-                  <p className="text-[10px] text-muted-foreground italic">
+                  <FieldDescription className="text-[10px] italic">
                     Public repositories only. For private ones, use the GitHub integration.
-                  </p>
-                </div>
+                  </FieldDescription>
+                </Field>
               </TabsContent>
 
               <TabsContent value="github" className="pt-4">
-                <div className="grid w-full items-center gap-1.5">
-                  <Label htmlFor="github_repo">Select Repository</Label>
+                <Field>
+                  <FieldLabel htmlFor="github_repo">Select Repository</FieldLabel>
                   {isLoadingRepos ? (
                     <div className="flex items-center justify-center p-4 border rounded-md">
                       <Loader2 className="size-4 animate-spin mr-2" />
@@ -163,23 +190,17 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
                       <Button 
                         size="sm" 
                         variant="outline"
-                        onClick={() => {
-                          const t = getToken();
-                          if (t) {
-                            window.location.href = getGithubInstallUrl(t);
-                          } else {
-                            toast.error("You must be logged in to connect GitHub");
-                          }
-                        }}
+                        type="button"
+                        onClick={handleConnectGithub}
                       >
                         Connect GitHub
                       </Button>
                     </div>
                   )}
-                </div>
+                </Field>
               </TabsContent>
             </Tabs>
-          </div>
+          </FieldGroup>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
