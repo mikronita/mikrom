@@ -358,6 +358,8 @@ export default function SettingsPage() {
                             <Button variant="outline" size="sm" asChild>
                               <a
                                 href={`https://github.com/settings/installations/${account.installation_id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
                               >
                                 Configure
                               </a>

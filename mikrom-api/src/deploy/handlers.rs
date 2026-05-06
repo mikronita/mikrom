@@ -161,11 +161,17 @@ pub async fn create_app_handler(
             }
         } else {
             // Fallback: Try to guess the API URL from the frontend URL
-            format!(
+            let url = format!(
                 "{}/webhooks/github/{}",
                 state.frontend_url.replace("3000", "5001"),
                 app.name
-            )
+            );
+            tracing::warn!(
+                app_name = %app.name,
+                %url,
+                "GITHUB_WEBHOOK_URL_BASE is missing, using fragile fallback URL guessing"
+            );
+            url
         };
 
         // Use a background task to not block the response
@@ -594,8 +600,9 @@ pub async fn deploy_app_version_handler(
     {
         match (&state.github_app_id, &state.github_private_key) {
             (Some(github_app_id), Some(github_private_key)) => {
-                // Default to main/master, or ideally we'd know the target branch
-                // For now, let's try main then master
+                // TODO: Fetch the repository's default branch or use a configured branch
+                // instead of hardcoding main/master.
+                // For now, we try main then master as a sensible default.
                 match crate::github::get_repo_latest_commit(
                     github_app_id,
                     github_private_key,
