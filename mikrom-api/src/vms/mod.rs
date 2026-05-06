@@ -37,11 +37,11 @@ use std::convert::Infallible;
         ("app_name" = String, Path, description = "Application name")
     ),
     responses(
-        (status = 200, description = "SSE stream of application logs"),
+        (status = 200, description = "SSE stream of application logs", content_type = "text/event-stream"),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
         (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
     ),
-    tag = "apps",
+    tag = "deployment",
     security(
         ("jwt" = [])
     )
@@ -89,11 +89,11 @@ pub async fn app_logs_stream_handler(
         ("app_name" = String, Path, description = "Application name")
     ),
     responses(
-        (status = 200, description = "SSE stream of application metrics"),
+        (status = 200, description = "SSE stream of application metrics", content_type = "text/event-stream"),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
         (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
     ),
-    tag = "apps",
+    tag = "deployment",
     security(
         ("jwt" = [])
     )
