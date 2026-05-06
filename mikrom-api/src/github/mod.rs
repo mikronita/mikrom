@@ -183,6 +183,7 @@ pub async fn create_repository_webhook(
         .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "mikrom-api")
+        .timeout(std::time::Duration::from_secs(10))
         .json(&serde_json::json!({
             "name": "web",
             "active": true,
@@ -247,6 +248,7 @@ pub async fn get_repo_latest_commit(
         .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "mikrom-api")
+        .timeout(std::time::Duration::from_secs(5))
         .send()
         .await
         .map_err(|e| ApiError::Internal(format!("GitHub API request failed: {}", e)))?;
