@@ -16,7 +16,7 @@ pub struct InstallCallbackQuery {
 
 #[utoipa::path(
     get,
-    path = "/github/install",
+    path = "/v1/github/install",
     responses(
         (status = 200, description = "Get GitHub App installation URL", body = serde_json::Value),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
@@ -50,7 +50,7 @@ pub async fn github_install(
 
 #[utoipa::path(
     get,
-    path = "/github/callback",
+    path = "/v1/github/callback",
     params(
         ("installation_id" = i64, Query, description = "GitHub installation ID"),
         ("setup_action" = String, Query, description = "Setup action"),
@@ -154,7 +154,7 @@ pub async fn github_callback(
 
 #[utoipa::path(
     get,
-    path = "/github/repos",
+    path = "/v1/github/repos",
     responses(
         (status = 200, description = "List available GitHub repositories", body = [GithubRepo]),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
@@ -203,7 +203,7 @@ pub async fn list_repos(
 
 #[utoipa::path(
     get,
-    path = "/github/accounts",
+    path = "/v1/github/accounts",
     responses(
         (status = 200, description = "List connected GitHub accounts", body = [UserGithubAccount]),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)

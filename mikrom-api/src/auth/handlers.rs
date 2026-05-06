@@ -43,7 +43,7 @@ pub struct UpdateProfileRequest {
 
 #[utoipa::path(
     post,
-    path = "/auth/register",
+    path = "/v1/auth/register",
     request_body = RegisterRequest,
     responses(
         (status = 201, description = "User registered successfully", body = AuthResponse),
@@ -119,7 +119,7 @@ pub async fn register(
 
 #[utoipa::path(
     post,
-    path = "/auth/login",
+    path = "/v1/auth/login",
     request_body = LoginRequest,
     responses(
         (status = 200, description = "User logged in successfully", body = AuthResponse),
@@ -170,7 +170,7 @@ pub async fn login(
 
 #[utoipa::path(
     get,
-    path = "/auth/me",
+    path = "/v1/auth/me",
     responses(
         (status = 200, description = "Get current user profile", body = UserResponse),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
@@ -205,7 +205,7 @@ pub async fn get_profile(
 
 #[utoipa::path(
     put,
-    path = "/auth/me",
+    path = "/v1/auth/me",
     request_body = UpdateProfileRequest,
     responses(
         (status = 200, description = "Profile updated successfully", body = UserResponse),

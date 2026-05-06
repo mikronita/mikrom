@@ -95,7 +95,7 @@ async fn test_create_app_endpoint() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/apps")
+                .uri("/v1/apps")
                 .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::from(format!(
@@ -188,7 +188,7 @@ async fn test_create_app_duplicate_name() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/apps")
+                .uri("/v1/apps")
                 .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::from(format!(
@@ -288,7 +288,7 @@ async fn test_list_apps_includes_secret() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/apps")
+                .uri("/v1/apps")
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
                 .unwrap(),
@@ -383,7 +383,7 @@ async fn test_get_app_secret_endpoint() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("/apps/{}/secret", app_name))
+                .uri(format!("/v1/apps/{}/secret", app_name))
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
                 .unwrap(),

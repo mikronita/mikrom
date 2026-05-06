@@ -46,7 +46,7 @@ async fn test_openapi_json_endpoint() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/api-docs/openapi.json")
+                .uri("/v1/api-docs/openapi.json")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -96,7 +96,7 @@ async fn test_swagger_ui_endpoint() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/docs/")
+                .uri("/v1/docs/")
                 .body(Body::empty())
                 .unwrap(),
         )

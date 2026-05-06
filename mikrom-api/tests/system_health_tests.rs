@@ -46,7 +46,7 @@ async fn test_health_endpoint_structure() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/health")
+                .uri("/v1/health")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -104,7 +104,7 @@ async fn test_health_stream_endpoint() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/health/stream")
+                .uri("/v1/health/stream")
                 .body(Body::empty())
                 .unwrap(),
         )

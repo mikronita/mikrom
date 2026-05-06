@@ -72,7 +72,7 @@ test-all-crates: ## Run unit tests for all crates
 	cargo nextest run -p mikrom-scheduler && \
 	cargo nextest run -p mikrom-agent && \
 	cargo nextest run -p mikrom-builder && \
-	cargo nextest run -p mikrom-api && \
+	cargo nextest run -p mikrom-api --features test-utils && \
 	cargo nextest run -p mikrom-init && \
 	cargo nextest run -p mikrom-telemetry
 

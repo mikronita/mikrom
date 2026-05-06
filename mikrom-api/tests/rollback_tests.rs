@@ -152,7 +152,7 @@ async fn test_activate_deployment_endpoint() {
             Request::builder()
                 .method("POST")
                 .uri(format!(
-                    "/apps/{}/deployments/{}/activate",
+                    "/v1/apps/{}/deployments/{}/activate",
                     "test-app", deployment_id
                 ))
                 .header("Authorization", format!("Bearer {}", token))
@@ -235,7 +235,7 @@ async fn test_activate_deployment_wrong_owner() {
             Request::builder()
                 .method("POST")
                 .uri(format!(
-                    "/apps/{}/deployments/{}/activate",
+                    "/v1/apps/{}/deployments/{}/activate",
                     "test-app", deployment_id
                 ))
                 .header("Authorization", format!("Bearer {}", token))
@@ -350,7 +350,7 @@ async fn test_activate_deployment_not_running() {
             Request::builder()
                 .method("POST")
                 .uri(format!(
-                    "/apps/{}/deployments/{}/activate",
+                    "/v1/apps/{}/deployments/{}/activate",
                     "test-app", deployment_id
                 ))
                 .header("Authorization", format!("Bearer {}", token))

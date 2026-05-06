@@ -37,7 +37,7 @@ pub struct AppSecretResponse {
 
 #[utoipa::path(
     get,
-    path = "/apps/{app_name}/secret",
+    path = "/v1/apps/{app_name}/secret",
     params(
         ("app_name" = String, Path, description = "Application name")
     ),
@@ -89,7 +89,7 @@ pub struct ManualDeployRequest {
 
 #[utoipa::path(
     post,
-    path = "/apps",
+    path = "/v1/apps",
     request_body = CreateAppRequest,
     responses(
         (status = 201, description = "Application created", body = AppResponse),
@@ -154,7 +154,7 @@ pub async fn create_app_handler(
                 base.to_string()
             } else {
                 format!(
-                    "{}/webhooks/github/{}",
+                    "{}/v1/webhooks/github/{}",
                     base.trim_end_matches('/'),
                     app.name
                 )
@@ -162,7 +162,7 @@ pub async fn create_app_handler(
         } else {
             // Fallback: Try to guess the API URL from the frontend URL
             let url = format!(
-                "{}/webhooks/github/{}",
+                "{}/v1/webhooks/github/{}",
                 state.frontend_url.replace("3000", "5001"),
                 app.name
             );
@@ -219,7 +219,7 @@ pub async fn create_app_handler(
 
 #[utoipa::path(
     get,
-    path = "/apps",
+    path = "/v1/apps",
     responses(
         (status = 200, description = "List applications", body = [AppResponse]),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
@@ -265,7 +265,7 @@ pub async fn list_apps_handler(
 
 #[utoipa::path(
     delete,
-    path = "/apps/{app_name}",
+    path = "/v1/apps/{app_name}",
     params(
         ("app_name" = String, Path, description = "Application name")
     ),
@@ -312,7 +312,7 @@ pub async fn delete_app_handler(
 
 #[utoipa::path(
     get,
-    path = "/apps/{app_name}/deployments",
+    path = "/v1/apps/{app_name}/deployments",
     params(
         ("app_name" = String, Path, description = "Application name")
     ),
@@ -341,7 +341,7 @@ pub async fn list_deployments_handler(
 
 #[utoipa::path(
     get,
-    path = "/apps/{app_name}/deployments/stream",
+    path = "/v1/apps/{app_name}/deployments/stream",
     params(
         ("app_name" = String, Path, description = "Application name")
     ),
@@ -437,7 +437,7 @@ pub async fn deployments_stream_handler(
 
 #[utoipa::path(
     post,
-    path = "/apps/{app_name}/deployments/{deployment_id}/activate",
+    path = "/v1/apps/{app_name}/deployments/{deployment_id}/activate",
     params(
         ("app_name" = String, Path, description = "Application name"),
         ("deployment_id" = Uuid, Path, description = "Deployment ID")
@@ -564,7 +564,7 @@ pub async fn activate_deployment_handler(
 
 #[utoipa::path(
     post,
-    path = "/apps/{app_name}/deploy",
+    path = "/v1/apps/{app_name}/deploy",
     params(
         ("app_name" = String, Path, description = "Application name")
     ),

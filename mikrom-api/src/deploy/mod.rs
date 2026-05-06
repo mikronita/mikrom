@@ -35,7 +35,7 @@ pub struct DeployResponseBody {
 
 #[utoipa::path(
     post,
-    path = "/deploy",
+    path = "/v1/deploy",
     request_body = DeployRequestPayload,
     responses(
         (status = 200, description = "Deployment initiated", body = DeployResponseBody),

@@ -170,7 +170,10 @@ async fn test_promotion_back_and_forth() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/apps/test-app/deployments/{}/activate", dep2_id))
+                .uri(format!(
+                    "/v1/apps/test-app/deployments/{}/activate",
+                    dep2_id
+                ))
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
                 .unwrap(),
@@ -336,7 +339,7 @@ async fn test_promotion_pauses_previous_active() {
             Request::builder()
                 .method("POST")
                 .uri(format!(
-                    "/apps/{}/deployments/{}/activate",
+                    "/v1/apps/{}/deployments/{}/activate",
                     "test-app", new_dep_id
                 ))
                 .header("Authorization", format!("Bearer {}", token))
@@ -478,7 +481,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
             Request::builder()
                 .method("POST")
                 .uri(format!(
-                    "/apps/{}/deployments/{}/activate",
+                    "/v1/apps/{}/deployments/{}/activate",
                     "test-app", dep_id
                 ))
                 .header("Authorization", format!("Bearer {}", token))
@@ -594,7 +597,7 @@ async fn test_delete_app_cleans_up_resources() {
         .oneshot(
             Request::builder()
                 .method("DELETE")
-                .uri("/apps/test-app")
+                .uri("/v1/apps/test-app")
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
                 .unwrap(),

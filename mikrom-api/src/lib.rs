@@ -148,11 +148,7 @@ pub fn create_app(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    Router::new()
-        .merge(
-            SwaggerUi::new("/docs")
-                .url("/api-docs/openapi.json", crate::openapi::ApiDoc::openapi()),
-        )
+    let api_routes = Router::new()
         .route("/health", get(health))
         .route("/health/stream", get(health_stream))
         .route("/auth/register", axum::routing::post(register))
@@ -165,8 +161,7 @@ pub fn create_app(state: AppState) -> Router {
             "/webhooks/github",
             axum::routing::post(github_webhook_handler_generic),
         )
-        .route("/auth/me", get(get_profile))
-        .route("/auth/me", axum::routing::put(update_profile))
+        .route("/auth/me", get(get_profile).put(update_profile))
         .route("/github/install", get(github_install))
         .route("/github/callback", get(github_callback))
         .route("/github/repos", get(list_repos))
@@ -176,9 +171,9 @@ pub fn create_app(state: AppState) -> Router {
         )
         .route(
             "/apps",
-            axum::routing::post(crate::deploy::create_app_handler),
+            axum::routing::post(crate::deploy::create_app_handler)
+                .get(crate::deploy::list_apps_handler),
         )
-        .route("/apps", get(crate::deploy::list_apps_handler))
         .route(
             "/apps/:app_name",
             axum::routing::delete(crate::deploy::delete_app_handler),
@@ -213,7 +208,7 @@ pub fn create_app(state: AppState) -> Router {
         )
         .route(
             "/apps/:app_name/deployments/:job_id",
-            get(get_deployment_status),
+            get(get_deployment_status).delete(stop_deployment),
         )
         .route(
             "/apps/:app_name/deployments/:job_id/logs",
@@ -228,15 +223,18 @@ pub fn create_app(state: AppState) -> Router {
             axum::routing::post(resume_deployment),
         )
         .route(
-            "/apps/:app_name/deployments/:job_id",
-            axum::routing::delete(stop_deployment),
-        )
-        .route(
             "/apps/:app_name/deployments/:job_id/delete",
             axum::routing::delete(delete_deployment_record),
         )
         .route("/deployments/active", get(list_active_deployments))
-        .route("/deployments/events", get(watch_deployments))
+        .route("/deployments/events", get(watch_deployments));
+
+    Router::new()
+        .merge(SwaggerUi::new("/v1/docs").url(
+            "/v1/api-docs/openapi.json",
+            crate::openapi::ApiDoc::openapi(),
+        ))
+        .nest("/v1", api_routes)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &axum::http::Request<_>| {
@@ -400,7 +398,7 @@ async fn get_system_health(state: &AppState) -> HashMap<String, String> {
 
 #[utoipa::path(
     get,
-    path = "/health",
+    path = "/v1/health",
     responses(
         (status = 200, description = "API Health Status", body = HealthResponse)
     ),
@@ -418,7 +416,7 @@ async fn health(State(state): State<AppState>) -> axum::Json<HealthResponse> {
 
 #[utoipa::path(
     get,
-    path = "/health/stream",
+    path = "/v1/health/stream",
     responses(
         (status = 200, description = "SSE stream of System Health Updates"),
     ),

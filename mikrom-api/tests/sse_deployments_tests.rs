@@ -119,7 +119,7 @@ async fn test_sse_deployments_stream_initial_data() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(format!("/apps/{}/deployments/stream", app_name))
+        .uri(format!("/v1/apps/{}/deployments/stream", app_name))
         .header("Authorization", format!("Bearer {}", token))
         .body(Body::empty())
         .unwrap();
@@ -179,7 +179,7 @@ async fn test_sse_deployments_auth_via_query_param() {
     let req = Request::builder()
         .method("GET")
         .uri(format!(
-            "/apps/{}/deployments/stream?token={}",
+            "/v1/apps/{}/deployments/stream?token={}",
             app_name, token
         ))
         .body(Body::empty())
@@ -290,7 +290,7 @@ async fn test_sse_deployments_stream_updates() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(format!("/apps/{}/deployments/stream", app_name))
+        .uri(format!("/v1/apps/{}/deployments/stream", app_name))
         .header("Authorization", format!("Bearer {}", token))
         .body(Body::empty())
         .unwrap();

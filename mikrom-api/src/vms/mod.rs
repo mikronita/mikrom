@@ -32,7 +32,7 @@ use std::convert::Infallible;
 
 #[utoipa::path(
     get,
-    path = "/apps/{app_name}/logs/stream",
+    path = "/v1/apps/{app_name}/logs/stream",
     params(
         ("app_name" = String, Path, description = "Application name")
     ),
@@ -84,7 +84,7 @@ pub async fn app_logs_stream_handler(
 
 #[utoipa::path(
     get,
-    path = "/apps/{app_name}/metrics/stream",
+    path = "/v1/apps/{app_name}/metrics/stream",
     params(
         ("app_name" = String, Path, description = "Application name")
     ),
@@ -156,7 +156,7 @@ pub struct LiveDeploymentStatus {
 
 #[utoipa::path(
     get,
-    path = "/deployments/active",
+    path = "/v1/deployments/active",
     responses(
         (status = 200, description = "List of active deployments", body = [LiveDeploymentInfo]),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
@@ -249,7 +249,7 @@ pub async fn list_active_deployments(
 
 #[utoipa::path(
     get,
-    path = "/deployments/events",
+    path = "/v1/deployments/events",
     responses(
         (status = 200, description = "SSE stream of active deployment events"),
         (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
@@ -503,7 +503,7 @@ pub async fn validate_app_deployment(
 
 #[utoipa::path(
     get,
-    path = "/apps/{app_name}/deployments/{job_id}",
+    path = "/v1/apps/{app_name}/deployments/{job_id}",
     params(
         ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")
@@ -585,7 +585,7 @@ pub async fn get_deployment_status(
 
 #[utoipa::path(
     get,
-    path = "/apps/{app_name}/deployments/{job_id}/logs",
+    path = "/v1/apps/{app_name}/deployments/{job_id}/logs",
     params(
         ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")
@@ -650,7 +650,7 @@ pub async fn get_deployment_logs(
 
 #[utoipa::path(
     post,
-    path = "/apps/{app_name}/deployments/{job_id}/pause",
+    path = "/v1/apps/{app_name}/deployments/{job_id}/pause",
     params(
         ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")
@@ -710,7 +710,7 @@ pub async fn pause_deployment(
 
 #[utoipa::path(
     post,
-    path = "/apps/{app_name}/deployments/{job_id}/resume",
+    path = "/v1/apps/{app_name}/deployments/{job_id}/resume",
     params(
         ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")
@@ -770,7 +770,7 @@ pub async fn resume_deployment(
 
 #[utoipa::path(
     delete,
-    path = "/apps/{app_name}/deployments/{job_id}",
+    path = "/v1/apps/{app_name}/deployments/{job_id}",
     params(
         ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")
@@ -837,7 +837,7 @@ pub async fn stop_deployment(
 
 #[utoipa::path(
     delete,
-    path = "/apps/{app_name}/deployments/{job_id}/delete",
+    path = "/v1/apps/{app_name}/deployments/{job_id}/delete",
     params(
         ("app_name" = String, Path, description = "Application name"),
         ("job_id" = String, Path, description = "Deployment Job ID")

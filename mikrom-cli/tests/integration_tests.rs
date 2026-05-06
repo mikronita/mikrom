@@ -9,7 +9,7 @@ async fn test_client_health() {
     let client = MikromClient::new(server.uri(), None);
 
     Mock::given(method("GET"))
-        .and(path("/health"))
+        .and(path("/v1/health"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "ok",
             "version": "1.0.0",
@@ -29,7 +29,7 @@ async fn test_client_register() {
     let client = MikromClient::new(server.uri(), None);
 
     Mock::given(method("POST"))
-        .and(path("/auth/register"))
+        .and(path("/v1/auth/register"))
         .and(body_json(
             json!({ "email": "test@example.com", "password": "password" }),
         ))
@@ -53,7 +53,7 @@ async fn test_client_login() {
     let client = MikromClient::new(server.uri(), None);
 
     Mock::given(method("POST"))
-        .and(path("/auth/login"))
+        .and(path("/v1/auth/login"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "token": "secret-token"
         })))
@@ -70,7 +70,7 @@ async fn test_client_whoami() {
     let client = MikromClient::new(server.uri(), Some("token".into()));
 
     Mock::given(method("GET"))
-        .and(path("/auth/me"))
+        .and(path("/v1/auth/me"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "id": "user-123",
             "email": "test@example.com",
@@ -93,7 +93,7 @@ async fn test_client_update_profile() {
     let client = MikromClient::new(server.uri(), Some("token".into()));
 
     Mock::given(method("PUT"))
-        .and(path("/auth/me"))
+        .and(path("/v1/auth/me"))
         .and(body_json(
             json!({ "first_name": "New", "last_name": "Name" }),
         ))
@@ -121,7 +121,7 @@ async fn test_client_create_app() {
     let client = MikromClient::new(server.uri(), Some("token".into()));
 
     Mock::given(method("POST"))
-        .and(path("/apps"))
+        .and(path("/v1/apps"))
         .and(header("authorization", "Bearer token"))
         .respond_with(ResponseTemplate::new(201).set_body_json(json!({
             "id": "app-123",
@@ -147,7 +147,7 @@ async fn test_client_list_apps() {
     let client = MikromClient::new(server.uri(), Some("token".into()));
 
     Mock::given(method("GET"))
-        .and(path("/apps"))
+        .and(path("/v1/apps"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             {
                 "id": "app-1",
@@ -171,7 +171,7 @@ async fn test_client_get_app_secret() {
     let client = MikromClient::new(server.uri(), Some("token".into()));
 
     Mock::given(method("GET"))
-        .and(path("/apps/test-app/secret"))
+        .and(path("/v1/apps/test-app/secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "github_webhook_secret": "real-secret-456"
         })))
@@ -188,7 +188,7 @@ async fn test_client_deploy_app() {
     let client = MikromClient::new(server.uri(), Some("token".into()));
 
     Mock::given(method("POST"))
-        .and(path("/apps/test-app/deploy"))
+        .and(path("/v1/apps/test-app/deploy"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "job_id": "job-123",
             "status": "BUILDING",
@@ -208,7 +208,7 @@ async fn test_client_get_deployment_status() {
     let client = MikromClient::new(server.uri(), Some("token".into()));
 
     Mock::given(method("GET"))
-        .and(path("/apps/test-app/deployments/job-123"))
+        .and(path("/v1/apps/test-app/deployments/job-123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "job_id": "job-123",
             "status": "RUNNING",
@@ -238,7 +238,7 @@ async fn test_client_error_handling() {
     let client = MikromClient::new(server.uri(), None);
 
     Mock::given(method("POST"))
-        .and(path("/auth/login"))
+        .and(path("/v1/auth/login"))
         .respond_with(ResponseTemplate::new(401).set_body_json(json!({
             "error": "Invalid credentials"
         })))
