@@ -58,6 +58,9 @@ async fn test_deployment_metadata_roundtrip() {
             port: 80,
             env_vars: std::collections::HashMap::new(),
             trigger_source: "github_webhook".to_string(),
+            git_commit_hash: None,
+            git_commit_message: None,
+            git_branch: None,
         })
         .await
         .expect("failed to create deployment");

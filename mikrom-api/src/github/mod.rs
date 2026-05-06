@@ -53,7 +53,13 @@ pub fn generate_jwt(app_id: &str, private_key_pem: &str) -> ApiResult<String> {
         iss: app_id.to_string(),
     };
 
-    let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
+    // Handle escaped newlines in private key if they exist
+    let pem = private_key_pem
+        .trim()
+        .trim_matches('"')
+        .replace("\\n", "\n");
+
+    let key = EncodingKey::from_rsa_pem(pem.as_bytes())
         .map_err(|e| ApiError::Internal(format!("Invalid private key: {}", e)))?;
 
     jsonwebtoken::encode(&Header::new(jsonwebtoken::Algorithm::RS256), &claims, &key)
@@ -74,6 +80,7 @@ pub async fn get_installation_token(
         ))
         .header("Authorization", format!("Bearer {}", jwt))
         .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "mikrom-api")
         .send()
         .await
         .map_err(|e| ApiError::Internal(format!("GitHub API request failed: {}", e)))?;
@@ -111,8 +118,9 @@ pub async fn list_installation_repos(
         );
         let response = HTTP_CLIENT
             .get(&url)
-            .header("Authorization", format!("token {}", token))
+            .header("Authorization", format!("Bearer {}", token))
             .header("Accept", "application/vnd.github.v3+json")
+            .header("User-Agent", "mikrom-api")
             .send()
             .await
             .map_err(|e| ApiError::Internal(format!("GitHub API request failed: {}", e)))?;
@@ -155,3 +163,114 @@ pub async fn list_installation_repos(
 
     Ok(all_repos)
 }
+
+pub async fn create_repository_webhook(
+    app_id: &str,
+    private_key_pem: &str,
+    installation_id: i64,
+    repo_full_name: &str,
+    webhook_url: &str,
+    webhook_secret: &str,
+) -> ApiResult<()> {
+    tracing::info!(repo = %repo_full_name, url = %webhook_url, "Creating GitHub repository webhook...");
+    let token = get_installation_token(app_id, private_key_pem, installation_id).await?;
+
+    let response = HTTP_CLIENT
+        .post(format!(
+            "https://api.github.com/repos/{}/hooks",
+            repo_full_name
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "mikrom-api")
+        .json(&serde_json::json!({
+            "name": "web",
+            "active": true,
+            "events": ["push"],
+            "config": {
+                "url": webhook_url,
+                "content_type": "json",
+                "secret": webhook_secret,
+                "insecure_ssl": "0"
+            }
+        }))
+        .send()
+        .await
+        .map_err(|e| ApiError::Internal(format!("GitHub API request failed: {}", e)))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_body = response.text().await.unwrap_or_default();
+        // If it already exists, we consider it a success for our purposes
+        if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
+            && error_body.contains("Hook already exists")
+        {
+            tracing::info!(repo = %repo_full_name, "GitHub webhook already exists, skipping creation");
+            return Ok(());
+        }
+        tracing::error!(repo = %repo_full_name, status = %status, body = %error_body, "Failed to create GitHub webhook");
+        return Err(ApiError::Internal(format!(
+            "Failed to create webhook: {} - {}",
+            status, error_body
+        )));
+    }
+
+    tracing::info!(repo = %repo_full_name, "Successfully created GitHub repository webhook");
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GithubCommitResponse {
+    pub sha: String,
+    pub commit: CommitDetail,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CommitDetail {
+    pub message: String,
+}
+
+pub async fn get_repo_latest_commit(
+    app_id: &str,
+    private_key_pem: &str,
+    installation_id: i64,
+    repo_full_name: &str,
+    branch: &str,
+) -> ApiResult<crate::repositories::app_repository::GitMetadata> {
+    let token = get_installation_token(app_id, private_key_pem, installation_id).await?;
+
+    let response = HTTP_CLIENT
+        .get(format!(
+            "https://api.github.com/repos/{}/commits/{}",
+            repo_full_name, branch
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "mikrom-api")
+        .send()
+        .await
+        .map_err(|e| ApiError::Internal(format!("GitHub API request failed: {}", e)))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(ApiError::Internal(format!(
+            "Failed to fetch latest commit: {} - {}",
+            status, error_body
+        )));
+    }
+
+    let commit_resp: GithubCommitResponse = response
+        .json()
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to parse commit response: {}", e)))?;
+
+    Ok(crate::repositories::app_repository::GitMetadata {
+        git_commit_hash: Some(commit_resp.sha),
+        git_commit_message: Some(commit_resp.commit.message),
+        git_branch: Some(branch.to_string()),
+    })
+}
+
+#[cfg(test)]
+mod tests;

@@ -133,3 +133,13 @@ required-features = ["test-utils"]
 name = "app_cleanup_integration_tests"
 path = "tests/app_cleanup_integration_tests.rs"
 required-features = ["test-utils"]
+
+[[test]]
+name = "github_callback_tests"
+path = "tests/github_callback_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "manual_deploy_git_metadata_tests"
+path = "tests/manual_deploy_git_metadata_tests.rs"
+required-features = ["test-utils"]

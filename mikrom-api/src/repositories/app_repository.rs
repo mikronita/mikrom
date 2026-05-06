@@ -12,6 +12,9 @@ pub struct NewDeployment {
     pub port: i32,
     pub env_vars: std::collections::HashMap<String, String>,
     pub trigger_source: String,
+    pub git_commit_hash: Option<String>,
+    pub git_commit_message: Option<String>,
+    pub git_branch: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -51,6 +54,7 @@ pub trait AppRepository: Send + Sync {
     async fn create_app(&self, params: CreateAppParams) -> anyhow::Result<App>;
     async fn get_app(&self, id: Uuid) -> anyhow::Result<Option<App>>;
     async fn get_app_by_name(&self, name: &str) -> anyhow::Result<Option<App>>;
+    async fn get_app_by_github_repo_id(&self, repo_id: i64) -> anyhow::Result<Option<App>>;
     async fn delete_app(&self, id: Uuid) -> anyhow::Result<()>;
     async fn list_apps_by_user(&self, user_id: Option<Uuid>) -> anyhow::Result<Vec<App>>;
     async fn set_active_deployment(&self, app_id: Uuid, deployment_id: Uuid) -> anyhow::Result<()>;

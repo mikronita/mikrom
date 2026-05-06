@@ -81,6 +81,9 @@ async fn test_encryption_at_rest() {
             port: 8080,
             env_vars: env_vars.clone(),
             trigger_source: "manual".to_string(),
+            git_commit_hash: None,
+            git_commit_message: None,
+            git_branch: None,
         })
         .await
         .expect("failed to create deployment");

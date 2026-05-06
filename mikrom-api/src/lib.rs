@@ -31,7 +31,7 @@ pub mod vms;
 pub mod test_utils;
 
 pub use deploy::deploy_app;
-use deploy::webhooks::github_webhook_handler;
+use deploy::webhooks::{github_webhook_handler, github_webhook_handler_generic};
 pub use error::{ApiError, ApiResult};
 pub use repositories::app_repository::AppRepository;
 pub use repositories::github_repository::GithubRepository;
@@ -68,6 +68,7 @@ pub struct AppState {
     pub github_app_id: Option<String>,
     pub github_private_key: Option<String>,
     pub github_app_slug: Option<String>,
+    pub github_webhook_url_base: Option<String>,
 }
 
 impl AppState {
@@ -159,6 +160,10 @@ pub fn create_app(state: AppState) -> Router {
         .route(
             "/webhooks/github/:app_name",
             axum::routing::post(github_webhook_handler),
+        )
+        .route(
+            "/webhooks/github",
+            axum::routing::post(github_webhook_handler_generic),
         )
         .route("/auth/me", get(get_profile))
         .route("/auth/me", axum::routing::put(update_profile))

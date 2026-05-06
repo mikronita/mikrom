@@ -86,6 +86,7 @@ async fn test_create_app_endpoint() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     let router = create_app(state);
@@ -178,6 +179,7 @@ async fn test_create_app_duplicate_name() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     let router = create_app(state);
@@ -277,6 +279,7 @@ async fn test_list_apps_includes_secret() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     let router = create_app(state);
@@ -371,6 +374,7 @@ async fn test_get_app_secret_endpoint() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     let router = create_app(state);

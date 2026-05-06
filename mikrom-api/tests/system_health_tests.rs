@@ -38,6 +38,7 @@ async fn test_health_endpoint_structure() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
     let app = create_app(state);
 
@@ -95,6 +96,7 @@ async fn test_health_stream_endpoint() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
     let app = create_app(state);
 

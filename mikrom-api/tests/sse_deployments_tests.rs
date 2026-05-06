@@ -42,6 +42,7 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     create_app(state)
@@ -275,6 +276,7 @@ async fn test_sse_deployments_stream_updates() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     let mut router = create_app(state);

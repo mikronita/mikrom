@@ -139,6 +139,18 @@ impl AppRepository for PostgresAppRepository {
         }
     }
 
+    async fn get_app_by_github_repo_id(&self, repo_id: i64) -> anyhow::Result<Option<App>> {
+        let app = sqlx::query_as::<_, App>("SELECT * FROM apps WHERE github_repo_id = $1")
+            .bind(repo_id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        match app {
+            Some(a) => Ok(Some(self.decrypt_app(a)?)),
+            None => Ok(None),
+        }
+    }
+
     async fn delete_app(&self, id: Uuid) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM apps WHERE id = $1")
             .bind(id)
@@ -201,8 +213,8 @@ impl AppRepository for PostgresAppRepository {
 
         let deployment = sqlx::query_as::<_, Deployment>(
             r#"
-            INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, port, env_vars, trigger_source)
-            VALUES ($1, $2, 'BUILDING', $3, $4, $5, $6, $7, $8)
+            INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, port, env_vars, trigger_source, git_commit_hash, git_commit_message, git_branch)
+            VALUES ($1, $2, 'BUILDING', $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *
             "#,
         )
@@ -214,6 +226,9 @@ impl AppRepository for PostgresAppRepository {
         .bind(data.port)
         .bind(env_json)
         .bind(data.trigger_source)
+        .bind(data.git_commit_hash)
+        .bind(data.git_commit_message)
+        .bind(data.git_branch)
         .fetch_one(&self.pool)
         .await?;
 
@@ -413,6 +428,9 @@ mod tests {
                 port: 8080,
                 env_vars: std::collections::HashMap::new(),
                 trigger_source: "manual".to_string(),
+                git_commit_hash: None,
+                git_commit_message: None,
+                git_branch: None,
             })
             .await
             .expect("failed to create deployment");

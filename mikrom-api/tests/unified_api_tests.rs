@@ -118,6 +118,7 @@ async fn test_hierarchical_deployment_status_success() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     let router = create_app(state);
@@ -217,6 +218,7 @@ async fn test_hierarchical_security_cross_app_prevention() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     let router = create_app(state);

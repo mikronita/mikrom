@@ -50,6 +50,7 @@ async fn test_route_reconciliation_on_startup() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     // 2. Create test data: an app with an active deployment
@@ -89,6 +90,9 @@ async fn test_route_reconciliation_on_startup() {
             port: 8080,
             env_vars: std::collections::HashMap::new(),
             trigger_source: "test".into(),
+            git_commit_hash: None,
+            git_commit_message: None,
+            git_branch: None,
         })
         .await
         .unwrap();

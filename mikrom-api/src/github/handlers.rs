@@ -75,9 +75,17 @@ pub async fn github_callback(
         .as_ref()
         .ok_or_else(|| ApiError::Internal("GITHUB_PRIVATE_KEY not configured".to_string()))?;
 
-    let state_token = query
-        .state
-        .ok_or_else(|| ApiError::BadRequest("Missing state parameter from GitHub".to_string()))?;
+    let state_token = match query.state {
+        Some(token) => token,
+        None => {
+            tracing::info!(
+                "GitHub callback without state parameter. installation_id: {}, setup_action: {}",
+                query.installation_id,
+                query.setup_action
+            );
+            return Ok(Redirect::to(&format!("{}/settings", state.frontend_url)));
+        },
+    };
 
     let claims = crate::auth::jwt::verify_token(&state_token, &state.jwt_secret)
         .map_err(|_| ApiError::BadRequest("Invalid or expired state parameter".to_string()))?;

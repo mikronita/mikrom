@@ -44,6 +44,7 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
     mikrom_api::create_app(state)
 }

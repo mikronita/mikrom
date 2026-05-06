@@ -296,6 +296,7 @@ mod tests {
             github_app_id: None,
             github_private_key: None,
             github_app_slug: None,
+            github_webhook_url_base: None,
         };
 
         let payload = RegisterRequest {
@@ -352,6 +353,7 @@ mod tests {
             github_app_id: None,
             github_private_key: None,
             github_app_slug: None,
+            github_webhook_url_base: None,
         };
 
         let payload = LoginRequest {

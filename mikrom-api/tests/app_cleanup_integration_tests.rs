@@ -95,6 +95,7 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
+        github_webhook_url_base: None,
     };
 
     let router = create_app(state);

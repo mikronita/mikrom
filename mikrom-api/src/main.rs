@@ -56,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
         github_app_id: config.github_app_id,
         github_private_key: config.github_private_key,
         github_app_slug: config.github_app_slug,
+        github_webhook_url_base: config.github_webhook_url_base,
     };
 
     mikrom_api::start_background_tasks(state.clone());
