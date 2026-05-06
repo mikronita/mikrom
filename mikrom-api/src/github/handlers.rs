@@ -54,7 +54,7 @@ pub async fn github_install(
     params(
         ("installation_id" = i64, Query, description = "GitHub installation ID"),
         ("setup_action" = String, Query, description = "Setup action"),
-        ("state" = Option<String>, Query, description = "State token for CSRF protection")
+        ("state" = String, Query, description = "State token for CSRF protection")
     ),
     responses(
         (status = 302, description = "Redirect back to frontend after successful installation"),
