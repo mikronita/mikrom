@@ -133,8 +133,8 @@ export default function AppDetailPage() {
     if (!liveMetrics) return;
 
     setMetricsHistory(prev => {
-        const newCpu = (liveMetrics.metrics.cpu_usage || 0) * 100;
-        const newRam = (liveMetrics.metrics.memory_usage || 0) / (1024 * 1024);
+        const newCpu = (liveMetrics.cpu_usage || 0) * 100;
+        const newRam = (liveMetrics.ram_used_bytes || 0) / (1024 * 1024);
         
         const newPoint = {
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -252,8 +252,8 @@ export default function AppDetailPage() {
   const latestMetrics = metricsHistory.length > 0
     ? metricsHistory[metricsHistory.length - 1]
     : (liveMetrics ? {
-        cpu: (liveMetrics.metrics.cpu_usage || 0) * 100,
-        ram: (liveMetrics.metrics.memory_usage || 0) / (1024 * 1024)
+        cpu: (liveMetrics.cpu_usage || 0) * 100,
+        ram: (liveMetrics.ram_used_bytes || 0) / (1024 * 1024)
       } : { cpu: 0, ram: 0 });
   return (
     <AuthGuard>

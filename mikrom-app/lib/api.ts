@@ -84,17 +84,15 @@ export interface LogLine {
 }
 
 export interface VmMetrics {
+  app_id: string;
   cpu_usage: number;
-  memory_usage: number;
-  disk_usage: number;
-  network_rx: number;
-  network_tx: number;
+  ram_used_bytes: number;
+  status: string;
+  error_message?: string | null;
+  ip_address?: string | null;
 }
 
-export interface VmMetricsResponse {
-  job_id: string;
-  metrics: VmMetrics;
-}
+export type VmMetricsResponse = VmMetrics;
 
 export interface PauseDeploymentResponse {
   success: boolean;
