@@ -1,13 +1,4 @@
 services:
-  cert-gen:
-    build:
-      context: .
-      dockerfile: mikrom-proto/Dockerfile.cert-gen
-    environment:
-      CERTS_OUT_DIR: /certs
-    volumes:
-      - certs:/certs
-
   postgres:
     image: postgres:17-alpine
     environment:
@@ -43,115 +34,9 @@ services:
     networks:
       - mikrom
 
-  mikrom-scheduler:
-    build:
-      context: .
-      dockerfile: mikrom-scheduler/Dockerfile
-    environment:
-      NATS_URL: nats://nats:4222
-      DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_scheduler
-      USE_TLS: "true"
-      CERTS_DIR: /certs/scheduler
-    volumes:
-      - certs:/certs
-    depends_on:
-      cert-gen:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    networks:
-      - mikrom
-
-  mikrom-api:
-    build:
-      context: .
-      dockerfile: mikrom-api/Dockerfile
-    environment:
-      NATS_URL: nats://nats:4222
-      DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_api
-      JWT_SECRET: ${JWT_SECRET:-change_me_in_production}
-      USE_TLS: "true"
-      CERTS_DIR: /certs/api
-      ACME_EMAIL: ${ACME_EMAIL:-admin@mikrom.es}
-      ACME_STAGING: "true"
-    ports:
-      - "5001:5001"
-    volumes:
-      - certs:/certs
-    depends_on:
-      cert-gen:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-      mikrom-scheduler:
-        condition: service_started
-    networks:
-      - mikrom
-
-  mikrom-router:
-    build:
-      context: .
-      dockerfile: mikrom-router/Dockerfile
-    environment:
-      NATS_URL: nats://nats:4222
-      DATABASE_URL: postgres://mikrom:mikrom_password@postgres:5432/mikrom_router?sslmode=disable
-      MASTER_KEY: ${MASTER_KEY:-default_master_key}
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      cert-gen:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-      nats:
-        condition: service_started
-    networks:
-      - mikrom
-
-  mikrom-builder:
-    build:
-      context: .
-      dockerfile: mikrom-builder/Dockerfile
-    environment:
-      NATS_URL: nats://nats:4222
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    depends_on:
-      - nats
-    networks:
-      - mikrom
-
   buildkit:
     image: moby/buildkit
     privileged: true
-    networks:
-      - mikrom
-
-  mikrom-app:
-    build:
-      context: mikrom-app
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    depends_on:
-      - mikrom-api
-    networks:
-      - mikrom
-
-  mikrom-telemetry:
-    build:
-      context: .
-      dockerfile: mikrom-telemetry/Dockerfile
-    environment:
-      NATS_URL: nats://nats:4222
-      LOKI_URL: http://loki:3100
-      METRICS_PORT: 9090
-    ports:
-      - "9090:9090"
-    depends_on:
-      - nats
-      - loki
     networks:
       - mikrom
 
