@@ -360,6 +360,7 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     #[tokio::test]
