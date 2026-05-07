@@ -95,7 +95,8 @@ pub async fn deploy_app(
             env: payload.env.clone().unwrap_or_default(),
         };
 
-        crate::deploy::worker::start_build_polling(state.clone(), task).await;
+        let guard = state.try_start_flow(app_id);
+        crate::deploy::worker::start_build_polling(state.clone(), task, guard).await;
 
         return Ok(Json(DeployResponseBody {
             job_id: None,

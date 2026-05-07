@@ -4,9 +4,8 @@ use mikrom_api::models::app::{App, Deployment};
 use mikrom_api::repositories::app_repository::UpdateDeploymentParams;
 use mikrom_api::repositories::{MockAppRepository, MockGithubRepository, MockUserRepository};
 use mikrom_api::scheduler::MockScheduler;
-use mikrom_proto::scheduler::{CheckHealthRequest, CheckHealthResponse, DeployResponse};
-use mockall::predicate::*;
-use prost::Message;
+use mikrom_proto::scheduler::{CheckHealthResponse, DeployResponse};
+use mockall::predicate::eq;
 use std::sync::Arc;
 use tokio::time::Duration;
 use uuid::Uuid;
@@ -47,11 +46,19 @@ async fn test_zero_downtime_flow_success() {
     };
 
     // Mocks for run_zero_downtime_flow
+    let call_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let app_clone = app.clone();
     mock_app_repo
         .expect_get_app()
         .with(eq(app_id))
-        .returning(move |_| Ok(Some(app_clone.clone())));
+        .returning(move |_| {
+            let count = call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut a = app_clone.clone();
+            if count > 0 {
+                a.active_deployment_id = Some(new_dep_id);
+            }
+            Ok(Some(a))
+        });
 
     mock_app_repo
         .expect_set_active_deployment()
@@ -92,11 +99,36 @@ async fn test_zero_downtime_flow_success() {
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
 
-    // Subscribe to health check requests to respond
-    let mut health_sub = nats_client
-        .subscribe("mikrom.scheduler.check_health")
-        .await
-        .unwrap();
+    let job_id = format!("job-zero-downtime-{}", Uuid::new_v4());
+    let job_id_clone = job_id.clone();
+
+    // Subscribe to health check requests to respond (only for our job_id)
+    let nats_clone = nats_client.clone();
+    tokio::spawn(async move {
+        use mikrom_proto::scheduler::CheckHealthRequest;
+        use prost::Message;
+
+        let mut health_sub = nats_clone
+            .subscribe("mikrom.scheduler.check_health")
+            .await
+            .unwrap();
+
+        while let Some(msg) = health_sub.next().await {
+            if let Ok(req) = CheckHealthRequest::decode(&msg.payload[..])
+                && req.job_id != job_id_clone
+            {
+                continue;
+            }
+
+            let resp = CheckHealthResponse {
+                is_healthy: true,
+                message: "Healthy".to_string(),
+            };
+            let mut buf = Vec::new();
+            resp.encode(&mut buf).unwrap();
+            let _ = nats_clone.publish(msg.reply.unwrap(), buf.into()).await;
+        }
+    });
 
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
@@ -127,29 +159,14 @@ async fn test_zero_downtime_flow_success() {
         state.clone(),
         app,
         new_deployment,
-        inner,
+        DeployResponse {
+            job_id: job_id.clone(),
+            ..inner
+        },
         user_id.to_string(),
         true,
         guard,
     );
-
-    // 1. Handle health check request
-    let msg = tokio::time::timeout(Duration::from_secs(5), health_sub.next())
-        .await
-        .expect("Timeout waiting for health check request")
-        .expect("No health check request");
-
-    let _req = CheckHealthRequest::decode(&msg.payload[..]).unwrap();
-    let resp = CheckHealthResponse {
-        is_healthy: true,
-        message: "Healthy".to_string(),
-    };
-    let mut buf = Vec::new();
-    resp.encode(&mut buf).unwrap();
-    nats_client
-        .publish(msg.reply.unwrap(), buf.into())
-        .await
-        .unwrap();
 
     // Now we wait for the flow to complete.
     // We'll wait up to 15s.

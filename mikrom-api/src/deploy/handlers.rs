@@ -725,6 +725,7 @@ pub async fn deploy_app_version_handler(
         memory_mib as u64,
         disk_mib as u64,
         env_vars,
+        guard,
     )
     .await?;
 
@@ -771,6 +772,11 @@ pub async fn trigger_app_build(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    // Protect against concurrent flows
+    let guard = state.try_start_flow(app.id).ok_or_else(|| {
+        ApiError::BadRequest("A deployment flow is already in progress for this application".into())
+    })?;
+
     DeploymentService::trigger_build(
         &state,
         &app,
@@ -779,6 +785,7 @@ pub async fn trigger_app_build(
         memory_mib as u64,
         disk_mib as u64,
         env_vars,
+        guard,
     )
     .await?;
 
