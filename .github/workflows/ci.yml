@@ -134,6 +134,15 @@ jobs:
           - 4223:4222
 
     steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf /usr/lib/jvm
+          df -h
+
       - name: Checkout
         uses: actions/checkout@v6
 
