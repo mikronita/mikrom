@@ -17,7 +17,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps } from "@/lib/hooks/use-apps";
 import { useVms, useWatchVms } from "@/lib/hooks/use-vms";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardFooter, CardContent } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { 
@@ -31,23 +31,26 @@ import {
 import { cn } from "@/lib/utils";
 import { CreateAppModal } from "@/components/CreateAppModal";
 
+const formatDate = (dateStr: string) => {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    }).format(new Date(dateStr));
+  } catch {
+    return dateStr;
+  }
+};
+
 export default function ApplicationsPage() {
   const { data: apps = [], isLoading: isLoadingApps, error: appsError } = useApps();
   const { data: vms = [], error: vmsError } = useVms();
   useWatchVms();
   const [showCreateApp, setShowCreateApp] = useState(false);
 
-  const formatDate = (dateStr: string) => {
-    try {
-      return new Intl.DateTimeFormat('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }).format(new Date(dateStr));
-    } catch {
-      return dateStr;
-    }
-  };
+  // Optimize VM lookup by creating a Map
+  const vmsMap = new Map(vms.map(vm => [vm.app_id || vm.app_name, vm]));
 
   return (
     <AuthGuard>
@@ -116,7 +119,7 @@ export default function ApplicationsPage() {
               </div>
             ) : (
               [...apps].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((app) => {
-                const appVm = vms.find(vm => vm.app_id === app.id || vm.app_name === app.name);
+                const appVm = vmsMap.get(app.id) || vmsMap.get(app.name);
                 const isRunning = !!appVm && appVm.status === "running";
 
                 return (
