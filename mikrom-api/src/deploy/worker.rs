@@ -318,13 +318,20 @@ async fn poll_and_deploy(
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
 
-                DeploymentService::run_zero_downtime_flow(
-                    state.clone(),
-                    app,
-                    deployment,
-                    inner,
-                    task.user_id.clone(),
-                );
+                // Acquire guard before starting zero-downtime flow
+                if let Some(guard) = state.try_start_flow(app.id) {
+                    DeploymentService::run_zero_downtime_flow(
+                        state.clone(),
+                        app,
+                        deployment,
+                        inner,
+                        task.user_id.clone(),
+                        true,
+                        guard,
+                    );
+                } else {
+                    error!(app = %app.name, "Deployment flow already in progress for app, skipping zero-downtime flow for completed build.");
+                }
 
                 break;
             },
@@ -408,6 +415,7 @@ mod tests {
             github_private_key: None,
             github_app_slug: None,
             github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
         }
     }
 

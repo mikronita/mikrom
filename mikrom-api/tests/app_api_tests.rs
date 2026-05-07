@@ -89,6 +89,7 @@ async fn test_create_app_endpoint() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
     let router = create_app(state);
@@ -182,6 +183,7 @@ async fn test_create_app_duplicate_name() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
     let router = create_app(state);
@@ -284,6 +286,7 @@ async fn test_list_apps_includes_secret() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
     let router = create_app(state);
@@ -381,6 +384,7 @@ async fn test_get_app_secret_endpoint() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
     let router = create_app(state);
@@ -476,6 +480,7 @@ async fn test_create_app_with_custom_config() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
     let auth = AuthUser {

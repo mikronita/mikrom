@@ -39,6 +39,7 @@ async fn test_api_versioning_enforcement() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
     let app = create_app(state);
 

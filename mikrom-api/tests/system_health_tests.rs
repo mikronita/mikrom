@@ -39,6 +39,7 @@ async fn test_health_endpoint_structure() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
     let app = create_app(state);
 
@@ -97,6 +98,7 @@ async fn test_health_stream_endpoint() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
     let app = create_app(state);
 

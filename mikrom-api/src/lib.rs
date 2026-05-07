@@ -69,9 +69,35 @@ pub struct AppState {
     pub github_private_key: Option<String>,
     pub github_app_slug: Option<String>,
     pub github_webhook_url_base: Option<String>,
+    pub active_deployment_flows: Arc<dashmap::DashSet<uuid::Uuid>>,
+}
+
+/// RAII guard to ensure an application's deployment flow is removed from the active set when dropped.
+pub struct DeploymentFlowGuard {
+    state: AppState,
+    app_id: uuid::Uuid,
+}
+
+impl Drop for DeploymentFlowGuard {
+    fn drop(&mut self) {
+        self.state.active_deployment_flows.remove(&self.app_id);
+    }
 }
 
 impl AppState {
+    /// Attempts to start a deployment flow for an application.
+    /// Returns a guard if successful, or None if a flow is already in progress.
+    pub fn try_start_flow(&self, app_id: uuid::Uuid) -> Option<DeploymentFlowGuard> {
+        if self.active_deployment_flows.insert(app_id) {
+            Some(DeploymentFlowGuard {
+                state: self.clone(),
+                app_id,
+            })
+        } else {
+            None
+        }
+    }
+
     pub async fn notify_router(&self, app: &crate::models::app::App) -> anyhow::Result<()> {
         let hostname = match &app.hostname {
             Some(h) => h,

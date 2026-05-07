@@ -486,19 +486,55 @@ pub async fn activate_deployment_handler(
         ));
     }
 
+    // Protect against concurrent flows before any scheduler interaction
+    let guard = state.try_start_flow(app.id).ok_or_else(|| {
+        ApiError::BadRequest("A deployment flow is already in progress for this application".into())
+    })?;
+
     match deployment.job_id.clone() {
         Some(job_id) => {
-            info!(job_id = %job_id, "Activating deployment with zero-downtime flow...");
+            info!(job_id = %job_id, status = %deployment.status, "Activating deployment with zero-downtime flow...");
 
+            use crate::deploy::service::{DeployParams, DeploymentService};
             use mikrom_proto::scheduler::{DeployResponse, DeployStatus};
-            let inner = DeployResponse {
-                job_id,
-                status: DeployStatus::Running as i32,
-                host_id: String::new(), // Not stored in Deployment model, scheduler will find it
-                vm_id: String::new(),   // Not stored in Deployment model, scheduler will find it
-                message: "Activating".to_string(),
-                ip_address: deployment.ip_address.clone().unwrap_or_default(),
-            };
+
+            let (inner, cleanup_on_failure) =
+                if deployment.status == "STOPPED" || deployment.status == "FAILED" {
+                    info!(app = %app.name, "Deployment is not running, starting it first...");
+                    let env_vars: std::collections::HashMap<String, String> =
+                        serde_json::from_value(deployment.env_vars.clone()).unwrap_or_default();
+
+                    let inner = match DeploymentService::deploy_to_scheduler(
+                        &state,
+                        &app,
+                        &deployment,
+                        DeployParams {
+                            image_tag: deployment.image_tag.clone().unwrap_or_default(),
+                            vcpus: deployment.vcpus as u32,
+                            memory_mib: deployment.memory_mib as u32,
+                            disk_mib: deployment.disk_mib as u32,
+                            env: env_vars,
+                        },
+                    )
+                    .await
+                    {
+                        Ok(inner) => inner,
+                        Err(e) => {
+                            return Err(e);
+                        },
+                    };
+                    (inner, true) // Cleanup if it fails to start/be healthy now
+                } else {
+                    let inner = DeployResponse {
+                        job_id,
+                        status: DeployStatus::Running as i32,
+                        host_id: String::new(),
+                        vm_id: String::new(),
+                        message: "Activating".to_string(),
+                        ip_address: deployment.ip_address.clone().unwrap_or_default(),
+                    };
+                    (inner, false) // Don't cleanup if it was already running
+                };
 
             DeploymentService::run_zero_downtime_flow(
                 state.clone(),
@@ -506,6 +542,8 @@ pub async fn activate_deployment_handler(
                 deployment,
                 inner,
                 auth.user_id,
+                cleanup_on_failure,
+                guard,
             );
 
             Ok(StatusCode::ACCEPTED)
@@ -626,12 +664,17 @@ pub async fn deploy_app_version_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    // Protect against concurrent flows
+    let guard = state.try_start_flow(app.id).ok_or_else(|| {
+        ApiError::BadRequest("A deployment flow is already in progress for this application".into())
+    })?;
+
     // If an image is provided directly, skip the build phase and deploy immediately
     if let Some(image_tag) = image {
         info!(app = %app.name, image = %image_tag, "Direct image deployment requested, skipping build");
 
         // 1. Trigger deployment
-        let inner = DeploymentService::deploy_to_scheduler(
+        let inner = match DeploymentService::deploy_to_scheduler(
             &state,
             &app,
             &deployment,
@@ -643,7 +686,13 @@ pub async fn deploy_app_version_handler(
                 env: env_vars.clone(),
             },
         )
-        .await?;
+        .await
+        {
+            Ok(inner) => inner,
+            Err(e) => {
+                return Err(e);
+            },
+        };
 
         // 2. Start Zero-Downtime orchestration in background
         DeploymentService::run_zero_downtime_flow(
@@ -652,6 +701,8 @@ pub async fn deploy_app_version_handler(
             deployment.clone(),
             inner.clone(),
             auth.user_id.clone(),
+            true,
+            guard,
         );
 
         return Ok(Json(crate::deploy::DeployResponseBody {

@@ -89,6 +89,7 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
     let router = create_app(state);

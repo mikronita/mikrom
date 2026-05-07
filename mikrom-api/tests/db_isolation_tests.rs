@@ -63,6 +63,7 @@ mod tests {
             github_private_key: None,
             github_app_slug: None,
             github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
         };
 
         // Subscribe to router updates

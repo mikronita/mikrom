@@ -3,6 +3,7 @@ use axum::{
     http::{Request, StatusCode},
 };
 use chrono::Utc;
+use futures::StreamExt;
 use mockall::predicate::{self, *};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -103,7 +104,7 @@ async fn test_promotion_back_and_forth() {
     // Expect dep1 to be paused
     mock_scheduler
         .expect_pause_app()
-        .with(eq("job-1".to_string()), eq(user_id.to_string()))
+        .with(eq("job-1".to_string()), eq("system".to_string()))
         .times(1)
         .returning(|_, _| Ok(true));
 
@@ -120,14 +121,25 @@ async fn test_promotion_back_and_forth() {
         .times(1)
         .returning(|_, _| Ok(()));
 
-    // Expect dep2 to be resumed
+    // Expect dep2 to be resumed (via deploy_to_scheduler)
     mock_scheduler
         .expect_resume_app()
-        .with(eq("job-2".to_string()), eq(user_id.to_string()))
+        .with(eq("job-2".to_string()), eq("system".to_string()))
         .times(1)
         .returning(|_, _| Ok(true));
 
-    // Expect dep2 status update to RUNNING
+    // Expect dep2 status update to SCHEDULED then RUNNING
+    mock_app_repo
+        .expect_update_deployment()
+        .with(
+            eq(dep2_id),
+            predicate::function(|params: &UpdateDeploymentParams| {
+                params.status == Some("SCHEDULED".to_string())
+            }),
+        )
+        .times(1)
+        .returning(|_, _| Ok(()));
+
     mock_app_repo
         .expect_update_deployment()
         .with(
@@ -143,6 +155,49 @@ async fn test_promotion_back_and_forth() {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
+
+    // Mock scheduler deployment and health check via NATS
+    let nats_clone = nats_client.clone();
+    let mut deploy_sub = nats_clone
+        .subscribe("mikrom.scheduler.deploy")
+        .await
+        .unwrap();
+    let mut health_sub = nats_clone
+        .subscribe("mikrom.scheduler.check_health")
+        .await
+        .unwrap();
+
+    tokio::spawn(async move {
+        use mikrom_proto::scheduler::{CheckHealthResponse, DeployResponse, DeployStatus};
+        use prost::Message;
+
+        tokio::select! {
+            Some(msg) = deploy_sub.next() => {
+                let resp = DeployResponse {
+                    job_id: "job-2".to_string(),
+                    status: DeployStatus::Running as i32,
+                    host_id: "host-1".to_string(),
+                    vm_id: "vm-1".to_string(),
+                    ip_address: "10.0.0.1".to_string(),
+                    message: "Started".to_string(),
+                };
+                let mut buf = Vec::new();
+                resp.encode(&mut buf).unwrap();
+                let _ = nats_clone.publish(msg.reply.unwrap(), buf.into()).await;
+            }
+        }
+
+        if let Some(msg) = health_sub.next().await {
+            let resp = CheckHealthResponse {
+                is_healthy: true,
+                message: "Healthy".to_string(),
+            };
+            let mut buf = Vec::new();
+            resp.encode(&mut buf).unwrap();
+            let _ = nats_clone.publish(msg.reply.unwrap(), buf.into()).await;
+        }
+    });
+
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
@@ -164,6 +219,7 @@ async fn test_promotion_back_and_forth() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
     let router = create_app(state);
@@ -334,6 +390,7 @@ async fn test_promotion_pauses_previous_active() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
     let router = create_app(state);
@@ -434,14 +491,25 @@ async fn test_activate_stopped_deployment_resumes_it() {
         .expect_list_deployments_by_app()
         .returning(move |_| Ok(vec![paused_dep_clone2.clone()]));
 
-    // Expect resumption
+    // Expect resumption (actually now it calls deploy_to_scheduler which calls resume_app)
     mock_scheduler
         .expect_resume_app()
-        .with(eq("job-stopped".to_string()), eq(user_id.to_string()))
+        .with(eq("job-stopped".to_string()), eq("system".to_string()))
         .times(1)
         .returning(|_, _| Ok(true));
 
-    // 5. Mock update_deployment for resuming (marking it RUNNING)
+    // 5. Mock update_deployment for resuming (marking it SCHEDULED then RUNNING)
+    mock_app_repo
+        .expect_update_deployment()
+        .with(
+            eq(dep_id),
+            predicate::function(|params: &UpdateDeploymentParams| {
+                params.status == Some("SCHEDULED".to_string())
+            }),
+        )
+        .times(1)
+        .returning(|_, _| Ok(()));
+
     mock_app_repo
         .expect_update_deployment()
         .with(
@@ -457,6 +525,49 @@ async fn test_activate_stopped_deployment_resumes_it() {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
+
+    // Mock scheduler deployment and health check via NATS
+    let nats_clone = nats_client.clone();
+    let mut deploy_sub = nats_clone
+        .subscribe("mikrom.scheduler.deploy")
+        .await
+        .unwrap();
+    let mut health_sub = nats_clone
+        .subscribe("mikrom.scheduler.check_health")
+        .await
+        .unwrap();
+
+    tokio::spawn(async move {
+        use mikrom_proto::scheduler::{CheckHealthResponse, DeployResponse, DeployStatus};
+        use prost::Message;
+
+        tokio::select! {
+            Some(msg) = deploy_sub.next() => {
+                let resp = DeployResponse {
+                    job_id: "job-stopped".to_string(),
+                    status: DeployStatus::Running as i32,
+                    host_id: "host-1".to_string(),
+                    vm_id: "vm-1".to_string(),
+                    ip_address: "10.0.0.1".to_string(),
+                    message: "Started".to_string(),
+                };
+                let mut buf = Vec::new();
+                resp.encode(&mut buf).unwrap();
+                let _ = nats_clone.publish(msg.reply.unwrap(), buf.into()).await;
+            }
+        }
+
+        if let Some(msg) = health_sub.next().await {
+            let resp = CheckHealthResponse {
+                is_healthy: true,
+                message: "Healthy".to_string(),
+            };
+            let mut buf = Vec::new();
+            resp.encode(&mut buf).unwrap();
+            let _ = nats_clone.publish(msg.reply.unwrap(), buf.into()).await;
+        }
+    });
+
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
@@ -478,6 +589,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
     let router = create_app(state);
@@ -597,6 +709,7 @@ async fn test_delete_app_cleans_up_resources() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
     let router = create_app(state);
