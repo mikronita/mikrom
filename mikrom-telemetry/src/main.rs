@@ -1,5 +1,5 @@
 use anyhow::Result;
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 use futures::StreamExt;
 use prometheus::{Encoder, GaugeVec, Opts, Registry, TextEncoder};
 use serde::{Deserialize, Serialize};
