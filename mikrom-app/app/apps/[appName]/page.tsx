@@ -129,8 +129,18 @@ export default function AppDetailPage() {
   const liveMetrics = useAppMetrics(decodedName);
   const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>([]);
 
+  // Reset history when active deployment changes to avoid connecting dots between different VMs
+  useEffect(() => {
+    setMetricsHistory([]);
+  }, [activeDeployment?.job_id]);
+
   useEffect(() => {
     if (!liveMetrics) return;
+
+    // Only update history if the metrics belong to the active/promoted deployment
+    if (liveMetrics.job_id && activeDeployment?.job_id && liveMetrics.job_id !== activeDeployment.job_id) {
+        return;
+    }
 
     setMetricsHistory(prev => {
         const newCpu = (liveMetrics.cpu_usage || 0) * 100;
@@ -145,7 +155,7 @@ export default function AppDetailPage() {
         // Limit to last 30 points
         return [...prev.slice(-29), newPoint];
     });
-  }, [liveMetrics]);
+  }, [liveMetrics, activeDeployment?.job_id]);
 
   const copyToClipboard = async (text: string, e?: React.MouseEvent) => {
     if (!text) {

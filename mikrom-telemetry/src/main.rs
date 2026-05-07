@@ -52,6 +52,8 @@ pub struct LogEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmMetrics {
     pub app_id: String,
+    #[serde(default)]
+    pub job_id: String,
     pub cpu_usage: f32,
     pub ram_used_bytes: u64,
     pub status: String,
