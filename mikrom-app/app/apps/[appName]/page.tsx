@@ -15,7 +15,7 @@ import {
   HiInformationCircle
 } from "react-icons/hi2";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Rocket, GitBranch, Zap, User } from "lucide-react";
 
 import { AuthGuard } from "@/components/AuthGuard";
@@ -121,24 +121,30 @@ export default function AppDetailPage() {
   const [confirmDeleteApp, setConfirmDeleteApp] = useState(false);
 
   const app = apps.find(a => a.name === decodedName);
-  // Prefer the active (promoted) deployment, but fallback to the latest running one if none is active
-  const activeDeployment = deployments.find(d => d.id === app?.active_deployment_id) 
-    || [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).find(d => d.status === "RUNNING");
+  
+  // Memoize active deployment to stabilize its identity and prevent unnecessary history resets
+  const activeDeployment = useMemo(() => {
+    // Prefer the active (promoted) deployment, but fallback to the latest running one if none is active
+    return deployments.find(d => d.id === app?.active_deployment_id) 
+      || [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).find(d => d.status === "RUNNING");
+  }, [deployments, app?.active_deployment_id]);
 
   // Active Instance Logic
   const liveMetrics = useAppMetrics(decodedName);
   const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>([]);
 
-  // Reset history when active deployment changes to avoid connecting dots between different VMs
+  // Reset history when active deployment IP changes to avoid connecting dots between different VMs.
+  // We use IP as it is the most stable identifier between the DB and the Agent's metrics.
   useEffect(() => {
     setMetricsHistory([]);
-  }, [activeDeployment?.job_id]);
+  }, [activeDeployment?.ip_address]);
 
   useEffect(() => {
     if (!liveMetrics) return;
 
-    // Only update history if the metrics belong to the active/promoted deployment
-    if (liveMetrics.job_id && activeDeployment?.job_id && liveMetrics.job_id !== activeDeployment.job_id) {
+    // Only update history if the metrics belong to the active/promoted deployment.
+    // We use IP address for matching as job_id is inconsistent between Agent (VM ID) and API (Scheduler ID).
+    if (activeDeployment?.ip_address && liveMetrics.ip_address !== activeDeployment.ip_address) {
         return;
     }
 
@@ -155,7 +161,7 @@ export default function AppDetailPage() {
         // Limit to last 30 points
         return [...prev.slice(-29), newPoint];
     });
-  }, [liveMetrics, activeDeployment?.job_id]);
+  }, [liveMetrics, activeDeployment?.ip_address]);
 
   const copyToClipboard = async (text: string, e?: React.MouseEvent) => {
     if (!text) {
