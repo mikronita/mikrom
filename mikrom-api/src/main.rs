@@ -57,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
         github_private_key: config.github_private_key,
         github_app_slug: config.github_app_slug,
         github_webhook_url_base: config.github_webhook_url_base,
+        active_deployment_flows: Arc::new(dashmap::DashSet::new()),
     };
 
     mikrom_api::start_background_tasks(state.clone());

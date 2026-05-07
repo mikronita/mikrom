@@ -49,6 +49,7 @@ utoipa-swagger-ui = { version = "8", features = ["axum"] }
 rand = "0.10.1"
 rustls = { version = "0.23", features = ["ring"] }
 reqwest = { version = "0.13.3", features = ["json"] }
+dashmap = "6.1.0"
 
 [dev-dependencies]
 axum-test = "15"

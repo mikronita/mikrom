@@ -208,136 +208,167 @@ impl DeploymentService {
         deployment: crate::models::app::Deployment,
         inner: mikrom_proto::scheduler::DeployResponse,
         user_id: String,
+        cleanup_on_failure: bool,
+        _guard: crate::DeploymentFlowGuard,
     ) {
         use crate::repositories::app_repository::UpdateDeploymentParams;
         use std::time::Duration;
         use tracing::{debug, error, info};
 
-        tokio::spawn(async move {
-            // 1. Polling for Health
-            let mut healthy = false;
-            let max_attempts = 60; // 120 seconds total
-            for attempt in 1..=max_attempts {
-                info!(
-                    app = %app.name,
-                    job_id = %inner.job_id,
-                    attempt = attempt,
-                    "Checking health for zero-downtime deployment..."
-                );
+        let app_id = app.id;
 
-                let health_req = mikrom_proto::scheduler::CheckHealthRequest {
-                    job_id: inner.job_id.clone(),
-                    user_id: user_id.clone(),
+        tokio::spawn(async move {
+            // Keep the guard in this task
+            let _guard = _guard;
+
+            let result = async {
+                // 1. Polling for Health
+                let mut healthy = false;
+                let max_attempts = 60; // 120 seconds total
+                for attempt in 1..=max_attempts {
+                    if attempt % 5 == 1 {
+                        info!(
+                            app = %app.name,
+                            job_id = %inner.job_id,
+                            attempt = attempt,
+                            "Checking health for zero-downtime deployment..."
+                        );
+                    } else {
+                        debug!(
+                            app = %app.name,
+                            job_id = %inner.job_id,
+                            attempt = attempt,
+                            "Checking health for zero-downtime deployment..."
+                        );
+                    }
+
+                    let health_req = mikrom_proto::scheduler::CheckHealthRequest {
+                        job_id: inner.job_id.clone(),
+                        user_id: user_id.clone(),
+                    };
+
+                    match state
+                        .nats
+                        .with_timeout(Duration::from_secs(7))
+                        .request::<_, mikrom_proto::scheduler::CheckHealthResponse>(
+                            "mikrom.scheduler.check_health",
+                            health_req,
+                        )
+                        .await
+                    {
+                        Ok(resp) if resp.is_healthy => {
+                            healthy = true;
+                            info!(app = %app.name, "New deployment is healthy!");
+                            break;
+                        },
+                        Ok(resp) => {
+                            debug!(
+                                app = %app.name,
+                                message = %resp.message,
+                                "Health check returned unhealthy"
+                            );
+                        },
+                        Err(e) => {
+                            debug!(
+                                app = %app.name,
+                                error = %e,
+                                "Health check request failed"
+                            );
+                        },
+                    }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+
+                if !healthy {
+                    if cleanup_on_failure {
+                        error!(
+                            app = %app.name,
+                            "Zero-downtime deployment failed: health check timeout. Cleaning up new VM."
+                        );
+                        let _ = state
+                            .scheduler
+                            .pause_app(inner.job_id, "system".to_string())
+                            .await;
+                        let _ = state
+                            .app_repo
+                            .update_deployment(
+                                deployment.id,
+                                UpdateDeploymentParams {
+                                    status: Some("FAILED".to_string()),
+                                    ..Default::default()
+                                },
+                            )
+                            .await;
+                    } else {
+                        error!(
+                            app = %app.name,
+                            "Promotion failed: health check timeout. App remains in preview."
+                        );
+                    }
+                    state.deployment_events.send(app.id).ok();
+                    return Ok::<(), anyhow::Error>(());
+                }
+
+                // 2. Identify old deployment
+                let old_active_id = match state.app_repo.get_app(app.id).await {
+                    Ok(Some(a)) => a.active_deployment_id,
+                    _ => None,
                 };
 
-                match state
-                    .nats
-                    .with_timeout(Duration::from_secs(7))
-                    .request::<_, mikrom_proto::scheduler::CheckHealthResponse>(
-                        "mikrom.scheduler.check_health",
-                        health_req,
-                    )
-                    .await
-                {
-                    Ok(resp) if resp.is_healthy => {
-                        healthy = true;
-                        info!(app = %app.name, "New deployment is healthy!");
-                        break;
-                    },
-                    Ok(resp) => {
-                        debug!(
-                            app = %app.name,
-                            message = %resp.message,
-                            "Health check returned unhealthy"
-                        );
-                    },
-                    Err(e) => {
-                        debug!(
-                            app = %app.name,
-                            error = %e,
-                            "Health check request failed"
-                        );
-                    },
-                }
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            }
-
-            if !healthy {
-                error!(
+                // 3. Promote new deployment to active
+                info!(
                     app = %app.name,
-                    "Zero-downtime deployment failed: health check timeout. Cleaning up new VM."
+                    deployment_id = %deployment.id,
+                    "Promoting new deployment to active"
                 );
                 let _ = state
-                    .scheduler
-                    .pause_app(inner.job_id, "system".to_string())
-                    .await;
-                let _ = state
                     .app_repo
-                    .update_deployment(
-                        deployment.id,
-                        UpdateDeploymentParams {
-                            status: Some("FAILED".to_string()),
-                            ..Default::default()
-                        },
-                    )
+                    .set_active_deployment(app.id, deployment.id)
                     .await;
-                state.deployment_events.send(app.id).ok();
-                return;
-            }
 
-            // 2. Identify old deployment
-            let old_active_id = match state.app_repo.get_app(app.id).await {
-                Ok(Some(a)) => a.active_deployment_id,
-                _ => None,
-            };
+                // Give the DB a moment to ensure the update is committed
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            // 3. Promote new deployment to active
-            info!(
-                app = %app.name,
-                deployment_id = %deployment.id,
-                "Promoting new deployment to active"
-            );
-            let _ = state
-                .app_repo
-                .set_active_deployment(app.id, deployment.id)
-                .await;
-
-            // Give the DB a moment to ensure the update is committed
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-            // 4. Notify router (atomic switch)
-            if let Ok(Some(app_refreshed)) = state.app_repo.get_app(app.id).await {
-                let _ = state.notify_router(&app_refreshed).await;
-            }
-
-            state.deployment_events.send(app.id).ok();
-
-            // 5. Drain Phase
-            if let Some(old_id) = old_active_id {
-                let drain_secs = app.drain_timeout as u64;
-                info!(app = %app.name, "Waiting {}s for drain phase...", drain_secs);
-                tokio::time::sleep(Duration::from_secs(drain_secs)).await;
-
-                // 6. Stop old VM
-                if let Ok(Some(old_dep)) = state.app_repo.get_deployment(old_id).await
-                    && let Some(old_job_id) = old_dep.job_id
-                {
-                    info!(app = %app.name, job_id = %old_job_id, "Stopping old version");
-                    let _ = state
-                        .scheduler
-                        .pause_app(old_job_id, "system".to_string())
-                        .await;
-                    let _ = state
-                        .app_repo
-                        .update_deployment(
-                            old_id,
-                            UpdateDeploymentParams {
-                                status: Some("STOPPED".to_string()),
-                                ..Default::default()
-                            },
-                        )
-                        .await;
+                // 4. Notify router (atomic switch)
+                if let Ok(Some(app_refreshed)) = state.app_repo.get_app(app.id).await {
+                    let _ = state.notify_router(&app_refreshed).await;
                 }
+
+                state.deployment_events.send(app.id).ok();
+
+                // 5. Drain Phase
+                if let Some(old_id) = old_active_id {
+                    let drain_secs = app.drain_timeout as u64;
+                    info!(app = %app.name, "Waiting {}s for drain phase...", drain_secs);
+                    tokio::time::sleep(Duration::from_secs(drain_secs)).await;
+
+                    // 6. Stop old VM
+                    if let Ok(Some(old_dep)) = state.app_repo.get_deployment(old_id).await
+                        && let Some(old_job_id) = old_dep.job_id
+                    {
+                        info!(app = %app.name, job_id = %old_job_id, "Stopping old version");
+                        let _ = state
+                            .scheduler
+                            .pause_app(old_job_id, "system".to_string())
+                            .await;
+                        let _ = state
+                            .app_repo
+                            .update_deployment(
+                                old_id,
+                                UpdateDeploymentParams {
+                                    status: Some("STOPPED".to_string()),
+                                    ..Default::default()
+                                },
+                            )
+                            .await;
+                    }
+                }
+                Ok(())
+            }
+            .await;
+
+            if let Err(e) = result {
+                error!(app_id = %app_id, error = %e, "Zero-downtime deployment flow failed unexpectedly");
             }
         });
     }
