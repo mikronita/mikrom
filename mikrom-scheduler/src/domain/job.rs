@@ -45,6 +45,7 @@ pub struct VmConfig {
     pub mac_address: Option<String>,
     pub netmask: Option<String>,
     pub volumes: Vec<Volume>,
+    pub health_check_path: String,
 }
 
 impl Default for VmConfig {
@@ -60,6 +61,7 @@ impl Default for VmConfig {
             mac_address: None,
             netmask: None,
             volumes: vec![],
+            health_check_path: "/".to_string(),
         }
     }
 }

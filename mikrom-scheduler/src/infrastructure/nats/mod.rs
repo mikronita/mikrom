@@ -75,6 +75,7 @@ impl AgentClient for NatsAgentClient {
             mac_address: config.mac_address.clone().unwrap_or_default(),
             netmask: config.netmask.clone().unwrap_or_default(),
             volumes: vec![], // TODO
+            health_check_path: config.health_check_path.clone(),
         };
 
         self.send_command(

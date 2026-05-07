@@ -344,8 +344,8 @@ impl FirecrackerManager {
 
         let paths = VmPaths::new(&self.fc_config.data_dir, &self.agent_id, &vm_id);
 
-        // 1. Exclusivity check
-        self.ensure_app_exclusivity(&app_id, &vm_id).await;
+        // 1. Exclusivity check (Disabled for Zero-Downtime deployments)
+        // self.ensure_app_exclusivity(&app_id, &vm_id).await;
 
         // 2. Kernel check (Stub mode check)
         let Some(kernel_path) = self.fc_config.kernel_path.clone() else {
@@ -484,6 +484,7 @@ impl FirecrackerManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn ensure_app_exclusivity(&self, app_id: &str, current_vm_id: &str) {
         let other_vms: Vec<String> = {
             let vms = self.vms.read().await;
@@ -1511,6 +1512,7 @@ mod tests {
             mac_address: None,
             netmask: None,
             volumes: vec![],
+            health_check_path: "/".to_string(),
         }
     }
 
@@ -1667,6 +1669,7 @@ mod tests {
             mac_address: None,
             netmask: None,
             volumes: vec![],
+            health_check_path: "/".to_string(),
         };
         assert_eq!(&cfg.env["PORT"], "3000");
         assert_eq!(cfg.vcpus, 2);

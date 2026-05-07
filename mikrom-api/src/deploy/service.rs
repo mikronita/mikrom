@@ -148,6 +148,7 @@ impl DeploymentService {
                 disk_mib: params.disk_mib,
                 port: app.port as u32,
                 env: params.env,
+                health_check_path: app.health_check_path.clone(),
                 ..Default::default()
             }),
             deployment_id: deployment.id.to_string(),
@@ -231,7 +232,7 @@ impl DeploymentService {
 
                 match state
                     .nats
-                    .with_timeout(Duration::from_secs(3))
+                    .with_timeout(Duration::from_secs(7))
                     .request::<_, mikrom_proto::scheduler::CheckHealthResponse>(
                         "mikrom.scheduler.check_health",
                         health_req,
@@ -313,8 +314,9 @@ impl DeploymentService {
 
             // 5. Drain Phase
             if let Some(old_id) = old_active_id {
-                info!(app = %app.name, "Waiting 10s for drain phase...");
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                let drain_secs = app.drain_timeout as u64;
+                info!(app = %app.name, "Waiting {}s for drain phase...", drain_secs);
+                tokio::time::sleep(Duration::from_secs(drain_secs)).await;
 
                 // 6. Stop old VM
                 if let Ok(Some(old_dep)) = state.app_repo.get_deployment(old_id).await

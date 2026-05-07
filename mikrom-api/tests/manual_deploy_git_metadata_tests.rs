@@ -54,16 +54,8 @@ async fn test_manual_deploy_without_github_metadata() {
         id: app_id,
         name: "test-app".to_string(),
         git_url: "https://github.com/owner/repo".into(),
-        port: 8080,
-        hostname: None,
         user_id,
-        github_webhook_secret: None,
-        github_installation_id: None, // No GitHub linked
-        github_repo_id: None,
-        github_repo_full_name: None,
-        active_deployment_id: None,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        ..Default::default()
     };
 
     mock_repo
@@ -152,16 +144,11 @@ async fn test_manual_deploy_with_github_metadata_fetch_failure() {
         id: app_id,
         name: "github-app".to_string(),
         git_url: "https://github.com/owner/repo".into(),
-        port: 8080,
-        hostname: None,
         user_id,
-        github_webhook_secret: None,
         github_installation_id: Some(123),
         github_repo_id: Some(456),
         github_repo_full_name: Some("owner/repo".to_string()),
-        active_deployment_id: None,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        ..Default::default()
     };
 
     mock_repo

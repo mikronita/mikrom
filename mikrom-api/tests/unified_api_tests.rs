@@ -51,15 +51,8 @@ async fn test_hierarchical_deployment_status_success() {
                 name: app_name.to_string(),
                 git_url: "git".to_string(),
                 port: 8080,
-                hostname: None,
                 user_id,
-                github_webhook_secret: None,
-                github_installation_id: None,
-                github_repo_id: None,
-                github_repo_full_name: None,
-                active_deployment_id: None,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
+                ..Default::default()
             }))
         });
 
@@ -155,15 +148,8 @@ async fn test_hierarchical_security_cross_app_prevention() {
                 name: app_a_name.to_string(),
                 git_url: "git".to_string(),
                 port: 8080,
-                hostname: None,
                 user_id,
-                github_webhook_secret: None,
-                github_installation_id: None,
-                github_repo_id: None,
-                github_repo_full_name: None,
-                active_deployment_id: None,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
+                ..Default::default()
             }))
         });
 

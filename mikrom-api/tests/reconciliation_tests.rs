@@ -72,10 +72,7 @@ async fn test_route_reconciliation_on_startup() {
             port: 8080,
             hostname: Some("reconcile.mikrom.local".into()),
             user_id,
-            github_webhook_secret: None,
-            github_installation_id: None,
-            github_repo_id: None,
-            github_repo_full_name: None,
+            ..Default::default()
         })
         .await
         .unwrap();

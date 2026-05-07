@@ -59,6 +59,7 @@ pub struct VmConfig {
     pub mac_address: Option<String>,
     pub netmask: Option<String>,
     pub volumes: Vec<Volume>,
+    pub health_check_path: String,
 }
 
 #[derive(Clone, Debug)]

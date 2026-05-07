@@ -191,6 +191,7 @@ message AppConfig {
   string mac_address = 7;
   repeated Volume volumes = 8;
   uint32 port = 9;
+  string health_check_path = 10;
 }
 
 

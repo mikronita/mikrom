@@ -56,18 +56,11 @@ async fn test_app_logs_stream_auth() {
     mock_app_repo.expect_get_app_by_name().returning(move |_| {
         Ok(Some(mikrom_api::models::app::App {
             id: app_id,
-            name: "test-logs-app".into(),
-            git_url: "".into(),
-            port: 80,
-            hostname: None,
+            name: "test-app".to_string(),
+            git_url: "git".to_string(),
+            port: 8080,
             user_id,
-            github_webhook_secret: None,
-            github_installation_id: None,
-            github_repo_id: None,
-            github_repo_full_name: None,
-            active_deployment_id: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            ..Default::default()
         }))
     });
 
@@ -102,18 +95,11 @@ async fn test_app_metrics_stream_auth() {
     mock_app_repo.expect_get_app_by_name().returning(move |_| {
         Ok(Some(mikrom_api::models::app::App {
             id: app_id,
-            name: "test-metrics-app".into(),
-            git_url: "".into(),
-            port: 80,
-            hostname: None,
+            name: "test-app".to_string(),
+            git_url: "git".to_string(),
+            port: 8080,
             user_id,
-            github_webhook_secret: None,
-            github_installation_id: None,
-            github_repo_id: None,
-            github_repo_full_name: None,
-            active_deployment_id: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            ..Default::default()
         }))
     });
 

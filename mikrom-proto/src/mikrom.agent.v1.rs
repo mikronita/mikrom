@@ -239,6 +239,8 @@ pub struct VmConfig {
     pub volumes: ::prost::alloc::vec::Vec<Volume>,
     #[prost(uint32, tag = "10")]
     pub port: u32,
+    #[prost(string, tag = "11")]
+    pub health_check_path: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StartVmResponse {

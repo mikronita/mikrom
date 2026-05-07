@@ -62,19 +62,12 @@ async fn test_sse_deployments_stream_initial_data() {
         .returning(move |name| {
             if name == "test-app" {
                 Ok(Some(mikrom_api::models::app::App {
-                    id: app_id_clone,
-                    name: "test-app".into(),
-                    git_url: "".into(),
-                    port: 80,
-                    hostname: None,
+                    id: app_id,
+                    name: "test-app".to_string(),
+                    git_url: "git".to_string(),
+                    port: 8080,
                     user_id,
-                    github_webhook_secret: None,
-                    github_installation_id: None,
-                    github_repo_id: None,
-                    github_repo_full_name: None,
-                    active_deployment_id: None,
-                    created_at: chrono::Utc::now(),
-                    updated_at: chrono::Utc::now(),
+                    ..Default::default()
                 }))
             } else {
                 Ok(None)
@@ -147,18 +140,11 @@ async fn test_sse_deployments_auth_via_query_param() {
     mock_app_repo.expect_get_app_by_name().returning(move |_| {
         Ok(Some(mikrom_api::models::app::App {
             id: app_id,
-            name: "test-app".into(),
-            git_url: "".into(),
-            port: 80,
-            hostname: None,
+            name: "test-app".to_string(),
+            git_url: "git".to_string(),
+            port: 8080,
             user_id,
-            github_webhook_secret: None,
-            github_installation_id: None,
-            github_repo_id: None,
-            github_repo_full_name: None,
-            active_deployment_id: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            ..Default::default()
         }))
     });
 
@@ -199,18 +185,11 @@ async fn test_sse_deployments_stream_updates() {
     mock_app_repo.expect_get_app_by_name().returning(move |_| {
         Ok(Some(mikrom_api::models::app::App {
             id: app_id,
-            name: "test-app".into(),
-            git_url: "".into(),
-            port: 80,
-            hostname: None,
+            name: "test-app".to_string(),
+            git_url: "git".to_string(),
+            port: 8080,
             user_id,
-            github_webhook_secret: None,
-            github_installation_id: None,
-            github_repo_id: None,
-            github_repo_full_name: None,
-            active_deployment_id: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            ..Default::default()
         }))
     });
 

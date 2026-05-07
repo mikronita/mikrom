@@ -123,6 +123,7 @@ pub async fn deploy_app(
             gateway: String::new(),
             mac_address: String::new(),
             volumes: vec![],
+            health_check_path: "/".to_string(),
         }),
         deployment_id: String::new(), // Not applicable for one-off deploy
     };

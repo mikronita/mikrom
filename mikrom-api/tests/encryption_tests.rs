@@ -36,12 +36,9 @@ async fn test_encryption_at_rest() {
             name: format!("test-app-{}", Uuid::new_v4()),
             git_url: "https://github.com/test/repo".to_string(),
             port: 8080,
-            hostname: None,
             user_id,
             github_webhook_secret: Some(webhook_secret.to_string()),
-            github_installation_id: None,
-            github_repo_id: None,
-            github_repo_full_name: None,
+            ..Default::default()
         })
         .await
         .expect("failed to create app");

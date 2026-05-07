@@ -28,8 +28,8 @@ impl JobRepository for PgJobRepository {
             INSERT INTO jobs (
                 job_id, app_id, app_name, image, user_id, status, host_id, vm_id,
                 vcpus, memory_mib, disk_mib, port, env_vars, ip_address, gateway,
-                mac_address, netmask, created_at, deployment_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                mac_address, netmask, created_at, deployment_id, health_check_path
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
             "#
         )
         .bind(&job.job_id)
@@ -51,6 +51,7 @@ impl JobRepository for PgJobRepository {
         .bind(&job.config.netmask)
         .bind(job.created_at)
         .bind(&job.deployment_id)
+        .bind(&job.config.health_check_path)
         .execute(&self.pool)
         .await?;
 
@@ -340,6 +341,7 @@ fn map_row_to_job(r: &sqlx::postgres::PgRow) -> Job {
             mac_address: r.get("mac_address"),
             netmask: r.get("netmask"),
             volumes: vec![], // TODO: Volumes
+            health_check_path: r.get("health_check_path"),
         },
     }
 }

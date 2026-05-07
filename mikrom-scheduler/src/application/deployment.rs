@@ -98,11 +98,11 @@ impl DeploymentService {
             return Err(e);
         }
 
-        // 4. Ensure exclusivity
-        if let Err(e) = self.ensure_exclusivity(&app_id, &job_id, &user_id).await {
-            let _ = self.job_repo.remove_job(&job_id).await;
-            return Err(e);
-        }
+        // 4. Ensure exclusivity (Disabled for Zero-Downtime deployments)
+        // if let Err(e) = self.ensure_exclusivity(&app_id, &job_id, &user_id).await {
+        //     let _ = self.job_repo.remove_job(&job_id).await;
+        //     return Err(e);
+        // }
 
         tracing::info!(job_id = %job_id, host_id = %host_id, "Dispatching job to agent");
 
@@ -188,6 +188,7 @@ impl DeploymentService {
         Ok(viable_workers.remove(0))
     }
 
+    #[allow(dead_code)]
     async fn ensure_exclusivity(
         &self,
         app_id: &str,

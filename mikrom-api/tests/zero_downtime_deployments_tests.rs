@@ -150,3 +150,90 @@ async fn test_zero_downtime_flow_success() {
     // We'll wait up to 15s.
     tokio::time::sleep(Duration::from_secs(12)).await;
 }
+
+#[tokio::test]
+async fn test_activate_deployment_no_job_id() {
+    use axum::extract::{Path, State};
+    use axum::http::StatusCode;
+    use mikrom_api::auth::AuthUser;
+    use mikrom_api::deploy::handlers::activate_deployment_handler;
+
+    let mut mock_app_repo = MockAppRepository::new();
+    let mock_scheduler = MockScheduler::new();
+
+    let user_id = Uuid::new_v4();
+    let app_id = Uuid::new_v4();
+    let deployment_id = Uuid::new_v4();
+
+    let app = App {
+        id: app_id,
+        name: "test-app".to_string(),
+        user_id,
+        ..Default::default()
+    };
+
+    let deployment = Deployment {
+        id: deployment_id,
+        app_id,
+        user_id,
+        job_id: None, // NO JOB ID
+        ..Default::default()
+    };
+
+    // Mocks
+    mock_app_repo
+        .expect_get_app_by_name()
+        .returning(move |_| Ok(Some(app.clone())));
+
+    mock_app_repo
+        .expect_get_deployment()
+        .with(eq(deployment_id))
+        .returning(move |_| Ok(Some(deployment.clone())));
+
+    mock_app_repo
+        .expect_set_active_deployment()
+        .with(eq(app_id), eq(deployment_id))
+        .times(1)
+        .returning(|_, _| Ok(()));
+
+    let nats_url =
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
+
+    let state = AppState {
+        user_repo: Arc::new(MockUserRepository::new()),
+        app_repo: Arc::new(mock_app_repo),
+        github_repo: Arc::new(MockGithubRepository::default()),
+        scheduler: Arc::new(mock_scheduler),
+        nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
+        router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
+        api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+        jwt_secret: "secret".to_string(),
+        master_key: "key".to_string(),
+        deployment_events: tokio::sync::broadcast::channel(100).0,
+        acme_email: "test@example.com".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
+        github_webhook_url_base: None,
+    };
+
+    let auth = AuthUser {
+        user_id: user_id.to_string(),
+        email: "test@example.com".to_string(),
+        role: mikrom_api::repositories::user_repository::UserRole::User,
+    };
+
+    let result = activate_deployment_handler(
+        auth,
+        State(state),
+        Path(("test-app".to_string(), deployment_id)),
+    )
+    .await;
+
+    let status = result.unwrap();
+    assert_eq!(status, StatusCode::OK); // Record-only activation should return 200 OK immediately
+}

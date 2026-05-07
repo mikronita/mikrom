@@ -47,6 +47,8 @@ async fn test_promotion_back_and_forth() {
         github_repo_id: None,
         github_repo_full_name: None,
         active_deployment_id: Some(dep1_id),
+        health_check_path: "/".to_string(),
+        drain_timeout: 10,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
@@ -218,6 +220,8 @@ async fn test_promotion_pauses_previous_active() {
         github_repo_id: None,
         github_repo_full_name: None,
         active_deployment_id: Some(old_dep_id),
+        health_check_path: "/".to_string(),
+        drain_timeout: 10,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
@@ -387,6 +391,8 @@ async fn test_activate_stopped_deployment_resumes_it() {
         github_repo_id: None,
         github_repo_full_name: None,
         active_deployment_id: None,
+        health_check_path: "/".to_string(),
+        drain_timeout: 10,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
@@ -529,6 +535,8 @@ async fn test_delete_app_cleans_up_resources() {
         github_repo_id: None,
         github_repo_full_name: None,
         active_deployment_id: None,
+        health_check_path: "/".to_string(),
+        drain_timeout: 10,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
