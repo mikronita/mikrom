@@ -18,6 +18,17 @@ service SchedulerService {
   rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
   rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse);
   rpc WatchApps(WatchAppsRequest) returns (stream WatchAppsResponse);
+  rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse);
+}
+
+message CheckHealthRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message CheckHealthResponse {
+  bool is_healthy = 1;
+  string message = 2;
 }
 
 message WatchAppsRequest {

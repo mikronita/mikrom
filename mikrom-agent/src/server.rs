@@ -10,6 +10,7 @@ pub struct AgentServer {
     metrics_collector: MetricsCollector,
     firecracker: FirecrackerManager,
     shutdown_flag: Arc<RwLock<bool>>,
+    http_client: reqwest::Client,
 }
 
 impl AgentServer {
@@ -25,12 +26,18 @@ impl AgentServer {
         ip_address: String,
         firecracker: FirecrackerManager,
     ) -> Self {
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap_or_default();
+
         Self {
             config: config.clone(),
             ip_address,
             metrics_collector: MetricsCollector::with_firecracker(firecracker.clone()),
             firecracker,
             shutdown_flag: Arc::new(RwLock::new(false)),
+            http_client,
         }
     }
 
@@ -79,8 +86,9 @@ impl AgentServer {
                     self_clone.firecracker.clone(),
                 );
 
-                // 2. Spawn command listener, heartbeat and exporter tasks
+                // 2. Spawn command listener, health check listener, heartbeat and exporter tasks
                 let cmd_handle = self_clone.start_command_listener(client.clone());
+                let health_check_handle = self_clone.start_health_check_listener(client.clone());
                 let heartbeat_handle = self_clone.start_heartbeat_loop(client.clone());
                 let exporter_handle = tokio::spawn(async move {
                     exporter.start_export_loop().await;
@@ -88,6 +96,7 @@ impl AgentServer {
 
                 tokio::select! {
                     _ = cmd_handle => tracing::warn!("Command listener exited"),
+                    _ = health_check_handle => tracing::warn!("Health check listener exited"),
                     _ = heartbeat_handle => {
                         tracing::warn!("Heartbeat loop exited, forcing NATS reconnect");
                         nats_client = None;
@@ -127,6 +136,85 @@ impl AgentServer {
                 });
             }
         })
+    }
+
+    fn start_health_check_listener(
+        &self,
+        client: async_nats::Client,
+    ) -> tokio::task::JoinHandle<()> {
+        let host_id = self.config.host_id.clone();
+        let firecracker = self.firecracker.clone();
+        let subject = format!("mikrom.agent.{host_id}.check_health");
+        let http_client = self.http_client.clone();
+
+        tokio::spawn(async move {
+            let Ok(mut subscription) = client.subscribe(subject.clone()).await else {
+                tracing::error!("Failed to subscribe to health checks on {subject}");
+                return;
+            };
+
+            tracing::info!("Listening for health checks on {subject}");
+            use futures::StreamExt;
+            while let Some(message) = subscription.next().await {
+                let fc = firecracker.clone();
+                let nats = client.clone();
+                let http = http_client.clone();
+                tokio::spawn(async move {
+                    Self::handle_health_check(message, fc, nats, http).await;
+                });
+            }
+        })
+    }
+
+    async fn handle_health_check(
+        message: async_nats::Message,
+        fc: FirecrackerManager,
+        nats: async_nats::Client,
+        http_client: reqwest::Client,
+    ) {
+        use mikrom_proto::agent::{CheckHealthRequest, CheckHealthResponse};
+        let Ok(req) = CheckHealthRequest::decode(&message.payload[..]) else {
+            tracing::error!("Failed to decode CheckHealthRequest");
+            return;
+        };
+
+        let vm_info = fc.get_vm_info(&req.vm_id).await;
+        let result = if let Some(vm) = vm_info {
+            if let Some(ip) = &vm.config.ip_address {
+                let port = vm.config.port;
+                let url = format!("http://{ip}:{port}/");
+                tracing::debug!(vm_id = %req.vm_id, url = %url, "Performing health check...");
+
+                match http_client.get(&url).send().await {
+                    Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
+                        Ok("Healthy".to_string())
+                    },
+                    Ok(resp) => Err(format!("Unhealthy: HTTP {}", resp.status())),
+                    Err(e) => Err(format!("Unhealthy: {e}")),
+                }
+            } else {
+                Err("VM has no IP address".to_string())
+            }
+        } else {
+            Err("VM not found".to_string())
+        };
+
+        if let Some(reply) = message.reply {
+            let response = match result {
+                Ok(msg) => CheckHealthResponse {
+                    is_healthy: true,
+                    message: msg,
+                },
+                Err(e) => CheckHealthResponse {
+                    is_healthy: false,
+                    message: e,
+                },
+            };
+            let mut buf = Vec::new();
+            if response.encode(&mut buf).is_ok() {
+                let _ = nats.publish(reply, buf.into()).await;
+            }
+        }
     }
 
     async fn handle_nats_command(
@@ -288,6 +376,55 @@ impl Clone for AgentServer {
             metrics_collector: self.metrics_collector.clone(),
             firecracker: self.firecracker.clone(),
             shutdown_flag: self.shutdown_flag.clone(),
+            http_client: self.http_client.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mikrom_proto::agent::{CheckHealthRequest, CheckHealthResponse};
+    use prost::Message;
+
+    #[tokio::test]
+    async fn test_handle_health_check_vm_not_found() {
+        let nats_url =
+            std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
+        let client = async_nats::connect(&nats_url).await.unwrap();
+
+        let fc = FirecrackerManager::new();
+        let reply = "test.reply.health".to_string();
+        let mut sub = client.subscribe(reply.clone()).await.unwrap();
+
+        let req = CheckHealthRequest {
+            vm_id: "non-existent-vm".to_string(),
+        };
+        let mut payload = Vec::new();
+        req.encode(&mut payload).unwrap();
+
+        let payload_len = payload.len();
+        let message = async_nats::Message {
+            subject: "test.subject".into(),
+            reply: Some(reply.clone().into()),
+            payload: payload.into(),
+            headers: None,
+            status: None,
+            description: None,
+            length: payload_len,
+        };
+
+        let http = reqwest::Client::new();
+        AgentServer::handle_health_check(message, fc, client.clone(), http).await;
+
+        use futures::StreamExt;
+        let resp_msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
+            .await
+            .expect("Timeout waiting for health check response")
+            .expect("No message received");
+
+        let resp = CheckHealthResponse::decode(&resp_msg.payload[..]).unwrap();
+        assert!(!resp.is_healthy);
+        assert_eq!(resp.message, "VM not found");
     }
 }

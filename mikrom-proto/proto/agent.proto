@@ -16,6 +16,16 @@ service AgentService {
   rpc ResumeVm(ResumeVmRequest) returns (ResumeVmResponse);
   rpc DeleteVm(DeleteVmRequest) returns (DeleteVmResponse);
   rpc GetVmStatus(GetVmStatusRequest) returns (GetVmStatusResponse);
+  rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse);
+}
+
+message CheckHealthRequest {
+  string vm_id = 1;
+}
+
+message CheckHealthResponse {
+  bool is_healthy = 1;
+  string message = 2;
 }
 
 message AgentCommand {

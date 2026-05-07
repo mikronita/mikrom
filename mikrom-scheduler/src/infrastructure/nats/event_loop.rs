@@ -56,6 +56,9 @@ impl NatsEventLoop {
                 "schedulers".to_string(),
             )
             .await?;
+        let mut health_sub = client
+            .queue_subscribe("mikrom.scheduler.check_health", "schedulers".to_string())
+            .await?;
 
         tracing::info!("NATS Event Loop started, listening for messages...");
 
@@ -71,8 +74,34 @@ impl NatsEventLoop {
                 Some(msg) = cancel_sub.next() => self.handle_cancel(msg).await,
                 Some(msg) = delete_sub.next() => self.handle_delete(msg).await,
                 Some(msg) = delete_all_sub.next() => self.handle_delete_all(msg).await,
+                Some(msg) = health_sub.next() => self.handle_check_health(msg).await,
             }
         }
+    }
+
+    async fn handle_check_health(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            if let Ok(req) =
+                mikrom_proto::scheduler::CheckHealthRequest::decode(&message.payload[..])
+            {
+                let result = server.check_health(req).await;
+                if let Some(reply) = message.reply {
+                    let response = match result {
+                        Ok(resp) => resp,
+                        Err(e) => mikrom_proto::scheduler::CheckHealthResponse {
+                            is_healthy: false,
+                            message: e.to_string(),
+                        },
+                    };
+                    let mut buf = Vec::new();
+                    if response.encode(&mut buf).is_ok() {
+                        let _ = client.publish(reply, buf.into()).await;
+                    }
+                }
+            }
+        });
     }
 
     async fn handle_heartbeat(&self, message: async_nats::Message) {

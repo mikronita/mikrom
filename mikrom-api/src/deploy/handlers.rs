@@ -3,7 +3,6 @@ use crate::auth::AuthUser;
 use crate::deploy::service::{DeployParams, DeploymentService};
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::Deployment;
-use crate::repositories::app_repository::UpdateDeploymentParams;
 use axum::{
     Json,
     extract::{Path, State},
@@ -457,7 +456,7 @@ pub async fn activate_deployment_handler(
     State(state): State<AppState>,
     Path((app_name, deployment_id)): Path<(String, Uuid)>,
 ) -> ApiResult<StatusCode> {
-    let mut app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
     let deployment = state
         .app_repo
@@ -477,89 +476,49 @@ pub async fn activate_deployment_handler(
         ));
     }
 
-    // 1. Find currently active deployment to stop it if necessary
-    let all_deps = state
-        .app_repo
-        .list_deployments_by_app(app.id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    match deployment.job_id.clone() {
+        Some(job_id) => {
+            info!(job_id = %job_id, "Activating deployment with zero-downtime flow...");
 
-    if let Some(active_id) = app.active_deployment_id
-        && active_id != deployment_id
-        && let Some(active_dep) = all_deps.iter().find(|d| d.id == active_id)
-        && let Some(job_id) = &active_dep.job_id
-    {
-        info!(job_id = %job_id, "Stopping previously active deployment...");
-        let _ = state
-            .scheduler
-            .pause_app(job_id.clone(), auth.user_id.clone())
-            .await;
+            use mikrom_proto::scheduler::{DeployResponse, DeployStatus};
+            let inner = DeployResponse {
+                job_id,
+                status: DeployStatus::Running as i32,
+                host_id: String::new(), // Not stored in Deployment model, scheduler will find it
+                vm_id: String::new(),   // Not stored in Deployment model, scheduler will find it
+                message: "Activating".to_string(),
+                ip_address: deployment.ip_address.clone().unwrap_or_default(),
+            };
 
-        // Mark old as STOPPED
-        let _ = state
-            .app_repo
-            .update_deployment(
-                active_id,
-                UpdateDeploymentParams {
-                    status: Some("STOPPED".to_string()),
-                    job_id: Some(job_id.clone()),
-                    image_tag: active_dep.image_tag.clone(),
-                    build_id: active_dep.build_id.clone(),
-                    ip_address: active_dep.ip_address.clone(),
-                    git_commit_hash: active_dep.git_commit_hash.clone(),
-                    git_commit_message: active_dep.git_commit_message.clone(),
-                    git_branch: active_dep.git_branch.clone(),
-                },
-            )
-            .await;
+            DeploymentService::run_zero_downtime_flow(
+                state.clone(),
+                app,
+                deployment,
+                inner,
+                auth.user_id,
+            );
+
+            Ok(StatusCode::ACCEPTED)
+        },
+        None => {
+            info!(app = %app.name, deployment_id = %deployment.id, "Activating deployment record only...");
+
+            state
+                .app_repo
+                .set_active_deployment(app.id, deployment_id)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+            // Update local app for notify_router
+            let mut updated_app = app;
+            updated_app.active_deployment_id = Some(deployment_id);
+
+            let _ = state.notify_router(&updated_app).await;
+            state.deployment_events.send(updated_app.id).ok();
+
+            Ok(StatusCode::OK)
+        },
     }
-
-    // 2. Update active pointer in DB
-    state
-        .app_repo
-        .set_active_deployment(app.id, deployment_id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // Give the DB a moment to ensure the update is committed before notifying other systems
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    // 3. If it has a job_id, ensure it's running
-    if let Some(job_id) = deployment.job_id {
-        info!(job_id = %job_id, "Activating deployment, ensuring it's running in the cluster...");
-        let _ = state
-            .scheduler
-            .resume_app(job_id.clone(), auth.user_id)
-            .await;
-
-        // Mark new as RUNNING
-        let _ = state
-            .app_repo
-            .update_deployment(
-                deployment.id,
-                UpdateDeploymentParams {
-                    status: Some("RUNNING".to_string()),
-                    job_id: Some(job_id),
-                    image_tag: deployment.image_tag.clone(),
-                    build_id: deployment.build_id.clone(),
-                    ip_address: deployment.ip_address.clone(),
-                    git_commit_hash: deployment.git_commit_hash.clone(),
-                    git_commit_message: deployment.git_commit_message.clone(),
-                    git_branch: deployment.git_branch.clone(),
-                },
-            )
-            .await;
-    }
-
-    state.deployment_events.send(app.id).ok();
-
-    // Update the local app object so notify_router gets the new deployment ID
-    app.active_deployment_id = Some(deployment_id);
-
-    // Notify router
-    let _ = state.notify_router(&app).await;
-
-    Ok(StatusCode::OK)
 }
 
 #[utoipa::path(
@@ -661,6 +620,7 @@ pub async fn deploy_app_version_handler(
     if let Some(image_tag) = image {
         info!(app = %app.name, image = %image_tag, "Direct image deployment requested, skipping build");
 
+        // 1. Trigger deployment
         let inner = DeploymentService::deploy_to_scheduler(
             &state,
             &app,
@@ -675,14 +635,23 @@ pub async fn deploy_app_version_handler(
         )
         .await?;
 
+        // 2. Start Zero-Downtime orchestration in background
+        DeploymentService::run_zero_downtime_flow(
+            state.clone(),
+            app,
+            deployment.clone(),
+            inner.clone(),
+            auth.user_id.clone(),
+        );
+
         return Ok(Json(crate::deploy::DeployResponseBody {
             job_id: Some(inner.job_id),
             deployment_id: Some(deployment.id.to_string()),
-            status: crate::scheduler::status_name(inner.status).to_string(),
+            status: "HEALTH_CHECKING".to_string(),
             host_id: Some(inner.host_id),
             vm_id: Some(inner.vm_id),
             image_tag: Some(image_tag),
-            message: inner.message,
+            message: "Deployment triggered, health check in progress".to_string(),
         }));
     }
 

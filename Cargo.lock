@@ -2323,6 +2323,7 @@ dependencies = [
  "mikrom-proto",
  "parking_lot",
  "prost 0.13.5",
+ "reqwest 0.13.3",
  "serde",
  "serde_json",
  "shlex",
@@ -2331,6 +2332,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]

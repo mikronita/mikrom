@@ -114,11 +114,10 @@ async fn test_activate_deployment_endpoint() {
         .with(eq(app_id))
         .returning(move |_| Ok(Some(app_for_notify_clone.clone())));
 
-    // 5. Mock list_deployments_by_app for cleanup logic
+    // 5. Mock list_deployments_by_app for cleanup logic (no longer called by handler if job_id is present)
     mock_app_repo
         .expect_list_deployments_by_app()
         .with(eq(app_id))
-        .times(1)
         .returning(move |_| Ok(vec![]));
 
     let nats_url =

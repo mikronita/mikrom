@@ -143,3 +143,8 @@ required-features = ["test-utils"]
 name = "manual_deploy_git_metadata_tests"
 path = "tests/manual_deploy_git_metadata_tests.rs"
 required-features = ["test-utils"]
+
+[[test]]
+name = "zero_downtime_deployments_tests"
+path = "tests/zero_downtime_deployments_tests.rs"
+required-features = ["test-utils"]
