@@ -9,6 +9,9 @@ The central management service for the Mikrom PaaS. It provides a REST API for a
 - **Authentication**: User registration, login (JWT), and profile management.
 - **App Management**: CRUD operations for applications (Git URLs, hostnames, ports).
 - **Deployment Orchestration**: Coordinating with `mikrom-builder` and `mikrom-scheduler` to turn source code into running microVMs.
+- **Automatic TLS**: Managing ACME accounts and certificates for secure application ingress.
+- **GitHub Integration**: Handling webhooks to trigger automatic builds on repository changes.
+- **Secret Management**: Storing and injecting encrypted environment variables into deployments.
 - **State Persistence**: Managing the PostgreSQL database for all system metadata.
 
 ## Endpoints
@@ -27,7 +30,9 @@ The central management service for the Mikrom PaaS. It provides a REST API for a
 | `POST` | `/apps` | JWT | Create a new application (Git URL required) |
 | `DELETE` | `/apps/{id}` | JWT | Delete an application and all its deployments |
 | `POST` | `/apps/{id}/deploy` | JWT | Trigger a new deployment for an application |
-| `GET` | `/deployments` | JWT | List all deployments (formerly `/vms`) |
+| `GET` | `/apps/{id}/secrets` | JWT | List application secrets |
+| `POST` | `/apps/{id}/secrets` | JWT | Add or update an application secret |
+| `GET` | `/deployments` | JWT | List all deployments |
 | `GET` | `/deployments/{id}` | JWT | Get deployment status |
 | `DELETE` | `/deployments/{id}` | JWT | Stop and remove a deployment |
 | `GET` | `/deployments/{id}/logs` | JWT | Get real-time microVM logs (SSE) |
@@ -36,8 +41,11 @@ The central management service for the Mikrom PaaS. It provides a REST API for a
 
 Mikrom uses PostgreSQL to track the state of the cluster:
 - **`users`**: Account information and credentials.
-- **`apps`**: Project definitions (name, git repo, assigned hostname).
+- **`apps`**: Project definitions (name, git repo, assigned hostname, GitHub config, Healthchecks).
 - **`deployments`**: Historical and active deployment runs (image tags, job IDs, IP addresses).
+- **`app_secrets`**: Encrypted environment variables for applications.
+- **`acme_accounts`**: Credentials and state for Let's Encrypt certificate management.
+- **`github_accounts`**: OAuth tokens and configurations for GitHub integration.
 
 ## Configuration
 

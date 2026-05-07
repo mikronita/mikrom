@@ -7,9 +7,10 @@ The intelligent resource manager for the Mikrom PaaS. It orchestrates the placem
 ## Key Responsibilities
 
 - **Worker Registry**: Tracks all active worker nodes, their identity, and their networking configuration.
-- **Resource Orchestration**: Selects the best worker for every deployment using intelligent scoring.
+- **Resource Orchestration**: Selects the best worker for every deployment using intelligent scoring based on real-time metrics.
 - **Job Lifecycle**: Manages the transitions between `PENDING`, `SCHEDULED`, `RUNNING`, and `FAILED` for every microVM.
 - **IPAM (IP Address Management)**: Automatically allocates and releases internal IP addresses for microVMs within each worker's subnet.
+- **Observability Hub**: Metrics reported by agents are consumed by both the scheduler (for placement) and `mikrom-telemetry` (for dashboard visualization).
 - **Health Monitoring**: Detects stale workers and automatically marks their workloads as unreachable.
 
 ## Intelligent Placement
