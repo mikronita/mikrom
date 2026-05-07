@@ -1,4 +1,5 @@
 pub mod ipam;
+pub mod sixpn_ipam;
 
 use crate::domain::{
     DomainResult, HostMetrics, Job, JobRepository, JobStatus, VmConfig, Worker, WorkerRepository,
