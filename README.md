@@ -8,9 +8,11 @@ Mikrom is a modern **Platform-as-a-Service (PaaS)** that deploys containerized w
 
 - **🚀 Zero-Config**: Automatic language detection and building via [Railpack](https://railpack.com/).
 - **⚡ MicroVM Isolation**: Every application runs in its own dedicated Firecracker microVM for maximum security and performance.
-- **🌐 Dynamic Routing**: Built-in ingress router with automatic hostname assignment (`app.apps.mikrom.spluca.org`).
+- **🌐 Dynamic Routing**: Built-in ingress router based on Caddy with automatic hostname assignment and TLS.
+- **🔒 Automatic TLS**: Seamless ACME integration (Let's Encrypt) for all your applications.
+- **🐙 GitHub Integration**: Connect your repositories for automated deployments on every push.
 - **🦀 Built with Rust**: High-performance, memory-safe backend services.
-- **📊 Real-time Dashboard**: Modern web interface built with Next.js and Tailwind CSS.
+- **📊 Real-time Observability**: Metrics and logs collection via NATS, Prometheus, and Loki.
 - **🛠️ Power CLI**: Full control over your apps and deployments from your terminal.
 
 ## Architecture
@@ -24,8 +26,10 @@ User (CLI/Web)
     → mikrom-scheduler (Resource allocation & IPAM)
       → mikrom-agent   (Worker node, Firecracker lifecycle)
 User (Traffic)
-  → mikrom-router   (Dynamic Ingress Proxy)
+  → mikrom-router   (Caddy-based Dynamic Ingress Proxy)
     → App MicroVM      (Target instance)
+Observability
+  → mikrom-telemetry (Prometheus & Loki metrics/logs)
 ```
 
 ## Repository Layout
@@ -34,7 +38,8 @@ User (Traffic)
 |---|---|
 | `mikrom-api/` | The central brain. Manages Users, Apps, and Deployments. |
 | `mikrom-builder/` | The build engine. Clones Git repos and builds OCI images using Railpack. |
-| `mikrom-router/` | High-performance dynamic reverse proxy for app ingress. |
+| `mikrom-router/` | High-performance Caddy-based dynamic reverse proxy. |
+| `mikrom-telemetry/` | Observability service for metrics (Prometheus) and logs (Loki). |
 | `mikrom-scheduler/` | Intelligent resource manager. Places workloads on the best workers. |
 | `mikrom-agent/` | The worker daemon. Manages microVMs and network isolation. |
 | `mikrom-app/` | Dashboard (Next.js 16, React 19, Tailwind CSS 4). |
@@ -61,7 +66,8 @@ make run-api        # port 5001
 make run-scheduler  # Internal NATS
 make run-builder    # Internal NATS
 make run-agent      # port 5003
-make run-router     # port 8080
+make run-router     # port 80/443
+make run-telemetry  # port 9090
 make run-app        # port 3000
 ```
 

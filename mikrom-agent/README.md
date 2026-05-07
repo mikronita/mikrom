@@ -7,10 +7,21 @@ The worker daemon for the Mikrom PaaS. It runs on every worker node and manages 
 ## Key Responsibilities
 
 - **Worker Registration**: Automatically registers with `mikrom-scheduler` on startup and maintains a heartbeat.
-- **Resource Monitoring**: Reports real-time CPU, RAM, and Disk metrics to the scheduler for intelligent placement.
+- **Resource Monitoring**: Reports real-time CPU, RAM, and Disk metrics to the scheduler for placement and to `mikrom-telemetry` for observability.
+- **Log Streaming**: Captures stdout/stderr from every microVM and streams it via NATS to the observability stack.
 - **Image Conversion**: Converts standard OCI/Docker images into Firecracker-compatible `.ext4` root filesystems on the fly.
 - **MicroVM Management**: Handles Firecracker process orchestration, Jailer isolation, and TAP network interface configuration.
 - **Robust Boot System**: Injects a custom multi-stage boot sequence into microVMs to handle complex PaaS application entrypoints.
+
+## Telemetry Stream
+
+The agent produces several real-time data streams via NATS:
+
+| Subject | Description |
+|---|---|
+| `mikrom.agent.<id>.metrics` | Host-level system metrics (CPU, RAM, Disk, Load). |
+| `mikrom.metrics.<app_id>.<vm_id>` | Individual microVM resource utilization. |
+| `mikrom.logs.<app_id>.<vm_id>` | Buffered console logs from the application. |
 
 ## The Boot System
 
