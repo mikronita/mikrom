@@ -182,13 +182,16 @@ impl AgentServer {
         let result = if let Some(vm) = vm_info {
             if let Some(ip) = &vm.config.ip_address {
                 let port = vm.config.port;
-                let url = format!("http://{ip}:{port}/");
+                let path = if vm.config.health_check_path.is_empty() {
+                    "/".to_string()
+                } else {
+                    vm.config.health_check_path.clone()
+                };
+                let url = format!("http://{ip}:{port}{path}");
                 tracing::debug!(vm_id = %req.vm_id, url = %url, "Performing health check...");
 
                 match http_client.get(&url).send().await {
-                    Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
-                        Ok("Healthy".to_string())
-                    },
+                    Ok(resp) if resp.status().is_success() => Ok("Healthy".to_string()),
                     Ok(resp) => Err(format!("Unhealthy: HTTP {}", resp.status())),
                     Err(e) => Err(format!("Unhealthy: {e}")),
                 }
@@ -426,5 +429,123 @@ mod tests {
         let resp = CheckHealthResponse::decode(&resp_msg.payload[..]).unwrap();
         assert!(!resp.is_healthy);
         assert_eq!(resp.message, "VM not found");
+    }
+
+    #[tokio::test]
+    async fn test_handle_health_check_http_logic() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // 1. Setup mock HTTP server
+        let mock_server = MockServer::start().await;
+        let mock_port = mock_server.address().port();
+        let mock_ip = mock_server.address().ip().to_string();
+
+        // Expect a hit on /custom-health and return 200
+        Mock::given(method("GET"))
+            .and(path("/custom-health"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        // 2. Setup Agent dependencies
+        let nats_url =
+            std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
+        let nats_client = async_nats::connect(&nats_url).await.unwrap();
+        let fc = FirecrackerManager::new();
+        let reply = "test.reply.http".to_string();
+        let mut sub = nats_client.subscribe(reply.clone()).await.unwrap();
+
+        // 3. Register a fake VM in the manager so get_vm_info returns it
+        let vm_id = "test-vm-http".to_string();
+        {
+            use crate::firecracker::config::{VmConfig, VmInfo, VmStatus};
+            let mut vms = fc.vms.write().await;
+            vms.insert(
+                vm_id.clone(),
+                VmInfo {
+                    vm_id: vm_id.clone(),
+                    app_id: "app-1".into(),
+                    image: "img".into(),
+                    status: VmStatus::Running,
+                    started_at: None,
+                    error_message: None,
+                    config: VmConfig {
+                        ip_address: Some(mock_ip),
+                        port: mock_port as u32,
+                        health_check_path: "/custom-health".into(),
+                        ..Default::default()
+                    },
+                },
+            );
+        }
+
+        // 4. Send health check request
+        let req = CheckHealthRequest {
+            vm_id: vm_id.clone(),
+        };
+        let mut payload = Vec::new();
+        req.encode(&mut payload).unwrap();
+        let payload_len = payload.len();
+        let message = async_nats::Message {
+            subject: "test.subject".into(),
+            reply: Some(reply.clone().into()),
+            payload: payload.into(),
+            headers: None,
+            status: None,
+            description: None,
+            length: payload_len,
+        };
+
+        let http = reqwest::Client::new();
+        AgentServer::handle_health_check(message, fc.clone(), nats_client.clone(), http).await;
+
+        // 5. Verify success (200 OK on custom path)
+        use futures::StreamExt;
+        let resp_msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
+            .await
+            .expect("Timeout waiting for health check response")
+            .unwrap();
+        let resp = CheckHealthResponse::decode(&resp_msg.payload[..]).unwrap();
+        assert!(
+            resp.is_healthy,
+            "Should be healthy for 200 OK: {}",
+            resp.message
+        );
+
+        // 6. Test 302 Redirect (should be Unhealthy now)
+        Mock::given(method("GET"))
+            .and(path("/redirect"))
+            .respond_with(ResponseTemplate::new(302))
+            .mount(&mock_server)
+            .await;
+
+        {
+            let mut vms = fc.vms.write().await;
+            vms.get_mut(&vm_id).unwrap().config.health_check_path = "/redirect".into();
+        }
+
+        let mut payload = Vec::new();
+        req.encode(&mut payload).unwrap();
+        let payload_len = payload.len();
+        let message = async_nats::Message {
+            subject: "test.subject".into(),
+            reply: Some(reply.clone().into()),
+            payload: payload.into(),
+            headers: None,
+            status: None,
+            description: None,
+            length: payload_len,
+        };
+
+        AgentServer::handle_health_check(message, fc, nats_client, reqwest::Client::new()).await;
+
+        let resp_msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
+            .await
+            .expect("Timeout waiting for second response")
+            .unwrap();
+        let resp = CheckHealthResponse::decode(&resp_msg.payload[..]).unwrap();
+        assert!(!resp.is_healthy, "Should be unhealthy for 302 Redirect");
+        assert!(resp.message.contains("HTTP 302 Found"));
     }
 }

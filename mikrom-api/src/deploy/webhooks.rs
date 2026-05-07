@@ -273,6 +273,8 @@ mod tests {
             github_repo_id: None,
             github_repo_full_name: None,
             active_deployment_id: None,
+            health_check_path: "/".to_string(),
+            drain_timeout: 10,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -345,6 +347,8 @@ mod tests {
             github_repo_id: None,
             github_repo_full_name: None,
             active_deployment_id: None,
+            health_check_path: "/".to_string(),
+            drain_timeout: 10,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -390,6 +394,8 @@ mod tests {
             github_repo_id: None,
             github_repo_full_name: None,
             active_deployment_id: None,
+            health_check_path: "/".to_string(),
+            drain_timeout: 10,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -438,6 +444,8 @@ mod tests {
             github_repo_id: Some(repo_id),
             github_repo_full_name: Some("owner/generic-repo".to_string()),
             active_deployment_id: None,
+            health_check_path: "/".to_string(),
+            drain_timeout: 10,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -484,6 +492,8 @@ mod tests {
             github_repo_id: Some(repo_id),
             github_repo_full_name: Some("owner/metadata-repo".to_string()),
             active_deployment_id: None,
+            health_check_path: "/".to_string(),
+            drain_timeout: 10,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

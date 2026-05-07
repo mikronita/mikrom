@@ -172,6 +172,7 @@ message VmConfig {
   string netmask = 8;
   repeated Volume volumes = 9;
   uint32 port = 10;
+  string health_check_path = 11;
 }
 
 

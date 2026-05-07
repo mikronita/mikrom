@@ -42,6 +42,7 @@ impl SchedulerServer {
                         read_only: v.read_only,
                     })
                     .collect(),
+                health_check_path: c.health_check_path,
             })
             .unwrap_or_default();
 

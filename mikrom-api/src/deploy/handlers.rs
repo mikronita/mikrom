@@ -27,6 +27,8 @@ pub struct CreateAppRequest {
     pub github_installation_id: Option<i64>,
     pub github_repo_id: Option<i64>,
     pub github_repo_full_name: Option<String>,
+    pub health_check_path: Option<String>,
+    pub drain_timeout: Option<i32>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -74,6 +76,8 @@ pub struct AppResponse {
     pub github_repo_id: Option<i64>,
     pub github_repo_full_name: Option<String>,
     pub active_deployment_id: Option<Uuid>,
+    pub health_check_path: String,
+    pub drain_timeout: i32,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -128,6 +132,8 @@ pub async fn create_app_handler(
             github_installation_id: payload.github_installation_id,
             github_repo_id: payload.github_repo_id,
             github_repo_full_name: payload.github_repo_full_name.clone(),
+            health_check_path: payload.health_check_path,
+            drain_timeout: payload.drain_timeout,
         })
         .await?;
 
@@ -211,6 +217,8 @@ pub async fn create_app_handler(
             github_repo_id: app.github_repo_id,
             github_repo_full_name: app.github_repo_full_name,
             active_deployment_id: app.active_deployment_id,
+            health_check_path: app.health_check_path,
+            drain_timeout: app.drain_timeout,
             created_at: app.created_at,
         }),
     ))
@@ -256,6 +264,8 @@ pub async fn list_apps_handler(
                 github_repo_id: a.github_repo_id,
                 github_repo_full_name: a.github_repo_full_name,
                 active_deployment_id: a.active_deployment_id,
+                health_check_path: a.health_check_path,
+                drain_timeout: a.drain_timeout,
                 created_at: a.created_at,
             })
             .collect(),

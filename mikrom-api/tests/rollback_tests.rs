@@ -39,17 +39,8 @@ async fn test_activate_deployment_endpoint() {
     let app_for_get = App {
         id: app_id,
         name: "test-app".to_string(),
-        git_url: "git".to_string(),
-        port: 8080,
-        hostname: None,
         user_id,
-        github_webhook_secret: None,
-        github_installation_id: None,
-        github_repo_id: None,
-        github_repo_full_name: None,
-        active_deployment_id: None,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        ..Default::default()
     };
     mock_app_repo
         .expect_get_app_by_name()
@@ -96,17 +87,9 @@ async fn test_activate_deployment_endpoint() {
     let app_for_notify = App {
         id: app_id,
         name: "test-app".to_string(),
-        git_url: "git".to_string(),
-        port: 8080,
-        hostname: None,
         user_id,
-        github_webhook_secret: None,
-        github_installation_id: None,
-        github_repo_id: None,
-        github_repo_full_name: None,
         active_deployment_id: Some(deployment_id),
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        ..Default::default()
     };
     let app_for_notify_clone = app_for_notify.clone();
     mock_app_repo
@@ -186,17 +169,8 @@ async fn test_activate_deployment_wrong_owner() {
     let app = App {
         id: app_id,
         name: "test-app".to_string(),
-        git_url: "git".to_string(),
-        port: 8080,
-        hostname: None,
         user_id: other_user_id, // Owned by someone else
-        github_webhook_secret: None,
-        github_installation_id: None,
-        github_repo_id: None,
-        github_repo_full_name: None,
-        active_deployment_id: None,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        ..Default::default()
     };
     mock_app_repo
         .expect_get_app_by_name()
@@ -268,17 +242,8 @@ async fn test_activate_deployment_not_running() {
     let app = App {
         id: app_id,
         name: "test-app".to_string(),
-        git_url: "git".to_string(),
-        port: 8080,
-        hostname: None,
-        user_id,
-        github_webhook_secret: None,
-        github_installation_id: None,
-        github_repo_id: None,
-        github_repo_full_name: None,
-        active_deployment_id: None,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        user_id, // This one is user_id
+        ..Default::default()
     };
     mock_app_repo
         .expect_get_app_by_name()

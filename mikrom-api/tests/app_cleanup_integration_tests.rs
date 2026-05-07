@@ -2,7 +2,6 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use chrono::Utc;
 use mockall::predicate::*;
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -41,13 +40,7 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         port: 8080,
         hostname: Some("test.example.com".to_string()),
         user_id,
-        github_webhook_secret: None,
-        github_installation_id: None,
-        github_repo_id: None,
-        github_repo_full_name: None,
-        active_deployment_id: None,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        ..Default::default()
     };
 
     let app_clone = app.clone();

@@ -57,6 +57,8 @@ async fn test_create_app_endpoint() {
                 github_repo_id: params.github_repo_id,
                 github_repo_full_name: params.github_repo_full_name,
                 active_deployment_id: None,
+                health_check_path: params.health_check_path.unwrap_or_else(|| "/".to_string()),
+                drain_timeout: params.drain_timeout.unwrap_or(10),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             })
@@ -250,6 +252,8 @@ async fn test_list_apps_includes_secret() {
                 github_repo_id: None,
                 github_repo_full_name: None,
                 active_deployment_id: None,
+                health_check_path: "/".to_string(),
+                drain_timeout: 10,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }])
@@ -345,6 +349,8 @@ async fn test_get_app_secret_endpoint() {
                 github_repo_id: None,
                 github_repo_full_name: None,
                 active_deployment_id: None,
+                health_check_path: "/".to_string(),
+                drain_timeout: 10,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -399,4 +405,89 @@ async fn test_get_app_secret_endpoint() {
     let secret_resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(secret_resp["github_webhook_secret"], "real-secret-123");
+}
+
+#[tokio::test]
+async fn test_create_app_with_custom_config() {
+    use axum::Json;
+    use axum::extract::State;
+    use mikrom_api::auth::AuthUser;
+    use mikrom_api::deploy::handlers::{CreateAppRequest, create_app_handler};
+    use mikrom_api::repositories::{MockGithubRepository, MockUserRepository};
+    use mikrom_api::scheduler::MockScheduler;
+    use mockall::predicate;
+
+    let mut mock_app_repo = MockAppRepository::new();
+    let user_id = Uuid::new_v4();
+    let app_id = Uuid::new_v4();
+
+    let request = CreateAppRequest {
+        name: "custom-app".to_string(),
+        git_url: "https://github.com/custom/repo".to_string(),
+        port: Some(3000),
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
+        health_check_path: Some("/healthz".to_string()),
+        drain_timeout: Some(60),
+    };
+
+    mock_app_repo
+        .expect_create_app()
+        .with(predicate::function(
+            |params: &mikrom_api::repositories::app_repository::CreateAppParams| {
+                params.name == "custom-app"
+                    && params.health_check_path == Some("/healthz".to_string())
+                    && params.drain_timeout == Some(60)
+            },
+        ))
+        .times(1)
+        .returning(move |params| {
+            Ok(App {
+                id: app_id,
+                name: params.name,
+                git_url: params.git_url,
+                port: params.port,
+                user_id: params.user_id,
+                health_check_path: params.health_check_path.unwrap(),
+                drain_timeout: params.drain_timeout.unwrap(),
+                ..Default::default()
+            })
+        });
+
+    let state = AppState {
+        user_repo: Arc::new(MockUserRepository::new()),
+        app_repo: Arc::new(mock_app_repo),
+        github_repo: Arc::new(MockGithubRepository::default()),
+        scheduler: Arc::new(MockScheduler::new()),
+        nats: mikrom_api::nats::TypedNatsClient::new(
+            async_nats::connect("nats://localhost:4223").await.unwrap(),
+        ),
+        router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
+        api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+        jwt_secret: "secret".to_string(),
+        master_key: "key".to_string(),
+        deployment_events: tokio::sync::broadcast::channel(100).0,
+        acme_email: "test@example.com".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
+        github_webhook_url_base: None,
+    };
+
+    let auth = AuthUser {
+        user_id: user_id.to_string(),
+        email: "test@example.com".to_string(),
+        role: mikrom_api::repositories::user_repository::UserRole::User,
+    };
+
+    let result = create_app_handler(auth, State(state), Json(request)).await;
+
+    let (_, Json(response)) = result.unwrap();
+    assert_eq!(response.name, "custom-app");
+    assert_eq!(response.health_check_path, "/healthz");
+    assert_eq!(response.drain_timeout, 60);
 }

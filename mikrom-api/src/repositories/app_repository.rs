@@ -46,6 +46,26 @@ pub struct CreateAppParams {
     pub github_installation_id: Option<i64>,
     pub github_repo_id: Option<i64>,
     pub github_repo_full_name: Option<String>,
+    pub health_check_path: Option<String>,
+    pub drain_timeout: Option<i32>,
+}
+
+impl Default for CreateAppParams {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            git_url: String::new(),
+            port: 8080,
+            hostname: None,
+            user_id: Uuid::new_v4(),
+            github_webhook_secret: None,
+            github_installation_id: None,
+            github_repo_id: None,
+            github_repo_full_name: None,
+            health_check_path: None,
+            drain_timeout: None,
+        }
+    }
 }
 
 #[mockall::automock]

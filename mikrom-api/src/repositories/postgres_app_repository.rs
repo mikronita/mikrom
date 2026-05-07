@@ -84,8 +84,11 @@ impl AppRepository for PostgresAppRepository {
             None
         };
 
+        let health_check_path = params.health_check_path.unwrap_or_else(|| "/".to_string());
+        let drain_timeout = params.drain_timeout.unwrap_or(10);
+
         let result = sqlx::query_as::<_, App>(
-            "INSERT INTO apps (name, git_url, port, hostname, user_id, github_webhook_secret, github_installation_id, github_repo_id, github_repo_full_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *"
+            "INSERT INTO apps (name, git_url, port, hostname, user_id, github_webhook_secret, github_installation_id, github_repo_id, github_repo_full_name, health_check_path, drain_timeout) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *"
         )
         .bind(&params.name)
         .bind(&params.git_url)
@@ -96,6 +99,8 @@ impl AppRepository for PostgresAppRepository {
         .bind(params.github_installation_id)
         .bind(params.github_repo_id)
         .bind(&params.github_repo_full_name)
+        .bind(health_check_path)
+        .bind(drain_timeout)
         .fetch_one(&self.pool)
         .await;
 
@@ -403,6 +408,8 @@ mod tests {
                 github_installation_id: None,
                 github_repo_id: None,
                 github_repo_full_name: None,
+                health_check_path: None,
+                drain_timeout: None,
             })
             .await
             .expect("failed to create app");
@@ -497,6 +504,8 @@ mod tests {
                 github_installation_id: None,
                 github_repo_id: None,
                 github_repo_full_name: None,
+                health_check_path: None,
+                drain_timeout: None,
             })
             .await
             .unwrap();
