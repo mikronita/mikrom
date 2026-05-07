@@ -65,5 +65,6 @@ make test-all          # Complete test suite
 - **Rust Services**: Standard Rust workspace conventions.
 - **Protocol Buffers**: Changes to `mikrom-proto/proto/*.proto` require regenerating code (managed by build scripts).
 - **Security**: Internal communication between services uses **NATS with mutual TLS (mTLS)** for encryption and authentication.
+- **Concurrency Control**: Use the RAII **`DeploymentFlowGuard`** pattern (managed via `AppState::try_start_flow`) to prevent concurrent zero-downtime deployment flows for the same application. Guards should be acquired early in handlers and moved into background tasks to ensure consistent state and prevent "lock leaks" during panics.
 - **Agent Boot System**: Uses a dual-script system: `mikrom-init.sh` (PID 1) and `app-run.sh` (executes the app entrypoint).
 - **Environment**: Configuration is driven by environment variables. Check `.env.example` in `mikrom-api/` for reference.

@@ -3,9 +3,8 @@ use mikrom_api::AppState;
 use mikrom_api::models::app::{App, Deployment};
 use mikrom_api::repositories::{MockAppRepository, MockGithubRepository, MockUserRepository};
 use mikrom_api::scheduler::MockScheduler;
-use mikrom_proto::scheduler::{CheckHealthResponse, DeployResponse};
+use mikrom_proto::scheduler::DeployResponse;
 use mockall::predicate::*;
-use prost::Message;
 use std::sync::Arc;
 use tokio::time::Duration;
 use uuid::Uuid;
@@ -49,11 +48,34 @@ async fn test_promote_stopped_deployment_resumes_it() {
         .times(1)
         .returning(|_, _| Ok(true));
 
-    // 2. Expect set_active_deployment to be called eventually
+    // 2. Mocks for stateful get_app
+    let call_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let app_clone = app.clone();
     mock_app_repo
-        .expect_get_app()
-        .returning(move |_| Ok(Some(app_clone.clone())));
+        .expect_get_app_by_name()
+        .with(eq("test-app".to_string()))
+        .returning({
+            let a = app_clone.clone();
+            move |_| Ok(Some(a.clone()))
+        });
+
+    mock_app_repo.expect_get_app().returning(move |_| {
+        let count = call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut a = app_clone.clone();
+        if count > 0 {
+            // orchestration calls it twice: once for old_id, once for verification
+            a.active_deployment_id = Some(new_dep_id);
+        }
+        Ok(Some(a))
+    });
+
+    mock_app_repo
+        .expect_get_deployment()
+        .with(eq(new_dep_id))
+        .returning({
+            let d = deployment.clone();
+            move |_| Ok(Some(d.clone()))
+        });
 
     mock_app_repo
         .expect_set_active_deployment()
@@ -81,10 +103,62 @@ async fn test_promote_stopped_deployment_resumes_it() {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
+
+    let job_id = format!("job-promotion-{}", Uuid::new_v4());
+    let job_id_clone = job_id.clone();
+    let app_id_str = app_id.to_string();
+
+    // Subscribe BEFORE calling the handler
+    let mut deploy_sub = nats_client
+        .subscribe("mikrom.scheduler.deploy")
+        .await
+        .unwrap();
     let mut health_sub = nats_client
         .subscribe("mikrom.scheduler.check_health")
         .await
         .unwrap();
+
+    // Mock scheduler deployment via NATS
+    let nats_clone = nats_client.clone();
+    tokio::spawn(async move {
+        use mikrom_proto::scheduler::{
+            CheckHealthRequest, CheckHealthResponse, DeployRequest, DeployResponse, DeployStatus,
+        };
+        use prost::Message;
+
+        while let Some(msg) = deploy_sub.next().await {
+            if let Ok(req) = DeployRequest::decode(&msg.payload[..])
+                && req.app_id != app_id_str
+            {
+                continue;
+            }
+            let resp = DeployResponse {
+                job_id: job_id_clone.clone(),
+                status: DeployStatus::Running as i32,
+                ip_address: "10.0.0.2".to_string(),
+                ..Default::default()
+            };
+            let mut buf = Vec::new();
+            resp.encode(&mut buf).unwrap();
+            let _ = nats_clone.publish(msg.reply.unwrap(), buf.into()).await;
+            break; // only handle one deployment
+        }
+
+        while let Some(msg) = health_sub.next().await {
+            if let Ok(req) = CheckHealthRequest::decode(&msg.payload[..])
+                && req.job_id != job_id_clone
+            {
+                continue;
+            }
+            let resp = CheckHealthResponse {
+                is_healthy: true,
+                message: "Healthy".to_string(),
+            };
+            let mut buf = Vec::new();
+            resp.encode(&mut buf).unwrap();
+            let _ = nats_clone.publish(msg.reply.unwrap(), buf.into()).await;
+        }
+    });
 
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
@@ -108,39 +182,23 @@ async fn test_promote_stopped_deployment_resumes_it() {
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
-    let guard = state.try_start_flow(app_id).unwrap();
+    let auth = mikrom_api::auth::extractor::AuthUser {
+        user_id: user_id.to_string(),
+        email: "test@example.com".to_string(),
+        role: mikrom_api::repositories::user_repository::UserRole::User,
+    };
 
-    // Start zero-downtime flow via handler-like logic or directly
-    mikrom_api::deploy::service::DeploymentService::run_zero_downtime_flow(
-        state.clone(),
-        app,
-        deployment,
-        DeployResponse {
-            job_id: "job-new".to_string(),
-            ip_address: "10.0.0.2".to_string(),
-            ..Default::default()
-        },
-        user_id.to_string(),
-        true, // cleanup_on_failure = true since we started it
-        guard,
-    );
+    // Call the handler!
+    mikrom_api::deploy::handlers::activate_deployment_handler(
+        auth,
+        axum::extract::State(state),
+        axum::extract::Path((app.name.clone(), new_dep_id)),
+    )
+    .await
+    .expect("Handler should succeed");
 
-    // Respond to health check
-    if let Some(msg) = health_sub.next().await {
-        let resp = CheckHealthResponse {
-            is_healthy: true,
-            message: "Healthy".to_string(),
-        };
-        let mut buf = Vec::new();
-        resp.encode(&mut buf).unwrap();
-        nats_client
-            .publish(msg.reply.unwrap(), buf.into())
-            .await
-            .unwrap();
-    }
-
-    // Wait a bit for flow to complete
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Wait a bit for background flow to complete
+    tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
 #[tokio::test]
@@ -164,7 +222,7 @@ async fn test_promote_unhealthy_deployment_no_cleanup() {
         app_id,
         user_id,
         status: "RUNNING".to_string(),
-        job_id: Some("job-1".to_string()),
+        job_id: Some("job-unhealthy".to_string()),
         ..Default::default()
     };
 
@@ -174,13 +232,45 @@ async fn test_promote_unhealthy_deployment_no_cleanup() {
     // 2. App repo update_deployment to FAILED should NOT be called
     mock_app_repo.expect_update_deployment().times(0);
 
+    let app_clone = app.clone();
+    mock_app_repo
+        .expect_get_app()
+        .returning(move |_| Ok(Some(app_clone.clone())));
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
-    let mut health_sub = nats_client
-        .subscribe("mikrom.scheduler.check_health")
-        .await
-        .unwrap();
+
+    let job_id = format!("job-unhealthy-{}", Uuid::new_v4());
+    let job_id_clone = job_id.clone();
+
+    // Subscribe to health check requests to respond (only for our job_id)
+    let nats_clone = nats_client.clone();
+    tokio::spawn(async move {
+        use mikrom_proto::scheduler::{CheckHealthRequest, CheckHealthResponse};
+        use prost::Message;
+
+        let mut health_sub = nats_clone
+            .subscribe("mikrom.scheduler.check_health")
+            .await
+            .unwrap();
+
+        while let Some(msg) = health_sub.next().await {
+            if let Ok(req) = CheckHealthRequest::decode(&msg.payload[..])
+                && req.job_id != job_id_clone
+            {
+                continue;
+            }
+
+            let resp = CheckHealthResponse {
+                is_healthy: false,
+                message: "Unhealthy".to_string(),
+            };
+            let mut buf = Vec::new();
+            resp.encode(&mut buf).unwrap();
+            let _ = nats_clone.publish(msg.reply.unwrap(), buf.into()).await;
+        }
+    });
 
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
@@ -207,14 +297,12 @@ async fn test_promote_unhealthy_deployment_no_cleanup() {
     let guard = state.try_start_flow(app_id).unwrap();
 
     // Start zero-downtime flow with cleanup_on_failure = false (since it was RUNNING)
-    // To speed up test, we will modify the loop in service.rs if it was possible,
-    // but here we'll just let it fail health check (by not responding or responding false)
     mikrom_api::deploy::service::DeploymentService::run_zero_downtime_flow(
         state.clone(),
         app,
         deployment,
         DeployResponse {
-            job_id: "job-1".to_string(),
+            job_id: job_id.clone(),
             ..Default::default()
         },
         user_id.to_string(),
@@ -222,23 +310,6 @@ async fn test_promote_unhealthy_deployment_no_cleanup() {
         guard,
     );
 
-    // Respond unhealthy
-    if let Some(msg) = health_sub.next().await {
-        let resp = CheckHealthResponse {
-            is_healthy: false,
-            message: "Unhealthy".to_string(),
-        };
-        let mut buf = Vec::new();
-        resp.encode(&mut buf).unwrap();
-        nats_client
-            .publish(msg.reply.unwrap(), buf.into())
-            .await
-            .unwrap();
-    }
-
-    // We can't wait for all 60 attempts in a unit test easily.
-    // However, the test will pass if pause_app/update_deployment are never called
-    // even if the flow is still running when the test ends (tokio::spawn).
-    // To properly test the "NO CLEANUP" logic, we'd need to mock time or reduce max_attempts.
-    // For now, this confirms the intent.
+    // Wait a bit
+    tokio::time::sleep(Duration::from_millis(500)).await;
 }

@@ -194,7 +194,11 @@ pub struct BuildTask {
     pub env: HashMap<String, String>,
 }
 
-pub async fn start_build_polling(state: AppState, task: BuildTask) {
+pub async fn start_build_polling(
+    state: AppState,
+    task: BuildTask,
+    guard: Option<crate::DeploymentFlowGuard>,
+) {
     let builder = Arc::new(RealBuilderClient {
         nats: state.nats.clone(),
     });
@@ -203,7 +207,7 @@ pub async fn start_build_polling(state: AppState, task: BuildTask) {
     });
 
     tokio::spawn(async move {
-        if let Err(e) = poll_and_deploy(state, task, builder, scheduler).await {
+        if let Err(e) = poll_and_deploy(state, task, builder, scheduler, guard).await {
             error!("Background build/deploy task failed: {}", e);
         }
     });
@@ -242,17 +246,22 @@ pub async fn resume_pending_builds(state: AppState) {
             env: serde_json::from_value(dep.env_vars).unwrap_or_default(),
         };
 
-        start_build_polling(state.clone(), task).await;
+        let guard = state.try_start_flow(app.id);
+        start_build_polling(state.clone(), task, guard).await;
     }
 }
 
-async fn poll_and_deploy(
+pub async fn poll_and_deploy(
     state: AppState,
     task: BuildTask,
     builder: Arc<dyn BuilderClient>,
     _scheduler: Arc<dyn SchedulerClient>,
+    guard: Option<crate::DeploymentFlowGuard>,
 ) -> anyhow::Result<()> {
     info!(build_id = %task.build_id, "Starting build status monitoring for deployment {}", task.deployment_id);
+
+    // Keep the guard active throughout the build if it was provided
+    let mut guard = guard;
 
     let subject = format!("mikrom.builder.{}.status", task.build_id);
     let mut subscription = state.nats.subscribe(subject).await?;
@@ -303,6 +312,19 @@ async fn poll_and_deploy(
                         .await?;
                 }
 
+                // Acquire guard before starting zero-downtime flow if we don't have it yet
+                let final_guard = if let Some(g) = guard.take() {
+                    g
+                } else {
+                    match state.try_start_flow(app.id) {
+                        Some(g) => g,
+                        None => {
+                            error!(app = %app.name, "Deployment flow already in progress for app, skipping zero-downtime flow for completed build.");
+                            break;
+                        },
+                    }
+                };
+
                 let inner = DeploymentService::deploy_to_scheduler(
                     &state,
                     &app,
@@ -318,20 +340,15 @@ async fn poll_and_deploy(
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
 
-                // Acquire guard before starting zero-downtime flow
-                if let Some(guard) = state.try_start_flow(app.id) {
-                    DeploymentService::run_zero_downtime_flow(
-                        state.clone(),
-                        app,
-                        deployment,
-                        inner,
-                        task.user_id.clone(),
-                        true,
-                        guard,
-                    );
-                } else {
-                    error!(app = %app.name, "Deployment flow already in progress for app, skipping zero-downtime flow for completed build.");
-                }
+                DeploymentService::run_zero_downtime_flow(
+                    state.clone(),
+                    app,
+                    deployment,
+                    inner,
+                    task.user_id.clone(),
+                    true,
+                    final_guard,
+                );
 
                 break;
             },

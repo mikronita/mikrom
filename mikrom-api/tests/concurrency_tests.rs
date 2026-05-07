@@ -76,16 +76,27 @@ async fn test_concurrent_flows_prevented() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let cc = call_count.clone();
 
-    // Respond to health checks and count them
+    let job_id = format!("job-concurrency-{}", Uuid::new_v4());
+    let job_id_clone = job_id.clone();
+
+    // Respond to health checks and count them (only for our job_id)
     tokio::spawn(async move {
+        use mikrom_proto::scheduler::CheckHealthRequest;
+        use prost::Message;
+
         while let Some(msg) = health_sub.next().await {
+            if let Ok(req) = CheckHealthRequest::decode(&msg.payload[..])
+                && req.job_id != job_id_clone
+            {
+                continue;
+            }
+
             cc.fetch_add(1, Ordering::SeqCst);
             let resp = CheckHealthResponse {
                 is_healthy: false,
                 message: "Unhealthy".to_string(),
             };
             let mut buf = Vec::new();
-            use prost::Message;
             resp.encode(&mut buf).unwrap();
             let _ = nats_client.publish(msg.reply.unwrap(), buf.into()).await;
         }
@@ -98,7 +109,7 @@ async fn test_concurrent_flows_prevented() {
         app.clone(),
         deployment.clone(),
         DeployResponse {
-            job_id: "job-1".to_string(),
+            job_id: job_id.clone(),
             ..Default::default()
         },
         user_id.to_string(),

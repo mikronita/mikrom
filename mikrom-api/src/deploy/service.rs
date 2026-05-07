@@ -16,6 +16,7 @@ pub struct DeployParams {
 }
 
 impl DeploymentService {
+    #[allow(clippy::too_many_arguments)]
     pub async fn trigger_build(
         state: &AppState,
         app: &App,
@@ -24,6 +25,7 @@ impl DeploymentService {
         memory_mib: u64,
         disk_mib: u64,
         env: std::collections::HashMap<String, String>,
+        guard: crate::DeploymentFlowGuard,
     ) -> ApiResult<String> {
         state
             .app_repo
@@ -113,7 +115,7 @@ impl DeploymentService {
             env,
         };
 
-        start_build_polling(state.clone(), task).await;
+        start_build_polling(state.clone(), task, Some(guard)).await;
 
         Ok(build_id)
     }
@@ -285,11 +287,12 @@ impl DeploymentService {
                             app = %app.name,
                             "Zero-downtime deployment failed: health check timeout. Cleaning up new VM."
                         );
-                        let _ = state
+                        state
                             .scheduler
                             .pause_app(inner.job_id, "system".to_string())
-                            .await;
-                        let _ = state
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+                        state
                             .app_repo
                             .update_deployment(
                                 deployment.id,
@@ -298,7 +301,7 @@ impl DeploymentService {
                                     ..Default::default()
                                 },
                             )
-                            .await;
+                            .await?;
                     } else {
                         error!(
                             app = %app.name,
@@ -321,37 +324,49 @@ impl DeploymentService {
                     deployment_id = %deployment.id,
                     "Promoting new deployment to active"
                 );
-                let _ = state
+                state
                     .app_repo
                     .set_active_deployment(app.id, deployment.id)
-                    .await;
-
-                // Give the DB a moment to ensure the update is committed
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    .await?;
 
                 // 4. Notify router (atomic switch)
-                if let Ok(Some(app_refreshed)) = state.app_repo.get_app(app.id).await {
-                    let _ = state.notify_router(&app_refreshed).await;
+                // We fetch the app again to ensure we have the newly active deployment state
+                if let Some(app_refreshed) = state.app_repo.get_app(app.id).await? {
+                    if app_refreshed.active_deployment_id != Some(deployment.id) {
+                        return Err(anyhow::anyhow!("Failed to verify active deployment promotion in DB"));
+                    }
+                    state.notify_router(&app_refreshed).await?;
+                } else {
+                    return Err(anyhow::anyhow!("Application not found during promotion"));
                 }
 
                 state.deployment_events.send(app.id).ok();
 
                 // 5. Drain Phase
                 if let Some(old_id) = old_active_id {
-                    let drain_secs = app.drain_timeout as u64;
-                    info!(app = %app.name, "Waiting {}s for drain phase...", drain_secs);
-                    tokio::time::sleep(Duration::from_secs(drain_secs)).await;
+                    // Validate drain_timeout to avoid negative or extreme values
+                    let drain_secs = if app.drain_timeout < 0 {
+                        0u64
+                    } else {
+                        app.drain_timeout as u64
+                    };
+
+                    if drain_secs > 0 {
+                        info!(app = %app.name, "Waiting {}s for drain phase...", drain_secs);
+                        tokio::time::sleep(Duration::from_secs(drain_secs)).await;
+                    }
 
                     // 6. Stop old VM
-                    if let Ok(Some(old_dep)) = state.app_repo.get_deployment(old_id).await
+                    if let Some(old_dep) = state.app_repo.get_deployment(old_id).await?
                         && let Some(old_job_id) = old_dep.job_id
                     {
                         info!(app = %app.name, job_id = %old_job_id, "Stopping old version");
-                        let _ = state
+                        state
                             .scheduler
                             .pause_app(old_job_id, "system".to_string())
-                            .await;
-                        let _ = state
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+                        state
                             .app_repo
                             .update_deployment(
                                 old_id,
@@ -360,7 +375,7 @@ impl DeploymentService {
                                     ..Default::default()
                                 },
                             )
-                            .await;
+                            .await?;
                     }
                 }
                 Ok(())
