@@ -86,6 +86,7 @@ export interface LogLine {
 
 export interface VmMetrics {
   app_id: string;
+  job_id: string;
   cpu_usage: number;
   ram_used_bytes: number;
   status: string;
