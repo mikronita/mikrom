@@ -88,6 +88,7 @@ pub trait AgentClient: Send + Sync {
     async fn resume_vm(&self, host_id: &str, vm_id: &str) -> DomainResult<()>;
     async fn stop_vm(&self, host_id: &str, vm_id: &str) -> DomainResult<()>;
     async fn delete_vm(&self, host_id: &str, vm_id: &str) -> DomainResult<()>;
+    async fn check_health(&self, host_id: &str, vm_id: &str) -> DomainResult<bool>;
 }
 
 #[async_trait]

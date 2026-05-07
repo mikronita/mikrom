@@ -181,7 +181,7 @@ async fn test_promotion_back_and_forth() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 }
 
@@ -349,7 +349,7 @@ async fn test_promotion_pauses_previous_active() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
 
     // Give background task a moment to run
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -491,7 +491,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
 
     // Give background task a moment to run
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

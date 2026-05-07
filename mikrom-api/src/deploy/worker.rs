@@ -303,7 +303,7 @@ async fn poll_and_deploy(
                         .await?;
                 }
 
-                DeploymentService::deploy_to_scheduler(
+                let inner = DeploymentService::deploy_to_scheduler(
                     &state,
                     &app,
                     &deployment,
@@ -318,22 +318,13 @@ async fn poll_and_deploy(
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
 
-                // Promote this deployment to be the active one for the app
-                info!(app = %task.app_name, deployment_id = %task.deployment_id, "Promoting new deployment to active");
-                let _ = state
-                    .app_repo
-                    .set_active_deployment(task.app_id, task.deployment_id)
-                    .await;
-
-                // Give the DB a moment to ensure the update is committed
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-                // Notify router
-                if let Ok(Some(app)) = state.app_repo.get_app(task.app_id).await {
-                    let _ = state.notify_router(&app).await;
-                }
-
-                state.deployment_events.send(task.app_id).ok();
+                DeploymentService::run_zero_downtime_flow(
+                    state.clone(),
+                    app,
+                    deployment,
+                    inner,
+                    task.user_id.clone(),
+                );
 
                 break;
             },

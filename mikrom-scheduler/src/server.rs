@@ -240,6 +240,30 @@ impl SchedulerServer {
             workers: worker_infos,
         })
     }
+
+    pub async fn check_health(
+        &self,
+        req: mikrom_proto::scheduler::CheckHealthRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::CheckHealthResponse> {
+        match self
+            .app_service
+            .check_health(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(is_healthy) => Ok(mikrom_proto::scheduler::CheckHealthResponse {
+                is_healthy,
+                message: if is_healthy {
+                    "Healthy".to_string()
+                } else {
+                    "Unhealthy".to_string()
+                },
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::CheckHealthResponse {
+                is_healthy: false,
+                message: e.to_string(),
+            }),
+        }
+    }
 }
 
 impl Clone for SchedulerServer {

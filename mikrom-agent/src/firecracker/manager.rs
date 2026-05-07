@@ -41,6 +41,11 @@ pub struct FirecrackerManager {
 }
 
 impl FirecrackerManager {
+    pub async fn get_vm_info(&self, vm_id: &str) -> Option<VmInfo> {
+        let vms = self.vms.read().await;
+        vms.get(vm_id).cloned()
+    }
+
     /// Returns a list of all VMs with detailed status and PID information.
     pub async fn get_all_vms(&self) -> Vec<VmDetailedInfo> {
         let vms = self.vms.read().await;

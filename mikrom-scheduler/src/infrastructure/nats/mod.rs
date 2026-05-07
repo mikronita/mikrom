@@ -128,4 +128,30 @@ impl AgentClient for NatsAgentClient {
         )
         .await
     }
+
+    async fn check_health(&self, host_id: &str, vm_id: &str) -> DomainResult<bool> {
+        let subject = format!("mikrom.agent.{host_id}.check_health");
+        let req = mikrom_proto::agent::CheckHealthRequest {
+            vm_id: vm_id.to_string(),
+        };
+
+        let mut payload = Vec::new();
+        req.encode(&mut payload)
+            .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(5),
+            self.client.request(subject, payload.into()),
+        )
+        .await
+        .map_err(|_| DomainError::Infrastructure("Health check timed out".to_string()))?
+        .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+
+        let inner = mikrom_proto::agent::CheckHealthResponse::decode(&response.payload[..])
+            .map_err(|e| {
+                DomainError::Infrastructure(format!("Failed to decode health check response: {e}"))
+            })?;
+
+        Ok(inner.is_healthy)
+    }
 }
