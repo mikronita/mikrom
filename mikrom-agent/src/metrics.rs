@@ -9,7 +9,7 @@ use sysinfo::System;
 pub struct VmMetrics {
     pub app_id: String,
     #[serde(default)]
-    pub job_id: String,
+    pub vm_id: String,
     pub cpu_usage: f32,
     pub ram_used_bytes: u64,
     pub status: crate::firecracker::VmStatus,
@@ -174,7 +174,7 @@ impl MetricsCollector {
                 vm.vm_id.clone(),
                 VmMetrics {
                     app_id: vm.app_id.clone(),
-                    job_id: vm.vm_id.clone(),
+                    vm_id: vm.vm_id.clone(),
                     cpu_usage: cpu,
                     ram_used_bytes: ram,
                     status: vm.status,
@@ -368,7 +368,7 @@ mod tests {
     fn test_vm_metrics_serialization() {
         let vm = VmMetrics {
             app_id: "app-123".to_string(),
-            job_id: "job-456".to_string(),
+            vm_id: "vm-456".to_string(),
             cpu_usage: 0.5,
             ram_used_bytes: 1024,
             status: crate::firecracker::VmStatus::Running,
@@ -379,7 +379,7 @@ mod tests {
         let json = serde_json::to_string(&vm).unwrap();
         let val: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(val["app_id"], "app-123");
-        assert_eq!(val["job_id"], "job-456");
+        assert_eq!(val["vm_id"], "vm-456");
         assert_eq!(val["cpu_usage"], 0.5);
     }
 
@@ -475,7 +475,7 @@ mod tests {
         let metrics = collector.collect().await;
         assert!(metrics.vms.contains_key(vm_id));
         let vm_metrics = metrics.vms.get(vm_id).unwrap();
-        assert_eq!(vm_metrics.job_id, vm_id);
+        assert_eq!(vm_metrics.vm_id, vm_id);
         assert_eq!(vm_metrics.app_id, "app-1");
 
         // Cleanup
