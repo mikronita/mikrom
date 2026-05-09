@@ -249,10 +249,10 @@ mod tests {
         async fn remove_jobs_by_app(&self, _app: &str) -> DomainResult<()> {
             Ok(())
         }
-        async fn list_jobs(
+        async fn list_jobs<'a>(
             &self,
-            _u: Option<&str>,
-            _a: Option<&str>,
+            _u: Option<&'a str>,
+            _a: Option<&'a str>,
             _s: Option<JobStatus>,
         ) -> DomainResult<Vec<Job>> {
             Ok(vec![])

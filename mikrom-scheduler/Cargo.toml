@@ -16,6 +16,7 @@ thiserror = "2"
 anyhow.workspace = true
 async-nats.workspace = true
 async-trait = "0.1"
+mockall = "0.13"
 envy.workspace = true
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "migrate"] }
 futures = "0.3"

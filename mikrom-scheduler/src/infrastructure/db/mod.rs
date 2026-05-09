@@ -152,10 +152,10 @@ impl JobRepository for PgJobRepository {
         Ok(())
     }
 
-    async fn list_jobs(
+    async fn list_jobs<'a>(
         &self,
-        user_id: Option<&str>,
-        app_id: Option<&str>,
+        user_id: Option<&'a str>,
+        app_id: Option<&'a str>,
         status: Option<JobStatus>,
     ) -> DomainResult<Vec<Job>> {
         let mut query = "SELECT * FROM jobs WHERE 1=1".to_string();
