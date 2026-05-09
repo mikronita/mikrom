@@ -1,4 +1,4 @@
-use crate::types::VmId;
+use mikrom_proto::id::VmId;
 use std::path::PathBuf;
 
 /// Centralized path management for Firecracker VM resources.

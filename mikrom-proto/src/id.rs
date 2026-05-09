@@ -76,6 +76,12 @@ macro_rules! define_id {
             }
         }
 
+        impl Default for $name {
+            fn default() -> Self {
+                Self(Uuid::nil())
+            }
+        }
+
         #[cfg(feature = "sqlx-postgres")]
         impl sqlx::Type<sqlx::Postgres> for $name {
             fn type_info() -> sqlx::postgres::PgTypeInfo {
