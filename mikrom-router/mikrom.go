@@ -134,17 +134,15 @@ func (m *MikromRouter) ServeHTTP(w http.ResponseWriter, r *http.Request, next ca
 	// Route regular traffic
 	host := r.Host
 	target, ok := m.app.routes.Load(host)
-	if !ok && strings.Contains(host, ":") {
-		// Try without port
-		hostNoPort := strings.Split(host, ":")[0]
-		target, ok = m.app.routes.Load(hostNoPort)
+	if !ok {
+		// Try without port using slicing to avoid allocation
+		if colon := strings.IndexByte(host, ':'); colon != -1 {
+			target, ok = m.app.routes.Load(host[:colon])
+		}
 	}
 
 	if ok {
-		targetURL := target.(string)
-		// Strip http:// or https:// if present
-		targetHost := strings.TrimPrefix(targetURL, "http://")
-		targetHost = strings.TrimPrefix(targetHost, "https://")
+		targetHost := target.(string)
 
 		// Set a variable that can be used by the reverse_proxy directive
 		caddyhttp.SetVar(r.Context(), "mikrom_target", targetHost)

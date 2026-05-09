@@ -2,6 +2,7 @@ package mikrom
 
 import (
 	"fmt"
+	"strings"
 
 	routerv1 "github.com/antpard/mikrom/mikrom-router/proto/router/v1"
 	schedulerv1 "github.com/antpard/mikrom/mikrom-router/proto/scheduler/v1"
@@ -59,8 +60,13 @@ func (m *MikromApp) listenForUpdates() {
 		}
 
 		if update.TargetUrl != nil {
-			m.routes.Store(update.Hostname, *update.TargetUrl)
-			if err := m.saveRoute(update.Hostname, *update.TargetUrl); err != nil {
+			target := *update.TargetUrl
+			// Strip http:// or https:// before storing to optimize hot-path
+			target = strings.TrimPrefix(target, "http://")
+			target = strings.TrimPrefix(target, "https://")
+
+			m.routes.Store(update.Hostname, target)
+			if err := m.saveRoute(update.Hostname, target); err != nil {
 				m.logger.Error("failed to save route to DB", zap.Error(err))
 			}
 		} else {
