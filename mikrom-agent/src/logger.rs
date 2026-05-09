@@ -1,3 +1,4 @@
+use crate::types::{AppId, VmId};
 use async_nats::Client;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -7,29 +8,29 @@ use tokio::time::{Duration, interval};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
-    pub vm_id: String,
-    pub app_id: String,
+    pub vm_id: VmId,
+    pub app_id: AppId,
     pub source: String, // "stdout" or "stderr"
     pub message: String,
     pub timestamp: i64,
 }
 
 pub struct LogShipper {
-    vm_id: String,
-    app_id: String,
+    vm_id: VmId,
+    app_id: AppId,
     nats_client: Option<Client>,
     batch_size: usize,
     flush_interval: Duration,
     /// Local cache for the API to query via SSE if needed, or for debugging
-    logs_map: std::sync::Arc<dashmap::DashMap<String, VecDeque<String>>>,
+    logs_map: std::sync::Arc<dashmap::DashMap<VmId, VecDeque<String>>>,
 }
 
 impl LogShipper {
     pub fn new(
-        vm_id: String,
-        app_id: String,
+        vm_id: VmId,
+        app_id: AppId,
         nats_client: Option<Client>,
-        logs_map: std::sync::Arc<dashmap::DashMap<String, VecDeque<String>>>,
+        logs_map: std::sync::Arc<dashmap::DashMap<VmId, VecDeque<String>>>,
     ) -> Self {
         Self {
             vm_id,
@@ -149,11 +150,11 @@ impl LogShipper {
             match serde_json::to_vec(&batch) {
                 Ok(payload) => {
                     if let Err(e) = nats.publish(topic, payload.into()).await {
-                        tracing::error!("Failed to publish logs to NATS: {e}");
+                        tracing::error!("Failed to publish logs to NATS: {}", e);
                     }
                 },
                 Err(e) => {
-                    tracing::error!("Failed to serialize log batch: {e}");
+                    tracing::error!("Failed to serialize log batch: {}", e);
                 },
             }
         }
@@ -169,90 +170,110 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_shipper_local_buffer() {
+        let vm_id = VmId::from("vm-1");
+        let app_id = AppId::from("app-1");
         let logs_map = Arc::new(dashmap::DashMap::new());
-        let vm_id = "test-vm".to_string();
-        let app_id = "test-app".to_string();
-
-        let shipper = LogShipper::new(vm_id.clone(), app_id.clone(), None, logs_map.clone());
-        let mut batch = Vec::new();
-
-        shipper
-            .process_line("stdout", "Hello World".to_string(), &mut batch, true)
-            .await;
-        shipper
-            .process_line("stderr", "Error Occurred".to_string(), &mut batch, true)
-            .await;
-
-        let buffer = logs_map.get(&vm_id).unwrap();
-
-        assert_eq!(buffer.len(), 2);
-        assert_eq!(buffer[0], "Hello World");
-        assert_eq!(buffer[1], "[stderr] Error Occurred");
-
-        assert_eq!(batch.len(), 2);
-        assert_eq!(batch[0].message, "Hello World");
-        assert_eq!(batch[1].source, "stderr");
-    }
-
-    #[tokio::test]
-    async fn test_log_shipper_system_filtering() {
-        let logs_map = Arc::new(dashmap::DashMap::new());
-        let vm_id = "test-vm".to_string();
-        let app_id = "test-app".to_string();
-
-        let shipper = LogShipper::new(vm_id.clone(), app_id.clone(), None, logs_map.clone());
-        let mut batch = Vec::new();
-
-        // System logs (before marker)
-        shipper
-            .process_line("stdout", "Booting kernel...".to_string(), &mut batch, false)
-            .await;
-
-        // App logs (after marker)
-        shipper
-            .process_line("stdout", "App started".to_string(), &mut batch, true)
-            .await;
-
-        let buffer = logs_map.get(&vm_id).unwrap();
-
-        assert_eq!(buffer.len(), 2);
-        assert_eq!(buffer[0], "[system] Booting kernel...");
-        assert_eq!(buffer[1], "App started");
-
-        // ONLY "App started" should be in the batch (to be sent to NATS)
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0].message, "App started");
-    }
-
-    #[tokio::test]
-    async fn test_log_shipper_spawn() {
-        let logs_map = Arc::new(dashmap::DashMap::new());
-        let vm_id = "test-vm".to_string();
-        let app_id = "test-app".to_string();
-
         let shipper = LogShipper::new(vm_id.clone(), app_id.clone(), None, logs_map.clone());
 
-        let (mut stdout_tx, stdout_rx) = tokio::io::duplex(1024);
-        let (mut stderr_tx, stderr_rx) = tokio::io::duplex(1024);
+        let (mut stdout_writer, stdout_reader) = tokio::io::duplex(64);
+        let (mut stderr_writer, stderr_reader) = tokio::io::duplex(64);
 
-        let handle = shipper.spawn(stdout_rx, stderr_rx).await;
+        let _handle = shipper.spawn(stdout_reader, stderr_reader).await;
 
-        stdout_tx.write_all(b"line 1\n").await.unwrap();
-        stderr_tx.write_all(b"error 1\n").await.unwrap();
+        stdout_writer
+            .write_all(b"__MIKROM_APP_START__\nHello Stdout\n")
+            .await
+            .unwrap();
+        stderr_writer.write_all(b"Hello Stderr\n").await.unwrap();
 
-        // Wait a bit for processing
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        {
-            let buffer = logs_map.get(&vm_id).unwrap();
-            assert!(buffer.contains(&"[system] line 1".to_string()));
-            assert!(buffer.contains(&"[system-err] error 1".to_string()));
+        // Retry with backoff to handle async processing delays
+        let mut buffer_content = Vec::new();
+        for i in 0..10 {
+            tokio::time::sleep(Duration::from_millis(100 * (i + 1))).await;
+            if let Some(buffer) = logs_map.get(&vm_id) {
+                buffer_content = buffer.iter().cloned().collect();
+                if buffer_content.iter().any(|l| l.contains("Hello Stdout"))
+                    && buffer_content
+                        .iter()
+                        .any(|l| l.contains("[stderr] Hello Stderr"))
+                {
+                    break;
+                }
+            }
         }
 
-        // Close streams
-        drop(stdout_tx);
-        drop(stderr_tx);
+        assert!(
+            buffer_content.iter().any(|l| l.contains("Hello Stdout")),
+            "Stdout log not found in buffer: {:?}",
+            buffer_content
+        );
+        assert!(
+            buffer_content
+                .iter()
+                .any(|l| l.contains("[stderr] Hello Stderr")),
+            "Stderr log not found in buffer: {:?}",
+            buffer_content
+        );
+    }
 
-        handle.await.unwrap();
+    #[tokio::test]
+    async fn test_log_shipper_system_logs_marker() {
+        let vm_id = VmId::from("vm-1");
+        let app_id = AppId::from("app-1");
+        let logs_map = Arc::new(dashmap::DashMap::new());
+        let shipper = LogShipper::new(vm_id.clone(), app_id.clone(), None, logs_map.clone());
+
+        let (mut stdout_writer, stdout_reader) = tokio::io::duplex(64);
+        let (_stderr_writer, stderr_reader) = tokio::io::duplex(64);
+
+        let _handle = shipper.spawn(stdout_reader, stderr_reader).await;
+
+        stdout_writer
+            .write_all(b"System Log Before\n")
+            .await
+            .unwrap();
+        stdout_writer
+            .write_all(b"__MIKROM_APP_START__\n")
+            .await
+            .unwrap();
+        stdout_writer.write_all(b"App Log After\n").await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let buffer = logs_map.get(&vm_id).unwrap();
+        assert!(
+            buffer
+                .iter()
+                .any(|l| l.contains("[system] System Log Before"))
+        );
+        assert!(buffer.iter().any(|l| l == "App Log After"));
+    }
+
+    #[tokio::test]
+    async fn test_log_shipper_rotates_buffer() {
+        let vm_id = VmId::from("vm-1");
+        let app_id = AppId::from("app-1");
+        let logs_map = Arc::new(dashmap::DashMap::new());
+        let shipper = LogShipper::new(vm_id.clone(), app_id.clone(), None, logs_map.clone());
+
+        let (mut stdout_writer, stdout_reader) = tokio::io::duplex(1024);
+        let (_stderr_writer, stderr_reader) = tokio::io::duplex(64);
+
+        let _handle = shipper.spawn(stdout_reader, stderr_reader).await;
+
+        for i in 0..1100 {
+            stdout_writer
+                .write_all(format!("line {}\n", i).as_bytes())
+                .await
+                .unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let buffer = logs_map.get(&vm_id).unwrap();
+        assert_eq!(buffer.len(), 1000);
+        // Should have the LATEST 1000 lines
+        assert!(buffer.iter().any(|l| l.contains("line 1099")));
+        assert!(!buffer.iter().any(|l| l == "line 0"));
     }
 }

@@ -1,11 +1,12 @@
 use crate::firecracker::process::VmProcess;
+use crate::types::VmId;
 use std::path::PathBuf;
 use tokio::process::Child;
 use tokio::task::JoinHandle;
 
 /// RAII guard to ensure resources are cleaned up if VM startup fails.
 pub struct VmStartupGuard {
-    pub vm_id: String,
+    pub vm_id: VmId,
     pub child: Option<Child>,
     pub tap_name: Option<String>,
     pub tap_ifindex: Option<u32>,
@@ -17,7 +18,7 @@ pub struct VmStartupGuard {
 }
 
 impl VmStartupGuard {
-    pub fn new(vm_id: String, socket_path: PathBuf) -> Self {
+    pub fn new(vm_id: VmId, socket_path: PathBuf) -> Self {
         Self {
             vm_id,
             child: None,

@@ -1,5 +1,6 @@
 use crate::firecracker::FirecrackerManager;
 use crate::metrics::MetricsCollector;
+use crate::types::{AppId, VmId};
 use parking_lot::RwLock;
 use prost::Message;
 use std::collections::HashMap;
@@ -16,9 +17,8 @@ pub struct AgentServer {
 }
 
 impl AgentServer {
-    #[must_use]
-    pub fn new(config: crate::config::AgentConfig, ip_address: String) -> Self {
-        let firecracker = FirecrackerManager::new();
+    pub async fn new(config: crate::config::AgentConfig, ip_address: String) -> Self {
+        let firecracker = FirecrackerManager::new().await;
         Self::with_manager(config, ip_address, firecracker)
     }
 
@@ -229,7 +229,8 @@ impl AgentServer {
             return;
         };
 
-        let vm_info = fc.get_vm_info(&req.vm_id).await;
+        let vm_id = VmId::from(req.vm_id);
+        let vm_info = fc.get_vm_info(&vm_id).await;
         let result = if let Some(vm) = vm_info {
             let port = vm.config.port;
             let path = if vm.config.health_check_path.is_empty() {
@@ -250,7 +251,7 @@ impl AgentServer {
 
             if let Some(ip_addr) = ip {
                 let url = format!("http://{ip_addr}:{port}{path}");
-                tracing::debug!(vm_id = %req.vm_id, url = %url, "Performing health check...");
+                tracing::debug!(vm_id = %vm_id, url = %url, "Performing health check...");
 
                 match http_client.get(&url).send().await {
                     Ok(resp) if resp.status().is_success() => Ok("Healthy".to_string()),
@@ -313,49 +314,56 @@ impl AgentServer {
                     config.netmask = Some(c.netmask).filter(|s| !s.is_empty());
                 }
 
-                fc.start_vm(req.vm_id, req.app_id, req.image, config)
-                    .await
-                    .map(|_| "VM started".to_string())
+                fc.start_vm(
+                    VmId::from(req.vm_id),
+                    AppId::from(req.app_id),
+                    req.image,
+                    config,
+                )
+                .await
+                .map(|_| "VM started".to_string())
             },
             Some(mikrom_proto::agent::agent_command::Command::StopVm(req)) => fc
-                .stop_vm(&req.vm_id)
+                .stop_vm(&VmId::from(req.vm_id))
                 .await
                 .map(|_| "VM stopped".to_string()),
             Some(mikrom_proto::agent::agent_command::Command::PauseVm(req)) => fc
-                .pause_vm(&req.vm_id)
+                .pause_vm(&VmId::from(req.vm_id))
                 .await
                 .map(|_| "VM paused".to_string()),
             Some(mikrom_proto::agent::agent_command::Command::ResumeVm(req)) => fc
-                .resume_vm(&req.vm_id)
+                .resume_vm(&VmId::from(req.vm_id))
                 .await
                 .map(|_| "VM resumed".to_string()),
             Some(mikrom_proto::agent::agent_command::Command::DeleteVm(req)) => fc
-                .delete_vm(&req.vm_id)
+                .delete_vm(&VmId::from(req.vm_id))
                 .await
                 .map(|_| "VM resources purged".to_string()),
             Some(mikrom_proto::agent::agent_command::Command::UpdateFirewall(req)) => {
+                use mikrom_agent_ebpf_common::{Action, Protocol};
+
                 let rules: Vec<mikrom_agent_ebpf_common::FirewallRule> = req
                     .rules
                     .into_iter()
                     .map(|r| mikrom_agent_ebpf_common::FirewallRule {
                         protocol: match r.protocol.to_lowercase().as_str() {
-                            "tcp" => 6,
-                            "udp" => 17,
-                            _ => 0,
+                            "tcp" => Protocol::Tcp,
+                            "udp" => Protocol::Udp,
+                            _ => Protocol::Any,
                         },
                         port_start: r.port_start as u16,
                         port_end: r.port_end as u16,
                         action: if r.action.to_lowercase() == "allow" {
-                            1
+                            Action::Allow
                         } else {
-                            0
+                            Action::Deny
                         },
                         remote_ip: [0u8; 16],
                         remote_prefix: 0,
                     })
                     .collect();
 
-                fc.update_vm_firewall(&req.vm_id, rules)
+                fc.update_vm_firewall(&VmId::from(req.vm_id), rules)
                     .await
                     .map(|_| "Firewall rules updated".to_string())
                     .map_err(|e| {
@@ -409,7 +417,7 @@ impl AgentServer {
                     .iter()
                     .map(|(id, vm)| {
                         (
-                            id.clone(),
+                            id.to_string(),
                             VmMetrics {
                                 cpu_usage: vm.cpu_usage,
                                 ram_used_bytes: vm.ram_used_bytes,
@@ -498,7 +506,7 @@ mod tests {
             std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
         let client = async_nats::connect(&nats_url).await.unwrap();
 
-        let fc = FirecrackerManager::new();
+        let fc = FirecrackerManager::new().await;
         let reply = "test.reply.health".to_string();
         let mut sub = client.subscribe(reply.clone()).await.unwrap();
 
@@ -554,12 +562,12 @@ mod tests {
         let nats_url =
             std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
         let nats_client = async_nats::connect(&nats_url).await.unwrap();
-        let fc = FirecrackerManager::new();
+        let fc = FirecrackerManager::new().await;
         let reply = "test.reply.http".to_string();
         let mut sub = nats_client.subscribe(reply.clone()).await.unwrap();
 
         // 3. Register a fake VM in the manager so get_vm_info returns it
-        let vm_id = "test-vm-http".to_string();
+        let vm_id = VmId::from("test-vm-http");
         {
             use crate::firecracker::config::{VmConfig, VmInfo, VmStatus};
             let mut vms = fc.vms.write().await;
@@ -567,7 +575,7 @@ mod tests {
                 vm_id.clone(),
                 VmInfo {
                     vm_id: vm_id.clone(),
-                    app_id: "app-1".into(),
+                    app_id: AppId::from("app-1"),
                     image: "img".into(),
                     status: VmStatus::Running,
                     started_at: None,
@@ -584,7 +592,7 @@ mod tests {
 
         // 4. Send health check request
         let req = CheckHealthRequest {
-            vm_id: vm_id.clone(),
+            vm_id: vm_id.to_string(),
         };
         let mut payload = Vec::new();
         req.encode(&mut payload).unwrap();

@@ -1,3 +1,4 @@
+use crate::types::{AppId, VmId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -31,8 +32,8 @@ pub enum VmStatus {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VmInfo {
-    pub vm_id: String,
-    pub app_id: String,
+    pub vm_id: VmId,
+    pub app_id: AppId,
     pub image: String,
     pub config: VmConfig,
     pub status: VmStatus,

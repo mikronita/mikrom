@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
         config.use_tls
     );
 
-    let server = AgentServer::new(config, ip_address);
+    let server = AgentServer::new(config, ip_address).await;
     server.serve().await?;
 
     Ok(())

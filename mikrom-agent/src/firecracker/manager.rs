@@ -6,6 +6,7 @@ use crate::firecracker::process::{
     CommandExecutor, RealCommandExecutor, VmDetailedInfo, VmProcess,
 };
 use crate::logger::LogShipper;
+use crate::types::{AppId, VmId};
 
 use std::collections::{HashMap, VecDeque};
 use std::os::unix::process::ExitStatusExt;
@@ -23,13 +24,13 @@ pub struct FirecrackerManager {
     /// Unique identifier for this agent.
     pub agent_id: String,
     /// Thread-safe map of active microVM information.
-    pub vms: Arc<RwLock<HashMap<String, VmInfo>>>,
+    pub vms: Arc<RwLock<HashMap<VmId, VmInfo>>>,
     /// Thread-safe map of active Firecracker processes.
-    pub processes: Arc<Mutex<HashMap<String, VmProcess>>>,
+    pub processes: Arc<Mutex<HashMap<VmId, VmProcess>>>,
     /// Configuration for Firecracker and Jailer.
     pub fc_config: FirecrackerConfig,
     /// In-memory ring buffer of logs for each VM.
-    pub logs: Arc<dashmap::DashMap<String, VecDeque<String>>>,
+    pub logs: Arc<dashmap::DashMap<VmId, VecDeque<String>>>,
     /// Image builder for converting OCI images to Firecracker-compatible rootfs.
     pub builder: Arc<crate::builder::ImageBuilder>,
     /// Interface for executing system commands.
@@ -42,7 +43,7 @@ pub struct FirecrackerManager {
 }
 
 impl FirecrackerManager {
-    pub async fn get_vm_info(&self, vm_id: &str) -> Option<VmInfo> {
+    pub async fn get_vm_info(&self, vm_id: &VmId) -> Option<VmInfo> {
         let vms = self.vms.read().await;
         vms.get(vm_id).cloned()
     }
@@ -76,13 +77,13 @@ impl FirecrackerManager {
 
     pub async fn update_vm_firewall(
         &self,
-        vm_id: &str,
+        vm_id: &VmId,
         rules: Vec<mikrom_agent_ebpf_common::FirewallRule>,
     ) -> anyhow::Result<()> {
         let all_vms = self.get_all_vms().await;
         let vm = all_vms
             .iter()
-            .find(|v| v.vm_id == vm_id)
+            .find(|v| v.vm_id == *vm_id)
             .ok_or_else(|| anyhow::anyhow!("VM not found"))?;
 
         if let Some(ifindex) = vm.tap_ifindex {
@@ -96,13 +97,23 @@ impl FirecrackerManager {
 
     /// Create a manager whose configuration is read from environment variables.
     #[must_use]
-    pub fn new() -> Self {
-        Self::with_config(FirecrackerConfig::from_env())
+    pub async fn new() -> Self {
+        let ebpf_manager = crate::ebpf::EbpfManager::load().await.ok();
+        Self::with_config_and_ebpf(FirecrackerConfig::from_env(), ebpf_manager)
     }
 
-    /// Create a manager with an explicit configuration (useful for tests).
-    #[must_use]
+    pub fn with_ebpf(ebpf: Option<crate::ebpf::EbpfManager>) -> Self {
+        Self::with_config_and_ebpf(FirecrackerConfig::from_env(), ebpf)
+    }
+
     pub fn with_config(fc_config: FirecrackerConfig) -> Self {
+        Self::with_config_and_ebpf(fc_config, None)
+    }
+
+    pub fn with_config_and_ebpf(
+        fc_config: FirecrackerConfig,
+        ebpf: Option<crate::ebpf::EbpfManager>,
+    ) -> Self {
         let builder =
             crate::builder::ImageBuilder::new().expect("Failed to initialize Docker builder");
 
@@ -155,9 +166,7 @@ impl FirecrackerManager {
             executor: Arc::new(RealCommandExecutor),
             allocated_ips: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
             nats_client: Arc::new(RwLock::new(Option::None)),
-            ebpf_manager: Arc::new(tokio::sync::Mutex::new(
-                crate::ebpf::EbpfManager::load().ok(),
-            )),
+            ebpf_manager: Arc::new(tokio::sync::Mutex::new(ebpf)),
         }
     }
 
@@ -273,8 +282,8 @@ impl FirecrackerManager {
 
     pub async fn start_vm(
         &self,
-        vm_id: String,
-        app_id: String,
+        vm_id: VmId,
+        app_id: AppId,
         image: String,
         config: VmConfig,
     ) -> Result<(), FirecrackerError> {
@@ -361,14 +370,14 @@ impl FirecrackerManager {
     #[tracing::instrument(skip(self, config), fields(vm_id = %vm_id, app_id = %app_id))]
     async fn start_vm_background(
         &self,
-        vm_id: String,
-        app_id: String,
+        vm_id: VmId,
+        app_id: AppId,
         image: String,
         mut config: VmConfig,
     ) -> Result<(), FirecrackerError> {
         tracing::info!(vm_id = %vm_id, "Background VM startup initiated");
 
-        let paths = VmPaths::new(&self.fc_config.data_dir, &self.agent_id, &vm_id);
+        let paths = VmPaths::new(&self.fc_config.data_dir, &self.agent_id, vm_id.clone());
 
         // 1. Exclusivity check (Disabled for Zero-Downtime deployments)
         // self.ensure_app_exclusivity(&app_id, &vm_id).await;
@@ -528,12 +537,14 @@ impl FirecrackerManager {
     }
 
     #[allow(dead_code)]
-    async fn ensure_app_exclusivity(&self, app_id: &str, current_vm_id: &str) {
-        let other_vms: Vec<String> = {
+    async fn ensure_app_exclusivity(&self, app_id: &AppId, current_vm_id: &VmId) {
+        let other_vms: Vec<VmId> = {
             let vms = self.vms.read().await;
             vms.values()
                 .filter(|v| {
-                    v.app_id == app_id && v.vm_id != current_vm_id && v.status != VmStatus::Stopped
+                    &v.app_id == app_id
+                        && &v.vm_id != current_vm_id
+                        && v.status != VmStatus::Stopped
                 })
                 .map(|v| v.vm_id.clone())
                 .collect()
@@ -552,16 +563,16 @@ impl FirecrackerManager {
 
     async fn spawn_log_task(
         &self,
-        vm_id: &str,
-        app_id: &str,
+        vm_id: &VmId,
+        app_id: &AppId,
         child: &mut tokio::process::Child,
     ) -> tokio::task::JoinHandle<()> {
         let stdout = child.stdout.take().expect("Failed to take stdout");
         let stderr = child.stderr.take().expect("Failed to take stderr");
 
         let shipper = LogShipper::new(
-            vm_id.to_string(),
-            app_id.to_string(),
+            vm_id.clone(),
+            app_id.clone(),
             self.nats_client.read().await.clone(),
             self.logs.clone(),
         );
@@ -571,7 +582,7 @@ impl FirecrackerManager {
 
     async fn setup_metrics(
         &self,
-        vm_id: &str,
+        vm_id: &VmId,
         chroot_dir: &Option<String>,
         active_socket_path: &str,
         paths: &VmPaths,
@@ -602,7 +613,7 @@ impl FirecrackerManager {
 
     async fn try_restore_snapshot(
         &self,
-        vm_id: &str,
+        vm_id: &VmId,
         chroot_dir: &Option<String>,
         active_socket_path: &str,
         paths: &VmPaths,
@@ -790,7 +801,7 @@ impl FirecrackerManager {
 
     async fn prepare_rootfs(
         &self,
-        vm_id: &str,
+        vm_id: &VmId,
         image: &str,
         rootfs_path: &str,
         port: u32,
@@ -831,7 +842,7 @@ impl FirecrackerManager {
         Ok(())
     }
 
-    pub async fn restart_vm(&self, vm_id: &str) -> Result<(), FirecrackerError> {
+    pub async fn restart_vm(&self, vm_id: &VmId) -> Result<(), FirecrackerError> {
         let (app_id, image, config) = {
             let vms = self.vms.read().await;
             let vm = vms
@@ -842,13 +853,12 @@ impl FirecrackerManager {
 
         tracing::info!(vm_id = %vm_id, "Restarting VM...");
         let _ = self.stop_vm(vm_id).await; // Best effort stop
-        self.start_vm(vm_id.to_string(), app_id, image, config)
-            .await?;
+        self.start_vm(vm_id.clone(), app_id, image, config).await?;
         Ok(())
     }
 
     #[tracing::instrument(skip(self), fields(vm_id = %vm_id))]
-    pub async fn stop_vm(&self, vm_id: &str) -> Result<(), FirecrackerError> {
+    pub async fn stop_vm(&self, vm_id: &VmId) -> Result<(), FirecrackerError> {
         {
             let mut vms = self.vms.write().await;
             match vms.get_mut(vm_id) {
@@ -923,7 +933,7 @@ impl FirecrackerManager {
     /// Completely purge all resources associated with a VM ID.
     /// This includes stopping it if it's running, and deleting all disk artifacts.
     #[tracing::instrument(skip(self), fields(vm_id = %vm_id))]
-    pub async fn delete_vm(&self, vm_id: &str) -> Result<(), FirecrackerError> {
+    pub async fn delete_vm(&self, vm_id: &VmId) -> Result<(), FirecrackerError> {
         tracing::info!("Purging all resources for VM");
 
         // 1. Stop the VM if it's running
@@ -961,7 +971,7 @@ impl FirecrackerManager {
     }
 
     #[tracing::instrument(skip(self), fields(vm_id = %vm_id))]
-    pub async fn pause_vm(&self, vm_id: &str) -> Result<(), FirecrackerError> {
+    pub async fn pause_vm(&self, vm_id: &VmId) -> Result<(), FirecrackerError> {
         let mut processes = self.processes.lock().await;
         let proc = processes
             .get_mut(vm_id)
@@ -1027,7 +1037,7 @@ impl FirecrackerManager {
     }
 
     #[tracing::instrument(skip(self), fields(vm_id = %vm_id))]
-    pub async fn resume_vm(&self, vm_id: &str) -> Result<(), FirecrackerError> {
+    pub async fn resume_vm(&self, vm_id: &VmId) -> Result<(), FirecrackerError> {
         let processes = self.processes.lock().await;
         if let Some(proc) = processes.get(vm_id) {
             let resume_body = serde_json::json!({ "state": "Resumed" }).to_string();
@@ -1051,7 +1061,7 @@ impl FirecrackerManager {
         let config = vm_info.config.clone();
 
         self.start_vm(
-            vm_id.to_string(),
+            vm_id.clone(),
             vm_info.app_id.clone(),
             vm_info.image.clone(),
             config,
@@ -1060,7 +1070,7 @@ impl FirecrackerManager {
         Ok(())
     }
 
-    pub async fn get_vm_status(&self, vm_id: &str) -> Result<VmStatus, FirecrackerError> {
+    pub async fn get_vm_status(&self, vm_id: &VmId) -> Result<VmStatus, FirecrackerError> {
         let vms = self.vms.read().await;
         match vms.get(vm_id) {
             Some(vm) => Ok(vm.status),
@@ -1072,11 +1082,11 @@ impl FirecrackerManager {
         self.vms.read().await.values().cloned().collect()
     }
 
-    pub async fn get_vm(&self, vm_id: &str) -> Option<VmInfo> {
+    pub async fn get_vm(&self, vm_id: &VmId) -> Option<VmInfo> {
         self.vms.read().await.get(vm_id).cloned()
     }
 
-    pub fn get_logs(&self, vm_id: &str) -> Vec<String> {
+    pub fn get_logs(&self, vm_id: &VmId) -> Vec<String> {
         self.logs
             .get(vm_id)
             .map(|logs| logs.iter().cloned().collect())
@@ -1088,7 +1098,7 @@ impl FirecrackerManager {
         let processes = self.processes.lock().await;
         for (vm_id, proc) in processes.iter() {
             if let Some(pid) = proc.child.id() {
-                pids.insert(vm_id.clone(), pid);
+                pids.insert(vm_id.to_string(), pid);
             }
         }
         pids
@@ -1117,7 +1127,7 @@ impl FirecrackerManager {
         Ok(vol_path)
     }
 
-    async fn set_failed(&self, vm_id: &str, msg: String) {
+    async fn set_failed(&self, vm_id: &VmId, msg: String) {
         let mut vms = self.vms.write().await;
         if let Some(vm) = vms.get_mut(vm_id) {
             vm.status = VmStatus::Failed;
@@ -1133,10 +1143,10 @@ impl FirecrackerManager {
         );
         let prefix = format!("fc-{}-", self.agent_id);
 
-        let active_vm_ids: std::collections::HashSet<String> = {
+        let active_vm_ids: std::collections::HashSet<VmId> = {
             let processes = self.processes.lock().await;
             let vms = self.vms.read().await;
-            let mut ids: std::collections::HashSet<String> = processes.keys().cloned().collect();
+            let mut ids: std::collections::HashSet<VmId> = processes.keys().cloned().collect();
             // Also protect VMs that are currently starting
             for id in vms.keys() {
                 ids.insert(id.clone());
@@ -1412,8 +1422,8 @@ impl FirecrackerManager {
         Ok(())
     }
 
-    async fn setup_tap(&self, vm_id: &str) -> Result<(String, u32), FirecrackerError> {
-        let tap_name = format!("m-tap-{}", &vm_id[..8]);
+    async fn setup_tap(&self, vm_id: &VmId) -> Result<(String, u32), FirecrackerError> {
+        let tap_name = format!("m-tap-{}", &vm_id.as_str()[..8]);
 
         let _ = tokio::process::Command::new("ip")
             .args(["link", "del", &tap_name])
@@ -1483,7 +1493,7 @@ impl FirecrackerManager {
     }
 
     /// Helper to get the jailer chroot directory for a VM.
-    fn get_chroot_dir(&self, vm_id: &str) -> std::path::PathBuf {
+    fn get_chroot_dir(&self, vm_id: &VmId) -> std::path::PathBuf {
         let exec_name = std::path::Path::new(&self.fc_config.binary)
             .file_name()
             .and_then(|n| n.to_str())
@@ -1491,12 +1501,12 @@ impl FirecrackerManager {
 
         std::path::Path::new(&self.fc_config.chroot_base)
             .join(exec_name)
-            .join(vm_id)
+            .join(vm_id.as_str())
     }
 
     async fn setup_jailer(
         &self,
-        vm_id: &str,
+        vm_id: &VmId,
         kernel_host_path: &str,
         rootfs_host_path: &str,
     ) -> Result<(String, Vec<String>, String, Option<String>), FirecrackerError> {
@@ -1614,15 +1624,9 @@ impl FirecrackerManager {
     }
 }
 
-impl Default for FirecrackerManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 impl FirecrackerManager {
-    pub async fn set_status_for_test(&self, vm_id: &str, status: VmStatus) {
+    pub async fn set_status_for_test(&self, vm_id: &VmId, status: VmStatus) {
         if let Some(vm) = self.vms.write().await.get_mut(vm_id) {
             vm.status = status;
         }
@@ -1630,15 +1634,15 @@ impl FirecrackerManager {
 
     async fn insert_process_for_test(
         &self,
-        vm_id: &str,
+        vm_id: &VmId,
         child: tokio::process::Child,
         socket_path: String,
     ) {
         let log_task = tokio::spawn(async {});
         self.processes.lock().await.insert(
-            vm_id.to_string(),
+            vm_id.clone(),
             VmProcess {
-                vm_id: vm_id.to_string(),
+                vm_id: vm_id.clone(),
                 child,
                 socket_path,
                 metrics_path: None,
@@ -1650,10 +1654,10 @@ impl FirecrackerManager {
         );
         let mut vms = self.vms.write().await;
         vms.insert(
-            vm_id.to_string(),
+            vm_id.clone(),
             VmInfo {
-                vm_id: vm_id.to_string(),
-                app_id: "test-app".to_string(),
+                vm_id: vm_id.clone(),
+                app_id: AppId::from("test-app"),
                 image: "test-image".to_string(),
                 status: VmStatus::Running,
                 config: VmConfig::default(),
@@ -1663,7 +1667,7 @@ impl FirecrackerManager {
         );
     }
 
-    async fn has_process(&self, vm_id: &str) -> bool {
+    async fn has_process(&self, vm_id: &VmId) -> bool {
         self.processes.lock().await.contains_key(vm_id)
     }
 }
@@ -1690,10 +1694,10 @@ mod tests {
         }
     }
 
-    async fn start(mgr: &FirecrackerManager, vm_id: &str) {
+    async fn start(mgr: &FirecrackerManager, vm_id: &VmId) {
         mgr.start_vm(
-            vm_id.to_string(),
-            "app-1".to_string(),
+            vm_id.clone(),
+            AppId::from("app-1"),
             "nginx:latest".to_string(),
             config(),
         )
@@ -1706,8 +1710,8 @@ mod tests {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         assert!(
             mgr.start_vm(
-                "vm-1".to_string(),
-                "app-1".to_string(),
+                VmId::from("vm-1"),
+                AppId::from("app-1"),
                 "img.ext4".to_string(),
                 config()
             )
@@ -1719,18 +1723,20 @@ mod tests {
     #[tokio::test]
     async fn test_started_vm_has_starting_status() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        start(&mgr, "vm-1").await;
-        assert_eq!(mgr.get_vm_status("vm-1").await.unwrap(), VmStatus::Starting);
+        let vm_id = VmId::from("vm-1");
+        start(&mgr, &vm_id).await;
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Starting);
     }
 
     #[tokio::test]
     async fn test_start_duplicate_vm_fails() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        start(&mgr, "vm-1").await;
+        let vm_id = VmId::from("vm-1");
+        start(&mgr, &vm_id).await;
         let result = mgr
             .start_vm(
-                "vm-1".to_string(),
-                "app-1".to_string(),
+                vm_id,
+                AppId::from("app-1"),
                 "img.ext4".to_string(),
                 config(),
             )
@@ -1741,16 +1747,17 @@ mod tests {
     #[tokio::test]
     async fn test_stop_vm_transitions_to_stopping() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        start(&mgr, "vm-1").await;
-        assert!(mgr.stop_vm("vm-1").await.is_ok());
-        assert_eq!(mgr.get_vm_status("vm-1").await.unwrap(), VmStatus::Stopped);
+        let vm_id = VmId::from("vm-1");
+        start(&mgr, &vm_id).await;
+        assert!(mgr.stop_vm(&vm_id).await.is_ok());
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Stopped);
     }
 
     #[tokio::test]
     async fn test_stop_nonexistent_vm_returns_error() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         assert!(matches!(
-            mgr.stop_vm("ghost").await,
+            mgr.stop_vm(&VmId::from("ghost")).await,
             Err(FirecrackerError::VmNotFound(_))
         ));
     }
@@ -1759,7 +1766,7 @@ mod tests {
     async fn test_get_status_nonexistent_returns_error() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         assert!(matches!(
-            mgr.get_vm_status("ghost").await,
+            mgr.get_vm_status(&VmId::from("ghost")).await,
             Err(FirecrackerError::VmNotFound(_))
         ));
     }
@@ -1777,24 +1784,25 @@ mod tests {
     #[tokio::test]
     async fn test_list_vms_after_starts() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        start(&mgr, "vm-1").await;
-        start(&mgr, "vm-2").await;
+        start(&mgr, &VmId::from("vm-1")).await;
+        start(&mgr, &VmId::from("vm-2")).await;
         assert_eq!(mgr.list_vms().await.len(), 2);
     }
 
     #[tokio::test]
     async fn test_get_vm_returns_correct_info() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let vm_id = VmId::from("vm-1");
         mgr.start_vm(
-            "vm-1".to_string(),
-            "app-42".to_string(),
+            vm_id.clone(),
+            AppId::from("app-42"),
             "ubuntu:24.04".to_string(),
             config(),
         )
         .await
         .unwrap();
-        let vm = mgr.get_vm("vm-1").await.unwrap();
-        assert_eq!(vm.app_id, "app-42");
+        let vm = mgr.get_vm(&vm_id).await.unwrap();
+        assert_eq!(vm.app_id, AppId::from("app-42"));
         assert_eq!(vm.image, "ubuntu:24.04");
         assert_eq!(vm.config.vcpus, 1);
         assert_eq!(vm.config.memory_mib, 256);
@@ -1805,7 +1813,7 @@ mod tests {
     async fn test_get_vm_nonexistent_returns_none() {
         assert!(
             FirecrackerManager::with_config(FirecrackerConfig::stub())
-                .get_vm("ghost")
+                .get_vm(&VmId::from("ghost"))
                 .await
                 .is_none()
         );
@@ -1819,11 +1827,12 @@ mod tests {
     #[tokio::test]
     async fn test_vm_info_serialization_roundtrip() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        start(&mgr, "vm-1").await;
-        let vm = mgr.get_vm("vm-1").await.unwrap();
+        let vm_id = VmId::from("vm-1");
+        start(&mgr, &vm_id).await;
+        let vm = mgr.get_vm(&vm_id).await.unwrap();
         let json = serde_json::to_string(&vm).unwrap();
         let restored: VmInfo = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.vm_id, "vm-1");
+        assert_eq!(restored.vm_id, vm_id);
         assert_eq!(restored.status, VmStatus::Starting);
     }
 
@@ -1864,44 +1873,49 @@ mod tests {
     #[tokio::test]
     async fn test_set_status_for_test_to_running() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        start(&mgr, "vm-1").await;
-        mgr.set_status_for_test("vm-1", VmStatus::Running).await;
-        assert_eq!(mgr.get_vm_status("vm-1").await.unwrap(), VmStatus::Running);
+        let vm_id = VmId::from("vm-1");
+        start(&mgr, &vm_id).await;
+        mgr.set_status_for_test(&vm_id, VmStatus::Running).await;
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Running);
     }
 
     #[tokio::test]
     async fn test_set_status_for_test_to_stopped() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        start(&mgr, "vm-1").await;
-        mgr.set_status_for_test("vm-1", VmStatus::Stopped).await;
-        assert_eq!(mgr.get_vm_status("vm-1").await.unwrap(), VmStatus::Stopped);
+        let vm_id = VmId::from("vm-1");
+        start(&mgr, &vm_id).await;
+        mgr.set_status_for_test(&vm_id, VmStatus::Stopped).await;
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Stopped);
     }
 
     #[tokio::test]
     async fn test_set_status_for_test_to_failed() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        start(&mgr, "vm-1").await;
-        mgr.set_status_for_test("vm-1", VmStatus::Failed).await;
-        assert_eq!(mgr.get_vm_status("vm-1").await.unwrap(), VmStatus::Failed);
+        let vm_id = VmId::from("vm-1");
+        start(&mgr, &vm_id).await;
+        mgr.set_status_for_test(&vm_id, VmStatus::Failed).await;
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Failed);
     }
 
     #[tokio::test]
     async fn test_set_status_for_test_on_nonexistent_vm_is_noop() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        mgr.set_status_for_test("ghost", VmStatus::Running).await;
+        mgr.set_status_for_test(&VmId::from("ghost"), VmStatus::Running)
+            .await;
     }
 
     #[tokio::test]
     async fn test_manager_is_cloneable_and_shares_state() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        start(&mgr, "vm-1").await;
+        let vm_id = VmId::from("vm-1");
+        start(&mgr, &vm_id).await;
         let cloned = mgr.clone();
         assert_eq!(
-            cloned.get_vm_status("vm-1").await.unwrap(),
+            cloned.get_vm_status(&vm_id).await.unwrap(),
             VmStatus::Starting
         );
-        cloned.set_status_for_test("vm-1", VmStatus::Running).await;
-        assert_eq!(mgr.get_vm_status("vm-1").await.unwrap(), VmStatus::Running);
+        cloned.set_status_for_test(&vm_id, VmStatus::Running).await;
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Running);
     }
 
     #[tokio::test]
@@ -1915,8 +1929,8 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 let result = m
                     .start_vm(
-                        format!("vm-{i}"),
-                        format!("app-{i}"),
+                        VmId::from(format!("vm-{i}")),
+                        AppId::from(format!("app-{i}")),
                         "nginx:latest".to_string(),
                         config(),
                     )
@@ -1946,8 +1960,8 @@ mod tests {
             let counter = success_count.clone();
             handles.push(tokio::spawn(async move {
                 if m.start_vm(
-                    "shared-vm".to_string(),
-                    "app-1".to_string(),
+                    VmId::from("shared-vm"),
+                    AppId::from("app-1"),
                     "nginx".to_string(),
                     config(),
                 )
@@ -1976,7 +1990,7 @@ mod tests {
         let mgr = Arc::new(FirecrackerManager::with_config(FirecrackerConfig::stub()));
 
         for i in 0..10 {
-            start(&mgr, &format!("vm-pre-{i}")).await;
+            start(&mgr, &VmId::from(format!("vm-pre-{i}"))).await;
         }
 
         let mut handles = vec![];
@@ -1984,8 +1998,8 @@ mod tests {
             let m = mgr.clone();
             handles.push(tokio::spawn(async move {
                 m.start_vm(
-                    format!("vm-{i}"),
-                    format!("app-{i}"),
+                    VmId::from(format!("vm-{i}")),
+                    AppId::from(format!("app-{i}")),
                     "img.ext4".to_string(),
                     config(),
                 )
@@ -1996,7 +2010,7 @@ mod tests {
         for i in 0..10 {
             let m = mgr.clone();
             handles.push(tokio::spawn(async move {
-                m.stop_vm(&format!("vm-pre-{i}")).await.unwrap();
+                m.stop_vm(&VmId::from(format!("vm-pre-{i}"))).await.unwrap();
             }));
         }
         for h in handles {
@@ -2006,13 +2020,17 @@ mod tests {
         assert_eq!(mgr.list_vms().await.len(), 20);
         for i in 0..10 {
             assert_eq!(
-                mgr.get_vm_status(&format!("vm-pre-{i}")).await.unwrap(),
+                mgr.get_vm_status(&VmId::from(format!("vm-pre-{i}")))
+                    .await
+                    .unwrap(),
                 VmStatus::Stopped
             );
         }
         for i in 10..20 {
             assert_eq!(
-                mgr.get_vm_status(&format!("vm-{i}")).await.unwrap(),
+                mgr.get_vm_status(&VmId::from(format!("vm-{i}")))
+                    .await
+                    .unwrap(),
                 VmStatus::Running
             );
         }
@@ -2023,7 +2041,7 @@ mod tests {
         use std::sync::Arc;
         let mgr = Arc::new(FirecrackerManager::with_config(FirecrackerConfig::stub()));
         for i in 0..5 {
-            start(&mgr, &format!("vm-{i}")).await;
+            start(&mgr, &VmId::from(format!("vm-{i}"))).await;
         }
 
         let mut handles = vec![];
@@ -2031,8 +2049,8 @@ mod tests {
             let m = mgr.clone();
             handles.push(tokio::spawn(async move {
                 let _ = m.list_vms().await;
-                let _ = m.get_vm_status("vm-0").await;
-                let _ = m.get_vm("vm-1").await;
+                let _ = m.get_vm_status(&VmId::from("vm-0")).await;
+                let _ = m.get_vm(&VmId::from("vm-1")).await;
             }));
         }
         for h in handles {
@@ -2198,10 +2216,11 @@ mod tests {
     async fn test_start_vm_real_mode_bad_binary_returns_process_error() {
         let (cfg, rootfs) = real_config_bad_binary().await;
         let mgr = FirecrackerManager::with_config(cfg);
+        let vm_id = VmId::from("vm-bad-bin");
         let result = mgr
             .start_vm(
-                "vm-bad-bin".to_string(),
-                "app-1".to_string(),
+                vm_id.clone(),
+                AppId::from("app-1"),
                 "img.ext4".to_string(),
                 config(),
             )
@@ -2214,21 +2233,18 @@ mod tests {
             matches!(result, Err(FirecrackerError::ProcessError(_))),
             "expected ProcessError, got {result:?}"
         );
-        assert_eq!(
-            mgr.get_vm_status("vm-bad-bin").await.unwrap(),
-            VmStatus::Failed
-        );
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Failed);
     }
 
     #[tokio::test]
     async fn test_start_vm_real_mode_failed_vm_has_error_message() {
         let (cfg, rootfs) = real_config_bad_binary().await;
         let mgr = FirecrackerManager::with_config(cfg);
-        let vm_id = "vm-fail-msg";
+        let vm_id = VmId::from("vm-fail-msg");
         let _result = mgr
             .start_vm(
-                vm_id.to_string(),
-                "app-1".to_string(),
+                vm_id.clone(),
+                AppId::from("app-1"),
                 "img.ext4".to_string(),
                 config(),
             )
@@ -2237,7 +2253,7 @@ mod tests {
         if let Err(e) = tokio::fs::remove_file(&rootfs).await {
             tracing::warn!("Failed to remove test rootfs {:?}: {}", rootfs, e);
         }
-        let vm = mgr.get_vm(vm_id).await.unwrap();
+        let vm = mgr.get_vm(&vm_id).await.unwrap();
         assert!(vm.error_message.is_some());
         assert!(!vm.error_message.unwrap().is_empty());
     }
@@ -2245,35 +2261,33 @@ mod tests {
     #[tokio::test]
     async fn test_start_vm_stub_mode_when_kernel_path_is_none() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let vm_id = VmId::from("vm-stub");
         let result = mgr
             .start_vm(
-                "vm-stub".to_string(),
-                "app-1".to_string(),
+                vm_id.clone(),
+                AppId::from("app-1"),
                 "img.ext4".to_string(),
                 config(),
             )
             .await;
 
         assert!(result.is_ok());
-        assert_eq!(
-            mgr.get_vm_status("vm-stub").await.unwrap(),
-            VmStatus::Starting
-        );
-        assert!(!mgr.has_process("vm-stub").await);
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Starting);
+        assert!(!mgr.has_process(&vm_id).await);
     }
 
     #[tokio::test]
     async fn test_stop_vm_real_mode_kills_process_and_sets_stopped() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        let vm_id = "vm-kill-test";
+        let vm_id = VmId::from("vm-kill-test");
 
         {
             let mut vms = mgr.vms.write().await;
             vms.insert(
-                vm_id.to_string(),
+                vm_id.clone(),
                 VmInfo {
-                    vm_id: vm_id.to_string(),
-                    app_id: "app-1".to_string(),
+                    vm_id: vm_id.clone(),
+                    app_id: AppId::from("app-1"),
                     image: "img".to_string(),
                     config: config(),
                     status: VmStatus::Running,
@@ -2293,12 +2307,12 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id().unwrap();
-        mgr.insert_process_for_test(vm_id, child, socket_path_str.clone())
+        mgr.insert_process_for_test(&vm_id, child, socket_path_str.clone())
             .await;
 
-        mgr.stop_vm(vm_id).await.unwrap();
-        assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
-        assert!(!mgr.has_process(vm_id).await);
+        mgr.stop_vm(&vm_id).await.unwrap();
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Stopped);
+        assert!(!mgr.has_process(&vm_id).await);
         assert!(!socket_path.exists(), "socket file should be cleaned up");
 
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -2309,25 +2323,23 @@ mod tests {
     #[tokio::test]
     async fn test_stop_vm_stub_mode_leaves_stopped_status() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        start(&mgr, "vm-stub-stop").await;
-        mgr.stop_vm("vm-stub-stop").await.unwrap();
-        assert_eq!(
-            mgr.get_vm_status("vm-stub-stop").await.unwrap(),
-            VmStatus::Stopped
-        );
+        let vm_id = VmId::from("vm-stub-stop");
+        start(&mgr, &vm_id).await;
+        mgr.stop_vm(&vm_id).await.unwrap();
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Stopped);
     }
 
     #[tokio::test]
     async fn test_stop_vm_real_mode_cleans_up_socket_even_if_already_gone() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        let vm_id = "vm-no-socket";
+        let vm_id = VmId::from("vm-no-socket");
         {
             let mut vms = mgr.vms.write().await;
             vms.insert(
-                vm_id.to_string(),
+                vm_id.clone(),
                 VmInfo {
-                    vm_id: vm_id.to_string(),
-                    app_id: "app-1".to_string(),
+                    vm_id: vm_id.clone(),
+                    app_id: AppId::from("app-1"),
                     image: "img".to_string(),
                     config: config(),
                     status: VmStatus::Running,
@@ -2341,18 +2353,18 @@ mod tests {
             .arg("60")
             .spawn()
             .unwrap();
-        mgr.insert_process_for_test(vm_id, child, nonexistent_sock)
+        mgr.insert_process_for_test(&vm_id, child, nonexistent_sock)
             .await;
 
-        mgr.stop_vm(vm_id).await.unwrap();
-        assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
+        mgr.stop_vm(&vm_id).await.unwrap();
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Stopped);
     }
 
     #[tokio::test]
     async fn test_setup_tap_name_generation() {
-        let mgr = FirecrackerManager::new();
-        let vm_id = "test-vm-id-123456789";
-        let result = mgr.setup_tap(vm_id).await;
+        let mgr = FirecrackerManager::new().await;
+        let vm_id = VmId::from("test-vm-id-123456789");
+        let result = mgr.setup_tap(&vm_id).await;
 
         if let Err(FirecrackerError::ProcessError(msg)) = result {
             let is_permission_denied =
@@ -2448,10 +2460,11 @@ mod tests {
         tokio::fs::write(&rootfs_path, b"rootfs").await.unwrap();
 
         let mgr = FirecrackerManager::with_config(cfg.clone());
+        let vm_id = VmId::from("vm-jail-1");
 
         let result = mgr
             .setup_jailer(
-                "vm-jail-1",
+                &vm_id,
                 &kernel_path.to_string_lossy(),
                 &rootfs_path.to_string_lossy(),
             )
@@ -2510,7 +2523,7 @@ mod tests {
         cfg.data_dir = temp_dir.to_string_lossy().to_string();
 
         let mgr = FirecrackerManager::with_config(cfg);
-        let vm_id = "gc-test";
+        let vm_id = VmId::from("gc-test");
 
         let child = tokio::process::Command::new("true").spawn().unwrap();
 
@@ -2518,16 +2531,16 @@ mod tests {
             .join(format!("fc-{}-gc.sock", mgr.agent_id));
         tokio::fs::write(&socket, b"").await.unwrap();
 
-        mgr.insert_process_for_test(vm_id, child, socket.to_string_lossy().to_string())
+        mgr.insert_process_for_test(&vm_id, child, socket.to_string_lossy().to_string())
             .await;
-        mgr.set_status_for_test(vm_id, VmStatus::Stopping).await;
+        mgr.set_status_for_test(&vm_id, VmStatus::Stopping).await;
 
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         mgr.run_gc().await;
 
-        assert!(!mgr.processes.lock().await.contains_key(vm_id));
-        assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
+        assert!(!mgr.processes.lock().await.contains_key(&vm_id));
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Stopped);
         assert!(!socket.exists(), "Socket should be cleaned up by GC");
 
         if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
@@ -2543,7 +2556,7 @@ mod tests {
         cfg.data_dir = temp_dir.to_string_lossy().to_string();
 
         let mgr = FirecrackerManager::with_config(cfg);
-        let vm_id = "gc-test-unexp";
+        let vm_id = VmId::from("gc-test-unexp");
 
         // Spawn a process that will exit quickly
         let child = tokio::process::Command::new("true").spawn().unwrap();
@@ -2552,19 +2565,19 @@ mod tests {
             .join(format!("fc-{}-gc-unexp.sock", mgr.agent_id));
         tokio::fs::write(&socket, b"").await.unwrap();
 
-        mgr.insert_process_for_test(vm_id, child, socket.to_string_lossy().to_string())
+        mgr.insert_process_for_test(&vm_id, child, socket.to_string_lossy().to_string())
             .await;
 
         // Use Stopping to avoid auto-restart and its race conditions in this test
-        mgr.set_status_for_test(vm_id, VmStatus::Stopping).await;
+        mgr.set_status_for_test(&vm_id, VmStatus::Stopping).await;
 
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         mgr.run_gc().await;
 
         // Verify cleanup
-        assert!(!mgr.processes.lock().await.contains_key(vm_id));
-        assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
+        assert!(!mgr.processes.lock().await.contains_key(&vm_id));
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Stopped);
         assert!(!socket.exists(), "Socket should be cleaned up by GC");
 
         if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
@@ -2580,7 +2593,7 @@ mod tests {
         cfg.data_dir = temp_dir.to_string_lossy().to_string();
 
         let mgr = FirecrackerManager::with_config(cfg);
-        let vm_id = "gc-test-nonzero";
+        let vm_id = VmId::from("gc-test-nonzero");
 
         // Spawn a process that exits with code 1
         let child = tokio::process::Command::new("false").spawn().unwrap();
@@ -2589,15 +2602,15 @@ mod tests {
             .join(format!("fc-{}-gc-nonzero.sock", mgr.agent_id));
         tokio::fs::write(&socket, b"").await.unwrap();
 
-        mgr.insert_process_for_test(vm_id, child, socket.to_string_lossy().to_string())
+        mgr.insert_process_for_test(&vm_id, child, socket.to_string_lossy().to_string())
             .await;
-        mgr.set_status_for_test(vm_id, VmStatus::Stopping).await;
+        mgr.set_status_for_test(&vm_id, VmStatus::Stopping).await;
 
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         mgr.run_gc().await;
 
-        assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
-        assert!(!mgr.processes.lock().await.contains_key(vm_id));
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Stopped);
+        assert!(!mgr.processes.lock().await.contains_key(&vm_id));
 
         if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
             tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
@@ -2612,7 +2625,7 @@ mod tests {
         cfg.data_dir = temp_dir.to_string_lossy().to_string();
 
         let mgr = FirecrackerManager::with_config(cfg);
-        let vm_id = "gc-test-signal";
+        let vm_id = VmId::from("gc-test-signal");
 
         // Spawn a process that we will kill
         let child = tokio::process::Command::new("sleep")
@@ -2624,22 +2637,22 @@ mod tests {
             .join(format!("fc-{}-gc-signal.sock", mgr.agent_id));
         tokio::fs::write(&socket, b"").await.unwrap();
 
-        mgr.insert_process_for_test(vm_id, child, socket.to_string_lossy().to_string())
+        mgr.insert_process_for_test(&vm_id, child, socket.to_string_lossy().to_string())
             .await;
-        mgr.set_status_for_test(vm_id, VmStatus::Stopping).await;
+        mgr.set_status_for_test(&vm_id, VmStatus::Stopping).await;
 
         // Kill it with SIGKILL
         {
             let mut processes = mgr.processes.lock().await;
-            let proc = processes.get_mut(vm_id).unwrap();
+            let proc = processes.get_mut(&vm_id).unwrap();
             proc.child.kill().await.unwrap();
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         mgr.run_gc().await;
 
-        assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Stopped);
-        assert!(!mgr.processes.lock().await.contains_key(vm_id));
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Stopped);
+        assert!(!mgr.processes.lock().await.contains_key(&vm_id));
 
         if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
             tracing::error!("Failed to clean up test directory {:?}: {}", temp_dir, e);
@@ -2648,8 +2661,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_id_isolation_vms() {
-        let mgr1 = FirecrackerManager::new();
-        let mgr2 = FirecrackerManager::new();
+        let mgr1 = FirecrackerManager::new().await;
+        let mgr2 = FirecrackerManager::new().await;
 
         assert_ne!(
             mgr1.agent_id, mgr2.agent_id,
@@ -2660,7 +2673,7 @@ mod tests {
     #[tokio::test]
     async fn test_initial_log_capture() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        let vm_id = "log-test-vm";
+        let vm_id = VmId::from("log-test-vm");
 
         let config = VmConfig {
             vcpus: 1,
@@ -2670,8 +2683,8 @@ mod tests {
             ..Default::default()
         };
         mgr.start_vm(
-            vm_id.to_string(),
-            "app-1".to_string(),
+            vm_id.clone(),
+            AppId::from("app-1"),
             "image".to_string(),
             config,
         )
@@ -2680,7 +2693,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        let logs = mgr.get_logs(vm_id);
+        let logs = mgr.get_logs(&vm_id);
         assert!(
             !logs.is_empty(),
             "Logs should not be empty after initialization"
@@ -2766,7 +2779,7 @@ mod tests {
     #[tokio::test]
     async fn test_stop_vm_removes_logs_from_memory() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        let vm_id = "vm-log-test";
+        let vm_id = VmId::from("vm-log-test");
 
         let config = VmConfig {
             vcpus: 1,
@@ -2775,8 +2788,8 @@ mod tests {
             ..Default::default()
         };
         mgr.start_vm(
-            vm_id.to_string(),
-            "app-1".to_string(),
+            vm_id.clone(),
+            AppId::from("app-1"),
             "image".to_string(),
             config,
         )
@@ -2785,16 +2798,16 @@ mod tests {
 
         {
             mgr.logs
-                .entry(vm_id.to_string())
+                .entry(vm_id.clone())
                 .or_default()
                 .push_back("test log".to_string());
         }
 
-        assert!(mgr.logs.contains_key(vm_id));
+        assert!(mgr.logs.contains_key(&vm_id));
 
-        mgr.stop_vm(vm_id).await.unwrap();
+        mgr.stop_vm(&vm_id).await.unwrap();
 
-        assert!(!mgr.logs.contains_key(vm_id));
+        assert!(!mgr.logs.contains_key(&vm_id));
     }
 
     #[test]
@@ -2811,7 +2824,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_all_vms_includes_metrics_and_socket_paths() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        let vm_id = "path-test-vm";
+        let vm_id = VmId::from("path-test-vm");
         let socket_path = format!("{}/test.sock", mgr.fc_config.data_dir);
         let metrics_path = Some(format!("{}/test-metrics.json", mgr.fc_config.data_dir));
 
@@ -2819,10 +2832,10 @@ mod tests {
         {
             let mut vms = mgr.vms.write().await;
             vms.insert(
-                vm_id.to_string(),
+                vm_id.clone(),
                 VmInfo {
-                    vm_id: vm_id.to_string(),
-                    app_id: "app1".into(),
+                    vm_id: vm_id.clone(),
+                    app_id: AppId::from("app1"),
                     image: "img".into(),
                     config: VmConfig::default(),
                     status: VmStatus::Running,
@@ -2838,9 +2851,9 @@ mod tests {
             let log_task = tokio::spawn(async {});
             let child = tokio::process::Command::new("true").spawn().unwrap();
             processes.insert(
-                vm_id.to_string(),
+                vm_id.clone(),
                 VmProcess {
-                    vm_id: vm_id.to_string(),
+                    vm_id: vm_id.clone(),
                     child,
                     socket_path: socket_path.clone(),
                     metrics_path: metrics_path.clone(),
@@ -2898,7 +2911,7 @@ mod tests {
         };
 
         // Simulate stale files from a previous run
-        let vm_id = "stale-vm";
+        let vm_id = VmId::from("stale-vm");
         let socket = temp_dir.join(format!("fc-{}-{}.sock", agent_id, vm_id));
         let rootfs = temp_dir.join(format!("fc-{}-{}-rootfs.ext4", agent_id, vm_id));
 
@@ -2932,7 +2945,7 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        let vm_id = "pause-lifecycle-test";
+        let vm_id = VmId::from("pause-lifecycle-test");
 
         // 1. Setup a multi-connection mock API for Pause and Snapshot
         let socket_path =
@@ -2962,15 +2975,15 @@ mod tests {
             .unwrap();
         let pid = child.id().unwrap();
 
-        mgr.insert_process_for_test(vm_id, child, socket_path_str.clone())
+        mgr.insert_process_for_test(&vm_id, child, socket_path_str.clone())
             .await;
-        mgr.set_status_for_test(vm_id, VmStatus::Running).await;
+        mgr.set_status_for_test(&vm_id, VmStatus::Running).await;
 
         // 3. Perform pause
-        mgr.pause_vm(vm_id).await.expect("pause_vm failed");
+        mgr.pause_vm(&vm_id).await.expect("pause_vm failed");
 
         // 4. Verify process is gone
-        assert!(!mgr.has_process(vm_id).await);
+        assert!(!mgr.has_process(&vm_id).await);
 
         // Verify PID is dead (sending signal 0 to check existence)
         let output = tokio::process::Command::new("kill")
@@ -2984,7 +2997,7 @@ mod tests {
         );
 
         // 5. Verify status is Paused
-        assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Paused);
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Paused);
 
         // 6. Verify socket file was removed
         assert!(!socket_path.exists());
@@ -2993,16 +3006,16 @@ mod tests {
     #[tokio::test]
     async fn test_resume_vm_restarts_from_snapshot_if_process_dead() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        let vm_id = "resume-lifecycle-test";
+        let vm_id = VmId::from("resume-lifecycle-test");
 
         // Setup VM info with status Paused, but NO process
         {
             let mut vms = mgr.vms.write().await;
             vms.insert(
-                vm_id.to_string(),
+                vm_id.clone(),
                 VmInfo {
-                    vm_id: vm_id.to_string(),
-                    app_id: "test-app".to_string(),
+                    vm_id: vm_id.clone(),
+                    app_id: AppId::from("test-app"),
                     image: "test-image".to_string(),
                     status: VmStatus::Paused,
                     config: config(),
@@ -3013,16 +3026,16 @@ mod tests {
         }
 
         // Resume should call start_vm
-        mgr.resume_vm(vm_id).await.expect("resume_vm failed");
+        mgr.resume_vm(&vm_id).await.expect("resume_vm failed");
 
-        // In stub mode, start_vm immediately marks it as Running
-        assert_eq!(mgr.get_vm_status(vm_id).await.unwrap(), VmStatus::Starting);
+        // In stub mode, start_vm immediately marks it as Starting
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Starting);
     }
 
     #[tokio::test]
     async fn test_delete_vm_purges_all_resources() {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        let vm_id = "delete-purge-test";
+        let vm_id = VmId::from("delete-purge-test");
 
         // 1. Setup fake files
         let data_dir = std::path::Path::new(&mgr.fc_config.data_dir);
@@ -3042,20 +3055,20 @@ mod tests {
         let exec_name = "firecracker";
         let chroot = std::path::Path::new(&mgr.fc_config.chroot_base)
             .join(exec_name)
-            .join(vm_id);
+            .join(vm_id.as_str());
         tokio::fs::create_dir_all(&chroot).await.unwrap();
         tokio::fs::write(chroot.join("fake-jail"), b"fake")
             .await
             .unwrap();
 
         // 3. Register VM in memory
-        mgr.set_status_for_test(vm_id, VmStatus::Stopped).await;
+        mgr.set_status_for_test(&vm_id, VmStatus::Stopped).await;
 
         // 4. Perform delete
-        mgr.delete_vm(vm_id).await.expect("delete_vm failed");
+        mgr.delete_vm(&vm_id).await.expect("delete_vm failed");
 
         // 5. Verify everything is gone
-        assert!(!mgr.has_process(vm_id).await);
+        assert!(!mgr.has_process(&vm_id).await);
         assert!(!rootfs.exists());
         assert!(!snap.exists());
         assert!(!mem.exists());

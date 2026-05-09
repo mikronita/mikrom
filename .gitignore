@@ -5,4 +5,5 @@ db_activity.log
 mikrom-router.deb
 .env
 6PN.md
+refactor.md
 *.log
