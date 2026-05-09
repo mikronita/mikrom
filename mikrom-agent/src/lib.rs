@@ -5,7 +5,6 @@ pub mod firecracker;
 pub mod logger;
 pub mod metrics;
 pub mod server;
-pub mod types;
 pub mod wireguard;
 
 pub use builder::ImageBuilder;

@@ -1,5 +1,5 @@
 use crate::firecracker::process::VmProcess;
-use crate::types::VmId;
+use mikrom_proto::id::VmId;
 use std::path::PathBuf;
 use tokio::process::Child;
 use tokio::task::JoinHandle;
@@ -36,7 +36,7 @@ impl VmStartupGuard {
     pub fn commit(mut self) -> VmProcess {
         self.committed = true;
         VmProcess {
-            vm_id: self.vm_id.clone(),
+            vm_id: self.vm_id,
             child: self
                 .child
                 .take()
@@ -57,7 +57,7 @@ impl VmStartupGuard {
 impl Drop for VmStartupGuard {
     fn drop(&mut self) {
         if !self.committed {
-            let vm_id = self.vm_id.clone();
+            let vm_id = self.vm_id;
             let child = self.child.take();
             let tap_name = self.tap_name.take();
             let chroot_dir = self.chroot_dir.take();

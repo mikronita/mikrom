@@ -1,5 +1,5 @@
 use crate::firecracker::config::VmStatus;
-use crate::types::{AppId, VmId};
+use mikrom_proto::id::{AppId, VmId};
 
 pub struct VmProcess {
     pub vm_id: VmId,

@@ -1,4 +1,4 @@
-use std::process::Command;
+use tokio::process::Command;
 use tracing::{info, warn};
 
 pub struct WireGuardManager {
@@ -47,7 +47,7 @@ impl WireGuardManager {
         Ok(general_purpose::STANDARD.encode(public.as_bytes()))
     }
 
-    pub fn init(&self, private_key: &str, host_id: &str) -> anyhow::Result<()> {
+    pub async fn init(&self, private_key: &str, host_id: &str) -> anyhow::Result<()> {
         let host_ipv6 = self.get_host_ipv6(host_id);
 
         // 1. Create baseline config
@@ -57,21 +57,23 @@ impl WireGuardManager {
         );
 
         let conf_path = format!("/etc/wireguard/{}.conf", self.interface);
-        std::fs::create_dir_all("/etc/wireguard")?;
+        let _ = tokio::fs::create_dir_all("/etc/wireguard").await;
 
+        tokio::fs::write(&conf_path, &conf).await?;
         use std::os::unix::fs::PermissionsExt;
-        std::fs::write(&conf_path, &conf)?;
         std::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600))?;
 
         // 2. Restart interface with wg-quick
         info!("Restarting WireGuard interface {}", self.interface);
         let _ = Command::new("wg-quick")
             .args(["down", &self.interface])
-            .status();
+            .status()
+            .await;
 
         let output = Command::new("wg-quick")
             .args(["up", &self.interface])
-            .output()?;
+            .output()
+            .await?;
 
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
@@ -101,7 +103,7 @@ impl WireGuardManager {
         format!("fd00::{:x}:{:x}", s1, s2)
     }
 
-    pub fn update_peers(
+    pub async fn update_peers(
         &self,
         peers: &[mikrom_proto::scheduler::Peer],
         private_key: &str,
@@ -164,30 +166,38 @@ impl WireGuardManager {
 
         let conf_path = format!("/etc/wireguard/{}.conf", self.interface);
 
+        tokio::fs::write(&conf_path, &conf).await?;
         use std::os::unix::fs::PermissionsExt;
-        std::fs::write(&conf_path, &conf)?;
         std::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600))?;
 
         // Sync configuration using wg-quick strip and wg syncconf
         // This is much faster and cleaner than restarting the interface
-        let mut strip_child = Command::new("wg-quick")
-            .args(["strip", &self.interface])
-            .stdout(std::process::Stdio::piped())
-            .spawn()?;
+        let iface = self.interface.clone();
+        let status = tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            use std::process::{Command, Stdio};
+            let mut strip_child = Command::new("wg-quick")
+                .args(["strip", &iface])
+                .stdout(Stdio::piped())
+                .spawn()?;
 
-        let mut sync_child = Command::new("wg")
-            .args(["syncconf", &self.interface, "/dev/stdin"])
-            .stdin(strip_child.stdout.take().unwrap())
-            .spawn()?;
+            let mut sync_child = Command::new("wg")
+                .args(["syncconf", &iface, "/dev/stdin"])
+                .stdin(strip_child.stdout.take().unwrap())
+                .spawn()?;
 
-        let status = sync_child.wait()?;
+            let status = sync_child.wait()?;
+            let _ = strip_child.wait();
+            Ok(status.success())
+        })
+        .await??;
 
-        if !status.success() {
+        if !status {
             warn!("Failed to sync WG configuration for {}", self.interface);
             // Fallback: try to bring the interface up if it was down
             let _ = Command::new("wg-quick")
                 .args(["up", &self.interface])
-                .status();
+                .status()
+                .await;
         }
 
         info!(

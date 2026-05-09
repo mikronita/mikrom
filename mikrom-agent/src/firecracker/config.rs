@@ -1,4 +1,4 @@
-use crate::types::{AppId, VmId};
+use mikrom_proto::id::{AppId, VmId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

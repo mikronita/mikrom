@@ -1,6 +1,5 @@
 use crate::firecracker::FirecrackerManager;
 use crate::metrics::MetricsCollector;
-use crate::types::{AppId, VmId};
 use parking_lot::RwLock;
 use prost::Message;
 use std::collections::HashMap;
@@ -67,7 +66,7 @@ impl AgentServer {
             },
         };
 
-        if let Err(e) = self.wg_manager.init(&priv_key, &self.config.host_id) {
+        if let Err(e) = self.wg_manager.init(&priv_key, &self.config.host_id).await {
             tracing::error!("Failed to initialize WireGuard: {e}");
         }
 
@@ -167,7 +166,10 @@ impl AgentServer {
                     mikrom_proto::scheduler::NetworkMeshUpdate::decode(&msg.payload[..])
                 {
                     info!("Received mesh update with {} peers", update.peers.len());
-                    if let Err(e) = wg_manager.update_peers(&update.peers, &priv_key, &host_id) {
+                    if let Err(e) = wg_manager
+                        .update_peers(&update.peers, &priv_key, &host_id)
+                        .await
+                    {
                         tracing::error!("Failed to update WireGuard peers: {e}");
                     }
                 }
@@ -178,7 +180,8 @@ impl AgentServer {
     fn start_command_listener(&self, client: async_nats::Client) -> tokio::task::JoinHandle<()> {
         let fc = self.firecracker.clone();
         let host_id = self.config.host_id.clone();
-        let subject = format!("mikrom.agent.command.{}", host_id);
+        // Fixed subject to match scheduler: mikrom.agent.{host_id}.cmd
+        let subject = format!("mikrom.agent.{}.cmd", host_id);
         let nats = client.clone();
 
         tokio::spawn(async move {
@@ -204,7 +207,8 @@ impl AgentServer {
     ) -> tokio::task::JoinHandle<()> {
         let fc = self.firecracker.clone();
         let host_id = self.config.host_id.clone();
-        let subject = format!("mikrom.agent.health.{}", host_id);
+        // Fixed subject to match scheduler: mikrom.agent.{host_id}.check_health
+        let subject = format!("mikrom.agent.{}.check_health", host_id);
         let nats = client.clone();
         let http_client = self.http_client.clone();
 
@@ -255,8 +259,8 @@ impl AgentServer {
                 }
 
                 fc.start_vm(
-                    VmId::from(req.vm_id),
-                    AppId::from(req.app_id),
+                    req.vm_id.parse().unwrap_or_default(),
+                    req.app_id.parse().unwrap_or_default(),
                     req.image,
                     config,
                 )
@@ -264,19 +268,19 @@ impl AgentServer {
                 .map(|_| "VM started".to_string())
             },
             Some(mikrom_proto::agent::agent_command::Command::StopVm(req)) => fc
-                .stop_vm(&VmId::from(req.vm_id))
+                .stop_vm(&req.vm_id.parse().unwrap_or_default())
                 .await
                 .map(|_| "VM stopped".to_string()),
             Some(mikrom_proto::agent::agent_command::Command::PauseVm(req)) => fc
-                .pause_vm(&VmId::from(req.vm_id))
+                .pause_vm(&req.vm_id.parse().unwrap_or_default())
                 .await
                 .map(|_| "VM paused".to_string()),
             Some(mikrom_proto::agent::agent_command::Command::ResumeVm(req)) => fc
-                .resume_vm(&VmId::from(req.vm_id))
+                .resume_vm(&req.vm_id.parse().unwrap_or_default())
                 .await
                 .map(|_| "VM resumed".to_string()),
             Some(mikrom_proto::agent::agent_command::Command::DeleteVm(req)) => fc
-                .delete_vm(&VmId::from(req.vm_id))
+                .delete_vm(&req.vm_id.parse().unwrap_or_default())
                 .await
                 .map(|_| "VM resources purged".to_string()),
             Some(mikrom_proto::agent::agent_command::Command::UpdateFirewall(req)) => {
@@ -303,7 +307,7 @@ impl AgentServer {
                     })
                     .collect();
 
-                fc.update_vm_firewall(&VmId::from(req.vm_id), rules)
+                fc.update_vm_firewall(&req.vm_id.parse().unwrap_or_default(), rules)
                     .await
                     .map(|_| "Firewall rules updated".to_string())
                     .map_err(|e| {
@@ -345,7 +349,7 @@ impl AgentServer {
             return;
         };
 
-        let vm_id = VmId::from(req.vm_id);
+        let vm_id = req.vm_id.parse().unwrap_or_default();
         let vm_info = fc.get_vm_info(&vm_id).await;
         let result = if let Some(vm) = vm_info {
             let port = vm.config.port;
@@ -357,7 +361,11 @@ impl AgentServer {
             let ip = vm.config.ip_address.clone();
 
             if let Some(ip_addr) = ip {
-                let url = format!("http://{ip_addr}:{port}{path}");
+                let url = if ip_addr.contains(':') {
+                    format!("http://[{ip_addr}]:{port}{path}")
+                } else {
+                    format!("http://{ip_addr}:{port}{path}")
+                };
                 tracing::debug!(vm_id = %vm_id, url = %url, "Performing health check...");
 
                 match http_client.get(&url).send().await {
@@ -499,6 +507,7 @@ mod tests {
     use async_nats::Message as NatsMessage;
     use futures::StreamExt;
     use mikrom_proto::agent::{CheckHealthRequest, CheckHealthResponse};
+    use mikrom_proto::id::{AppId, VmId};
     use prost::Message;
 
     #[tokio::test]
@@ -557,15 +566,15 @@ mod tests {
         let mut sub = nats_client.subscribe(reply.clone()).await.unwrap();
 
         // 3. Register a fake VM in the manager so get_vm_info returns it
-        let vm_id = VmId::from("test-vm-http");
+        let vm_id = VmId::new();
         {
             use crate::firecracker::config::{VmConfig, VmInfo, VmStatus};
             let mut vms = fc.vms.write().await;
             vms.insert(
-                vm_id.clone(),
+                vm_id,
                 VmInfo {
-                    vm_id: vm_id.clone(),
-                    app_id: AppId::from("test-app"),
+                    vm_id,
+                    app_id: AppId::new(),
                     image: "nginx".to_string(),
                     status: VmStatus::Running,
                     config: VmConfig {

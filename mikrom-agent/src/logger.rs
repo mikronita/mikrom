@@ -1,6 +1,6 @@
-use crate::types::{AppId, VmId};
 use async_nats::Client;
 use chrono::Utc;
+use mikrom_proto::id::{AppId, VmId};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -110,7 +110,7 @@ impl LogShipper {
         {
             let mut buffer = self
                 .logs_map
-                .entry(self.vm_id.clone())
+                .entry(self.vm_id)
                 .or_insert_with(|| VecDeque::with_capacity(1000));
 
             if buffer.len() >= 1000 {
@@ -135,8 +135,8 @@ impl LogShipper {
         // 2. Add to NATS batch ONLY if it's an application log
         if is_app_log {
             batch.push(LogEntry {
-                vm_id: self.vm_id.clone(),
-                app_id: self.app_id.clone(),
+                vm_id: self.vm_id,
+                app_id: self.app_id,
                 source: source.to_string(),
                 message,
                 timestamp: Utc::now().timestamp_nanos_opt().unwrap_or(0),
@@ -170,10 +170,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_shipper_local_buffer() {
-        let vm_id = VmId::from("vm-1");
-        let app_id = AppId::from("app-1");
+        let vm_id = VmId::new();
+        let app_id = AppId::new();
         let logs_map = Arc::new(dashmap::DashMap::new());
-        let shipper = LogShipper::new(vm_id.clone(), app_id.clone(), None, logs_map.clone());
+        let shipper = LogShipper::new(vm_id, app_id, None, logs_map.clone());
 
         let (mut stdout_writer, stdout_reader) = tokio::io::duplex(64);
         let (mut stderr_writer, stderr_reader) = tokio::io::duplex(64);
@@ -181,9 +181,14 @@ mod tests {
         let _handle = shipper.spawn(stdout_reader, stderr_reader).await;
 
         stdout_writer
-            .write_all(b"__MIKROM_APP_START__\nHello Stdout\n")
+            .write_all(b"__MIKROM_APP_START__\n")
             .await
             .unwrap();
+
+        // Give it a moment to process the marker
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        stdout_writer.write_all(b"Hello Stdout\n").await.unwrap();
         stderr_writer.write_all(b"Hello Stderr\n").await.unwrap();
 
         // Retry with backoff to handle async processing delays
@@ -218,10 +223,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_shipper_system_logs_marker() {
-        let vm_id = VmId::from("vm-1");
-        let app_id = AppId::from("app-1");
+        let vm_id = VmId::new();
+        let app_id = AppId::new();
         let logs_map = Arc::new(dashmap::DashMap::new());
-        let shipper = LogShipper::new(vm_id.clone(), app_id.clone(), None, logs_map.clone());
+        let shipper = LogShipper::new(vm_id, app_id, None, logs_map.clone());
 
         let (mut stdout_writer, stdout_reader) = tokio::io::duplex(64);
         let (_stderr_writer, stderr_reader) = tokio::io::duplex(64);
@@ -251,10 +256,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_shipper_rotates_buffer() {
-        let vm_id = VmId::from("vm-1");
-        let app_id = AppId::from("app-1");
+        let vm_id = VmId::new();
+        let app_id = AppId::new();
         let logs_map = Arc::new(dashmap::DashMap::new());
-        let shipper = LogShipper::new(vm_id.clone(), app_id.clone(), None, logs_map.clone());
+        let shipper = LogShipper::new(vm_id, app_id, None, logs_map.clone());
 
         let (mut stdout_writer, stdout_reader) = tokio::io::duplex(1024);
         let (_stderr_writer, stderr_reader) = tokio::io::duplex(64);
