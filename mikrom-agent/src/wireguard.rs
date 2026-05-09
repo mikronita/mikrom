@@ -29,16 +29,19 @@ impl WireGuardManager {
         std::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600))?;
 
         // 2. Restart interface with wg-quick
+        info!("Restarting WireGuard interface {}", self.interface);
         let _ = Command::new("wg-quick")
             .args(["down", &self.interface])
             .status();
 
-        let status = Command::new("wg-quick")
+        let output = Command::new("wg-quick")
             .args(["up", &self.interface])
-            .status()?;
+            .output()?;
 
-        if !status.success() {
-            warn!("wg-quick up failed for {}", self.interface);
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            warn!("wg-quick up failed for {}: {}", self.interface, err);
+            return Err(anyhow::anyhow!("wg-quick up failed: {}", err));
         }
 
         info!(
@@ -130,15 +133,24 @@ impl WireGuardManager {
         std::fs::write(&conf_path, &conf)?;
         std::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600))?;
 
-        // Sync configuration
+        // Sync configuration using wg-quick strip and wg syncconf
+        // This is much faster and cleaner than restarting the interface
         let sync_cmd = format!(
             "wg-quick strip {} | wg syncconf {} /dev/stdin",
             self.interface, self.interface
         );
-        let status = Command::new("bash").args(["-c", &sync_cmd]).status()?;
+        let output = Command::new("bash").args(["-c", &sync_cmd]).output()?;
 
-        if !status.success() {
-            warn!("Failed to sync WG configuration for {}", self.interface);
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            warn!(
+                "Failed to sync WG configuration for {}: {}",
+                self.interface, err
+            );
+            // Fallback: try to bring the interface up if it was down
+            let _ = Command::new("wg-quick")
+                .args(["up", &self.interface])
+                .status();
         }
 
         info!(
