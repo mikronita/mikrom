@@ -71,13 +71,13 @@ pub struct AppState {
     pub github_private_key: Option<String>,
     pub github_app_slug: Option<String>,
     pub github_webhook_url_base: Option<String>,
-    pub active_deployment_flows: Arc<dashmap::DashSet<uuid::Uuid>>,
+    pub active_deployment_flows: Arc<dashmap::DashSet<mikrom_proto::id::AppId>>,
 }
 
 /// RAII guard to ensure an application's deployment flow is removed from the active set when dropped.
 pub struct DeploymentFlowGuard {
     state: AppState,
-    app_id: uuid::Uuid,
+    app_id: mikrom_proto::id::AppId,
 }
 
 impl Drop for DeploymentFlowGuard {
@@ -89,7 +89,7 @@ impl Drop for DeploymentFlowGuard {
 impl AppState {
     /// Attempts to start a deployment flow for an application.
     /// Returns a guard if successful, or None if a flow is already in progress.
-    pub fn try_start_flow(&self, app_id: uuid::Uuid) -> Option<DeploymentFlowGuard> {
+    pub fn try_start_flow(&self, app_id: mikrom_proto::id::AppId) -> Option<DeploymentFlowGuard> {
         if self.active_deployment_flows.insert(app_id) {
             Some(DeploymentFlowGuard {
                 state: self.clone(),

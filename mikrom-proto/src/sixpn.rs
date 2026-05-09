@@ -1,13 +1,13 @@
+use crate::id::UserId;
 use sha2::{Digest, Sha256};
 use std::net::Ipv6Addr;
-use uuid::Uuid;
 
 pub struct SixPn;
 
 impl SixPn {
-    /// Generates a unique /40 VPC prefix for a given user UUID within the fd00::/8 range.
+    /// Generates a unique /40 VPC prefix for a given user identifier within the fd00::/8 range.
     /// Format: fd<32-bit-hash>::/40
-    pub fn generate_vpc_prefix(user_id: Uuid) -> Ipv6Addr {
+    pub fn generate_vpc_prefix(user_id: UserId) -> Ipv6Addr {
         let mut hasher = Sha256::new();
         hasher.update(user_id.as_bytes());
         let result = hasher.finalize();

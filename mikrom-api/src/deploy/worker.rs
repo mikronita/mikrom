@@ -246,7 +246,7 @@ pub async fn resume_pending_builds(state: AppState) {
             env: serde_json::from_value(dep.env_vars).unwrap_or_default(),
         };
 
-        let guard = state.try_start_flow(app.id);
+        let guard = state.try_start_flow(app.id.into());
         start_build_polling(state.clone(), task, guard).await;
     }
 }
@@ -316,7 +316,7 @@ pub async fn poll_and_deploy(
                 let final_guard = if let Some(g) = guard.take() {
                     g
                 } else {
-                    match state.try_start_flow(app.id) {
+                    match state.try_start_flow(app.id.into()) {
                         Some(g) => g,
                         None => {
                             error!(app = %app.name, "Deployment flow already in progress for app, skipping zero-downtime flow for completed build.");

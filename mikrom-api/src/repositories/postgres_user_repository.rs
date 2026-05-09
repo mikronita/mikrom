@@ -92,7 +92,7 @@ impl UserRepository for PostgresUserRepository {
             UserRole::User => "user",
         };
 
-        let vpc_prefix = mikrom_proto::sixpn::SixPn::generate_vpc_prefix(id).to_string();
+        let vpc_prefix = mikrom_proto::sixpn::SixPn::generate_vpc_prefix(id.into()).to_string();
 
         let result = sqlx::query("INSERT INTO users (id, email, password_hash, role, first_name, last_name, vpc_ipv6_prefix) VALUES ($1, $2, $3, $4, $5, $6, $7)")
             .bind(id)

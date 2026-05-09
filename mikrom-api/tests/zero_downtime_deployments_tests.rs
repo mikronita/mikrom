@@ -152,7 +152,7 @@ async fn test_zero_downtime_flow_success() {
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
-    let guard = state.try_start_flow(app_id).unwrap();
+    let guard = state.try_start_flow(app_id.into()).unwrap();
 
     // Start zero-downtime flow
     mikrom_api::deploy::service::DeploymentService::run_zero_downtime_flow(
