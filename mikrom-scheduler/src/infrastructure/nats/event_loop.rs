@@ -175,6 +175,25 @@ impl NatsEventLoop {
                     } else {
                         // Broadcast mesh update immediately
                         if let Ok(workers) = server.app_service.worker_repo.list_workers().await {
+                            // 1. Fetch all running jobs once and group by host_id
+                            let mut jobs_by_host = std::collections::HashMap::new();
+                            if let Ok(jobs) = server
+                                .app_service
+                                .job_repo
+                                .list_jobs(None, None, Some(crate::domain::JobStatus::Running))
+                                .await
+                            {
+                                for job in jobs {
+                                    if let Some(host_id) = &job.host_id {
+                                        jobs_by_host
+                                            .entry(host_id.clone())
+                                            .or_insert_with(Vec::new)
+                                            .push(job);
+                                    }
+                                }
+                            }
+
+                            // 2. Build and broadcast update for each worker
                             for w in &workers {
                                 let mut peers = Vec::new();
                                 for peer_worker in &workers {
@@ -194,17 +213,10 @@ impl NatsEventLoop {
                                         allowed_ips.push(format!("{}{}", wg_ip, prefix));
                                     }
 
-                                    // Include all running jobs on this peer worker
-                                    if let Ok(jobs) = server
-                                        .app_service
-                                        .job_repo
-                                        .list_jobs(None, Some(crate::domain::JobStatus::Running))
-                                        .await
-                                    {
+                                    // Use pre-grouped jobs
+                                    if let Some(jobs) = jobs_by_host.get(&peer_worker.host_id) {
                                         for job in jobs {
-                                            if job.host_id.as_deref() == Some(&peer_worker.host_id)
-                                                && let Some(ipv6) = &job.config.ipv6_address
-                                            {
+                                            if let Some(ipv6) = &job.config.ipv6_address {
                                                 let prefix =
                                                     if ipv6.contains(':') { "/128" } else { "/32" };
                                                 allowed_ips.push(format!("{}{}", ipv6, prefix));
@@ -303,11 +315,14 @@ impl NatsEventLoop {
                                         allowed_ips.push(format!("{}{}", wg_ip, prefix));
                                     }
 
-                                    // Include all running jobs on this peer worker
                                     if let Ok(jobs) = server
                                         .app_service
                                         .job_repo
-                                        .list_jobs(None, Some(crate::domain::JobStatus::Running))
+                                        .list_jobs(
+                                            None,
+                                            None,
+                                            Some(crate::domain::JobStatus::Running),
+                                        )
                                         .await
                                     {
                                         for job in jobs {

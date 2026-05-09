@@ -121,6 +121,7 @@ pub trait JobRepository: Send + Sync {
     async fn list_jobs(
         &self,
         user_id: Option<&str>,
+        app_id: Option<&str>,
         status: Option<JobStatus>,
     ) -> DomainResult<Vec<Job>>;
     async fn find_job_by_vm_id(&self, vm_id: &str) -> DomainResult<Option<Job>>;

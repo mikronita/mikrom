@@ -3,7 +3,7 @@
 
 use aya_ebpf::{
     macros::{classifier, map},
-    maps::HashMap,
+    maps::{HashMap, PerCpuHashMap},
     programs::TcContext,
 };
 use mikrom_agent_ebpf_common::{FirewallRule, NetworkStats};
@@ -16,7 +16,7 @@ use network_types::{
 };
 
 #[map]
-static STATS: HashMap<u32, NetworkStats> = HashMap::with_max_entries(1024, 0);
+static STATS: PerCpuHashMap<u32, NetworkStats> = PerCpuHashMap::with_max_entries(1024, 0);
 
 #[map]
 static RULES: HashMap<u32, FirewallRule> = HashMap::with_max_entries(16384, 0);
@@ -77,6 +77,7 @@ fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
     // TODO: Handle IPv6 extension headers (Fragment, Hop-by-Hop, etc.)
     // Current implementation only parses the fixed header.
     let ipv6hdr: Ipv6Hdr = ctx.load(EthHdr::LEN).map_err(|_| ())?;
+    let src_ip = unsafe { ipv6hdr.src_addr.in6_u.u6_addr8 };
     let protocol = ipv6hdr.next_hdr;
     let dst_port = match protocol {
         IpProto::Tcp => {
@@ -98,6 +99,33 @@ fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
         let rule = unsafe { RULES.get(&key) };
         if let Some(rule) = rule {
             has_rules = true;
+
+            // Match IP prefix if specified
+            if rule.remote_prefix != 0 {
+                let mut match_ip = true;
+                let full_bytes = (rule.remote_prefix / 8) as usize;
+                let partial_bits = rule.remote_prefix % 8;
+
+                for (src_byte, rule_byte) in
+                    src_ip.iter().zip(rule.remote_ip.iter()).take(full_bytes)
+                {
+                    if src_byte != rule_byte {
+                        match_ip = false;
+                        break;
+                    }
+                }
+
+                if match_ip && partial_bits > 0 && full_bytes < 16 {
+                    let mask = !((1 << (8 - partial_bits)) - 1);
+                    if (src_ip[full_bytes] & mask) != (rule.remote_ip[full_bytes] & mask) {
+                        match_ip = false;
+                    }
+                }
+
+                if !match_ip {
+                    continue;
+                }
+            }
 
             // Match protocol
             if rule.protocol != 0 && rule.protocol != (protocol as u8) {

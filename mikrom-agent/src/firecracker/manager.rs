@@ -1251,20 +1251,39 @@ impl FirecrackerManager {
         );
 
         // 1. Create bridge if not exists
-        let _ = tokio::process::Command::new("ip")
+        let output = tokio::process::Command::new("ip")
             .args(["link", "add", "name", &bridge_name, "type", "bridge"])
             .output()
             .await;
 
+        if let Ok(out) = output
+            && !out.status.success()
+        {
+            let err = String::from_utf8_lossy(&out.stderr);
+            if !err.contains("File exists") {
+                tracing::warn!("Failed to create bridge {}: {}", bridge_name, err);
+            }
+        }
+
         // 2. Set bridge UP
-        let _ = tokio::process::Command::new("ip")
+        let output = tokio::process::Command::new("ip")
             .args(["link", "set", "dev", &bridge_name, "up"])
             .output()
             .await;
 
+        if let Ok(out) = output
+            && !out.status.success()
+        {
+            tracing::warn!(
+                "Failed to set bridge {} UP: {}",
+                bridge_name,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
         // 3. Clear any existing IPv6 addresses in the fd00:: range to avoid conflicts
         // This is crucial if the agent was previously running with a /8 mask
-        let _ = tokio::process::Command::new("ip")
+        let output = tokio::process::Command::new("ip")
             .args([
                 "-6",
                 "addr",
@@ -1277,24 +1296,74 @@ impl FirecrackerManager {
             .output()
             .await;
 
+        if let Ok(out) = output
+            && !out.status.success()
+        {
+            tracing::warn!(
+                "Failed to flush IPv6 addresses on bridge {}: {}",
+                bridge_name,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
         // 4. Add IPv4 address (ignore error if exists)
-        let _ = tokio::process::Command::new("ip")
+        let output = tokio::process::Command::new("ip")
             .args(["addr", "add", &bridge_ip, "dev", &bridge_name])
             .output()
             .await;
 
+        if let Ok(out) = output
+            && !out.status.success()
+        {
+            let err = String::from_utf8_lossy(&out.stderr);
+            if !err.contains("File exists") {
+                tracing::warn!(
+                    "Failed to add IPv4 address {} to bridge {}: {}",
+                    bridge_ip,
+                    bridge_name,
+                    err
+                );
+            }
+        }
+
         // 5. Assign stable IPv6 gateway addresses
         // Using /128 for the ULA address so it doesn't conflict with the WireGuard fd00::/8 route
-        let _ = tokio::process::Command::new("ip")
+        let output = tokio::process::Command::new("ip")
             .args(["-6", "addr", "add", "fd00::1/128", "dev", &bridge_name])
             .output()
             .await;
 
+        if let Ok(out) = output
+            && !out.status.success()
+        {
+            let err = String::from_utf8_lossy(&out.stderr);
+            if !err.contains("File exists") {
+                tracing::warn!(
+                    "Failed to add IPv6 address fd00::1/128 to bridge {}: {}",
+                    bridge_name,
+                    err
+                );
+            }
+        }
+
         // Ensure fe80::1 is also present for link-local gatewaying
-        let _ = tokio::process::Command::new("ip")
+        let output = tokio::process::Command::new("ip")
             .args(["-6", "addr", "add", "fe80::1/64", "dev", &bridge_name])
             .output()
             .await;
+
+        if let Ok(out) = output
+            && !out.status.success()
+        {
+            let err = String::from_utf8_lossy(&out.stderr);
+            if !err.contains("File exists") {
+                tracing::warn!(
+                    "Failed to add IPv6 link-local address fe80::1/64 to bridge {}: {}",
+                    bridge_name,
+                    err
+                );
+            }
+        }
 
         // 6. Enable forwarding
         tokio::process::Command::new("sysctl")
