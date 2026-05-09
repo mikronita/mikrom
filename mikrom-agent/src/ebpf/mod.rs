@@ -14,6 +14,13 @@ impl EbpfManager {
         let data =
             include_bytes_aligned!("../../../target/bpfel-unknown-none/release/mikrom-agent-ebpf");
 
+        if data.is_empty() {
+            warn!(
+                "eBPF binary is empty, likely a dummy file for compilation. eBPF features will be disabled."
+            );
+            return Err(anyhow::anyhow!("eBPF binary not found"));
+        }
+
         let mut ebpf = Ebpf::load(data)?;
         if let Err(e) = EbpfLogger::init(&mut ebpf) {
             warn!("failed to initialize eBPF logger: {}", e);
