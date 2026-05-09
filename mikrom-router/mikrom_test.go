@@ -15,7 +15,7 @@ func TestMikromRouter_ServeHTTP(t *testing.T) {
 	app := &MikromApp{
 		logger: logger,
 	}
-	app.routes.Store("example.com", "http://backend:8080")
+	app.routes.Store("example.com", "backend:8080")
 	app.acme.Store("test-token", "test-auth")
 
 	router := MikromRouter{

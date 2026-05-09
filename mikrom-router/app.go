@@ -200,14 +200,12 @@ func (m *MikromApp) runNatsLogger() {
 				continue
 			}
 
-			var message interface{} = msg
-			// If msg is JSON, unmarshal it to avoid double-encoding
 			trimmed := strings.TrimSpace(msg)
+			var message interface{} = msg
+
+			// If msg is JSON, use RawMessage to avoid double-encoding without expensive unmarshaling
 			if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
-				var jsonMsg interface{}
-				if err := json.Unmarshal([]byte(trimmed), &jsonMsg); err == nil {
-					message = jsonMsg
-				}
+				message = json.RawMessage(trimmed)
 			}
 
 			entry := LogEntry{
@@ -224,7 +222,6 @@ func (m *MikromApp) runNatsLogger() {
 				continue
 			}
 			_ = m.nc.Publish(subject, payload)
-
 		}
 	}
 }
@@ -328,7 +325,8 @@ func (m *MikromApp) Start() error {
 		hostname, _ := os.Hostname()
 		// Use a more unique ID for the router host to allow multiple instances
 		hostID := fmt.Sprintf("router-%s", hostname)
-		pubKey, err := m.wg.Init(hostID)
+		wgIPv6 := m.getRouterIPv6(hostID)
+		pubKey, err := m.wg.Init(hostID, wgIPv6)
 		if err != nil {
 			m.logger.Error("failed to initialize WireGuard", zap.Error(err))
 		} else {

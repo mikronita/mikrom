@@ -11,6 +11,10 @@ import (
 type WireGuardManager struct {
 	Interface string
 	Logger    *zap.Logger
+
+	privKey string
+	pubKey  string
+	ipv6    string
 }
 
 func NewWireGuardManager(iface string, logger *zap.Logger) *WireGuardManager {
@@ -20,7 +24,9 @@ func NewWireGuardManager(iface string, logger *zap.Logger) *WireGuardManager {
 	}
 }
 
-func (w *WireGuardManager) Init(hostID string) (string, error) {
+func (w *WireGuardManager) Init(hostID, ipv6 string) (string, error) {
+	w.ipv6 = ipv6
+
 	// 1. Ensure config dirs exist
 	exec.Command("sudo", "mkdir", "-p", "/etc/mikrom").Run()
 	exec.Command("sudo", "mkdir", "-p", "/etc/wireguard").Run()
@@ -59,22 +65,27 @@ func (w *WireGuardManager) Init(hostID string) (string, error) {
 		cmd.Run()
 	}
 
-	// 3. Read private key using sudo
+	// 3. Read and cache keys
 	out, err := exec.Command("sudo", "cat", keyPath).Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to read private key: %w", err)
 	}
-	privKey := strings.TrimSpace(string(out))
+	w.privKey = strings.TrimSpace(string(out))
 
-	// 3. Create initial wg-quick config using sudo
-	hostIPv6 := "fd00::ace"
+	out, err = exec.Command("sudo", "cat", pubKeyPath).Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to read public key: %w", err)
+	}
+	w.pubKey = strings.TrimSpace(string(out))
+
+	// 4. Create initial wg-quick config using sudo
 	conf := fmt.Sprintf(`[Interface]
-	PrivateKey = %s
-	Address = %s/64
-	ListenPort = 51822
-	PostUp = ip -6 route add fd00::/8 dev %%i metric 100 || true
-	PostUp = ip -6 route add fd0d::/16 dev %%i metric 10 || true
-	`, privKey, hostIPv6)
+PrivateKey = %s
+Address = %s/64
+ListenPort = 51822
+PostUp = ip -6 route add fd00::/8 dev %%i metric 100 || true
+PostUp = ip -6 route add fd0d::/16 dev %%i metric 10 || true
+`, w.privKey, w.ipv6)
 
 	confPath := fmt.Sprintf("/etc/wireguard/%s.conf", w.Interface)
 	cmd := exec.Command("sudo", "tee", confPath)
@@ -89,38 +100,26 @@ func (w *WireGuardManager) Init(hostID string) (string, error) {
 		w.Logger.Warn("wg-quick up failed (might already be up)", zap.Error(err), zap.String("output", string(out)))
 	}
 
-	// 6. Get public key to return
-	out, _ = exec.Command("sudo", "cat", pubKeyPath).Output()
-	pubKey := strings.TrimSpace(string(out))
-
-	w.Logger.Info("WireGuard interface initialized via wg-quick", zap.String("interface", w.Interface), zap.String("ip", hostIPv6))
-	return pubKey, nil
+	w.Logger.Info("WireGuard interface initialized via wg-quick", zap.String("interface", w.Interface), zap.String("ip", w.ipv6))
+	return w.pubKey, nil
 }
 
 func (w *WireGuardManager) UpdatePeers(peers []PeerInfo) error {
-	// 1. Read private key using sudo
-	out, err := exec.Command("sudo", "cat", "/etc/mikrom/router.key").Output()
-	if err != nil {
-		return fmt.Errorf("failed to read private key: %w", err)
+	if w.privKey == "" || w.pubKey == "" || w.ipv6 == "" {
+		return fmt.Errorf("WireGuardManager not initialized")
 	}
-	privKey := strings.TrimSpace(string(out))
 
-	// 2. Read our own public key to skip self-peering
-	out, _ = exec.Command("sudo", "cat", "/etc/mikrom/router.pub").Output()
-	myPubKey := strings.TrimSpace(string(out))
-
-	// 3. Build config
-	hostIPv6 := "fd00::ace"
+	// 1. Build config using cached state
 	var sb strings.Builder
 	sb.WriteString("[Interface]\n")
-	sb.WriteString(fmt.Sprintf("PrivateKey = %s\n", privKey))
-	sb.WriteString(fmt.Sprintf("Address = %s/64\n", hostIPv6))
+	sb.WriteString(fmt.Sprintf("PrivateKey = %s\n", w.privKey))
+	sb.WriteString(fmt.Sprintf("Address = %s/64\n", w.ipv6))
 	sb.WriteString("ListenPort = 51822\n")
 	sb.WriteString("PostUp = ip -6 route add fd00::/8 dev %i metric 100 || true\n")
 	sb.WriteString("PostUp = ip -6 route add fd0d::/16 dev %i metric 10 || true\n\n")
 
 	for _, peer := range peers {
-		if peer.PublicKey == "" || peer.Endpoint == "" || peer.PublicKey == myPubKey {
+		if peer.PublicKey == "" || peer.Endpoint == "" || peer.PublicKey == w.pubKey {
 			continue
 		}
 
@@ -136,7 +135,7 @@ func (w *WireGuardManager) UpdatePeers(peers []PeerInfo) error {
 		sb.WriteString("PersistentKeepalive = 25\n\n")
 	}
 
-	// 4. Write config using sudo
+	// 2. Write config using sudo
 	confPath := fmt.Sprintf("/etc/wireguard/%s.conf", w.Interface)
 	cmd := exec.Command("sudo", "tee", confPath)
 	cmd.Stdin = strings.NewReader(sb.String())
@@ -144,7 +143,7 @@ func (w *WireGuardManager) UpdatePeers(peers []PeerInfo) error {
 		return fmt.Errorf("failed to write wg config: %w", err)
 	}
 
-	// 5. Sync configuration
+	// 3. Sync configuration
 	stripCmd := fmt.Sprintf("wg-quick strip %s | wg syncconf %s /dev/stdin", w.Interface, w.Interface)
 	if out, err := exec.Command("sudo", "bash", "-c", stripCmd).CombinedOutput(); err != nil {
 		w.Logger.Warn("failed to sync WG configuration", zap.Error(err), zap.String("output", string(out)))
