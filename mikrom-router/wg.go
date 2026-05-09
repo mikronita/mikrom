@@ -144,10 +144,22 @@ func (w *WireGuardManager) UpdatePeers(peers []PeerInfo) error {
 	}
 
 	// 3. Sync configuration
-	stripCmd := fmt.Sprintf("wg-quick strip %s | wg syncconf %s /dev/stdin", w.Interface, w.Interface)
-	if out, err := exec.Command("sudo", "bash", "-c", stripCmd).CombinedOutput(); err != nil {
+	stripCmd := exec.Command("sudo", "wg-quick", "strip", w.Interface)
+	syncCmd := exec.Command("sudo", "wg", "syncconf", w.Interface, "/dev/stdin")
+
+	pipe, err := stripCmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create pipe: %w", err)
+	}
+	syncCmd.Stdin = pipe
+
+	if err := stripCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start strip: %w", err)
+	}
+	if out, err := syncCmd.CombinedOutput(); err != nil {
 		w.Logger.Warn("failed to sync WG configuration", zap.Error(err), zap.String("output", string(out)))
 	}
+	_ = stripCmd.Wait()
 
 	w.Logger.Info("WireGuard mesh updated via wg syncconf", zap.Int("peers", len(peers)))
 	return nil

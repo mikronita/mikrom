@@ -1093,12 +1093,12 @@ impl FirecrackerManager {
             .unwrap_or_default()
     }
 
-    pub async fn get_pids(&self) -> HashMap<String, u32> {
+    pub async fn get_pids(&self) -> HashMap<VmId, u32> {
         let mut pids = HashMap::new();
         let processes = self.processes.lock().await;
         for (vm_id, proc) in processes.iter() {
             if let Some(pid) = proc.child.id() {
-                pids.insert(vm_id.to_string(), pid);
+                pids.insert(vm_id.clone(), pid);
             }
         }
         pids

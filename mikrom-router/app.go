@@ -204,7 +204,7 @@ func (m *MikromApp) runNatsLogger() {
 			var message interface{} = msg
 
 			// If msg is JSON, use RawMessage to avoid double-encoding without expensive unmarshaling
-			if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+			if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") && json.Valid([]byte(trimmed)) {
 				message = json.RawMessage(trimmed)
 			}
 

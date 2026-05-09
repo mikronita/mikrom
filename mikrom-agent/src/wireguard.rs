@@ -12,6 +12,41 @@ impl WireGuardManager {
         }
     }
 
+    pub fn load_or_generate_key(&self, data_dir: &str) -> anyhow::Result<String> {
+        let key_path = std::path::Path::new(data_dir).join("wg.key");
+
+        if key_path.exists() {
+            let key = std::fs::read_to_string(&key_path)?;
+            return Ok(key.trim().to_string());
+        }
+
+        info!("Generating new WireGuard private key...");
+        let secret = x25519_dalek::StaticSecret::random_from_rng(rand::thread_rng());
+        let priv_bytes = secret.to_bytes();
+
+        // Convert to base64 for WireGuard
+        use base64::{Engine as _, engine::general_purpose};
+        let priv_b64 = general_purpose::STANDARD.encode(priv_bytes);
+
+        std::fs::write(&key_path, &priv_b64)?;
+        // Set permissions to 600
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))?;
+
+        Ok(priv_b64)
+    }
+
+    pub fn get_public_key(&self, private_key: &str) -> anyhow::Result<String> {
+        use base64::{Engine as _, engine::general_purpose};
+        let priv_bytes = general_purpose::STANDARD.decode(private_key.trim())?;
+        let secret =
+            x25519_dalek::StaticSecret::from(<[u8; 32]>::try_from(priv_bytes).map_err(|_| {
+                anyhow::anyhow!("Invalid private key length (expected 32 bytes decoded)")
+            })?);
+        let public = x25519_dalek::PublicKey::from(&secret);
+        Ok(general_purpose::STANDARD.encode(public.as_bytes()))
+    }
+
     pub fn init(&self, private_key: &str, host_id: &str) -> anyhow::Result<()> {
         let host_ipv6 = self.get_host_ipv6(host_id);
 
@@ -135,18 +170,20 @@ impl WireGuardManager {
 
         // Sync configuration using wg-quick strip and wg syncconf
         // This is much faster and cleaner than restarting the interface
-        let sync_cmd = format!(
-            "wg-quick strip {} | wg syncconf {} /dev/stdin",
-            self.interface, self.interface
-        );
-        let output = Command::new("bash").args(["-c", &sync_cmd]).output()?;
+        let mut strip_child = Command::new("wg-quick")
+            .args(["strip", &self.interface])
+            .stdout(std::process::Stdio::piped())
+            .spawn()?;
 
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            warn!(
-                "Failed to sync WG configuration for {}: {}",
-                self.interface, err
-            );
+        let mut sync_child = Command::new("wg")
+            .args(["syncconf", &self.interface, "/dev/stdin"])
+            .stdin(strip_child.stdout.take().unwrap())
+            .spawn()?;
+
+        let status = sync_child.wait()?;
+
+        if !status.success() {
+            warn!("Failed to sync WG configuration for {}", self.interface);
             // Fallback: try to bring the interface up if it was down
             let _ = Command::new("wg-quick")
                 .args(["up", &self.interface])

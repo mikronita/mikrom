@@ -6,7 +6,11 @@ use aya::{Ebpf, include_bytes_aligned};
 use aya_log::EbpfLogger;
 use error::EbpfError;
 use mikrom_agent_ebpf_common::{FirewallRule, NetworkStats};
+use std::sync::LazyLock;
+use tokio::sync::Semaphore;
 use tracing::{info, warn};
+
+static LOADING_SEMAPHORE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(1));
 
 pub struct EbpfManager {
     ebpf: Ebpf,
@@ -14,6 +18,11 @@ pub struct EbpfManager {
 
 impl EbpfManager {
     pub async fn load() -> Result<Self, EbpfError> {
+        let _permit = LOADING_SEMAPHORE
+            .acquire()
+            .await
+            .map_err(|_| EbpfError::CastError("Semaphore closed".to_string()))?;
+
         let data =
             include_bytes_aligned!("../../../target/bpfel-unknown-none/release/mikrom-agent-ebpf");
 

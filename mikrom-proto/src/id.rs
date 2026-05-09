@@ -14,6 +14,7 @@ macro_rules! define_id {
         pub struct $name(Uuid);
 
         impl $name {
+            #[allow(clippy::new_without_default)]
             pub fn new() -> Self {
                 Self(Uuid::new_v4())
             }
@@ -24,6 +25,10 @@ macro_rules! define_id {
 
             pub fn as_uuid(&self) -> &Uuid {
                 &self.0
+            }
+
+            pub fn is_nil(&self) -> bool {
+                self.0.is_nil()
             }
         }
 
@@ -71,12 +76,6 @@ macro_rules! define_id {
             }
         }
 
-        impl Default for $name {
-            fn default() -> Self {
-                Self(Uuid::nil())
-            }
-        }
-
         #[cfg(feature = "sqlx-postgres")]
         impl sqlx::Type<sqlx::Postgres> for $name {
             fn type_info() -> sqlx::postgres::PgTypeInfo {
@@ -90,6 +89,9 @@ macro_rules! define_id {
                 value: sqlx::postgres::PgValueRef<'r>,
             ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
                 let uuid = <Uuid as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+                if uuid.is_nil() {
+                    return Err("Decoded nil UUID for typed ID".into());
+                }
                 Ok(Self(uuid))
             }
         }
