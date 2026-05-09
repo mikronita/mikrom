@@ -1,4 +1,5 @@
 use crate::firecracker::FirecrackerManager;
+use crate::types::{AppId, VmId};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -7,9 +8,9 @@ use sysinfo::System;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VmMetrics {
-    pub app_id: String,
+    pub app_id: AppId,
     #[serde(default)]
-    pub vm_id: String,
+    pub vm_id: VmId,
     pub cpu_usage: f32,
     pub ram_used_bytes: u64,
     pub status: crate::firecracker::VmStatus,
@@ -31,7 +32,7 @@ pub struct SystemMetrics {
     pub load_avg_1: f32,
     pub load_avg_5: f32,
     pub load_avg_15: f32,
-    pub vms: HashMap<String, VmMetrics>,
+    pub vms: HashMap<VmId, VmMetrics>,
     pub timestamp: i64,
 }
 
@@ -386,8 +387,8 @@ mod tests {
     #[test]
     fn test_vm_metrics_serialization() {
         let vm = VmMetrics {
-            app_id: "app-123".to_string(),
-            vm_id: "vm-456".to_string(),
+            app_id: AppId::from("app-123"),
+            vm_id: VmId::from("vm-456"),
             cpu_usage: 0.5,
             ram_used_bytes: 1024,
             status: crate::firecracker::VmStatus::Running,
@@ -449,7 +450,7 @@ mod tests {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         let collector = MetricsCollector::with_firecracker(mgr.clone());
 
-        let vm_id = "test-vm-metrics";
+        let vm_id = VmId::from("test-vm-metrics");
         let metrics_file = format!(
             "{}/metrics-{}.json",
             mgr.fc_config.data_dir,
@@ -468,8 +469,8 @@ mod tests {
 
         // Start a stub VM
         mgr.start_vm(
-            vm_id.to_string(),
-            "app-1".to_string(),
+            vm_id.clone(),
+            AppId::from("app-1"),
             "image".to_string(),
             VmConfig::default(),
         )
@@ -482,9 +483,9 @@ mod tests {
             let log_task = tokio::spawn(async {});
             let child = tokio::process::Command::new("true").spawn().unwrap();
             processes.insert(
-                vm_id.to_string(),
+                vm_id.clone(),
                 crate::firecracker::process::VmProcess {
-                    vm_id: vm_id.to_string(),
+                    vm_id: vm_id.clone(),
                     child,
                     socket_path: format!("{}/fake.sock", mgr.fc_config.data_dir),
                     metrics_path: Some(metrics_file.clone()),
@@ -497,10 +498,10 @@ mod tests {
         }
 
         let metrics = collector.collect().await;
-        assert!(metrics.vms.contains_key(vm_id));
-        let vm_metrics = metrics.vms.get(vm_id).unwrap();
+        assert!(metrics.vms.contains_key(&vm_id));
+        let vm_metrics = metrics.vms.get(&vm_id).unwrap();
         assert_eq!(vm_metrics.vm_id, vm_id);
-        assert_eq!(vm_metrics.app_id, "app-1");
+        assert_eq!(vm_metrics.app_id, AppId::from("app-1"));
 
         // Cleanup
         if let Err(e) = tokio::fs::remove_file(metrics_file).await {

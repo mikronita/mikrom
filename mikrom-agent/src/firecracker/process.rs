@@ -1,8 +1,8 @@
 use crate::firecracker::config::VmStatus;
+use crate::types::{AppId, VmId};
 
 pub struct VmProcess {
-    #[allow(dead_code)]
-    pub vm_id: String,
+    pub vm_id: VmId,
     pub child: tokio::process::Child,
     pub socket_path: String,
     pub metrics_path: Option<String>,
@@ -27,8 +27,8 @@ impl CommandExecutor for RealCommandExecutor {
 }
 
 pub struct VmDetailedInfo {
-    pub vm_id: String,
-    pub app_id: String,
+    pub vm_id: VmId,
+    pub app_id: AppId,
     pub status: VmStatus,
     pub error_message: Option<String>,
     pub pid: Option<u32>,

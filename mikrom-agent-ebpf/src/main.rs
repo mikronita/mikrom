@@ -128,7 +128,9 @@ fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
             }
 
             // Match protocol
-            if rule.protocol != 0 && rule.protocol != (protocol as u8) {
+            use mikrom_agent_ebpf_common::Protocol;
+            let rule_proto = rule.protocol;
+            if rule_proto != Protocol::Any && rule_proto as u8 != protocol as u8 {
                 continue;
             }
 
@@ -137,7 +139,8 @@ fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
                 continue;
             }
 
-            if rule.action == 1 {
+            use mikrom_agent_ebpf_common::Action;
+            if rule.action == Action::Allow {
                 allowed = true;
                 break;
             }
