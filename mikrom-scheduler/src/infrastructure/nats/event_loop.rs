@@ -8,6 +8,8 @@ use mikrom_proto::scheduler::{
 };
 use prost::Message;
 
+const MESH_PRUNING_THRESHOLD_SECS: i64 = 30;
+
 pub struct NatsEventLoop {
     server: SchedulerServer,
     client: async_nats::Client,
@@ -113,11 +115,11 @@ impl NatsEventLoop {
             return updates;
         };
 
-        // Filter for active workers only (last 30 seconds)
+        // Filter for active workers only
         let now = chrono::Utc::now().timestamp();
         let active_workers: Vec<_> = workers
             .iter()
-            .filter(|w| now - w.last_heartbeat < 30)
+            .filter(|w| now - w.last_heartbeat < MESH_PRUNING_THRESHOLD_SECS)
             .collect();
 
         // 1. Fetch all running jobs once and group by host_id
@@ -138,26 +140,20 @@ impl NatsEventLoop {
             }
         }
 
-        // 2. Build update for each worker (even if inactive, to tell them they are alone if they wake up)
-        for w in &workers {
-            let mut peers = Vec::new();
-            // Only include ACTIVE workers as peers for others
-            for peer_worker in &active_workers {
-                // Skip self
-                if peer_worker.host_id == w.host_id {
-                    continue;
-                }
-
+        // 2. Pre-build ALL potential peers
+        let all_peers: Vec<mikrom_proto::scheduler::Peer> = active_workers
+            .iter()
+            .filter(|w| w.wireguard_pubkey.is_some())
+            .map(|w| {
                 let mut allowed_ips = Vec::new();
-                if let Some(wg_ip) = &peer_worker.wireguard_ip
+                if let Some(wg_ip) = &w.wireguard_ip
                     && !wg_ip.is_empty()
                 {
                     let prefix = if wg_ip.contains(':') { "/128" } else { "/32" };
                     allowed_ips.push(format!("{}{}", wg_ip, prefix));
                 }
 
-                // Use pre-grouped jobs
-                if let Some(jobs) = jobs_by_host.get(&peer_worker.host_id) {
+                if let Some(jobs) = jobs_by_host.get(&w.host_id) {
                     for job in jobs {
                         if let Some(ipv6) = &job.config.ipv6_address {
                             let prefix = if ipv6.contains(':') { "/128" } else { "/32" };
@@ -166,21 +162,23 @@ impl NatsEventLoop {
                     }
                 }
 
-                if !peer_worker
-                    .wireguard_pubkey
-                    .as_deref()
-                    .unwrap_or_default()
-                    .is_empty()
-                {
-                    peers.push(mikrom_proto::scheduler::Peer {
-                        host_id: peer_worker.host_id.clone(),
-                        ip_address: peer_worker.ip_address.clone(),
-                        wireguard_pubkey: peer_worker.wireguard_pubkey.clone().unwrap_or_default(),
-                        allowed_ips,
-                        wireguard_port: peer_worker.wireguard_port.unwrap_or(51820),
-                    });
+                mikrom_proto::scheduler::Peer {
+                    host_id: w.host_id.clone(),
+                    ip_address: w.ip_address.clone(),
+                    wireguard_pubkey: w.wireguard_pubkey.clone().unwrap_or_default(),
+                    allowed_ips,
+                    wireguard_port: w.wireguard_port.unwrap_or(51820),
                 }
-            }
+            })
+            .collect();
+
+        // 3. Build update for each worker (even if inactive, to tell them they are alone if they wake up)
+        for w in &workers {
+            let peers: Vec<_> = all_peers
+                .iter()
+                .filter(|p| p.host_id != w.host_id)
+                .cloned()
+                .collect();
 
             updates.insert(
                 w.host_id.clone(),
