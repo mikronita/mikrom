@@ -115,7 +115,7 @@ impl AppService {
     }
 
     pub async fn delete_all_by_app(&self, app_id: &str, user_id: &str) -> DomainResult<()> {
-        let jobs = self.job_repo.list_jobs(Some(user_id), None).await?;
+        let jobs = self.job_repo.list_jobs(Some(user_id), None, None).await?;
         let app_jobs: Vec<_> = jobs.into_iter().filter(|j| j.app_id == app_id).collect();
 
         for job in app_jobs {
@@ -166,15 +166,10 @@ impl AppService {
             .collect();
 
         // 2. Find all active jobs for this app
-        let jobs = self
+        let app_jobs = self
             .job_repo
-            .list_jobs(None, Some(JobStatus::Running))
+            .list_jobs(None, Some(&req.app_id), Some(JobStatus::Running))
             .await?;
-
-        let app_jobs: Vec<_> = jobs
-            .into_iter()
-            .filter(|j| j.app_id == req.app_id)
-            .collect();
 
         // 3. Push updates to agents
         for job in app_jobs {
@@ -257,6 +252,7 @@ mod tests {
         async fn list_jobs(
             &self,
             _u: Option<&str>,
+            _a: Option<&str>,
             _s: Option<JobStatus>,
         ) -> DomainResult<Vec<Job>> {
             Ok(vec![])

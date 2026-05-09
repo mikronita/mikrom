@@ -49,12 +49,12 @@ impl WireGuardManager {
     }
 
     pub fn get_host_ipv6(&self, host_id: &str) -> String {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-        host_id.hash(&mut hasher);
-        let hash = hasher.finish();
+        // Use a stable hash function instead of DefaultHasher
+        // DJB2 hash algorithm (simple, stable, fast)
+        let mut hash: u64 = 5381;
+        for c in host_id.bytes() {
+            hash = ((hash << 5).wrapping_add(hash)) ^ (c as u64);
+        }
 
         // Use 32 bits of the hash to create a 'normal' looking IPv6 (fd00::xxxx:xxxx)
         let s1 = (hash >> 16) & 0xFFFF;

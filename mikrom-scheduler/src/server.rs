@@ -119,7 +119,7 @@ impl SchedulerServer {
         let jobs = self
             .app_service
             .job_repo
-            .list_jobs(Some(&req.user_id), None)
+            .list_jobs(Some(&req.user_id), None, None)
             .await
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 

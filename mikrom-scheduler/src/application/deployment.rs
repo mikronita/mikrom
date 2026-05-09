@@ -166,7 +166,7 @@ impl DeploymentService {
         }
 
         // Count current app instances per worker for anti-affinity
-        let jobs = self.job_repo.list_jobs(None, None).await?;
+        let jobs = self.job_repo.list_jobs(None, None, None).await?;
         let mut app_counts_per_host: HashMap<String, u32> = HashMap::new();
         for job in jobs {
             if job.app_id == app_id
@@ -205,7 +205,7 @@ impl DeploymentService {
         current_job_id: &str,
         _user_id: &str,
     ) -> DomainResult<()> {
-        let jobs = self.job_repo.list_jobs(None, None).await?;
+        let jobs = self.job_repo.list_jobs(None, None, None).await?;
         let other_jobs: Vec<Job> = jobs
             .into_iter()
             .filter(|j| {

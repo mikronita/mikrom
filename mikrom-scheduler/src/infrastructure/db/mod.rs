@@ -155,19 +155,36 @@ impl JobRepository for PgJobRepository {
     async fn list_jobs(
         &self,
         user_id: Option<&str>,
-        _status: Option<JobStatus>,
+        app_id: Option<&str>,
+        status: Option<JobStatus>,
     ) -> DomainResult<Vec<Job>> {
-        let rows = if let Some(uid) = user_id {
-            sqlx::query("SELECT * FROM jobs WHERE user_id = $1")
-                .bind(uid)
-                .fetch_all(&self.pool)
-                .await?
-        } else {
-            sqlx::query("SELECT * FROM jobs")
-                .fetch_all(&self.pool)
-                .await?
-        };
+        let mut query = "SELECT * FROM jobs WHERE 1=1".to_string();
+        let mut params_count = 1;
 
+        if user_id.is_some() {
+            query.push_str(&format!(" AND user_id = ${}", params_count));
+            params_count += 1;
+        }
+        if app_id.is_some() {
+            query.push_str(&format!(" AND app_id = ${}", params_count));
+            params_count += 1;
+        }
+        if status.is_some() {
+            query.push_str(&format!(" AND status = ${}", params_count));
+        }
+
+        let mut q = sqlx::query(&query);
+        if let Some(uid) = user_id {
+            q = q.bind(uid);
+        }
+        if let Some(aid) = app_id {
+            q = q.bind(aid);
+        }
+        if let Some(st) = status {
+            q = q.bind(st.as_str());
+        }
+
+        let rows = q.fetch_all(&self.pool).await?;
         Ok(rows.iter().map(map_row_to_job).collect())
     }
 

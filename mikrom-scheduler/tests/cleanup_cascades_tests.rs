@@ -110,14 +110,14 @@ mod tests {
         job_repo.add_job(other_job).await.unwrap();
 
         // Verify initial state
-        let jobs = job_repo.list_jobs(None, None).await.unwrap();
+        let jobs = job_repo.list_jobs(None, None, None).await.unwrap();
         assert_eq!(jobs.len(), 4);
 
         // Perform bulk cleanup
         job_repo.remove_jobs_by_app(&app_id).await.unwrap();
 
         // Verify result
-        let remaining_jobs = job_repo.list_jobs(None, None).await.unwrap();
+        let remaining_jobs = job_repo.list_jobs(None, None, None).await.unwrap();
         assert_eq!(remaining_jobs.len(), 1, "Only 1 job should remain");
         assert_eq!(
             remaining_jobs[0].app_id, "app-other",

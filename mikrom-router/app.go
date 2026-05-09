@@ -3,6 +3,7 @@ package mikrom
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -87,12 +88,27 @@ type MikromApp struct {
 	logChan chan string
 }
 
+func (m *MikromApp) getRouterIPv6(hostID string) string {
+	// DJB2 hash algorithm (simple, stable, fast)
+	var hash uint64 = 5381
+	for _, b := range []byte(hostID) {
+		hash = ((hash << 5) + hash) ^ uint64(b)
+	}
+
+	// Use 32 bits of the hash to create a 'normal' looking IPv6 (fd00::xxxx:xxxx)
+	s1 := (hash >> 16) & 0xFFFF
+	s2 := hash & 0xFFFF
+
+	return fmt.Sprintf("fd00::%x:%x", s1, s2)
+}
+
 func (m *MikromApp) runRouterHeartbeat(hostID, hostname, pubKey string) {
 	m.logger.Info("starting router heartbeat loop", zap.String("host_id", hostID))
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	subject := "mikrom.scheduler.router.heartbeat"
+	wgIPv6 := m.getRouterIPv6(hostID)
 
 	for {
 		ip := m.getOutboundIP()
@@ -101,7 +117,7 @@ func (m *MikromApp) runRouterHeartbeat(hostID, hostname, pubKey string) {
 			Hostname:        hostname,
 			IpAddress:       ip,
 			WireguardPubkey: pubKey,
-			WireguardIp:     "fd00::ace",
+			WireguardIp:     wgIPv6,
 			WireguardPort:   51822,
 		}
 
@@ -109,7 +125,7 @@ func (m *MikromApp) runRouterHeartbeat(hostID, hostname, pubKey string) {
 		if err == nil {
 			if m.nc != nil && m.nc.IsConnected() {
 				m.nc.Publish(subject, payload)
-				m.logger.Info("sent router heartbeat", zap.String("host_id", hostID))
+				m.logger.Info("sent router heartbeat", zap.String("host_id", hostID), zap.String("wg_ip", wgIPv6))
 			}
 		} else {
 			m.logger.Error("failed to marshal router heartbeat", zap.Error(err))
@@ -310,7 +326,8 @@ func (m *MikromApp) Start() error {
 
 		// WireGuard Setup
 		hostname, _ := os.Hostname()
-		hostID := "router-host-local" // Fixed ID for the router host
+		// Use a more unique ID for the router host to allow multiple instances
+		hostID := fmt.Sprintf("router-%s", hostname)
 		pubKey, err := m.wg.Init(hostID)
 		if err != nil {
 			m.logger.Error("failed to initialize WireGuard", zap.Error(err))
