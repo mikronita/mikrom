@@ -67,6 +67,7 @@ pub enum SchedulingStrategy {
     BinPacking,
 }
 
+#[mockall::automock]
 #[async_trait]
 pub trait WorkerRepository: Send + Sync {
     async fn register(&self, worker: Worker) -> DomainResult<()>;
@@ -77,6 +78,7 @@ pub trait WorkerRepository: Send + Sync {
     async fn get_available_workers(&self, threshold_secs: i64) -> DomainResult<Vec<Worker>>;
 }
 
+#[mockall::automock]
 #[async_trait]
 pub trait AgentClient: Send + Sync {
     async fn start_vm(
@@ -100,6 +102,7 @@ pub trait AgentClient: Send + Sync {
     ) -> DomainResult<()>;
 }
 
+#[mockall::automock]
 #[async_trait]
 pub trait JobRepository: Send + Sync {
     async fn add_job(&self, job: Job) -> DomainResult<()>;
@@ -118,10 +121,10 @@ pub trait JobRepository: Send + Sync {
     async fn cancel_job(&self, job_id: &str, timestamp: i64) -> DomainResult<()>;
     async fn remove_job(&self, job_id: &str) -> DomainResult<()>;
     async fn remove_jobs_by_app(&self, app_id: &str) -> DomainResult<()>;
-    async fn list_jobs(
+    async fn list_jobs<'a>(
         &self,
-        user_id: Option<&str>,
-        app_id: Option<&str>,
+        user_id: Option<&'a str>,
+        app_id: Option<&'a str>,
         status: Option<JobStatus>,
     ) -> DomainResult<Vec<Job>>;
     async fn find_job_by_vm_id(&self, vm_id: &str) -> DomainResult<Option<Job>>;

@@ -93,9 +93,32 @@ impl NatsEventLoop {
     }
 
     async fn broadcast_mesh_updates(server: SchedulerServer, client: async_nats::Client) {
+        let updates = Self::calculate_mesh_updates(&server).await;
+
+        for (host_id, update) in updates {
+            let mut buf = Vec::new();
+            if update.encode(&mut buf).is_ok() {
+                let subject = format!("mikrom.scheduler.network.mesh.{}", host_id);
+                let _ = client.publish(subject, buf.into()).await;
+            }
+        }
+    }
+
+    async fn calculate_mesh_updates(
+        server: &SchedulerServer,
+    ) -> std::collections::HashMap<String, mikrom_proto::scheduler::NetworkMeshUpdate> {
+        let mut updates = std::collections::HashMap::new();
+
         let Ok(workers) = server.app_service.worker_repo.list_workers().await else {
-            return;
+            return updates;
         };
+
+        // Filter for active workers only (last 30 seconds)
+        let now = chrono::Utc::now().timestamp();
+        let active_workers: Vec<_> = workers
+            .iter()
+            .filter(|w| now - w.last_heartbeat < 30)
+            .collect();
 
         // 1. Fetch all running jobs once and group by host_id
         let mut jobs_by_host = std::collections::HashMap::new();
@@ -115,12 +138,13 @@ impl NatsEventLoop {
             }
         }
 
-        // 2. Build and broadcast update for each worker
+        // 2. Build update for each worker (even if inactive, to tell them they are alone if they wake up)
         for w in &workers {
             let mut peers = Vec::new();
-            for peer_worker in &workers {
-                // Skip self and only include peers with a public key
-                if peer_worker.host_id == w.host_id || peer_worker.wireguard_pubkey.is_none() {
+            // Only include ACTIVE workers as peers for others
+            for peer_worker in &active_workers {
+                // Skip self
+                if peer_worker.host_id == w.host_id {
                     continue;
                 }
 
@@ -158,13 +182,13 @@ impl NatsEventLoop {
                 }
             }
 
-            let update = mikrom_proto::scheduler::NetworkMeshUpdate { peers };
-            let mut buf = Vec::new();
-            if update.encode(&mut buf).is_ok() {
-                let subject = format!("mikrom.scheduler.network.mesh.{}", w.host_id);
-                let _ = client.publish(subject, buf.into()).await;
-            }
+            updates.insert(
+                w.host_id.clone(),
+                mikrom_proto::scheduler::NetworkMeshUpdate { peers },
+            );
         }
+
+        updates
     }
 
     async fn handle_update_security_groups(&self, message: async_nats::Message) {
@@ -533,5 +557,108 @@ impl NatsEventLoop {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::AppService;
+    use crate::application::deployment::DeploymentService;
+    use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository, Worker};
+    use chrono::Utc;
+    use sqlx::PgPool;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_calculate_mesh_updates_prunes_dead_workers() {
+        let mut worker_repo = MockWorkerRepository::new();
+        let mut job_repo = MockJobRepository::new();
+
+        let now = Utc::now().timestamp();
+
+        // Active worker (10 seconds ago)
+        let active_worker = Worker {
+            host_id: "active-host".to_string(),
+            hostname: "active".to_string(),
+            ip_address: "1.1.1.1".to_string(),
+            bridge_ip: "10.0.0.1/24".to_string(),
+            wireguard_pubkey: Some("pub-active".to_string()),
+            wireguard_ip: Some("fd00::1".to_string()),
+            wireguard_port: Some(51820),
+            metrics: None,
+            registered_at: now,
+            last_heartbeat: now - 10,
+        };
+
+        // Dead worker (60 seconds ago)
+        let dead_worker = Worker {
+            host_id: "dead-host".to_string(),
+            hostname: "dead".to_string(),
+            ip_address: "2.2.2.2".to_string(),
+            bridge_ip: "10.0.0.1/24".to_string(),
+            wireguard_pubkey: Some("pub-dead".to_string()),
+            wireguard_ip: Some("fd00::2".to_string()),
+            wireguard_port: Some(51820),
+            metrics: None,
+            registered_at: now,
+            last_heartbeat: now - 60,
+        };
+
+        // Mock list_workers to return both
+        worker_repo
+            .expect_list_workers()
+            .returning(move || Ok(vec![active_worker.clone(), dead_worker.clone()]));
+
+        job_repo.expect_list_jobs().returning(|_, _, _| Ok(vec![]));
+
+        let url = "postgres://localhost/dummy";
+        let pool = PgPool::connect_lazy(url).unwrap();
+
+        let worker_repo = Arc::new(worker_repo);
+        let job_repo = Arc::new(job_repo);
+        let agent_client = Arc::new(MockAgentClient::new());
+
+        let deployment = DeploymentService::new(
+            job_repo.clone(),
+            worker_repo.clone(),
+            agent_client.clone(),
+            pool.clone(),
+        );
+
+        let app_service = Arc::new(AppService {
+            deployment,
+            worker_repo,
+            job_repo,
+            agent_client,
+            pool,
+        });
+
+        let server = SchedulerServer {
+            app_service,
+            certs: None,
+        };
+
+        let updates = NatsEventLoop::calculate_mesh_updates(&server).await;
+
+        // Verify:
+        // 1. Both workers should get an update (because they are in the list)
+        // 2. BUT the dead worker should NOT be in the peer list of the active worker
+
+        let active_update = updates
+            .get("active-host")
+            .expect("active host update missing");
+
+        let has_dead_peer = active_update.peers.iter().any(|p| p.host_id == "dead-host");
+        assert!(
+            !has_dead_peer,
+            "Dead worker should have been pruned from the mesh"
+        );
+
+        assert_eq!(
+            updates.len(),
+            2,
+            "Both workers should still be updated (though they might be alone)"
+        );
     }
 }
