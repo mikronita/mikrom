@@ -487,7 +487,7 @@ pub async fn activate_deployment_handler(
     }
 
     // Protect against concurrent flows before any scheduler interaction
-    let guard = state.try_start_flow(app.id).ok_or_else(|| {
+    let guard = state.try_start_flow(app.id.into()).ok_or_else(|| {
         ApiError::BadRequest("A deployment flow is already in progress for this application".into())
     })?;
 
@@ -665,7 +665,7 @@ pub async fn deploy_app_version_handler(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Protect against concurrent flows
-    let guard = state.try_start_flow(app.id).ok_or_else(|| {
+    let guard = state.try_start_flow(app.id.into()).ok_or_else(|| {
         ApiError::BadRequest("A deployment flow is already in progress for this application".into())
     })?;
 
@@ -773,7 +773,7 @@ pub async fn trigger_app_build(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Protect against concurrent flows
-    let guard = state.try_start_flow(app.id).ok_or_else(|| {
+    let guard = state.try_start_flow(app.id.into()).ok_or_else(|| {
         ApiError::BadRequest("A deployment flow is already in progress for this application".into())
     })?;
 

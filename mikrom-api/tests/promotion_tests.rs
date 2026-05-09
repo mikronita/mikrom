@@ -321,7 +321,7 @@ async fn test_promote_unhealthy_deployment_no_cleanup() {
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
-    let guard = state.try_start_flow(app_id).unwrap();
+    let guard = state.try_start_flow(app_id.into()).unwrap();
 
     // Start zero-downtime flow with cleanup_on_failure = false (since it was RUNNING)
     mikrom_api::deploy::service::DeploymentService::run_zero_downtime_flow(

@@ -16,6 +16,7 @@ pub mod router {
     include!("mikrom.router.v1.rs");
 }
 
+pub mod id;
 pub mod sixpn;
 pub mod subjects;
 pub mod telemetry;

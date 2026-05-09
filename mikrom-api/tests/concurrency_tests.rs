@@ -103,7 +103,9 @@ async fn test_concurrent_flows_prevented() {
     });
 
     // Start flow 1
-    let guard1 = state.try_start_flow(app.id).expect("Flow 1 should start");
+    let guard1 = state
+        .try_start_flow(app.id.into())
+        .expect("Flow 1 should start");
     mikrom_api::deploy::service::DeploymentService::run_zero_downtime_flow(
         state.clone(),
         app.clone(),
@@ -118,7 +120,7 @@ async fn test_concurrent_flows_prevented() {
     );
 
     // Start flow 2 (concurrently) - it should fail to acquire guard
-    let guard2_opt = state.try_start_flow(app.id);
+    let guard2_opt = state.try_start_flow(app.id.into());
     assert!(guard2_opt.is_none(), "Flow 2 should be prevented");
 
     // Wait a bit
