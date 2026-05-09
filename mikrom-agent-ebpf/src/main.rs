@@ -1,5 +1,5 @@
-#![no_std]
-#![no_main]
+#![cfg_attr(target_arch = "bpf", no_std)]
+#![cfg_attr(target_arch = "bpf", no_main)]
 
 use aya_ebpf::{
     macros::{classifier, map},
@@ -150,6 +150,9 @@ fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
 
     Ok(TC_ACT_OK)
 }
+
+#[cfg(not(target_arch = "bpf"))]
+fn main() {}
 
 #[cfg(target_arch = "bpf")]
 #[panic_handler]
