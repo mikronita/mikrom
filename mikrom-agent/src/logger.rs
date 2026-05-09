@@ -118,8 +118,14 @@ impl LogShipper {
 
             let formatted = match (source, is_app_log) {
                 ("stderr", true) => format!("[stderr] {message}"),
-                ("stderr", false) => format!("[system-err] {message}"),
-                ("stdout", false) => format!("[system] {message}"),
+                ("stderr", false) => {
+                    tracing::debug!(vm_id = %self.vm_id, "[system-err] {message}");
+                    format!("[system-err] {message}")
+                },
+                ("stdout", false) => {
+                    tracing::debug!(vm_id = %self.vm_id, "[system] {message}");
+                    format!("[system] {message}")
+                },
                 _ => message.clone(),
             };
             buffer.push_back(formatted);

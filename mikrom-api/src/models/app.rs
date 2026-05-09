@@ -54,6 +54,7 @@ pub struct Deployment {
     pub image_tag: Option<String>,
     pub job_id: Option<String>,
     pub ip_address: Option<String>,
+    pub ipv6_address: Option<String>,
     pub status: String,
     pub vcpus: i32,
     pub memory_mib: i64,
@@ -65,6 +66,19 @@ pub struct Deployment {
     pub git_commit_message: Option<String>,
     pub git_branch: Option<String>,
     pub trigger_source: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone, ToSchema)]
+pub struct SecurityRule {
+    pub id: Uuid,
+    pub app_id: Uuid,
+    pub protocol: String,
+    pub port_start: i32,
+    pub port_end: i32,
+    pub action: String,
+    pub priority: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

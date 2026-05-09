@@ -38,8 +38,10 @@ pub use repositories::github_repository::GithubRepository;
 pub use repositories::user_repository::UserRepository;
 pub use scheduler::Scheduler;
 pub use vms::{
-    delete_deployment_record, get_deployment_logs, get_deployment_status, list_active_deployments,
-    pause_deployment, resume_deployment, stop_deployment, watch_deployments,
+    create_security_rule_handler, delete_deployment_record, delete_security_rule_handler,
+    get_deployment_logs, get_deployment_status, get_mesh_status_handler, list_active_deployments,
+    list_security_rules_handler, pause_deployment, resume_deployment, stop_deployment,
+    watch_deployments,
 };
 
 use mikrom_proto::router::RouterConfigUpdate;
@@ -106,13 +108,18 @@ impl AppState {
 
         let target_url = if let Some(dep_id) = app.active_deployment_id {
             if let Some(dep) = self.app_repo.get_deployment(dep_id).await? {
-                if let Some(ip) = dep.ip_address {
-                    let formatted_ip = if ip.contains(':') && !ip.contains('[') {
-                        format!("[{}]", ip)
+                let ip = if let Some(ipv6) = dep.ipv6_address {
+                    if !ipv6.is_empty() {
+                        Some(format!("[{}]", ipv6))
                     } else {
-                        ip.to_string()
-                    };
-                    Some(format!("http://{}:{}", formatted_ip, dep.port))
+                        dep.ip_address.clone()
+                    }
+                } else {
+                    dep.ip_address.clone()
+                };
+
+                if let Some(ip_addr) = ip {
+                    Some(format!("http://{}:{}", ip_addr, dep.port))
                 } else {
                     None
                 }
@@ -253,6 +260,15 @@ pub fn create_app(state: AppState) -> Router {
             "/apps/:app_name/deployments/:job_id/delete",
             axum::routing::delete(delete_deployment_record),
         )
+        .route(
+            "/apps/:app_name/security-groups",
+            get(list_security_rules_handler).post(create_security_rule_handler),
+        )
+        .route(
+            "/apps/:app_name/security-groups/:rule_id",
+            axum::routing::delete(delete_security_rule_handler),
+        )
+        .route("/networking/mesh", get(get_mesh_status_handler))
         .route("/deployments/active", get(list_active_deployments))
         .route("/deployments/events", get(watch_deployments));
 

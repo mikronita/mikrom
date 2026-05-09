@@ -5,8 +5,7 @@ members = [
     "mikrom-agent",
     "mikrom-api",
     "mikrom-cli", "mikrom-builder", "mikrom-init", "mikrom-telemetry"
-]
-exclude = ["ngx-rust"]
+, "mikrom-agent-ebpf-common", "mikrom-agent-ebpf"]
 resolver = "2"
 
 [workspace.dependencies]

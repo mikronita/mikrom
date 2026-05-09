@@ -56,6 +56,8 @@ pub struct VmConfig {
     pub env: std::collections::HashMap<String, String>,
     pub ip_address: Option<String>,
     pub gateway: Option<String>,
+    pub ipv6_address: Option<String>,
+    pub ipv6_gateway: Option<String>,
     pub mac_address: Option<String>,
     pub netmask: Option<String>,
     pub volumes: Vec<Volume>,

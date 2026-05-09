@@ -109,6 +109,7 @@ impl AppScheduler {
                 ram_used_bytes,
                 user_id: job.user_id,
                 deployment_id: job.deployment_id.unwrap_or_default(),
+                ipv6_address: job.config.ipv6_address.unwrap_or_default(),
             };
 
             let mut buf = Vec::new();

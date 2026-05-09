@@ -13,12 +13,24 @@ use mikrom_api::AppState;
 use mikrom_api::create_app;
 use mikrom_api::models::app::{App, Deployment};
 use mikrom_api::repositories::app_repository::UpdateDeploymentParams;
+use mikrom_api::repositories::user_repository::{User, UserRole};
 use mikrom_api::repositories::{MockAppRepository, MockUserRepository};
 use mikrom_api::scheduler::MockScheduler;
 
 #[tokio::test]
 async fn test_promotion_back_and_forth() {
-    let mock_user_repo = MockUserRepository::new();
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(|id| {
+        Ok(Some(User {
+            id,
+            email: "test@example.com".into(),
+            password_hash: "hash".into(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
     let mut mock_app_repo = MockAppRepository::new();
     let mut mock_scheduler = MockScheduler::new();
 
@@ -245,7 +257,18 @@ async fn test_promotion_back_and_forth() {
 
 #[tokio::test]
 async fn test_promotion_pauses_previous_active() {
-    let mock_user_repo = MockUserRepository::new();
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(|id| {
+        Ok(Some(User {
+            id,
+            email: "test@example.com".into(),
+            password_hash: "hash".into(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
     let mut mock_app_repo = MockAppRepository::new();
     let mut mock_scheduler = MockScheduler::new();
 
@@ -418,7 +441,18 @@ async fn test_promotion_pauses_previous_active() {
 
 #[tokio::test]
 async fn test_activate_stopped_deployment_resumes_it() {
-    let mock_user_repo = MockUserRepository::new();
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(|id| {
+        Ok(Some(User {
+            id,
+            email: "test@example.com".into(),
+            password_hash: "hash".into(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
     let mut mock_app_repo = MockAppRepository::new();
     let mut mock_scheduler = MockScheduler::new();
 
@@ -617,7 +651,18 @@ async fn test_activate_stopped_deployment_resumes_it() {
 
 #[tokio::test]
 async fn test_delete_app_cleans_up_resources() {
-    let mock_user_repo = MockUserRepository::new();
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(|id| {
+        Ok(Some(User {
+            id,
+            email: "test@example.com".into(),
+            password_hash: "hash".into(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
     let mut mock_app_repo = MockAppRepository::new();
     let mut mock_scheduler = MockScheduler::new();
 

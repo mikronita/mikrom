@@ -1,0 +1,130 @@
+#![no_std]
+#![no_main]
+
+use aya_ebpf::{
+    macros::{classifier, map},
+    maps::HashMap,
+    programs::TcContext,
+};
+use mikrom_agent_ebpf_common::{FirewallRule, NetworkStats};
+use network_types::{
+    eth::{EthHdr, EtherType},
+    ip::IpProto,
+    ip::Ipv6Hdr,
+    tcp::TcpHdr,
+    udp::UdpHdr,
+};
+
+#[map]
+static STATS: HashMap<u32, NetworkStats> = HashMap::with_max_entries(1024, 0);
+
+#[map]
+static RULES: HashMap<u32, FirewallRule> = HashMap::with_max_entries(16384, 0);
+
+const TC_ACT_OK: i32 = 0;
+const TC_ACT_SHOT: i32 = 2;
+
+#[classifier]
+pub fn mikrom_ingress(ctx: TcContext) -> i32 {
+    let len = ctx.len() as u64;
+    let ifindex = unsafe { (*ctx.skb.skb).ifindex };
+
+    if let Some(stats) = STATS.get_ptr_mut(&ifindex) {
+        unsafe {
+            (*stats).tx_bytes += len;
+        }
+    } else {
+        let initial = NetworkStats {
+            tx_bytes: len,
+            rx_bytes: 0,
+        };
+        let _ = STATS.insert(&ifindex, &initial, 0);
+    }
+
+    TC_ACT_OK
+}
+
+#[classifier]
+pub fn mikrom_egress(ctx: TcContext) -> i32 {
+    let len = ctx.len() as u64;
+    let ifindex = unsafe { (*ctx.skb.skb).ifindex };
+
+    if let Some(stats) = STATS.get_ptr_mut(&ifindex) {
+        unsafe {
+            (*stats).rx_bytes += len;
+        }
+    } else {
+        let initial = NetworkStats {
+            tx_bytes: 0,
+            rx_bytes: len,
+        };
+        let _ = STATS.insert(&ifindex, &initial, 0);
+    }
+
+    match try_mikrom_egress(ctx, ifindex) {
+        Ok(ret) => ret,
+        Err(_) => TC_ACT_SHOT,
+    }
+}
+
+fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
+    let ethhdr: EthHdr = ctx.load(0).map_err(|_| ())?;
+    match ethhdr.ether_type {
+        EtherType::Ipv6 => {},
+        _ => return Ok(TC_ACT_OK),
+    }
+
+    // TODO: Handle IPv6 extension headers (Fragment, Hop-by-Hop, etc.)
+    // Current implementation only parses the fixed header.
+    let ipv6hdr: Ipv6Hdr = ctx.load(EthHdr::LEN).map_err(|_| ())?;
+    let protocol = ipv6hdr.next_hdr;
+    let dst_port = match protocol {
+        IpProto::Tcp => {
+            let tcphdr: TcpHdr = ctx.load(EthHdr::LEN + Ipv6Hdr::LEN).map_err(|_| ())?;
+            u16::from_be(tcphdr.dest)
+        },
+        IpProto::Udp => {
+            let udphdr: UdpHdr = ctx.load(EthHdr::LEN + Ipv6Hdr::LEN).map_err(|_| ())?;
+            u16::from_be(udphdr.dest)
+        },
+        _ => 0,
+    };
+
+    let mut has_rules = false;
+    let mut allowed = false;
+
+    for i in 0..16 {
+        let key = (ifindex << 4) | i;
+        let rule = unsafe { RULES.get(&key) };
+        if let Some(rule) = rule {
+            has_rules = true;
+
+            // Match protocol
+            if rule.protocol != 0 && rule.protocol != (protocol as u8) {
+                continue;
+            }
+
+            // Match port
+            if rule.port_start != 0 && (dst_port < rule.port_start || dst_port > rule.port_end) {
+                continue;
+            }
+
+            if rule.action == 1 {
+                allowed = true;
+                break;
+            }
+        }
+    }
+
+    if has_rules && !allowed {
+        return Ok(TC_ACT_SHOT);
+    }
+
+    Ok(TC_ACT_OK)
+}
+
+#[cfg(target_arch = "bpf")]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}

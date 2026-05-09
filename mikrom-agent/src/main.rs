@@ -3,6 +3,15 @@ use mikrom_agent::server::AgentServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+    if std::env::var("RUST_LOG").is_err()
+        && let Ok(level) = std::env::var("LOG_LEVEL")
+    {
+        unsafe {
+            std::env::set_var("RUST_LOG", level);
+        }
+    }
+
     let config = AgentConfig::load()?;
 
     mikrom_proto::telemetry::init_telemetry("mikrom-agent", env!("CARGO_PKG_VERSION"), None)?;

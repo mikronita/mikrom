@@ -78,6 +78,7 @@ async fn test_deployment_metadata_roundtrip() {
                 image_tag: Some("img:v2".to_string()),
                 build_id: Some("build-xyz".to_string()),
                 ip_address: Some("192.168.1.100".to_string()),
+                ipv6_address: None,
                 git_commit_hash: Some(commit_hash.to_string()),
                 git_commit_message: Some(commit_msg.to_string()),
                 git_branch: Some(branch.to_string()),

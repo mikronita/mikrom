@@ -3,16 +3,20 @@ package mikrom
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
+	schedulerv1 "github.com/antpard/mikrom/mikrom-router/proto/scheduler/v1"
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 func init() {
@@ -75,11 +79,90 @@ type MikromApp struct {
 
 	pool   *pgxpool.Pool
 	nc     *nats.Conn
+	wg     *WireGuardManager
 	ctx    context.Context
 	cancel context.CancelFunc
 	logger *zap.Logger
 
 	logChan chan string
+}
+
+func (m *MikromApp) runRouterHeartbeat(hostID, hostname, pubKey string) {
+	m.logger.Info("starting router heartbeat loop", zap.String("host_id", hostID))
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	subject := "mikrom.scheduler.router.heartbeat"
+
+	for {
+		ip := m.getOutboundIP()
+		heartbeat := &schedulerv1.RouterHeartbeat{
+			HostId:          hostID,
+			Hostname:        hostname,
+			IpAddress:       ip,
+			WireguardPubkey: pubKey,
+			WireguardIp:     "fd00::ace",
+			WireguardPort:   51822,
+		}
+
+		payload, err := proto.Marshal(heartbeat)
+		if err == nil {
+			if m.nc != nil && m.nc.IsConnected() {
+				m.nc.Publish(subject, payload)
+				m.logger.Info("sent router heartbeat", zap.String("host_id", hostID))
+			}
+		} else {
+			m.logger.Error("failed to marshal router heartbeat", zap.Error(err))
+		}
+
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (m *MikromApp) getOutboundIP() string {
+	// 1. Try to find an IP in the 192.168.122.0/24 range first
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, i := range ifaces {
+			addrs, err := i.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				var ip net.IP
+				match := false
+				switch v := addr.(type) {
+				case *net.IPNet:
+					ip = v.IP
+				case *net.IPAddr:
+					ip = v.IP
+				}
+				if ip != nil && !ip.IsLoopback() && ip.To4() != nil {
+					ip4 := ip.To4()
+					if ip4[0] == 192 && ip4[1] == 168 && ip4[2] == 122 {
+						match = true
+					}
+				}
+				if match {
+					return ip.String()
+				}
+			}
+		}
+	}
+
+	// 2. Fallback to generic outbound detection
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "127.0.0.1"
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
 }
 
 type LogEntry struct {
@@ -143,6 +226,7 @@ func (m *MikromApp) Provision(ctx caddy.Context) error {
 	m.logger = ctx.Logger()
 	m.ctx, m.cancel = context.WithCancel(ctx)
 	m.logChan = make(chan string, 1000)
+	m.wg = NewWireGuardManager("wg-mikrom", m.logger)
 
 	if m.NatsURL == "" {
 		m.NatsURL = nats.DefaultURL
@@ -223,6 +307,16 @@ func (m *MikromApp) Start() error {
 
 		// Start NATS listeners
 		m.listenForUpdates()
+
+		// WireGuard Setup
+		hostname, _ := os.Hostname()
+		hostID := "router-host-local" // Fixed ID for the router host
+		pubKey, err := m.wg.Init(hostID)
+		if err != nil {
+			m.logger.Error("failed to initialize WireGuard", zap.Error(err))
+		} else {
+			go m.runRouterHeartbeat(hostID, hostname, pubKey)
+		}
 	}()
 
 	return nil

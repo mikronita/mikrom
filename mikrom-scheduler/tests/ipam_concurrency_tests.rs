@@ -13,11 +13,12 @@ async fn test_concurrent_ip_allocation() {
     let bridge_ip = "10.0.0.1/24";
 
     // Register worker first (needed for foreign key)
-    sqlx::query("INSERT INTO workers (id, hostname, ip_address, bridge_ip, last_heartbeat, registered_at) VALUES ($1, $2, $3, $4, $5, $6)")
+    sqlx::query("INSERT INTO workers (id, hostname, ip_address, bridge_ip, wireguard_pubkey, last_heartbeat, registered_at) VALUES ($1, $2, $3, $4, $5, $6, $7)")
         .bind(&worker_id)
         .bind("test-host")
         .bind("1.2.3.4")
         .bind(bridge_ip)
+        .bind(None::<String>)
         .bind(chrono::Utc::now().timestamp())
         .bind(chrono::Utc::now().timestamp())
         .execute(&pool)
@@ -35,7 +36,7 @@ async fn test_concurrent_ip_allocation() {
         let pool_clone = pool.clone();
         let job_id_clone = job_id.clone();
         tokio::spawn(async move {
-            sqlx::query("INSERT INTO jobs (job_id, app_id, app_name, image, user_id, status, created_at, vcpus, memory_mib, disk_mib, port) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)")
+            sqlx::query("INSERT INTO jobs (job_id, app_id, app_name, image, user_id, status, created_at, vcpus, memory_mib, disk_mib, port, health_check_path) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)")
                 .bind(&job_id_clone)
                 .bind("app-1")
                 .bind("test")
@@ -47,6 +48,7 @@ async fn test_concurrent_ip_allocation() {
                 .bind(128)
                 .bind(512)
                 .bind(80)
+                .bind("/")
                 .execute(&pool_clone)
                 .await.unwrap();
         }).await.unwrap();

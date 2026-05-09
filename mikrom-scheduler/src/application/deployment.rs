@@ -38,13 +38,23 @@ impl DeploymentService {
         image: String,
         user_id: String,
         deployment_id: String,
-        config: VmConfig,
+        vpc_ipv6_prefix: String,
+        mut config: VmConfig,
         strategy: SchedulingStrategy,
     ) -> DomainResult<Job> {
         let job_id = Uuid::new_v4().to_string();
         let vm_id = Uuid::new_v4().to_string();
 
-        // 1. Select best worker
+        // 1. Allocate 6PN IPv6 if possible
+        if !vpc_ipv6_prefix.is_empty()
+            && let Ok(prefix) = vpc_ipv6_prefix.parse::<std::net::Ipv6Addr>()
+        {
+            let ipv6 = mikrom_proto::sixpn::SixPn::allocate_vm_ipv6(prefix, &job_id);
+            config.ipv6_address = Some(ipv6.to_string());
+            config.ipv6_gateway = Some("fe80::1".to_string());
+        }
+
+        // 2. Select best worker
         let worker = self.select_best_worker(&config, &app_id, strategy).await?;
         let host_id = worker.host_id.clone();
 

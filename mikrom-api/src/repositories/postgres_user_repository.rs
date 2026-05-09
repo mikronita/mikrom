@@ -17,14 +17,16 @@ impl PostgresUserRepository {
 #[async_trait]
 impl UserRepository for PostgresUserRepository {
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError> {
-        let result = sqlx::query_as::<_, (sqlx::types::Uuid, String, String, String, Option<String>, Option<String>)>(
-            "SELECT id, email, password_hash, role, first_name, last_name FROM users WHERE email = $1",
+        let result = sqlx::query_as::<_, (sqlx::types::Uuid, String, String, String, Option<String>, Option<String>, Option<String>)>(
+            "SELECT id, email, password_hash, role, first_name, last_name, vpc_ipv6_prefix FROM users WHERE email = $1",
         )
         .bind(email)
         .fetch_optional(&self.pool)
         .await?;
 
-        if let Some((id, email, password_hash, role_str, first_name, last_name)) = result {
+        if let Some((id, email, password_hash, role_str, first_name, last_name, vpc_ipv6_prefix)) =
+            result
+        {
             let role = match role_str.as_str() {
                 "admin" => UserRole::Admin,
                 _ => UserRole::User,
@@ -36,6 +38,7 @@ impl UserRepository for PostgresUserRepository {
                 role,
                 first_name,
                 last_name,
+                vpc_ipv6_prefix,
             }))
         } else {
             Ok(None)
@@ -52,15 +55,18 @@ impl UserRepository for PostgresUserRepository {
                 String,
                 Option<String>,
                 Option<String>,
+                Option<String>,
             ),
         >(
-            "SELECT id, email, password_hash, role, first_name, last_name FROM users WHERE id = $1",
+            "SELECT id, email, password_hash, role, first_name, last_name, vpc_ipv6_prefix FROM users WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
 
-        if let Some((id, email, password_hash, role_str, first_name, last_name)) = result {
+        if let Some((id, email, password_hash, role_str, first_name, last_name, vpc_ipv6_prefix)) =
+            result
+        {
             let role = match role_str.as_str() {
                 "admin" => UserRole::Admin,
                 _ => UserRole::User,
@@ -72,6 +78,7 @@ impl UserRepository for PostgresUserRepository {
                 role,
                 first_name,
                 last_name,
+                vpc_ipv6_prefix,
             }))
         } else {
             Ok(None)
@@ -84,13 +91,17 @@ impl UserRepository for PostgresUserRepository {
             UserRole::Admin => "admin",
             UserRole::User => "user",
         };
-        let result = sqlx::query("INSERT INTO users (id, email, password_hash, role, first_name, last_name) VALUES ($1, $2, $3, $4, $5, $6)")
+
+        let vpc_prefix = mikrom_proto::sixpn::SixPn::generate_vpc_prefix(id).to_string();
+
+        let result = sqlx::query("INSERT INTO users (id, email, password_hash, role, first_name, last_name, vpc_ipv6_prefix) VALUES ($1, $2, $3, $4, $5, $6, $7)")
             .bind(id)
             .bind(&user.email)
             .bind(&user.password_hash)
             .bind(role_str)
             .bind(&user.first_name)
             .bind(&user.last_name)
+            .bind(vpc_prefix)
             .execute(&self.pool)
             .await;
 
@@ -134,10 +145,11 @@ impl UserRepository for PostgresUserRepository {
                 String,
                 Option<String>,
                 Option<String>,
+                Option<String>,
             ),
         >(
             "UPDATE users SET first_name = COALESCE($1, first_name), last_name = COALESCE($2, last_name) \
-             WHERE id = $3 RETURNING id, email, password_hash, role, first_name, last_name",
+             WHERE id = $3 RETURNING id, email, password_hash, role, first_name, last_name, vpc_ipv6_prefix",
         )
         .bind(first_name)
         .bind(last_name)
@@ -145,7 +157,7 @@ impl UserRepository for PostgresUserRepository {
         .fetch_one(&self.pool)
         .await?;
 
-        let (id, email, password_hash, role_str, first_name, last_name) = result;
+        let (id, email, password_hash, role_str, first_name, last_name, vpc_ipv6_prefix) = result;
         let role = match role_str.as_str() {
             "admin" => UserRole::Admin,
             _ => UserRole::User,
@@ -158,6 +170,7 @@ impl UserRepository for PostgresUserRepository {
             role,
             first_name,
             last_name,
+            vpc_ipv6_prefix,
         })
     }
 }

@@ -1,5 +1,4 @@
 pub mod ipam;
-pub mod sixpn_ipam;
 
 use crate::domain::{
     DomainResult, HostMetrics, Job, JobRepository, JobStatus, VmConfig, Worker, WorkerRepository,
@@ -29,8 +28,9 @@ impl JobRepository for PgJobRepository {
             INSERT INTO jobs (
                 job_id, app_id, app_name, image, user_id, status, host_id, vm_id,
                 vcpus, memory_mib, disk_mib, port, env_vars, ip_address, gateway,
-                mac_address, netmask, created_at, deployment_id, health_check_path
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+                mac_address, netmask, created_at, deployment_id, health_check_path,
+                ipv6_address, ipv6_gateway
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
             "#
         )
         .bind(&job.job_id)
@@ -53,6 +53,8 @@ impl JobRepository for PgJobRepository {
         .bind(job.created_at)
         .bind(&job.deployment_id)
         .bind(&job.config.health_check_path)
+        .bind(&job.config.ipv6_address)
+        .bind(&job.config.ipv6_gateway)
         .execute(&self.pool)
         .await?;
 
@@ -209,19 +211,26 @@ impl WorkerRepository for PgWorkerRepository {
         // Upsert the worker
         sqlx::query(
             r#"
-            INSERT INTO workers (id, hostname, ip_address, bridge_ip, last_heartbeat, registered_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO workers (id, hostname, ip_address, bridge_ip, wireguard_pubkey, wireguard_ip, wireguard_port, last_heartbeat, registered_at, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Online')
             ON CONFLICT (id) DO UPDATE SET
                 hostname = EXCLUDED.hostname,
                 ip_address = EXCLUDED.ip_address,
                 bridge_ip = EXCLUDED.bridge_ip,
-                last_heartbeat = EXCLUDED.last_heartbeat
+                wireguard_pubkey = EXCLUDED.wireguard_pubkey,
+                wireguard_ip = EXCLUDED.wireguard_ip,
+                wireguard_port = EXCLUDED.wireguard_port,
+                last_heartbeat = EXCLUDED.last_heartbeat,
+                status = 'Online'
             "#,
         )
         .bind(&worker.host_id)
         .bind(&worker.hostname)
         .bind(&worker.ip_address)
         .bind(&worker.bridge_ip)
+        .bind(&worker.wireguard_pubkey)
+        .bind(&worker.wireguard_ip)
+        .bind(worker.wireguard_port.unwrap_or(51820))
         .bind(now)
         .bind(now)
         .execute(&self.pool)
@@ -260,7 +269,7 @@ impl WorkerRepository for PgWorkerRepository {
 
     async fn get_worker(&self, host_id: &str) -> DomainResult<Option<Worker>> {
         let row = sqlx::query(
-            "SELECT id, hostname, ip_address, bridge_ip, metrics, registered_at, last_heartbeat FROM workers WHERE id = $1"
+            "SELECT id, hostname, ip_address, bridge_ip, wireguard_pubkey, wireguard_ip, wireguard_port, metrics, registered_at, last_heartbeat FROM workers WHERE id = $1"
         )
         .bind(host_id)
         .fetch_optional(&self.pool)
@@ -275,7 +284,7 @@ impl WorkerRepository for PgWorkerRepository {
 
     async fn list_workers(&self) -> DomainResult<Vec<Worker>> {
         let rows = sqlx::query(
-            "SELECT id, hostname, ip_address, bridge_ip, metrics, registered_at, last_heartbeat FROM workers"
+            "SELECT id, hostname, ip_address, bridge_ip, wireguard_pubkey, wireguard_ip, wireguard_port, metrics, registered_at, last_heartbeat FROM workers"
         )
         .fetch_all(&self.pool)
         .await?;
@@ -289,7 +298,7 @@ impl WorkerRepository for PgWorkerRepository {
 
         let rows = sqlx::query(
             r#"
-            SELECT id, hostname, ip_address, bridge_ip, metrics, registered_at, last_heartbeat
+            SELECT id, hostname, ip_address, bridge_ip, wireguard_pubkey, wireguard_ip, wireguard_port, metrics, registered_at, last_heartbeat
             FROM workers
             WHERE metrics IS NOT NULL AND last_heartbeat > $1 AND status = 'Online'
             "#,
@@ -341,6 +350,8 @@ fn map_row_to_job(r: &sqlx::postgres::PgRow) -> Job {
             gateway: r.get("gateway"),
             mac_address: r.get("mac_address"),
             netmask: r.get("netmask"),
+            ipv6_address: r.get("ipv6_address"),
+            ipv6_gateway: r.get("ipv6_gateway"),
             volumes: vec![], // TODO: Volumes
             health_check_path: r.get("health_check_path"),
         },
@@ -355,6 +366,9 @@ fn map_row_to_worker(r: &sqlx::postgres::PgRow) -> Worker {
         hostname: r.get("hostname"),
         ip_address: r.get("ip_address"),
         bridge_ip: r.get::<String, _>("bridge_ip").clone(),
+        wireguard_pubkey: r.get("wireguard_pubkey"),
+        wireguard_ip: r.get("wireguard_ip"),
+        wireguard_port: r.try_get("wireguard_port").ok(),
         metrics,
         registered_at: r.get("registered_at"),
         last_heartbeat: r.get("last_heartbeat"),

@@ -16,6 +16,8 @@ pub struct VmMetrics {
     pub error_message: Option<String>,
     pub ip_address: Option<String>,
     pub firecracker_metrics: Option<serde_json::Value>,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -170,6 +172,21 @@ impl MetricsCollector {
                 fc_metrics = Some(json);
             }
 
+            // Tertiary: Get Network Stats from eBPF
+            let mut tx_bytes = 0;
+            let mut rx_bytes = 0;
+            if let Some(ifindex) = vm.tap_ifindex
+                && let Some(mgr) = &self.firecracker
+            {
+                let ebpf = mgr.ebpf_manager.lock().await;
+                if let Some(ebpf) = ebpf.as_ref()
+                    && let Some(stats) = ebpf.get_stats(ifindex)
+                {
+                    tx_bytes = stats.tx_bytes;
+                    rx_bytes = stats.rx_bytes;
+                }
+            }
+
             vms.insert(
                 vm.vm_id.clone(),
                 VmMetrics {
@@ -181,6 +198,8 @@ impl MetricsCollector {
                     error_message: vm.error_message,
                     ip_address: vm.ip_address,
                     firecracker_metrics: fc_metrics,
+                    tx_bytes,
+                    rx_bytes,
                 },
             );
         }
@@ -375,12 +394,16 @@ mod tests {
             error_message: None,
             ip_address: Some("10.0.0.1".to_string()),
             firecracker_metrics: None,
+            tx_bytes: 100,
+            rx_bytes: 200,
         };
         let json = serde_json::to_string(&vm).unwrap();
         let val: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(val["app_id"], "app-123");
         assert_eq!(val["vm_id"], "vm-456");
         assert_eq!(val["cpu_usage"], 0.5);
+        assert_eq!(val["tx_bytes"], 100);
+        assert_eq!(val["rx_bytes"], 200);
     }
 
     #[test]
@@ -466,6 +489,7 @@ mod tests {
                     socket_path: format!("{}/fake.sock", mgr.fc_config.data_dir),
                     metrics_path: Some(metrics_file.clone()),
                     tap_name: None,
+                    tap_ifindex: None,
                     log_task,
                     chroot_dir: None,
                 },

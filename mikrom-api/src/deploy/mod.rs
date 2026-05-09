@@ -109,6 +109,18 @@ pub async fn deploy_app(
         }));
     }
 
+    let user_id_uuid = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| ApiError::BadRequest("Invalid user ID format".to_string()))?;
+
+    let user = state
+        .user_repo
+        .find_by_id(user_id_uuid)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+    let vpc_ipv6_prefix = user.vpc_ipv6_prefix.unwrap_or_default();
+
     let nats_req = mikrom_proto::scheduler::DeployRequest {
         app_id: Uuid::new_v4().to_string(),
         app_name: payload.app_name.clone(),
@@ -125,8 +137,11 @@ pub async fn deploy_app(
             mac_address: String::new(),
             volumes: vec![],
             health_check_path: "/".to_string(),
+            ipv6_address: String::new(),
+            ipv6_gateway: String::new(),
         }),
         deployment_id: String::new(), // Not applicable for one-off deploy
+        vpc_ipv6_prefix,
     };
 
     tracing::info!("Sending deployment request via NATS (Protobuf)...");

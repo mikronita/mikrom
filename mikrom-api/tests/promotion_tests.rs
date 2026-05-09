@@ -1,6 +1,7 @@
 use futures::StreamExt;
 use mikrom_api::AppState;
 use mikrom_api::models::app::{App, Deployment};
+use mikrom_api::repositories::user_repository::{User, UserRole};
 use mikrom_api::repositories::{MockAppRepository, MockGithubRepository, MockUserRepository};
 use mikrom_api::scheduler::MockScheduler;
 use mikrom_proto::scheduler::DeployResponse;
@@ -160,8 +161,21 @@ async fn test_promote_stopped_deployment_resumes_it() {
         }
     });
 
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(|id| {
+        Ok(Some(User {
+            id,
+            email: "test@example.com".into(),
+            password_hash: "hash".into(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
+
     let state = AppState {
-        user_repo: Arc::new(MockUserRepository::new()),
+        user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
@@ -272,8 +286,21 @@ async fn test_promote_unhealthy_deployment_no_cleanup() {
         }
     });
 
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(|id| {
+        Ok(Some(User {
+            id,
+            email: "test@example.com".into(),
+            password_hash: "hash".into(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
+
     let state = AppState {
-        user_repo: Arc::new(MockUserRepository::new()),
+        user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),

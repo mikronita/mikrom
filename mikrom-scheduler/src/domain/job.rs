@@ -44,6 +44,8 @@ pub struct VmConfig {
     pub gateway: Option<String>,
     pub mac_address: Option<String>,
     pub netmask: Option<String>,
+    pub ipv6_address: Option<String>,
+    pub ipv6_gateway: Option<String>,
     pub volumes: Vec<Volume>,
     pub health_check_path: String,
 }
@@ -60,6 +62,8 @@ impl Default for VmConfig {
             gateway: None,
             mac_address: None,
             netmask: None,
+            ipv6_address: None,
+            ipv6_gateway: None,
             volumes: vec![],
             health_check_path: "/".to_string(),
         }

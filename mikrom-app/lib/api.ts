@@ -32,6 +32,7 @@ export interface UserProfile {
   role: string;
   first_name: string | null;
   last_name: string | null;
+  vpc_ipv6_prefix: string | null;
 }
 
 export interface UpdateProfileRequest {
@@ -58,6 +59,7 @@ export interface LiveDeploymentInfo {
   memory_mib?: number;
   cpu_usage?: number;
   ram_used_bytes?: number;
+  ipv6_address?: string;
 }
 
 export interface LiveDeploymentStatus {
@@ -149,7 +151,14 @@ export interface DeploymentInfo {
   build_id: string | null;
   image_tag: string | null;
   job_id: string | null;
+  ip_address: string | null;
+  ipv6_address: string | null;
   status: string;
+  vcpus: number;
+  memory_mib: number;
+  disk_mib: number;
+  port: number;
+  env_vars?: Record<string, string>;
   git_commit_hash: string | null;
   git_commit_message: string | null;
   git_branch: string | null;
@@ -466,6 +475,92 @@ export async function getVmMetrics(token: string, appName: string, jobId: string
   }
 }
 
+
+export interface SecurityRule {
+  id: string;
+  app_id: string;
+  protocol: string;
+  port_start: number;
+  port_end: number;
+  action: string;
+  priority: number;
+  created_at: string;
+}
+
+export interface CreateSecurityRuleRequest {
+  protocol: string;
+  port_start: number;
+  port_end: number;
+  action: string;
+}
+
+export interface MeshWorker {
+  id: string;
+  hostname: string;
+  ip_address: string;
+  wireguard_pubkey: string;
+  last_seen_at: string;
+}
+
+export interface MeshStatus {
+  total_workers: number;
+  workers: MeshWorker[];
+}
+
+export async function getMeshStatus(token: string): Promise<{ data?: MeshStatus; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/networking/mesh`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<MeshStatus>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch mesh status") };
+    return { data: result as MeshStatus };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function listSecurityRules(token: string, appName: string): Promise<{ data?: SecurityRule[]; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/security-groups`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<SecurityRule[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch security rules") };
+    return { data: result as SecurityRule[] };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function createSecurityRule(token: string, appName: string, data: CreateSecurityRuleRequest): Promise<{ data?: SecurityRule; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/security-groups`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<SecurityRule>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create security rule") };
+    return { data: result as SecurityRule };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function deleteSecurityRule(token: string, appName: string, ruleId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apps/${appName}/security-groups/${ruleId}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to delete security rule") };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Network error" };
+  }
+}
 
 export async function listApps(token: string): Promise<{ data?: AppInfo[]; error?: string }> {
   try {

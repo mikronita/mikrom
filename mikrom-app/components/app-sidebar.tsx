@@ -8,7 +8,9 @@ import {
   HiCog, 
   HiLogout, 
   HiCube,
-  HiCollection
+  HiCollection,
+  HiShieldCheck,
+  HiServer
 } from "react-icons/hi";
 import { ChevronsUpDown } from "lucide-react";
 import { logout, getToken } from "@/lib/auth";
@@ -61,6 +63,7 @@ export function AppSidebar() {
   const navigation = [
     { name: "Dashboard", href: "/", icon: HiChartPie, active: pathname === "/" },
     { name: "Applications", href: "/apps", icon: HiCollection, active: pathname.startsWith("/apps") },
+    { name: "Networking", href: "/networking", icon: HiShieldCheck, active: pathname.startsWith("/networking") },
     { name: "Settings", href: "/settings", icon: HiCog, active: pathname === "/settings" },
   ];
 
