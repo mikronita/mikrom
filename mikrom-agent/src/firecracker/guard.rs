@@ -8,6 +8,7 @@ pub struct VmStartupGuard {
     pub vm_id: String,
     pub child: Option<Child>,
     pub tap_name: Option<String>,
+    pub tap_ifindex: Option<u32>,
     pub chroot_dir: Option<PathBuf>,
     pub log_task: Option<JoinHandle<()>>,
     pub socket_path: PathBuf,
@@ -21,6 +22,7 @@ impl VmStartupGuard {
             vm_id,
             child: None,
             tap_name: None,
+            tap_ifindex: None,
             chroot_dir: None,
             log_task: None,
             socket_path,
@@ -41,6 +43,7 @@ impl VmStartupGuard {
             socket_path: self.socket_path.to_string_lossy().to_string(),
             metrics_path: self.metrics_path.take(),
             tap_name: self.tap_name.take(),
+            tap_ifindex: self.tap_ifindex,
             log_task: self.log_task.take().expect("Log task must exist at commit"),
             chroot_dir: self
                 .chroot_dir

@@ -11,12 +11,24 @@ use uuid::Uuid;
 use mikrom_api::AppState;
 use mikrom_api::create_app;
 use mikrom_api::models::app::{App, Deployment};
+use mikrom_api::repositories::user_repository::{User, UserRole};
 use mikrom_api::repositories::{MockAppRepository, MockUserRepository};
 use mikrom_api::test_utils::TestDb;
 
 #[tokio::test]
 async fn test_activate_deployment_endpoint() {
-    let mock_user_repo = MockUserRepository::new();
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(|id| {
+        Ok(Some(User {
+            id,
+            email: "test@example.com".into(),
+            password_hash: "hash".into(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
     let mut mock_app_repo = MockAppRepository::new();
     let db = TestDb::new().await;
     let db_pool = db.pool().clone();
@@ -57,6 +69,7 @@ async fn test_activate_deployment_endpoint() {
         image_tag: None,
         job_id: None,
         ip_address: None,
+        ipv6_address: None,
         status: "RUNNING".to_string(),
         vcpus: 1,
         memory_mib: 256,
@@ -150,7 +163,18 @@ async fn test_activate_deployment_endpoint() {
 
 #[tokio::test]
 async fn test_activate_deployment_wrong_owner() {
-    let mock_user_repo = MockUserRepository::new();
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(|id| {
+        Ok(Some(User {
+            id,
+            email: "test@example.com".into(),
+            password_hash: "hash".into(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
     let mut mock_app_repo = MockAppRepository::new();
 
     let user_id = Uuid::new_v4();
@@ -225,7 +249,18 @@ async fn test_activate_deployment_wrong_owner() {
 
 #[tokio::test]
 async fn test_activate_deployment_not_running() {
-    let mock_user_repo = MockUserRepository::new();
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(|id| {
+        Ok(Some(User {
+            id,
+            email: "test@example.com".into(),
+            password_hash: "hash".into(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
     let mut mock_app_repo = MockAppRepository::new();
 
     let user_id = Uuid::new_v4();
@@ -259,6 +294,7 @@ async fn test_activate_deployment_not_running() {
         image_tag: None,
         job_id: None,
         ip_address: None,
+        ipv6_address: None,
         status: "FAILED".to_string(), // Not RUNNING
         vcpus: 1,
         memory_mib: 256,

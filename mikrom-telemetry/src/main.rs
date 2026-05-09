@@ -58,6 +58,8 @@ pub struct VmMetrics {
     pub ram_used_bytes: u64,
     pub status: String,
     pub ip_address: Option<String>,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +81,8 @@ pub struct TelemetryService {
     registry: Registry,
     cpu_gauge: GaugeVec,
     ram_gauge: GaugeVec,
+    tx_gauge: GaugeVec,
+    rx_gauge: GaugeVec,
     sys_cpu_gauge: GaugeVec,
     sys_ram_used_gauge: GaugeVec,
     sys_ram_total_gauge: GaugeVec,
@@ -100,6 +104,20 @@ impl TelemetryService {
         )?;
         let ram_gauge = GaugeVec::new(
             Opts::new("mikrom_vm_ram_usage_bytes", "RAM usage in bytes per VM"),
+            &["app_id", "vm_id"],
+        )?;
+        let tx_gauge = GaugeVec::new(
+            Opts::new(
+                "mikrom_vm_network_tx_bytes",
+                "Network bytes transmitted per VM",
+            ),
+            &["app_id", "vm_id"],
+        )?;
+        let rx_gauge = GaugeVec::new(
+            Opts::new(
+                "mikrom_vm_network_rx_bytes",
+                "Network bytes received per VM",
+            ),
             &["app_id", "vm_id"],
         )?;
 
@@ -134,6 +152,8 @@ impl TelemetryService {
 
         registry.register(Box::new(cpu_gauge.clone()))?;
         registry.register(Box::new(ram_gauge.clone()))?;
+        registry.register(Box::new(tx_gauge.clone()))?;
+        registry.register(Box::new(rx_gauge.clone()))?;
         registry.register(Box::new(sys_cpu_gauge.clone()))?;
         registry.register(Box::new(sys_ram_used_gauge.clone()))?;
         registry.register(Box::new(sys_ram_total_gauge.clone()))?;
@@ -148,6 +168,8 @@ impl TelemetryService {
             registry,
             cpu_gauge,
             ram_gauge,
+            tx_gauge,
+            rx_gauge,
             sys_cpu_gauge,
             sys_ram_used_gauge,
             sys_ram_total_gauge,
@@ -214,6 +236,12 @@ impl TelemetryService {
             self.ram_gauge
                 .with_label_values(&[app_id, vm_id])
                 .set(metrics.ram_used_bytes as f64);
+            self.tx_gauge
+                .with_label_values(&[app_id, vm_id])
+                .set(metrics.tx_bytes as f64);
+            self.rx_gauge
+                .with_label_values(&[app_id, vm_id])
+                .set(metrics.rx_bytes as f64);
         }
         Ok(())
     }

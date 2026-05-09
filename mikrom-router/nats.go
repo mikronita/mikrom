@@ -1,7 +1,10 @@
 package mikrom
 
 import (
-	"github.com/antpard/mikrom/mikrom-router/proto/router/v1"
+	"fmt"
+
+	routerv1 "github.com/antpard/mikrom/mikrom-router/proto/router/v1"
+	schedulerv1 "github.com/antpard/mikrom/mikrom-router/proto/scheduler/v1"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -11,11 +14,45 @@ const (
 	SubjectRouterConfigUpdated        = "mikrom.router.config_updated"
 	SubjectRouterTlsCertUpdated       = "mikrom.router.tls_cert_updated"
 	SubjectRouterAcmeChallengeUpdated = "mikrom.router.acme_challenge_updated"
+	SubjectSchedulerNetworkMesh       = "mikrom.scheduler.network.mesh"
 )
 
+func (m *MikromApp) handleMeshUpdate(data []byte) {
+	var update schedulerv1.NetworkMeshUpdate
+	if err := proto.Unmarshal(data, &update); err != nil {
+		m.logger.Error("failed to unmarshal network mesh update", zap.Error(err))
+		return
+	}
+
+	var peers []PeerInfo
+	for _, p := range update.Peers {
+		if p.IpAddress == "" || p.IpAddress == "127.0.0.1" {
+			continue
+		}
+		peers = append(peers, PeerInfo{
+			HostID:     p.HostId,
+			Endpoint:   fmt.Sprintf("%s:%d", p.IpAddress, p.WireguardPort),
+			PublicKey:  p.WireguardPubkey,
+			AllowedIPs: p.AllowedIps,
+		})
+
+	}
+
+	if err := m.wg.UpdatePeers(peers); err != nil {
+		m.logger.Error("failed to update WireGuard peers", zap.Error(err))
+	}
+}
+
 func (m *MikromApp) listenForUpdates() {
+	hostID := "router-host-local"
+	subject := fmt.Sprintf("mikrom.scheduler.network.mesh.%s", hostID)
+
+	m.nc.Subscribe(subject, func(msg *nats.Msg) {
+		m.handleMeshUpdate(msg.Data)
+	})
+
 	m.nc.Subscribe(SubjectRouterConfigUpdated, func(msg *nats.Msg) {
-		var update v1.RouterConfigUpdate
+		var update routerv1.RouterConfigUpdate
 		if err := proto.Unmarshal(msg.Data, &update); err != nil {
 			m.logger.Error("failed to unmarshal router config update", zap.Error(err))
 			return
@@ -35,7 +72,7 @@ func (m *MikromApp) listenForUpdates() {
 	})
 
 	m.nc.Subscribe(SubjectRouterAcmeChallengeUpdated, func(msg *nats.Msg) {
-		var update v1.AcmeChallengeUpdate
+		var update routerv1.AcmeChallengeUpdate
 		if err := proto.Unmarshal(msg.Data, &update); err != nil {
 			m.logger.Error("failed to unmarshal acme challenge update", zap.Error(err))
 			return
@@ -55,7 +92,7 @@ func (m *MikromApp) listenForUpdates() {
 	})
 
 	m.nc.Subscribe(SubjectRouterTlsCertUpdated, func(msg *nats.Msg) {
-		var update v1.TlsCertificateUpdate
+		var update routerv1.TlsCertificateUpdate
 		if err := proto.Unmarshal(msg.Data, &update); err != nil {
 			m.logger.Error("failed to unmarshal tls cert update", zap.Error(err))
 			return

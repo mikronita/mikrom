@@ -4,7 +4,8 @@ use mikrom_proto::scheduler::{
     AppInfo, AppStatusResponse, CancelRequest, CancelResponse, DeleteAllByAppRequest,
     DeleteAllByAppResponse, DeleteAppRequest, DeleteAppResponse, DeployRequest, DeployResponse,
     ListAppsRequest, ListAppsResponse, ListWorkersRequest, ListWorkersResponse, PauseRequest,
-    PauseResponse, ResumeRequest, ResumeResponse,
+    PauseResponse, ResumeRequest, ResumeResponse, UpdateSecurityGroupsRequest,
+    UpdateSecurityGroupsResponse,
 };
 use mikrom_proto::tls::ServiceCerts;
 use std::sync::Arc;
@@ -33,6 +34,8 @@ impl SchedulerServer {
                 gateway: None,
                 mac_address: None,
                 netmask: None,
+                ipv6_address: Some(c.ipv6_address),
+                ipv6_gateway: Some(c.ipv6_gateway),
                 volumes: c
                     .volumes
                     .iter()
@@ -57,6 +60,7 @@ impl SchedulerServer {
                 req.image,
                 req.user_id,
                 req.deployment_id,
+                req.vpc_ipv6_prefix,
                 config,
                 strategy,
             )
@@ -104,6 +108,7 @@ impl SchedulerServer {
                     cpu_usage,
                     ram_used_bytes,
                     ip_address: job.config.ip_address.unwrap_or_default(),
+                    ipv6_address: job.config.ipv6_address.unwrap_or_default(),
                 })
             },
             Err(e) => Err(anyhow::anyhow!(e.to_string())),
@@ -133,6 +138,7 @@ impl SchedulerServer {
                 ram_used_bytes,
                 user_id: job.user_id,
                 deployment_id: job.deployment_id.unwrap_or_default(),
+                ipv6_address: job.config.ipv6_address.unwrap_or_default(),
             });
         }
         Ok(ListAppsResponse { apps })
@@ -234,6 +240,7 @@ impl SchedulerServer {
                 ip_address: w.ip_address,
                 bridge_ip: w.bridge_ip,
                 last_heartbeat: w.last_heartbeat,
+                wireguard_pubkey: w.wireguard_pubkey.unwrap_or_default(),
             })
             .collect();
 
@@ -261,6 +268,22 @@ impl SchedulerServer {
             }),
             Err(e) => Ok(mikrom_proto::scheduler::CheckHealthResponse {
                 is_healthy: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn update_security_groups(
+        &self,
+        req: UpdateSecurityGroupsRequest,
+    ) -> anyhow::Result<UpdateSecurityGroupsResponse> {
+        match self.app_service.update_security_groups(req).await {
+            Ok(_) => Ok(UpdateSecurityGroupsResponse {
+                success: true,
+                message: "Security groups updated".to_string(),
+            }),
+            Err(e) => Ok(UpdateSecurityGroupsResponse {
+                success: false,
                 message: e.to_string(),
             }),
         }

@@ -13,7 +13,7 @@ pub struct CheckHealthResponse {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AgentCommand {
-    #[prost(oneof = "agent_command::Command", tags = "1, 2, 3, 4, 5")]
+    #[prost(oneof = "agent_command::Command", tags = "1, 2, 3, 4, 5, 6")]
     pub command: ::core::option::Option<agent_command::Command>,
 }
 /// Nested message and enum types in `AgentCommand`.
@@ -30,7 +30,34 @@ pub mod agent_command {
         ResumeVm(super::ResumeVmRequest),
         #[prost(message, tag = "5")]
         DeleteVm(super::DeleteVmRequest),
+        #[prost(message, tag = "6")]
+        UpdateFirewall(super::UpdateFirewallRequest),
     }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct FirewallRule {
+    #[prost(string, tag = "1")]
+    pub protocol: ::prost::alloc::string::String,
+    #[prost(int32, tag = "2")]
+    pub port_start: i32,
+    #[prost(int32, tag = "3")]
+    pub port_end: i32,
+    #[prost(string, tag = "4")]
+    pub action: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateFirewallRequest {
+    #[prost(string, tag = "1")]
+    pub vm_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "2")]
+    pub rules: ::prost::alloc::vec::Vec<FirewallRule>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateFirewallResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AgentCommandResponse {
@@ -241,6 +268,10 @@ pub struct VmConfig {
     pub port: u32,
     #[prost(string, tag = "11")]
     pub health_check_path: ::prost::alloc::string::String,
+    #[prost(string, tag = "12")]
+    pub ipv6_address: ::prost::alloc::string::String,
+    #[prost(string, tag = "13")]
+    pub ipv6_gateway: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StartVmResponse {

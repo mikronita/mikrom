@@ -20,6 +20,7 @@ pub struct User {
     pub role: UserRole,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
+    pub vpc_ipv6_prefix: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +76,7 @@ mod tests {
             role: UserRole::User,
             first_name: None,
             last_name: None,
+            vpc_ipv6_prefix: None,
         }
     }
 

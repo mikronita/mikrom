@@ -2,7 +2,37 @@ syntax = "proto3";
 
 package mikrom.scheduler.v1;
 
-option go_package = "mikrom/scheduler/v1";
+option go_package = "github.com/antpard/mikrom/mikrom-router/proto/scheduler/v1";
+
+message NetworkMeshUpdate {
+  repeated Peer peers = 1;
+}
+
+message FirewallRule {
+  string protocol = 1;
+  int32 port_start = 2;
+  int32 port_end = 3;
+  string action = 4;
+}
+
+message UpdateSecurityGroupsRequest {
+  string app_id = 1;
+  string user_id = 2;
+  repeated FirewallRule rules = 3;
+}
+
+message UpdateSecurityGroupsResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message Peer {
+  string host_id = 1;
+  string ip_address = 2;
+  string wireguard_pubkey = 3;
+  repeated string allowed_ips = 4;
+  int32 wireguard_port = 5;
+}
 
 service SchedulerService {
   rpc RegisterWorker(RegisterWorkerRequest) returns (RegisterWorkerResponse);
@@ -19,6 +49,7 @@ service SchedulerService {
   rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse);
   rpc WatchApps(WatchAppsRequest) returns (stream WatchAppsResponse);
   rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse);
+  rpc UpdateSecurityGroups(UpdateSecurityGroupsRequest) returns (UpdateSecurityGroupsResponse);
 }
 
 message CheckHealthRequest {
@@ -46,6 +77,18 @@ message WorkerHeartbeat {
   string ip_address = 3;
   string bridge_ip = 5;
   ReportMetricsRequest metrics = 6;
+  string wireguard_pubkey = 7;
+  string wireguard_ip = 8;
+  int32 wireguard_port = 9;
+}
+
+message RouterHeartbeat {
+  string host_id = 1;
+  string hostname = 2;
+  string ip_address = 3;
+  string wireguard_pubkey = 7;
+  string wireguard_ip = 8;
+  int32 wireguard_port = 9;
 }
 
 message ListWorkersRequest {}
@@ -61,6 +104,7 @@ message WorkerInfo {
   string ip_address = 3;
   string bridge_ip = 5;
   int64 last_heartbeat = 6;
+  string wireguard_pubkey = 7;
 }
 
 // ... other messages ...
@@ -122,6 +166,7 @@ message RegisterWorkerRequest {
   string hostname = 2;
   string ip_address = 3;
   string bridge_ip = 5;
+  string wireguard_pubkey = 6;
 }
 
 message RegisterWorkerResponse {
@@ -135,6 +180,8 @@ message VmMetrics {
   VmStatus status = 3;
   string error_message = 4;
   string ip_address = 5;
+  uint64 tx_bytes = 6;
+  uint64 rx_bytes = 7;
 }
 
 enum VmStatus {
@@ -173,6 +220,7 @@ message DeployRequest {
   AppConfig config = 4;
   string user_id = 5;
   string deployment_id = 6;
+  string vpc_ipv6_prefix = 7;
 }
 
 message Volume {
@@ -192,6 +240,8 @@ message AppConfig {
   repeated Volume volumes = 8;
   uint32 port = 9;
   string health_check_path = 10;
+  string ipv6_address = 11;
+  string ipv6_gateway = 12;
 }
 
 
@@ -231,6 +281,7 @@ message AppStatusResponse {
   float cpu_usage = 9;
   uint64 ram_used_bytes = 10;
   string ip_address = 11;
+  string ipv6_address = 12;
 }
 
 message CancelRequest {
@@ -264,4 +315,5 @@ message AppInfo {
   uint64 ram_used_bytes = 9;
   string user_id = 10;
   string deployment_id = 11;
+  string ipv6_address = 12;
 }

@@ -99,6 +99,7 @@ async fn test_sse_deployments_stream_initial_data() {
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
                 ip_address: None,
+                ipv6_address: None,
             }])
         });
 
@@ -226,6 +227,7 @@ async fn test_sse_deployments_stream_updates() {
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
                 ip_address: None,
+                ipv6_address: None,
             }])
         });
 

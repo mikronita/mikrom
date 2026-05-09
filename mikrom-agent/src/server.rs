@@ -2,6 +2,7 @@ use crate::firecracker::FirecrackerManager;
 use crate::metrics::MetricsCollector;
 use parking_lot::RwLock;
 use prost::Message;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct AgentServer {
@@ -11,6 +12,7 @@ pub struct AgentServer {
     firecracker: FirecrackerManager,
     shutdown_flag: Arc<RwLock<bool>>,
     http_client: reqwest::Client,
+    wg_manager: Arc<crate::wireguard::WireGuardManager>,
 }
 
 impl AgentServer {
@@ -38,6 +40,7 @@ impl AgentServer {
             firecracker,
             shutdown_flag: Arc::new(RwLock::new(false)),
             http_client,
+            wg_manager: Arc::new(crate::wireguard::WireGuardManager::new("wg0")),
         }
     }
 
@@ -52,6 +55,13 @@ impl AgentServer {
 
         // Start background tasks (GC)
         self.firecracker.start_background_tasks();
+
+        // 3. Initialize WireGuard
+        if let Some(priv_key) = self.config.get_wg_private_key()
+            && let Err(e) = self.wg_manager.init(&priv_key, &self.config.host_id)
+        {
+            tracing::error!("Failed to initialize WireGuard: {e}");
+        }
 
         let nats_url = self.config.nats_url.clone();
         let firecracker = self.firecracker.clone();
@@ -86,10 +96,12 @@ impl AgentServer {
                     self_clone.firecracker.clone(),
                 );
 
-                // 2. Spawn command listener, health check listener, heartbeat and exporter tasks
+                // 2. Spawn listeners
                 let cmd_handle = self_clone.start_command_listener(client.clone());
                 let health_check_handle = self_clone.start_health_check_listener(client.clone());
                 let heartbeat_handle = self_clone.start_heartbeat_loop(client.clone());
+                let mesh_handle = self_clone
+                    .start_mesh_listener(client.clone(), self_clone.config.host_id.clone());
                 let exporter_handle = tokio::spawn(async move {
                     exporter.start_export_loop().await;
                 });
@@ -101,6 +113,7 @@ impl AgentServer {
                         tracing::warn!("Heartbeat loop exited, forcing NATS reconnect");
                         nats_client = None;
                     }
+                    _ = mesh_handle => tracing::warn!("Mesh listener exited"),
                     _ = exporter_handle => tracing::warn!("Exporter loop exited"),
                 }
             }
@@ -113,6 +126,44 @@ impl AgentServer {
 
         tracing::info!("Agent shutdown requested");
         Ok(())
+    }
+
+    fn start_mesh_listener(
+        &self,
+        client: async_nats::Client,
+        host_id: String,
+    ) -> tokio::task::JoinHandle<()> {
+        let wg_manager = self.wg_manager.clone();
+        let host_subject = format!("mikrom.scheduler.network.mesh.{}", host_id);
+        let config = self.config.clone();
+
+        tokio::spawn(async move {
+            let mut host_sub = match client.subscribe(host_subject.clone()).await {
+                Ok(sub) => sub,
+                Err(e) => {
+                    tracing::error!("Failed to subscribe to host mesh updates: {e}");
+                    return;
+                },
+            };
+
+            tracing::info!("Listening for mesh updates on {}", host_subject);
+            use futures::StreamExt;
+            loop {
+                let message = tokio::select! {
+                    Some(msg) = host_sub.next() => msg,
+                    else => break,
+                };
+
+                if let Ok(update) =
+                    mikrom_proto::scheduler::NetworkMeshUpdate::decode(&message.payload[..])
+                    && let Some(priv_key) = config.get_wg_private_key()
+                    && let Err(e) =
+                        wg_manager.update_peers(&update.peers, &priv_key, &config.host_id)
+                {
+                    tracing::error!("Failed to update WireGuard peers: {e}");
+                }
+            }
+        })
     }
 
     fn start_command_listener(&self, client: async_nats::Client) -> tokio::task::JoinHandle<()> {
@@ -180,14 +231,25 @@ impl AgentServer {
 
         let vm_info = fc.get_vm_info(&req.vm_id).await;
         let result = if let Some(vm) = vm_info {
-            if let Some(ip) = &vm.config.ip_address {
-                let port = vm.config.port;
-                let path = if vm.config.health_check_path.is_empty() {
-                    "/".to_string()
+            let port = vm.config.port;
+            let path = if vm.config.health_check_path.is_empty() {
+                "/".to_string()
+            } else {
+                vm.config.health_check_path.clone()
+            };
+
+            let ip = if let Some(ipv6) = &vm.config.ipv6_address {
+                if !ipv6.is_empty() {
+                    Some(format!("[{}]", ipv6))
                 } else {
-                    vm.config.health_check_path.clone()
-                };
-                let url = format!("http://{ip}:{port}{path}");
+                    vm.config.ip_address.clone()
+                }
+            } else {
+                vm.config.ip_address.clone()
+            };
+
+            if let Some(ip_addr) = ip {
+                let url = format!("http://{ip_addr}:{port}{path}");
                 tracing::debug!(vm_id = %req.vm_id, url = %url, "Performing health check...");
 
                 match http_client.get(&url).send().await {
@@ -245,9 +307,12 @@ impl AgentServer {
                     config.env = c.env;
                     config.ip_address = Some(c.ip_address).filter(|s| !s.is_empty());
                     config.gateway = Some(c.gateway).filter(|s| !s.is_empty());
+                    config.ipv6_address = Some(c.ipv6_address).filter(|s| !s.is_empty());
+                    config.ipv6_gateway = Some(c.ipv6_gateway).filter(|s| !s.is_empty());
                     config.mac_address = Some(c.mac_address).filter(|s| !s.is_empty());
                     config.netmask = Some(c.netmask).filter(|s| !s.is_empty());
                 }
+
                 fc.start_vm(req.vm_id, req.app_id, req.image, config)
                     .await
                     .map(|_| "VM started".to_string())
@@ -268,6 +333,35 @@ impl AgentServer {
                 .delete_vm(&req.vm_id)
                 .await
                 .map(|_| "VM resources purged".to_string()),
+            Some(mikrom_proto::agent::agent_command::Command::UpdateFirewall(req)) => {
+                let rules: Vec<mikrom_agent_ebpf_common::FirewallRule> = req
+                    .rules
+                    .into_iter()
+                    .map(|r| mikrom_agent_ebpf_common::FirewallRule {
+                        protocol: match r.protocol.to_lowercase().as_str() {
+                            "tcp" => 6,
+                            "udp" => 17,
+                            _ => 0,
+                        },
+                        port_start: r.port_start as u16,
+                        port_end: r.port_end as u16,
+                        action: if r.action.to_lowercase() == "allow" {
+                            1
+                        } else {
+                            0
+                        },
+                        remote_ip: [0u8; 16],
+                        remote_prefix: 0,
+                    })
+                    .collect();
+
+                fc.update_vm_firewall(&req.vm_id, rules)
+                    .await
+                    .map(|_| "Firewall rules updated".to_string())
+                    .map_err(|e| {
+                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
+                    })
+            },
             None => Err(crate::firecracker::config::FirecrackerError::ProcessError(
                 "Empty command".to_string(),
             )),
@@ -296,6 +390,8 @@ impl AgentServer {
         let hostname = self.config.hostname();
         let ip_address = self.ip_address.clone();
         let bridge_ip = self.config.bridge_ip.clone();
+        let wireguard_pubkey = self.config.wireguard_pubkey.clone().unwrap_or_default();
+        let wireguard_ip = self.wg_manager.get_host_ipv6(&host_id);
         let metrics_collector = self.metrics_collector.clone();
 
         tokio::spawn(async move {
@@ -308,7 +404,7 @@ impl AgentServer {
                     ReportMetricsRequest, VmMetrics, VmStatus as ProtoVmStatus, WorkerHeartbeat,
                 };
 
-                let vms: std::collections::HashMap<String, VmMetrics> = metrics
+                let proto_vms = metrics
                     .vms
                     .iter()
                     .map(|(id, vm)| {
@@ -331,10 +427,12 @@ impl AgentServer {
                                 } as i32,
                                 error_message: vm.error_message.clone().unwrap_or_default(),
                                 ip_address: vm.ip_address.clone().unwrap_or_default(),
+                                tx_bytes: vm.tx_bytes,
+                                rx_bytes: vm.rx_bytes,
                             },
                         )
                     })
-                    .collect();
+                    .collect::<HashMap<String, VmMetrics>>();
 
                 let heartbeat = WorkerHeartbeat {
                     host_id: host_id.clone(),
@@ -349,12 +447,15 @@ impl AgentServer {
                         disk_used_bytes: metrics.disk_used_bytes,
                         disk_total_bytes: metrics.disk_total_bytes,
                         apps_count: metrics.apps_count,
-                        timestamp: chrono::Utc::now().timestamp(),
+                        timestamp: metrics.timestamp,
                         load_avg_1: metrics.load_avg_1,
                         load_avg_5: metrics.load_avg_5,
                         load_avg_15: metrics.load_avg_15,
-                        vms,
+                        vms: proto_vms,
                     }),
+                    wireguard_pubkey: wireguard_pubkey.clone(),
+                    wireguard_ip: wireguard_ip.clone(),
+                    wireguard_port: 51820,
                 };
 
                 let mut payload = Vec::new();
@@ -380,6 +481,7 @@ impl Clone for AgentServer {
             firecracker: self.firecracker.clone(),
             shutdown_flag: self.shutdown_flag.clone(),
             http_client: self.http_client.clone(),
+            wg_manager: self.wg_manager.clone(),
         }
     }
 }

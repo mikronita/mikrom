@@ -17,6 +17,7 @@ service AgentService {
   rpc DeleteVm(DeleteVmRequest) returns (DeleteVmResponse);
   rpc GetVmStatus(GetVmStatusRequest) returns (GetVmStatusResponse);
   rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse);
+  rpc UpdateFirewall(UpdateFirewallRequest) returns (UpdateFirewallResponse);
 }
 
 message CheckHealthRequest {
@@ -35,7 +36,25 @@ message AgentCommand {
     PauseVmRequest pause_vm = 3;
     ResumeVmRequest resume_vm = 4;
     DeleteVmRequest delete_vm = 5;
+    UpdateFirewallRequest update_firewall = 6;
   }
+}
+
+message FirewallRule {
+  string protocol = 1;
+  int32 port_start = 2;
+  int32 port_end = 3;
+  string action = 4;
+}
+
+message UpdateFirewallRequest {
+  string vm_id = 1;
+  repeated FirewallRule rules = 2;
+}
+
+message UpdateFirewallResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message AgentCommandResponse {
@@ -173,6 +192,8 @@ message VmConfig {
   repeated Volume volumes = 9;
   uint32 port = 10;
   string health_check_path = 11;
+  string ipv6_address = 12;
+  string ipv6_gateway = 13;
 }
 
 

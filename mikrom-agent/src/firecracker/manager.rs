@@ -37,7 +37,8 @@ pub struct FirecrackerManager {
     /// Tracks allocated IP addresses on the host bridge.
     pub allocated_ips: Arc<tokio::sync::Mutex<std::collections::HashSet<std::net::Ipv4Addr>>>,
     /// NATS client for log streaming.
-    pub nats_client: Arc<RwLock<Option<async_nats::Client>>>,
+    nats_client: Arc<RwLock<Option<async_nats::Client>>>,
+    pub ebpf_manager: Arc<tokio::sync::Mutex<Option<crate::ebpf::EbpfManager>>>,
 }
 
 impl FirecrackerManager {
@@ -67,10 +68,32 @@ impl FirecrackerManager {
                     ip_address: vm.config.ip_address.clone(),
                     metrics_path,
                     socket_path,
+                    tap_ifindex: proc.and_then(|p| p.tap_ifindex),
                 }
             })
             .collect()
     }
+
+    pub async fn update_vm_firewall(
+        &self,
+        vm_id: &str,
+        rules: Vec<mikrom_agent_ebpf_common::FirewallRule>,
+    ) -> anyhow::Result<()> {
+        let all_vms = self.get_all_vms().await;
+        let vm = all_vms
+            .iter()
+            .find(|v| v.vm_id == vm_id)
+            .ok_or_else(|| anyhow::anyhow!("VM not found"))?;
+
+        if let Some(ifindex) = vm.tap_ifindex {
+            let mut ebpf = self.ebpf_manager.lock().await;
+            if let Some(ebpf) = ebpf.as_mut() {
+                ebpf.update_rules(ifindex, rules)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Create a manager whose configuration is read from environment variables.
     #[must_use]
     pub fn new() -> Self {
@@ -131,7 +154,10 @@ impl FirecrackerManager {
             builder: Arc::new(builder),
             executor: Arc::new(RealCommandExecutor),
             allocated_ips: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
-            nats_client: Arc::new(RwLock::new(None)),
+            nats_client: Arc::new(RwLock::new(Option::None)),
+            ebpf_manager: Arc::new(tokio::sync::Mutex::new(
+                crate::ebpf::EbpfManager::load().ok(),
+            )),
         }
     }
 
@@ -360,8 +386,15 @@ impl FirecrackerManager {
 
         // 3. Prepare RootFS
         let rootfs_path = paths.rootfs_path();
-        self.prepare_rootfs(&vm_id, &image, &rootfs_path.to_string_lossy(), config.port)
-            .await?;
+        self.prepare_rootfs(
+            &vm_id,
+            &image,
+            &rootfs_path.to_string_lossy(),
+            config.port,
+            config.ipv6_address.clone(),
+            config.ipv6_gateway.clone(),
+        )
+        .await?;
 
         // 4. Resolve Networking
         if config.ip_address.as_deref().unwrap_or("").is_empty() {
@@ -375,10 +408,19 @@ impl FirecrackerManager {
             }
         }
 
-        let tap_name = if config.ip_address.is_some() {
-            Some(self.setup_tap(&vm_id).await?)
+        // 4. Set up TAP if network is requested
+        let (tap_name, tap_ifindex) = if config.ip_address.is_some() {
+            let (tap, ifindex) = self.setup_tap(&vm_id).await?;
+            // Attach eBPF filter to TAP
+            let mut ebpf = self.ebpf_manager.lock().await;
+            if let Some(ebpf) = ebpf.as_mut()
+                && let Err(e) = ebpf.attach_tc(&tap)
+            {
+                tracing::warn!("Failed to attach eBPF filter to {}: {}", tap, e);
+            }
+            (Some(tap), Some(ifindex))
         } else {
-            None
+            (None, None)
         };
 
         // 5. Jailer or Direct Spawn
@@ -425,6 +467,7 @@ impl FirecrackerManager {
         // 6. Initialize Startup Guard
         let mut guard = VmStartupGuard::new(vm_id.clone(), PathBuf::from(&active_socket_path));
         guard.tap_name = tap_name.clone();
+        guard.tap_ifindex = tap_ifindex;
         guard.chroot_dir = chroot_dir.clone().map(PathBuf::from);
 
         // 7. Spawn Firecracker
@@ -643,6 +686,11 @@ impl FirecrackerManager {
             boot_args.push_str(&format!(" ip={ip}::{gw}:{mask}::eth0:off"));
         }
 
+        if let (Some(ipv6), Some(gw6)) = (&config.ipv6_address, &config.ipv6_gateway) {
+            // Kernel ip= format for IPv6: ip=[addr]::[gw]:prefix::device:off
+            boot_args.push_str(&format!(" ip=[{ipv6}]::[{gw6}]:64::eth0:off"));
+        }
+
         let kernel_api_path = if chroot_dir.is_some() {
             "/vmlinux.bin".to_string()
         } else {
@@ -708,6 +756,15 @@ impl FirecrackerManager {
             &serde_json::json!({ "action_type": "InstanceStart" }).to_string(),
         )
         .await?;
+
+        // 7. Add host route for IPv6
+        if let Some(ipv6) = &config.ipv6_address {
+            let _ = tokio::process::Command::new("ip")
+                .args(["-6", "route", "add", ipv6, "dev", "mikrom-br0"])
+                .output()
+                .await;
+        }
+
         Ok(())
     }
 
@@ -737,6 +794,8 @@ impl FirecrackerManager {
         image: &str,
         rootfs_path: &str,
         port: u32,
+        ipv6_addr: Option<String>,
+        ipv6_gw: Option<String>,
     ) -> Result<(), FirecrackerError> {
         tracing::info!(vm_id = %vm_id, rootfs_path = %rootfs_path, "Preparing rootfs");
 
@@ -763,7 +822,7 @@ impl FirecrackerManager {
                 "Image not found as local file, attempting docker pull/convert"
             );
             self.builder
-                .docker_to_ext4(image, dst_path, port)
+                .docker_to_ext4(image, dst_path, port, ipv6_addr, ipv6_gw)
                 .await
                 .map_err(|e| {
                     FirecrackerError::ProcessError(format!("Image builder failed: {e}"))
@@ -1191,32 +1250,70 @@ impl FirecrackerManager {
             bridge_ip
         );
 
+        // 1. Create bridge if not exists
         let _ = tokio::process::Command::new("ip")
             .args(["link", "add", "name", &bridge_name, "type", "bridge"])
             .output()
             .await;
 
+        // 2. Set bridge UP
+        let _ = tokio::process::Command::new("ip")
+            .args(["link", "set", "dev", &bridge_name, "up"])
+            .output()
+            .await;
+
+        // 3. Clear any existing IPv6 addresses in the fd00:: range to avoid conflicts
+        // This is crucial if the agent was previously running with a /8 mask
+        let _ = tokio::process::Command::new("ip")
+            .args([
+                "-6",
+                "addr",
+                "flush",
+                "dev",
+                &bridge_name,
+                "scope",
+                "global",
+            ])
+            .output()
+            .await;
+
+        // 4. Add IPv4 address (ignore error if exists)
         let _ = tokio::process::Command::new("ip")
             .args(["addr", "add", &bridge_ip, "dev", &bridge_name])
             .output()
             .await;
 
-        tokio::process::Command::new("ip")
-            .args(["link", "set", "dev", &bridge_name, "up"])
+        // 5. Assign stable IPv6 gateway addresses
+        // Using /128 for the ULA address so it doesn't conflict with the WireGuard fd00::/8 route
+        let _ = tokio::process::Command::new("ip")
+            .args(["-6", "addr", "add", "fd00::1/128", "dev", &bridge_name])
             .output()
-            .await
-            .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to bring bridge up: {e}"))
-            })?;
+            .await;
 
+        // Ensure fe80::1 is also present for link-local gatewaying
+        let _ = tokio::process::Command::new("ip")
+            .args(["-6", "addr", "add", "fe80::1/64", "dev", &bridge_name])
+            .output()
+            .await;
+
+        // 6. Enable forwarding
         tokio::process::Command::new("sysctl")
             .args(["-w", "net.ipv4.ip_forward=1"])
             .output()
             .await
             .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to enable IP forwarding: {e}"))
+                FirecrackerError::ProcessError(format!("Failed to enable IPv4 forwarding: {e}"))
             })?;
 
+        tokio::process::Command::new("sysctl")
+            .args(["-w", "net.ipv6.conf.all.forwarding=1"])
+            .output()
+            .await
+            .map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to enable IPv6 forwarding: {e}"))
+            })?;
+
+        // 7. Setup NAT
         let output = tokio::process::Command::new("iptables")
             .args([
                 "-t",
@@ -1234,21 +1331,19 @@ impl FirecrackerManager {
             .output()
             .await;
 
-        if let Ok(o) = output {
-            if !o.status.success() {
-                tracing::warn!(
-                    "Failed to setup iptables MASQUERADE: {}",
-                    String::from_utf8_lossy(&o.stderr)
-                );
-            }
-        } else if let Err(e) = output {
-            tracing::warn!("Error running iptables: {}", e);
+        if let Ok(o) = output
+            && !o.status.success()
+        {
+            tracing::warn!(
+                "Failed to setup iptables MASQUERADE: {}",
+                String::from_utf8_lossy(&o.stderr)
+            );
         }
 
         Ok(())
     }
 
-    async fn setup_tap(&self, vm_id: &str) -> Result<String, FirecrackerError> {
+    async fn setup_tap(&self, vm_id: &str) -> Result<(String, u32), FirecrackerError> {
         let tap_name = format!("m-tap-{}", &vm_id[..8]);
 
         let _ = tokio::process::Command::new("ip")
@@ -1296,7 +1391,14 @@ impl FirecrackerManager {
             .output()
             .await;
 
-        Ok(tap_name)
+        // Get ifindex
+        let ifindex = std::fs::read_to_string(format!("/sys/class/net/{}/ifindex", tap_name))
+            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to read ifindex: {e}")))?
+            .trim()
+            .parse::<u32>()
+            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to parse ifindex: {e}")))?;
+
+        Ok((tap_name, ifindex))
     }
 
     async fn cleanup_tap(&self, tap_name: &str) {
@@ -1472,6 +1574,7 @@ impl FirecrackerManager {
                 socket_path,
                 metrics_path: None,
                 tap_name: None,
+                tap_ifindex: None,
                 log_task,
                 chroot_dir: None,
             },
@@ -1513,6 +1616,8 @@ mod tests {
             netmask: None,
             volumes: vec![],
             health_check_path: "/".to_string(),
+            ipv6_address: None,
+            ipv6_gateway: None,
         }
     }
 
@@ -1670,6 +1775,8 @@ mod tests {
             netmask: None,
             volumes: vec![],
             health_check_path: "/".to_string(),
+            ipv6_address: None,
+            ipv6_gateway: None,
         };
         assert_eq!(&cfg.env["PORT"], "3000");
         assert_eq!(cfg.vcpus, 2);
@@ -2669,6 +2776,7 @@ mod tests {
                     socket_path: socket_path.clone(),
                     metrics_path: metrics_path.clone(),
                     tap_name: None,
+                    tap_ifindex: None,
                     log_task,
                     chroot_dir: None,
                 },

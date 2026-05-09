@@ -102,6 +102,7 @@ async fn test_route_reconciliation_on_startup() {
             UpdateDeploymentParams {
                 status: Some("RUNNING".into()),
                 ip_address: Some("10.0.9.9".into()),
+                ipv6_address: None,
                 ..Default::default()
             },
         )

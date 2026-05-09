@@ -12,6 +12,7 @@ pub struct AppService {
     pub job_repo: Arc<dyn JobRepository>,
     pub worker_repo: Arc<dyn WorkerRepository>,
     pub agent_client: Arc<dyn AgentClient>,
+    pub pool: sqlx::PgPool,
 }
 
 impl AppService {
@@ -26,11 +27,12 @@ impl AppService {
                 job_repo.clone(),
                 worker_repo.clone(),
                 agent_client.clone(),
-                pool,
+                pool.clone(),
             ),
             job_repo,
             worker_repo,
             agent_client,
+            pool,
         }
     }
 
@@ -85,6 +87,7 @@ impl AppService {
                 job.image.clone(),
                 job.user_id.clone(),
                 job.deployment_id.clone().unwrap_or_default(),
+                String::new(), // VPC prefix unknown during resume for now
                 job.config.clone(),
                 crate::domain::worker::SchedulingStrategy::LeastLoaded,
             )
@@ -134,6 +137,56 @@ impl AppService {
         } else {
             Ok(false)
         }
+    }
+
+    pub async fn update_security_groups(
+        &self,
+        req: mikrom_proto::scheduler::UpdateSecurityGroupsRequest,
+    ) -> DomainResult<()> {
+        // 1. Fetch rules from DB
+        let rules_rows = sqlx::query(
+            "SELECT protocol, port_start, port_end, action FROM security_rules WHERE app_id = $1 ORDER BY priority ASC",
+        )
+        .bind(uuid::Uuid::parse_str(&req.app_id).map_err(|e| DomainError::Infrastructure(e.to_string()))?)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+
+        let proto_rules: Vec<mikrom_proto::scheduler::FirewallRule> = rules_rows
+            .into_iter()
+            .map(|r| {
+                use sqlx::Row;
+                mikrom_proto::scheduler::FirewallRule {
+                    protocol: r.get("protocol"),
+                    port_start: r.get("port_start"),
+                    port_end: r.get("port_end"),
+                    action: r.get("action"),
+                }
+            })
+            .collect();
+
+        // 2. Find all active jobs for this app
+        let jobs = self
+            .job_repo
+            .list_jobs(None, Some(JobStatus::Running))
+            .await?;
+
+        let app_jobs: Vec<_> = jobs
+            .into_iter()
+            .filter(|j| j.app_id == req.app_id)
+            .collect();
+
+        // 3. Push updates to agents
+        for job in app_jobs {
+            if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
+                let _ = self
+                    .agent_client
+                    .update_firewall(host_id, vm_id, proto_rules.clone())
+                    .await;
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn get_job_metrics(&self, job: &Job) -> (f32, u64) {
@@ -246,6 +299,15 @@ mod tests {
 
     #[async_trait]
     impl AgentClient for DummyAgentClient {
+        async fn update_firewall(
+            &self,
+            _host_id: &str,
+            _vm_id: &str,
+            _rules: Vec<mikrom_proto::scheduler::FirewallRule>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+
         async fn start_vm(
             &self,
             _h: &str,
@@ -298,11 +360,12 @@ mod tests {
                 job_repo.clone(),
                 worker_repo.clone(),
                 agent_client.clone(),
-                pool,
+                pool.clone(),
             ),
             job_repo,
             worker_repo,
             agent_client,
+            pool,
         };
 
         let res = service.check_health("job-1", "user-1").await.unwrap();

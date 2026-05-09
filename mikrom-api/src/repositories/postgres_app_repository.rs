@@ -246,13 +246,14 @@ impl AppRepository for PostgresAppRepository {
         params: crate::repositories::app_repository::UpdateDeploymentParams,
     ) -> anyhow::Result<()> {
         sqlx::query(
-            "UPDATE deployments SET status = COALESCE($1, status), job_id = COALESCE($2, job_id), image_tag = COALESCE($3, image_tag), build_id = COALESCE($4, build_id), ip_address = COALESCE($5, ip_address), git_commit_hash = COALESCE($6, git_commit_hash), git_commit_message = COALESCE($7, git_commit_message), git_branch = COALESCE($8, git_branch), updated_at = NOW() WHERE id = $9"
+            "UPDATE deployments SET status = COALESCE($1, status), job_id = COALESCE($2, job_id), image_tag = COALESCE($3, image_tag), build_id = COALESCE($4, build_id), ip_address = COALESCE($5, ip_address), ipv6_address = COALESCE($6, ipv6_address), git_commit_hash = COALESCE($7, git_commit_hash), git_commit_message = COALESCE($8, git_commit_message), git_branch = COALESCE($9, git_branch), updated_at = NOW() WHERE id = $10"
         )
         .bind(params.status)
         .bind(params.job_id)
         .bind(params.image_tag)
         .bind(params.build_id)
         .bind(params.ip_address)
+        .bind(params.ipv6_address)
         .bind(params.git_commit_hash)
         .bind(params.git_commit_message)
         .bind(params.git_branch)
@@ -361,6 +362,48 @@ impl AppRepository for PostgresAppRepository {
             .execute(&self.pool)
             .await?;
 
+        Ok(())
+    }
+
+    async fn list_security_rules(
+        &self,
+        app_id: Uuid,
+    ) -> anyhow::Result<Vec<crate::models::app::SecurityRule>> {
+        let rules = sqlx::query_as::<_, crate::models::app::SecurityRule>(
+            "SELECT * FROM security_rules WHERE app_id = $1 ORDER BY priority ASC, created_at ASC",
+        )
+        .bind(app_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rules)
+    }
+
+    async fn create_security_rule(
+        &self,
+        app_id: Uuid,
+        protocol: String,
+        port_start: i32,
+        port_end: i32,
+        action: String,
+    ) -> anyhow::Result<crate::models::app::SecurityRule> {
+        let rule = sqlx::query_as::<_, crate::models::app::SecurityRule>(
+            "INSERT INTO security_rules (app_id, protocol, port_start, port_end, action) VALUES ($1, $2, $3, $4, $5) RETURNING *"
+        )
+        .bind(app_id)
+        .bind(protocol)
+        .bind(port_start)
+        .bind(port_end)
+        .bind(action)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(rule)
+    }
+
+    async fn delete_security_rule(&self, id: Uuid) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM security_rules WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }

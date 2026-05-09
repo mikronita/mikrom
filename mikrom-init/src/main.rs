@@ -25,14 +25,15 @@ fn default_workdir() -> String {
     "/app".to_string()
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     println!("[mikrom-init] Initializing microVM environment...");
 
     if let Err(e) = setup_mounts() {
         eprintln!("[mikrom-init] Warning: Mount setup encountered errors: {e}");
     }
 
-    if let Err(e) = setup_system() {
+    if let Err(e) = setup_system().await {
         eprintln!("[mikrom-init] Warning: System setup encountered errors: {e}");
     }
 
@@ -43,6 +44,10 @@ fn main() -> Result<()> {
             fallback_to_shell();
         },
     };
+
+    if let Err(e) = setup_networking(&config).await {
+        eprintln!("[mikrom-init] Warning: Networking setup encountered errors: {e}");
+    }
 
     println!(
         "[mikrom-init] Starting application: {:?}",
@@ -90,17 +95,96 @@ fn setup_mounts() -> Result<()> {
     Ok(())
 }
 
-fn setup_system() -> Result<()> {
+use futures::stream::TryStreamExt;
+
+async fn setup_system() -> Result<()> {
     // Set hostname
     let _ = nix::unistd::sethostname("localhost");
 
     // Bring up loopback interface
-    let status = Command::new("ip")
-        .args(["link", "set", "lo", "up"])
-        .status();
+    println!("[mikrom-init] Bringing up loopback interface...");
+    let (connection, handle, _) = rtnetlink::new_connection()?;
+    tokio::spawn(connection);
 
-    if let Err(e) = status {
-        eprintln!("[mikrom-init] Warning: Failed to bring up loopback: {e}");
+    let mut links = handle.link().get().match_name("lo".into()).execute();
+    if let Some(msg) = links
+        .try_next()
+        .await
+        .map_err(|e| anyhow!("Failed to get loopback link: {e}"))?
+    {
+        handle
+            .link()
+            .set(msg.header.index)
+            .up()
+            .execute()
+            .await
+            .map_err(|e| anyhow!("Failed to set loopback up: {e}"))?;
+    }
+
+    Ok(())
+}
+
+async fn setup_networking(config: &InitConfig) -> Result<()> {
+    println!("[mikrom-init] Configuring eth0 interface...");
+
+    let (connection, handle, _) = rtnetlink::new_connection()?;
+    tokio::spawn(connection);
+
+    let mut links = handle.link().get().match_name("eth0".into()).execute();
+    let link_index = if let Some(msg) = links
+        .try_next()
+        .await
+        .map_err(|e| anyhow!("Failed to get eth0 link: {e}"))?
+    {
+        handle
+            .link()
+            .set(msg.header.index)
+            .up()
+            .mtu(1500)
+            .execute()
+            .await
+            .map_err(|e| anyhow!("Failed to set eth0 up: {e}"))?;
+        msg.header.index
+    } else {
+        return Err(anyhow!("Interface eth0 not found"));
+    };
+
+    if let Some(ipv6_addr_str) = config.env.get("IPV6_ADDR") {
+        let (addr, prefix) = if let Some((addr_part, prefix_part)) = ipv6_addr_str.split_once('/') {
+            (
+                addr_part.parse::<std::net::Ipv6Addr>()?,
+                prefix_part.parse::<u8>()?,
+            )
+        } else {
+            (ipv6_addr_str.parse::<std::net::Ipv6Addr>()?, 64)
+        };
+
+        println!(
+            "[mikrom-init] Configuring IPv6 address: {}/{}",
+            addr, prefix
+        );
+        handle
+            .address()
+            .add(link_index, std::net::IpAddr::V6(addr), prefix)
+            .execute()
+            .await
+            .map_err(|e| anyhow!("Failed to add IPv6 address: {e}"))?;
+
+        if let Some(ipv6_gw_str) = config.env.get("IPV6_GW") {
+            let gw = ipv6_gw_str.parse::<std::net::Ipv6Addr>()?;
+            println!("[mikrom-init] Configuring IPv6 gateway: {}", gw);
+
+            handle
+                .route()
+                .add()
+                .v6()
+                .destination_prefix(std::net::Ipv6Addr::UNSPECIFIED, 0)
+                .gateway(gw)
+                .output_interface(link_index)
+                .execute()
+                .await
+                .map_err(|e| anyhow!("Failed to add IPv6 gateway: {e}"))?;
+        }
     }
 
     Ok(())

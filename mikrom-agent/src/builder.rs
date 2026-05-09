@@ -18,6 +18,8 @@ impl ImageBuilder {
         image: &str,
         output_path: &Path,
         port: u32,
+        ipv6_addr: Option<String>,
+        ipv6_gw: Option<String>,
     ) -> anyhow::Result<()> {
         info!(
             "Converting Docker image {} to ext4 at {:?} (port={})",
@@ -222,6 +224,12 @@ impl ImageBuilder {
             }
         }
         env_map.insert("PORT".to_string(), port.to_string());
+        if let Some(addr) = ipv6_addr {
+            env_map.insert("IPV6_ADDR".to_string(), addr);
+        }
+        if let Some(gw) = ipv6_gw {
+            env_map.insert("IPV6_GW".to_string(), gw);
+        }
 
         let init_config = serde_json::json!({
             "env": env_map,
@@ -297,7 +305,7 @@ mod tests {
         let builder = ImageBuilder::new().unwrap();
         let temp_path = PathBuf::from("/tmp/test-invalid-image.ext4");
         let result = builder
-            .docker_to_ext4("nonexistent-image-12345", &temp_path, 8080)
+            .docker_to_ext4("nonexistent-image-12345", &temp_path, 8080, None, None)
             .await;
         assert!(result.is_err());
     }

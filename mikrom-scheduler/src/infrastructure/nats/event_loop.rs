@@ -1,9 +1,10 @@
-use crate::domain::HostMetrics;
+use crate::domain::{HostMetrics, Worker};
 use crate::server::SchedulerServer;
 use futures::StreamExt;
 use mikrom_proto::scheduler::{
     AppStatusRequest, CancelRequest, DeleteAllByAppRequest, DeleteAppRequest, DeployRequest,
-    ListAppsRequest, ListWorkersRequest, PauseRequest, ResumeRequest, WorkerHeartbeat,
+    ListAppsRequest, ListWorkersRequest, PauseRequest, ResumeRequest, RouterHeartbeat,
+    WorkerHeartbeat,
 };
 use prost::Message;
 
@@ -23,6 +24,10 @@ impl NatsEventLoop {
         // 1. Heartbeats
         let mut heartbeat_sub = client
             .subscribe("mikrom.scheduler.worker.heartbeat")
+            .await?;
+
+        let mut router_heartbeat_sub = client
+            .subscribe("mikrom.scheduler.router.heartbeat")
             .await?;
 
         // 2. Queue Group Subscriptions for Load Balancing
@@ -59,12 +64,19 @@ impl NatsEventLoop {
         let mut health_sub = client
             .queue_subscribe("mikrom.scheduler.check_health", "schedulers".to_string())
             .await?;
+        let mut security_sub = client
+            .queue_subscribe(
+                "mikrom.scheduler.update_security_groups",
+                "schedulers".to_string(),
+            )
+            .await?;
 
         tracing::info!("NATS Event Loop started, listening for messages...");
 
         loop {
             tokio::select! {
                 Some(msg) = heartbeat_sub.next() => self.handle_heartbeat(msg).await,
+                Some(msg) = router_heartbeat_sub.next() => self.handle_router_heartbeat(msg).await,
                 Some(msg) = deploy_sub.next() => self.handle_deploy(msg).await,
                 Some(msg) = status_sub.next() => self.handle_status(msg).await,
                 Some(msg) = list_sub.next() => self.handle_list_apps(msg).await,
@@ -75,8 +87,34 @@ impl NatsEventLoop {
                 Some(msg) = delete_sub.next() => self.handle_delete(msg).await,
                 Some(msg) = delete_all_sub.next() => self.handle_delete_all(msg).await,
                 Some(msg) = health_sub.next() => self.handle_check_health(msg).await,
+                Some(msg) = security_sub.next() => self.handle_update_security_groups(msg).await,
             }
         }
+    }
+
+    async fn handle_update_security_groups(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            if let Ok(req) =
+                mikrom_proto::scheduler::UpdateSecurityGroupsRequest::decode(&message.payload[..])
+            {
+                let result = server.update_security_groups(req).await;
+                if let Some(reply) = message.reply {
+                    let response = match result {
+                        Ok(resp) => resp,
+                        Err(e) => mikrom_proto::scheduler::UpdateSecurityGroupsResponse {
+                            success: false,
+                            message: e.to_string(),
+                        },
+                    };
+                    let mut buf = Vec::new();
+                    if response.encode(&mut buf).is_ok() {
+                        let _ = client.publish(reply, buf.into()).await;
+                    }
+                }
+            }
+        });
     }
 
     async fn handle_check_health(&self, message: async_nats::Message) {
@@ -104,61 +142,253 @@ impl NatsEventLoop {
         });
     }
 
+    async fn handle_router_heartbeat(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            match RouterHeartbeat::decode(&message.payload[..]) {
+                Ok(heartbeat) => {
+                    tracing::info!(
+                        "Received heartbeat from router {} with WG IP {}",
+                        heartbeat.host_id,
+                        heartbeat.wireguard_ip
+                    );
+                    let worker = Worker {
+                        host_id: heartbeat.host_id.clone(),
+                        hostname: heartbeat.hostname.clone(),
+                        ip_address: heartbeat.ip_address.clone(),
+                        bridge_ip: "10.0.0.1/24".to_string(), // Dummy for router
+                        wireguard_pubkey: Some(heartbeat.wireguard_pubkey.clone()),
+                        wireguard_ip: Some(heartbeat.wireguard_ip.clone()),
+                        wireguard_port: Some(heartbeat.wireguard_port),
+                        metrics: None,
+                        registered_at: chrono::Utc::now().timestamp(),
+                        last_heartbeat: chrono::Utc::now().timestamp(),
+                    };
+
+                    if let Err(e) = server.app_service.worker_repo.register(worker).await {
+                        tracing::error!(
+                            "Failed to register router {} from heartbeat: {}",
+                            heartbeat.host_id,
+                            e
+                        );
+                    } else {
+                        // Broadcast mesh update immediately
+                        if let Ok(workers) = server.app_service.worker_repo.list_workers().await {
+                            for w in &workers {
+                                let mut peers = Vec::new();
+                                for peer_worker in &workers {
+                                    // Skip self and only include peers with a public key
+                                    if peer_worker.host_id == w.host_id
+                                        || peer_worker.wireguard_pubkey.is_none()
+                                    {
+                                        continue;
+                                    }
+
+                                    let mut allowed_ips = Vec::new();
+                                    if let Some(wg_ip) = &peer_worker.wireguard_ip
+                                        && !wg_ip.is_empty()
+                                    {
+                                        let prefix =
+                                            if wg_ip.contains(':') { "/128" } else { "/32" };
+                                        allowed_ips.push(format!("{}{}", wg_ip, prefix));
+                                    }
+
+                                    // Include all running jobs on this peer worker
+                                    if let Ok(jobs) = server
+                                        .app_service
+                                        .job_repo
+                                        .list_jobs(None, Some(crate::domain::JobStatus::Running))
+                                        .await
+                                    {
+                                        for job in jobs {
+                                            if job.host_id.as_deref() == Some(&peer_worker.host_id)
+                                                && let Some(ipv6) = &job.config.ipv6_address
+                                            {
+                                                let prefix =
+                                                    if ipv6.contains(':') { "/128" } else { "/32" };
+                                                allowed_ips.push(format!("{}{}", ipv6, prefix));
+                                            }
+                                        }
+                                    }
+
+                                    if !peer_worker
+                                        .wireguard_pubkey
+                                        .as_deref()
+                                        .unwrap_or_default()
+                                        .is_empty()
+                                    {
+                                        peers.push(mikrom_proto::scheduler::Peer {
+                                            host_id: peer_worker.host_id.clone(),
+                                            ip_address: peer_worker.ip_address.clone(),
+                                            wireguard_pubkey: peer_worker
+                                                .wireguard_pubkey
+                                                .clone()
+                                                .unwrap_or_default(),
+                                            allowed_ips,
+                                            wireguard_port: peer_worker
+                                                .wireguard_port
+                                                .unwrap_or(51820),
+                                        });
+                                    }
+                                }
+
+                                let update = mikrom_proto::scheduler::NetworkMeshUpdate { peers };
+                                let mut buf = Vec::new();
+                                if update.encode(&mut buf).is_ok() {
+                                    let subject =
+                                        format!("mikrom.scheduler.network.mesh.{}", w.host_id);
+                                    let _ = client.publish(subject, buf.into()).await;
+                                }
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Failed to decode router heartbeat: {}", e);
+                },
+            }
+        });
+    }
+
     async fn handle_heartbeat(&self, message: async_nats::Message) {
         let server = self.server.clone();
+        let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(heartbeat) = WorkerHeartbeat::decode(&message.payload[..]) {
-                tracing::info!("Received heartbeat from worker {}", heartbeat.host_id);
-                let worker = crate::domain::Worker {
-                    host_id: heartbeat.host_id.clone(),
-                    hostname: heartbeat.hostname.clone(),
-                    ip_address: heartbeat.ip_address.clone(),
-                    bridge_ip: heartbeat.bridge_ip.clone(),
-                    metrics: None, // Will update below
-                    registered_at: chrono::Utc::now().timestamp(),
-                    last_heartbeat: chrono::Utc::now().timestamp(),
-                };
-
-                if let Err(e) = server.app_service.worker_repo.register(worker).await {
-                    tracing::error!(
-                        "Failed to register worker {} from heartbeat: {}",
+            match WorkerHeartbeat::decode(&message.payload[..]) {
+                Ok(heartbeat) => {
+                    tracing::info!(
+                        "Received heartbeat from worker {} with WG IP {}",
                         heartbeat.host_id,
-                        e
+                        heartbeat.wireguard_ip
                     );
-                }
-
-                if let Some(metrics) = heartbeat.metrics {
-                    let host_metrics = HostMetrics {
-                        cpu_usage: metrics.cpu_usage,
-                        ram_used_bytes: metrics.ram_used_bytes,
-                        ram_total_bytes: metrics.ram_total_bytes,
-                        disk_used_bytes: metrics.disk_used_bytes,
-                        disk_total_bytes: metrics.disk_total_bytes,
-                        apps_count: metrics.apps_count,
-                        load_avg_1: metrics.load_avg_1,
-                        load_avg_5: metrics.load_avg_5,
-                        load_avg_15: metrics.load_avg_15,
-                        timestamp: metrics.timestamp,
-                        vms: metrics
-                            .vms
-                            .into_iter()
-                            .map(|(k, v)| {
-                                (
-                                    k,
-                                    crate::domain::VmMetrics {
-                                        cpu_usage: v.cpu_usage,
-                                        ram_used_bytes: v.ram_used_bytes,
-                                    },
-                                )
-                            })
-                            .collect(),
+                    let worker = Worker {
+                        host_id: heartbeat.host_id.clone(),
+                        hostname: heartbeat.hostname.clone(),
+                        ip_address: heartbeat.ip_address.clone(),
+                        bridge_ip: heartbeat.bridge_ip.clone(),
+                        wireguard_pubkey: Some(heartbeat.wireguard_pubkey.clone()),
+                        wireguard_ip: Some(heartbeat.wireguard_ip.clone()),
+                        wireguard_port: Some(heartbeat.wireguard_port),
+                        metrics: None, // Will update below
+                        registered_at: chrono::Utc::now().timestamp(),
+                        last_heartbeat: chrono::Utc::now().timestamp(),
                     };
-                    let _ = server
-                        .app_service
-                        .worker_repo
-                        .update_metrics(&heartbeat.host_id, host_metrics)
-                        .await;
-                }
+
+                    if let Err(e) = server.app_service.worker_repo.register(worker).await {
+                        tracing::error!(
+                            "Failed to register worker {} from heartbeat: {}",
+                            heartbeat.host_id,
+                            e
+                        );
+                    } else {
+                        // Broadcast mesh update
+                        if let Ok(workers) = server.app_service.worker_repo.list_workers().await {
+                            for w in &workers {
+                                let mut peers = Vec::new();
+                                for peer_worker in &workers {
+                                    // Skip self and only include peers with a public key
+                                    if peer_worker.host_id == w.host_id
+                                        || peer_worker.wireguard_pubkey.is_none()
+                                    {
+                                        continue;
+                                    }
+
+                                    let mut allowed_ips = Vec::new();
+                                    if let Some(wg_ip) = &peer_worker.wireguard_ip
+                                        && !wg_ip.is_empty()
+                                    {
+                                        let prefix =
+                                            if wg_ip.contains(':') { "/128" } else { "/32" };
+                                        allowed_ips.push(format!("{}{}", wg_ip, prefix));
+                                    }
+
+                                    // Include all running jobs on this peer worker
+                                    if let Ok(jobs) = server
+                                        .app_service
+                                        .job_repo
+                                        .list_jobs(None, Some(crate::domain::JobStatus::Running))
+                                        .await
+                                    {
+                                        for job in jobs {
+                                            if job.host_id.as_deref() == Some(&peer_worker.host_id)
+                                                && let Some(ipv6) = &job.config.ipv6_address
+                                            {
+                                                let prefix =
+                                                    if ipv6.contains(':') { "/128" } else { "/32" };
+                                                allowed_ips.push(format!("{}{}", ipv6, prefix));
+                                            }
+                                        }
+                                    }
+
+                                    if !peer_worker
+                                        .wireguard_pubkey
+                                        .as_deref()
+                                        .unwrap_or_default()
+                                        .is_empty()
+                                    {
+                                        peers.push(mikrom_proto::scheduler::Peer {
+                                            host_id: peer_worker.host_id.clone(),
+                                            ip_address: peer_worker.ip_address.clone(),
+                                            wireguard_pubkey: peer_worker
+                                                .wireguard_pubkey
+                                                .clone()
+                                                .unwrap_or_default(),
+                                            allowed_ips,
+                                            wireguard_port: peer_worker
+                                                .wireguard_port
+                                                .unwrap_or(51820),
+                                        });
+                                    }
+                                }
+
+                                let update = mikrom_proto::scheduler::NetworkMeshUpdate { peers };
+                                let mut buf = Vec::new();
+                                if update.encode(&mut buf).is_ok() {
+                                    let subject =
+                                        format!("mikrom.scheduler.network.mesh.{}", w.host_id);
+                                    let _ = client.publish(subject, buf.into()).await;
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(metrics) = heartbeat.metrics {
+                        let host_metrics = HostMetrics {
+                            cpu_usage: metrics.cpu_usage,
+                            ram_used_bytes: metrics.ram_used_bytes,
+                            ram_total_bytes: metrics.ram_total_bytes,
+                            disk_used_bytes: metrics.disk_used_bytes,
+                            disk_total_bytes: metrics.disk_total_bytes,
+                            apps_count: metrics.apps_count,
+                            load_avg_1: metrics.load_avg_1,
+                            load_avg_5: metrics.load_avg_5,
+                            load_avg_15: metrics.load_avg_15,
+                            timestamp: metrics.timestamp,
+                            vms: metrics
+                                .vms
+                                .into_iter()
+                                .map(|(k, v)| {
+                                    (
+                                        k,
+                                        crate::domain::VmMetrics {
+                                            cpu_usage: v.cpu_usage,
+                                            ram_used_bytes: v.ram_used_bytes,
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        };
+                        let _ = server
+                            .app_service
+                            .worker_repo
+                            .update_metrics(&heartbeat.host_id, host_metrics)
+                            .await;
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Failed to decode heartbeat: {}", e);
+                },
             }
         });
     }

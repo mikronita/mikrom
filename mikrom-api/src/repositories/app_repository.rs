@@ -24,6 +24,7 @@ pub struct UpdateDeploymentParams {
     pub image_tag: Option<String>,
     pub build_id: Option<String>,
     pub ip_address: Option<String>,
+    pub ipv6_address: Option<String>,
     pub git_commit_hash: Option<String>,
     pub git_commit_message: Option<String>,
     pub git_branch: Option<String>,
@@ -96,4 +97,18 @@ pub trait AppRepository: Send + Sync {
     ) -> anyhow::Result<Vec<Deployment>>;
     async fn get_active_deployment(&self, app_id: Uuid) -> anyhow::Result<Option<Deployment>>;
     async fn delete_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<()>;
+
+    async fn list_security_rules(
+        &self,
+        app_id: Uuid,
+    ) -> anyhow::Result<Vec<crate::models::app::SecurityRule>>;
+    async fn create_security_rule(
+        &self,
+        app_id: Uuid,
+        protocol: String,
+        port_start: i32,
+        port_end: i32,
+        action: String,
+    ) -> anyhow::Result<crate::models::app::SecurityRule>;
+    async fn delete_security_rule(&self, id: Uuid) -> anyhow::Result<()>;
 }

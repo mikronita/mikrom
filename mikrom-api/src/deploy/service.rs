@@ -139,6 +139,15 @@ impl DeploymentService {
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+        let user = state
+            .user_repo
+            .find_by_id(app.user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+        let vpc_ipv6_prefix = user.vpc_ipv6_prefix.unwrap_or_default();
+
         let nats_req = DeployRequest {
             app_id: app.id.to_string(),
             app_name: app.name.clone(),
@@ -154,6 +163,7 @@ impl DeploymentService {
                 ..Default::default()
             }),
             deployment_id: deployment.id.to_string(),
+            vpc_ipv6_prefix,
         };
 
         let nats_result: ApiResult<DeployResponse> = state

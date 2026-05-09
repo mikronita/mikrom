@@ -1,4 +1,5 @@
 use crate::error::{ApiError, ApiResult};
+use crate::models::app::SecurityRule;
 use crate::repositories::app_repository::UpdateDeploymentParams;
 use axum::{
     Json,
@@ -25,6 +26,7 @@ pub struct LiveDeploymentInfo {
     pub vm_id: String,
     pub cpu_usage: f32,
     pub ram_used_bytes: u64,
+    pub ipv6_address: Option<String>,
 }
 
 use futures::Stream;
@@ -206,7 +208,7 @@ pub async fn list_active_deployments(
     // 3. Map deployments to LiveDeploymentInfo, using scheduler data if available
     let mut active_deployments = Vec::new();
     for dep in deployments {
-        let (status, host_id, vm_id, cpu_usage, ram_used_bytes) =
+        let (status, host_id, vm_id, cpu_usage, ram_used_bytes, ipv6_address) =
             if let Some(job_id_real) = &dep.job_id {
                 if let Some(sch_app) = scheduler_apps.get(job_id_real) {
                     (
@@ -215,13 +217,37 @@ pub async fn list_active_deployments(
                         sch_app.vm_id.clone(),
                         sch_app.cpu_usage,
                         sch_app.ram_used_bytes,
+                        if sch_app.ipv6_address.is_empty() {
+                            dep.ipv6_address.clone()
+                        } else {
+                            Some(sch_app.ipv6_address.clone())
+                        },
                     )
                 } else {
-                    (dep.status.clone(), String::new(), String::new(), 0.0, 0)
+                    (
+                        dep.status.clone(),
+                        String::new(),
+                        String::new(),
+                        0.0,
+                        0,
+                        dep.ipv6_address.clone(),
+                    )
                 }
             } else {
-                (dep.status.clone(), String::new(), String::new(), 0.0, 0)
+                (
+                    dep.status.clone(),
+                    String::new(),
+                    String::new(),
+                    0.0,
+                    0,
+                    dep.ipv6_address.clone(),
+                )
             };
+
+        // Only include deployments that are actually RUNNING in the cluster or marked as RUNNING in DB
+        if status != "RUNNING" {
+            continue;
+        }
 
         // Get app name from repo
         let app_name = if let Ok(Some(app)) = state.app_repo.get_app(dep.app_id).await {
@@ -241,6 +267,7 @@ pub async fn list_active_deployments(
             vm_id,
             cpu_usage,
             ram_used_bytes,
+            ipv6_address,
         });
     }
 
@@ -868,6 +895,198 @@ pub async fn delete_deployment_record(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     state.deployment_events.send(app.id).ok();
+
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MeshStatus {
+    pub workers: Vec<crate::models::worker::Worker>,
+    pub total_workers: usize,
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/networking/mesh",
+    responses(
+        (status = 200, description = "Mesh network status", body = MeshStatus),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "networking",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn get_mesh_status_handler(
+    _auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+) -> ApiResult<Json<MeshStatus>> {
+    let workers = sqlx::query_as::<_, crate::models::worker::Worker>(
+        "SELECT * FROM workers WHERE last_seen_at > NOW() - INTERVAL '5 minutes' ORDER BY hostname",
+    )
+    .fetch_all(&state.api_db)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(MeshStatus {
+        total_workers: workers.len(),
+        workers,
+    }))
+}
+
+#[derive(Debug, serde::Deserialize, ToSchema)]
+pub struct CreateSecurityRuleRequest {
+    pub protocol: String,
+    pub port_start: i32,
+    pub port_end: i32,
+    pub action: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/apps/{app_name}/security-groups",
+    params(
+        ("app_name" = String, Path, description = "Application name")
+    ),
+    responses(
+        (status = 200, description = "List of security rules", body = [SecurityRule]),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "networking",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn list_security_rules_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path(app_name): Path<String>,
+) -> ApiResult<Json<Vec<crate::models::app::SecurityRule>>> {
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    let rules = state.app_repo.list_security_rules(app.id).await?;
+    Ok(Json(rules))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/apps/{app_name}/security-groups",
+    request_body = CreateSecurityRuleRequest,
+    params(
+        ("app_name" = String, Path, description = "Application name")
+    ),
+    responses(
+        (status = 201, description = "Security rule created", body = SecurityRule),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "networking",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn create_security_rule_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path(app_name): Path<String>,
+    Json(payload): Json<CreateSecurityRuleRequest>,
+) -> ApiResult<(
+    axum::http::StatusCode,
+    Json<crate::models::app::SecurityRule>,
+)> {
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    let rule = state
+        .app_repo
+        .create_security_rule(
+            app.id,
+            payload.protocol,
+            payload.port_start,
+            payload.port_end,
+            payload.action,
+        )
+        .await?;
+
+    // Notify scheduler to apply rules to active VMs
+    let nats_req = mikrom_proto::scheduler::UpdateSecurityGroupsRequest {
+        app_id: app.id.to_string(),
+        user_id: auth.user_id.clone(),
+        rules: Vec::new(), // Rules will be fetched by scheduler from DB
+    };
+
+    let _: anyhow::Result<mikrom_proto::scheduler::UpdateSecurityGroupsResponse> = state
+        .nats
+        .request("mikrom.scheduler.update_security_groups", nats_req)
+        .await;
+
+    Ok((axum::http::StatusCode::CREATED, Json(rule)))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/apps/{app_name}/security-groups/{rule_id}",
+    params(
+        ("app_name" = String, Path, description = "Application name"),
+        ("rule_id" = String, Path, description = "Rule UUID")
+    ),
+    responses(
+        (status = 200, description = "Security rule deleted"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Application/Rule not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "networking",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn delete_security_rule_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, rule_id)): Path<(String, String)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let app = state
+        .app_repo
+        .get_app_by_name(&app_name)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    let rule_uuid =
+        uuid::Uuid::parse_str(&rule_id).map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    state.app_repo.delete_security_rule(rule_uuid).await?;
+
+    // Notify scheduler to apply rules to active VMs
+    let nats_req = mikrom_proto::scheduler::UpdateSecurityGroupsRequest {
+        app_id: app.id.to_string(),
+        user_id: auth.user_id.clone(),
+        rules: Vec::new(),
+    };
+
+    let _: anyhow::Result<mikrom_proto::scheduler::UpdateSecurityGroupsResponse> = state
+        .nats
+        .request("mikrom.scheduler.update_security_groups", nats_req)
+        .await;
 
     Ok(Json(serde_json::json!({ "success": true })))
 }

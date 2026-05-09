@@ -6,7 +6,7 @@ use crate::domain::{AgentClient, DomainError, DomainResult, VmConfig};
 use async_trait::async_trait;
 use mikrom_proto::agent::{
     AgentCommand, AgentCommandResponse, DeleteVmRequest, PauseVmRequest, ResumeVmRequest,
-    StartVmRequest, StopVmRequest, VmConfig as ProtoVmConfig,
+    StartVmRequest, StopVmRequest, UpdateFirewallRequest, VmConfig as ProtoVmConfig,
 };
 use prost::Message;
 use std::time::Duration;
@@ -76,6 +76,8 @@ impl AgentClient for NatsAgentClient {
             netmask: config.netmask.clone().unwrap_or_default(),
             volumes: vec![], // TODO
             health_check_path: config.health_check_path.clone(),
+            ipv6_address: config.ipv6_address.clone().unwrap_or_default(),
+            ipv6_gateway: config.ipv6_gateway.clone().unwrap_or_default(),
         };
 
         self.send_command(
@@ -148,11 +150,35 @@ impl AgentClient for NatsAgentClient {
         .map_err(|_| DomainError::Infrastructure("Health check timed out".to_string()))?
         .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
 
-        let inner = mikrom_proto::agent::CheckHealthResponse::decode(&response.payload[..])
-            .map_err(|e| {
-                DomainError::Infrastructure(format!("Failed to decode health check response: {e}"))
-            })?;
+        let res = mikrom_proto::agent::CheckHealthResponse::decode(&response.payload[..])
+            .map_err(|e| DomainError::Infrastructure(format!("Decode failed: {e}")))?;
 
-        Ok(inner.is_healthy)
+        Ok(res.is_healthy)
+    }
+
+    async fn update_firewall(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        rules: Vec<mikrom_proto::scheduler::FirewallRule>,
+    ) -> DomainResult<()> {
+        let agent_rules = rules
+            .into_iter()
+            .map(|r| mikrom_proto::agent::FirewallRule {
+                protocol: r.protocol,
+                port_start: r.port_start,
+                port_end: r.port_end,
+                action: r.action,
+            })
+            .collect();
+
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::UpdateFirewall(UpdateFirewallRequest {
+                vm_id: vm_id.to_string(),
+                rules: agent_rules,
+            }),
+        )
+        .await
     }
 }

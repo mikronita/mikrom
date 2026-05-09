@@ -27,6 +27,7 @@ pub struct UserResponse {
     pub role: crate::repositories::user_repository::UserRole,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
+    pub vpc_ipv6_prefix: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -111,6 +112,7 @@ pub async fn register(
                 role: user.role,
                 first_name: user.first_name,
                 last_name: user.last_name,
+                vpc_ipv6_prefix: user.vpc_ipv6_prefix,
             },
             token,
         }),
@@ -163,6 +165,7 @@ pub async fn login(
             role: user.role,
             first_name: user.first_name,
             last_name: user.last_name,
+            vpc_ipv6_prefix: user.vpc_ipv6_prefix,
         },
         token,
     }))
@@ -200,6 +203,7 @@ pub async fn get_profile(
         role: user.role,
         first_name: user.first_name,
         last_name: user.last_name,
+        vpc_ipv6_prefix: user.vpc_ipv6_prefix,
     }))
 }
 
@@ -243,6 +247,7 @@ pub async fn update_profile(
         role: user.role,
         first_name: user.first_name,
         last_name: user.last_name,
+        vpc_ipv6_prefix: user.vpc_ipv6_prefix,
     }))
 }
 
@@ -268,6 +273,7 @@ mod tests {
                 role: crate::repositories::user_repository::UserRole::User,
                 first_name: None,
                 last_name: None,
+                vpc_ipv6_prefix: None,
             }))
         });
 
@@ -326,6 +332,7 @@ mod tests {
                 role: crate::repositories::user_repository::UserRole::User,
                 first_name: None,
                 last_name: None,
+                vpc_ipv6_prefix: None,
             }))
         });
 

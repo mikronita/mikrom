@@ -52,6 +52,9 @@ pub struct Worker {
     pub hostname: String,
     pub ip_address: String,
     pub bridge_ip: String,
+    pub wireguard_pubkey: Option<String>,
+    pub wireguard_ip: Option<String>,
+    pub wireguard_port: Option<i32>,
     pub metrics: Option<HostMetrics>,
     pub registered_at: i64,
     pub last_heartbeat: i64,
@@ -89,6 +92,12 @@ pub trait AgentClient: Send + Sync {
     async fn stop_vm(&self, host_id: &str, vm_id: &str) -> DomainResult<()>;
     async fn delete_vm(&self, host_id: &str, vm_id: &str) -> DomainResult<()>;
     async fn check_health(&self, host_id: &str, vm_id: &str) -> DomainResult<bool>;
+    async fn update_firewall(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        rules: Vec<mikrom_proto::scheduler::FirewallRule>,
+    ) -> DomainResult<()>;
 }
 
 #[async_trait]

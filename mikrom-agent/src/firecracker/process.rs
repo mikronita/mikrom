@@ -7,6 +7,7 @@ pub struct VmProcess {
     pub socket_path: String,
     pub metrics_path: Option<String>,
     pub tap_name: Option<String>,
+    pub tap_ifindex: Option<u32>,
     pub log_task: tokio::task::JoinHandle<()>,
     pub chroot_dir: Option<String>,
 }
@@ -34,4 +35,5 @@ pub struct VmDetailedInfo {
     pub ip_address: Option<String>,
     pub metrics_path: Option<String>,
     pub socket_path: Option<String>,
+    pub tap_ifindex: Option<u32>,
 }
