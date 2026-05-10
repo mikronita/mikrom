@@ -88,12 +88,17 @@ export interface LogLine {
 
 export interface VmMetrics {
   app_id: string;
+  job_id?: string;
+  deployment_id?: string;
   vm_id: string;
   cpu_usage: number;
   ram_used_bytes: number;
+  tx_bytes?: number;
+  rx_bytes?: number;
   status: string;
   error_message?: string | null;
   ip_address?: string | null;
+  ipv6_address?: string | null;
 }
 
 export type VmMetricsResponse = VmMetrics;

@@ -282,6 +282,8 @@ message AppStatusResponse {
   uint64 ram_used_bytes = 10;
   string ip_address = 11;
   string ipv6_address = 12;
+  uint64 tx_bytes = 13;
+  uint64 rx_bytes = 14;
 }
 
 message CancelRequest {
@@ -316,4 +318,6 @@ message AppInfo {
   string user_id = 10;
   string deployment_id = 11;
   string ipv6_address = 12;
+  uint64 tx_bytes = 13;
+  uint64 rx_bytes = 14;
 }

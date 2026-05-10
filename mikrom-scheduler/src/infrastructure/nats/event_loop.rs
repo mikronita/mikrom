@@ -317,6 +317,48 @@ impl NatsEventLoop {
                     }
 
                     if let Some(metrics) = heartbeat.metrics {
+                        let running_jobs_by_vm = server
+                            .app_service
+                            .job_repo
+                            .list_jobs(None, None, Some(crate::domain::JobStatus::Running))
+                            .await
+                            .map(|jobs| {
+                                jobs.into_iter()
+                                    .filter(|job| {
+                                        job.host_id.as_deref() == Some(&heartbeat.host_id)
+                                    })
+                                    .filter_map(|job| job.vm_id.clone().map(|vm_id| (vm_id, job)))
+                                    .collect::<std::collections::HashMap<_, _>>()
+                            })
+                            .unwrap_or_default();
+
+                        for (vm_id, vm_metrics) in &metrics.vms {
+                            let Some(job) = running_jobs_by_vm.get(vm_id) else {
+                                continue;
+                            };
+
+                            let event = serde_json::json!({
+                                "app_id": job.app_id,
+                                "job_id": job.job_id,
+                                "deployment_id": job.deployment_id,
+                                "vm_id": vm_id,
+                                "cpu_usage": vm_metrics.cpu_usage,
+                                "ram_used_bytes": vm_metrics.ram_used_bytes,
+                                "tx_bytes": vm_metrics.tx_bytes,
+                                "rx_bytes": vm_metrics.rx_bytes,
+                                "status": "RUNNING",
+                                "ip_address": if vm_metrics.ip_address.is_empty() {
+                                    serde_json::Value::Null
+                                } else {
+                                    serde_json::Value::String(vm_metrics.ip_address.clone())
+                                },
+                                "ipv6_address": job.config.ipv6_address,
+                            });
+
+                            let subject = format!("mikrom.metrics.{}.{}", job.app_id, vm_id);
+                            let _ = client.publish(subject, event.to_string().into()).await;
+                        }
+
                         let host_metrics = HostMetrics {
                             cpu_usage: metrics.cpu_usage,
                             ram_used_bytes: metrics.ram_used_bytes,
@@ -337,6 +379,8 @@ impl NatsEventLoop {
                                         crate::domain::VmMetrics {
                                             cpu_usage: v.cpu_usage,
                                             ram_used_bytes: v.ram_used_bytes,
+                                            tx_bytes: v.tx_bytes,
+                                            rx_bytes: v.rx_bytes,
                                         },
                                     )
                                 })

@@ -35,5 +35,6 @@ pub struct VmDetailedInfo {
     pub ip_address: Option<String>,
     pub metrics_path: Option<String>,
     pub socket_path: Option<String>,
+    pub tap_name: Option<String>,
     pub tap_ifindex: Option<u32>,
 }

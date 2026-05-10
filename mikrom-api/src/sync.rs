@@ -134,7 +134,9 @@ async fn sync_deployment_state(
     let has_new_ipv6 =
         !ipv6_address.is_empty() && dep.ipv6_address.as_deref() != Some(ipv6_address);
 
-    if status_changed || has_new_ip || has_new_ipv6 {
+    let deployment_changed = status_changed || has_new_ip || has_new_ipv6;
+
+    if deployment_changed {
         let _ = state
             .app_repo
             .update_deployment(
@@ -165,8 +167,34 @@ async fn sync_deployment_state(
             )
             .await;
         state.deployment_events.send(dep.app_id).ok();
+    }
 
-        if let Ok(Some(app)) = state.app_repo.get_app(dep.app_id).await {
+    if let Ok(Some(mut app)) = state.app_repo.get_app(dep.app_id).await {
+        let mut route_changed = deployment_changed;
+
+        if app.active_deployment_id.is_none() && db_status == "RUNNING" {
+            match state.app_repo.set_active_deployment(app.id, dep.id).await {
+                Ok(_) => {
+                    app.active_deployment_id = Some(dep.id);
+                    route_changed = true;
+                    info!(
+                        app_id = %app.id,
+                        deployment_id = %dep.id,
+                        "Promoted first running deployment to active"
+                    );
+                },
+                Err(e) => {
+                    error!(
+                        app_id = %app.id,
+                        deployment_id = %dep.id,
+                        error = %e,
+                        "Failed to promote running deployment to active"
+                    );
+                },
+            }
+        }
+
+        if route_changed {
             let _ = state.notify_router(&app).await;
         }
     }

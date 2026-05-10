@@ -318,13 +318,14 @@ func (m *MikromApp) Start() error {
 			m.logger.Error("initial sync from DB failed", zap.Error(err))
 		}
 
-		// Start NATS listeners
-		m.listenForUpdates()
-
 		// WireGuard Setup
 		hostname, _ := os.Hostname()
 		// Use a more unique ID for the router host to allow multiple instances
 		hostID := fmt.Sprintf("router-%s", hostname)
+
+		// Start NATS listeners
+		m.listenForUpdates(hostID)
+
 		wgIPv6 := m.getRouterIPv6(hostID)
 		pubKey, err := m.wg.Init(hostID, wgIPv6)
 		if err != nil {

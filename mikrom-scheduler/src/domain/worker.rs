@@ -8,6 +8,8 @@ use std::collections::HashMap;
 pub struct VmMetrics {
     pub cpu_usage: f32,
     pub ram_used_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,7 +36,15 @@ impl HostMetrics {
         let ram_req = memory_mib * 1024 * 1024;
         let disk_req = disk_mib * 1024 * 1024;
 
-        ram_free >= ram_req && disk_free >= disk_req
+        let ram_ok = ram_free >= ram_req;
+        let disk_ok = if self.disk_total_bytes == 0 {
+            // Metrics not implemented or no limit reported, bypass for resilience
+            true
+        } else {
+            disk_free >= disk_req
+        };
+
+        ram_ok && disk_ok
     }
 
     pub fn calculate_score(&self, max_apps: u32) -> f32 {
@@ -128,4 +138,55 @@ pub trait JobRepository: Send + Sync {
         status: Option<JobStatus>,
     ) -> DomainResult<Vec<Job>>;
     async fn find_job_by_vm_id(&self, vm_id: &str) -> DomainResult<Option<Job>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_can_fit_vm_standard() {
+        let metrics = HostMetrics {
+            cpu_usage: 0.0,
+            ram_total_bytes: 2048 * 1024 * 1024,
+            ram_used_bytes: 512 * 1024 * 1024,
+            disk_total_bytes: 10 * 1024 * 1024 * 1024,
+            disk_used_bytes: 2 * 1024 * 1024 * 1024,
+            apps_count: 0,
+            load_avg_1: 0.0,
+            load_avg_5: 0.0,
+            load_avg_15: 0.0,
+            timestamp: 0,
+            vms: HashMap::new(),
+        };
+
+        // Fits: 512MB RAM, 1GB Disk
+        assert!(metrics.can_fit_vm(512, 1024));
+        // Does not fit: 2GB RAM
+        assert!(!metrics.can_fit_vm(2048, 1024));
+        // Does not fit: 9GB Disk
+        assert!(!metrics.can_fit_vm(512, 9 * 1024));
+    }
+
+    #[test]
+    fn test_can_fit_vm_resilience_bypass() {
+        let metrics = HostMetrics {
+            cpu_usage: 0.0,
+            ram_total_bytes: 2048 * 1024 * 1024,
+            ram_used_bytes: 512 * 1024 * 1024,
+            disk_total_bytes: 0, // 0 means metrics not implemented
+            disk_used_bytes: 0,
+            apps_count: 0,
+            load_avg_1: 0.0,
+            load_avg_5: 0.0,
+            load_avg_15: 0.0,
+            timestamp: 0,
+            vms: HashMap::new(),
+        };
+
+        // Fits because disk check is bypassed
+        assert!(metrics.can_fit_vm(512, 1024));
+        // Still fails RAM check
+        assert!(!metrics.can_fit_vm(2048, 1024));
+    }
 }

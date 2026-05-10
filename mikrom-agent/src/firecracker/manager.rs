@@ -59,6 +59,7 @@ impl FirecrackerManager {
                 let pid = proc.map(|p| p.child.id().unwrap_or(0));
                 let metrics_path = proc.and_then(|p| p.metrics_path.clone());
                 let socket_path = proc.map(|p| p.socket_path.clone());
+                let tap_name = proc.and_then(|p| p.tap_name.clone());
 
                 VmDetailedInfo {
                     vm_id: vm.vm_id,
@@ -69,6 +70,7 @@ impl FirecrackerManager {
                     ip_address: vm.config.ip_address.clone(),
                     metrics_path,
                     socket_path,
+                    tap_name,
                     tap_ifindex: proc.and_then(|p| p.tap_ifindex),
                 }
             })
