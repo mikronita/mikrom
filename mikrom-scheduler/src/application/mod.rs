@@ -184,7 +184,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn get_job_metrics(&self, job: &Job) -> (f32, u64) {
+    pub async fn get_job_metrics(&self, job: &Job) -> (f32, u64, u64, u64) {
         let metrics = async {
             let host_id = job.host_id.as_ref()?;
             let worker = self.worker_repo.get_worker(host_id).await.ok()??;
@@ -193,11 +193,11 @@ impl AppService {
             metrics
                 .vms
                 .get(vm_id)
-                .map(|m| (m.cpu_usage, m.ram_used_bytes))
+                .map(|m| (m.cpu_usage, m.ram_used_bytes, m.tx_bytes, m.rx_bytes))
         }
         .await;
 
-        metrics.unwrap_or((0.0, 0))
+        metrics.unwrap_or((0.0, 0, 0, 0))
     }
 }
 

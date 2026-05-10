@@ -4,7 +4,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use sysinfo::System;
+use sysinfo::{Disks, Pid, System};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VmMetrics {
@@ -57,6 +57,7 @@ impl Default for SystemMetrics {
 
 pub struct MetricsCollector {
     sys: Arc<RwLock<System>>,
+    disks: Arc<RwLock<Disks>>,
     firecracker: Option<FirecrackerManager>,
     apps_count: Arc<RwLock<u32>>,
 }
@@ -71,8 +72,10 @@ impl MetricsCollector {
     pub fn new() -> Self {
         let mut sys = System::new_all();
         sys.refresh_all();
+        let disks = Disks::new_with_refreshed_list();
         Self {
             sys: Arc::new(RwLock::new(sys)),
+            disks: Arc::new(RwLock::new(disks)),
             firecracker: None,
             apps_count: Arc::new(RwLock::new(0)),
         }
@@ -81,8 +84,10 @@ impl MetricsCollector {
     pub fn with_firecracker(firecracker: FirecrackerManager) -> Self {
         let mut sys = System::new_all();
         sys.refresh_all();
+        let disks = Disks::new_with_refreshed_list();
         Self {
             sys: Arc::new(RwLock::new(sys)),
+            disks: Arc::new(RwLock::new(disks)),
             firecracker: Some(firecracker),
             apps_count: Arc::new(RwLock::new(0)),
         }
@@ -112,9 +117,19 @@ impl MetricsCollector {
             metrics.ram_used_bytes = sys.used_memory();
             metrics.ram_total_bytes = sys.total_memory();
 
-            // Disk metrics (simplified)
-            metrics.disk_used_bytes = 0;
-            metrics.disk_total_bytes = 0;
+            // Disk metrics
+            let mut disks = self.disks.write();
+            disks.refresh_list();
+
+            let mut total_disk = 0;
+            let mut available_disk = 0;
+            for disk in disks.iter_mut() {
+                disk.refresh();
+                total_disk += disk.total_space();
+                available_disk += disk.available_space();
+            }
+            metrics.disk_total_bytes = total_disk;
+            metrics.disk_used_bytes = total_disk.saturating_sub(available_disk);
 
             let load_avg = sysinfo::System::load_average();
             metrics.load_avg_1 = load_avg.one as f32;
@@ -145,6 +160,15 @@ impl MetricsCollector {
                 rx_bytes: 0,
             };
 
+            if let Some(pid) = vm.pid.filter(|pid| *pid > 0) {
+                let pid = Pid::from_u32(pid);
+                let sys = self.sys.read();
+                if let Some(process) = sys.process(pid) {
+                    vm_metrics.cpu_usage = process.cpu_usage();
+                    vm_metrics.ram_used_bytes = process.memory();
+                }
+            }
+
             // Attempt to read Firecracker metrics if path is available
             if let Some(metrics_path) = vm.metrics_path
                 && let Ok(content) = tokio::fs::read_to_string(&metrics_path).await
@@ -166,6 +190,15 @@ impl MetricsCollector {
                 }
             }
 
+            if vm_metrics.tx_bytes == 0
+                && vm_metrics.rx_bytes == 0
+                && let Some(tap_name) = vm.tap_name.as_deref()
+            {
+                let (tx_bytes, rx_bytes) = read_tap_network_stats(tap_name).await;
+                vm_metrics.tx_bytes = tx_bytes;
+                vm_metrics.rx_bytes = rx_bytes;
+            }
+
             metrics.vms.insert(vm_metrics.vm_id, vm_metrics);
         }
 
@@ -173,10 +206,26 @@ impl MetricsCollector {
     }
 }
 
+async fn read_tap_network_stats(tap_name: &str) -> (u64, u64) {
+    let base = format!("/sys/class/net/{tap_name}/statistics");
+    let tx_bytes = read_u64_file(&format!("{base}/tx_bytes")).await;
+    let rx_bytes = read_u64_file(&format!("{base}/rx_bytes")).await;
+    (tx_bytes, rx_bytes)
+}
+
+async fn read_u64_file(path: &str) -> u64 {
+    tokio::fs::read_to_string(path)
+        .await
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
 impl Clone for MetricsCollector {
     fn clone(&self) -> Self {
         Self {
             sys: self.sys.clone(),
+            disks: self.disks.clone(),
             firecracker: self.firecracker.clone(),
             apps_count: self.apps_count.clone(),
         }
@@ -312,6 +361,7 @@ mod tests {
         let collector = MetricsCollector::new();
         let metrics = collector.collect().await;
         assert!(metrics.ram_total_bytes > 0);
+        assert!(metrics.disk_total_bytes > 0);
         assert!(metrics.timestamp > 0);
     }
 

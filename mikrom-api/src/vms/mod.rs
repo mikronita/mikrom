@@ -116,20 +116,34 @@ pub async fn app_metrics_stream_handler(
         return Err(ApiError::Forbidden);
     }
 
-    // 2. Subscribe to NATS for all metrics of this app
-    // Subject pattern: mikrom.metrics.<app_id>.>
-    let nats_sub = state
+    let app_id = app.id.to_string();
+    let active_deployment_id = app.active_deployment_id.map(|id| id.to_string());
+    let mut nats_sub = state
         .nats
-        .subscribe(format!("mikrom.metrics.{}.>", app.id))
+        .subscribe(format!("mikrom.metrics.{}.>", app_id))
         .await
         .map_err(|e| ApiError::Internal(format!("NATS subscription failed: {e}")))?;
 
     let stream = async_stream::stream! {
-        let mut nats_stream = nats_sub;
-        while let Some(msg) = nats_stream.next().await {
-             if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&msg.payload) {
-                 yield Ok(Event::default().data(json.to_string()));
-             }
+        while let Some(msg) = nats_sub.next().await {
+            let Ok(data) = serde_json::from_slice::<serde_json::Value>(&msg.payload) else {
+                continue;
+            };
+
+            if let Some(active_deployment_id) = &active_deployment_id
+                && data
+                    .get("deployment_id")
+                    .and_then(|value| value.as_str())
+                    != Some(active_deployment_id.as_str())
+            {
+                continue;
+            }
+
+            if data.get("status").and_then(|value| value.as_str()) != Some("RUNNING") {
+                continue;
+            }
+
+            yield Ok(Event::default().data(data.to_string()));
         }
     };
 

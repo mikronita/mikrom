@@ -15,7 +15,7 @@ import {
   HiInformationCircle
 } from "react-icons/hi2";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { Rocket, GitBranch, Zap, User } from "lucide-react";
 
 import { AuthGuard } from "@/components/AuthGuard";
@@ -88,6 +88,14 @@ const chartConfig = {
     label: "RAM Usage",
     color: "var(--chart-2)",
   },
+  rx: {
+    label: "Network In",
+    color: "var(--chart-3)",
+  },
+  tx: {
+    label: "Network Out",
+    color: "var(--chart-4)",
+  },
 } satisfies ChartConfig;
 
 function getStatusBadgeClass(status: string): string {
@@ -102,6 +110,23 @@ interface MetricPoint {
   time: string;
   cpu: number;
   ram: number;
+  rx: number;
+  tx: number;
+}
+
+function normalizeCpuUsage(cpuUsage: number | undefined): number {
+  const value = cpuUsage || 0;
+  return value <= 1 ? value * 100 : value;
+}
+
+function formatNetworkRate(kibPerSecond: number): string {
+  if (kibPerSecond > 0 && kibPerSecond < 1) {
+    return `${(kibPerSecond * 1024).toFixed(0)} B/s`;
+  }
+  if (kibPerSecond >= 1024) {
+    return `${(kibPerSecond / 1024).toFixed(1)} MiB/s`;
+  }
+  return `${kibPerSecond.toFixed(1)} KiB/s`;
 }
 
 export default function AppDetailPage() {
@@ -116,7 +141,7 @@ export default function AppDetailPage() {
   const { data: realSecret } = useAppSecret(decodedName);
 
   const [showSecret, setShowSecret] = useState(false);
-  const [activeChart, setActiveChart] = useState<"cpu" | "ram">("cpu");
+  const [activeChart, setActiveChart] = useState<"cpu" | "ram" | "network">("network");
   const [showWebhookModal, setShowWebhookModal] = useState(false);
   const [confirmDeleteApp, setConfirmDeleteApp] = useState(false);
 
@@ -132,36 +157,88 @@ export default function AppDetailPage() {
   // Active Instance Logic
   const liveMetrics = useAppMetrics(decodedName);
   const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>([]);
+  const activeDeploymentId = activeDeployment?.id;
+  const activeDeploymentJobId = activeDeployment?.job_id;
+  const activeDeploymentIp = activeDeployment?.ip_address;
+  const activeDeploymentIpv6 = activeDeployment?.ipv6_address;
+  const appId = app?.id;
 
-  // Reset history when active deployment IP changes to avoid connecting dots between different VMs.
-  // We use IP as it is the most stable identifier between the DB and the Agent's metrics.
+  const lastNetworkRef = useRef<Record<string, {
+    tx: number;
+    rx: number;
+    time: number;
+  }>>({});
+
+  // Reset history when the active deployment changes to avoid connecting dots between different VMs.
   useEffect(() => {
     setMetricsHistory([]);
-  }, [activeDeployment?.ip_address]);
+    lastNetworkRef.current = {};
+  }, [activeDeploymentId, activeDeploymentJobId, activeDeploymentIp, activeDeploymentIpv6]);
 
   useEffect(() => {
     if (!liveMetrics) return;
 
-    // Only update history if the metrics belong to the active/promoted deployment.
-    // We use IP address for matching as job_id is inconsistent between Agent (VM ID) and API (Scheduler ID).
-    if (activeDeployment?.ip_address && liveMetrics.ip_address !== activeDeployment.ip_address) {
+    // The SSE endpoint is already scoped to the app. Keep only a defensive app-id
+    // guard so stale deployment/job/IP metadata cannot drop valid live samples.
+    if (appId && liveMetrics.app_id && liveMetrics.app_id !== appId) {
         return;
     }
 
     setMetricsHistory(prev => {
-        const newCpu = (liveMetrics.cpu_usage || 0) * 100;
+        const newCpu = normalizeCpuUsage(liveMetrics.cpu_usage);
         const newRam = (liveMetrics.ram_used_bytes || 0) / (1024 * 1024);
-        
+        const txBytes = liveMetrics.tx_bytes || 0;
+        const rxBytes = liveMetrics.rx_bytes || 0;
+        const now = Date.now();
+        const networkKey = liveMetrics.deployment_id || liveMetrics.job_id || liveMetrics.vm_id || "current";
+        const previousNetwork = lastNetworkRef.current[networkKey];
+        let txRate = 0;
+        let rxRate = 0;
+
+        if (previousNetwork) {
+          const deltaTime = (now - previousNetwork.time) / 1000;
+          const deltaTx = txBytes - previousNetwork.tx;
+          const deltaRx = rxBytes - previousNetwork.rx;
+          const countersChanged = deltaTx > 0 || deltaRx > 0;
+
+          if (deltaTime > 0 && deltaTx >= 0 && deltaRx >= 0 && countersChanged) {
+            txRate = deltaTx / deltaTime / 1024;
+            rxRate = deltaRx / deltaTime / 1024;
+            lastNetworkRef.current[networkKey] = {
+              tx: txBytes,
+              rx: rxBytes,
+              time: now,
+            };
+          } else {
+            lastNetworkRef.current[networkKey] = {
+              tx: txBytes,
+              rx: rxBytes,
+              time: now,
+            };
+          }
+        } else {
+          lastNetworkRef.current[networkKey] = {
+            tx: txBytes,
+            rx: rxBytes,
+            time: now,
+          };
+        }
+
         const newPoint = {
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
             cpu: newCpu,
-            ram: newRam
+            ram: newRam,
+            rx: rxRate,
+            tx: txRate
         };
 
         // Limit to last 30 points
         return [...prev.slice(-29), newPoint];
     });
-  }, [liveMetrics, activeDeployment?.ip_address]);
+  }, [
+    liveMetrics,
+    appId,
+  ]);
 
   const copyToClipboard = async (text: string, e?: React.MouseEvent) => {
     if (!text) {
@@ -268,9 +345,12 @@ export default function AppDetailPage() {
   const latestMetrics = metricsHistory.length > 0
     ? metricsHistory[metricsHistory.length - 1]
     : (liveMetrics ? {
-        cpu: (liveMetrics.cpu_usage || 0) * 100,
-        ram: (liveMetrics.ram_used_bytes || 0) / (1024 * 1024)
-      } : { cpu: 0, ram: 0 });
+        cpu: normalizeCpuUsage(liveMetrics.cpu_usage),
+        ram: (liveMetrics.ram_used_bytes || 0) / (1024 * 1024),
+        rx: 0,
+        tx: 0
+      } : { cpu: 0, ram: 0, rx: 0, tx: 0 });
+  const latestNetworkValue = formatNetworkRate(latestMetrics.rx + latestMetrics.tx);
   return (
     <AuthGuard>
       <DashboardLayout>
@@ -508,11 +588,11 @@ export default function AppDetailPage() {
                         <div className="flex flex-1 flex-col justify-center gap-1 px-6 pb-3 sm:pb-0">
                           <CardTitle>System Performance</CardTitle>
                           <CardDescription>
-                            Real-time CPU and RAM utilization
+                            Real-time CPU, RAM and network usage
                           </CardDescription>
                         </div>
                         <div className="flex">
-                          {(["cpu", "ram"] as const).map((key) => {
+                          {(["network", "cpu", "ram"] as const).map((key) => {
                             return (
                               <button
                                 key={key}
@@ -521,12 +601,14 @@ export default function AppDetailPage() {
                                 onClick={() => setActiveChart(key)}
                               >
                                 <span className="text-xs text-muted-foreground uppercase">
-                                  {chartConfig[key].label}
+                                  {key === "network" ? "Network (In/Out)" : chartConfig[key].label}
                                 </span>
                                 <span className="text-lg leading-none font-bold sm:text-3xl">
                                   {key === "cpu" 
                                     ? `${latestMetrics.cpu.toFixed(1)}%` 
-                                    : `${latestMetrics.ram.toFixed(0)} MiB`}
+                                    : key === "ram"
+                                    ? `${latestMetrics.ram.toFixed(0)} MiB`
+                                    : latestNetworkValue}
                                 </span>
                               </button>
                             )
@@ -561,27 +643,52 @@ export default function AppDetailPage() {
                                 tickLine={false}
                                 axisLine={false}
                                 tickMargin={8}
-                                width={40}
+                                width={50}
                                 tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
-                                tickFormatter={(value) => activeChart === "cpu" ? `${value}%` : `${value}`}
+                                tickFormatter={(value) => {
+                                  if (activeChart === "cpu") return `${value}%`;
+                                  if (activeChart === "network") return formatNetworkRate(value);
+                                  return `${value}`;
+                                }}
                               />
                               <ChartTooltip
                                 content={
                                   <ChartTooltipContent
                                     className="w-[150px]"
-                                    nameKey={activeChart}
+                                    nameKey={activeChart === "network" ? undefined : activeChart}
                                     labelFormatter={(value) => value}
                                   />
                                 }
                               />
-                              <Line
-                                dataKey={activeChart}
-                                type="monotone"
-                                stroke={`var(--color-${activeChart})`}
-                                strokeWidth={2}
-                                dot={false}
-                                isAnimationActive={false}
-                              />
+                              {activeChart === "network" ? (
+                                <>
+                                  <Line
+                                    dataKey="rx"
+                                    type="monotone"
+                                    stroke="var(--color-rx)"
+                                    strokeWidth={2}
+                                    dot={false}
+                                    isAnimationActive={false}
+                                  />
+                                  <Line
+                                    dataKey="tx"
+                                    type="monotone"
+                                    stroke="var(--color-tx)"
+                                    strokeWidth={2}
+                                    dot={false}
+                                    isAnimationActive={false}
+                                  />
+                                </>
+                              ) : (
+                                <Line
+                                  dataKey={activeChart}
+                                  type="monotone"
+                                  stroke={`var(--color-${activeChart})`}
+                                  strokeWidth={2}
+                                  dot={false}
+                                  isAnimationActive={false}
+                                />
+                              )}
                             </LineChart>
                           </ChartContainer>
                         </div>

@@ -95,7 +95,8 @@ impl SchedulerServer {
             .await
         {
             Ok(job) => {
-                let (cpu_usage, ram_used_bytes) = self.app_service.get_job_metrics(&job).await;
+                let (cpu_usage, ram_used_bytes, tx_bytes, rx_bytes) =
+                    self.app_service.get_job_metrics(&job).await;
                 Ok(AppStatusResponse {
                     job_id: job.job_id,
                     status: job.status as i32,
@@ -109,6 +110,8 @@ impl SchedulerServer {
                     ram_used_bytes,
                     ip_address: job.config.ip_address.unwrap_or_default(),
                     ipv6_address: job.config.ipv6_address.unwrap_or_default(),
+                    tx_bytes,
+                    rx_bytes,
                 })
             },
             Err(e) => Err(anyhow::anyhow!(e.to_string())),
@@ -125,7 +128,8 @@ impl SchedulerServer {
 
         let mut apps = Vec::new();
         for job in jobs {
-            let (cpu_usage, ram_used_bytes) = self.app_service.get_job_metrics(&job).await;
+            let (cpu_usage, ram_used_bytes, tx_bytes, rx_bytes) =
+                self.app_service.get_job_metrics(&job).await;
             apps.push(AppInfo {
                 job_id: job.job_id,
                 app_id: job.app_id,
@@ -139,6 +143,8 @@ impl SchedulerServer {
                 user_id: job.user_id,
                 deployment_id: job.deployment_id.unwrap_or_default(),
                 ipv6_address: job.config.ipv6_address.unwrap_or_default(),
+                tx_bytes,
+                rx_bytes,
             });
         }
         Ok(ListAppsResponse { apps })

@@ -369,6 +369,10 @@ pub struct AppStatusResponse {
     pub ip_address: ::prost::alloc::string::String,
     #[prost(string, tag = "12")]
     pub ipv6_address: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "13")]
+    pub tx_bytes: u64,
+    #[prost(uint64, tag = "14")]
+    pub rx_bytes: u64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CancelRequest {
@@ -422,6 +426,10 @@ pub struct AppInfo {
     pub deployment_id: ::prost::alloc::string::String,
     #[prost(string, tag = "12")]
     pub ipv6_address: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "13")]
+    pub tx_bytes: u64,
+    #[prost(uint64, tag = "14")]
+    pub rx_bytes: u64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

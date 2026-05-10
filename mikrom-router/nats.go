@@ -44,8 +44,7 @@ func (m *MikromApp) handleMeshUpdate(data []byte) {
 	}
 }
 
-func (m *MikromApp) listenForUpdates() {
-	hostID := "router-host-local"
+func (m *MikromApp) listenForUpdates(hostID string) {
 	subject := fmt.Sprintf("mikrom.scheduler.network.mesh.%s", hostID)
 
 	m.nc.Subscribe(subject, func(msg *nats.Msg) {

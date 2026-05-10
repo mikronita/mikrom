@@ -79,22 +79,27 @@ impl AppScheduler {
             use mikrom_proto::scheduler::AppInfo;
             use prost::Message;
 
-            let (cpu_usage, ram_used_bytes) = if let Some(host_id) = &job.host_id {
+            let (cpu_usage, ram_used_bytes, tx_bytes, rx_bytes) = if let Some(host_id) = &job.host_id {
                 if let Ok(Some(metrics)) = self.worker_registry.get_metrics(host_id).await {
                     if let Some(vm_id) = &job.vm_id {
                         if let Some(vm_m) = metrics.vms.get(vm_id) {
-                            (vm_m.cpu_usage, vm_m.ram_used_bytes)
+                            (
+                                vm_m.cpu_usage,
+                                vm_m.ram_used_bytes,
+                                vm_m.tx_bytes,
+                                vm_m.rx_bytes,
+                            )
                         } else {
-                            (0.0, 0)
+                            (0.0, 0, 0, 0)
                         }
                     } else {
-                        (0.0, 0)
+                        (0.0, 0, 0, 0)
                     }
                 } else {
-                    (0.0, 0)
+                    (0.0, 0, 0, 0)
                 }
             } else {
-                (0.0, 0)
+                (0.0, 0, 0, 0)
             };
 
             let app_info = AppInfo {
@@ -110,6 +115,8 @@ impl AppScheduler {
                 user_id: job.user_id,
                 deployment_id: job.deployment_id.unwrap_or_default(),
                 ipv6_address: job.config.ipv6_address.unwrap_or_default(),
+                tx_bytes,
+                rx_bytes,
             };
 
             let mut buf = Vec::new();
