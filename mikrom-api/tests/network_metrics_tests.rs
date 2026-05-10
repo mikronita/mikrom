@@ -1,3 +1,5 @@
+#![cfg(feature = "test-utils")]
+
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -100,11 +102,17 @@ async fn test_active_deployments_endpoint_responds() {
     let body = axum::body::to_bytes(response.into_body(), 10000)
         .await
         .unwrap();
-    let body_str = String::from_utf8_lossy(&body);
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
     // Verify JSON contains network fields
-    assert!(body_str.contains("\"tx_bytes\":"));
-    assert!(body_str.contains("\"rx_bytes\":"));
+    let deployments = json.as_array().expect("Response should be an array");
+    let dep = &deployments[0];
+    assert!(dep.get("tx_bytes").is_some(), "tx_bytes field missing");
+    assert!(dep.get("rx_bytes").is_some(), "rx_bytes field missing");
+    assert_eq!(
+        dep["tx_bytes"], 0,
+        "tx_bytes should be 0 in DB fallback case"
+    );
 }
 
 #[tokio::test]
@@ -167,4 +175,10 @@ async fn test_deployment_status_endpoint_responds() {
     // But ideally we want it to fallback or at least have the right fields.
     // In our implementation, if NATS fails it might return 500 or fallback depending on where it fails.
     assert!(status == StatusCode::OK || status == StatusCode::INTERNAL_SERVER_ERROR);
+
+    if status == StatusCode::OK {
+        let json: serde_json::Value = serde_json::from_str(&body_str).unwrap();
+        assert!(json.get("tx_bytes").is_some());
+        assert!(json.get("rx_bytes").is_some());
+    }
 }

@@ -6,7 +6,6 @@ use aya_ebpf::{
     maps::{HashMap, PerCpuHashMap},
     programs::TcContext,
 };
-use aya_log_ebpf::info;
 use mikrom_agent_ebpf_common::{FirewallRule, NetworkStats};
 use network_types::{
     eth::{EthHdr, EtherType},
@@ -26,13 +25,7 @@ const TC_ACT_OK: i32 = 0;
 const TC_ACT_SHOT: i32 = 2;
 
 #[inline(always)]
-fn increment_stats(ctx: &TcContext, ifindex: u32, len: u64, is_tx: bool) {
-    if is_tx {
-        info!(ctx, "TX ifindex: {}, len: {}", ifindex, len);
-    } else {
-        info!(ctx, "RX ifindex: {}, len: {}", ifindex, len);
-    }
-
+fn increment_stats(ifindex: u32, len: u64, is_tx: bool) {
     if let Some(stats) = STATS.get_ptr_mut(&ifindex) {
         unsafe {
             if is_tx {
@@ -62,7 +55,7 @@ pub fn mikrom_ingress(ctx: TcContext) -> i32 {
     let len = ctx.len() as u64;
     let ifindex = unsafe { (*ctx.skb.skb).ifindex };
 
-    increment_stats(&ctx, ifindex, len, true);
+    increment_stats(ifindex, len, true);
 
     TC_ACT_OK
 }
@@ -72,14 +65,13 @@ pub fn mikrom_egress(ctx: TcContext) -> i32 {
     let len = ctx.len() as u64;
     let ifindex = unsafe { (*ctx.skb.skb).ifindex };
 
-    increment_stats(&ctx, ifindex, len, false);
+    increment_stats(ifindex, len, false);
 
     match try_mikrom_egress(ctx, ifindex) {
         Ok(ret) => ret,
         Err(_) => TC_ACT_SHOT,
     }
 }
-
 fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
     let ethhdr: EthHdr = ctx.load(0).map_err(|_| ())?;
     match ethhdr.ether_type {
