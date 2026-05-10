@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::path::PathBuf;
+use uuid::Uuid;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 #[derive(Debug, Deserialize, Clone)]
@@ -35,7 +36,7 @@ fn default_bridge_ip() -> String {
 }
 
 fn default_host_id() -> String {
-    mikrom_proto::id::compact_id()
+    Uuid::new_v4().to_string()
 }
 
 fn default_use_tls() -> bool {

@@ -4,11 +4,11 @@ use prost::Message;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use mikrom_proto::builder::{
     BuildRequest, BuildResponse, BuildStatus, GetBuildStatusRequest, GetBuildStatusResponse,
 };
-use mikrom_proto::id::compact_id;
 
 use crate::builder::{AppBuilder, GitMetadata};
 
@@ -86,7 +86,7 @@ impl BuilderServer {
         let req = BuildRequest::decode(&message.payload[..])
             .map_err(|e| anyhow::anyhow!("Failed to decode BuildRequest: {}", e))?;
 
-        let build_id = compact_id();
+        let build_id = Uuid::new_v4().to_string();
         info!(build_id = %build_id, app_id = %req.app_id, "Received build request");
 
         // Acknowledge build start if reply subject exists
