@@ -60,6 +60,7 @@ impl HostMetrics {
 pub struct Worker {
     pub host_id: String,
     pub hostname: String,
+    pub advertise_address: String,
     pub wireguard_pubkey: Option<String>,
     pub wireguard_ip: Option<String>,
     pub wireguard_port: Option<i32>,

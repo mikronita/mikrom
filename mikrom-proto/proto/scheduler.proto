@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package mikrom.scheduler.v1;
 
-option go_package = "github.com/antpard/mikrom/mikrom-router/proto/scheduler/v1";
+option go_package = "github.com/antpard/mikrom/mikrom-proto/proto/scheduler/v1";
 
 message NetworkMeshUpdate {
   repeated Peer peers = 1;
@@ -78,6 +78,7 @@ message WorkerHeartbeat {
   string wireguard_pubkey = 7;
   string wireguard_ip = 8;
   int32 wireguard_port = 9;
+  string advertise_address = 10;
 }
 
 message RouterHeartbeat {
@@ -87,6 +88,7 @@ message RouterHeartbeat {
   string wireguard_pubkey = 7;
   string wireguard_ip = 8;
   int32 wireguard_port = 9;
+  string advertise_address = 10;
 }
 
 message ListWorkersRequest {}
@@ -101,6 +103,7 @@ message WorkerInfo {
   string hostname = 2;
   int64 last_heartbeat = 6;
   string wireguard_pubkey = 7;
+  string advertise_address = 8;
 }
 
 // ... other messages ...

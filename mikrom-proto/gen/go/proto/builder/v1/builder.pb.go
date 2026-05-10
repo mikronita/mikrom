@@ -457,7 +457,7 @@ const file_builder_proto_rawDesc = "" +
 	"\x13BUILD_STATUS_FAILED\x10\x042\xc6\x01\n" +
 	"\x0eBuilderService\x12M\n" +
 	"\bBuildApp\x12\x1f.mikrom.builder.v1.BuildRequest\x1a .mikrom.builder.v1.BuildResponse\x12e\n" +
-	"\x0eGetBuildStatus\x12(.mikrom.builder.v1.GetBuildStatusRequest\x1a).mikrom.builder.v1.GetBuildStatusResponseB:Z8github.com/antpard/mikrom/mikrom-router/proto/builder/v1b\x06proto3"
+	"\x0eGetBuildStatus\x12(.mikrom.builder.v1.GetBuildStatusRequest\x1a).mikrom.builder.v1.GetBuildStatusResponseB9Z7github.com/antpard/mikrom/mikrom-proto/proto/builder/v1b\x06proto3"
 
 var (
 	file_builder_proto_rawDescOnce sync.Once

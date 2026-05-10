@@ -9,6 +9,8 @@ pub struct PgJobRepository {
     pool: PgPool,
 }
 
+const JOB_COLUMNS: &str = "job_id, app_id, app_name, image, user_id, status, host_id, vm_id, vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path, ipv6_address, ipv6_gateway, scheduled_at, started_at, stopped_at, error_message";
+
 impl PgJobRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -55,7 +57,8 @@ impl JobRepository for PgJobRepository {
     }
 
     async fn get_job(&self, job_id: &str) -> DomainResult<Option<Job>> {
-        let row = sqlx::query("SELECT job_id, app_id, app_name, image, user_id, status, host_id, vm_id, vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path, ipv6_address, ipv6_gateway, scheduled_at, started_at, stopped_at, error_message FROM jobs WHERE job_id = $1")
+        let query = format!("SELECT {} FROM jobs WHERE job_id = $1", JOB_COLUMNS);
+        let row = sqlx::query(&query)
             .bind(job_id)
             .fetch_optional(&self.pool)
             .await?;
@@ -130,7 +133,7 @@ impl JobRepository for PgJobRepository {
         app_id: Option<&'a str>,
         status: Option<JobStatus>,
     ) -> DomainResult<Vec<Job>> {
-        let mut query = "SELECT job_id, app_id, app_name, image, user_id, status, host_id, vm_id, vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path, ipv6_address, ipv6_gateway, scheduled_at, started_at, stopped_at, error_message FROM jobs WHERE 1=1".to_string();
+        let mut query = format!("SELECT {} FROM jobs WHERE 1=1", JOB_COLUMNS);
         let mut params_count = 1;
 
         if user_id.is_some() {
@@ -179,6 +182,8 @@ pub struct PgWorkerRepository {
     pool: PgPool,
 }
 
+const WORKER_COLUMNS: &str = "id, hostname, advertise_address, wireguard_pubkey, wireguard_ip, wireguard_port, metrics, registered_at, last_heartbeat";
+
 impl PgWorkerRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -200,10 +205,11 @@ impl WorkerRepository for PgWorkerRepository {
         // Upsert the worker
         sqlx::query(
             r#"
-            INSERT INTO workers (id, hostname, wireguard_pubkey, wireguard_ip, wireguard_port, last_heartbeat, registered_at, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'Online')
+            INSERT INTO workers (id, hostname, advertise_address, wireguard_pubkey, wireguard_ip, wireguard_port, last_heartbeat, registered_at, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Online')
             ON CONFLICT (id) DO UPDATE SET
                 hostname = EXCLUDED.hostname,
+                advertise_address = EXCLUDED.advertise_address,
                 wireguard_pubkey = EXCLUDED.wireguard_pubkey,
                 wireguard_ip = EXCLUDED.wireguard_ip,
                 wireguard_port = EXCLUDED.wireguard_port,
@@ -213,6 +219,7 @@ impl WorkerRepository for PgWorkerRepository {
         )
         .bind(&worker.host_id)
         .bind(&worker.hostname)
+        .bind(&worker.advertise_address)
         .bind(&worker.wireguard_pubkey)
         .bind(&worker.wireguard_ip)
         .bind(worker.wireguard_port.unwrap_or(51820))
@@ -253,12 +260,11 @@ impl WorkerRepository for PgWorkerRepository {
     }
 
     async fn get_worker(&self, host_id: &str) -> DomainResult<Option<Worker>> {
-        let row = sqlx::query(
-            "SELECT id, hostname, wireguard_pubkey, wireguard_ip, wireguard_port, metrics, registered_at, last_heartbeat FROM workers WHERE id = $1"
-        )
-        .bind(host_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let query = format!("SELECT {} FROM workers WHERE id = $1", WORKER_COLUMNS);
+        let row = sqlx::query(&query)
+            .bind(host_id)
+            .fetch_optional(&self.pool)
+            .await?;
 
         if let Some(r) = row {
             Ok(Some(map_row_to_worker(&r)))
@@ -268,11 +274,8 @@ impl WorkerRepository for PgWorkerRepository {
     }
 
     async fn list_workers(&self) -> DomainResult<Vec<Worker>> {
-        let rows = sqlx::query(
-            "SELECT id, hostname, wireguard_pubkey, wireguard_ip, wireguard_port, metrics, registered_at, last_heartbeat FROM workers"
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let query = format!("SELECT {} FROM workers", WORKER_COLUMNS);
+        let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
 
         Ok(rows.iter().map(map_row_to_worker).collect())
     }
@@ -281,16 +284,14 @@ impl WorkerRepository for PgWorkerRepository {
         let now = chrono::Utc::now().timestamp();
         let threshold = now - threshold_secs;
 
-        let rows = sqlx::query(
-            r#"
-            SELECT id, hostname, wireguard_pubkey, wireguard_ip, wireguard_port, metrics, registered_at, last_heartbeat
-            FROM workers
-            WHERE metrics IS NOT NULL AND last_heartbeat > $1 AND status = 'Online'
-            "#,
-        )
-        .bind(threshold)
-        .fetch_all(&self.pool)
-        .await?;
+        let query = format!(
+            "SELECT {} FROM workers WHERE metrics IS NOT NULL AND last_heartbeat > $1 AND status = 'Online'",
+            WORKER_COLUMNS
+        );
+        let rows = sqlx::query(&query)
+            .bind(threshold)
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(rows.iter().map(map_row_to_worker).collect())
     }
@@ -345,6 +346,7 @@ fn map_row_to_worker(r: &sqlx::postgres::PgRow) -> Worker {
     Worker {
         host_id: r.get("id"),
         hostname: r.get("hostname"),
+        advertise_address: r.get("advertise_address"),
         wireguard_pubkey: r.get("wireguard_pubkey"),
         wireguard_ip: r.get("wireguard_ip"),
         wireguard_port: r.try_get("wireguard_port").ok(),

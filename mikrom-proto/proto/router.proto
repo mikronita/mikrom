@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package mikrom.router.v1;
 
-option go_package = "github.com/antpard/mikrom/mikrom-router/proto/router/v1";
+option go_package = "github.com/antpard/mikrom/mikrom-proto/proto/router/v1";
 
 message RouterConfigUpdate {
   string hostname = 1;

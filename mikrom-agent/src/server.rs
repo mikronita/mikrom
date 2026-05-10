@@ -404,6 +404,7 @@ impl AgentServer {
         let wireguard_pubkey = pub_key;
         let wireguard_ip = self.wg_manager.get_host_ipv6(&host_id);
         let metrics_collector = self.metrics_collector.clone();
+        let advertise_address = self.ip_address.clone();
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
@@ -464,6 +465,7 @@ impl AgentServer {
                     wireguard_pubkey: wireguard_pubkey.clone(),
                     wireguard_ip: wireguard_ip.clone(),
                     wireguard_port: 51820,
+                    advertise_address: advertise_address.clone(),
                 };
 
                 let mut buf = Vec::new();

@@ -2298,7 +2298,7 @@ const file_agent_proto_rawDesc = "" +
 	"\bDeleteVm\x12 .mikrom.agent.v1.DeleteVmRequest\x1a!.mikrom.agent.v1.DeleteVmResponse\x12X\n" +
 	"\vGetVmStatus\x12#.mikrom.agent.v1.GetVmStatusRequest\x1a$.mikrom.agent.v1.GetVmStatusResponse\x12X\n" +
 	"\vCheckHealth\x12#.mikrom.agent.v1.CheckHealthRequest\x1a$.mikrom.agent.v1.CheckHealthResponse\x12a\n" +
-	"\x0eUpdateFirewall\x12&.mikrom.agent.v1.UpdateFirewallRequest\x1a'.mikrom.agent.v1.UpdateFirewallResponseB8Z6github.com/antpard/mikrom/mikrom-router/proto/agent/v1b\x06proto3"
+	"\x0eUpdateFirewall\x12&.mikrom.agent.v1.UpdateFirewallRequest\x1a'.mikrom.agent.v1.UpdateFirewallResponseB7Z5github.com/antpard/mikrom/mikrom-proto/proto/agent/v1b\x06proto3"
 
 var (
 	file_agent_proto_rawDescOnce sync.Once
