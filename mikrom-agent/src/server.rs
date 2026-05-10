@@ -412,7 +412,7 @@ impl AgentServer {
         let metrics_collector = self.metrics_collector.clone();
 
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
             loop {
                 interval.tick().await;
                 let metrics = metrics_collector.collect().await;

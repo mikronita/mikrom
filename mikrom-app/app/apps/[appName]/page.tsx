@@ -112,6 +112,8 @@ interface MetricPoint {
   ram: number;
   rx: number;
   tx: number;
+  total_rx: number;
+  total_tx: number;
 }
 
 function normalizeCpuUsage(cpuUsage: number | undefined): number {
@@ -120,13 +122,22 @@ function normalizeCpuUsage(cpuUsage: number | undefined): number {
 }
 
 function formatNetworkRate(kibPerSecond: number): string {
-  if (kibPerSecond > 0 && kibPerSecond < 1) {
+  if (kibPerSecond === 0) return "0 KiB/s";
+  if (kibPerSecond < 0.1) {
     return `${(kibPerSecond * 1024).toFixed(0)} B/s`;
   }
   if (kibPerSecond >= 1024) {
     return `${(kibPerSecond / 1024).toFixed(1)} MiB/s`;
   }
   return `${kibPerSecond.toFixed(1)} KiB/s`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
 export default function AppDetailPage() {
@@ -177,59 +188,67 @@ export default function AppDetailPage() {
 
   useEffect(() => {
     if (!liveMetrics) return;
+    console.log("Incoming metrics:", liveMetrics);
+    console.log("Current appId:", appId);
 
     // The SSE endpoint is already scoped to the app. Keep only a defensive app-id
     // guard so stale deployment/job/IP metadata cannot drop valid live samples.
     if (appId && liveMetrics.app_id && liveMetrics.app_id !== appId) {
+        console.warn("AppId mismatch drop:", { expected: appId, got: liveMetrics.app_id });
         return;
+    }
+
+    const txBytes = liveMetrics.tx_bytes || 0;
+    const rxBytes = liveMetrics.rx_bytes || 0;
+    const now = Date.now();
+    const networkKey = liveMetrics.deployment_id || liveMetrics.job_id || liveMetrics.vm_id || "current";
+    const previousNetwork = lastNetworkRef.current[networkKey];
+    
+    let txRate = 0;
+    let rxRate = 0;
+
+    if (previousNetwork) {
+      const deltaTime = (now - previousNetwork.time) / 1000;
+      if (deltaTime > 0.8) { // Expecting ~1s interval now
+        const deltaTx = Math.max(0, txBytes - previousNetwork.tx);
+        const deltaRx = Math.max(0, rxBytes - previousNetwork.rx);
+        
+        // Rate is 0 if no change
+        txRate = deltaTx / deltaTime / 1024;
+        rxRate = deltaRx / deltaTime / 1024;
+        
+        lastNetworkRef.current[networkKey] = {
+          tx: txBytes,
+          rx: rxBytes,
+          time: now,
+        };
+      } else {
+        // Sample too close, maintain previous (or 0 if first)
+        return; 
+      }
+    } else {
+      lastNetworkRef.current[networkKey] = {
+        tx: txBytes,
+        rx: rxBytes,
+        time: now,
+      };
+      // For the first sample, we can't calculate a rate
+      txRate = 0;
+      rxRate = 0;
     }
 
     setMetricsHistory(prev => {
         const newCpu = normalizeCpuUsage(liveMetrics.cpu_usage);
         const newRam = (liveMetrics.ram_used_bytes || 0) / (1024 * 1024);
-        const txBytes = liveMetrics.tx_bytes || 0;
-        const rxBytes = liveMetrics.rx_bytes || 0;
-        const now = Date.now();
-        const networkKey = liveMetrics.deployment_id || liveMetrics.job_id || liveMetrics.vm_id || "current";
-        const previousNetwork = lastNetworkRef.current[networkKey];
-        let txRate = 0;
-        let rxRate = 0;
-
-        if (previousNetwork) {
-          const deltaTime = (now - previousNetwork.time) / 1000;
-          const deltaTx = txBytes - previousNetwork.tx;
-          const deltaRx = rxBytes - previousNetwork.rx;
-          const countersChanged = deltaTx > 0 || deltaRx > 0;
-
-          if (deltaTime > 0 && deltaTx >= 0 && deltaRx >= 0 && countersChanged) {
-            txRate = deltaTx / deltaTime / 1024;
-            rxRate = deltaRx / deltaTime / 1024;
-            lastNetworkRef.current[networkKey] = {
-              tx: txBytes,
-              rx: rxBytes,
-              time: now,
-            };
-          } else {
-            lastNetworkRef.current[networkKey] = {
-              tx: txBytes,
-              rx: rxBytes,
-              time: now,
-            };
-          }
-        } else {
-          lastNetworkRef.current[networkKey] = {
-            tx: txBytes,
-            rx: rxBytes,
-            time: now,
-          };
-        }
 
         const newPoint = {
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
             cpu: newCpu,
             ram: newRam,
             rx: rxRate,
-            tx: txRate
+            tx: txRate,
+            total_rx: rxBytes,
+            total_tx: txBytes,
         };
 
         // Limit to last 30 points
@@ -348,8 +367,13 @@ export default function AppDetailPage() {
         cpu: normalizeCpuUsage(liveMetrics.cpu_usage),
         ram: (liveMetrics.ram_used_bytes || 0) / (1024 * 1024),
         rx: 0,
-        tx: 0
-      } : { cpu: 0, ram: 0, rx: 0, tx: 0 });
+        tx: 0,
+        total_rx: liveMetrics.rx_bytes || 0,
+        total_tx: liveMetrics.tx_bytes || 0,
+      } : { cpu: 0, ram: 0, rx: 0, tx: 0, total_rx: 0, total_tx: 0 });
+
+  const totalTraffic = latestMetrics.total_rx + latestMetrics.total_tx;
+
   const latestNetworkValue = formatNetworkRate(latestMetrics.rx + latestMetrics.tx);
   return (
     <AuthGuard>
@@ -588,7 +612,9 @@ export default function AppDetailPage() {
                         <div className="flex flex-1 flex-col justify-center gap-1 px-6 pb-3 sm:pb-0">
                           <CardTitle>System Performance</CardTitle>
                           <CardDescription>
-                            Real-time CPU, RAM and network usage
+                            {activeChart === "network" 
+                              ? `Total network usage: ${formatBytes(totalTraffic)}`
+                              : "Real-time CPU, RAM and network usage"}
                           </CardDescription>
                         </div>
                         <div className="flex">
