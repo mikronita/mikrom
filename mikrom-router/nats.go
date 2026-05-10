@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	routerv1 "github.com/antpard/mikrom/mikrom-router/proto/router/v1"
-	schedulerv1 "github.com/antpard/mikrom/mikrom-router/proto/scheduler/v1"
+	routerv1 "github.com/antpard/mikrom/mikrom-proto/proto/router/v1"
+	schedulerv1 "github.com/antpard/mikrom/mikrom-proto/proto/scheduler/v1"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"

@@ -1,8 +1,9 @@
 module github.com/antpard/mikrom/mikrom-router
 
-go 1.26.2
+go 1.26.3
 
 require (
+	github.com/antpard/mikrom/mikrom-proto v0.0.0-00010101000000-000000000000
 	github.com/caddyserver/caddy/v2 v2.11.2
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/jackc/pgx/v5 v5.9.2
@@ -175,3 +176,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	howett.net/plist v1.0.0 // indirect
 )
+
+replace github.com/antpard/mikrom/mikrom-proto => ../mikrom-proto/gen/go

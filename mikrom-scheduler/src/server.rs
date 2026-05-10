@@ -239,6 +239,7 @@ impl SchedulerServer {
                 hostname: w.hostname,
                 last_heartbeat: w.last_heartbeat,
                 wireguard_pubkey: w.wireguard_pubkey.unwrap_or_default(),
+                advertise_address: w.advertise_address,
             })
             .collect();
 

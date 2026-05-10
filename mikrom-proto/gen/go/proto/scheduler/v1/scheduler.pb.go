@@ -636,15 +636,16 @@ func (x *WatchAppsResponse) GetApp() *AppInfo {
 }
 
 type WorkerHeartbeat struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	HostId          string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
-	Hostname        string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
-	Metrics         *ReportMetricsRequest  `protobuf:"bytes,6,opt,name=metrics,proto3" json:"metrics,omitempty"`
-	WireguardPubkey string                 `protobuf:"bytes,7,opt,name=wireguard_pubkey,json=wireguardPubkey,proto3" json:"wireguard_pubkey,omitempty"`
-	WireguardIp     string                 `protobuf:"bytes,8,opt,name=wireguard_ip,json=wireguardIp,proto3" json:"wireguard_ip,omitempty"`
-	WireguardPort   int32                  `protobuf:"varint,9,opt,name=wireguard_port,json=wireguardPort,proto3" json:"wireguard_port,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	HostId           string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	Hostname         string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	Metrics          *ReportMetricsRequest  `protobuf:"bytes,6,opt,name=metrics,proto3" json:"metrics,omitempty"`
+	WireguardPubkey  string                 `protobuf:"bytes,7,opt,name=wireguard_pubkey,json=wireguardPubkey,proto3" json:"wireguard_pubkey,omitempty"`
+	WireguardIp      string                 `protobuf:"bytes,8,opt,name=wireguard_ip,json=wireguardIp,proto3" json:"wireguard_ip,omitempty"`
+	WireguardPort    int32                  `protobuf:"varint,9,opt,name=wireguard_port,json=wireguardPort,proto3" json:"wireguard_port,omitempty"`
+	AdvertiseAddress string                 `protobuf:"bytes,10,opt,name=advertise_address,json=advertiseAddress,proto3" json:"advertise_address,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *WorkerHeartbeat) Reset() {
@@ -719,15 +720,23 @@ func (x *WorkerHeartbeat) GetWireguardPort() int32 {
 	return 0
 }
 
+func (x *WorkerHeartbeat) GetAdvertiseAddress() string {
+	if x != nil {
+		return x.AdvertiseAddress
+	}
+	return ""
+}
+
 type RouterHeartbeat struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	HostId          string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
-	Hostname        string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
-	WireguardPubkey string                 `protobuf:"bytes,7,opt,name=wireguard_pubkey,json=wireguardPubkey,proto3" json:"wireguard_pubkey,omitempty"`
-	WireguardIp     string                 `protobuf:"bytes,8,opt,name=wireguard_ip,json=wireguardIp,proto3" json:"wireguard_ip,omitempty"`
-	WireguardPort   int32                  `protobuf:"varint,9,opt,name=wireguard_port,json=wireguardPort,proto3" json:"wireguard_port,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	HostId           string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	Hostname         string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	WireguardPubkey  string                 `protobuf:"bytes,7,opt,name=wireguard_pubkey,json=wireguardPubkey,proto3" json:"wireguard_pubkey,omitempty"`
+	WireguardIp      string                 `protobuf:"bytes,8,opt,name=wireguard_ip,json=wireguardIp,proto3" json:"wireguard_ip,omitempty"`
+	WireguardPort    int32                  `protobuf:"varint,9,opt,name=wireguard_port,json=wireguardPort,proto3" json:"wireguard_port,omitempty"`
+	AdvertiseAddress string                 `protobuf:"bytes,10,opt,name=advertise_address,json=advertiseAddress,proto3" json:"advertise_address,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RouterHeartbeat) Reset() {
@@ -793,6 +802,13 @@ func (x *RouterHeartbeat) GetWireguardPort() int32 {
 		return x.WireguardPort
 	}
 	return 0
+}
+
+func (x *RouterHeartbeat) GetAdvertiseAddress() string {
+	if x != nil {
+		return x.AdvertiseAddress
+	}
+	return ""
 }
 
 type ListWorkersRequest struct {
@@ -876,13 +892,14 @@ func (x *ListWorkersResponse) GetWorkers() []*WorkerInfo {
 }
 
 type WorkerInfo struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	HostId          string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
-	Hostname        string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
-	LastHeartbeat   int64                  `protobuf:"varint,6,opt,name=last_heartbeat,json=lastHeartbeat,proto3" json:"last_heartbeat,omitempty"`
-	WireguardPubkey string                 `protobuf:"bytes,7,opt,name=wireguard_pubkey,json=wireguardPubkey,proto3" json:"wireguard_pubkey,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	HostId           string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	Hostname         string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	LastHeartbeat    int64                  `protobuf:"varint,6,opt,name=last_heartbeat,json=lastHeartbeat,proto3" json:"last_heartbeat,omitempty"`
+	WireguardPubkey  string                 `protobuf:"bytes,7,opt,name=wireguard_pubkey,json=wireguardPubkey,proto3" json:"wireguard_pubkey,omitempty"`
+	AdvertiseAddress string                 `protobuf:"bytes,8,opt,name=advertise_address,json=advertiseAddress,proto3" json:"advertise_address,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *WorkerInfo) Reset() {
@@ -939,6 +956,13 @@ func (x *WorkerInfo) GetLastHeartbeat() int64 {
 func (x *WorkerInfo) GetWireguardPubkey() string {
 	if x != nil {
 		return x.WireguardPubkey
+	}
+	return ""
+}
+
+func (x *WorkerInfo) GetAdvertiseAddress() string {
+	if x != nil {
+		return x.AdvertiseAddress
 	}
 	return ""
 }
@@ -2756,29 +2780,34 @@ const file_scheduler_proto_rawDesc = "" +
 	"\x10WatchAppsRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"C\n" +
 	"\x11WatchAppsResponse\x12.\n" +
-	"\x03app\x18\x01 \x01(\v2\x1c.mikrom.scheduler.v1.AppInfoR\x03app\"\x92\x02\n" +
+	"\x03app\x18\x01 \x01(\v2\x1c.mikrom.scheduler.v1.AppInfoR\x03app\"\xbf\x02\n" +
 	"\x0fWorkerHeartbeat\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12C\n" +
 	"\ametrics\x18\x06 \x01(\v2).mikrom.scheduler.v1.ReportMetricsRequestR\ametrics\x12)\n" +
 	"\x10wireguard_pubkey\x18\a \x01(\tR\x0fwireguardPubkey\x12!\n" +
 	"\fwireguard_ip\x18\b \x01(\tR\vwireguardIp\x12%\n" +
-	"\x0ewireguard_port\x18\t \x01(\x05R\rwireguardPortJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06\"\xc1\x01\n" +
+	"\x0ewireguard_port\x18\t \x01(\x05R\rwireguardPort\x12+\n" +
+	"\x11advertise_address\x18\n" +
+	" \x01(\tR\x10advertiseAddressJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06\"\xee\x01\n" +
 	"\x0fRouterHeartbeat\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12)\n" +
 	"\x10wireguard_pubkey\x18\a \x01(\tR\x0fwireguardPubkey\x12!\n" +
 	"\fwireguard_ip\x18\b \x01(\tR\vwireguardIp\x12%\n" +
-	"\x0ewireguard_port\x18\t \x01(\x05R\rwireguardPortJ\x04\b\x03\x10\x04\"\x14\n" +
+	"\x0ewireguard_port\x18\t \x01(\x05R\rwireguardPort\x12+\n" +
+	"\x11advertise_address\x18\n" +
+	" \x01(\tR\x10advertiseAddressJ\x04\b\x03\x10\x04\"\x14\n" +
 	"\x12ListWorkersRequest\"P\n" +
 	"\x13ListWorkersResponse\x129\n" +
-	"\aworkers\x18\x01 \x03(\v2\x1f.mikrom.scheduler.v1.WorkerInfoR\aworkers\"\xa5\x01\n" +
+	"\aworkers\x18\x01 \x03(\v2\x1f.mikrom.scheduler.v1.WorkerInfoR\aworkers\"\xd2\x01\n" +
 	"\n" +
 	"WorkerInfo\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12%\n" +
 	"\x0elast_heartbeat\x18\x06 \x01(\x03R\rlastHeartbeat\x12)\n" +
-	"\x10wireguard_pubkey\x18\a \x01(\tR\x0fwireguardPubkeyJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06\">\n" +
+	"\x10wireguard_pubkey\x18\a \x01(\tR\x0fwireguardPubkey\x12+\n" +
+	"\x11advertise_address\x18\b \x01(\tR\x10advertiseAddressJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06\">\n" +
 	"\fPauseRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\"C\n" +
@@ -2959,7 +2988,7 @@ const file_scheduler_proto_rawDesc = "" +
 	"\vListWorkers\x12'.mikrom.scheduler.v1.ListWorkersRequest\x1a(.mikrom.scheduler.v1.ListWorkersResponse\x12\\\n" +
 	"\tWatchApps\x12%.mikrom.scheduler.v1.WatchAppsRequest\x1a&.mikrom.scheduler.v1.WatchAppsResponse0\x01\x12`\n" +
 	"\vCheckHealth\x12'.mikrom.scheduler.v1.CheckHealthRequest\x1a(.mikrom.scheduler.v1.CheckHealthResponse\x12{\n" +
-	"\x14UpdateSecurityGroups\x120.mikrom.scheduler.v1.UpdateSecurityGroupsRequest\x1a1.mikrom.scheduler.v1.UpdateSecurityGroupsResponseB<Z:github.com/antpard/mikrom/mikrom-router/proto/scheduler/v1b\x06proto3"
+	"\x14UpdateSecurityGroups\x120.mikrom.scheduler.v1.UpdateSecurityGroupsRequest\x1a1.mikrom.scheduler.v1.UpdateSecurityGroupsResponseB;Z9github.com/antpard/mikrom/mikrom-proto/proto/scheduler/v1b\x06proto3"
 
 var (
 	file_scheduler_proto_rawDescOnce sync.Once

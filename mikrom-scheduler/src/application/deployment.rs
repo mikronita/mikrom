@@ -2,7 +2,6 @@ use crate::domain::{
     AgentClient, DomainError, DomainResult, Job, JobRepository, JobStatus, SchedulingStrategy,
     VmConfig, Worker, WorkerRepository,
 };
-use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -18,7 +17,6 @@ impl DeploymentService {
         job_repo: Arc<dyn JobRepository>,
         worker_repo: Arc<dyn WorkerRepository>,
         agent_client: Arc<dyn AgentClient>,
-        _pool: PgPool,
     ) -> Self {
         Self {
             job_repo,

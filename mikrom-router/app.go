@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	schedulerv1 "github.com/antpard/mikrom/mikrom-router/proto/scheduler/v1"
+	schedulerv1 "github.com/antpard/mikrom/mikrom-proto/proto/scheduler/v1"
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
@@ -111,12 +111,14 @@ func (m *MikromApp) runRouterHeartbeat(hostID, hostname, pubKey string) {
 	wgIPv6 := m.getRouterIPv6(hostID)
 
 	for {
+		ip := m.getOutboundIP()
 		heartbeat := &schedulerv1.RouterHeartbeat{
-			HostId:          hostID,
-			Hostname:        hostname,
-			WireguardPubkey: pubKey,
-			WireguardIp:     wgIPv6,
-			WireguardPort:   51822,
+			HostId:           hostID,
+			Hostname:         hostname,
+			WireguardPubkey:  pubKey,
+			WireguardIp:      wgIPv6,
+			WireguardPort:    51822,
+			AdvertiseAddress: ip,
 		}
 
 		payload, err := proto.Marshal(heartbeat)

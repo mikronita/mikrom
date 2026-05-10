@@ -164,7 +164,7 @@ impl NatsEventLoop {
 
                 mikrom_proto::scheduler::Peer {
                     host_id: w.host_id.clone(),
-                    endpoint: w.wireguard_ip.clone().unwrap_or_default(),
+                    endpoint: w.advertise_address.clone(),
                     wireguard_pubkey: w.wireguard_pubkey.clone().unwrap_or_default(),
                     allowed_ips,
                     wireguard_port: w.wireguard_port.unwrap_or(51820),
@@ -253,6 +253,7 @@ impl NatsEventLoop {
                     let worker = Worker {
                         host_id: heartbeat.host_id.clone(),
                         hostname: heartbeat.hostname.clone(),
+                        advertise_address: heartbeat.advertise_address.clone(),
                         wireguard_pubkey: Some(heartbeat.wireguard_pubkey.clone()),
                         wireguard_ip: Some(heartbeat.wireguard_ip.clone()),
                         wireguard_port: Some(heartbeat.wireguard_port),
@@ -293,6 +294,7 @@ impl NatsEventLoop {
                     let worker = Worker {
                         host_id: heartbeat.host_id.clone(),
                         hostname: heartbeat.hostname.clone(),
+                        advertise_address: heartbeat.advertise_address.clone(),
                         wireguard_pubkey: Some(heartbeat.wireguard_pubkey.clone()),
                         wireguard_ip: Some(heartbeat.wireguard_ip.clone()),
                         wireguard_port: Some(heartbeat.wireguard_port),
@@ -614,6 +616,7 @@ mod tests {
         let active_worker = Worker {
             host_id: "active-host".to_string(),
             hostname: "active".to_string(),
+            advertise_address: "1.1.1.1".to_string(),
             wireguard_pubkey: Some("pub-active".to_string()),
             wireguard_ip: Some("fd00::1".to_string()),
             wireguard_port: Some(51820),
@@ -626,6 +629,7 @@ mod tests {
         let dead_worker = Worker {
             host_id: "dead-host".to_string(),
             hostname: "dead".to_string(),
+            advertise_address: "2.2.2.2".to_string(),
             wireguard_pubkey: Some("pub-dead".to_string()),
             wireguard_ip: Some("fd00::2".to_string()),
             wireguard_port: Some(51820),
@@ -648,12 +652,8 @@ mod tests {
         let job_repo = Arc::new(job_repo);
         let agent_client = Arc::new(MockAgentClient::new());
 
-        let deployment = DeploymentService::new(
-            job_repo.clone(),
-            worker_repo.clone(),
-            agent_client.clone(),
-            pool.clone(),
-        );
+        let deployment =
+            DeploymentService::new(job_repo.clone(), worker_repo.clone(), agent_client.clone());
 
         let app_service = Arc::new(AppService {
             deployment,

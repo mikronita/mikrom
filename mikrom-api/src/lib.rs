@@ -108,15 +108,10 @@ impl AppState {
 
         let target_url = if let Some(dep_id) = app.active_deployment_id {
             if let Some(dep) = self.app_repo.get_deployment(dep_id).await? {
-                let ip = if let Some(ipv6) = dep.ipv6_address {
-                    if !ipv6.is_empty() {
-                        Some(format!("[{}]", ipv6))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
+                let ip = dep
+                    .ipv6_address
+                    .filter(|ipv6| !ipv6.is_empty())
+                    .map(|ipv6| format!("[{}]", ipv6));
 
                 if let Some(ip_addr) = ip {
                     Some(format!("http://{}:{}", ip_addr, dep.port))

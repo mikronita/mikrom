@@ -240,7 +240,7 @@ const file_router_proto_rawDesc = "" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x19\n" +
 	"\bkey_auth\x18\x02 \x01(\tR\akeyAuth\x12\x1a\n" +
 	"\bhostname\x18\x03 \x01(\tR\bhostname\x12\x1b\n" +
-	"\tis_delete\x18\x04 \x01(\bR\bisDeleteB9Z7github.com/antpard/mikrom/mikrom-router/proto/router/v1b\x06proto3"
+	"\tis_delete\x18\x04 \x01(\bR\bisDeleteB8Z6github.com/antpard/mikrom/mikrom-proto/proto/router/v1b\x06proto3"
 
 var (
 	file_router_proto_rawDescOnce sync.Once

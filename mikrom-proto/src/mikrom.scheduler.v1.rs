@@ -82,6 +82,8 @@ pub struct WorkerHeartbeat {
     pub wireguard_ip: ::prost::alloc::string::String,
     #[prost(int32, tag = "9")]
     pub wireguard_port: i32,
+    #[prost(string, tag = "10")]
+    pub advertise_address: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RouterHeartbeat {
@@ -95,6 +97,8 @@ pub struct RouterHeartbeat {
     pub wireguard_ip: ::prost::alloc::string::String,
     #[prost(int32, tag = "9")]
     pub wireguard_port: i32,
+    #[prost(string, tag = "10")]
+    pub advertise_address: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct ListWorkersRequest {}
@@ -113,6 +117,8 @@ pub struct WorkerInfo {
     pub last_heartbeat: i64,
     #[prost(string, tag = "7")]
     pub wireguard_pubkey: ::prost::alloc::string::String,
+    #[prost(string, tag = "8")]
+    pub advertise_address: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PauseRequest {

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package mikrom.builder.v1;
 
-option go_package = "github.com/antpard/mikrom/mikrom-router/proto/builder/v1";
+option go_package = "github.com/antpard/mikrom/mikrom-proto/proto/builder/v1";
 
 service BuilderService {
   rpc BuildApp(BuildRequest) returns (BuildResponse);

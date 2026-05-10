@@ -20,6 +20,7 @@ mod tests {
         let worker = Worker {
             host_id: host_id.clone(),
             hostname: "test-hostname".to_string(),
+            advertise_address: "127.0.0.1".to_string(),
             wireguard_pubkey: None,
             wireguard_ip: None,
             wireguard_port: None,
