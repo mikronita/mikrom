@@ -4,6 +4,36 @@ use std::ops::Deref;
 use std::str::FromStr;
 use uuid::Uuid;
 
+const BASE62_ALPHABET: &[u8; 62] =
+    b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/// Generate a compact, URL-safe identifier with UUIDv4 entropy.
+///
+/// UUIDv4 stores 122 random bits and is normally rendered as 36 characters
+/// with hyphens. This keeps the same collision profile but renders the backing
+/// 128-bit value in base62, producing up to 22 ASCII characters.
+#[must_use]
+pub fn compact_id() -> String {
+    encode_base62(Uuid::new_v4().as_u128())
+}
+
+fn encode_base62(mut value: u128) -> String {
+    if value == 0 {
+        return "0".to_string();
+    }
+
+    let mut buf = [0_u8; 22];
+    let mut index = buf.len();
+
+    while value > 0 {
+        index -= 1;
+        buf[index] = BASE62_ALPHABET[(value % 62) as usize];
+        value /= 62;
+    }
+
+    String::from_utf8(buf[index..].to_vec()).expect("base62 alphabet is valid UTF-8")
+}
+
 macro_rules! define_id {
     ($name:ident, $doc:expr) => {
         #[doc = $doc]
@@ -125,3 +155,34 @@ define_id!(
     SecurityRuleId,
     "Unique identifier for a security firewall rule."
 );
+
+#[cfg(test)]
+mod tests {
+    use super::{compact_id, encode_base62};
+    use std::collections::HashSet;
+
+    #[test]
+    fn compact_id_is_short_ascii_base62() {
+        let id = compact_id();
+
+        assert!(!id.is_empty());
+        assert!(id.len() <= 22);
+        assert!(id.chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+
+    #[test]
+    fn compact_id_does_not_collide_in_sample() {
+        let mut seen = HashSet::new();
+
+        for _ in 0..10_000 {
+            assert!(seen.insert(compact_id()));
+        }
+    }
+
+    #[test]
+    fn encodes_known_values() {
+        assert_eq!(encode_base62(0), "0");
+        assert_eq!(encode_base62(61), "z");
+        assert_eq!(encode_base62(62), "10");
+    }
+}

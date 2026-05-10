@@ -119,7 +119,7 @@ impl FirecrackerManager {
         let builder =
             crate::builder::ImageBuilder::new().expect("Failed to initialize Docker builder");
 
-        let mut agent_id = uuid::Uuid::new_v4().to_string();
+        let mut agent_id = mikrom_proto::id::compact_id();
 
         // Ensure data directory exists and handle persistent agent_id
         if !fc_config.data_dir.is_empty() {
