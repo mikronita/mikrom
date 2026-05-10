@@ -7,14 +7,20 @@ use uuid::Uuid;
 const BASE62_ALPHABET: &[u8; 62] =
     b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-/// Generate a compact, URL-safe identifier with UUIDv4 entropy.
+/// Generate a compact, URL-safe identifier for presentation layers.
 ///
 /// UUIDv4 stores 122 random bits and is normally rendered as 36 characters
 /// with hyphens. This keeps the same collision profile but renders the backing
 /// 128-bit value in base62, producing up to 22 ASCII characters.
 #[must_use]
 pub fn compact_id() -> String {
-    encode_base62(Uuid::new_v4().as_u128())
+    compact_uuid(Uuid::new_v4())
+}
+
+/// Render an existing UUID in compact base62 form.
+#[must_use]
+pub fn compact_uuid(uuid: Uuid) -> String {
+    encode_base62(uuid.as_u128())
 }
 
 fn encode_base62(mut value: u128) -> String {
@@ -31,7 +37,9 @@ fn encode_base62(mut value: u128) -> String {
         value /= 62;
     }
 
-    String::from_utf8(buf[index..].to_vec()).expect("base62 alphabet is valid UTF-8")
+    std::str::from_utf8(&buf[index..])
+        .expect("base62 alphabet is valid UTF-8")
+        .to_string()
 }
 
 macro_rules! define_id {

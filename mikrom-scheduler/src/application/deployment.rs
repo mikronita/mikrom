@@ -3,10 +3,10 @@ use crate::domain::{
     VmConfig, Worker, WorkerRepository,
 };
 use crate::infrastructure::db::ipam::Ipam;
-use mikrom_proto::id::compact_id;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 pub struct DeploymentService {
     job_repo: Arc<dyn JobRepository>,
@@ -42,8 +42,8 @@ impl DeploymentService {
         mut config: VmConfig,
         strategy: SchedulingStrategy,
     ) -> DomainResult<Job> {
-        let job_id = compact_id();
-        let vm_id = compact_id();
+        let job_id = Uuid::new_v4().to_string();
+        let vm_id = Uuid::new_v4().to_string();
 
         // 1. Allocate 6PN IPv6 if possible
         if !vpc_ipv6_prefix.is_empty()
