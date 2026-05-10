@@ -108,8 +108,6 @@ pub struct RegisterRequest {
     pub host_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub hostname: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub ip_address: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterResponse {
@@ -140,8 +138,6 @@ pub struct VmMetrics {
     pub status: i32,
     #[prost(string, tag = "4")]
     pub error_message: ::prost::alloc::string::String,
-    #[prost(string, tag = "5")]
-    pub ip_address: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MetricsRequest {
@@ -254,14 +250,6 @@ pub struct VmConfig {
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
-    #[prost(string, tag = "5")]
-    pub ip_address: ::prost::alloc::string::String,
-    #[prost(string, tag = "6")]
-    pub gateway: ::prost::alloc::string::String,
-    #[prost(string, tag = "7")]
-    pub mac_address: ::prost::alloc::string::String,
-    #[prost(string, tag = "8")]
-    pub netmask: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "9")]
     pub volumes: ::prost::alloc::vec::Vec<Volume>,
     #[prost(uint32, tag = "10")]

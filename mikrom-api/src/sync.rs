@@ -46,11 +46,9 @@ pub async fn start_ip_sync_task(state: AppState) {
                         .await
                     {
                         let db_status = crate::scheduler::status_name(inner.status);
-                        let ip_address = inner.ip_address;
                         let ipv6_address = inner.ipv6_address;
 
-                        sync_deployment_state(&state, &dep, db_status, &ip_address, &ipv6_address)
-                            .await;
+                        sync_deployment_state(&state, &dep, db_status, &ipv6_address).await;
                     }
                 }
             });
@@ -100,7 +98,7 @@ pub async fn start_nats_job_listener(state: AppState) {
 
                 if let Some(dep) = dep {
                     let db_status = crate::scheduler::status_name(info.status);
-                    sync_deployment_state(&state, &dep, db_status, "", &info.ipv6_address).await;
+                    sync_deployment_state(&state, &dep, db_status, &info.ipv6_address).await;
                 }
             });
         }
@@ -111,7 +109,6 @@ async fn sync_deployment_state(
     state: &AppState,
     dep: &crate::models::app::Deployment,
     db_status: &str,
-    ip_address: &str,
     ipv6_address: &str,
 ) {
     // Prevent status downgrades (e.g., RUNNING -> PENDING due to out-of-order NATS messages)
@@ -130,11 +127,10 @@ async fn sync_deployment_state(
     let current_priority = status_priority(&dep.status);
 
     let status_changed = db_status != dep.status && new_priority >= current_priority;
-    let has_new_ip = !ip_address.is_empty() && dep.ip_address.as_deref() != Some(ip_address);
     let has_new_ipv6 =
         !ipv6_address.is_empty() && dep.ipv6_address.as_deref() != Some(ipv6_address);
 
-    let deployment_changed = status_changed || has_new_ip || has_new_ipv6;
+    let deployment_changed = status_changed || has_new_ipv6;
 
     if deployment_changed {
         let _ = state
@@ -150,11 +146,6 @@ async fn sync_deployment_state(
                     job_id: dep.job_id.clone(),
                     image_tag: dep.image_tag.clone(),
                     build_id: dep.build_id.clone(),
-                    ip_address: if !ip_address.is_empty() {
-                        Some(ip_address.to_string())
-                    } else {
-                        None
-                    },
                     ipv6_address: if !ipv6_address.is_empty() {
                         Some(ipv6_address.to_string())
                     } else {

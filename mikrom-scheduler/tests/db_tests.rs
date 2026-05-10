@@ -24,8 +24,7 @@ mod tests {
             .map(|row: sqlx::postgres::PgRow| row.get(0))
             .collect();
 
-        assert!(table_names.contains(&"workers".to_string()));
         assert!(table_names.contains(&"jobs".to_string()));
-        assert!(table_names.contains(&"ip_allocations".to_string()));
+        assert!(table_names.contains(&"workers".to_string()));
     }
 }

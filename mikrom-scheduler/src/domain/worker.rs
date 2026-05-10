@@ -60,8 +60,6 @@ impl HostMetrics {
 pub struct Worker {
     pub host_id: String,
     pub hostname: String,
-    pub ip_address: String,
-    pub bridge_ip: String,
     pub wireguard_pubkey: Option<String>,
     pub wireguard_ip: Option<String>,
     pub wireguard_port: Option<i32>,
@@ -120,14 +118,6 @@ pub trait JobRepository: Send + Sync {
     async fn update_job_status(&self, job_id: &str, status: JobStatus) -> DomainResult<()>;
     async fn start_job(&self, job_id: &str, timestamp: i64) -> DomainResult<()>;
     async fn fail_job(&self, job_id: &str, message: String, timestamp: i64) -> DomainResult<()>;
-    async fn update_job_ip(
-        &self,
-        job_id: &str,
-        ip: &str,
-        gateway: &str,
-        mac: &str,
-        netmask: &str,
-    ) -> DomainResult<()>;
     async fn cancel_job(&self, job_id: &str, timestamp: i64) -> DomainResult<()>;
     async fn remove_job(&self, job_id: &str) -> DomainResult<()>;
     async fn remove_jobs_by_app(&self, app_id: &str) -> DomainResult<()>;

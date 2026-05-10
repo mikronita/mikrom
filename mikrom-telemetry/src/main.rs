@@ -57,7 +57,7 @@ pub struct VmMetrics {
     pub cpu_usage: f32,
     pub ram_used_bytes: u64,
     pub status: String,
-    pub ip_address: Option<String>,
+    pub ipv6_address: Option<String>,
     pub tx_bytes: u64,
     pub rx_bytes: u64,
 }

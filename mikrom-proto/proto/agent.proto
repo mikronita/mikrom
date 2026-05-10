@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package mikrom.agent.v1;
 
-option go_package = "mikrom/agent/v1";
+option go_package = "github.com/antpard/mikrom/mikrom-router/proto/agent/v1";
 
 service AgentService {
   rpc Register(RegisterRequest) returns (RegisterResponse);
@@ -92,9 +92,9 @@ message ResumeVmResponse {
 }
 
 message RegisterRequest {
+  reserved 3;
   string host_id = 1;
   string hostname = 2;
-  string ip_address = 3;
 }
 
 message RegisterResponse {
@@ -112,11 +112,11 @@ message UnregisterResponse {
 }
 
 message VmMetrics {
+  reserved 5;
   float cpu_usage = 1;
   uint64 ram_used_bytes = 2;
   VmStatus status = 3;
   string error_message = 4;
-  string ip_address = 5;
 }
 
 message MetricsRequest {
@@ -181,14 +181,11 @@ message Volume {
 }
 
 message VmConfig {
+  reserved 5, 6, 7, 8;
   uint32 vcpus = 1;
   uint32 memory_mib = 2;
   uint32 disk_mib = 3;
   map<string, string> env = 4;
-  string ip_address = 5;
-  string gateway = 6;
-  string mac_address = 7;
-  string netmask = 8;
   repeated Volume volumes = 9;
   uint32 port = 10;
   string health_check_path = 11;

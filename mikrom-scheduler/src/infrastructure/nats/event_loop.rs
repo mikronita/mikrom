@@ -164,7 +164,7 @@ impl NatsEventLoop {
 
                 mikrom_proto::scheduler::Peer {
                     host_id: w.host_id.clone(),
-                    ip_address: w.ip_address.clone(),
+                    endpoint: w.wireguard_ip.clone().unwrap_or_default(),
                     wireguard_pubkey: w.wireguard_pubkey.clone().unwrap_or_default(),
                     allowed_ips,
                     wireguard_port: w.wireguard_port.unwrap_or(51820),
@@ -253,8 +253,6 @@ impl NatsEventLoop {
                     let worker = Worker {
                         host_id: heartbeat.host_id.clone(),
                         hostname: heartbeat.hostname.clone(),
-                        ip_address: heartbeat.ip_address.clone(),
-                        bridge_ip: "10.0.0.1/24".to_string(), // Dummy for router
                         wireguard_pubkey: Some(heartbeat.wireguard_pubkey.clone()),
                         wireguard_ip: Some(heartbeat.wireguard_ip.clone()),
                         wireguard_port: Some(heartbeat.wireguard_port),
@@ -295,8 +293,6 @@ impl NatsEventLoop {
                     let worker = Worker {
                         host_id: heartbeat.host_id.clone(),
                         hostname: heartbeat.hostname.clone(),
-                        ip_address: heartbeat.ip_address.clone(),
-                        bridge_ip: heartbeat.bridge_ip.clone(),
                         wireguard_pubkey: Some(heartbeat.wireguard_pubkey.clone()),
                         wireguard_ip: Some(heartbeat.wireguard_ip.clone()),
                         wireguard_port: Some(heartbeat.wireguard_port),
@@ -347,11 +343,6 @@ impl NatsEventLoop {
                                 "tx_bytes": vm_metrics.tx_bytes,
                                 "rx_bytes": vm_metrics.rx_bytes,
                                 "status": "RUNNING",
-                                "ip_address": if vm_metrics.ip_address.is_empty() {
-                                    serde_json::Value::Null
-                                } else {
-                                    serde_json::Value::String(vm_metrics.ip_address.clone())
-                                },
                                 "ipv6_address": job.config.ipv6_address,
                             });
 
@@ -623,8 +614,6 @@ mod tests {
         let active_worker = Worker {
             host_id: "active-host".to_string(),
             hostname: "active".to_string(),
-            ip_address: "1.1.1.1".to_string(),
-            bridge_ip: "10.0.0.1/24".to_string(),
             wireguard_pubkey: Some("pub-active".to_string()),
             wireguard_ip: Some("fd00::1".to_string()),
             wireguard_port: Some(51820),
@@ -637,8 +626,6 @@ mod tests {
         let dead_worker = Worker {
             host_id: "dead-host".to_string(),
             hostname: "dead".to_string(),
-            ip_address: "2.2.2.2".to_string(),
-            bridge_ip: "10.0.0.1/24".to_string(),
             wireguard_pubkey: Some("pub-dead".to_string()),
             wireguard_ip: Some("fd00::2".to_string()),
             wireguard_port: Some(51820),

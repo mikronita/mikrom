@@ -36,7 +36,7 @@ pub struct Peer {
     #[prost(string, tag = "1")]
     pub host_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub ip_address: ::prost::alloc::string::String,
+    pub endpoint: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub wireguard_pubkey: ::prost::alloc::string::String,
     #[prost(string, repeated, tag = "4")]
@@ -74,10 +74,6 @@ pub struct WorkerHeartbeat {
     pub host_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub hostname: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub ip_address: ::prost::alloc::string::String,
-    #[prost(string, tag = "5")]
-    pub bridge_ip: ::prost::alloc::string::String,
     #[prost(message, optional, tag = "6")]
     pub metrics: ::core::option::Option<ReportMetricsRequest>,
     #[prost(string, tag = "7")]
@@ -93,8 +89,6 @@ pub struct RouterHeartbeat {
     pub host_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub hostname: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub ip_address: ::prost::alloc::string::String,
     #[prost(string, tag = "7")]
     pub wireguard_pubkey: ::prost::alloc::string::String,
     #[prost(string, tag = "8")]
@@ -115,10 +109,6 @@ pub struct WorkerInfo {
     pub host_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub hostname: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub ip_address: ::prost::alloc::string::String,
-    #[prost(string, tag = "5")]
-    pub bridge_ip: ::prost::alloc::string::String,
     #[prost(int64, tag = "6")]
     pub last_heartbeat: i64,
     #[prost(string, tag = "7")]
@@ -202,10 +192,6 @@ pub struct RegisterWorkerRequest {
     pub host_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub hostname: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub ip_address: ::prost::alloc::string::String,
-    #[prost(string, tag = "5")]
-    pub bridge_ip: ::prost::alloc::string::String,
     #[prost(string, tag = "6")]
     pub wireguard_pubkey: ::prost::alloc::string::String,
 }
@@ -226,8 +212,6 @@ pub struct VmMetrics {
     pub status: i32,
     #[prost(string, tag = "4")]
     pub error_message: ::prost::alloc::string::String,
-    #[prost(string, tag = "5")]
-    pub ip_address: ::prost::alloc::string::String,
     #[prost(uint64, tag = "6")]
     pub tx_bytes: u64,
     #[prost(uint64, tag = "7")]
@@ -304,12 +288,6 @@ pub struct AppConfig {
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
-    #[prost(string, tag = "5")]
-    pub ip_address: ::prost::alloc::string::String,
-    #[prost(string, tag = "6")]
-    pub gateway: ::prost::alloc::string::String,
-    #[prost(string, tag = "7")]
-    pub mac_address: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "8")]
     pub volumes: ::prost::alloc::vec::Vec<Volume>,
     #[prost(uint32, tag = "9")]
@@ -333,8 +311,6 @@ pub struct DeployResponse {
     pub vm_id: ::prost::alloc::string::String,
     #[prost(string, tag = "5")]
     pub message: ::prost::alloc::string::String,
-    #[prost(string, tag = "6")]
-    pub ip_address: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppStatusRequest {
@@ -365,8 +341,6 @@ pub struct AppStatusResponse {
     pub cpu_usage: f32,
     #[prost(uint64, tag = "10")]
     pub ram_used_bytes: u64,
-    #[prost(string, tag = "11")]
-    pub ip_address: ::prost::alloc::string::String,
     #[prost(string, tag = "12")]
     pub ipv6_address: ::prost::alloc::string::String,
     #[prost(uint64, tag = "13")]

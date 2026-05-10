@@ -250,12 +250,8 @@ impl AgentServer {
                     config.disk_mib = u64::from(c.disk_mib);
                     config.port = c.port;
                     config.env = c.env;
-                    config.ip_address = Some(c.ip_address).filter(|s| !s.is_empty());
-                    config.gateway = Some(c.gateway).filter(|s| !s.is_empty());
                     config.ipv6_address = Some(c.ipv6_address).filter(|s| !s.is_empty());
                     config.ipv6_gateway = Some(c.ipv6_gateway).filter(|s| !s.is_empty());
-                    config.mac_address = Some(c.mac_address).filter(|s| !s.is_empty());
-                    config.netmask = Some(c.netmask).filter(|s| !s.is_empty());
                 }
 
                 fc.start_vm(
@@ -358,7 +354,7 @@ impl AgentServer {
             } else {
                 vm.config.health_check_path.clone()
             };
-            let ip = vm.config.ip_address.clone();
+            let ip = vm.config.ipv6_address.clone();
 
             if let Some(ip_addr) = ip {
                 let url = if ip_addr.contains(':') {
@@ -374,7 +370,7 @@ impl AgentServer {
                     Err(e) => Err(format!("Unhealthy: {e}")),
                 }
             } else {
-                Err("VM has no IP address assigned".to_string())
+                Err("VM has no IPv6 address assigned (6PN required)".to_string())
             }
         } else {
             Err("VM not found".to_string())
@@ -405,8 +401,6 @@ impl AgentServer {
     ) -> tokio::task::JoinHandle<()> {
         let host_id = self.config.host_id.clone();
         let hostname = self.config.hostname();
-        let ip_address = self.ip_address.clone();
-        let bridge_ip = self.config.bridge_ip.clone();
         let wireguard_pubkey = pub_key;
         let wireguard_ip = self.wg_manager.get_host_ipv6(&host_id);
         let metrics_collector = self.metrics_collector.clone();
@@ -443,7 +437,6 @@ impl AgentServer {
                                     crate::firecracker::VmStatus::Failed => ProtoVmStatus::Failed,
                                 } as i32,
                                 error_message: vm.error_message.clone().unwrap_or_default(),
-                                ip_address: vm.ip_address.clone().unwrap_or_default(),
                                 tx_bytes: vm.tx_bytes,
                                 rx_bytes: vm.rx_bytes,
                             },
@@ -454,8 +447,6 @@ impl AgentServer {
                 let heartbeat = WorkerHeartbeat {
                     host_id: host_id.clone(),
                     hostname: hostname.clone(),
-                    ip_address: ip_address.clone(),
-                    bridge_ip: bridge_ip.clone(),
                     metrics: Some(ReportMetricsRequest {
                         host_id: host_id.clone(),
                         cpu_usage: metrics.cpu_usage,
@@ -580,7 +571,7 @@ mod tests {
                     config: VmConfig {
                         port: server.address().port() as u32,
                         health_check_path: "/".to_string(),
-                        ip_address: Some(server.address().ip().to_string()),
+                        ipv6_address: Some(server.address().ip().to_string()),
                         ..Default::default()
                     },
                     started_at: None,

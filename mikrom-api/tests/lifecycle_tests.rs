@@ -190,7 +190,6 @@ async fn test_promotion_back_and_forth() {
                     status: DeployStatus::Running as i32,
                     host_id: "host-1".to_string(),
                     vm_id: "vm-1".to_string(),
-                    ip_address: "10.0.0.1".to_string(),
                     message: "Started".to_string(),
                 };
                 let mut buf = Vec::new();
@@ -582,7 +581,6 @@ async fn test_activate_stopped_deployment_resumes_it() {
                     status: DeployStatus::Running as i32,
                     host_id: "host-1".to_string(),
                     vm_id: "vm-1".to_string(),
-                    ip_address: "10.0.0.1".to_string(),
                     message: "Started".to_string(),
                 };
                 let mut buf = Vec::new();

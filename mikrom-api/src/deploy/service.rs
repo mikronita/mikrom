@@ -202,7 +202,6 @@ impl DeploymentService {
                     status: Some(db_status.to_string()),
                     job_id: Some(inner.job_id.clone()),
                     image_tag: Some(params.image_tag),
-                    ip_address: Some(inner.ip_address.clone()),
                     ..Default::default()
                 },
             )

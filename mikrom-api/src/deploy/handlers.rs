@@ -531,7 +531,6 @@ pub async fn activate_deployment_handler(
                         host_id: String::new(),
                         vm_id: String::new(),
                         message: "Activating".to_string(),
-                        ip_address: deployment.ip_address.clone().unwrap_or_default(),
                     };
                     (inner, false) // Don't cleanup if it was already running
                 };

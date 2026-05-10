@@ -136,7 +136,6 @@ async fn test_promote_stopped_deployment_resumes_it() {
             let resp = DeployResponse {
                 job_id: job_id_clone.clone(),
                 status: DeployStatus::Running as i32,
-                ip_address: "10.0.0.2".to_string(),
                 ..Default::default()
             };
             let mut buf = Vec::new();

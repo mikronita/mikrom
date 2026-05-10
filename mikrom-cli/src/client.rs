@@ -52,6 +52,7 @@ pub struct LiveDeploymentInfo {
     pub image: String,
     pub status: String,
     pub host_id: String,
+    pub ipv6_address: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,6 +64,7 @@ pub struct LiveDeploymentStatus {
     pub scheduled_at: i64,
     pub started_at: i64,
     pub error_message: String,
+    pub ipv6_address: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

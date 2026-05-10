@@ -111,11 +111,9 @@ func (m *MikromApp) runRouterHeartbeat(hostID, hostname, pubKey string) {
 	wgIPv6 := m.getRouterIPv6(hostID)
 
 	for {
-		ip := m.getOutboundIP()
 		heartbeat := &schedulerv1.RouterHeartbeat{
 			HostId:          hostID,
 			Hostname:        hostname,
-			IpAddress:       ip,
 			WireguardPubkey: pubKey,
 			WireguardIp:     wgIPv6,
 			WireguardPort:   51822,

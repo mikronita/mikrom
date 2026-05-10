@@ -37,6 +37,9 @@ async fn list(client: &MikromClient) -> Result<()> {
             println!("\n{} {}", ui::ROCKET, ui::bold_cyan(&dep.app_name));
             ui::label_value(ui::DEP, "Job ID:", &dep.job_id);
             ui::label_value(ui::INFO, "Status:", &status_painted.to_string());
+            if let Some(ipv6) = &dep.ipv6_address {
+                ui::label_value(ui::INFO, "IPv6:", ipv6);
+            }
             ui::label_value(ui::APP, "Image:", &dep.image);
             ui::label_value(ui::SYS, "Host ID:", &dep.host_id);
         }
@@ -50,6 +53,9 @@ async fn status(client: &MikromClient, app: &str, job_id: &str) -> Result<()> {
     ui::label_value(ui::APP, "App Name:", app);
     ui::label_value(ui::DEP, "Job ID:", &status.job_id);
     ui::label_value(ui::INFO, "Status:", &ui::cyan_label(&status.status));
+    if let Some(ipv6) = &status.ipv6_address {
+        ui::label_value(ui::INFO, "IPv6 Addr:", ipv6);
+    }
     ui::label_value(ui::SYS, "Worker ID:", &status.host_id);
     ui::label_value(ui::SYS, "VM ID:", &status.vm_id);
     ui::label_value(

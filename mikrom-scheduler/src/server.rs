@@ -30,10 +30,6 @@ impl SchedulerServer {
                 disk_mib: u64::from(c.disk_mib),
                 port: c.port,
                 env: c.env,
-                ip_address: None,
-                gateway: None,
-                mac_address: None,
-                netmask: None,
                 ipv6_address: Some(c.ipv6_address),
                 ipv6_gateway: Some(c.ipv6_gateway),
                 volumes: c
@@ -72,7 +68,6 @@ impl SchedulerServer {
                 host_id: job.host_id.unwrap_or_default(),
                 vm_id: job.vm_id.unwrap_or_default(),
                 message: "Deployment successful".to_string(),
-                ip_address: job.config.ip_address.unwrap_or_default(),
             }),
             Err(e) => {
                 tracing::error!("Deployment failed for app {}: {}", req.app_id, e);
@@ -108,7 +103,6 @@ impl SchedulerServer {
                     error_message: job.error_message.unwrap_or_default(),
                     cpu_usage,
                     ram_used_bytes,
-                    ip_address: job.config.ip_address.unwrap_or_default(),
                     ipv6_address: job.config.ipv6_address.unwrap_or_default(),
                     tx_bytes,
                     rx_bytes,
@@ -243,8 +237,6 @@ impl SchedulerServer {
             .map(|w| mikrom_proto::scheduler::WorkerInfo {
                 host_id: w.host_id,
                 hostname: w.hostname,
-                ip_address: w.ip_address,
-                bridge_ip: w.bridge_ip,
                 last_heartbeat: w.last_heartbeat,
                 wireguard_pubkey: w.wireguard_pubkey.unwrap_or_default(),
             })

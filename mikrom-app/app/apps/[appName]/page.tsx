@@ -170,7 +170,6 @@ export default function AppDetailPage() {
   const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>([]);
   const activeDeploymentId = activeDeployment?.id;
   const activeDeploymentJobId = activeDeployment?.job_id;
-  const activeDeploymentIp = activeDeployment?.ip_address;
   const activeDeploymentIpv6 = activeDeployment?.ipv6_address;
   const appId = app?.id;
 
@@ -184,7 +183,7 @@ export default function AppDetailPage() {
   useEffect(() => {
     setMetricsHistory([]);
     lastNetworkRef.current = {};
-  }, [activeDeploymentId, activeDeploymentJobId, activeDeploymentIp, activeDeploymentIpv6]);
+  }, [activeDeploymentId, activeDeploymentJobId, activeDeploymentIpv6]);
 
   useEffect(() => {
     if (!liveMetrics) return;
@@ -449,6 +448,7 @@ export default function AppDetailPage() {
                     <TableRow>
                       <TableHead>Deployment</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Network</TableHead>
                       <TableHead>Duration</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead>Environment</TableHead>
@@ -459,14 +459,14 @@ export default function AppDetailPage() {
                     {isLoading && deployments.length === 0 ? (
                       Array.from({ length: 3 }).map((_, i) => (
                         <TableRow key={i}>
-                          <TableCell colSpan={6}>
+                          <TableCell colSpan={7}>
                             <div className="h-8 bg-muted animate-pulse rounded" />
                           </TableCell>
                         </TableRow>
                       ))
                     ) : deployments.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="py-10">
+                        <TableCell colSpan={7} className="py-10">
                           <Empty className="border-none">
                             <EmptyHeader>
                               <EmptyMedia variant="icon">
@@ -547,6 +547,13 @@ export default function AppDetailPage() {
                                 <Badge className={cn("font-semibold", getStatusBadgeClass(dep.status))}>
                                   {dep.status}
                                 </Badge>
+                              </TableCell>
+                              <TableCell>
+                                {dep.ipv6_address ? (
+                                  <span className="text-xs font-mono text-muted-foreground">{dep.ipv6_address}</span>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground italic">Pending...</span>
+                                )}
                               </TableCell>
                               <TableCell className="text-muted-foreground text-xs font-medium">
                                 {dep.status === "RUNNING" || dep.status === "FAILED" || dep.status === "STOPPED" 

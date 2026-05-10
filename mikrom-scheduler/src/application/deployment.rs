@@ -2,7 +2,6 @@ use crate::domain::{
     AgentClient, DomainError, DomainResult, Job, JobRepository, JobStatus, SchedulingStrategy,
     VmConfig, Worker, WorkerRepository,
 };
-use crate::infrastructure::db::ipam::Ipam;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,7 +11,6 @@ pub struct DeploymentService {
     job_repo: Arc<dyn JobRepository>,
     worker_repo: Arc<dyn WorkerRepository>,
     agent_client: Arc<dyn AgentClient>,
-    pool: PgPool, // Still needed for IPAM which is coupled to sqlx for now
 }
 
 impl DeploymentService {
@@ -20,13 +18,12 @@ impl DeploymentService {
         job_repo: Arc<dyn JobRepository>,
         worker_repo: Arc<dyn WorkerRepository>,
         agent_client: Arc<dyn AgentClient>,
-        pool: PgPool,
+        _pool: PgPool,
     ) -> Self {
         Self {
             job_repo,
             worker_repo,
             agent_client,
-            pool,
         }
     }
 
@@ -69,44 +66,8 @@ impl DeploymentService {
         );
         job.schedule(host_id.clone(), vm_id.clone());
 
-        // 2. Persist job (needed for IP allocation foreign key)
+        // 2. Persist job
         self.job_repo.add_job(job.clone()).await?;
-
-        // 3. Allocate IP
-        let ipam = Ipam::new(self.pool.clone(), host_id.clone(), worker.bridge_ip.clone());
-        let allocation = match ipam.allocate(&job_id).await {
-            Ok(Some(a)) => a,
-            Ok(None) => {
-                let _ = self.job_repo.remove_job(&job_id).await;
-                return Err(DomainError::IpPoolExhausted);
-            },
-            Err(e) => {
-                // Cleanup job if IP allocation fails
-                let _ = self.job_repo.remove_job(&job_id).await;
-                return Err(DomainError::Infrastructure(e.to_string()));
-            },
-        };
-
-        // Update job with IP info
-        job.config.ip_address = Some(allocation.ip.clone());
-        job.config.gateway = Some(allocation.gateway.clone());
-        job.config.mac_address = Some(allocation.mac.clone());
-        job.config.netmask = Some(ipam.netmask());
-
-        if let Err(e) = self
-            .job_repo
-            .update_job_ip(
-                &job_id,
-                &allocation.ip,
-                &allocation.gateway,
-                &allocation.mac,
-                &ipam.netmask(),
-            )
-            .await
-        {
-            let _ = self.job_repo.remove_job(&job_id).await;
-            return Err(e);
-        }
 
         // 4. Ensure exclusivity (Disabled for Zero-Downtime deployments)
         // if let Err(e) = self.ensure_exclusivity(&app_id, &job_id, &user_id).await {
@@ -123,7 +84,7 @@ impl DeploymentService {
             .await
         {
             tracing::error!(job_id = %job_id, error = %e, "Failed to deploy to agent");
-            // Remove job and release IP if we failed to start it
+            // Remove job if we failed to start it
             let _ = self.job_repo.remove_job(&job_id).await;
             return Err(e);
         }

@@ -28,7 +28,7 @@ message UpdateSecurityGroupsResponse {
 
 message Peer {
   string host_id = 1;
-  string ip_address = 2;
+  string endpoint = 2;
   string wireguard_pubkey = 3;
   repeated string allowed_ips = 4;
   int32 wireguard_port = 5;
@@ -71,11 +71,9 @@ message WatchAppsResponse {
 }
 
 message WorkerHeartbeat {
-  reserved 4;
+  reserved 3, 4, 5;
   string host_id = 1;
   string hostname = 2;
-  string ip_address = 3;
-  string bridge_ip = 5;
   ReportMetricsRequest metrics = 6;
   string wireguard_pubkey = 7;
   string wireguard_ip = 8;
@@ -83,9 +81,9 @@ message WorkerHeartbeat {
 }
 
 message RouterHeartbeat {
+  reserved 3;
   string host_id = 1;
   string hostname = 2;
-  string ip_address = 3;
   string wireguard_pubkey = 7;
   string wireguard_ip = 8;
   int32 wireguard_port = 9;
@@ -98,11 +96,9 @@ message ListWorkersResponse {
 }
 
 message WorkerInfo {
-  reserved 4;
+  reserved 3, 4, 5;
   string host_id = 1;
   string hostname = 2;
-  string ip_address = 3;
-  string bridge_ip = 5;
   int64 last_heartbeat = 6;
   string wireguard_pubkey = 7;
 }
@@ -161,11 +157,9 @@ message DeleteAllByAppResponse {
 }
 
 message RegisterWorkerRequest {
-  reserved 4;
+  reserved 3, 4, 5;
   string host_id = 1;
   string hostname = 2;
-  string ip_address = 3;
-  string bridge_ip = 5;
   string wireguard_pubkey = 6;
 }
 
@@ -175,11 +169,11 @@ message RegisterWorkerResponse {
 }
 
 message VmMetrics {
+  reserved 5;
   float cpu_usage = 1;
   uint64 ram_used_bytes = 2;
   VmStatus status = 3;
   string error_message = 4;
-  string ip_address = 5;
   uint64 tx_bytes = 6;
   uint64 rx_bytes = 7;
 }
@@ -230,13 +224,11 @@ message Volume {
 }
 
 message AppConfig {
+  reserved 5, 6, 7;
   uint32 vcpus = 1;
   uint32 memory_mib = 2;
   uint32 disk_mib = 3;
   map<string, string> env = 4;
-  string ip_address = 5;
-  string gateway = 6;
-  string mac_address = 7;
   repeated Volume volumes = 8;
   uint32 port = 9;
   string health_check_path = 10;
@@ -246,12 +238,12 @@ message AppConfig {
 
 
 message DeployResponse {
+  reserved 6;
   string job_id = 1;
   DeployStatus status = 2;
   string host_id = 3;
   string vm_id = 4;
   string message = 5;
-  string ip_address = 6;
 }
 
 enum DeployStatus {
@@ -270,6 +262,7 @@ message AppStatusRequest {
 }
 
 message AppStatusResponse {
+  reserved 11;
   string job_id = 1;
   DeployStatus status = 2;
   string host_id = 3;
@@ -280,7 +273,6 @@ message AppStatusResponse {
   string error_message = 8;
   float cpu_usage = 9;
   uint64 ram_used_bytes = 10;
-  string ip_address = 11;
   string ipv6_address = 12;
   uint64 tx_bytes = 13;
   uint64 rx_bytes = 14;
