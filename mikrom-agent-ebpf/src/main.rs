@@ -6,6 +6,7 @@ use aya_ebpf::{
     maps::{HashMap, PerCpuHashMap},
     programs::TcContext,
 };
+use aya_log_ebpf::info;
 use mikrom_agent_ebpf_common::{FirewallRule, NetworkStats};
 use network_types::{
     eth::{EthHdr, EtherType},
@@ -24,22 +25,44 @@ static RULES: HashMap<u32, FirewallRule> = HashMap::with_max_entries(16384, 0);
 const TC_ACT_OK: i32 = 0;
 const TC_ACT_SHOT: i32 = 2;
 
+#[inline(always)]
+fn increment_stats(ctx: &TcContext, ifindex: u32, len: u64, is_tx: bool) {
+    if is_tx {
+        info!(ctx, "TX ifindex: {}, len: {}", ifindex, len);
+    } else {
+        info!(ctx, "RX ifindex: {}, len: {}", ifindex, len);
+    }
+
+    if let Some(stats) = STATS.get_ptr_mut(&ifindex) {
+        unsafe {
+            if is_tx {
+                (*stats).tx_bytes += len;
+            } else {
+                (*stats).rx_bytes += len;
+            }
+        }
+    } else {
+        let initial = if is_tx {
+            NetworkStats {
+                tx_bytes: len,
+                rx_bytes: 0,
+            }
+        } else {
+            NetworkStats {
+                tx_bytes: 0,
+                rx_bytes: len,
+            }
+        };
+        let _ = STATS.insert(&ifindex, &initial, 0);
+    }
+}
+
 #[classifier]
 pub fn mikrom_ingress(ctx: TcContext) -> i32 {
     let len = ctx.len() as u64;
     let ifindex = unsafe { (*ctx.skb.skb).ifindex };
 
-    if let Some(stats) = STATS.get_ptr_mut(&ifindex) {
-        unsafe {
-            (*stats).tx_bytes += len;
-        }
-    } else {
-        let initial = NetworkStats {
-            tx_bytes: len,
-            rx_bytes: 0,
-        };
-        let _ = STATS.insert(&ifindex, &initial, 0);
-    }
+    increment_stats(&ctx, ifindex, len, true);
 
     TC_ACT_OK
 }
@@ -49,17 +72,7 @@ pub fn mikrom_egress(ctx: TcContext) -> i32 {
     let len = ctx.len() as u64;
     let ifindex = unsafe { (*ctx.skb.skb).ifindex };
 
-    if let Some(stats) = STATS.get_ptr_mut(&ifindex) {
-        unsafe {
-            (*stats).rx_bytes += len;
-        }
-    } else {
-        let initial = NetworkStats {
-            tx_bytes: 0,
-            rx_bytes: len,
-        };
-        let _ = STATS.insert(&ifindex, &initial, 0);
-    }
+    increment_stats(&ctx, ifindex, len, false);
 
     match try_mikrom_egress(ctx, ifindex) {
         Ok(ret) => ret,

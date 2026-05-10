@@ -1,6 +1,6 @@
 pub mod error;
 
-use aya::maps::HashMap;
+use aya::maps::{HashMap, PerCpuHashMap};
 use aya::programs::tc;
 use aya::{Ebpf, include_bytes_aligned};
 use aya_log::EbpfLogger;
@@ -8,7 +8,7 @@ use error::EbpfError;
 use mikrom_agent_ebpf_common::{FirewallRule, NetworkStats};
 use std::sync::LazyLock;
 use tokio::sync::Semaphore;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 static LOADING_SEMAPHORE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(1));
 
@@ -36,6 +36,8 @@ impl EbpfManager {
         let mut ebpf = tokio::task::spawn_blocking(move || Ebpf::load(data))
             .await
             .map_err(|e| EbpfError::CastError(e.to_string()))??;
+
+        info!("Loaded eBPF binary ({} bytes)", data.len());
 
         if let Err(e) = EbpfLogger::init(&mut ebpf) {
             warn!("failed to initialize eBPF logger: {}", e);
@@ -69,8 +71,32 @@ impl EbpfManager {
 
     pub fn get_stats(&self, ifindex: u32) -> Option<NetworkStats> {
         let map = self.ebpf.map("STATS")?;
-        let stats: HashMap<_, u32, NetworkStats> = HashMap::try_from(map).ok()?;
-        stats.get(&ifindex, 0).ok()
+        let stats_map: PerCpuHashMap<_, u32, NetworkStats> = PerCpuHashMap::try_from(map).ok()?;
+
+        match stats_map.get(&ifindex, 0) {
+            Ok(cpu_stats) => {
+                let mut total_stats = NetworkStats {
+                    tx_bytes: 0,
+                    rx_bytes: 0,
+                };
+
+                for cpu_stat in cpu_stats.iter() {
+                    total_stats.tx_bytes += cpu_stat.tx_bytes;
+                    total_stats.rx_bytes += cpu_stat.rx_bytes;
+                }
+
+                debug!(ifindex = %ifindex, tx = %total_stats.tx_bytes, rx = %total_stats.rx_bytes, "Retrieved eBPF network stats");
+                Some(total_stats)
+            },
+            Err(aya::maps::MapError::KeyNotFound) => {
+                warn!(ifindex = %ifindex, "No eBPF stats found for interface (KeyNotFound)");
+                None
+            },
+            Err(e) => {
+                warn!(ifindex = %ifindex, error = %e, "Failed to read eBPF stats map");
+                None
+            },
+        }
     }
 
     pub fn update_rules(

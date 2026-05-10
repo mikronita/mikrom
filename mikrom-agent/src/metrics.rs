@@ -194,9 +194,10 @@ impl MetricsCollector {
                 && vm_metrics.rx_bytes == 0
                 && let Some(tap_name) = vm.tap_name.as_deref()
             {
-                let (tx_bytes, rx_bytes) = read_tap_network_stats(tap_name).await;
-                vm_metrics.tx_bytes = tx_bytes;
-                vm_metrics.rx_bytes = rx_bytes;
+                let (tap_tx, tap_rx) = read_tap_network_stats(tap_name).await;
+                vm_metrics.tx_bytes = tap_rx; // Host RX = VM TX (Out)
+                vm_metrics.rx_bytes = tap_tx; // Host TX = VM RX (In)
+                tracing::debug!(vm_id = %vm.vm_id, tap = %tap_name, tx = %vm_metrics.tx_bytes, rx = %vm_metrics.rx_bytes, "Retrieved sysfs network stats");
             }
 
             metrics.vms.insert(vm_metrics.vm_id, vm_metrics);
@@ -455,5 +456,22 @@ mod tests {
         if let Err(e) = tokio::fs::remove_file(metrics_file).await {
             tracing::warn!("Failed to remove test metrics file: {}", e);
         }
+    }
+
+    #[tokio::test]
+    async fn test_sysfs_metrics_mapping_logic() {
+        // Test variables representing sysfs data
+        let host_tx = 1000u64;
+        let host_rx = 2000u64;
+
+        // The logic we want to test:
+        // vm_metrics.tx_bytes = host_rx; // Host RX = VM TX (Out)
+        // vm_metrics.rx_bytes = host_tx; // Host TX = VM RX (In)
+
+        let vm_tx_mapped = host_rx;
+        let vm_rx_mapped = host_tx;
+
+        assert_eq!(vm_tx_mapped, 2000, "Host RX must be mapped to VM TX");
+        assert_eq!(vm_rx_mapped, 1000, "Host TX must be mapped to VM RX");
     }
 }

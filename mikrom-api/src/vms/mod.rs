@@ -26,6 +26,8 @@ pub struct LiveDeploymentInfo {
     pub vm_id: String,
     pub cpu_usage: f32,
     pub ram_used_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
     pub ipv6_address: Option<String>,
 }
 
@@ -166,6 +168,8 @@ pub struct LiveDeploymentStatus {
     pub error_message: String,
     pub cpu_usage: f32,
     pub ram_used_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
     pub vcpus: i32,
     pub memory_mib: i64,
 }
@@ -222,7 +226,7 @@ pub async fn list_active_deployments(
     // 3. Map deployments to LiveDeploymentInfo, using scheduler data if available
     let mut active_deployments = Vec::new();
     for dep in deployments {
-        let (status, host_id, vm_id, cpu_usage, ram_used_bytes, ipv6_address) =
+        let (status, host_id, vm_id, cpu_usage, ram_used_bytes, tx_bytes, rx_bytes, ipv6_address) =
             if let Some(job_id_real) = &dep.job_id {
                 if let Some(sch_app) = scheduler_apps.get(job_id_real) {
                     (
@@ -231,6 +235,8 @@ pub async fn list_active_deployments(
                         sch_app.vm_id.clone(),
                         sch_app.cpu_usage,
                         sch_app.ram_used_bytes,
+                        sch_app.tx_bytes,
+                        sch_app.rx_bytes,
                         if sch_app.ipv6_address.is_empty() {
                             dep.ipv6_address.clone()
                         } else {
@@ -244,6 +250,8 @@ pub async fn list_active_deployments(
                         String::new(),
                         0.0,
                         0,
+                        0,
+                        0,
                         dep.ipv6_address.clone(),
                     )
                 }
@@ -253,6 +261,8 @@ pub async fn list_active_deployments(
                     String::new(),
                     String::new(),
                     0.0,
+                    0,
+                    0,
                     0,
                     dep.ipv6_address.clone(),
                 )
@@ -281,6 +291,8 @@ pub async fn list_active_deployments(
             vm_id,
             cpu_usage,
             ram_used_bytes,
+            tx_bytes,
+            rx_bytes,
             ipv6_address,
         });
     }
@@ -372,6 +384,8 @@ pub async fn watch_deployments(
                                 "vm_id": job.vm_id,
                                 "cpu_usage": job.cpu_usage,
                                 "ram_used_bytes": job.ram_used_bytes,
+                                "tx_bytes": job.tx_bytes,
+                                "rx_bytes": job.rx_bytes,
                                 "scheduled_at": 0,
                                 "started_at": 0,
                                 "stopped_at": 0,
@@ -401,6 +415,8 @@ pub async fn watch_deployments(
                                     "vm_id": String::new(),
                                     "cpu_usage": 0.0,
                                     "ram_used_bytes": 0,
+                                    "tx_bytes": 0,
+                                    "rx_bytes": 0,
                                     "scheduled_at": 0,
                                     "started_at": 0,
                                     "stopped_at": 0,
@@ -444,6 +460,8 @@ pub async fn watch_deployments(
                                 "vm_id": job.vm_id,
                                 "cpu_usage": job.cpu_usage,
                                 "ram_used_bytes": job.ram_used_bytes,
+                                "tx_bytes": job.tx_bytes,
+                                "rx_bytes": job.rx_bytes,
                                 "scheduled_at": 0,
                                 "started_at": 0,
                                 "stopped_at": 0,
@@ -586,6 +604,8 @@ pub async fn get_deployment_status(
             error_message: String::new(),
             cpu_usage: 0.0,
             ram_used_bytes: 0,
+            tx_bytes: 0,
+            rx_bytes: 0,
             vcpus: dep.vcpus,
             memory_mib: dep.memory_mib,
         }));
@@ -617,6 +637,8 @@ pub async fn get_deployment_status(
         error_message: inner.error_message,
         cpu_usage: inner.cpu_usage,
         ram_used_bytes: inner.ram_used_bytes,
+        tx_bytes: inner.tx_bytes,
+        rx_bytes: inner.rx_bytes,
         vcpus: dep.vcpus,
         memory_mib: dep.memory_mib,
     };
