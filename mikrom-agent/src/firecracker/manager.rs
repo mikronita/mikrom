@@ -67,7 +67,6 @@ impl FirecrackerManager {
                     status: vm.status,
                     error_message: vm.error_message.clone(),
                     pid,
-                    ip_address: vm.config.ip_address.clone(),
                     metrics_path,
                     socket_path,
                     tap_name,

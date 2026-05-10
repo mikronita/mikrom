@@ -9,13 +9,11 @@ use sysinfo::{Disks, Pid, System};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VmMetrics {
     pub app_id: AppId,
-    #[serde(default)]
     pub vm_id: VmId,
     pub cpu_usage: f32,
     pub ram_used_bytes: u64,
     pub status: VmStatus,
     pub error_message: Option<String>,
-    pub ip_address: Option<String>,
     pub firecracker_metrics: Option<serde_json::Value>,
     pub tx_bytes: u64,
     pub rx_bytes: u64,
@@ -154,7 +152,6 @@ impl MetricsCollector {
                 ram_used_bytes: 0,
                 status: vm.status,
                 error_message: vm.error_message,
-                ip_address: vm.ip_address,
                 firecracker_metrics: None,
                 tx_bytes: 0,
                 rx_bytes: 0,
@@ -286,7 +283,6 @@ mod tests {
             ram_used_bytes: 1024,
             status: VmStatus::Running,
             error_message: None,
-            ip_address: Some("10.0.0.1".to_string()),
             firecracker_metrics: None,
             tx_bytes: 100,
             rx_bytes: 200,
@@ -310,13 +306,12 @@ mod tests {
                 app_id: AppId::new(),
                 vm_id,
                 cpu_usage: 0.1,
-                ram_used_bytes: 512,
+                ram_used_bytes: 2048,
                 status: VmStatus::Running,
                 error_message: None,
-                ip_address: None,
                 firecracker_metrics: None,
-                tx_bytes: 0,
-                rx_bytes: 0,
+                tx_bytes: 300,
+                rx_bytes: 400,
             },
         );
 

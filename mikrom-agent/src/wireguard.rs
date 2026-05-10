@@ -116,7 +116,7 @@ impl WireGuardManager {
         );
 
         for peer in peers {
-            if peer.wireguard_pubkey.is_empty() || peer.ip_address.is_empty() {
+            if peer.wireguard_pubkey.is_empty() || peer.endpoint.is_empty() {
                 continue;
             }
 
@@ -134,16 +134,17 @@ impl WireGuardManager {
                 peer.wireguard_pubkey.clone()
             };
 
-            // AllowedIPs: Ensure every IP has a prefix length
+            // AllowedIPs: Ensure every IP has a prefix length, but don't double-prefix
             let formatted_allowed_ips: Vec<String> = peer
                 .allowed_ips
                 .iter()
                 .map(|ip| {
                     if ip.contains('/') {
                         ip.clone()
+                    } else if ip.contains(':') {
+                        format!("{}/128", ip)
                     } else {
-                        let prefix = if ip.contains(':') { "/128" } else { "/32" };
-                        format!("{}{}", ip, prefix)
+                        format!("{}/32", ip)
                     }
                 })
                 .collect();
@@ -158,7 +159,7 @@ impl WireGuardManager {
             conf.push_str(&format!("PublicKey = {}\n", pubkey));
             conf.push_str(&format!(
                 "Endpoint = {}:{}\n",
-                peer.ip_address, peer.wireguard_port
+                peer.endpoint, peer.wireguard_port
             ));
             conf.push_str(&format!("AllowedIPs = {}\n", allowed_ips));
             conf.push_str("PersistentKeepalive = 25\n\n");

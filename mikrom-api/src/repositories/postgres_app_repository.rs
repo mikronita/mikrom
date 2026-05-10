@@ -1,5 +1,5 @@
 use crate::models::app::{App, Deployment};
-use crate::repositories::app_repository::{AppRepository, NewDeployment};
+use crate::repositories::app_repository::{AppRepository, NewDeployment, UpdateDeploymentParams};
 use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -243,16 +243,15 @@ impl AppRepository for PostgresAppRepository {
     async fn update_deployment(
         &self,
         id: Uuid,
-        params: crate::repositories::app_repository::UpdateDeploymentParams,
+        params: UpdateDeploymentParams,
     ) -> anyhow::Result<()> {
         sqlx::query(
-            "UPDATE deployments SET status = COALESCE($1, status), job_id = COALESCE($2, job_id), image_tag = COALESCE($3, image_tag), build_id = COALESCE($4, build_id), ip_address = COALESCE($5, ip_address), ipv6_address = COALESCE($6, ipv6_address), git_commit_hash = COALESCE($7, git_commit_hash), git_commit_message = COALESCE($8, git_commit_message), git_branch = COALESCE($9, git_branch), updated_at = NOW() WHERE id = $10"
+            "UPDATE deployments SET status = COALESCE($1, status), job_id = COALESCE($2, job_id), image_tag = COALESCE($3, image_tag), build_id = COALESCE($4, build_id), ipv6_address = COALESCE($5, ipv6_address), git_commit_hash = COALESCE($6, git_commit_hash), git_commit_message = COALESCE($7, git_commit_message), git_branch = COALESCE($8, git_branch), updated_at = NOW() WHERE id = $9"
         )
         .bind(params.status)
         .bind(params.job_id)
         .bind(params.image_tag)
         .bind(params.build_id)
-        .bind(params.ip_address)
         .bind(params.ipv6_address)
         .bind(params.git_commit_hash)
         .bind(params.git_commit_message)
@@ -490,12 +489,11 @@ mod tests {
         app_repo
             .update_deployment(
                 deployment.id,
-                crate::repositories::app_repository::UpdateDeploymentParams {
+                UpdateDeploymentParams {
                     status: Some("RUNNING".to_string()),
                     job_id: Some("job-123".to_string()),
                     image_tag: Some("img:v1".to_string()),
                     build_id: Some("build-abc".to_string()),
-                    ip_address: Some("10.0.0.1".to_string()),
                     ..Default::default()
                 },
             )

@@ -18,7 +18,7 @@ async fn test_nats_protobuf_serialization_router() {
     // Simulate what mikrom-api does
     let update = RouterConfigUpdate {
         hostname: "example.com".to_string(),
-        target_url: Some("http://10.0.0.1:8080".to_string()),
+        target_url: Some("http://[fd00::1]:8080".to_string()),
         timestamp: chrono::Utc::now().timestamp(),
     };
 
@@ -33,7 +33,10 @@ async fn test_nats_protobuf_serialization_router() {
         let decoded = RouterConfigUpdate::decode(&msg.payload[..])
             .expect("Failed to decode RouterConfigUpdate");
         assert_eq!(decoded.hostname, "example.com");
-        assert_eq!(decoded.target_url, Some("http://10.0.0.1:8080".to_string()));
+        assert_eq!(
+            decoded.target_url,
+            Some("http://[fd00::1]:8080".to_string())
+        );
     } else {
         panic!("No message received");
     }

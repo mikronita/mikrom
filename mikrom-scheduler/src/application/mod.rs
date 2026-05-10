@@ -230,16 +230,6 @@ mod tests {
         async fn fail_job(&self, _job_id: &str, _msg: String, _ts: i64) -> DomainResult<()> {
             Ok(())
         }
-        async fn update_job_ip(
-            &self,
-            _j: &str,
-            _ip: &str,
-            _gw: &str,
-            _m: &str,
-            _nm: &str,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
         async fn cancel_job(&self, _j: &str, _ts: i64) -> DomainResult<()> {
             Ok(())
         }

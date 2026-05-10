@@ -1,7 +1,7 @@
 #[test]
 fn test_mesh_ip_formatting() {
     // Test that our manual logic in event_loop.rs for adding prefixes is correct
-    let wg_ips = vec!["fd00::1", "10.0.0.1", "fd00::abcd:1234"];
+    let wg_ips = vec!["fd00::1", "fd00::2", "fd00::abcd:1234"];
 
     let formatted: Vec<String> = wg_ips
         .into_iter()
@@ -12,7 +12,7 @@ fn test_mesh_ip_formatting() {
         .collect();
 
     assert_eq!(formatted[0], "fd00::1/128");
-    assert_eq!(formatted[1], "10.0.0.1/32");
+    assert_eq!(formatted[1], "fd00::2/128");
     assert_eq!(formatted[2], "fd00::abcd:1234/128");
 }
 

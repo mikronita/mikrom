@@ -39,7 +39,6 @@ async fn test_zero_downtime_flow_success() {
     let inner = DeployResponse {
         job_id: "job-new".to_string(),
         status: 2, // Scheduled
-        ip_address: "10.0.0.2".to_string(),
         host_id: "host-1".to_string(),
         vm_id: "vm-new".to_string(),
         message: "Scheduled".to_string(),

@@ -27,12 +27,12 @@ func (m *MikromApp) handleMeshUpdate(data []byte) {
 
 	var peers []PeerInfo
 	for _, p := range update.Peers {
-		if p.IpAddress == "" || p.IpAddress == "127.0.0.1" {
+		if p.Endpoint == "" {
 			continue
 		}
 		peers = append(peers, PeerInfo{
 			HostID:     p.HostId,
-			Endpoint:   fmt.Sprintf("%s:%d", p.IpAddress, p.WireguardPort),
+			Endpoint:   fmt.Sprintf("%s:%d", p.Endpoint, p.WireguardPort),
 			PublicKey:  p.WireguardPubkey,
 			AllowedIPs: p.AllowedIps,
 		})

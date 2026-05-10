@@ -112,10 +112,10 @@ impl AppState {
                     if !ipv6.is_empty() {
                         Some(format!("[{}]", ipv6))
                     } else {
-                        dep.ip_address.clone()
+                        None
                     }
                 } else {
-                    dep.ip_address.clone()
+                    None
                 };
 
                 if let Some(ip_addr) = ip {

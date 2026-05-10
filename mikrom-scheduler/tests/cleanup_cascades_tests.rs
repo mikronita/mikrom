@@ -5,9 +5,7 @@ mod common_utils;
 mod tests {
     use super::common_utils;
     use mikrom_scheduler::domain::{Job, JobRepository, VmConfig, Worker, WorkerRepository};
-    use mikrom_scheduler::infrastructure::db::ipam::Ipam;
     use mikrom_scheduler::infrastructure::db::{PgJobRepository, PgWorkerRepository};
-    use sqlx::Row;
 
     #[tokio::test]
     async fn test_cascading_cleanup_on_job_deletion() {
@@ -22,8 +20,6 @@ mod tests {
         let worker = Worker {
             host_id: host_id.clone(),
             hostname: "test-hostname".to_string(),
-            ip_address: "192.168.1.1".to_string(),
-            bridge_ip: "10.0.0.1/24".to_string(),
             wireguard_pubkey: None,
             wireguard_ip: None,
             wireguard_port: None,
@@ -47,32 +43,16 @@ mod tests {
         );
         job_repo.add_job(job).await.unwrap();
 
-        // 3. Allocate an IP for this job
-        let ipam = Ipam::new(pool.clone(), host_id.clone(), "10.0.0.1/24".to_string());
-        let _allocation = ipam.allocate(&job_id).await.unwrap().unwrap();
+        // 3. Verify job is present
+        let job = job_repo.get_job(&job_id).await.unwrap();
+        assert!(job.is_some());
 
-        // 4. Verify IP is allocated and linked to job
-        let count: i64 = sqlx::query("SELECT COUNT(*) FROM ip_allocations WHERE job_id = $1")
-            .bind(&job_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap()
-            .get(0);
-        assert_eq!(count, 1, "IP allocation should be linked to job_id");
-
-        // 5. Delete the job and verify IP allocation is cleaned up automatically (CASCADE)
+        // 4. Delete the job
         job_repo.remove_job(&job_id).await.unwrap();
 
-        let count: i64 = sqlx::query("SELECT COUNT(*) FROM ip_allocations WHERE job_id = $1")
-            .bind(&job_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap()
-            .get(0);
-        assert_eq!(
-            count, 0,
-            "IP allocation should be cleaned up via CASCADE after job deletion"
-        );
+        // 5. Verify job is gone
+        let job = job_repo.get_job(&job_id).await.unwrap();
+        assert!(job.is_none());
     }
 
     #[tokio::test]

@@ -97,7 +97,6 @@ export interface VmMetrics {
   rx_bytes?: number;
   status: string;
   error_message?: string | null;
-  ip_address?: string | null;
   ipv6_address?: string | null;
 }
 
@@ -155,8 +154,7 @@ export interface DeploymentInfo {
   app_id: string;
   build_id: string | null;
   image_tag: string | null;
-  job_id: string | null;
-  ip_address: string | null;
+  job_id?: string | null;
   ipv6_address: string | null;
   status: string;
   vcpus: number;
@@ -502,7 +500,6 @@ export interface CreateSecurityRuleRequest {
 export interface MeshWorker {
   id: string;
   hostname: string;
-  ip_address: string;
   wireguard_pubkey: string;
   last_seen_at: string;
 }

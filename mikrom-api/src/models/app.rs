@@ -53,7 +53,6 @@ pub struct Deployment {
     pub build_id: Option<String>,
     pub image_tag: Option<String>,
     pub job_id: Option<String>,
-    pub ip_address: Option<String>,
     pub ipv6_address: Option<String>,
     pub status: String,
     pub vcpus: i32,

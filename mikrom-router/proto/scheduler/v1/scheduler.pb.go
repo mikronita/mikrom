@@ -370,7 +370,7 @@ func (x *UpdateSecurityGroupsResponse) GetMessage() string {
 type Peer struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	HostId          string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
-	IpAddress       string                 `protobuf:"bytes,2,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
+	Endpoint        string                 `protobuf:"bytes,2,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
 	WireguardPubkey string                 `protobuf:"bytes,3,opt,name=wireguard_pubkey,json=wireguardPubkey,proto3" json:"wireguard_pubkey,omitempty"`
 	AllowedIps      []string               `protobuf:"bytes,4,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
 	WireguardPort   int32                  `protobuf:"varint,5,opt,name=wireguard_port,json=wireguardPort,proto3" json:"wireguard_port,omitempty"`
@@ -415,9 +415,9 @@ func (x *Peer) GetHostId() string {
 	return ""
 }
 
-func (x *Peer) GetIpAddress() string {
+func (x *Peer) GetEndpoint() string {
 	if x != nil {
-		return x.IpAddress
+		return x.Endpoint
 	}
 	return ""
 }
@@ -639,8 +639,6 @@ type WorkerHeartbeat struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	HostId          string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
 	Hostname        string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
-	IpAddress       string                 `protobuf:"bytes,3,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
-	BridgeIp        string                 `protobuf:"bytes,5,opt,name=bridge_ip,json=bridgeIp,proto3" json:"bridge_ip,omitempty"`
 	Metrics         *ReportMetricsRequest  `protobuf:"bytes,6,opt,name=metrics,proto3" json:"metrics,omitempty"`
 	WireguardPubkey string                 `protobuf:"bytes,7,opt,name=wireguard_pubkey,json=wireguardPubkey,proto3" json:"wireguard_pubkey,omitempty"`
 	WireguardIp     string                 `protobuf:"bytes,8,opt,name=wireguard_ip,json=wireguardIp,proto3" json:"wireguard_ip,omitempty"`
@@ -693,20 +691,6 @@ func (x *WorkerHeartbeat) GetHostname() string {
 	return ""
 }
 
-func (x *WorkerHeartbeat) GetIpAddress() string {
-	if x != nil {
-		return x.IpAddress
-	}
-	return ""
-}
-
-func (x *WorkerHeartbeat) GetBridgeIp() string {
-	if x != nil {
-		return x.BridgeIp
-	}
-	return ""
-}
-
 func (x *WorkerHeartbeat) GetMetrics() *ReportMetricsRequest {
 	if x != nil {
 		return x.Metrics
@@ -739,7 +723,6 @@ type RouterHeartbeat struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	HostId          string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
 	Hostname        string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
-	IpAddress       string                 `protobuf:"bytes,3,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
 	WireguardPubkey string                 `protobuf:"bytes,7,opt,name=wireguard_pubkey,json=wireguardPubkey,proto3" json:"wireguard_pubkey,omitempty"`
 	WireguardIp     string                 `protobuf:"bytes,8,opt,name=wireguard_ip,json=wireguardIp,proto3" json:"wireguard_ip,omitempty"`
 	WireguardPort   int32                  `protobuf:"varint,9,opt,name=wireguard_port,json=wireguardPort,proto3" json:"wireguard_port,omitempty"`
@@ -787,13 +770,6 @@ func (x *RouterHeartbeat) GetHostId() string {
 func (x *RouterHeartbeat) GetHostname() string {
 	if x != nil {
 		return x.Hostname
-	}
-	return ""
-}
-
-func (x *RouterHeartbeat) GetIpAddress() string {
-	if x != nil {
-		return x.IpAddress
 	}
 	return ""
 }
@@ -903,8 +879,6 @@ type WorkerInfo struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	HostId          string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
 	Hostname        string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
-	IpAddress       string                 `protobuf:"bytes,3,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
-	BridgeIp        string                 `protobuf:"bytes,5,opt,name=bridge_ip,json=bridgeIp,proto3" json:"bridge_ip,omitempty"`
 	LastHeartbeat   int64                  `protobuf:"varint,6,opt,name=last_heartbeat,json=lastHeartbeat,proto3" json:"last_heartbeat,omitempty"`
 	WireguardPubkey string                 `protobuf:"bytes,7,opt,name=wireguard_pubkey,json=wireguardPubkey,proto3" json:"wireguard_pubkey,omitempty"`
 	unknownFields   protoimpl.UnknownFields
@@ -951,20 +925,6 @@ func (x *WorkerInfo) GetHostId() string {
 func (x *WorkerInfo) GetHostname() string {
 	if x != nil {
 		return x.Hostname
-	}
-	return ""
-}
-
-func (x *WorkerInfo) GetIpAddress() string {
-	if x != nil {
-		return x.IpAddress
-	}
-	return ""
-}
-
-func (x *WorkerInfo) GetBridgeIp() string {
-	if x != nil {
-		return x.BridgeIp
 	}
 	return ""
 }
@@ -1515,8 +1475,6 @@ type RegisterWorkerRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	HostId          string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
 	Hostname        string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
-	IpAddress       string                 `protobuf:"bytes,3,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
-	BridgeIp        string                 `protobuf:"bytes,5,opt,name=bridge_ip,json=bridgeIp,proto3" json:"bridge_ip,omitempty"`
 	WireguardPubkey string                 `protobuf:"bytes,6,opt,name=wireguard_pubkey,json=wireguardPubkey,proto3" json:"wireguard_pubkey,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -1562,20 +1520,6 @@ func (x *RegisterWorkerRequest) GetHostId() string {
 func (x *RegisterWorkerRequest) GetHostname() string {
 	if x != nil {
 		return x.Hostname
-	}
-	return ""
-}
-
-func (x *RegisterWorkerRequest) GetIpAddress() string {
-	if x != nil {
-		return x.IpAddress
-	}
-	return ""
-}
-
-func (x *RegisterWorkerRequest) GetBridgeIp() string {
-	if x != nil {
-		return x.BridgeIp
 	}
 	return ""
 }
@@ -1645,7 +1589,6 @@ type VmMetrics struct {
 	RamUsedBytes  uint64                 `protobuf:"varint,2,opt,name=ram_used_bytes,json=ramUsedBytes,proto3" json:"ram_used_bytes,omitempty"`
 	Status        VmStatus               `protobuf:"varint,3,opt,name=status,proto3,enum=mikrom.scheduler.v1.VmStatus" json:"status,omitempty"`
 	ErrorMessage  string                 `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	IpAddress     string                 `protobuf:"bytes,5,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
 	TxBytes       uint64                 `protobuf:"varint,6,opt,name=tx_bytes,json=txBytes,proto3" json:"tx_bytes,omitempty"`
 	RxBytes       uint64                 `protobuf:"varint,7,opt,name=rx_bytes,json=rxBytes,proto3" json:"rx_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1706,13 +1649,6 @@ func (x *VmMetrics) GetStatus() VmStatus {
 func (x *VmMetrics) GetErrorMessage() string {
 	if x != nil {
 		return x.ErrorMessage
-	}
-	return ""
-}
-
-func (x *VmMetrics) GetIpAddress() string {
-	if x != nil {
-		return x.IpAddress
 	}
 	return ""
 }
@@ -2065,9 +2001,6 @@ type AppConfig struct {
 	MemoryMib       uint32                 `protobuf:"varint,2,opt,name=memory_mib,json=memoryMib,proto3" json:"memory_mib,omitempty"`
 	DiskMib         uint32                 `protobuf:"varint,3,opt,name=disk_mib,json=diskMib,proto3" json:"disk_mib,omitempty"`
 	Env             map[string]string      `protobuf:"bytes,4,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	IpAddress       string                 `protobuf:"bytes,5,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
-	Gateway         string                 `protobuf:"bytes,6,opt,name=gateway,proto3" json:"gateway,omitempty"`
-	MacAddress      string                 `protobuf:"bytes,7,opt,name=mac_address,json=macAddress,proto3" json:"mac_address,omitempty"`
 	Volumes         []*Volume              `protobuf:"bytes,8,rep,name=volumes,proto3" json:"volumes,omitempty"`
 	Port            uint32                 `protobuf:"varint,9,opt,name=port,proto3" json:"port,omitempty"`
 	HealthCheckPath string                 `protobuf:"bytes,10,opt,name=health_check_path,json=healthCheckPath,proto3" json:"health_check_path,omitempty"`
@@ -2135,27 +2068,6 @@ func (x *AppConfig) GetEnv() map[string]string {
 	return nil
 }
 
-func (x *AppConfig) GetIpAddress() string {
-	if x != nil {
-		return x.IpAddress
-	}
-	return ""
-}
-
-func (x *AppConfig) GetGateway() string {
-	if x != nil {
-		return x.Gateway
-	}
-	return ""
-}
-
-func (x *AppConfig) GetMacAddress() string {
-	if x != nil {
-		return x.MacAddress
-	}
-	return ""
-}
-
 func (x *AppConfig) GetVolumes() []*Volume {
 	if x != nil {
 		return x.Volumes
@@ -2198,7 +2110,6 @@ type DeployResponse struct {
 	HostId        string                 `protobuf:"bytes,3,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
 	VmId          string                 `protobuf:"bytes,4,opt,name=vm_id,json=vmId,proto3" json:"vm_id,omitempty"`
 	Message       string                 `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
-	IpAddress     string                 `protobuf:"bytes,6,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2268,13 +2179,6 @@ func (x *DeployResponse) GetMessage() string {
 	return ""
 }
 
-func (x *DeployResponse) GetIpAddress() string {
-	if x != nil {
-		return x.IpAddress
-	}
-	return ""
-}
-
 type AppStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
@@ -2339,8 +2243,9 @@ type AppStatusResponse struct {
 	ErrorMessage  string                 `protobuf:"bytes,8,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	CpuUsage      float32                `protobuf:"fixed32,9,opt,name=cpu_usage,json=cpuUsage,proto3" json:"cpu_usage,omitempty"`
 	RamUsedBytes  uint64                 `protobuf:"varint,10,opt,name=ram_used_bytes,json=ramUsedBytes,proto3" json:"ram_used_bytes,omitempty"`
-	IpAddress     string                 `protobuf:"bytes,11,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
 	Ipv6Address   string                 `protobuf:"bytes,12,opt,name=ipv6_address,json=ipv6Address,proto3" json:"ipv6_address,omitempty"`
+	TxBytes       uint64                 `protobuf:"varint,13,opt,name=tx_bytes,json=txBytes,proto3" json:"tx_bytes,omitempty"`
+	RxBytes       uint64                 `protobuf:"varint,14,opt,name=rx_bytes,json=rxBytes,proto3" json:"rx_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2445,18 +2350,25 @@ func (x *AppStatusResponse) GetRamUsedBytes() uint64 {
 	return 0
 }
 
-func (x *AppStatusResponse) GetIpAddress() string {
-	if x != nil {
-		return x.IpAddress
-	}
-	return ""
-}
-
 func (x *AppStatusResponse) GetIpv6Address() string {
 	if x != nil {
 		return x.Ipv6Address
 	}
 	return ""
+}
+
+func (x *AppStatusResponse) GetTxBytes() uint64 {
+	if x != nil {
+		return x.TxBytes
+	}
+	return 0
+}
+
+func (x *AppStatusResponse) GetRxBytes() uint64 {
+	if x != nil {
+		return x.RxBytes
+	}
+	return 0
 }
 
 type CancelRequest struct {
@@ -2673,6 +2585,8 @@ type AppInfo struct {
 	UserId        string                 `protobuf:"bytes,10,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	DeploymentId  string                 `protobuf:"bytes,11,opt,name=deployment_id,json=deploymentId,proto3" json:"deployment_id,omitempty"`
 	Ipv6Address   string                 `protobuf:"bytes,12,opt,name=ipv6_address,json=ipv6Address,proto3" json:"ipv6_address,omitempty"`
+	TxBytes       uint64                 `protobuf:"varint,13,opt,name=tx_bytes,json=txBytes,proto3" json:"tx_bytes,omitempty"`
+	RxBytes       uint64                 `protobuf:"varint,14,opt,name=rx_bytes,json=rxBytes,proto3" json:"rx_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2791,6 +2705,20 @@ func (x *AppInfo) GetIpv6Address() string {
 	return ""
 }
 
+func (x *AppInfo) GetTxBytes() uint64 {
+	if x != nil {
+		return x.TxBytes
+	}
+	return 0
+}
+
+func (x *AppInfo) GetRxBytes() uint64 {
+	if x != nil {
+		return x.RxBytes
+	}
+	return 0
+}
+
 var File_scheduler_proto protoreflect.FileDescriptor
 
 const file_scheduler_proto_rawDesc = "" +
@@ -2810,11 +2738,10 @@ const file_scheduler_proto_rawDesc = "" +
 	"\x05rules\x18\x03 \x03(\v2!.mikrom.scheduler.v1.FirewallRuleR\x05rules\"R\n" +
 	"\x1cUpdateSecurityGroupsResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xb1\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xae\x01\n" +
 	"\x04Peer\x12\x17\n" +
-	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1d\n" +
-	"\n" +
-	"ip_address\x18\x02 \x01(\tR\tipAddress\x12)\n" +
+	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1a\n" +
+	"\bendpoint\x18\x02 \x01(\tR\bendpoint\x12)\n" +
 	"\x10wireguard_pubkey\x18\x03 \x01(\tR\x0fwireguardPubkey\x12\x1f\n" +
 	"\vallowed_ips\x18\x04 \x03(\tR\n" +
 	"allowedIps\x12%\n" +
@@ -2829,37 +2756,29 @@ const file_scheduler_proto_rawDesc = "" +
 	"\x10WatchAppsRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"C\n" +
 	"\x11WatchAppsResponse\x12.\n" +
-	"\x03app\x18\x01 \x01(\v2\x1c.mikrom.scheduler.v1.AppInfoR\x03app\"\xc2\x02\n" +
+	"\x03app\x18\x01 \x01(\v2\x1c.mikrom.scheduler.v1.AppInfoR\x03app\"\x92\x02\n" +
 	"\x0fWorkerHeartbeat\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1a\n" +
-	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1d\n" +
-	"\n" +
-	"ip_address\x18\x03 \x01(\tR\tipAddress\x12\x1b\n" +
-	"\tbridge_ip\x18\x05 \x01(\tR\bbridgeIp\x12C\n" +
+	"\bhostname\x18\x02 \x01(\tR\bhostname\x12C\n" +
 	"\ametrics\x18\x06 \x01(\v2).mikrom.scheduler.v1.ReportMetricsRequestR\ametrics\x12)\n" +
 	"\x10wireguard_pubkey\x18\a \x01(\tR\x0fwireguardPubkey\x12!\n" +
 	"\fwireguard_ip\x18\b \x01(\tR\vwireguardIp\x12%\n" +
-	"\x0ewireguard_port\x18\t \x01(\x05R\rwireguardPortJ\x04\b\x04\x10\x05\"\xda\x01\n" +
+	"\x0ewireguard_port\x18\t \x01(\x05R\rwireguardPortJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06\"\xc1\x01\n" +
 	"\x0fRouterHeartbeat\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1a\n" +
-	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1d\n" +
-	"\n" +
-	"ip_address\x18\x03 \x01(\tR\tipAddress\x12)\n" +
+	"\bhostname\x18\x02 \x01(\tR\bhostname\x12)\n" +
 	"\x10wireguard_pubkey\x18\a \x01(\tR\x0fwireguardPubkey\x12!\n" +
 	"\fwireguard_ip\x18\b \x01(\tR\vwireguardIp\x12%\n" +
-	"\x0ewireguard_port\x18\t \x01(\x05R\rwireguardPort\"\x14\n" +
+	"\x0ewireguard_port\x18\t \x01(\x05R\rwireguardPortJ\x04\b\x03\x10\x04\"\x14\n" +
 	"\x12ListWorkersRequest\"P\n" +
 	"\x13ListWorkersResponse\x129\n" +
-	"\aworkers\x18\x01 \x03(\v2\x1f.mikrom.scheduler.v1.WorkerInfoR\aworkers\"\xd5\x01\n" +
+	"\aworkers\x18\x01 \x03(\v2\x1f.mikrom.scheduler.v1.WorkerInfoR\aworkers\"\xa5\x01\n" +
 	"\n" +
 	"WorkerInfo\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1a\n" +
-	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1d\n" +
-	"\n" +
-	"ip_address\x18\x03 \x01(\tR\tipAddress\x12\x1b\n" +
-	"\tbridge_ip\x18\x05 \x01(\tR\bbridgeIp\x12%\n" +
+	"\bhostname\x18\x02 \x01(\tR\bhostname\x12%\n" +
 	"\x0elast_heartbeat\x18\x06 \x01(\x03R\rlastHeartbeat\x12)\n" +
-	"\x10wireguard_pubkey\x18\a \x01(\tR\x0fwireguardPubkeyJ\x04\b\x04\x10\x05\">\n" +
+	"\x10wireguard_pubkey\x18\a \x01(\tR\x0fwireguardPubkeyJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06\">\n" +
 	"\fPauseRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\"C\n" +
@@ -2890,26 +2809,21 @@ const file_scheduler_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\"L\n" +
 	"\x16DeleteAllByAppResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xb9\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x89\x01\n" +
 	"\x15RegisterWorkerRequest\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1a\n" +
-	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1d\n" +
-	"\n" +
-	"ip_address\x18\x03 \x01(\tR\tipAddress\x12\x1b\n" +
-	"\tbridge_ip\x18\x05 \x01(\tR\bbridgeIp\x12)\n" +
-	"\x10wireguard_pubkey\x18\x06 \x01(\tR\x0fwireguardPubkeyJ\x04\b\x04\x10\x05\"L\n" +
+	"\bhostname\x18\x02 \x01(\tR\bhostname\x12)\n" +
+	"\x10wireguard_pubkey\x18\x06 \x01(\tR\x0fwireguardPubkeyJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06\"L\n" +
 	"\x16RegisterWorkerResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xff\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xe6\x01\n" +
 	"\tVmMetrics\x12\x1b\n" +
 	"\tcpu_usage\x18\x01 \x01(\x02R\bcpuUsage\x12$\n" +
 	"\x0eram_used_bytes\x18\x02 \x01(\x04R\framUsedBytes\x125\n" +
 	"\x06status\x18\x03 \x01(\x0e2\x1d.mikrom.scheduler.v1.VmStatusR\x06status\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x12\x1d\n" +
-	"\n" +
-	"ip_address\x18\x05 \x01(\tR\tipAddress\x12\x19\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x12\x19\n" +
 	"\btx_bytes\x18\x06 \x01(\x04R\atxBytes\x12\x19\n" +
-	"\brx_bytes\x18\a \x01(\x04R\arxBytes\"\xa3\x04\n" +
+	"\brx_bytes\x18\a \x01(\x04R\arxBytesJ\x04\b\x05\x10\x06\"\xa3\x04\n" +
 	"\x14ReportMetricsRequest\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1b\n" +
 	"\tcpu_usage\x18\x02 \x01(\x02R\bcpuUsage\x12$\n" +
@@ -2943,18 +2857,13 @@ const file_scheduler_proto_rawDesc = "" +
 	"\x06Volume\x12\x1b\n" +
 	"\tvolume_id\x18\x01 \x01(\tR\bvolumeId\x12\x19\n" +
 	"\bsize_mib\x18\x02 \x01(\x04R\asizeMib\x12\x1b\n" +
-	"\tread_only\x18\x03 \x01(\bR\breadOnly\"\xe5\x03\n" +
+	"\tread_only\x18\x03 \x01(\bR\breadOnly\"\x9d\x03\n" +
 	"\tAppConfig\x12\x14\n" +
 	"\x05vcpus\x18\x01 \x01(\rR\x05vcpus\x12\x1d\n" +
 	"\n" +
 	"memory_mib\x18\x02 \x01(\rR\tmemoryMib\x12\x19\n" +
 	"\bdisk_mib\x18\x03 \x01(\rR\adiskMib\x129\n" +
-	"\x03env\x18\x04 \x03(\v2'.mikrom.scheduler.v1.AppConfig.EnvEntryR\x03env\x12\x1d\n" +
-	"\n" +
-	"ip_address\x18\x05 \x01(\tR\tipAddress\x12\x18\n" +
-	"\agateway\x18\x06 \x01(\tR\agateway\x12\x1f\n" +
-	"\vmac_address\x18\a \x01(\tR\n" +
-	"macAddress\x125\n" +
+	"\x03env\x18\x04 \x03(\v2'.mikrom.scheduler.v1.AppConfig.EnvEntryR\x03env\x125\n" +
 	"\avolumes\x18\b \x03(\v2\x1b.mikrom.scheduler.v1.VolumeR\avolumes\x12\x12\n" +
 	"\x04port\x18\t \x01(\rR\x04port\x12*\n" +
 	"\x11health_check_path\x18\n" +
@@ -2963,18 +2872,16 @@ const file_scheduler_proto_rawDesc = "" +
 	"\fipv6_gateway\x18\f \x01(\tR\vipv6Gateway\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc9\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\b\"\xb0\x01\n" +
 	"\x0eDeployResponse\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x129\n" +
 	"\x06status\x18\x02 \x01(\x0e2!.mikrom.scheduler.v1.DeployStatusR\x06status\x12\x17\n" +
 	"\ahost_id\x18\x03 \x01(\tR\x06hostId\x12\x13\n" +
 	"\x05vm_id\x18\x04 \x01(\tR\x04vmId\x12\x18\n" +
-	"\amessage\x18\x05 \x01(\tR\amessage\x12\x1d\n" +
-	"\n" +
-	"ip_address\x18\x06 \x01(\tR\tipAddress\"B\n" +
+	"\amessage\x18\x05 \x01(\tR\amessageJ\x04\b\x06\x10\a\"B\n" +
 	"\x10AppStatusRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\"\x9e\x03\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"\xbb\x03\n" +
 	"\x11AppStatusResponse\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x129\n" +
 	"\x06status\x18\x02 \x01(\x0e2!.mikrom.scheduler.v1.DeployStatusR\x06status\x12\x17\n" +
@@ -2988,10 +2895,10 @@ const file_scheduler_proto_rawDesc = "" +
 	"\rerror_message\x18\b \x01(\tR\ferrorMessage\x12\x1b\n" +
 	"\tcpu_usage\x18\t \x01(\x02R\bcpuUsage\x12$\n" +
 	"\x0eram_used_bytes\x18\n" +
-	" \x01(\x04R\framUsedBytes\x12\x1d\n" +
-	"\n" +
-	"ip_address\x18\v \x01(\tR\tipAddress\x12!\n" +
-	"\fipv6_address\x18\f \x01(\tR\vipv6Address\"?\n" +
+	" \x01(\x04R\framUsedBytes\x12!\n" +
+	"\fipv6_address\x18\f \x01(\tR\vipv6Address\x12\x19\n" +
+	"\btx_bytes\x18\r \x01(\x04R\atxBytes\x12\x19\n" +
+	"\brx_bytes\x18\x0e \x01(\x04R\arxBytesJ\x04\b\v\x10\f\"?\n" +
 	"\rCancelRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\"D\n" +
@@ -3003,7 +2910,7 @@ const file_scheduler_proto_rawDesc = "" +
 	"\x06status\x18\x02 \x01(\x0e2!.mikrom.scheduler.v1.DeployStatusH\x00R\x06status\x88\x01\x01B\t\n" +
 	"\a_status\"D\n" +
 	"\x10ListAppsResponse\x120\n" +
-	"\x04apps\x18\x01 \x03(\v2\x1c.mikrom.scheduler.v1.AppInfoR\x04apps\"\xf5\x02\n" +
+	"\x04apps\x18\x01 \x03(\v2\x1c.mikrom.scheduler.v1.AppInfoR\x04apps\"\xab\x03\n" +
 	"\aAppInfo\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x15\n" +
 	"\x06app_id\x18\x02 \x01(\tR\x05appId\x12\x19\n" +
@@ -3017,7 +2924,9 @@ const file_scheduler_proto_rawDesc = "" +
 	"\auser_id\x18\n" +
 	" \x01(\tR\x06userId\x12#\n" +
 	"\rdeployment_id\x18\v \x01(\tR\fdeploymentId\x12!\n" +
-	"\fipv6_address\x18\f \x01(\tR\vipv6Address*\xaf\x01\n" +
+	"\fipv6_address\x18\f \x01(\tR\vipv6Address\x12\x19\n" +
+	"\btx_bytes\x18\r \x01(\x04R\atxBytes\x12\x19\n" +
+	"\brx_bytes\x18\x0e \x01(\x04R\arxBytes*\xaf\x01\n" +
 	"\bVmStatus\x12\x19\n" +
 	"\x15VM_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12VM_STATUS_STARTING\x10\x01\x12\x15\n" +

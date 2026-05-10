@@ -28,7 +28,8 @@ User (Traffic) → mikrom-router → App MicroVM
 - **GitHub**: Automated deployments via Webhooks.
 - **ACME**: Automatic TLS certificate management via Let's Encrypt.
 - **Secrets**: Encrypted environment variable management.
-- **Healthchecks**: Configurable liveness and readiness probes for apps.
+- **Healthchecks**: Configurable liveness and readiness probes for apps (using strict IPv6/6PN connectivity).
+- **Networking**: IPv6-only control plane with 6PN mesh. Local IPv4 NAT managed by the Agent for outbound internet access.
 
 ## Building and Running
 

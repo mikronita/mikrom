@@ -68,7 +68,6 @@ async fn test_activate_deployment_endpoint() {
         build_id: None,
         image_tag: None,
         job_id: None,
-        ip_address: None,
         ipv6_address: None,
         status: "RUNNING".to_string(),
         vcpus: 1,
@@ -293,7 +292,6 @@ async fn test_activate_deployment_not_running() {
         build_id: None,
         image_tag: None,
         job_id: None,
-        ip_address: None,
         ipv6_address: None,
         status: "FAILED".to_string(), // Not RUNNING
         vcpus: 1,

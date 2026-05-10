@@ -70,10 +70,6 @@ impl AgentClient for NatsAgentClient {
             disk_mib: config.disk_mib as u32,
             port: config.port,
             env: config.env.clone(),
-            ip_address: config.ip_address.clone().unwrap_or_default(),
-            gateway: config.gateway.clone().unwrap_or_default(),
-            mac_address: config.mac_address.clone().unwrap_or_default(),
-            netmask: config.netmask.clone().unwrap_or_default(),
             volumes: vec![], // TODO
             health_check_path: config.health_check_path.clone(),
             ipv6_address: config.ipv6_address.clone().unwrap_or_default(),

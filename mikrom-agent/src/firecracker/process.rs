@@ -32,7 +32,6 @@ pub struct VmDetailedInfo {
     pub status: VmStatus,
     pub error_message: Option<String>,
     pub pid: Option<u32>,
-    pub ip_address: Option<String>,
     pub metrics_path: Option<String>,
     pub socket_path: Option<String>,
     pub tap_name: Option<String>,

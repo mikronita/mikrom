@@ -101,8 +101,7 @@ async fn test_route_reconciliation_on_startup() {
             dep.id,
             UpdateDeploymentParams {
                 status: Some("RUNNING".into()),
-                ip_address: Some("10.0.9.9".into()),
-                ipv6_address: None,
+                ipv6_address: Some("fd00::1".into()),
                 ..Default::default()
             },
         )
@@ -138,5 +137,5 @@ async fn test_route_reconciliation_on_startup() {
     let update = RouterConfigUpdate::decode(&msg.payload[..]).unwrap();
 
     assert_eq!(update.hostname, "reconcile.mikrom.local");
-    assert_eq!(update.target_url, Some("http://10.0.9.9:8080".into()));
+    assert_eq!(update.target_url, Some("http://[fd00::1]:8080".into()));
 }

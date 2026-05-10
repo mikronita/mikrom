@@ -219,7 +219,8 @@ async fn test_client_get_deployment_status() {
             "stopped_at": 0,
             "error_message": "",
             "cpu_usage": 0.5,
-            "ram_used_bytes": 1024
+            "ram_used_bytes": 1024,
+            "ipv6_address": "fd00::1"
         })))
         .mount(&server)
         .await;
@@ -230,6 +231,30 @@ async fn test_client_get_deployment_status() {
         .unwrap();
     assert_eq!(res.status, "RUNNING");
     assert_eq!(res.host_id, "node-1");
+    assert_eq!(res.ipv6_address, Some("fd00::1".to_string()));
+}
+
+#[tokio::test]
+async fn test_client_list_active_deployments_with_ipv6() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/deployments/active"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "job_id": "job-1",
+            "app_name": "app-1",
+            "image": "nginx",
+            "status": "RUNNING",
+            "host_id": "node-1",
+            "ipv6_address": "fd00::1"
+        }])))
+        .mount(&server)
+        .await;
+
+    let res = client.list_active_deployments().await.unwrap();
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0].ipv6_address, Some("fd00::1".to_string()));
 }
 
 #[tokio::test]
