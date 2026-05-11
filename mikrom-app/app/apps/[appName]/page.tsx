@@ -16,7 +16,7 @@ import {
 } from "react-icons/hi2";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useMemo, useRef } from "react";
-import { Rocket, GitBranch, Zap, User } from "lucide-react";
+import { Boxes, Rocket, GitBranch, Zap, User } from "lucide-react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -382,7 +382,10 @@ export default function AppDetailPage() {
             <div className="flex items-center gap-4">
               <div>
                 <div className="flex items-center gap-3">
-                  <h1 className="text-2xl font-bold tracking-tight">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                    <Boxes />
+                  </div>
+                  <h1 className="text-2xl font-semibold tracking-tight">
                     {app?.name || decodedName}.apps.mikrom.spluca.org
                   </h1>
                   <a 

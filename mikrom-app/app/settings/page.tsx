@@ -36,7 +36,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getUserProfile, updateUserProfile, listGithubAccounts } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Settings } from "lucide-react";
 import { FaGithub } from "react-icons/fa";
 import { getGithubInstallUrl } from "@/lib/api";
 
@@ -125,11 +125,16 @@ export default function SettingsPage() {
     <AuthGuard>
       <DashboardLayout>
         <div className="space-y-6">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              Settings
-            </h1>
-            <p className="text-muted-foreground mt-1">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                <Settings />
+              </div>
+              <h1 className="text-3xl font-semibold tracking-tight">
+                Settings
+              </h1>
+            </div>
+            <p className="text-sm text-muted-foreground">
               Manage your personal information, security preferences and billing.
             </p>
           </div>

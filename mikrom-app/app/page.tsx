@@ -12,6 +12,7 @@ import {
   Container,
   Cpu,
   Hammer,
+  LayoutDashboard,
   Router,
   Server
 } from "lucide-react";
@@ -103,9 +104,14 @@ export default function Page() {
         <div className="flex flex-col gap-8">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div className="flex flex-col gap-2">
-              <h1 className="text-3xl font-semibold tracking-tight">
-                Dashboard
-              </h1>
+              <div className="flex items-center gap-3">
+                <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  <LayoutDashboard />
+                </div>
+                <h1 className="text-3xl font-semibold tracking-tight">
+                  Dashboard
+                </h1>
+              </div>
               <p className="max-w-2xl text-sm text-muted-foreground">
                 Monitor and manage your cloud infrastructure.
               </p>
