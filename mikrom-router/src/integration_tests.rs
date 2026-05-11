@@ -51,11 +51,12 @@ struct TestEnv {
     _upstream_addr: SocketAddr,
 }
 
-async fn setup_test_env(rps_limit: isize) -> TestEnv {
+async fn setup_test_env(rps_limit: isize, use_ipv6: bool) -> TestEnv {
     init_test_tracing();
     // 1. Start Dummy Upstream (Using fallback to catch everything including /)
     let app = Router::new().fallback(any(dummy_upstream_handler));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let bind_addr = if use_ipv6 { "[::1]:0" } else { "127.0.0.1:0" };
+    let listener = tokio::net::TcpListener::bind(bind_addr).await.unwrap();
     let upstream_addr = listener.local_addr().unwrap();
 
     tokio::spawn(async move {
@@ -69,11 +70,15 @@ async fn setup_test_env(rps_limit: isize) -> TestEnv {
     // 3. Find a free port for the proxy
     let (proxy_addr_str, proxy_port) = {
         let listener =
-            std::net::TcpListener::bind("127.0.0.1:0").expect("Failed to bind proxy listener");
+            std::net::TcpListener::bind(bind_addr).expect("Failed to bind proxy listener");
         let addr = listener.local_addr().unwrap();
         (addr.to_string(), addr.port())
     };
-    let proxy_url = format!("http://{proxy_addr_str}");
+    let proxy_url = if use_ipv6 {
+        format!("http://[::1]:{proxy_port}")
+    } else {
+        format!("http://127.0.0.1:{proxy_port}")
+    };
 
     // 4. Configure routes to the upstream
     let targets = vec![upstream_addr.to_string()];
@@ -90,9 +95,12 @@ async fn setup_test_env(rps_limit: isize) -> TestEnv {
         // Add all possible host variations that might come in the Host header
         s.routes.insert("localhost".to_string(), route.clone());
         s.routes.insert("127.0.0.1".to_string(), route.clone());
+        s.routes.insert("[::1]".to_string(), route.clone());
         s.routes
             .insert(format!("localhost:{proxy_port}"), route.clone());
-        s.routes.insert(format!("127.0.0.1:{proxy_port}"), route);
+        s.routes
+            .insert(format!("127.0.0.1:{proxy_port}"), route.clone());
+        s.routes.insert(format!("[::1]:{proxy_port}"), route);
         drop(s);
     }
 
@@ -121,7 +129,7 @@ async fn setup_test_env(rps_limit: isize) -> TestEnv {
 
 #[tokio::test]
 async fn test_integration_acme_challenge() {
-    let env = setup_test_env(100).await;
+    let env = setup_test_env(100, false).await;
     {
         let mut s = env.state.write().await;
         s.acme_tokens
@@ -144,7 +152,7 @@ async fn test_integration_acme_challenge() {
 
 #[tokio::test]
 async fn test_integration_rate_limiting() {
-    let env = setup_test_env(2).await; // 2 RPS limit
+    let env = setup_test_env(2, false).await; // 2 RPS limit
 
     let client = reqwest::Client::new();
 
@@ -170,7 +178,7 @@ async fn test_integration_rate_limiting() {
 
 #[tokio::test]
 async fn test_integration_security_headers() {
-    let env = setup_test_env(100).await;
+    let env = setup_test_env(100, false).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -196,7 +204,7 @@ async fn test_integration_security_headers() {
 
 #[tokio::test]
 async fn test_integration_proxy_headers_and_tracing() {
-    let env = setup_test_env(100).await;
+    let env = setup_test_env(100, false).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -219,7 +227,7 @@ async fn test_integration_proxy_headers_and_tracing() {
 
 #[tokio::test]
 async fn test_integration_http_to_https_redirection() {
-    let env = setup_test_env(100).await;
+    let env = setup_test_env(100, false).await;
 
     // Add a certificate for "localhost" to trigger redirection
     {
@@ -252,4 +260,24 @@ async fn test_integration_http_to_https_redirection() {
         res.headers().get("Location").unwrap(),
         "https://localhost/some/path"
     );
+}
+
+#[tokio::test]
+async fn test_integration_ipv6_connectivity() {
+    let env = setup_test_env(100, true).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(&env.proxy_url)
+        .send()
+        .await
+        .expect("Failed to send request to proxy via IPv6");
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.text().await.unwrap();
+
+    // Check if proxy headers were injected and received by upstream with IPv6 address
+    assert!(body.contains("x-forwarded-for: ::1"));
+    assert!(body.contains("x-real-ip: ::1"));
+    assert!(body.contains("x-forwarded-proto: http"));
 }
