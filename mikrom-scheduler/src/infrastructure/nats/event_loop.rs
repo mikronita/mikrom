@@ -75,8 +75,13 @@ impl NatsEventLoop {
 
         tracing::info!("NATS Event Loop started, listening for messages...");
 
+        let mut mesh_interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+
         loop {
             tokio::select! {
+                _ = mesh_interval.tick() => {
+                    Self::broadcast_mesh_updates(self.server.clone(), self.client.clone()).await;
+                }
                 Some(msg) = heartbeat_sub.next() => self.handle_heartbeat(msg).await,
                 Some(msg) = router_heartbeat_sub.next() => self.handle_router_heartbeat(msg).await,
                 Some(msg) = deploy_sub.next() => self.handle_deploy(msg).await,
@@ -141,7 +146,7 @@ impl NatsEventLoop {
         }
 
         // 2. Pre-build ALL potential peers
-        let all_peers: Vec<mikrom_proto::scheduler::Peer> = active_workers
+        let mut all_peers: Vec<mikrom_proto::scheduler::Peer> = active_workers
             .iter()
             .filter(|w| w.wireguard_pubkey.is_some())
             .map(|w| {
@@ -162,6 +167,9 @@ impl NatsEventLoop {
                     }
                 }
 
+                // Sort allowed IPs for idempotency
+                allowed_ips.sort();
+
                 mikrom_proto::scheduler::Peer {
                     host_id: w.host_id.clone(),
                     endpoint: w.advertise_address.clone(),
@@ -171,6 +179,9 @@ impl NatsEventLoop {
                 }
             })
             .collect();
+
+        // Sort peers by host_id to ensure deterministic output for agent idempotency checks
+        all_peers.sort_by(|a, b| a.host_id.cmp(&b.host_id));
 
         // 3. Build update for each worker (even if inactive, to tell them they are alone if they wake up)
         for w in &workers {
@@ -269,7 +280,7 @@ impl NatsEventLoop {
                             e
                         );
                     } else {
-                        // Broadcast mesh update immediately
+                        // Fast-path: Broadcast mesh update immediately on new registration
                         Self::broadcast_mesh_updates(server, client).await;
                     }
                 },
@@ -310,7 +321,7 @@ impl NatsEventLoop {
                             e
                         );
                     } else {
-                        // Broadcast mesh update
+                        // Fast-path: Broadcast mesh update immediately on new registration
                         Self::broadcast_mesh_updates(server.clone(), client.clone()).await;
                     }
 

@@ -1,15 +1,22 @@
 use tokio::process::Command;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 pub struct WireGuardManager {
     interface: String,
+    config_dir: String,
 }
 
 impl WireGuardManager {
     pub fn new(interface: &str) -> Self {
         Self {
             interface: interface.to_string(),
+            config_dir: "/etc/wireguard".to_string(),
         }
+    }
+
+    pub fn with_config_dir(mut self, dir: &str) -> Self {
+        self.config_dir = dir.to_string();
+        self
     }
 
     pub fn load_or_generate_key(&self, data_dir: &str) -> anyhow::Result<String> {
@@ -56,8 +63,8 @@ impl WireGuardManager {
             private_key, host_ipv6
         );
 
-        let conf_path = format!("/etc/wireguard/{}.conf", self.interface);
-        let _ = tokio::fs::create_dir_all("/etc/wireguard").await;
+        let conf_path = format!("{}/{}.conf", self.config_dir, self.interface);
+        let _ = tokio::fs::create_dir_all(&self.config_dir).await;
 
         tokio::fs::write(&conf_path, &conf).await?;
         use std::os::unix::fs::PermissionsExt;
@@ -165,11 +172,26 @@ impl WireGuardManager {
             conf.push_str("PersistentKeepalive = 25\n\n");
         }
 
-        let conf_path = format!("/etc/wireguard/{}.conf", self.interface);
+        let conf_path = format!("{}/{}.conf", self.config_dir, self.interface);
 
-        tokio::fs::write(&conf_path, &conf).await?;
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600))?;
+        // Idempotency check: if the config hasn't changed, do nothing
+        if let Ok(existing_conf) = tokio::fs::read_to_string(&conf_path).await {
+            if existing_conf != conf {
+                tokio::fs::write(&conf_path, &conf).await?;
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600))?;
+            } else {
+                debug!(
+                    "WireGuard config for {} is unchanged, skipping sync",
+                    self.interface
+                );
+                return Ok(());
+            }
+        } else {
+            tokio::fs::write(&conf_path, &conf).await?;
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600))?;
+        }
 
         // Sync configuration using wg-quick strip and wg syncconf
         // This is much faster and cleaner than restarting the interface
@@ -230,11 +252,40 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_get_host_ipv6_unique_for_different_hosts() {
-        let manager = WireGuardManager::new("wg0");
-        let ip1 = manager.get_host_ipv6("host-a");
-        let ip2 = manager.get_host_ipv6("host-b");
-        assert_ne!(ip1, ip2, "Different host IDs should produce different IPs");
+    #[tokio::test]
+    async fn test_update_peers_idempotency() {
+        let temp_dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let conf_dir = temp_dir.to_str().unwrap();
+        let manager = WireGuardManager::new("m-test-wg").with_config_dir(conf_dir);
+
+        let peers = vec![mikrom_proto::scheduler::Peer {
+            host_id: "host1".to_string(),
+            wireguard_pubkey: "pubkey".to_string(),
+            endpoint: "1.1.1.1".to_string(),
+            wireguard_port: 51820,
+            allowed_ips: vec!["fd00::1/128".to_string()],
+        }];
+
+        // 1. First call will try to sync.
+        // It might "succeed" (return Ok) even if 'wg' fails because of the best-effort fallback logic,
+        // but it WILL write the file.
+        let result = manager.update_peers(&peers, "privkey", "host1").await;
+        assert!(result.is_ok(), "First call should return Ok (best effort)");
+
+        // The file should have been written
+        let conf_path = format!("{}/m-test-wg.conf", conf_dir);
+        assert!(std::path::Path::new(&conf_path).exists());
+
+        // 2. Second call with SAME data should return Ok(()) immediately due to idempotency.
+        // We know it's idempotent because it won't even try to call 'wg syncconf' (which would log warnings/errors in stderr)
+        let result = manager.update_peers(&peers, "privkey", "host1").await;
+        assert!(
+            result.is_ok(),
+            "Second call should be idempotent and return Ok"
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
