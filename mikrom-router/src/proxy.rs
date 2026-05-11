@@ -1,7 +1,6 @@
 use crate::state::State;
 use async_trait::async_trait;
-use http::HeaderValue;
-use opentelemetry::propagation::Injector;
+use opentelemetry::propagation::{Extractor, Injector};
 use pingora::lb::LoadBalancer;
 use pingora::lb::selection::RoundRobin;
 use pingora::modules::http::HttpModules;
@@ -48,7 +47,9 @@ pub struct MikromProxy {
     rps_limit: isize,
 }
 
-pub struct MikromCtx {}
+pub struct MikromCtx {
+    pub span: tracing::Span,
+}
 
 impl MikromProxy {
     #[must_use]
@@ -97,19 +98,48 @@ impl Injector for PingoraHeaderInjector<'_> {
     }
 }
 
+struct PingoraHeaderExtractor<'a>(&'a RequestHeader);
+
+impl Extractor for PingoraHeaderExtractor<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.headers.get(key).and_then(|h| h.to_str().ok())
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0
+            .headers
+            .keys()
+            .map(http::HeaderName::as_str)
+            .collect()
+    }
+}
+
 #[async_trait]
 impl ProxyHttp for MikromProxy {
     type CTX = MikromCtx;
     fn new_ctx(&self) -> Self::CTX {
-        MikromCtx {}
+        MikromCtx {
+            span: tracing::Span::none(),
+        }
     }
 
     fn init_downstream_modules(&self, modules: &mut HttpModules) {
         modules.add_module(ResponseCompressionBuilder::enable(3));
     }
 
-    async fn request_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<bool> {
-        // 0. Rate Limiting (Per IP)
+    async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
+        // 0. Extract Tracing Context and Start Span
+        let parent_cx = opentelemetry::global::get_text_map_propagator(|propagator| {
+            propagator.extract(&PingoraHeaderExtractor(session.req_header()))
+        });
+
+        let span = tracing::info_span!("proxy_request", 
+            method = ?session.req_header().method,
+            uri = %session.req_header().uri);
+        span.set_parent(parent_cx);
+        ctx.span = span;
+
+        // 0.1 Rate Limiting (Per IP)
         if let Some(addr) = session.client_addr() {
             let ip = addr.to_string();
             let curr_window_requests = self.rate_limiter.observe(&ip, 1);
@@ -215,7 +245,7 @@ impl ProxyHttp for MikromProxy {
         &self,
         session: &mut Session,
         upstream_request: &mut RequestHeader,
-        _ctx: &mut Self::CTX,
+        ctx: &mut Self::CTX,
     ) -> Result<()> {
         // 1. Add standard proxy headers
         if let Some(addr) = session.client_addr()
@@ -238,7 +268,7 @@ impl ProxyHttp for MikromProxy {
         }
 
         // 2. Propagate Trace Context
-        let context = tracing::Span::current().context();
+        let context = ctx.span.context();
         let mut injector = PingoraHeaderInjector(upstream_request);
         opentelemetry::global::get_text_map_propagator(|propagator| {
             propagator.inject_context(&context, &mut injector);
@@ -253,36 +283,37 @@ impl ProxyHttp for MikromProxy {
         upstream_response: &mut ResponseHeader,
         _ctx: &mut Self::CTX,
     ) -> Result<()> {
-        let headers = &mut upstream_response.headers;
-
         // 1. Security Headers
         // HSTS - 1 year
-        if !headers.contains_key("Strict-Transport-Security") {
-            headers.insert(
+        if upstream_response
+            .headers
+            .get("Strict-Transport-Security")
+            .is_none()
+        {
+            upstream_response.insert_header(
                 "Strict-Transport-Security",
-                HeaderValue::from_static("max-age=31536000; includeSubDomains; preload"),
-            );
+                "max-age=31536000; includeSubDomains; preload",
+            )?;
         }
 
         // X-Content-Type-Options
-        if !headers.contains_key("X-Content-Type-Options") {
-            headers.insert(
-                "X-Content-Type-Options",
-                HeaderValue::from_static("nosniff"),
-            );
+        if upstream_response
+            .headers
+            .get("X-Content-Type-Options")
+            .is_none()
+        {
+            upstream_response.insert_header("X-Content-Type-Options", "nosniff")?;
         }
 
         // X-Frame-Options
-        if !headers.contains_key("X-Frame-Options") {
-            headers.insert("X-Frame-Options", HeaderValue::from_static("SAMEORIGIN"));
+        if upstream_response.headers.get("X-Frame-Options").is_none() {
+            upstream_response.insert_header("X-Frame-Options", "SAMEORIGIN")?;
         }
 
         // Referrer-Policy
-        if !headers.contains_key("Referrer-Policy") {
-            headers.insert(
-                "Referrer-Policy",
-                HeaderValue::from_static("strict-origin-when-cross-origin"),
-            );
+        if upstream_response.headers.get("Referrer-Policy").is_none() {
+            upstream_response
+                .insert_header("Referrer-Policy", "strict-origin-when-cross-origin")?;
         }
 
         Ok(())
