@@ -5,10 +5,15 @@ import Link from "next/link";
 import { 
   Rocket, 
   Plus, 
-  LayoutDashboard, 
   Activity, 
   ArrowRight,
-  Container
+  Bot,
+  CalendarClock,
+  Container,
+  Cpu,
+  Hammer,
+  Router,
+  Server
 } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -21,7 +26,21 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CreateAppModal } from "@/components/CreateAppModal";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { cn } from "@/lib/utils";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+
+const formatDate = (dateStr: string) => {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(dateStr));
+  } catch {
+    return dateStr;
+  }
+};
 
 export default function Page() {
   const { data: vms = [], isFetching: isFetchingVms } = useVms();
@@ -39,239 +58,252 @@ export default function Page() {
   ).length;
 
   // Map apps to their live status if available
-  const appsWithStatus = apps.slice(0, 5).map(app => {
-    const liveVm = vms.find(vm => vm.app_id === app.id || vm.app_name === app.name);
-    return {
-      ...app,
-      status: liveVm ? liveVm.status : "Stopped"
-    };
-  });
+  const appsWithStatus = [...apps]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 5)
+    .map((app) => {
+      const liveVm = vms.find(vm => vm.app_id === app.id || vm.app_name === app.name);
+      return {
+        ...app,
+        liveVm,
+        status: liveVm ? liveVm.status : "Stopped"
+      };
+    });
 
   const isEmpty = !isLoadingApps && apps.length === 0;
   const hasUndeployedApps = apps.length > 0 && apps.every(app => !vms.some(vm => vm.app_id === app.id || vm.app_name === app.name));
+  const offlineServices = Object.values(healthData?.services ?? {}).filter((status) => status !== "ONLINE").length;
+  const statCards = [
+    {
+      title: "Applications",
+      value: apps.length,
+      description: "Git projects in the workspace",
+      icon: Container,
+      loading: isLoadingApps,
+    },
+    {
+      title: "Running VMs",
+      value: runningCount,
+      description: "Instances currently serving traffic",
+      icon: Activity,
+      loading: isFetchingVms && vms.length === 0,
+    },
+    {
+      title: "Deploying",
+      value: pendingCount,
+      description: "Builds or starts in progress",
+      icon: Rocket,
+      loading: isFetchingVms && vms.length === 0,
+    },
+  ];
 
   return (
     <AuthGuard>
       <DashboardLayout>
-        <div className="space-y-8">
-          {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">
+        <div className="flex flex-col gap-8">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col gap-2">
+              <h1 className="text-3xl font-semibold tracking-tight">
                 Dashboard
               </h1>
-              <p className="text-muted-foreground mt-1">
+              <p className="max-w-2xl text-sm text-muted-foreground">
                 Monitor and manage your cloud infrastructure.
               </p>
             </div>
             {!isEmpty && (
-              <div className="flex items-center gap-3">
-                <Button onClick={() => setShowCreateApp(true)}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  New Application
-                </Button>
-              </div>
+              <Button onClick={() => setShowCreateApp(true)}>
+                <Plus data-icon="inline-start" />
+                New Application
+              </Button>
             )}
           </div>
 
           {hasUndeployedApps && (
-            <Alert className="bg-primary/5 border-primary/20 shadow-sm">
-              <Rocket className="h-4 w-4 text-primary" />
-              <AlertTitle className="font-bold">Next Step: Deploy your first app</AlertTitle>
-              <AlertDescription className="flex items-center justify-between flex-wrap gap-4 mt-1">
+            <Alert>
+              <Rocket />
+              <AlertTitle>Deploy your first app</AlertTitle>
+              <AlertDescription className="flex flex-wrap items-center justify-between gap-4">
                 <span>You have applications created but none are currently running in a microVM.</span>
-                <Link href={`/apps/${apps[0].name}`}>
-                  <Button size="sm" className="h-8">Deploy Now</Button>
-                </Link>
+                <Button size="sm" asChild>
+                  <Link href={`/apps/${apps[0].name}`}>Deploy now</Link>
+                </Button>
               </AlertDescription>
             </Alert>
           )}
 
-          {/* Stats Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            <Card className="relative overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Applications</CardTitle>
-                <Container className="w-4 h-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                {isLoadingApps ? (
-                  <div className="h-8 w-12 bg-muted animate-pulse rounded" />
-                ) : (
-                  <div className="text-2xl font-bold">{apps.length}</div>
-                )}
-                <p className="text-xs text-muted-foreground mt-1">
-                  Active projects
-                </p>
-              </CardContent>
-              <div className="absolute bottom-0 left-0 h-1 w-full bg-primary/10" />
-            </Card>
-            
-            <Card className="relative overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Running VMs</CardTitle>
-                <Activity className="w-4 h-4 text-green-500" />
-              </CardHeader>
-              <CardContent>
-                {isFetchingVms && vms.length === 0 ? (
-                  <div className="h-8 w-12 bg-muted animate-pulse rounded" />
-                ) : (
-                  <div className="text-2xl font-bold text-green-600 dark:text-green-400">{runningCount}</div>
-                )}
-                <p className="text-xs text-muted-foreground mt-1">
-                  Currently serving traffic
-                </p>
-              </CardContent>
-              <div className="absolute bottom-0 left-0 h-1 w-full bg-green-500/10" />
-            </Card>
-
-            <Card className="relative overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Deploying</CardTitle>
-                <Rocket className="w-4 h-4 text-yellow-500" />
-              </CardHeader>
-              <CardContent>
-                {isFetchingVms && vms.length === 0 ? (
-                  <div className="h-8 w-12 bg-muted animate-pulse rounded" />
-                ) : (
-                  <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{pendingCount}</div>
-                )}
-                <p className="text-xs text-muted-foreground mt-1">
-                  Ongoing deployments
-                </p>
-              </CardContent>
-              <div className="absolute bottom-0 left-0 h-1 w-full bg-yellow-500/10" />
-            </Card>
+          <div className="grid gap-4 md:grid-cols-3">
+            {statCards.map((stat) => (
+              <Card key={stat.title}>
+                <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
+                  <CardTitle className="text-sm font-medium">{stat.title}</CardTitle>
+                  <stat.icon className="text-muted-foreground" />
+                </CardHeader>
+                <CardContent className="flex flex-col gap-1">
+                  {stat.loading ? (
+                    <Skeleton className="h-8 w-16" />
+                  ) : (
+                    <div className="text-3xl font-semibold tracking-tight">{stat.value}</div>
+                  )}
+                  <p className="text-xs text-muted-foreground">{stat.description}</p>
+                </CardContent>
+              </Card>
+            ))}
           </div>
 
           {isEmpty ? (
-            /* Minimal Empty State */
-            <div className="flex flex-col items-center justify-center min-h-[400px] border-2 border-dashed rounded-xl bg-muted/5 p-12 text-center">
-              <div className="w-16 h-16 bg-primary/10 text-primary rounded-full flex items-center justify-center mb-6">
-                <Rocket className="w-8 h-8" />
-              </div>
-              <h2 className="text-2xl font-bold tracking-tight">No applications found</h2>
-              <p className="text-muted-foreground mt-2 max-w-sm">
-                Get started by creating your first application and deploying it to Mikrom Cloud Platform.
-              </p>
-              <Button size="lg" className="mt-8 shadow-sm" onClick={() => setShowCreateApp(true)}>
-                <Plus className="w-5 h-5 mr-2" />
-                Create Application
-              </Button>
-            </div>
+            <Empty className="min-h-[420px] border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Rocket />
+                </EmptyMedia>
+                <EmptyTitle>No applications found</EmptyTitle>
+                <EmptyDescription>
+                  Create your first application and deploy it to a Mikrom microVM.
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button onClick={() => setShowCreateApp(true)}>
+                  <Plus data-icon="inline-start" />
+                  Create Application
+                </Button>
+              </EmptyContent>
+            </Empty>
           ) : (
-            /* Dashboard Content */
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2 space-y-8">
-                {/* Recent Applications */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-semibold flex items-center gap-2">
-                      <LayoutDashboard className="w-5 h-5 text-primary" />
-                      Recent Applications
-                    </h2>
-                    <Link href="/apps">
-                      <Button variant="ghost" size="sm" className="text-primary hover:bg-primary/5">
-                        View all
-                        <ArrowRight className="ml-2 h-4 w-4" />
-                      </Button>
-                    </Link>
-                  </div>
-                  
-                  <Card className="overflow-hidden border-0 shadow-sm ring-1 ring-border">
-                    <Table>
-                      <TableHeader className="bg-muted/30">
-                        <TableRow>
-                          <TableHead className="py-3">Application</TableHead>
-                          <TableHead className="py-3">Status</TableHead>
-                          <TableHead className="py-3 text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {isLoadingApps ? (
-                          Array(3).fill(0).map((_, i) => (
-                            <TableRow key={i}>
-                              <TableCell><div className="h-4 w-32 bg-muted animate-pulse rounded" /></TableCell>
-                              <TableCell><div className="h-4 w-16 bg-muted animate-pulse rounded" /></TableCell>
-                              <TableCell className="text-right"><div className="h-8 w-20 bg-muted animate-pulse rounded ml-auto" /></TableCell>
-                            </TableRow>
-                          ))
-                        ) : (
-                          appsWithStatus.map((app) => (
-                            <TableRow key={app.id} className="hover:bg-muted/10 transition-colors cursor-default">
-                              <TableCell>
-                                <div className="flex flex-col">
-                                  <span className="font-bold text-base">{app.name}</span>
-                                  <span className="text-xs text-muted-foreground truncate max-w-[250px]">{app.git_url}</span>
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <Badge 
-                                  variant={
-                                    app.status.toLowerCase() === "running" ? "success" : 
-                                    (app.status.toLowerCase() === "building" || app.status.toLowerCase() === "pending") ? "warning" : 
-                                    "secondary"
-                                  }
-                                  className="capitalize px-3 py-1 font-medium"
-                                >
-                                  {app.status}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <Link href={`/apps/${app.name}`}>
-                                  <Button size="sm" variant="outline" className="h-8 px-4">
-                                    Manage
-                                  </Button>
-                                </Link>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </Card>
-                </div>
-              </div>
-
-              {/* Sidebar */}
-              <div className="space-y-6">
-                {/* System Health */}
-                <Card className="shadow-sm overflow-hidden">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-lg font-bold">System Status</CardTitle>
-                    <CardDescription>Health of core services.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {[
-                      { name: "API", key: "API" },
-                      { name: "Agents", key: "Agents" },
-                      { name: "Scheduler", key: "Scheduler" },
-                      { name: "Builder", key: "Builder" },
-                      { name: "Router", key: "Router" },
-                    ].map((service) => {
-                      const status = healthData?.services?.[service.key] || (isHealthError ? 'OFFLINE' : 'CHECKING');
-                      const isOnline = status === 'ONLINE';
-                      const isChecking = status === 'CHECKING';
-                      
-                      return (
-                        <div key={service.name} className="flex items-center justify-between">
-                          <span className="text-sm font-medium">{service.name}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] uppercase font-bold text-muted-foreground">{status}</span>
-                            <div className={cn(
-                              "w-2.5 h-2.5 rounded-full",
-                              isOnline ? "bg-green-500" : (isChecking ? "bg-yellow-500 animate-pulse" : "bg-red-500 animate-pulse")
-                            )} />
-                          </div>
+            <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <Card className="min-w-0">
+                <CardHeader className="border-b">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="flex items-start gap-3">
+                      <div className="flex size-10 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground">
+                        <Container />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <CardTitle>Recent Applications</CardTitle>
                         </div>
-                      );
-                    })}
-                  </CardContent>
-                  <div className="bg-muted/30 px-6 py-3 border-t">
-                    <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest">Version {healthData?.version || '0.0.0'}</p>
+                        <CardDescription>Latest projects and their runtime state.</CardDescription>
+                      </div>
+                    </div>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href="/apps">
+                        View all
+                        <ArrowRight data-icon="inline-end" />
+                      </Link>
+                    </Button>
                   </div>
-                </Card>
-              </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <Table className="table-fixed">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[52%] pl-6">Application</TableHead>
+                        <TableHead className="w-[24%]">Status</TableHead>
+                        <TableHead className="hidden w-[24%] xl:table-cell">Created</TableHead>
+                        <TableHead className="w-[96px] pr-6 text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isLoadingApps ? (
+                        Array.from({ length: 3 }).map((_, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="pl-6"><Skeleton className="h-9 w-44" /></TableCell>
+                            <TableCell><Skeleton className="h-5 w-20" /></TableCell>
+                            <TableCell className="hidden xl:table-cell"><Skeleton className="h-5 w-24" /></TableCell>
+                            <TableCell className="pr-6 text-right"><Skeleton className="ml-auto h-8 w-20" /></TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        appsWithStatus.map((app) => (
+                          <TableRow key={app.id}>
+                            <TableCell className="pl-6">
+                              <div className="flex min-w-0 items-center gap-3">
+                                <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground">
+                                  <Server />
+                                </div>
+                                <div className="flex min-w-0 flex-col gap-1">
+                                  <span className="truncate font-medium">{app.name}</span>
+                                  <span className="truncate text-xs text-muted-foreground">
+                                    {app.hostname || "No public hostname"}
+                                  </span>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  app.status.toLowerCase() === "running" ? "success" :
+                                  (app.status.toLowerCase() === "building" || app.status.toLowerCase() === "pending") ? "warning" :
+                                  "secondary"
+                                }
+                                className="capitalize"
+                              >
+                                {app.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="hidden text-sm text-muted-foreground xl:table-cell">
+                              {formatDate(app.created_at)}
+                            </TableCell>
+                            <TableCell className="pr-6 text-right">
+                              <Button size="sm" variant="outline" asChild>
+                                <Link href={`/apps/${app.name}`}>Manage</Link>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <CardTitle>System Status</CardTitle>
+                      <CardDescription>Health of core services.</CardDescription>
+                    </div>
+                    <Badge variant={isHealthError || offlineServices > 0 ? "destructive" : "secondary"}>
+                      {isHealthError || offlineServices > 0 ? "Degraded" : "Operational"}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4">
+                  {[
+                    { name: "API", key: "API", icon: Cpu },
+                    { name: "Agents", key: "Agents", icon: Bot },
+                    { name: "Scheduler", key: "Scheduler", icon: CalendarClock },
+                    { name: "Builder", key: "Builder", icon: Hammer },
+                    { name: "Router", key: "Router", icon: Router },
+                  ].map((service, index, array) => {
+                    const status = healthData?.services?.[service.key] || (isHealthError ? "OFFLINE" : "CHECKING");
+                    const isOnline = status === "ONLINE";
+                    const isChecking = status === "CHECKING";
+                    const ServiceIcon = service.icon;
+
+                    return (
+                      <div key={service.name} className="flex flex-col gap-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-2">
+                            <ServiceIcon className="text-muted-foreground" />
+                            <span className="text-sm font-medium">{service.name}</span>
+                          </div>
+                          <Badge
+                            variant={isOnline ? "secondary" : isChecking ? "outline" : "destructive"}
+                            className="uppercase"
+                          >
+                            {status}
+                          </Badge>
+                        </div>
+                        {index < array.length - 1 && <Separator />}
+                      </div>
+                    );
+                  })}
+                </CardContent>
+                <CardContent className="border-t pt-4">
+                  <p className="text-xs text-muted-foreground">Version {healthData?.version || "0.0.0"}</p>
+                </CardContent>
+              </Card>
             </div>
           )}
         </div>

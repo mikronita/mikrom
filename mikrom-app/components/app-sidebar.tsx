@@ -3,21 +3,11 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { 
-  HiChartPie, 
-  HiCog, 
-  HiLogout, 
-  HiCube,
-  HiCollection,
-  HiShieldCheck,
-  HiServer
-} from "react-icons/hi";
-import { ChevronsUpDown } from "lucide-react";
+import { Boxes, ChevronsUpDown, LayoutDashboard, LogOut, Network, Settings, Shield } from "lucide-react";
 import { logout, getToken } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 import { getUserProfile } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,54 +51,48 @@ export function AppSidebar() {
     : profile?.email.split("@")[0] || "User";
 
   const navigation = [
-    { name: "Dashboard", href: "/", icon: HiChartPie, active: pathname === "/" },
-    { name: "Applications", href: "/apps", icon: HiCollection, active: pathname.startsWith("/apps") },
-    { name: "Networking", href: "/networking", icon: HiShieldCheck, active: pathname.startsWith("/networking") },
-    { name: "Settings", href: "/settings", icon: HiCog, active: pathname === "/settings" },
+    { name: "Dashboard", href: "/", icon: LayoutDashboard, active: pathname === "/" },
+    { name: "Applications", href: "/apps", icon: Boxes, active: pathname.startsWith("/apps") },
+    { name: "Networking", href: "/networking", icon: Network, active: pathname.startsWith("/networking") },
+    { name: "Settings", href: "/settings", icon: Settings, active: pathname === "/settings" },
   ];
 
   return (
-    <Sidebar className="border-r border-sidebar-border bg-sidebar/50 backdrop-blur-xl">
-      <SidebarHeader className="h-16 border-b border-sidebar-border/50 p-0 flex items-center">
+    <Sidebar>
+      <SidebarHeader className="flex h-16 items-center border-b p-0">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild className="md:h-14 hover:bg-transparent focus-visible:ring-0 px-4">
+            <SidebarMenuButton size="lg" asChild className="px-4 md:h-14">
               <Link href="/" className="flex items-center gap-3">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-lg shadow-primary/20 shrink-0">
-                  <HiCube className="size-5" />
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  <Shield />
                 </div>
-                <div className="flex flex-col gap-0 overflow-hidden">
-                  <span className="text-base font-black leading-none tracking-tight whitespace-nowrap">MIKROM</span>
-                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mt-0.5">Cloud Platform</span>
+                <div className="flex flex-col overflow-hidden">
+                  <span className="whitespace-nowrap text-sm font-semibold leading-none">Mikrom</span>
+                  <span className="mt-1 text-xs text-muted-foreground">Cloud Platform</span>
                 </div>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent className="p-2">
+      <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="px-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-2">
+          <SidebarGroupLabel>
             Management
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu className="gap-1">
+            <SidebarMenu>
               {navigation.map((item) => (
                 <SidebarMenuItem key={item.name}>
                   <SidebarMenuButton
                     asChild
                     isActive={item.active}
                     tooltip={item.name}
-                    className={cn(
-                      "h-10 px-3 transition-all duration-200 rounded-lg",
-                      item.active 
-                        ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary" 
-                        : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                    )}
                   >
                     <Link href={item.href} className="flex items-center">
-                      <item.icon className="size-5 shrink-0" />
-                      <span className="font-semibold ml-3">{item.name}</span>
+                      <item.icon />
+                      <span>{item.name}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -117,23 +101,23 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-2 border-t border-sidebar-border/50">
+      <SidebarFooter className="border-t">
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <SidebarMenuButton
                   size="lg"
-                  className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground h-12 px-2"
+                  className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                 >
-                  <Avatar className="size-8 rounded-lg shrink-0">
-                    <AvatarFallback className="rounded-lg bg-muted text-[10px] font-bold">{initials}</AvatarFallback>
+                  <Avatar className="size-8 shrink-0 rounded-lg">
+                    <AvatarFallback className="rounded-lg text-xs font-medium">{initials}</AvatarFallback>
                   </Avatar>
-                  <div className="grid flex-1 text-left text-sm leading-tight ml-3">
-                    <span className="truncate font-bold">{fullName}</span>
-                    <span className="truncate text-[10px] text-muted-foreground">{profile?.email}</span>
+                  <div className="grid flex-1 text-left text-sm leading-tight">
+                    <span className="truncate font-medium">{fullName}</span>
+                    <span className="truncate text-xs text-muted-foreground">{profile?.email}</span>
                   </div>
-                  <ChevronsUpDown className="ml-auto size-4" />
+                  <ChevronsUpDown className="ml-auto" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -159,7 +143,7 @@ export function AppSidebar() {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => logout()} className="text-destructive">
-                  <HiLogout className="mr-2 size-4" />
+                  <LogOut data-icon="inline-start" />
                   Sign out
                 </DropdownMenuItem>
               </DropdownMenuContent>

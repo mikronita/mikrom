@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { useDeployApp } from "@/lib/hooks/use-vms";
 import { useRouter } from "next/navigation";
 import { DeployRequest } from "@/lib/api";
@@ -71,10 +71,10 @@ export function DeployModal({ onClose }: DeployModalProps) {
         <DialogHeader>
           <DialogTitle>Deploy New App</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleDeploySubmit} className="space-y-6 pt-4">
-          <div className="space-y-4">
-            <div className="grid w-full items-center gap-1.5">
-              <Label htmlFor="app_name">App Name</Label>
+        <form onSubmit={handleDeploySubmit} className="flex flex-col gap-6 pt-2">
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="app_name">App Name</FieldLabel>
               <Input
                 id="app_name"
                 required
@@ -82,10 +82,10 @@ export function DeployModal({ onClose }: DeployModalProps) {
                 onChange={(e) => setForm((f) => ({ ...f, app_name: e.target.value }))}
                 placeholder="my-micro-service"
               />
-            </div>
+            </Field>
 
-            <div className="grid w-full items-center gap-1.5">
-              <Label htmlFor="image">Docker Image / RootFS</Label>
+            <Field>
+              <FieldLabel htmlFor="image">Docker Image / RootFS</FieldLabel>
               <Input
                 id="image"
                 required
@@ -93,11 +93,11 @@ export function DeployModal({ onClose }: DeployModalProps) {
                 onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))}
                 placeholder="e.g. nginx:alpine"
               />
-            </div>
+            </Field>
 
-            <div className="grid grid-cols-3 gap-4">
-              <div className="grid w-full items-center gap-1.5">
-                <Label htmlFor="vcpus" className="text-[10px] uppercase">vCPUs</Label>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field>
+                <FieldLabel htmlFor="vcpus">vCPUs</FieldLabel>
                 <Input
                   id="vcpus"
                   type="number"
@@ -106,9 +106,9 @@ export function DeployModal({ onClose }: DeployModalProps) {
                   onChange={(e) => setForm((f) => ({ ...f, vcpus: e.target.value }))}
                   placeholder="1"
                 />
-              </div>
-              <div className="grid w-full items-center gap-1.5">
-                <Label htmlFor="memory" className="text-[10px] uppercase">RAM (MiB)</Label>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="memory">RAM (MiB)</FieldLabel>
                 <Input
                   id="memory"
                   type="number"
@@ -117,9 +117,9 @@ export function DeployModal({ onClose }: DeployModalProps) {
                   onChange={(e) => setForm((f) => ({ ...f, memory_mib: e.target.value }))}
                   placeholder="512"
                 />
-              </div>
-              <div className="grid w-full items-center gap-1.5">
-                <Label htmlFor="disk" className="text-[10px] uppercase">Disk (MiB)</Label>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="disk">Disk (MiB)</FieldLabel>
                 <Input
                   id="disk"
                   type="number"
@@ -128,9 +128,9 @@ export function DeployModal({ onClose }: DeployModalProps) {
                   onChange={(e) => setForm((f) => ({ ...f, disk_mib: e.target.value }))}
                   placeholder="1024"
                 />
-              </div>
+              </Field>
             </div>
-          </div>
+          </FieldGroup>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
@@ -138,7 +138,7 @@ export function DeployModal({ onClose }: DeployModalProps) {
             <Button type="submit" disabled={deployMutation.isPending}>
               {deployMutation.isPending ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Loader2 data-icon="inline-start" className="animate-spin" />
                   Deploying...
                 </>
               ) : (

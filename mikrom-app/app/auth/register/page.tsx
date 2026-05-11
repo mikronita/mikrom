@@ -8,7 +8,7 @@ import { Loader2, AlertCircle, UserPlus } from "lucide-react";
 import { register } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -51,39 +51,34 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950 px-4 relative overflow-hidden">
-      {/* Background blobs */}
-      <div className="absolute top-0 right-0 w-full h-full -z-10 opacity-30 pointer-events-none">
-        <div className="absolute -top-24 -right-24 w-96 h-96 bg-zinc-200 dark:bg-zinc-800 rounded-full blur-[100px]" />
-        <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-zinc-200 dark:bg-zinc-800 rounded-full blur-[100px]" />
-      </div>
-
-      <Card className="w-full max-w-md shadow-2xl border-zinc-200/50 dark:border-zinc-800/50">
-        <CardHeader className="space-y-1 text-center">
-          <div className="flex justify-center mb-4">
-            <div className="w-12 h-12 bg-zinc-900 dark:bg-zinc-50 rounded-2xl flex items-center justify-center shadow-lg">
-              <UserPlus className="w-6 h-6 text-white dark:text-zinc-900" />
+    <div className="flex min-h-screen flex-col items-center justify-center bg-muted/30 px-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="items-center text-center">
+          <div className="mb-2 flex justify-center">
+            <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+              <UserPlus />
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold tracking-tight">Create an account</CardTitle>
+          <CardTitle className="text-2xl font-semibold tracking-tight">Create an account</CardTitle>
           <CardDescription>
             Enter your details to get started with Mikrom
           </CardDescription>
         </CardHeader>
         
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             {error && (
               <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
+                <AlertCircle />
                 <AlertDescription>
                   {error}
                 </AlertDescription>
               </Alert>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="email">Email address</Label>
+            <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="email">Email address</FieldLabel>
               <Input
                 id="email"
                 type="email"
@@ -93,10 +88,10 @@ export default function RegisterPage() {
                 disabled={isLoading}
                 required
               />
-            </div>
+            </Field>
 
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+            <Field>
+              <FieldLabel htmlFor="password">Password</FieldLabel>
               <Input
                 id="password"
                 type="password"
@@ -106,10 +101,10 @@ export default function RegisterPage() {
                 disabled={isLoading}
                 required
               />
-            </div>
+            </Field>
 
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
+            <Field>
+              <FieldLabel htmlFor="confirmPassword">Confirm Password</FieldLabel>
               <Input
                 id="confirmPassword"
                 type="password"
@@ -119,13 +114,14 @@ export default function RegisterPage() {
                 disabled={isLoading}
                 required
               />
-            </div>
+            </Field>
+            </FieldGroup>
 
             <div className="flex flex-col gap-4 pt-2">
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 data-icon="inline-start" className="animate-spin" />
                     Creating account...
                   </>
                 ) : (
