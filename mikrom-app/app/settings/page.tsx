@@ -124,45 +124,47 @@ export default function SettingsPage() {
   return (
     <AuthGuard>
       <DashboardLayout>
-        <div className="space-y-6">
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <Settings />
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-3">
+                <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  <Settings />
+                </div>
+                <h1 className="text-3xl font-semibold tracking-tight">
+                  Settings
+                </h1>
               </div>
-              <h1 className="text-3xl font-semibold tracking-tight">
-                Settings
-              </h1>
+              <p className="max-w-2xl text-sm text-muted-foreground">
+                Manage your personal information, security preferences and billing.
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground">
-              Manage your personal information, security preferences and billing.
-            </p>
           </div>
 
-          <div className="bg-card rounded-2xl border shadow-sm overflow-hidden">
-            <Tabs defaultValue="profile" className="w-full">
-              <TabsList>
-                <TabsTrigger value="profile">
-                  <HiUser data-icon="inline-start" /> Profile
-                </TabsTrigger>
-                <TabsTrigger value="security">
-                  <HiKey data-icon="inline-start" /> Security
-                </TabsTrigger>
-                <TabsTrigger value="api">
-                  <HiCloudDownload data-icon="inline-start" /> API Access
-                </TabsTrigger>
-                <TabsTrigger value="billing">
-                  <HiCreditCard data-icon="inline-start" /> Billing
-                </TabsTrigger>
-                <TabsTrigger value="integrations">
-                  <HiPlus data-icon="inline-start" /> Integrations
-                </TabsTrigger>
-                <TabsTrigger value="notifications">
-                  <HiBell data-icon="inline-start" /> Notifications
-                </TabsTrigger>
-              </TabsList>
+          <Tabs defaultValue="profile" className="flex w-full flex-col gap-6">
+            <TabsList className="h-auto w-full justify-start overflow-x-auto">
+              <TabsTrigger value="profile">
+                <HiUser data-icon="inline-start" /> Profile
+              </TabsTrigger>
+              <TabsTrigger value="security">
+                <HiKey data-icon="inline-start" /> Security
+              </TabsTrigger>
+              <TabsTrigger value="api">
+                <HiCloudDownload data-icon="inline-start" /> API access
+              </TabsTrigger>
+              <TabsTrigger value="billing">
+                <HiCreditCard data-icon="inline-start" /> Billing
+              </TabsTrigger>
+              <TabsTrigger value="integrations">
+                <HiPlus data-icon="inline-start" /> Integrations
+              </TabsTrigger>
+              <TabsTrigger value="notifications">
+                <HiBell data-icon="inline-start" /> Notifications
+              </TabsTrigger>
+            </TabsList>
 
-              <TabsContent value="profile" className="p-0">
+            <Card className="overflow-hidden">
+              <TabsContent value="profile" className="m-0 p-0">
                 {isLoading ? (
                   <div className="p-12 flex justify-center items-center">
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -185,7 +187,7 @@ export default function SettingsPage() {
 
                     <FieldGroup className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <Field>
-                        <FieldLabel htmlFor="firstName">First Name</FieldLabel>
+                        <FieldLabel htmlFor="firstName">First name</FieldLabel>
                         <Input 
                           id="firstName" 
                           placeholder="John" 
@@ -194,7 +196,7 @@ export default function SettingsPage() {
                         />
                       </Field>
                       <Field>
-                        <FieldLabel htmlFor="lastName">Last Name</FieldLabel>
+                        <FieldLabel htmlFor="lastName">Last name</FieldLabel>
                         <Input 
                           id="lastName" 
                           placeholder="Doe" 
@@ -203,7 +205,7 @@ export default function SettingsPage() {
                         />
                       </Field>
                       <Field className="md:col-span-2">
-                        <FieldLabel htmlFor="email">Email Address</FieldLabel>
+                        <FieldLabel htmlFor="email">Email address</FieldLabel>
                         <InputGroup>
                           <InputGroupAddon>
                             <HiMail data-icon="inline-start" />
@@ -241,9 +243,9 @@ export default function SettingsPage() {
                 )}
               </TabsContent>
 
-              <TabsContent value="security" className="p-6 space-y-8">
+              <TabsContent value="security" className="m-0 p-6 space-y-8">
                 <div>
-                  <h3 className="text-lg font-bold mb-4">Change Password</h3>
+                  <h3 className="mb-4 text-lg font-semibold">Change password</h3>
                   <FieldGroup className="max-w-md">
                     <Field>
                       <FieldLabel htmlFor="currentPassword">Current Password</FieldLabel>
@@ -260,7 +262,7 @@ export default function SettingsPage() {
                 <div className="pt-8 border-t">
                   <div className="flex items-center justify-between mb-4">
                     <div>
-                      <h3 className="text-lg font-bold">Two-Factor Authentication</h3>
+                      <h3 className="text-lg font-semibold">Two-factor authentication</h3>
                       <p className="text-sm text-muted-foreground">Add an extra layer of security to your account.</p>
                     </div>
                     <Badge variant="outline" className="text-yellow-600 border-yellow-200 dark:border-yellow-800">
@@ -271,7 +273,7 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="pt-8 border-t">
-                  <h3 className="text-lg font-bold text-destructive mb-2">Danger Zone</h3>
+                  <h3 className="mb-2 text-lg font-semibold text-destructive">Danger zone</h3>
                   <p className="text-sm text-muted-foreground mb-4">Once you delete your account, there is no going back. Please be certain.</p>
                   <Button variant="destructive" size="sm">
                     <HiTrash className="mr-2 h-4 w-4" />
@@ -280,10 +282,10 @@ export default function SettingsPage() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="api" className="p-6 space-y-6">
+              <TabsContent value="api" className="m-0 p-6 space-y-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-lg font-bold">Personal Access Tokens</h3>
+                    <h3 className="text-lg font-semibold">Personal access tokens</h3>
                     <p className="text-sm text-muted-foreground">Use tokens to authenticate with the Mikrom CLI and API.</p>
                   </div>
                   <Button size="sm">
@@ -308,12 +310,12 @@ export default function SettingsPage() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="billing" className="p-6 space-y-6">
+              <TabsContent value="billing" className="m-0 p-6 space-y-6">
                 <Card className="bg-zinc-900 border-none text-white">
                   <CardHeader className="flex flex-row items-start justify-between">
                     <div>
-                      <p className="text-zinc-400 text-xs uppercase font-bold tracking-widest mb-1">Current Plan</p>
-                      <CardTitle className="text-2xl font-bold text-white">Pro Developer</CardTitle>
+                      <p className="mb-1 text-xs font-medium text-zinc-400">Current plan</p>
+                      <CardTitle className="text-2xl font-semibold text-white">Pro developer</CardTitle>
                       <CardDescription className="text-zinc-400 mt-1">$29 / month</CardDescription>
                     </div>
                     <Badge variant="secondary" className="bg-blue-500/20 text-blue-400 border-blue-500/30">Active</Badge>
@@ -325,7 +327,7 @@ export default function SettingsPage() {
                 </Card>
 
                 <div className="pt-4">
-                  <h3 className="text-lg font-bold mb-4">Payment Method</h3>
+                  <h3 className="mb-4 text-lg font-semibold">Payment method</h3>
                   <div className="flex items-center gap-4 p-4 border rounded-xl">
                     <div className="w-12 h-8 bg-muted rounded flex items-center justify-center font-bold italic text-muted-foreground">VISA</div>
                     <div className="flex-1">
@@ -337,9 +339,9 @@ export default function SettingsPage() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="integrations" className="p-6 space-y-6">
+              <TabsContent value="integrations" className="m-0 p-6 space-y-6">
                 <FieldSet>
-                  <FieldLegend>Source Control</FieldLegend>
+                  <FieldLegend>Source control</FieldLegend>
                   <FieldDescription>Connect your GitHub account to deploy private repositories.</FieldDescription>
                   
                   <FieldGroup className="mt-6">
@@ -379,7 +381,7 @@ export default function SettingsPage() {
                             <FaGithub className="h-6 w-6" />
                           </div>
                           <div>
-                            <p className="text-sm font-bold">GitHub App Integration</p>
+                            <p className="text-sm font-semibold">GitHub app integration</p>
                             <p className="text-xs text-muted-foreground">Deploy from any repository you have access to.</p>
                           </div>
                         </div>
@@ -408,9 +410,9 @@ export default function SettingsPage() {
                 </FieldSet>
               </TabsContent>
 
-              <TabsContent value="notifications" className="p-6 space-y-6">
+              <TabsContent value="notifications" className="m-0 p-6 space-y-6">
                 <FieldSet>
-                  <FieldLegend variant="label">Email Notifications</FieldLegend>
+                  <FieldLegend variant="label">Email notifications</FieldLegend>
                   <FieldDescription>Choose what updates you want to receive via email.</FieldDescription>
                   
                   <FieldGroup className="gap-6">
@@ -432,8 +434,8 @@ export default function SettingsPage() {
                   </FieldGroup>
                 </FieldSet>
               </TabsContent>
-            </Tabs>
-          </div>
+            </Card>
+          </Tabs>
         </div>
       </DashboardLayout>
     </AuthGuard>
