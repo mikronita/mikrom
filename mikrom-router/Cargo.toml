@@ -10,10 +10,15 @@ async-trait = "0.1.89"
 chrono = "0.4.44"
 futures-util = "0.3.32"
 hostname = "0.4.2"
+http = "1.1"
 mikrom-proto = { version = "0.1.1", path = "../mikrom-proto" }
 openssl = "0.10.79"
 openssl-sys = "0.9.115"
+opentelemetry = "0.27"
+opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic"] }
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 pingora = { version = "0.8.0", features = ["openssl", "lb", "proxy"] }
+pingora-limits = "0.8.0"
 pingora-openssl = "0.8.0"
 prost.workspace = true
 serde = { version = "1.0.228", features = ["derive"] }
@@ -21,7 +26,8 @@ serde_json = "1.0.149"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres"] }
 tokio = { workspace = true, features = ["full"] }
 tracing = "0.1.44"
-tracing-subscriber = "0.3.23"
+tracing-opentelemetry = "0.28"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 x509-parser = "0.18.1"
 
 [lints]

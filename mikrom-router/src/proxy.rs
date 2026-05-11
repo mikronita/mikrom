@@ -1,9 +1,19 @@
 use crate::state::State;
 use async_trait::async_trait;
+use http::HeaderValue;
+use opentelemetry::propagation::Injector;
+use pingora::lb::LoadBalancer;
+use pingora::lb::selection::RoundRobin;
+use pingora::modules::http::HttpModules;
+use pingora::modules::http::compression::ResponseCompressionBuilder;
 use pingora::prelude::*;
+use pingora_limits::rate::Rate;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::sync::RwLock;
+use tracing::{info, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 pub struct RouterMetricsCounters {
     pub requests_total: AtomicU64,
@@ -32,57 +42,93 @@ impl Default for RouterMetricsCounters {
 
 pub struct MikromProxy {
     state: Arc<RwLock<State>>,
-    lb_counter: AtomicUsize,
     acme_staging: bool,
     pub metrics: Arc<RouterMetricsCounters>,
+    rate_limiter: Rate,
+    rps_limit: isize,
 }
 
+pub struct MikromCtx {}
+
 impl MikromProxy {
-    pub const fn new(
+    #[must_use]
+    pub fn new(
         state: Arc<RwLock<State>>,
         acme_staging: bool,
         metrics: Arc<RouterMetricsCounters>,
+        rps_limit: isize,
     ) -> Self {
         Self {
             state,
-            lb_counter: AtomicUsize::new(0),
             acme_staging,
             metrics,
+            rate_limiter: Rate::new(Duration::from_secs(1)),
+            rps_limit,
         }
     }
 
-    pub async fn select_target(&self, host: &str) -> Result<String> {
+    pub async fn get_lb(&self, host: &str) -> Result<Arc<LoadBalancer<RoundRobin>>> {
         let state = self.state.read().await;
 
-        if let Some(route) = state.routes.get(host) {
-            if route.targets.is_empty() {
-                return Err(Error::explain(
-                    ErrorType::InternalError,
-                    format!("No targets defined for host: {host}"),
-                ));
-            }
-
-            // Simple Round Robin
-            let index = self.lb_counter.fetch_add(1, Ordering::Relaxed) % route.targets.len();
-            let target = route.targets[index].clone();
-            drop(state);
-            return Ok(target);
-        }
-
+        let res = state.routes.get(host).map_or_else(
+            || {
+                Err(Error::explain(
+                    ErrorType::HTTPStatus(404),
+                    format!("No route found for host: {host}"),
+                ))
+            },
+            |route| Ok(route.lb.clone()),
+        );
         drop(state);
-        Err(Error::explain(
-            ErrorType::HTTPStatus(404),
-            format!("No route found for host: {host}"),
-        ))
+        res
+    }
+}
+
+struct PingoraHeaderInjector<'a>(&'a mut RequestHeader);
+
+impl Injector for PingoraHeaderInjector<'_> {
+    fn set(&mut self, key: &str, value: String) {
+        use http::header::HeaderName;
+        if let Ok(name) = HeaderName::try_from(key)
+            && let Err(e) = self.0.insert_header(name, value)
+        {
+            warn!("Failed to inject tracing header: {e}");
+        }
     }
 }
 
 #[async_trait]
 impl ProxyHttp for MikromProxy {
-    type CTX = ();
-    fn new_ctx(&self) -> Self::CTX {}
+    type CTX = MikromCtx;
+    fn new_ctx(&self) -> Self::CTX {
+        MikromCtx {}
+    }
+
+    fn init_downstream_modules(&self, modules: &mut HttpModules) {
+        modules.add_module(ResponseCompressionBuilder::enable(3));
+    }
 
     async fn request_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<bool> {
+        // 0. Rate Limiting (Per IP)
+        if let Some(addr) = session.client_addr() {
+            let ip = addr.to_string();
+            let curr_window_requests = self.rate_limiter.observe(&ip, 1);
+            if curr_window_requests > self.rps_limit {
+                warn!("Rate limit exceeded for IP: {ip} (requests: {curr_window_requests})");
+                let mut header = ResponseHeader::build(429, None)?;
+                header.insert_header("Content-Type", "text/plain")?;
+                header.insert_header("Retry-After", "1")?;
+
+                session
+                    .write_response_header(Box::new(header), false)
+                    .await?;
+                session
+                    .write_response_body(Some("Too Many Requests\n".into()), true)
+                    .await?;
+                return Ok(true); // Short-circuit
+            }
+        }
+
         let host = session
             .get_header("Host")
             .and_then(|h| h.to_str().ok())
@@ -152,8 +198,16 @@ impl ProxyHttp for MikromProxy {
             .and_then(|h| h.to_str().ok())
             .unwrap_or("");
 
-        let target = self.select_target(host).await?;
-        let peer = Box::new(HttpPeer::new(&target, false, host.to_string()));
+        let lb = self.get_lb(host).await?;
+        let upstream = lb.select(b"", 256).ok_or_else(|| {
+            Error::explain(
+                ErrorType::InternalError,
+                format!("No healthy upstreams for host: {host}"),
+            )
+        })?;
+
+        info!("Selected upstream: {upstream:?}");
+        let peer = Box::new(HttpPeer::new(upstream.to_string(), false, host.to_string()));
         Ok(peer)
     }
 
@@ -163,7 +217,7 @@ impl ProxyHttp for MikromProxy {
         upstream_request: &mut RequestHeader,
         _ctx: &mut Self::CTX,
     ) -> Result<()> {
-        // Add standard proxy headers
+        // 1. Add standard proxy headers
         if let Some(addr) = session.client_addr()
             && let Some(inet) = addr.as_inet()
         {
@@ -181,6 +235,54 @@ impl ProxyHttp for MikromProxy {
             upstream_request.insert_header("X-Forwarded-Proto", "https")?;
         } else {
             upstream_request.insert_header("X-Forwarded-Proto", "http")?;
+        }
+
+        // 2. Propagate Trace Context
+        let context = tracing::Span::current().context();
+        let mut injector = PingoraHeaderInjector(upstream_request);
+        opentelemetry::global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(&context, &mut injector);
+        });
+
+        Ok(())
+    }
+
+    async fn response_filter(
+        &self,
+        _session: &mut Session,
+        upstream_response: &mut ResponseHeader,
+        _ctx: &mut Self::CTX,
+    ) -> Result<()> {
+        let headers = &mut upstream_response.headers;
+
+        // 1. Security Headers
+        // HSTS - 1 year
+        if !headers.contains_key("Strict-Transport-Security") {
+            headers.insert(
+                "Strict-Transport-Security",
+                HeaderValue::from_static("max-age=31536000; includeSubDomains; preload"),
+            );
+        }
+
+        // X-Content-Type-Options
+        if !headers.contains_key("X-Content-Type-Options") {
+            headers.insert(
+                "X-Content-Type-Options",
+                HeaderValue::from_static("nosniff"),
+            );
+        }
+
+        // X-Frame-Options
+        if !headers.contains_key("X-Frame-Options") {
+            headers.insert("X-Frame-Options", HeaderValue::from_static("SAMEORIGIN"));
+        }
+
+        // Referrer-Policy
+        if !headers.contains_key("Referrer-Policy") {
+            headers.insert(
+                "Referrer-Policy",
+                HeaderValue::from_static("strict-origin-when-cross-origin"),
+            );
         }
 
         Ok(())

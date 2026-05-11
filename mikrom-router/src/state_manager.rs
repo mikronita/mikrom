@@ -1,35 +1,17 @@
 use crate::state::State;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::fs;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
 
 pub struct StateManager {
-    cache_path: PathBuf,
     state: Arc<RwLock<State>>,
 }
 
 impl StateManager {
-    pub async fn new(cache_path: PathBuf) -> Result<Self> {
-        let state = if cache_path.exists() {
-            info!("Loading state from cache: {:?}", cache_path);
-            let data = fs::read(&cache_path).await?;
-            serde_json::from_slice(&data).unwrap_or_else(|e| {
-                warn!(
-                    "Failed to parse state cache: {}. Starting with empty state.",
-                    e
-                );
-                State::default()
-            })
-        } else {
-            State::default()
-        };
-
+    pub fn new(_cache_path: PathBuf) -> Result<Self> {
         Ok(Self {
-            cache_path,
-            state: Arc::new(RwLock::new(state)),
+            state: Arc::new(RwLock::new(State::default())),
         })
     }
 
@@ -41,14 +23,7 @@ impl StateManager {
     pub async fn update_state(&self, new_state: State) -> Result<()> {
         let mut state = self.state.write().await;
         *state = new_state;
-
-        // Save to disk
-        let data = serde_json::to_vec(&*state)?;
         drop(state);
-        fs::write(&self.cache_path, data)
-            .await
-            .context("Failed to write state cache to disk")?;
-
         Ok(())
     }
 }
@@ -57,20 +32,26 @@ impl StateManager {
 mod tests {
     use super::*;
     use crate::state::Route;
+    use pingora::lb::LoadBalancer;
+    use pingora::lb::selection::RoundRobin;
     use std::collections::HashMap;
     use tempfile::NamedTempFile;
 
     #[tokio::test]
-    async fn test_state_manager_persistence() {
+    async fn test_state_manager_logic() {
         let temp_file = NamedTempFile::new().unwrap();
         let cache_path = temp_file.path().to_path_buf();
 
         let mut routes = HashMap::new();
+        let targets = vec!["[fd00::1]:8080".to_string()];
+        let lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice()).unwrap();
+
         routes.insert(
             "test.mikrom.local".to_string(),
             Route {
                 host: "test.mikrom.local".to_string(),
-                targets: vec!["[fd00::1]:8080".to_string()],
+                targets: targets.clone(),
+                lb: Arc::new(lb),
             },
         );
 
@@ -80,34 +61,25 @@ mod tests {
             certificates: HashMap::new(),
         };
 
-        // 1. Create manager and save state
-        {
-            let manager = StateManager::new(cache_path.clone()).await.unwrap();
-            manager.update_state(initial_state.clone()).await.unwrap();
-        }
+        let manager = StateManager::new(cache_path).unwrap();
+        manager.update_state(initial_state.clone()).await.unwrap();
 
-        // 2. Load manager and verify state
-        {
-            let manager = StateManager::new(cache_path.clone()).await.unwrap();
-            let state_arc = manager.get_state();
-            let state = state_arc.read().await;
-            assert_eq!(state.routes.len(), 1);
-            assert_eq!(
-                state.routes.get("test.mikrom.local").unwrap().targets[0],
-                "[fd00::1]:8080"
-            );
-            drop(state);
-        }
+        let state_arc = manager.get_state();
+        let state = state_arc.read().await;
+        assert_eq!(state.routes.len(), 1);
+        assert_eq!(
+            state.routes.get("test.mikrom.local").unwrap().targets[0],
+            "[fd00::1]:8080"
+        );
+        drop(state);
     }
 
     #[tokio::test]
-    async fn test_state_manager_empty_cache() {
+    async fn test_state_manager_empty_initial() {
         let temp_file = NamedTempFile::new().unwrap();
         let cache_path = temp_file.path().to_path_buf();
-        // Delete the file to ensure it doesn't exist
-        std::fs::remove_file(&cache_path).unwrap();
 
-        let manager = StateManager::new(cache_path).await.unwrap();
+        let manager = StateManager::new(cache_path).unwrap();
         let state_arc = manager.get_state();
         let state = state_arc.read().await;
         assert!(state.routes.is_empty());
