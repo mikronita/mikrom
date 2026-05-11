@@ -33,30 +33,47 @@ impl TlsAccept for MikromTlsHandler {
         let state = self.state.read().await;
 
         if let Some(cert_info) = state.certificates.get(&sni) {
-            match X509::from_pem(cert_info.cert_pem.as_bytes()) {
-                Ok(cert) => {
-                    if let Err(e) = ssl.set_certificate(&cert) {
-                        error!("Failed to set certificate for {sni}: {e}");
-                        return;
-                    }
-                },
-                Err(e) => {
-                    error!("Invalid certificate for {sni}: {e}");
+            // HIGH: Use pre-parsed native types for performance
+            if let Some(cert) = &cert_info.parsed_cert {
+                if let Err(e) = ssl.set_certificate(cert) {
+                    error!("Failed to set certificate for {sni}: {e}");
                     return;
-                },
+                }
+            } else {
+                // Fallback to parsing if not pre-parsed (should not happen in prod)
+                match X509::from_pem(cert_info.cert_pem.as_bytes()) {
+                    Ok(cert) => {
+                        if let Err(e) = ssl.set_certificate(&cert) {
+                            error!("Failed to set certificate for {sni}: {e}");
+                            return;
+                        }
+                    },
+                    Err(e) => {
+                        error!("Invalid certificate for {sni}: {e}");
+                        return;
+                    },
+                }
             }
 
-            match PKey::private_key_from_pem(cert_info.key_pem.as_bytes()) {
-                Ok(pkey) => {
-                    if let Err(e) = ssl.set_private_key(&pkey) {
-                        error!("Failed to set private key for {sni}: {e}");
-                        return;
-                    }
-                },
-                Err(e) => {
-                    error!("Invalid private key for {sni}: {e}");
+            if let Some(pkey) = &cert_info.parsed_key {
+                if let Err(e) = ssl.set_private_key(pkey) {
+                    error!("Failed to set private key for {sni}: {e}");
                     return;
-                },
+                }
+            } else {
+                // Fallback to parsing if not pre-parsed
+                match PKey::private_key_from_pem(cert_info.key_pem.as_bytes()) {
+                    Ok(pkey) => {
+                        if let Err(e) = ssl.set_private_key(&pkey) {
+                            error!("Failed to set private key for {sni}: {e}");
+                            return;
+                        }
+                    },
+                    Err(e) => {
+                        error!("Invalid private key for {sni}: {e}");
+                        return;
+                    },
+                }
             }
             debug!("Successfully loaded certificate for {sni}");
         }

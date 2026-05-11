@@ -20,7 +20,20 @@ impl StateManager {
         self.state.clone()
     }
 
-    pub async fn update_state(&self, new_state: State) -> Result<()> {
+    pub async fn update_state(&self, mut new_state: State) -> Result<()> {
+        // Pre-parse certificates for performance
+        for cert in new_state.certificates.values_mut() {
+            use openssl::pkey::PKey;
+            use openssl::x509::X509;
+
+            if let Ok(x509) = X509::from_pem(cert.cert_pem.as_bytes()) {
+                cert.parsed_cert = Some(x509);
+            }
+            if let Ok(pkey) = PKey::private_key_from_pem(cert.key_pem.as_bytes()) {
+                cert.parsed_key = Some(pkey);
+            }
+        }
+
         let mut state = self.state.write().await;
         *state = new_state;
         drop(state);

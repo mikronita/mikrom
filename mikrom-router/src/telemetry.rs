@@ -7,12 +7,14 @@ use std::sync::atomic::Ordering;
 use tokio::time::{Duration, interval};
 use tracing::{error, info};
 
+const TELEMETRY_INTERVAL_SECS: u64 = 5;
+
 pub async fn start_telemetry_loop(
     nats: Client,
     metrics_counters: Arc<RouterMetricsCounters>,
     router_id: String,
 ) {
-    let mut interval = interval(Duration::from_secs(5));
+    let mut interval = interval(Duration::from_secs(TELEMETRY_INTERVAL_SECS));
     info!("Starting telemetry loop for router: {router_id}");
 
     loop {

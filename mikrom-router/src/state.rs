@@ -1,3 +1,5 @@
+use openssl::pkey::{PKey, Private};
+use openssl::x509::X509;
 use pingora::lb::LoadBalancer;
 use pingora::lb::selection::RoundRobin;
 use serde::{Deserialize, Serialize};
@@ -30,8 +32,22 @@ impl fmt::Debug for Route {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Certificate {
     pub cert_pem: String,
     pub key_pem: String,
+    #[serde(skip)]
+    pub parsed_cert: Option<X509>,
+    #[serde(skip)]
+    pub parsed_key: Option<PKey<Private>>,
+}
+
+impl fmt::Debug for Certificate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Certificate")
+            .field("cert_pem_len", &self.cert_pem.len())
+            .field("key_pem_len", &self.key_pem.len())
+            .field("parsed", &self.parsed_cert.is_some())
+            .finish_non_exhaustive()
+    }
 }

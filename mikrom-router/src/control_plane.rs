@@ -130,7 +130,15 @@ impl ControlPlane {
             let domain: String = row.get("hostname");
             let cert_pem: String = row.get("cert_chain");
             let key_pem: String = row.get("private_key");
-            certificates.insert(domain, Certificate { cert_pem, key_pem });
+            certificates.insert(
+                domain,
+                Certificate {
+                    cert_pem,
+                    key_pem,
+                    parsed_cert: None,
+                    parsed_key: None,
+                },
+            );
         }
 
         let new_state = State {

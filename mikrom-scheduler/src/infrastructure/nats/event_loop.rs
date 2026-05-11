@@ -146,7 +146,7 @@ impl NatsEventLoop {
         }
 
         // 2. Pre-build ALL potential peers
-        let mut all_peers: Vec<mikrom_proto::scheduler::Peer> = active_workers
+        let all_peers: Vec<mikrom_proto::scheduler::Peer> = active_workers
             .iter()
             .filter(|w| w.wireguard_pubkey.is_some())
             .map(|w| {
@@ -179,9 +179,6 @@ impl NatsEventLoop {
                 }
             })
             .collect();
-
-        // Sort peers by host_id to ensure deterministic output for agent idempotency checks
-        all_peers.sort_by(|a, b| a.host_id.cmp(&b.host_id));
 
         // 3. Build update for each worker (even if inactive, to tell them they are alone if they wake up)
         for w in &workers {

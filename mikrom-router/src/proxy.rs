@@ -17,6 +17,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 pub struct RouterMetricsCounters {
     pub requests_total: AtomicU64,
     pub responses_2xx: AtomicU64,
+    pub responses_3xx: AtomicU64,
     pub responses_4xx: AtomicU64,
     pub responses_5xx: AtomicU64,
 }
@@ -27,6 +28,7 @@ impl RouterMetricsCounters {
         Self {
             requests_total: AtomicU64::new(0),
             responses_2xx: AtomicU64::new(0),
+            responses_3xx: AtomicU64::new(0),
             responses_4xx: AtomicU64::new(0),
             responses_5xx: AtomicU64::new(0),
         }
@@ -90,10 +92,13 @@ struct PingoraHeaderInjector<'a>(&'a mut RequestHeader);
 impl Injector for PingoraHeaderInjector<'_> {
     fn set(&mut self, key: &str, value: String) {
         use http::header::HeaderName;
-        if let Ok(name) = HeaderName::try_from(key)
-            && let Err(e) = self.0.insert_header(name, value)
-        {
-            warn!("Failed to inject tracing header: {e}");
+        match HeaderName::try_from(key) {
+            Ok(name) => {
+                if let Err(e) = self.0.insert_header(name, value) {
+                    warn!("Failed to inject tracing header {key}: {e}");
+                }
+            },
+            Err(e) => warn!("Invalid tracing header key {key}: {e}"),
         }
     }
 }
@@ -229,7 +234,13 @@ impl ProxyHttp for MikromProxy {
             .unwrap_or("");
 
         let lb = self.get_lb(host).await?;
-        let upstream = lb.select(b"", 256).ok_or_else(|| {
+
+        // Use client address as a hash seed for better distribution/stickiness if LB supports it
+        let hash = session
+            .client_addr()
+            .map_or_else(|| b"".to_vec(), |addr| addr.to_string().into_bytes());
+
+        let upstream = lb.select(&hash, 256).ok_or_else(|| {
             Error::explain(
                 ErrorType::InternalError,
                 format!("No healthy upstreams for host: {host}"),
@@ -326,6 +337,8 @@ impl ProxyHttp for MikromProxy {
             let code = response.status.as_u16();
             if (200..300).contains(&code) {
                 self.metrics.responses_2xx.fetch_add(1, Ordering::Relaxed);
+            } else if (300..400).contains(&code) {
+                self.metrics.responses_3xx.fetch_add(1, Ordering::Relaxed);
             } else if (400..500).contains(&code) {
                 self.metrics.responses_4xx.fetch_add(1, Ordering::Relaxed);
             } else if (500..600).contains(&code) {
