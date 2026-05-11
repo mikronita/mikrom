@@ -2,22 +2,13 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { 
-  HiPlus, 
-  HiCollection, 
-  HiExclamationCircle,
-  HiExternalLink,
-  HiCalendar,
-  HiChip,
-  HiDatabase
-} from "react-icons/hi";
-import { FolderPlus } from "lucide-react";
+import { Calendar, Cpu, ExternalLink, FolderPlus, GitBranch, HardDrive, Plus, TriangleAlert } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps } from "@/lib/hooks/use-apps";
 import { useVms, useWatchVms } from "@/lib/hooks/use-vms";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { 
@@ -28,7 +19,7 @@ import {
   EmptyMedia, 
   EmptyTitle 
 } from "@/components/ui/empty";
-import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import { CreateAppModal } from "@/components/CreateAppModal";
 
 const formatDate = (dateStr: string) => {
@@ -55,46 +46,48 @@ export default function ApplicationsPage() {
   return (
     <AuthGuard>
       <DashboardLayout>
-        <div className="space-y-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col gap-2">
+              <h1 className="text-3xl font-semibold tracking-tight">
                 Applications
               </h1>
-              <p className="text-muted-foreground mt-1">
+              <p className="max-w-2xl text-sm text-muted-foreground">
                 Manage your Git-based projects and deployments.
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <Button size="sm" onClick={() => setShowCreateApp(true)}>
-                <HiPlus className="w-4 h-4 mr-2" />
-                New Application
-              </Button>
-            </div>
+            <Button onClick={() => setShowCreateApp(true)}>
+              <Plus data-icon="inline-start" />
+              New Application
+            </Button>
           </div>
 
           {(appsError || vmsError) && (
             <Alert variant="destructive">
-              <HiExclamationCircle className="h-4 w-4" />
+              <TriangleAlert />
               <AlertDescription>
                 {appsError?.message || vmsError?.message || "Failed to load applications"}
               </AlertDescription>
             </Alert>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {isLoadingApps && apps.length === 0 ? (
               Array.from({ length: 6 }).map((_, i) => (
-                <Card key={i} className="overflow-hidden">
-                  <CardHeader className="p-6">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-lg bg-muted animate-pulse" />
-                      <div className="space-y-2">
-                        <div className="h-4 w-24 bg-muted animate-pulse rounded" />
-                        <div className="h-3 w-32 bg-muted animate-pulse rounded" />
+                <Card key={i}>
+                  <CardHeader>
+                    <div className="flex items-start gap-4">
+                      <Skeleton className="size-10 rounded-lg" />
+                      <div className="flex flex-1 flex-col gap-2">
+                        <Skeleton className="h-5 w-32" />
+                        <Skeleton className="h-4 w-full" />
                       </div>
                     </div>
                   </CardHeader>
+                  <CardContent className="flex flex-col gap-3">
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="h-4 w-28" />
+                  </CardContent>
                 </Card>
               ))
             ) : apps.length === 0 && !isLoadingApps ? (
@@ -111,7 +104,7 @@ export default function ApplicationsPage() {
                   </EmptyHeader>
                   <EmptyContent>
                     <Button size="sm" onClick={() => setShowCreateApp(true)}>
-                      <HiPlus className="w-4 h-4 mr-2" />
+                      <Plus data-icon="inline-start" />
                       Connect your first repository
                     </Button>
                   </EmptyContent>
@@ -126,58 +119,52 @@ export default function ApplicationsPage() {
                   <Link 
                     key={app.id} 
                     href={`/apps/${encodeURIComponent(app.name)}`}
-                    className="block group"
+                    className="block"
                   >
-                    <Card 
-                      className="h-full hover:border-primary/50 transition-all duration-200 flex flex-col shadow-sm cursor-pointer group-hover:shadow-md group-hover:-translate-y-1"
-                    >
-                      <CardHeader className="p-6 pb-4">
+                    <Card className="h-full transition-colors hover:bg-muted/30">
+                      <CardHeader>
                         <div className="flex items-start gap-4">
-                          <div className={cn(
-                            "w-12 h-12 rounded-xl flex items-center justify-center border bg-card shadow-sm transition-all group-hover:scale-110 shrink-0",
-                            isRunning ? "text-green-500 border-green-500/20 bg-green-500/5" : "text-muted-foreground bg-muted/20"
-                          )}>
-                            <HiCollection className="w-6 h-6" />
+                          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
+                            <GitBranch />
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <CardTitle className="text-xl font-bold flex items-center gap-2">
-                              <span className="truncate">{app.name}</span>
-                              {isRunning && <Badge variant="success" className="text-[10px] py-0 px-1.5 h-4 uppercase font-bold tracking-wider">Live</Badge>}
-                            </CardTitle>
-                            <div className="text-[10px] text-muted-foreground mt-2 bg-muted/30 px-2 py-1.5 rounded-md border border-dashed leading-relaxed group-hover:bg-muted/50 transition-colors">
-                              <span className="font-mono break-all">
-                                {app.git_url}
-                              </span>
+                          <div className="flex min-w-0 flex-1 flex-col gap-2">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <CardTitle className="truncate text-base">
+                                {app.name}
+                              </CardTitle>
+                              {isRunning && <Badge variant="success" className="uppercase">Live</Badge>}
                             </div>
+                            <CardDescription className="truncate font-mono text-xs">
+                              {app.git_url}
+                            </CardDescription>
                           </div>
                         </div>
                       </CardHeader>
                       
-                      <CardContent className="px-6 pb-6 pt-2 space-y-4">
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <HiCalendar className="w-3.5 h-3.5" />
-                          <span>Created {formatDate(app.created_at)}</span>
-                        </div>
-                        
-                        {app.hostname && (
-                          <div className="flex items-center gap-2 text-xs">
-                            <HiExternalLink className="w-3.5 h-3.5 text-indigo-500" />
-                            <span className="text-indigo-500 hover:underline truncate">
-                              {app.hostname}
+                      <CardContent className="flex flex-col gap-4">
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5">
+                            <Calendar />
+                            Created {formatDate(app.created_at)}
+                          </span>
+                          {app.hostname && (
+                            <span className="inline-flex min-w-0 items-center gap-1.5">
+                              <ExternalLink />
+                              <span className="truncate">{app.hostname}</span>
                             </span>
-                          </div>
-                        )}
+                          )}
+                        </div>
 
                         {isRunning && appVm && (
-                          <div className="flex items-center gap-4 pt-1">
-                            <div className="flex items-center gap-1.5 text-xs font-medium">
-                              <HiChip className="w-3.5 h-3.5 text-orange-500" />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="secondary" className="gap-1.5">
+                              <Cpu />
                               <span>{appVm.vcpus || 1} vCPU</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 text-xs font-medium">
-                              <HiDatabase className="w-3.5 h-3.5 text-blue-500" />
+                            </Badge>
+                            <Badge variant="secondary" className="gap-1.5">
+                              <HardDrive />
                               <span>{appVm.memory_mib || 128} MB</span>
-                            </div>
+                            </Badge>
                           </div>
                         )}
                       </CardContent>

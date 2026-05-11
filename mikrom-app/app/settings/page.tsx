@@ -70,7 +70,7 @@ export default function SettingsPage() {
         toast.dismiss(toastId);
         toast.error("Failed to get installation URL");
       }
-    } catch (err) {
+    } catch {
       toast.dismiss(toastId);
       toast.error("Failed to start GitHub installation");
     }

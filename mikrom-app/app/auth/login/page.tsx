@@ -9,7 +9,7 @@ import { login } from "@/lib/api";
 import { setToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -45,24 +45,24 @@ function LoginForm() {
   };
 
   return (
-    <Card className="w-full max-w-md shadow-2xl border-zinc-200/50 dark:border-zinc-800/50">
-      <CardHeader className="space-y-1 text-center">
-        <div className="flex justify-center mb-4">
-          <div className="w-12 h-12 bg-zinc-900 dark:bg-zinc-50 rounded-2xl flex items-center justify-center shadow-lg">
-            <Box className="w-6 h-6 text-white dark:text-zinc-900" />
+    <Card className="w-full max-w-md">
+      <CardHeader className="items-center text-center">
+        <div className="mb-2 flex justify-center">
+          <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <Box />
           </div>
         </div>
-        <CardTitle className="text-2xl font-bold tracking-tight">Welcome back</CardTitle>
+        <CardTitle className="text-2xl font-semibold tracking-tight">Welcome back</CardTitle>
         <CardDescription>
           Enter your credentials to access your dashboard
         </CardDescription>
       </CardHeader>
       
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {showSuccess && (
-            <Alert variant="default" className="bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-800 dark:text-green-300">
-              <CheckCircle2 className="h-4 w-4" />
+            <Alert>
+              <CheckCircle2 />
               <AlertDescription>
                 Account created! You can now sign in.
               </AlertDescription>
@@ -71,15 +71,16 @@ function LoginForm() {
 
           {error && (
             <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
+              <AlertCircle />
               <AlertDescription>
                 {error}
               </AlertDescription>
             </Alert>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="email">Email address</Label>
+          <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="email">Email address</FieldLabel>
             <Input
               id="email"
               type="email"
@@ -89,11 +90,11 @@ function LoginForm() {
               disabled={isLoading}
               required
             />
-          </div>
+          </Field>
 
-          <div className="space-y-2">
+          <Field>
             <div className="flex items-center justify-between">
-              <Label htmlFor="password">Password</Label>
+              <FieldLabel htmlFor="password">Password</FieldLabel>
               <button type="button" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
                 Forgot password?
               </button>
@@ -107,13 +108,14 @@ function LoginForm() {
               disabled={isLoading}
               required
             />
-          </div>
+          </Field>
+          </FieldGroup>
 
           <div className="flex flex-col gap-4 pt-2">
             <Button type="submit" disabled={isLoading} className="w-full">
               {isLoading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 data-icon="inline-start" className="animate-spin" />
                   Signing in...
                 </>
               ) : (
@@ -135,14 +137,8 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950 px-4 relative overflow-hidden">
-      {/* Background blobs */}
-      <div className="absolute top-0 left-0 w-full h-full -z-10 opacity-30 pointer-events-none">
-        <div className="absolute -top-24 -left-24 w-96 h-96 bg-zinc-200 dark:bg-zinc-800 rounded-full blur-[100px]" />
-        <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-zinc-200 dark:bg-zinc-800 rounded-full blur-[100px]" />
-      </div>
-
-      <Suspense fallback={<Loader2 className="w-8 h-8 animate-spin text-zinc-400" />}>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-muted/30 px-4">
+      <Suspense fallback={<Loader2 className="animate-spin text-muted-foreground" />}>
         <LoginForm />
       </Suspense>
     </div>

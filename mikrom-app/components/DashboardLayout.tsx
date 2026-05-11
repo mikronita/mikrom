@@ -3,15 +3,10 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { 
-  HiSearch,
-  HiBell,
-  HiMoon,
-  HiSun
-} from "react-icons/hi";
+import { Bell, Moon, Search, Sun } from "lucide-react";
 import { useWatchVms } from "@/lib/hooks/use-vms";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { 
   Breadcrumb, 
   BreadcrumbItem, 
@@ -35,10 +30,9 @@ function ThemeToggle() {
       variant="ghost"
       size="icon"
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-      className="h-9 w-9"
     >
-      <HiMoon className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-      <HiSun className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+      <Moon className="rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+      <Sun className="absolute rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
       <span className="sr-only">Toggle theme</span>
     </Button>
   );
@@ -54,7 +48,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-4 border-b bg-background/50 backdrop-blur-md px-6 sticky top-0 z-10">
+        <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-4 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:px-6">
           <div className="flex-1 overflow-hidden">
             <Breadcrumb>
               <BreadcrumbList className="flex-nowrap">
@@ -77,10 +71,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                       <React.Fragment key={href}>
                         <BreadcrumbItem>
                           {isLast ? (
-                            <BreadcrumbPage className="font-bold text-foreground truncate max-w-[100px] sm:max-w-none">{name}</BreadcrumbPage>
+                            <BreadcrumbPage className="max-w-[140px] truncate font-medium text-foreground sm:max-w-none">{name}</BreadcrumbPage>
                           ) : (
                             <BreadcrumbLink asChild className="hidden sm:block">
-                              <Link href={href} className="hover:text-foreground transition-colors">{name}</Link>
+                              <Link href={href}>{name}</Link>
                             </BreadcrumbLink>
                           )}
                         </BreadcrumbItem>
@@ -92,23 +86,24 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             </Breadcrumb>
           </div>
           <div className="flex items-center gap-4">
-            <div className="hidden lg:flex relative w-64">
-              <HiSearch className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="Search..."
-                className="pl-9 h-9 bg-muted/50 border-none"
-              />
+            <div className="hidden w-64 lg:block">
+              <InputGroup>
+                <InputGroupAddon>
+                  <Search />
+                </InputGroupAddon>
+                <InputGroupInput type="search" placeholder="Search..." />
+              </InputGroup>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full">
-                <HiBell className="h-5 w-5" />
+              <Button variant="ghost" size="icon">
+                <Bell />
+                <span className="sr-only">Notifications</span>
               </Button>
               <ThemeToggle />
             </div>
           </div>
         </header>
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-4 md:p-6">
           <div className="mx-auto w-full max-w-7xl">
             {children}
           </div>

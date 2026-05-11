@@ -2,8 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
-import { FaGithub, FaGlobe } from "react-icons/fa";
+import { GitPullRequest, Globe, Loader2, Lock } from "lucide-react";
 import { 
   Dialog, 
   DialogContent, 
@@ -105,7 +104,7 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
         toast.dismiss(toastId);
         toast.error("Failed to get installation URL");
       }
-    } catch (err) {
+    } catch {
       toast.dismiss(toastId);
       toast.error("Failed to start GitHub installation");
     }
@@ -117,7 +116,7 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
         <DialogHeader>
           <DialogTitle>Create New Application</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-6 pt-4">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-6 pt-2">
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="app_name">App Name</FieldLabel>
@@ -133,11 +132,11 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="manual">
-                  <FaGlobe className="size-4 mr-2" />
+                  <Globe data-icon="inline-start" />
                   Manual URL
                 </TabsTrigger>
                 <TabsTrigger value="github">
-                  <FaGithub className="size-4 mr-2" />
+                  <GitPullRequest data-icon="inline-start" />
                   GitHub
                 </TabsTrigger>
               </TabsList>
@@ -162,8 +161,8 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
                 <Field>
                   <FieldLabel htmlFor="github_repo">Select Repository</FieldLabel>
                   {isLoadingRepos ? (
-                    <div className="flex items-center justify-center p-4 border rounded-md">
-                      <Loader2 className="size-4 animate-spin mr-2" />
+                    <div className="flex items-center justify-center gap-2 rounded-md border p-4 text-sm text-muted-foreground">
+                      <Loader2 className="animate-spin" />
                       Loading repositories...
                     </div>
                   ) : githubRepos && githubRepos.length > 0 ? (
@@ -176,7 +175,7 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
                           {githubRepos.map(repo => (
                             <SelectItem key={repo.id} value={repo.id.toString()}>
                               <div className="flex items-center gap-2">
-                                {repo.private && <Loader2 className="size-3 text-muted-foreground" /> /* Just as a placeholder for lock icon */}
+                                {repo.private && <Lock />}
                                 <span>{repo.full_name}</span>
                               </div>
                             </SelectItem>
@@ -185,7 +184,7 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
                       </SelectContent>
                     </Select>
                   ) : (
-                    <div className="text-center p-6 border rounded-md space-y-4">
+                    <div className="flex flex-col items-center gap-4 rounded-md border p-6 text-center">
                       <p className="text-sm text-muted-foreground">No GitHub accounts connected.</p>
                       <Button 
                         size="sm" 
@@ -208,7 +207,7 @@ export function CreateAppModal({ onClose }: CreateAppModalProps) {
             <Button type="submit" disabled={createAppMutation.isPending || (activeTab === "github" && !selectedRepoId)}>
               {createAppMutation.isPending ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Loader2 data-icon="inline-start" className="animate-spin" />
                   Creating...
                 </>
               ) : (
