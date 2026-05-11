@@ -150,7 +150,7 @@ export default function NetworkingPage() {
   if (!mounted) {
     return (
       <DashboardLayout>
-        <div className="flex flex-col gap-6 p-6">
+        <div className="flex flex-col gap-6">
           <Skeleton className="h-10 w-64" />
           <div className="grid gap-6 md:grid-cols-3">
             <Skeleton className="h-32 w-full" />
@@ -165,7 +165,7 @@ export default function NetworkingPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col gap-6 p-6">
+      <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3">
             <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
@@ -176,21 +176,21 @@ export default function NetworkingPage() {
             </h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            Manage your private L3 mesh network and Security Groups.
+            Manage your private L3 mesh network and security groups.
           </p>
         </div>
 
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           <Card className="overflow-hidden border-2 transition-all hover:border-primary/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 bg-muted/30">
-              <CardTitle className="text-sm font-bold uppercase tracking-wider">VPC Prefix</CardTitle>
+              <CardTitle className="text-sm font-medium">VPC prefix</CardTitle>
               <HiOutlineGlobeAlt className="size-5 text-primary" />
             </CardHeader>
             <CardContent className="pt-4">
               {profileLoading ? (
                 <Skeleton className="h-8 w-full" />
               ) : (
-                <div className="text-2xl font-black font-mono break-all">
+                <div className="break-all font-mono text-2xl font-semibold">
                   {profile?.vpc_ipv6_prefix || "Not assigned"}
                 </div>
               )}
@@ -202,14 +202,14 @@ export default function NetworkingPage() {
 
           <Card className="overflow-hidden border-2 transition-all hover:border-primary/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 bg-muted/30">
-              <CardTitle className="text-sm font-bold uppercase tracking-wider">Active Peers</CardTitle>
+              <CardTitle className="text-sm font-medium">Active peers</CardTitle>
               <HiServer className="size-5 text-primary" />
             </CardHeader>
             <CardContent className="pt-4">
               {meshLoading ? (
                 <Skeleton className="h-8 w-16" />
               ) : (
-                <div className="text-3xl font-black">{mesh?.total_workers || 0}</div>
+                <div className="text-3xl font-semibold">{mesh?.total_workers || 0}</div>
               )}
               <p className="text-xs text-muted-foreground mt-2 font-medium">
                 Agent nodes currently in your mesh network.
@@ -219,13 +219,13 @@ export default function NetworkingPage() {
 
           <Card className="overflow-hidden border-2 transition-all hover:border-primary/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 bg-muted/30">
-              <CardTitle className="text-sm font-bold uppercase tracking-wider">Mesh Status</CardTitle>
-              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 font-bold">
-                ENCRYPTED
+              <CardTitle className="text-sm font-medium">Mesh status</CardTitle>
+              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 font-medium">
+                Encrypted
               </Badge>
             </CardHeader>
             <CardContent className="pt-4">
-              <div className="text-2xl font-black">WireGuard</div>
+              <div className="text-2xl font-semibold">WireGuard</div>
               <p className="text-xs text-muted-foreground mt-2 font-medium">
                 All internal traffic is secured via mTLS and WireGuard.
               </p>
@@ -251,11 +251,11 @@ export default function NetworkingPage() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent bg-muted/20">
-                  <TableHead className="font-bold uppercase text-[10px] tracking-widest px-6 h-10">Application</TableHead>
-                  <TableHead className="font-bold uppercase text-[10px] tracking-widest h-10">VM ID</TableHead>
-                  <TableHead className="font-bold uppercase text-[10px] tracking-widest h-10">IPv6 Address</TableHead>
-                  <TableHead className="font-bold uppercase text-[10px] tracking-widest h-10">Host</TableHead>
-                  <TableHead className="font-bold uppercase text-[10px] tracking-widest h-10 text-right pr-6">Status</TableHead>
+                  <TableHead className="h-10 px-6 font-medium">Application</TableHead>
+                  <TableHead className="h-10 font-medium">VM ID</TableHead>
+                  <TableHead className="h-10 font-medium">IPv6 address</TableHead>
+                  <TableHead className="h-10 font-medium">Host</TableHead>
+                  <TableHead className="h-10 pr-6 text-right font-medium">Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -285,8 +285,8 @@ export default function NetworkingPage() {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground font-medium">{deployment.host_id}</TableCell>
                       <TableCell className="text-right pr-6">
-                        <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 font-bold uppercase text-[10px]">
-                          {deployment.status}
+                        <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 font-medium capitalize">
+                          {deployment.status.toLowerCase()}
                         </Badge>
                       </TableCell>
                     </TableRow>
@@ -303,7 +303,7 @@ export default function NetworkingPage() {
               <div>
                 <CardTitle className="text-lg font-bold flex items-center gap-2">
                   <HiOutlineShieldCheck className="size-5" />
-                  Security Groups
+                  Security groups
                 </CardTitle>
                 <CardDescription className="font-medium mt-1">
                   Distributed L3/L4 firewalling powered by eBPF.
@@ -312,7 +312,7 @@ export default function NetworkingPage() {
               <div className="flex items-center gap-3">
                 <Select onValueChange={(val) => setSelectedApp(val)}>
                   <SelectTrigger className="w-[200px] h-9 font-bold">
-                    <SelectValue placeholder="Select Application" />
+                    <SelectValue placeholder="Select application" />
                   </SelectTrigger>
                   <SelectContent>
                     {apps?.map(app => (
@@ -325,12 +325,12 @@ export default function NetworkingPage() {
                     <DialogTrigger asChild>
                       <Button size="sm" className="font-bold gap-2">
                         <HiPlus className="size-4" />
-                        Add Rule
+                        Add rule
                       </Button>
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>Add Security Rule</DialogTitle>
+                        <DialogTitle>Add security rule</DialogTitle>
                         <DialogDescription>
                           Create a new firewall rule for <strong>{selectedApp}</strong>.
                         </DialogDescription>
@@ -354,7 +354,7 @@ export default function NetworkingPage() {
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="grid gap-2">
-                            <Label htmlFor="port_start">Port Start</Label>
+                            <Label htmlFor="port_start">Port start</Label>
                             <Input 
                               id="port_start" 
                               type="number" 
@@ -363,7 +363,7 @@ export default function NetworkingPage() {
                             />
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="port_end">Port End</Label>
+                            <Label htmlFor="port_end">Port end</Label>
                             <Input 
                               id="port_end" 
                               type="number"
@@ -382,8 +382,8 @@ export default function NetworkingPage() {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="allow">ALLOW</SelectItem>
-                              <SelectItem value="deny">DENY</SelectItem>
+                              <SelectItem value="allow">Allow</SelectItem>
+                              <SelectItem value="deny">Deny</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -394,7 +394,7 @@ export default function NetworkingPage() {
                           disabled={createRuleMutation.isPending}
                           className="font-bold w-full"
                         >
-                          {createRuleMutation.isPending ? "Creating..." : "Create Rule"}
+                          {createRuleMutation.isPending ? "Creating..." : "Create rule"}
                         </Button>
                       </DialogFooter>
                     </DialogContent>
@@ -407,7 +407,7 @@ export default function NetworkingPage() {
             {!selectedApp ? (
               <div className="flex flex-col items-center justify-center h-48 text-muted-foreground p-6 text-center">
                 <HiInformationCircle className="size-12 opacity-20 mb-4" />
-                <p className="font-bold">Select an application to manage its Security Group rules.</p>
+                <p className="font-bold">Select an application to manage its security group rules.</p>
                 <p className="text-sm mt-1">Rules are applied to all active microVMs of the selected app.</p>
               </div>
             ) : rulesLoading ? (
@@ -424,27 +424,27 @@ export default function NetworkingPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent bg-muted/20">
-                    <TableHead className="font-bold uppercase text-[10px] tracking-widest px-6 h-10">Protocol</TableHead>
-                    <TableHead className="font-bold uppercase text-[10px] tracking-widest h-10">Port Range</TableHead>
-                    <TableHead className="font-bold uppercase text-[10px] tracking-widest h-10">Action</TableHead>
-                    <TableHead className="font-bold uppercase text-[10px] tracking-widest h-10 text-right pr-6">Actions</TableHead>
+                    <TableHead className="h-10 px-6 font-medium">Protocol</TableHead>
+                    <TableHead className="h-10 font-medium">Port range</TableHead>
+                    <TableHead className="h-10 font-medium">Action</TableHead>
+                    <TableHead className="h-10 pr-6 text-right font-medium">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {rules?.map((rule) => (
                     <TableRow key={rule.id} className="group hover:bg-muted/50 transition-colors">
-                      <TableCell className="px-6 font-black uppercase">{rule.protocol}</TableCell>
+                      <TableCell className="px-6 font-medium">{rule.protocol}</TableCell>
                       <TableCell className="font-mono">
-                        {rule.protocol === "any" ? "All Ports" : rule.port_start === rule.port_end ? rule.port_start : `${rule.port_start}-${rule.port_end}`}
+                        {rule.protocol === "any" ? "All ports" : rule.port_start === rule.port_end ? rule.port_start : `${rule.port_start}-${rule.port_end}`}
                       </TableCell>
                       <TableCell>
                         <Badge 
                           className={rule.action === "allow" 
-                            ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 font-black" 
-                            : "bg-destructive/10 text-destructive border-destructive/20 font-black"
+                            ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 font-medium"
+                            : "bg-destructive/10 text-destructive border-destructive/20 font-medium"
                           }
                         >
-                          {rule.action.toUpperCase()}
+                          {rule.action}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right pr-6">
