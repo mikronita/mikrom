@@ -17,9 +17,8 @@ deb-agent: build-init ## Build Debian package for mikrom-agent
 	cd mikrom-agent && cargo deb --no-build
 
 .PHONY: deb-router
-deb-router: ## Build Debian package for mikrom-router (Caddy 2.11)
-	docker build --no-cache -t mikrom-deb-builder -f mikrom-router/Dockerfile.deb .
-	docker run --rm -v $(PWD):/out mikrom-deb-builder
+deb-router: ## Build Debian package for mikrom-router (Rust/Pingora)
+	cd mikrom-router && ./package.sh
 
 .PHONY: fmt
 fmt: ## Format Rust code
@@ -74,7 +73,8 @@ test-all-crates: ## Run unit tests for all crates
 	cargo nextest run -p mikrom-builder && \
 	cargo nextest run -p mikrom-api --features test-utils && \
 	cargo nextest run -p mikrom-init && \
-	cargo nextest run -p mikrom-telemetry
+	cargo nextest run -p mikrom-telemetry && \
+	cargo nextest run -p mikrom-router
 
 .PHONY: test-all
 test-all: test-all-crates test-integration ## Run unit + integration tests
@@ -107,8 +107,8 @@ run-telemetry: ## Run mikrom-telemetry with watch
 	cd mikrom-telemetry && cargo watch -x run
 
 .PHONY: run-router
-run-router: ## Run mikrom-router
-	cd mikrom-router && go run ./cmd/mikrom-caddy run --config Caddyfile.test --adapter caddyfile
+run-router: ## Run mikrom-router (Rust/Pingora)
+	cd mikrom-router && cargo watch -x run
 
 .PHONY: build-init
 build-init: ## Build mikrom-init as a static binary (musl)
@@ -200,28 +200,12 @@ db-stop: ## Stop PostgreSQL instance
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 
-.PHONY: fmt-go
-fmt-go: ## Format Go code
-	cd mikrom-router && go fmt ./...
-
-.PHONY: fmt-check-go
-fmt-check-go: ## Check Go formatting
-	cd mikrom-router && [ -z "$$(gofmt -l .)" ] || (echo "Go files not formatted:" && gofmt -l . && exit 1)
-
-.PHONY: vet-go
-vet-go: ## Run go vet
-	cd mikrom-router && go vet ./...
-
-.PHONY: test-go
-test-go: ## Run Go tests
-	cd mikrom-router && go test ./...
-
 .PHONY: clean
 clean: ## Remove Rust build artefacts
 	cargo clean
 
 .PHONY: check
-check: fmt-check clippy test fmt-check-go vet-go test-go ## Run all checks (Rust + Go)
+check: fmt-check clippy test ## Run all checks (Rust)
 
 .PHONY: help
 help: ## Show this help
