@@ -27,6 +27,7 @@ import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarGroupContent,
+  SidebarRail,
 } from "@/components/ui/sidebar";
 
 export function AppSidebar() {
@@ -58,16 +59,16 @@ export function AppSidebar() {
   ];
 
   return (
-    <Sidebar>
-      <SidebarHeader className="flex h-16 items-center border-b p-0">
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="flex h-16 items-center border-b p-2">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild className="px-4 md:h-14">
+            <SidebarMenuButton size="lg" asChild className="md:h-12 group-data-[collapsible=icon]:!size-8">
               <Link href="/" className="flex items-center gap-3">
                 <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
                   <Shield />
                 </div>
-                <div className="flex flex-col overflow-hidden">
+                <div className="flex flex-col overflow-hidden group-data-[collapsible=icon]:hidden">
                   <span className="whitespace-nowrap text-sm font-semibold leading-none">Mikrom</span>
                   <span className="mt-1 text-xs text-muted-foreground">Cloud Platform</span>
                 </div>
@@ -92,7 +93,7 @@ export function AppSidebar() {
                   >
                     <Link href={item.href} className="flex items-center">
                       <item.icon />
-                      <span>{item.name}</span>
+                      <span className="group-data-[collapsible=icon]:hidden">{item.name}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -113,11 +114,11 @@ export function AppSidebar() {
                   <Avatar className="size-8 shrink-0 rounded-lg">
                     <AvatarFallback className="rounded-lg text-xs font-medium">{initials}</AvatarFallback>
                   </Avatar>
-                  <div className="grid flex-1 text-left text-sm leading-tight">
+                  <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
                     <span className="truncate font-medium">{fullName}</span>
                     <span className="truncate text-xs text-muted-foreground">{profile?.email}</span>
                   </div>
-                  <ChevronsUpDown className="ml-auto" />
+                  <ChevronsUpDown className="ml-auto group-data-[collapsible=icon]:hidden" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -151,6 +152,7 @@ export function AppSidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   );
 }
