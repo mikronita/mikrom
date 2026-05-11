@@ -8,6 +8,9 @@ pub mod tls;
 #[cfg(test)]
 mod proxy_tests;
 
+#[cfg(test)]
+mod integration_tests;
+
 use anyhow::Result;
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
