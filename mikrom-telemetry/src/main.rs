@@ -244,10 +244,15 @@ impl TelemetryService {
     }
 
     async fn listen_vm_metrics(self: Arc<Self>) -> Result<()> {
-        let mut sub = self.nats.subscribe("mikrom.metrics.vms.*").await?;
-        tracing::info!("Listening for VM metrics on mikrom.metrics.vms.*");
+        let mut sub = self.nats.subscribe("mikrom.metrics.>").await?;
+        tracing::info!("Listening for VM metrics on mikrom.metrics.>");
 
         while let Some(msg) = sub.next().await {
+            // Check if it's router metrics (handled elsewhere)
+            if msg.subject.starts_with("mikrom.metrics.router.") {
+                continue;
+            }
+
             let Ok(metrics) = serde_json::from_slice::<VmMetrics>(&msg.payload) else {
                 continue;
             };
@@ -294,6 +299,9 @@ impl TelemetryService {
             self.router_responses_gauge
                 .with_label_values(&[router_id, "2xx"])
                 .set(metrics.responses_2xx as f64);
+            self.router_responses_gauge
+                .with_label_values(&[router_id, "3xx"])
+                .set(metrics.responses_3xx as f64);
             self.router_responses_gauge
                 .with_label_values(&[router_id, "4xx"])
                 .set(metrics.responses_4xx as f64);

@@ -148,28 +148,29 @@ impl BuilderServer {
         nats: async_nats::Client,
         mut rx: mpsc::Receiver<GitMetadata>,
     ) {
-        if let Some(meta) = rx.recv().await
-            && let Some(mut info) = builds.get_mut(&build_id)
-        {
-            info.git_commit_hash = Some(meta.hash.clone());
-            info.git_commit_message = Some(meta.message.clone());
-            info.git_branch = Some(meta.branch.clone());
+        #[allow(clippy::collapsible_if)]
+        if let Some(meta) = rx.recv().await {
+            if let Some(mut info) = builds.get_mut(&build_id) {
+                info.git_commit_hash = Some(meta.hash.clone());
+                info.git_commit_message = Some(meta.message.clone());
+                info.git_branch = Some(meta.branch.clone());
 
-            let progress = GetBuildStatusResponse {
-                build_id: build_id.clone(),
-                status: BuildStatus::Building as i32,
-                git_commit_hash: meta.hash,
-                git_commit_message: meta.message,
-                git_branch: meta.branch,
-                ..Default::default()
-            };
+                let progress = GetBuildStatusResponse {
+                    build_id: build_id.clone(),
+                    status: BuildStatus::Building as i32,
+                    git_commit_hash: meta.hash,
+                    git_commit_message: meta.message,
+                    git_branch: meta.branch,
+                    ..Default::default()
+                };
 
-            let _ = nats
-                .publish(
-                    format!("mikrom.builder.{}.status", build_id),
-                    progress.encode_to_vec().into(),
-                )
-                .await;
+                let _ = nats
+                    .publish(
+                        format!("mikrom.builder.{}.status", build_id),
+                        progress.encode_to_vec().into(),
+                    )
+                    .await;
+            }
         }
     }
 

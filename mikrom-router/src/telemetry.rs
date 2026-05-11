@@ -20,13 +20,22 @@ pub async fn start_telemetry_loop(
     loop {
         interval.tick().await;
 
+        let requests_total = metrics_counters.requests_total.load(Ordering::Relaxed);
+        #[allow(clippy::cast_precision_loss)]
+        let latency_avg_ms = if requests_total > 0 {
+            metrics_counters.latency_sum_ms.load(Ordering::Relaxed) as f32 / requests_total as f32
+        } else {
+            0.0
+        };
+
         let metrics = RouterMetrics {
             router_id: router_id.clone(),
-            requests_total: metrics_counters.requests_total.load(Ordering::Relaxed),
+            requests_total,
             responses_2xx: metrics_counters.responses_2xx.load(Ordering::Relaxed),
+            responses_3xx: metrics_counters.responses_3xx.load(Ordering::Relaxed),
             responses_4xx: metrics_counters.responses_4xx.load(Ordering::Relaxed),
             responses_5xx: metrics_counters.responses_5xx.load(Ordering::Relaxed),
-            latency_avg_ms: 0.0,
+            latency_avg_ms: f64::from(latency_avg_ms),
             timestamp: chrono::Utc::now().timestamp(),
         };
 

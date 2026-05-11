@@ -38,6 +38,8 @@ pub struct RouterMetrics {
     pub requests_total: u64,
     #[prost(uint64, tag = "3")]
     pub responses_2xx: u64,
+    #[prost(uint64, tag = "8")]
+    pub responses_3xx: u64,
     #[prost(uint64, tag = "4")]
     pub responses_4xx: u64,
     #[prost(uint64, tag = "5")]

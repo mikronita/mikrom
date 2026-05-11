@@ -20,6 +20,7 @@ pub struct RouterMetricsCounters {
     pub responses_3xx: AtomicU64,
     pub responses_4xx: AtomicU64,
     pub responses_5xx: AtomicU64,
+    pub latency_sum_ms: AtomicU64,
 }
 
 impl RouterMetricsCounters {
@@ -31,6 +32,7 @@ impl RouterMetricsCounters {
             responses_3xx: AtomicU64::new(0),
             responses_4xx: AtomicU64::new(0),
             responses_5xx: AtomicU64::new(0),
+            latency_sum_ms: AtomicU64::new(0),
         }
     }
 }
@@ -51,6 +53,7 @@ pub struct MikromProxy {
 
 pub struct MikromCtx {
     pub span: tracing::Span,
+    pub request_start_time: chrono::DateTime<chrono::Utc>,
 }
 
 impl MikromProxy {
@@ -125,6 +128,7 @@ impl ProxyHttp for MikromProxy {
     fn new_ctx(&self) -> Self::CTX {
         MikromCtx {
             span: tracing::Span::none(),
+            request_start_time: chrono::Utc::now(),
         }
     }
 
@@ -259,12 +263,13 @@ impl ProxyHttp for MikromProxy {
         ctx: &mut Self::CTX,
     ) -> Result<()> {
         // 1. Add standard proxy headers
-        if let Some(addr) = session.client_addr()
-            && let Some(inet) = addr.as_inet()
-        {
-            let ip = inet.ip().to_string();
-            upstream_request.insert_header("X-Forwarded-For", &ip)?;
-            upstream_request.insert_header("X-Real-IP", &ip)?;
+        #[allow(clippy::collapsible_if)]
+        if let Some(addr) = session.client_addr() {
+            if let Some(inet) = addr.as_inet() {
+                let ip = inet.ip().to_string();
+                upstream_request.insert_header("X-Forwarded-For", &ip)?;
+                upstream_request.insert_header("X-Real-IP", &ip)?;
+            }
         }
 
         let is_tls = session
@@ -330,8 +335,16 @@ impl ProxyHttp for MikromProxy {
         Ok(())
     }
 
-    async fn logging(&self, session: &mut Session, _e: Option<&Error>, _ctx: &mut Self::CTX) {
+    async fn logging(&self, session: &mut Session, _e: Option<&Error>, ctx: &mut Self::CTX) {
         self.metrics.requests_total.fetch_add(1, Ordering::Relaxed);
+
+        // Record latency
+        let latency = chrono::Utc::now()
+            .signed_duration_since(ctx.request_start_time)
+            .num_milliseconds();
+        self.metrics
+            .latency_sum_ms
+            .fetch_add(latency.max(0).cast_unsigned(), Ordering::Relaxed);
 
         if let Some(response) = session.response_written() {
             let code = response.status.as_u16();

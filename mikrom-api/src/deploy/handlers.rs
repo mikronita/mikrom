@@ -147,61 +147,64 @@ pub async fn create_app_handler(
         "Checking if automatic GitHub webhook should be created"
     );
 
-    if let Some(installation_id) = app.github_installation_id
-        && let Some(repo_full_name) = &app.github_repo_full_name
-        && let Some(github_app_id) = &state.github_app_id
-        && let Some(github_private_key) = &state.github_private_key
-    {
-        tracing::info!(app_name = %app.name, "Initiating automatic GitHub webhook creation");
-        let webhook_url = if let Some(base) = &state.github_webhook_url_base {
-            if base.contains("smee.io") {
-                // Smee.io doesn't support subpaths on the public URL
-                base.to_string()
-            } else {
-                format!(
-                    "{}/v1/webhooks/github/{}",
-                    base.trim_end_matches('/'),
-                    app.name
-                )
-            }
-        } else {
-            // Fallback: Try to guess the API URL from the frontend URL
-            let url = format!(
-                "{}/v1/webhooks/github/{}",
-                state.frontend_url.replace("3000", "5001"),
-                app.name
-            );
-            tracing::warn!(
-                app_name = %app.name,
-                %url,
-                "GITHUB_WEBHOOK_URL_BASE is missing, using fragile fallback URL guessing"
-            );
-            url
-        };
+    #[allow(clippy::collapsible_if)]
+    if let Some(installation_id) = app.github_installation_id {
+        if let Some(repo_full_name) = &app.github_repo_full_name {
+            if let Some(github_app_id) = &state.github_app_id {
+                if let Some(github_private_key) = &state.github_private_key {
+                    tracing::info!(app_name = %app.name, "Initiating automatic GitHub webhook creation");
+                    let webhook_url = if let Some(base) = &state.github_webhook_url_base {
+                        if base.contains("smee.io") {
+                            // Smee.io doesn't support subpaths on the public URL
+                            base.to_string()
+                        } else {
+                            format!(
+                                "{}/v1/webhooks/github/{}",
+                                base.trim_end_matches('/'),
+                                app.name
+                            )
+                        }
+                    } else {
+                        // Fallback: Try to guess the API URL from the frontend URL
+                        let url = format!(
+                            "{}/v1/webhooks/github/{}",
+                            state.frontend_url.replace("3000", "5001"),
+                            app.name
+                        );
+                        tracing::warn!(
+                            app_name = %app.name,
+                            %url,
+                            "GITHUB_WEBHOOK_URL_BASE is missing, using fragile fallback URL guessing"
+                        );
+                        url
+                    };
 
-        // Use a background task to not block the response
-        let github_app_id = github_app_id.clone();
-        let github_private_key = github_private_key.clone();
-        let repo_full_name = repo_full_name.clone();
-        let webhook_secret = webhook_secret.clone();
+                    // Use a background task to not block the response
+                    let github_app_id = github_app_id.clone();
+                    let github_private_key = github_private_key.clone();
+                    let repo_full_name = repo_full_name.clone();
+                    let webhook_secret = webhook_secret.clone();
 
-        let app_id = app.id;
-        tokio::spawn(async move {
-            if let Err(e) = crate::github::create_repository_webhook(
-                &github_app_id,
-                &github_private_key,
-                installation_id,
-                &repo_full_name,
-                &webhook_url,
-                &webhook_secret,
-            )
-            .await
-            {
-                tracing::error!(%app_id, error = %e, "Failed to automatically create GitHub webhook");
-            } else {
-                tracing::info!(app_name = %payload.name, "Successfully created automatic GitHub webhook");
+                    let app_id = app.id;
+                    tokio::spawn(async move {
+                        if let Err(e) = crate::github::create_repository_webhook(
+                            &github_app_id,
+                            &github_private_key,
+                            installation_id,
+                            &repo_full_name,
+                            &webhook_url,
+                            &webhook_secret,
+                        )
+                        .await
+                        {
+                            tracing::error!(%app_id, error = %e, "Failed to automatically create GitHub webhook");
+                        } else {
+                            tracing::info!(app_name = %payload.name, "Successfully created automatic GitHub webhook");
+                        }
+                    });
+                }
             }
-        });
+        }
     }
 
     Ok((
@@ -601,43 +604,47 @@ pub async fn deploy_app_version_handler(
 
     // Try to fetch latest git metadata if linked to GitHub
     let mut git_metadata = None;
-    if let Some(installation_id) = app.github_installation_id
-        && let Some(repo_full_name) = &app.github_repo_full_name
-    {
-        match (&state.github_app_id, &state.github_private_key) {
-            (Some(github_app_id), Some(github_private_key)) => {
-                // TODO: Fetch the repository's default branch or use a configured branch
-                // instead of hardcoding main/master.
-                // For now, we try main then master as a sensible default.
-                match crate::github::get_repo_latest_commit(
-                    github_app_id,
-                    github_private_key,
-                    installation_id,
-                    repo_full_name,
-                    "main",
-                )
-                .await
-                {
-                    Ok(meta) => git_metadata = Some(meta),
-                    Err(_) => {
-                        // Try master if main fails
-                        if let Ok(meta) = crate::github::get_repo_latest_commit(
-                            github_app_id,
-                            github_private_key,
-                            installation_id,
-                            repo_full_name,
-                            "master",
-                        )
-                        .await
-                        {
-                            git_metadata = Some(meta);
-                        }
-                    },
-                }
-            },
-            _ => {
-                tracing::warn!(app_id = %app.id, "GitHub linked but API credentials missing in state")
-            },
+    #[allow(clippy::collapsible_if)]
+    if let Some(installation_id) = app.github_installation_id {
+        if let Some(repo_full_name) = &app.github_repo_full_name {
+            match (&state.github_app_id, &state.github_private_key) {
+                (Some(github_app_id), Some(github_private_key)) => {
+                    // TODO: Fetch the repository's default branch or use a configured branch
+                    // instead of hardcoding main/master.
+                    // For now, we try main then master as a sensible default.
+                    match crate::github::get_repo_latest_commit(
+                        github_app_id,
+                        github_private_key,
+                        installation_id,
+                        repo_full_name,
+                        "main",
+                    )
+                    .await
+                    {
+                        Ok(meta) => git_metadata = Some(meta),
+                        Err(_) => {
+                            // Try master if main fails
+                            if let Ok(meta) = crate::github::get_repo_latest_commit(
+                                github_app_id,
+                                github_private_key,
+                                installation_id,
+                                repo_full_name,
+                                "master",
+                            )
+                            .await
+                            {
+                                git_metadata = Some(meta);
+                            }
+                        },
+                    }
+                },
+                _ => {
+                    tracing::warn!(
+                        app_id = %app.id,
+                        "GitHub linked but API credentials missing in state"
+                    )
+                },
+            }
         }
     }
 

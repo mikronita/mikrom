@@ -41,12 +41,13 @@ impl DeploymentService {
         let vm_id = Uuid::new_v4().to_string();
 
         // 1. Allocate 6PN IPv6 if possible
-        if !vpc_ipv6_prefix.is_empty()
-            && let Ok(prefix) = vpc_ipv6_prefix.parse::<std::net::Ipv6Addr>()
-        {
-            let ipv6 = mikrom_proto::sixpn::SixPn::allocate_vm_ipv6(prefix, &job_id);
-            config.ipv6_address = Some(ipv6.to_string());
-            config.ipv6_gateway = Some("fe80::1".to_string());
+        #[allow(clippy::collapsible_if)]
+        if !vpc_ipv6_prefix.is_empty() {
+            if let Ok(prefix) = vpc_ipv6_prefix.parse::<std::net::Ipv6Addr>() {
+                let ipv6 = mikrom_proto::sixpn::SixPn::allocate_vm_ipv6(prefix, &job_id);
+                config.ipv6_address = Some(ipv6.to_string());
+                config.ipv6_gateway = Some("fe80::1".to_string());
+            }
         }
 
         // 2. Select best worker
@@ -128,12 +129,14 @@ impl DeploymentService {
         let jobs = self.job_repo.list_jobs(None, None, None).await?;
         let mut app_counts_per_host: HashMap<String, u32> = HashMap::new();
         for job in jobs {
+            #[allow(clippy::collapsible_if)]
             if job.app_id == app_id
                 && job.status != JobStatus::Failed
                 && job.status != JobStatus::Cancelled
-                && let Some(host_id) = &job.host_id
             {
-                *app_counts_per_host.entry(host_id.clone()).or_insert(0) += 1;
+                if let Some(host_id) = &job.host_id {
+                    *app_counts_per_host.entry(host_id.clone()).or_insert(0) += 1;
+                }
             }
         }
 
@@ -178,14 +181,15 @@ impl DeploymentService {
 
         for old_job in other_jobs {
             tracing::info!(new_job_id = %current_job_id, old_job_id = %old_job.job_id, app_id = %app_id, "Pausing existing cluster instance for exclusivity");
-            if let Some(host_id) = &old_job.host_id
-                && let Some(vm_id) = &old_job.vm_id
-            {
-                let _ = self.agent_client.pause_vm(host_id, vm_id).await;
-                let _ = self
-                    .job_repo
-                    .update_job_status(&old_job.job_id, JobStatus::Stopped)
-                    .await;
+            #[allow(clippy::collapsible_if)]
+            if let Some(host_id) = &old_job.host_id {
+                if let Some(vm_id) = &old_job.vm_id {
+                    let _ = self.agent_client.pause_vm(host_id, vm_id).await;
+                    let _ = self
+                        .job_repo
+                        .update_job_status(&old_job.job_id, JobStatus::Stopped)
+                        .await;
+                }
             }
         }
         Ok(())

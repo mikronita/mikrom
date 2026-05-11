@@ -179,7 +179,8 @@ impl WireGuardManager {
             if existing_conf != conf {
                 tokio::fs::write(&conf_path, &conf).await?;
                 use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600))?;
+                tokio::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600))
+                    .await?;
             } else {
                 debug!(
                     "WireGuard config for {} is unchanged, skipping sync",
@@ -190,7 +191,7 @@ impl WireGuardManager {
         } else {
             tokio::fs::write(&conf_path, &conf).await?;
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600))?;
+            tokio::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600)).await?;
         }
 
         // Sync configuration using wg-quick strip and wg syncconf
