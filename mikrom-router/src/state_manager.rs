@@ -1,17 +1,75 @@
-use crate::state::State;
+use crate::state::{Certificate, Route, State};
 use anyhow::Result;
+use pingora::lb::LoadBalancer;
+use pingora::lb::selection::RoundRobin;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::{error, info, warn};
+
+#[derive(Serialize, Deserialize)]
+struct SerializableState {
+    pub routes: HashMap<String, Vec<String>>, // host -> targets
+    pub acme_tokens: HashMap<String, String>,
+    pub certificates: HashMap<String, Certificate>,
+}
 
 pub struct StateManager {
     state: Arc<RwLock<State>>,
+    cache_path: PathBuf,
 }
 
 impl StateManager {
-    pub fn new(_cache_path: PathBuf) -> Result<Self> {
+    pub fn new(cache_path: PathBuf) -> Result<Self> {
+        let mut initial_state = State::default();
+
+        if cache_path.exists() {
+            info!("Loading state from cache: {:?}", cache_path);
+            match std::fs::read_to_string(&cache_path) {
+                Ok(content) => match serde_json::from_str::<SerializableState>(&content) {
+                    Ok(s_state) => {
+                        for (host, targets) in s_state.routes {
+                            if let Ok(lb) =
+                                LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice())
+                            {
+                                initial_state.routes.insert(
+                                    host.clone(),
+                                    Route {
+                                        host,
+                                        targets,
+                                        lb: Arc::new(lb),
+                                    },
+                                );
+                            }
+                        }
+                        initial_state.acme_tokens = s_state.acme_tokens;
+                        initial_state.certificates = s_state.certificates;
+
+                        // Pre-parse certificates
+                        for cert in initial_state.certificates.values_mut() {
+                            use openssl::pkey::PKey;
+                            use openssl::x509::X509;
+
+                            if let Ok(x509) = X509::from_pem(cert.cert_pem.as_bytes()) {
+                                cert.parsed_cert = Some(x509);
+                            }
+                            if let Ok(pkey) = PKey::private_key_from_pem(cert.key_pem.as_bytes()) {
+                                cert.parsed_key = Some(pkey);
+                            }
+                        }
+                        info!("Successfully restored state from cache.");
+                    },
+                    Err(e) => warn!("Failed to parse state cache: {e}"),
+                },
+                Err(e) => warn!("Failed to read state cache: {e}"),
+            }
+        }
+
         Ok(Self {
-            state: Arc::new(RwLock::new(State::default())),
+            state: Arc::new(RwLock::new(initial_state)),
+            cache_path,
         })
     }
 
@@ -32,6 +90,26 @@ impl StateManager {
             if let Ok(pkey) = PKey::private_key_from_pem(cert.key_pem.as_bytes()) {
                 cert.parsed_key = Some(pkey);
             }
+        }
+
+        // Persist to disk
+        let s_state = SerializableState {
+            routes: new_state
+                .routes
+                .iter()
+                .map(|(k, v)| (k.clone(), v.targets.clone()))
+                .collect(),
+            acme_tokens: new_state.acme_tokens.clone(),
+            certificates: new_state.certificates.clone(),
+        };
+
+        match serde_json::to_string_pretty(&s_state) {
+            Ok(json) => {
+                if let Err(e) = tokio::fs::write(&self.cache_path, json).await {
+                    error!("Failed to write state cache to {:?}: {e}", self.cache_path);
+                }
+            },
+            Err(e) => error!("Failed to serialize state for cache: {e}"),
         }
 
         let mut state = self.state.write().await;

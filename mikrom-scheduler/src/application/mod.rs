@@ -118,10 +118,11 @@ impl AppService {
         let app_jobs: Vec<_> = jobs.into_iter().filter(|j| j.app_id == app_id).collect();
 
         for job in app_jobs {
-            if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id)
-                && let Err(e) = self.agent_client.delete_vm(host_id, vm_id).await
-            {
-                tracing::error!("Failed to delete VM {} on host {}: {}", vm_id, host_id, e);
+            #[allow(clippy::collapsible_if)]
+            if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
+                if let Err(e) = self.agent_client.delete_vm(host_id, vm_id).await {
+                    tracing::error!("Failed to delete VM {} on host {}: {}", vm_id, host_id, e);
+                }
             }
         }
 

@@ -418,10 +418,11 @@ impl FirecrackerManager {
             let (tap, ifindex) = self.setup_tap(&vm_id).await?;
             // Attach eBPF filter to TAP
             let mut ebpf = self.ebpf_manager.lock().await;
-            if let Some(ebpf) = ebpf.as_mut()
-                && let Err(e) = ebpf.attach_tc(&tap)
-            {
-                tracing::warn!("Failed to attach eBPF filter to {}: {}", tap, e);
+            #[allow(clippy::collapsible_if)]
+            if let Some(ebpf) = ebpf.as_mut() {
+                if let Err(e) = ebpf.attach_tc(&tap) {
+                    tracing::warn!("Failed to attach eBPF filter to {}: {}", tap, e);
+                }
             }
             (Some(tap), Some(ifindex))
         } else {

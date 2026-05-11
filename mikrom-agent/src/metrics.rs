@@ -167,34 +167,37 @@ impl MetricsCollector {
             }
 
             // Attempt to read Firecracker metrics if path is available
-            if let Some(metrics_path) = vm.metrics_path
-                && let Ok(content) = tokio::fs::read_to_string(&metrics_path).await
-                && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
-            {
-                vm_metrics.firecracker_metrics = Some(json);
-            }
-
-            // Attempt to read eBPF stats if ifindex is available
-            if let Some(ifindex) = vm.tap_ifindex
-                && let Some(mgr) = &self.firecracker
-            {
-                let ebpf = mgr.ebpf_manager.lock().await;
-                if let Some(ebpf) = ebpf.as_ref()
-                    && let Some(stats) = ebpf.get_stats(ifindex)
-                {
-                    vm_metrics.tx_bytes = stats.tx_bytes;
-                    vm_metrics.rx_bytes = stats.rx_bytes;
+            #[allow(clippy::collapsible_if)]
+            if let Some(metrics_path) = vm.metrics_path {
+                if let Ok(content) = tokio::fs::read_to_string(&metrics_path).await {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                        vm_metrics.firecracker_metrics = Some(json);
+                    }
                 }
             }
 
-            if vm_metrics.tx_bytes == 0
-                && vm_metrics.rx_bytes == 0
-                && let Some(tap_name) = vm.tap_name.as_deref()
-            {
-                let (tap_tx, tap_rx) = read_tap_network_stats(tap_name).await;
-                vm_metrics.tx_bytes = tap_rx; // Host RX = VM TX (Out)
-                vm_metrics.rx_bytes = tap_tx; // Host TX = VM RX (In)
-                tracing::debug!(vm_id = %vm.vm_id, tap = %tap_name, tx = %vm_metrics.tx_bytes, rx = %vm_metrics.rx_bytes, "Retrieved sysfs network stats");
+            // Attempt to read eBPF stats if ifindex is available
+            #[allow(clippy::collapsible_if)]
+            if let Some(ifindex) = vm.tap_ifindex {
+                if let Some(mgr) = &self.firecracker {
+                    let ebpf = mgr.ebpf_manager.lock().await;
+                    if let Some(ebpf) = ebpf.as_ref() {
+                        if let Some(stats) = ebpf.get_stats(ifindex) {
+                            vm_metrics.tx_bytes = stats.tx_bytes;
+                            vm_metrics.rx_bytes = stats.rx_bytes;
+                        }
+                    }
+                }
+            }
+
+            #[allow(clippy::collapsible_if)]
+            if vm_metrics.tx_bytes == 0 && vm_metrics.rx_bytes == 0 {
+                if let Some(tap_name) = vm.tap_name.as_deref() {
+                    let (tap_tx, tap_rx) = read_tap_network_stats(tap_name).await;
+                    vm_metrics.tx_bytes = tap_rx; // Host RX = VM TX (Out)
+                    vm_metrics.rx_bytes = tap_tx; // Host TX = VM RX (In)
+                    tracing::debug!(vm_id = %vm.vm_id, tap = %tap_name, tx = %vm_metrics.tx_bytes, rx = %vm_metrics.rx_bytes, "Retrieved sysfs network stats");
+                }
             }
 
             metrics.vms.insert(vm_metrics.vm_id, vm_metrics);
@@ -259,10 +262,11 @@ impl FirecrackerExporter {
             let host_id = self.firecracker.agent_id.clone();
             let subject = format!("mikrom.telemetry.host.{}", host_id);
 
-            if let Ok(payload) = serde_json::to_vec(&metrics)
-                && let Err(e) = self.client.publish(subject, payload.into()).await
-            {
-                tracing::error!("Failed to publish metrics to NATS: {}", e);
+            #[allow(clippy::collapsible_if)]
+            if let Ok(payload) = serde_json::to_vec(&metrics) {
+                if let Err(e) = self.client.publish(subject, payload.into()).await {
+                    tracing::error!("Failed to publish metrics to NATS: {}", e);
+                }
             }
         }
     }

@@ -28,6 +28,7 @@ message RouterMetrics {
   string router_id = 1;
   uint64 requests_total = 2;
   uint64 responses_2xx = 3;
+  uint64 responses_3xx = 8;
   uint64 responses_4xx = 4;
   uint64 responses_5xx = 5;
   double latency_avg_ms = 6;

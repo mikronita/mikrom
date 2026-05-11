@@ -366,26 +366,28 @@ impl DeploymentService {
                     }
 
                     // 6. Stop old VM
-                    if let Some(old_dep) = state.app_repo.get_deployment(old_id).await?
-                        && let Some(old_job_id) = old_dep.job_id
-                    {
-                        info!(app = %app.name, job_id = %old_job_id, "Stopping old version");
-                        state
-                            .scheduler
-                            .pause_app(old_job_id, "system".to_string())
-                            .await
-                            .map_err(|e| anyhow::anyhow!(e))?;
-                        state
-                            .app_repo
-                            .update_deployment(
-                                old_id,
-                                UpdateDeploymentParams {
-                                    status: Some("STOPPED".to_string()),
-                                    ..Default::default()
-                                },
-                            )
-                            .await?;
+                    #[allow(clippy::collapsible_if)]
+                    if let Some(old_dep) = state.app_repo.get_deployment(old_id).await? {
+                        if let Some(old_job_id) = old_dep.job_id {
+                            info!(app = %app.name, job_id = %old_job_id, "Stopping old version");
+                            state
+                                .scheduler
+                                .pause_app(old_job_id, "system".to_string())
+                                .await
+                                .map_err(|e| anyhow::anyhow!(e))?;
+                            state
+                                .app_repo
+                                .update_deployment(
+                                    old_id,
+                                    crate::repositories::app_repository::UpdateDeploymentParams {
+                                        status: Some("STOPPED".to_string()),
+                                        ..Default::default()
+                                    },
+                                )
+                                .await?;
+                        }
                     }
+
                 }
                 Ok(())
             }

@@ -31,15 +31,43 @@ impl ControlPlane {
         // 1. Initial sync
         self.sync_full_state().await?;
 
-        // 2. Listen for updates via NATS (Simplified for now)
+        // 2. Setup debouncing channel
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
+        let self_clone = Arc::new(Self {
+            db: self.db.clone(),
+            nats: self.nats.clone(),
+            state_manager: self.state_manager.clone(),
+        });
+
+        // Background sync worker with debouncing
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
+            let mut pending = false;
+
+            loop {
+                tokio::select! {
+                    Some(()) = rx.recv() => {
+                        pending = true;
+                    }
+                    _ = interval.tick() => {
+                        if pending {
+                            if let Err(e) = self_clone.sync_full_state().await {
+                                error!("Failed to sync state after NATS update: {e}");
+                            }
+                            pending = false;
+                        }
+                    }
+                }
+            }
+        });
+
+        // 3. Listen for updates via NATS
         let mut subscriber = self.nats.subscribe("mikrom.router.>").await?;
 
         info!("Control plane listening for NATS updates...");
         while let Some(msg) = subscriber.next().await {
             info!("Received NATS update: {:?}", msg.subject);
-            if let Err(e) = self.sync_full_state().await {
-                error!("Failed to sync state after NATS update: {e}");
-            }
+            let _ = tx.try_send(());
         }
 
         Ok(())
@@ -51,7 +79,7 @@ impl ControlPlane {
         // Fetch routes
         let route_rows = sqlx::query(
             r"
-            SELECT a.name as app_name, a.custom_domain, d.ipv6 as target_ip
+            SELECT a.name as app_name, a.custom_domain, d.ipv6 as target_ip, d.port as target_port
             FROM apps a
             JOIN deployments d ON a.active_deployment_id = d.id
             WHERE d.status = 'running'
@@ -66,8 +94,9 @@ impl ControlPlane {
             let app_name: String = row.get("app_name");
             let custom_domain: Option<String> = row.get("custom_domain");
             let target_ip: String = row.get("target_ip");
+            let target_port: i32 = row.get("target_port");
 
-            let target = format!("[{target_ip}]:8080");
+            let target = format!("[{target_ip}]:{target_port}");
 
             // 1. Internal route
             let internal_host = format!("{app_name}.mikrom.local");
