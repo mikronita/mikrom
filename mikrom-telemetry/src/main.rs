@@ -1,7 +1,9 @@
 use anyhow::Result;
 use axum::{Router, routing::get};
 use futures::StreamExt;
+use mikrom_proto::router::RouterMetrics;
 use prometheus::{Encoder, GaugeVec, Opts, Registry, TextEncoder};
+use prost::Message;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -90,6 +92,9 @@ pub struct TelemetryService {
     sys_disk_total_gauge: GaugeVec,
     sys_apps_count_gauge: GaugeVec,
     sys_load_gauge: GaugeVec,
+    // Router metrics
+    router_req_total_gauge: GaugeVec,
+    router_responses_gauge: GaugeVec,
     http_client: reqwest::Client,
 }
 
@@ -150,6 +155,21 @@ impl TelemetryService {
             &["node_id", "period"],
         )?;
 
+        let router_req_total_gauge = GaugeVec::new(
+            Opts::new(
+                "mikrom_router_requests_total",
+                "Total requests handled by router",
+            ),
+            &["router_id"],
+        )?;
+        let router_responses_gauge = GaugeVec::new(
+            Opts::new(
+                "mikrom_router_responses_total",
+                "Total responses by status family",
+            ),
+            &["router_id", "family"],
+        )?;
+
         registry.register(Box::new(cpu_gauge.clone()))?;
         registry.register(Box::new(ram_gauge.clone()))?;
         registry.register(Box::new(tx_gauge.clone()))?;
@@ -161,6 +181,8 @@ impl TelemetryService {
         registry.register(Box::new(sys_disk_total_gauge.clone()))?;
         registry.register(Box::new(sys_apps_count_gauge.clone()))?;
         registry.register(Box::new(sys_load_gauge.clone()))?;
+        registry.register(Box::new(router_req_total_gauge.clone()))?;
+        registry.register(Box::new(router_responses_gauge.clone()))?;
 
         Ok(Self {
             config,
@@ -177,6 +199,8 @@ impl TelemetryService {
             sys_disk_total_gauge,
             sys_apps_count_gauge,
             sys_load_gauge,
+            router_req_total_gauge,
+            router_responses_gauge,
             http_client: reqwest::Client::new(),
         })
     }
@@ -184,6 +208,7 @@ impl TelemetryService {
     pub async fn run(self: Arc<Self>) -> Result<()> {
         let vm_metrics_handle = tokio::spawn(self.clone().listen_vm_metrics());
         let sys_metrics_handle = tokio::spawn(self.clone().listen_sys_metrics());
+        let router_metrics_handle = tokio::spawn(self.clone().listen_router_metrics());
         let logs_handle = tokio::spawn(self.clone().listen_logs());
         let server_handle = tokio::spawn(self.clone().run_metrics_server());
 
@@ -194,6 +219,10 @@ impl TelemetryService {
             },
             res = sys_metrics_handle => {
                 tracing::error!("System metrics task exited");
+                res
+            },
+            res = router_metrics_handle => {
+                tracing::error!("Router metrics task exited");
                 res
             },
             res = logs_handle => {
@@ -219,6 +248,11 @@ impl TelemetryService {
         tracing::info!("Listening for VM metrics on mikrom.metrics.>");
 
         while let Some(msg) = sub.next().await {
+            // Check if it's router metrics (handled elsewhere)
+            if msg.subject.starts_with("mikrom.metrics.router.") {
+                continue;
+            }
+
             let Ok(metrics) = serde_json::from_slice::<VmMetrics>(&msg.payload) else {
                 continue;
             };
@@ -242,6 +276,35 @@ impl TelemetryService {
             self.rx_gauge
                 .with_label_values(&[app_id, vm_id])
                 .set(metrics.rx_bytes as f64);
+        }
+        Ok(())
+    }
+
+    async fn listen_router_metrics(self: Arc<Self>) -> Result<()> {
+        let mut sub = self.nats.subscribe("mikrom.metrics.router.*").await?;
+        tracing::info!("Listening for Router metrics on mikrom.metrics.router.*");
+
+        while let Some(msg) = sub.next().await {
+            let Ok(metrics) = RouterMetrics::decode(&msg.payload[..]) else {
+                tracing::warn!("Failed to decode RouterMetrics from NATS");
+                continue;
+            };
+
+            let router_id = &metrics.router_id;
+
+            self.router_req_total_gauge
+                .with_label_values(&[router_id])
+                .set(metrics.requests_total as f64);
+
+            self.router_responses_gauge
+                .with_label_values(&[router_id, "2xx"])
+                .set(metrics.responses_2xx as f64);
+            self.router_responses_gauge
+                .with_label_values(&[router_id, "4xx"])
+                .set(metrics.responses_4xx as f64);
+            self.router_responses_gauge
+                .with_label_values(&[router_id, "5xx"])
+                .set(metrics.responses_5xx as f64);
         }
         Ok(())
     }
@@ -449,18 +512,5 @@ mod tests {
         assert_eq!(config.nats_url, "nats://localhost:4222");
         assert_eq!(config.loki_url, "http://localhost:3100");
         assert_eq!(config.metrics_port, 9090);
-    }
-
-    #[tokio::test]
-    async fn test_telemetry_service_registry() {
-        let _config = Config {
-            nats_url: "nats://localhost:4222".to_string(),
-            loki_url: "http://localhost:3100".to_string(),
-            metrics_port: 9090,
-        };
-
-        // We might fail to connect to NATS if it's not running, so we only test if NATS is up or mock it.
-        // For a pure unit test, we'd need to mock NATS client, but here we can at least check the registry logic
-        // if we had a way to bypass the connect.
     }
 }

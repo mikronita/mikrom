@@ -30,3 +30,20 @@ pub struct AcmeChallengeUpdate {
     #[prost(bool, tag = "4")]
     pub is_delete: bool,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RouterMetrics {
+    #[prost(string, tag = "1")]
+    pub router_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "2")]
+    pub requests_total: u64,
+    #[prost(uint64, tag = "3")]
+    pub responses_2xx: u64,
+    #[prost(uint64, tag = "4")]
+    pub responses_4xx: u64,
+    #[prost(uint64, tag = "5")]
+    pub responses_5xx: u64,
+    #[prost(double, tag = "6")]
+    pub latency_avg_ms: f64,
+    #[prost(int64, tag = "7")]
+    pub timestamp: i64,
+}

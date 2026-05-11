@@ -1,0 +1,15 @@
+[Unit]
+Description=Mikrom Pingora Router
+After=network.target nats.service postgresql.service
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/mikrom/router.env
+ExecStart=/usr/bin/mikrom-router
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
