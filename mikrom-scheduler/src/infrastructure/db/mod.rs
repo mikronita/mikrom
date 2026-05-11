@@ -274,7 +274,7 @@ impl WorkerRepository for PgWorkerRepository {
     }
 
     async fn list_workers(&self) -> DomainResult<Vec<Worker>> {
-        let query = format!("SELECT {} FROM workers", WORKER_COLUMNS);
+        let query = format!("SELECT {} FROM workers ORDER BY id", WORKER_COLUMNS);
         let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
 
         Ok(rows.iter().map(map_row_to_worker).collect())
@@ -285,7 +285,7 @@ impl WorkerRepository for PgWorkerRepository {
         let threshold = now - threshold_secs;
 
         let query = format!(
-            "SELECT {} FROM workers WHERE metrics IS NOT NULL AND last_heartbeat > $1 AND status = 'Online'",
+            "SELECT {} FROM workers WHERE metrics IS NOT NULL AND last_heartbeat > $1 AND status = 'Online' ORDER BY id",
             WORKER_COLUMNS
         );
         let rows = sqlx::query(&query)

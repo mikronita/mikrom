@@ -237,6 +237,8 @@ async fn test_integration_http_to_https_redirection() {
             crate::state::Certificate {
                 cert_pem: "fake-cert".to_string(),
                 key_pem: "fake-key".to_string(),
+                parsed_cert: None,
+                parsed_key: None,
             },
         );
     }
