@@ -9,15 +9,69 @@ pub mod tls;
 mod proxy_tests;
 
 use anyhow::Result;
+use opentelemetry::global;
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::propagation::TraceContextPropagator;
+use opentelemetry_sdk::trace::TracerProvider;
 use pingora::listeners::tls::TlsSettings;
 use pingora::prelude::*;
+use pingora::server::configuration::ServerConf;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
+fn init_tracing(service_name: &str) -> Result<()> {
+    // 1. Create the OTLP SpanExporter with Tonic
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint(
+            std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+                .unwrap_or_else(|_| "http://localhost:4317".to_string()),
+        )
+        .build()?;
+
+    // 2. Create the TracerProvider and register the exporter
+    let provider = TracerProvider::builder()
+        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+        .with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
+            "service.name",
+            service_name.to_string(),
+        )]))
+        .build();
+
+    // 3. Set the global tracer provider
+    global::set_tracer_provider(provider.clone());
+
+    // 4. Set global propagator for trace context propagation
+    global::set_text_map_propagator(TraceContextPropagator::new());
+
+    // 5. Setup tracing subscriber with OTel layer
+    let tracer = provider.tracer("mikrom-router");
+    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(tracing_subscriber::fmt::layer())
+        .with(telemetry)
+        .init();
+
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    let router_id = std::env::var("ROUTER_ID").unwrap_or_else(|_| {
+        hostname::get().map_or_else(
+            |_| "unknown-router".to_string(),
+            |h| h.to_string_lossy().into_owned(),
+        )
+    });
+
+    init_tracing(&format!("mikrom-router-{router_id}"))?;
 
     info!("Starting Mikrom Router (Pingora)...");
 
@@ -27,12 +81,10 @@ async fn main() -> Result<()> {
         std::env::var("STATE_CACHE_PATH").unwrap_or_else(|_| "router-state.json".to_string()),
     );
     let acme_staging = std::env::var("ACME_STAGING").unwrap_or_default() == "true";
-    let router_id = std::env::var("ROUTER_ID").unwrap_or_else(|_| {
-        hostname::get().map_or_else(
-            |_| "unknown-router".to_string(),
-            |h| h.to_string_lossy().into_owned(),
-        )
-    });
+    let rps_limit = std::env::var("RPS_LIMIT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(100);
 
     if acme_staging {
         info!(
@@ -41,7 +93,7 @@ async fn main() -> Result<()> {
     }
 
     // 1. Initialize State Manager
-    let state_manager = Arc::new(state_manager::StateManager::new(cache_path).await?);
+    let state_manager = Arc::new(state_manager::StateManager::new(cache_path)?);
     let state = state_manager.get_state();
 
     // 2. Start Control Plane in background
@@ -72,10 +124,27 @@ async fn main() -> Result<()> {
     });
 
     // 5. Start Pingora Proxy
-    let mut server = Server::new(None)?;
+    let opt = Opt {
+        upgrade: true,
+        ..Default::default()
+    };
+
+    // Configure server settings for enterprise stability
+    let conf = ServerConf {
+        upgrade_sock: "/tmp/mikrom_router_upgrade.sock".to_string(),
+        grace_period_seconds: Some(30), // Allow 30s for active requests to finish
+        threads: std::env::var("ROUTER_THREADS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0), // 0 means use number of CPUs
+        ..Default::default()
+    };
+
+    let mut server = Server::new_with_opt_and_conf(Some(opt), conf);
     server.bootstrap();
 
-    let proxy_instance = proxy::MikromProxy::new(state.clone(), acme_staging, metrics_counters);
+    let proxy_instance =
+        proxy::MikromProxy::new(state.clone(), acme_staging, metrics_counters, rps_limit);
 
     let mut proxy_service = http_proxy_service(&server.configuration, proxy_instance);
     proxy_service.add_tcp("[::]:80");

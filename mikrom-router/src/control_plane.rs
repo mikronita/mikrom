@@ -1,8 +1,11 @@
 use crate::state::{Certificate, Route, State};
 use crate::state_manager::StateManager;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_nats::Client;
 use futures_util::StreamExt;
+use pingora::lb::LoadBalancer;
+use pingora::lb::health_check::TcpHealthCheck;
+use pingora::lb::selection::RoundRobin;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,7 +38,7 @@ impl ControlPlane {
         while let Some(msg) = subscriber.next().await {
             info!("Received NATS update: {:?}", msg.subject);
             if let Err(e) = self.sync_full_state().await {
-                error!("Failed to sync state after NATS update: {}", e);
+                error!("Failed to sync state after NATS update: {e}");
             }
         }
 
@@ -57,7 +60,7 @@ impl ControlPlane {
         .fetch_all(&self.db)
         .await?;
 
-        let mut routes: HashMap<String, Route> = HashMap::new();
+        let mut route_targets: HashMap<String, Vec<String>> = HashMap::new();
         for row in route_rows {
             use sqlx::Row;
             let app_name: String = row.get("app_name");
@@ -68,24 +71,38 @@ impl ControlPlane {
 
             // 1. Internal route
             let internal_host = format!("{app_name}.mikrom.local");
-            routes
-                .entry(internal_host.clone())
-                .and_modify(|r| r.targets.push(target.clone()))
-                .or_insert_with(|| Route {
-                    host: internal_host,
-                    targets: vec![target.clone()],
-                });
+            route_targets
+                .entry(internal_host)
+                .or_default()
+                .push(target.clone());
 
             // 2. Custom domain route
             if let Some(domain) = custom_domain {
-                routes
-                    .entry(domain.clone())
-                    .and_modify(|r| r.targets.push(target.clone()))
-                    .or_insert_with(|| Route {
-                        host: domain,
-                        targets: vec![target.clone()],
-                    });
+                route_targets.entry(domain).or_default().push(target);
             }
+        }
+
+        let mut routes: HashMap<String, Route> = HashMap::new();
+        for (host, targets) in route_targets {
+            // Create Pingora Load Balancer with Health Check
+            let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice())
+                .context("Failed to create load balancer from targets")?;
+
+            let mut hc = TcpHealthCheck::default();
+            hc.consecutive_success = 1;
+            hc.consecutive_failure = 2;
+
+            lb.set_health_check(Box::new(hc));
+            lb.health_check_frequency = Some(std::time::Duration::from_secs(5));
+
+            routes.insert(
+                host.clone(),
+                Route {
+                    host,
+                    targets,
+                    lb: Arc::new(lb),
+                },
+            );
         }
 
         // Fetch ACME tokens
