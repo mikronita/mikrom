@@ -14,8 +14,7 @@ import {
   CreateSecurityRuleRequest
 } from "@/lib/api";
 import { getToken } from "@/lib/auth";
-import { 
-  HiShieldCheck, 
+import {
   HiServer, 
   HiOutlineGlobeAlt,
   HiOutlineShieldCheck,
@@ -55,6 +54,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Network } from "lucide-react";
 
 export default function NetworkingPage() {
   const token = getToken();
@@ -166,14 +166,16 @@ export default function NetworkingPage() {
   return (
     <DashboardLayout>
       <div className="flex flex-col gap-6 p-6">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-primary/10 text-primary">
-              <HiShieldCheck className="size-8" />
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+              <Network />
             </div>
-            Networking (6PN)
-          </h1>
-          <p className="text-muted-foreground mt-2 font-medium">
+            <h1 className="text-3xl font-semibold tracking-tight">
+              Networking (6PN)
+            </h1>
+          </div>
+          <p className="text-sm text-muted-foreground">
             Manage your private L3 mesh network and Security Groups.
           </p>
         </div>

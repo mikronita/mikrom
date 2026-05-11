@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Calendar, Cpu, ExternalLink, FolderPlus, GitBranch, HardDrive, Plus, TriangleAlert } from "lucide-react";
+import { Boxes, Calendar, Cpu, ExternalLink, FolderPlus, GitBranch, HardDrive, Plus, TriangleAlert } from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps } from "@/lib/hooks/use-apps";
@@ -49,9 +49,14 @@ export default function ApplicationsPage() {
         <div className="flex flex-col gap-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div className="flex flex-col gap-2">
-              <h1 className="text-3xl font-semibold tracking-tight">
-                Applications
-              </h1>
+              <div className="flex items-center gap-3">
+                <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  <Boxes />
+                </div>
+                <h1 className="text-3xl font-semibold tracking-tight">
+                  Applications
+                </h1>
+              </div>
               <p className="max-w-2xl text-sm text-muted-foreground">
                 Manage your Git-based projects and deployments.
               </p>
