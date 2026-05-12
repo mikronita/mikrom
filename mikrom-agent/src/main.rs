@@ -18,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
     mikrom_proto::telemetry::init_telemetry("mikrom-agent", env!("CARGO_PKG_VERSION"), None)?;
 
     let hostname = config.hostname();
-    let ip_address = get_local_ip();
+    let advertise_address = hostname.clone();
 
     tracing::info!(
         "Starting agent {} (hostname: {}, mtls: {})",
@@ -27,20 +27,8 @@ async fn main() -> anyhow::Result<()> {
         config.use_tls
     );
 
-    let server = AgentServer::new(config, ip_address).await;
+    let server = AgentServer::new(config, advertise_address).await;
     server.serve().await?;
 
     Ok(())
-}
-
-fn get_local_ip() -> String {
-    #[allow(clippy::collapsible_if)]
-    if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
-        if socket.connect("8.8.8.8:80").is_ok() {
-            if let Ok(std::net::SocketAddr::V4(v4)) = socket.local_addr() {
-                return v4.ip().to_string();
-            }
-        }
-    }
-    "127.0.0.1".to_string()
 }

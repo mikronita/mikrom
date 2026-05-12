@@ -1,9 +1,13 @@
+#![allow(clippy::map_unwrap_or, clippy::uninlined_format_args)]
+
 pub mod control_plane;
+pub mod crypto;
 pub mod proxy;
 pub mod state;
 pub mod state_manager;
 pub mod telemetry;
 pub mod tls;
+pub mod wireguard;
 
 #[cfg(test)]
 mod proxy_tests;
@@ -29,6 +33,16 @@ use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+
+pub static TRACING_INIT: std::sync::Once = std::sync::Once::new();
+
+pub fn init_tracing_once(router_id: &str) {
+    TRACING_INIT.call_once(|| {
+        if let Err(e) = init_tracing(&format!("mikrom-router-{router_id}")) {
+            eprintln!("Failed to initialize tracing: {e}");
+        }
+    });
+}
 
 fn init_tracing(service_name: &str) -> Result<()> {
     // 1. Create the OTLP SpanExporter with Tonic
@@ -68,8 +82,7 @@ fn init_tracing(service_name: &str) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let router_id = std::env::var("ROUTER_ID").unwrap_or_else(|_| {
         hostname::get().map_or_else(
             |_| "unknown-router".to_string(),
@@ -77,14 +90,25 @@ async fn main() -> Result<()> {
         )
     });
 
-    init_tracing(&format!("mikrom-router-{router_id}"))?;
+    // We MUST NOT call init_tracing here because it uses OTLP/Tonic which needs a Tokio reactor.
+    // Pingora will provide the reactor once the server starts.
+    // We initialize it inside the background services instead.
 
     info!("Starting Mikrom Router (Pingora)...");
 
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let nats_url = std::env::var("NATS_URL").expect("NATS_URL must be set");
+    let master_key = std::env::var("MASTER_KEY").expect("MASTER_KEY must be set");
+    let wg_port = std::env::var("ROUTER_WG_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(51822);
+    let advertise_address =
+        std::env::var("ROUTER_ADVERTISE_ADDRESS").unwrap_or_else(|_| router_id.clone());
+    let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "/var/lib/mikrom".to_string());
     let cache_path = PathBuf::from(
-        std::env::var("STATE_CACHE_PATH").unwrap_or_else(|_| "router-state.json".to_string()),
+        std::env::var("STATE_CACHE_PATH")
+            .unwrap_or_else(|_| format!("{}/router-state.json", data_dir)),
     );
     let acme_staging = std::env::var("ACME_STAGING").unwrap_or_default() == "true";
     let rps_limit = std::env::var("RPS_LIMIT")
@@ -98,42 +122,15 @@ async fn main() -> Result<()> {
         );
     }
 
-    // 1. Initialize State Manager
+    // 1. Initialize State Manager (Sync)
     let state_manager = Arc::new(state_manager::StateManager::new(cache_path)?);
     let state = state_manager.get_state();
 
-    // 2. Start Control Plane in background
-    let db = sqlx::PgPool::connect(&db_url).await?;
-
-    info!("Running database migrations...");
-    sqlx::migrate!("./migrations").run(&db).await?;
-
-    let nats = async_nats::connect(&nats_url).await?;
-    let cp_state_manager = state_manager.clone();
-    let nats_for_cp = nats.clone();
-
-    tokio::spawn(async move {
-        let cp = control_plane::ControlPlane::new(db, nats_for_cp, cp_state_manager);
-        if let Err(e) = cp.run().await {
-            tracing::error!("Control plane error: {e}");
-        }
-    });
-
-    // 3. Initialize Metrics
+    // 2. Initialize Metrics (Sync)
     let metrics_counters = Arc::new(proxy::RouterMetricsCounters::new());
 
-    // 4. Start Telemetry Loop
-    let metrics_for_telemetry = metrics_counters.clone();
-    let router_id_for_telemetry = router_id.clone();
-    tokio::spawn(async move {
-        telemetry::start_telemetry_loop(nats, metrics_for_telemetry, router_id_for_telemetry).await;
-    });
-
-    // 5. Start Pingora Proxy
-    let opt = Opt {
-        upgrade: true,
-        ..Default::default()
-    };
+    // 3. Start Pingora Proxy
+    let opt = Opt::default();
 
     // Configure server settings for enterprise stability
     let conf = ServerConf {
@@ -142,12 +139,35 @@ async fn main() -> Result<()> {
         threads: std::env::var("ROUTER_THREADS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(0), // 0 means use number of CPUs
+            .filter(|&n| n > 0)
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(std::num::NonZero::get)
+                    .unwrap_or(1)
+            }),
         ..Default::default()
     };
 
     let mut server = Server::new_with_opt_and_conf(Some(opt), conf);
     server.bootstrap();
+
+    // 4. Register Background Services
+    let cp = control_plane::ControlPlane::new(
+        db_url,
+        nats_url.clone(),
+        master_key,
+        state_manager,
+        router_id.clone(),
+        advertise_address,
+        data_dir,
+        wg_port,
+    );
+    let cp_service = background_service("Control Plane", cp);
+    server.add_service(cp_service);
+
+    let telemet = telemetry::TelemetryLoop::new(nats_url, metrics_counters.clone(), router_id);
+    let telemet_service = background_service("Telemetry Loop", telemet);
+    server.add_service(telemet_service);
 
     let proxy_instance =
         proxy::MikromProxy::new(state.clone(), acme_staging, metrics_counters, rps_limit);

@@ -3015,12 +3015,15 @@ dependencies = [
 name = "mikrom-router"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "async-nats",
  "async-trait",
  "axum 0.7.9",
+ "base64 0.22.1",
  "chrono",
  "futures-util",
+ "hex",
  "hostname",
  "http 1.4.0",
  "mikrom-proto",
@@ -3033,16 +3036,20 @@ dependencies = [
  "pingora-limits",
  "pingora-openssl",
  "prost 0.13.5",
+ "rand 0.8.6",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-test",
  "tracing",
  "tracing-opentelemetry 0.28.0",
  "tracing-subscriber",
+ "x25519-dalek",
  "x509-parser 0.18.1",
 ]
 

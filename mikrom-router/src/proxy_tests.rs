@@ -20,6 +20,7 @@ mod tests {
                 host: "app.mikrom.local".to_string(),
                 targets: targets.clone(),
                 lb: Arc::new(lb),
+                use_tls: false,
             },
         );
 
@@ -56,6 +57,7 @@ mod tests {
                 host: "app.mikrom.local".to_string(),
                 targets: targets.clone(),
                 lb: Arc::new(lb),
+                use_tls: false,
             },
         );
 

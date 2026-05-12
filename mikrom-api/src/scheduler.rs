@@ -1,9 +1,12 @@
+use mikrom_proto::scheduler::ListWorkersResponse;
+
 #[async_trait::async_trait]
 pub trait Scheduler: Send + Sync {
     async fn pause_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
     async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
     async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
     async fn delete_all_by_app(&self, app_id: String, user_id: String) -> Result<bool, String>;
+    async fn list_workers(&self) -> Result<ListWorkersResponse, String>;
 }
 
 pub struct NatsScheduler {
@@ -84,6 +87,22 @@ impl Scheduler for NatsScheduler {
 
         Ok(inner.success)
     }
+
+    async fn list_workers(&self) -> Result<ListWorkersResponse, String> {
+        use mikrom_proto::scheduler::ListWorkersRequest;
+        use prost::Message;
+        let nats_req = ListWorkersRequest {};
+        let mut buf = Vec::new();
+        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
+
+        let response = self
+            .client
+            .request(mikrom_proto::subjects::SCHEDULER_LIST_WORKERS, buf.into())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        ListWorkersResponse::decode(&response.payload[..]).map_err(|e| e.to_string())
+    }
 }
 
 mockall::mock! {
@@ -94,6 +113,7 @@ mockall::mock! {
         async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
         async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
         async fn delete_all_by_app(&self, app_id: String, user_id: String) -> Result<bool, String>;
+        async fn list_workers(&self) -> Result<ListWorkersResponse, String>;
     }
 }
 

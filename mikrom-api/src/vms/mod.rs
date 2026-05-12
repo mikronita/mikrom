@@ -957,16 +957,17 @@ pub async fn get_mesh_status_handler(
     _auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
 ) -> ApiResult<Json<MeshStatus>> {
-    let workers = sqlx::query_as::<_, crate::models::worker::Worker>(
-        "SELECT * FROM workers WHERE last_seen_at > NOW() - INTERVAL '5 minutes' ORDER BY hostname",
-    )
-    .fetch_all(&state.api_db)
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    use crate::models::worker::Worker;
+
+    let workers = state
+        .scheduler
+        .list_workers()
+        .await
+        .map_err(ApiError::Internal)?;
 
     Ok(Json(MeshStatus {
-        total_workers: workers.len(),
-        workers,
+        total_workers: workers.workers.len(),
+        workers: workers.workers.into_iter().map(Worker::from).collect(),
     }))
 }
 

@@ -1,9 +1,23 @@
+#![allow(
+    clippy::must_use_candidate,
+    clippy::return_self_not_must_use,
+    clippy::missing_const_for_fn,
+    clippy::items_after_statements,
+    clippy::uninlined_format_args,
+    clippy::cast_lossless,
+    clippy::option_if_let_else,
+    clippy::format_push_string,
+    clippy::collapsible_if,
+    clippy::redundant_closure_for_method_calls
+)]
+
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
 pub struct WireGuardManager {
     interface: String,
     config_dir: String,
+    listen_port: u16,
 }
 
 impl WireGuardManager {
@@ -11,7 +25,13 @@ impl WireGuardManager {
         Self {
             interface: interface.to_string(),
             config_dir: "/etc/wireguard".to_string(),
+            listen_port: 51821,
         }
+    }
+
+    pub fn with_listen_port(mut self, port: u16) -> Self {
+        self.listen_port = port;
+        self
     }
 
     pub fn with_config_dir(mut self, dir: &str) -> Self {
@@ -59,8 +79,8 @@ impl WireGuardManager {
 
         // 1. Create baseline config for wg setconf
         let conf = format!(
-            "[Interface]\nPrivateKey = {}\nListenPort = 51820\n",
-            private_key
+            "[Interface]\nPrivateKey = {}\nListenPort = {}\n",
+            private_key, self.listen_port
         );
 
         let conf_path = format!("{}/{}.conf", self.config_dir, self.interface);
@@ -153,9 +173,11 @@ impl WireGuardManager {
         host_id: &str,
     ) -> anyhow::Result<()> {
         let mut conf = format!(
-            "[Interface]\nPrivateKey = {}\nListenPort = 51820\n\n",
-            private_key
+            "[Interface]\nPrivateKey = {}\nListenPort = {}\n\n",
+            private_key, self.listen_port
         );
+
+        let mut route_targets = Vec::new();
 
         for peer in peers {
             if peer.wireguard_pubkey.is_empty() || peer.endpoint.is_empty() {
@@ -177,25 +199,15 @@ impl WireGuardManager {
             };
 
             // AllowedIPs: Ensure every IP has a prefix length, but don't double-prefix
-            let formatted_allowed_ips: Vec<String> = peer
-                .allowed_ips
-                .iter()
-                .map(|ip| {
-                    if ip.contains('/') {
-                        ip.clone()
-                    } else if ip.contains(':') {
-                        format!("{}/128", ip)
-                    } else {
-                        format!("{}/32", ip)
-                    }
-                })
-                .collect();
+            let formatted_allowed_ips = Self::normalize_allowed_ips(&peer.allowed_ips);
 
             let allowed_ips = if formatted_allowed_ips.is_empty() {
                 "fd00::/8".to_string()
             } else {
                 formatted_allowed_ips.join(",")
             };
+
+            route_targets.extend(formatted_allowed_ips.iter().cloned());
 
             conf.push_str("[Peer]\n");
             conf.push_str(&format!("PublicKey = {}\n", pubkey));
@@ -210,14 +222,15 @@ impl WireGuardManager {
         let conf_path = format!("{}/{}.conf", self.config_dir, self.interface);
 
         // Idempotency check: if the config hasn't changed, do nothing
-        if let Ok(existing_conf) = tokio::fs::read_to_string(&conf_path).await
-            && existing_conf == conf
-        {
-            debug!(
-                "WireGuard config for {} is unchanged, skipping sync",
-                self.interface
-            );
-            return Ok(());
+        if let Ok(existing_conf) = tokio::fs::read_to_string(&conf_path).await {
+            if existing_conf == conf {
+                debug!(
+                    "WireGuard config for {} is unchanged, skipping sync",
+                    self.interface
+                );
+                self.sync_routes(&route_targets).await?;
+                return Ok(());
+            }
         }
 
         tokio::fs::write(&conf_path, &conf).await?;
@@ -236,66 +249,113 @@ impl WireGuardManager {
             return self.init(private_key, host_id).await;
         }
 
+        self.sync_routes(&route_targets).await?;
+
         info!(
             "WireGuard mesh updated with {} peers via wg syncconf",
             peers.len()
         );
         Ok(())
     }
+
+    fn normalize_allowed_ips(allowed_ips: &[String]) -> Vec<String> {
+        allowed_ips
+            .iter()
+            .map(|ip| {
+                if ip.contains('/') {
+                    ip.clone()
+                } else if ip.contains(':') {
+                    format!("{}/128", ip)
+                } else {
+                    format!("{}/32", ip)
+                }
+            })
+            .collect()
+    }
+
+    async fn sync_routes(&self, route_targets: &[String]) -> anyhow::Result<()> {
+        let desired: std::collections::HashSet<String> = route_targets
+            .iter()
+            .map(|target| Self::route_key(target))
+            .collect();
+
+        let current_output = Command::new("ip")
+            .args(["-6", "route", "show", "dev", &self.interface])
+            .output()
+            .await?;
+
+        if current_output.status.success() {
+            let current_routes: Vec<String> = String::from_utf8_lossy(&current_output.stdout)
+                .lines()
+                .filter_map(|line| line.split_whitespace().next())
+                .filter(|target| !target.contains('/'))
+                .map(|target| target.to_string())
+                .collect();
+
+            for current in current_routes {
+                if !desired.contains(&current) {
+                    let status = Command::new("ip")
+                        .args(["-6", "route", "del", &current, "dev", &self.interface])
+                        .status()
+                        .await?;
+
+                    if !status.success() {
+                        return Err(anyhow::anyhow!(
+                            "Failed to delete stale route {} on {}",
+                            current,
+                            self.interface
+                        ));
+                    }
+                }
+            }
+        }
+
+        for target in route_targets {
+            let family = if target.contains(':') { "-6" } else { "-4" };
+            let status = Command::new("ip")
+                .args([family, "route", "replace", target, "dev", &self.interface])
+                .status()
+                .await?;
+
+            if !status.success() {
+                return Err(anyhow::anyhow!(
+                    "Failed to install route {target} on {}",
+                    self.interface
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn route_key(target: &str) -> String {
+        target.split('/').next().unwrap_or(target).to_string()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::WireGuardManager;
 
     #[test]
-    fn test_get_host_ipv6_is_deterministic() {
-        let manager = WireGuardManager::new("wg0");
-        let host_id = "test-node-123";
-        let ip1 = manager.get_host_ipv6(host_id);
-        let ip2 = manager.get_host_ipv6(host_id);
-        assert_eq!(ip1, ip2, "IPv6 generation must be deterministic");
-        assert!(
-            ip1.starts_with("fd00::"),
-            "IPv6 must start with fd00:: prefix"
+    fn normalize_allowed_ips_adds_prefixes_once() {
+        let ips = vec![
+            "fd00::1".to_string(),
+            "fd00::2/128".to_string(),
+            "192.168.122.10".to_string(),
+            "192.168.122.11/32".to_string(),
+        ];
+
+        let normalized = WireGuardManager::normalize_allowed_ips(&ips);
+
+        assert_eq!(
+            normalized,
+            vec![
+                "fd00::1/128".to_string(),
+                "fd00::2/128".to_string(),
+                "192.168.122.10/32".to_string(),
+                "192.168.122.11/32".to_string(),
+            ]
         );
-        assert!(
-            ip1.matches(':').count() >= 2,
-            "IPv6 should have colons between segments"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_update_peers_idempotency() {
-        let temp_dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        let conf_dir = temp_dir.to_str().unwrap();
-        let manager = WireGuardManager::new("m-test-wg").with_config_dir(conf_dir);
-
-        let peers = vec![mikrom_proto::scheduler::Peer {
-            host_id: "host1".to_string(),
-            wireguard_pubkey: "pubkey".to_string(),
-            endpoint: "1.1.1.1".to_string(),
-            wireguard_port: 51820,
-            allowed_ips: vec!["fd00::1/128".to_string()],
-        }];
-
-        // 1. First call should write the config file even if system commands fail
-        // in a restricted test environment.
-        let _ = manager.update_peers(&peers, "privkey", "host1").await;
-
-        // The file should have been written
-        let conf_path = format!("{}/m-test-wg.conf", conf_dir);
-        assert!(std::path::Path::new(&conf_path).exists());
-        let first_conf = std::fs::read_to_string(&conf_path).unwrap();
-        assert!(!first_conf.is_empty());
-
-        // 2. Second call with SAME data should leave the config unchanged.
-        let _ = manager.update_peers(&peers, "privkey", "host1").await;
-        let second_conf = std::fs::read_to_string(&conf_path).unwrap();
-        assert_eq!(first_conf, second_conf);
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

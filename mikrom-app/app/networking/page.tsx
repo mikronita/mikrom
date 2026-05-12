@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import Link from "next/link";
+
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
@@ -308,7 +310,10 @@ export default function NetworkingPage() {
                       runningDeployments.map((deployment) => (
                         <TableRow key={deployment.vm_id}>
                           <TableCell className="px-6">
-                            <div className="flex items-center gap-3">
+                            <Link
+                              href={`/apps/${encodeURIComponent(deployment.app_name)}`}
+                              className="flex items-center gap-3 hover:opacity-80"
+                            >
                               <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
                                 <Boxes />
                               </div>
@@ -318,7 +323,7 @@ export default function NetworkingPage() {
                                   vm-{formatVmId(deployment.vm_id)}
                                 </div>
                               </div>
-                            </div>
+                            </Link>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col gap-1">

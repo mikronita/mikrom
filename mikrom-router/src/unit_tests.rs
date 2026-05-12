@@ -39,6 +39,7 @@ mod ipv6_helpers {
             host: "test.local".to_string(),
             targets: targets.clone(),
             lb: Arc::new(lb),
+            use_tls: false,
         };
 
         let upstream1 = route.lb.select(b"", 256).unwrap();

@@ -90,6 +90,7 @@ async fn setup_test_env(rps_limit: isize, use_ipv6: bool) -> TestEnv {
             host: "localhost".to_string(),
             targets: targets.clone(),
             lb: lb_arc,
+            use_tls: false,
         };
 
         // Add all possible host variations that might come in the Host header
@@ -237,7 +238,7 @@ async fn test_integration_http_to_https_redirection() {
             crate::state::Certificate {
                 cert_pem: "fake-cert".to_string(),
                 key_pem: "fake-key".to_string(),
-                parsed_cert: None,
+                parsed_chain: Vec::new(),
                 parsed_key: None,
             },
         );
