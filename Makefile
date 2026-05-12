@@ -122,8 +122,8 @@ run-app: ## Run mikrom-app dev server  (port 3000)
 
 .PHONY: dev
 dev: ## Launch all services in tmux windows
-	@tmux new-session -d -s mikrom -n api 'make run-api'
-	@tmux new-window -t mikrom -n scheduler 'make run-scheduler'
+	@tmux new-session -d -s mikrom -n api 'make run-api 2>&1 | tee /tmp/mikrom-api.log'
+	@tmux new-window -t mikrom -n scheduler 'make run-scheduler 2>&1 | tee /tmp/mikrom-scheduler.log'
 	@tmux new-window -t mikrom -n builder 'make run-builder'
 	@tmux new-window -t mikrom -n telemetry 'make run-telemetry'
 	@tmux new-window -t mikrom -n app 'make run-app'

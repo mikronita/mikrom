@@ -65,10 +65,11 @@ async fn test_zero_downtime_flow_success() {
         .times(1)
         .returning(|_, _| Ok(()));
 
-    // Old deployment cleanup (after 10s sleep)
+    // Old deployment cleanup now happens immediately after promotion.
     mock_app_repo
         .expect_get_deployment()
         .with(eq(old_dep_id))
+        .times(2)
         .returning(move |_| {
             Ok(Some(Deployment {
                 id: old_dep_id,
@@ -82,6 +83,17 @@ async fn test_zero_downtime_flow_success() {
         .with(eq("job-old".to_string()), eq("system".to_string()))
         .times(1)
         .returning(|_, _| Ok(true));
+
+    mock_app_repo
+        .expect_update_deployment()
+        .with(
+            eq(old_dep_id),
+            mockall::predicate::function(|params: &UpdateDeploymentParams| {
+                params.status == Some("DRAINING".to_string())
+            }),
+        )
+        .times(1)
+        .returning(|_, _| Ok(()));
 
     mock_app_repo
         .expect_update_deployment()
@@ -167,9 +179,8 @@ async fn test_zero_downtime_flow_success() {
         guard,
     );
 
-    // Now we wait for the flow to complete.
-    // We'll wait up to 15s.
-    tokio::time::sleep(Duration::from_secs(12)).await;
+    // Give the background task a moment to finish the immediate pause.
+    tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
 #[tokio::test]

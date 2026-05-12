@@ -4,6 +4,7 @@ use parking_lot::RwLock;
 use prost::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::info;
 
 pub struct AgentServer {
@@ -340,7 +341,7 @@ impl AgentServer {
         nats: &async_nats::Client,
         http_client: &reqwest::Client,
     ) {
-        use mikrom_proto::agent::{CheckHealthRequest, CheckHealthResponse};
+        use mikrom_proto::agent::CheckHealthRequest;
         let Ok(req) = CheckHealthRequest::decode(&message.payload[..]) else {
             tracing::error!("Failed to decode CheckHealthRequest");
             return;
@@ -358,17 +359,70 @@ impl AgentServer {
             let ip = vm.config.ipv6_address.clone();
 
             if let Some(ip_addr) = ip {
+                if !fc.is_app_started(&vm_id).await {
+                    return Self::reply_health_check(
+                        message,
+                        nats,
+                        Err("VM application has not started yet".to_string()),
+                    )
+                    .await;
+                }
+
+                let started_at_ms = fc.get_vm_started_at_ms(&vm_id).await.unwrap_or_default();
+                let now_ms = chrono::Utc::now().timestamp_millis() as u64;
+                if started_at_ms > 0 {
+                    let boot_grace_ms = Duration::from_millis(250).as_millis() as u64;
+                    if now_ms.saturating_sub(started_at_ms) < boot_grace_ms {
+                        tracing::info!(
+                            vm_id = %vm_id,
+                            ready_since_ms = started_at_ms,
+                            boot_grace_ms = boot_grace_ms,
+                            "Waiting briefly after application marker before health checking"
+                        );
+                        return Self::reply_health_check(
+                            message,
+                            nats,
+                            Err("VM application is still booting".to_string()),
+                        )
+                        .await;
+                    }
+                }
+
                 let url = if ip_addr.contains(':') {
                     format!("http://[{ip_addr}]:{port}{path}")
                 } else {
                     format!("http://{ip_addr}:{port}{path}")
                 };
-                tracing::debug!(vm_id = %vm_id, url = %url, "Performing health check...");
+                tracing::info!(
+                    vm_id = %vm_id,
+                    ip = %ip_addr,
+                    port = port,
+                    path = %path,
+                    url = %url,
+                    "Performing health check..."
+                );
 
                 match http_client.get(&url).send().await {
                     Ok(resp) if resp.status().is_success() => Ok("Healthy".to_string()),
-                    Ok(resp) => Err(format!("Unhealthy: HTTP {}", resp.status())),
-                    Err(e) => Err(format!("Unhealthy: {e}")),
+                    Ok(resp) => {
+                        let status = resp.status();
+                        tracing::warn!(
+                            vm_id = %vm_id,
+                            url = %url,
+                            status = %status,
+                            "Health check returned non-success status"
+                        );
+                        Err(format!("Unhealthy: HTTP {}", status))
+                    },
+                    Err(e) => {
+                        tracing::warn!(
+                            vm_id = %vm_id,
+                            url = %url,
+                            error = %e,
+                            "Health check request failed"
+                        );
+                        Err(format!("Unhealthy: {e}"))
+                    },
                 }
             } else {
                 Err("VM has no IPv6 address assigned (6PN required)".to_string())
@@ -376,6 +430,16 @@ impl AgentServer {
         } else {
             Err("VM not found".to_string())
         };
+
+        Self::reply_health_check(message, nats, result).await;
+    }
+
+    async fn reply_health_check(
+        message: async_nats::Message,
+        nats: &async_nats::Client,
+        result: Result<String, String>,
+    ) {
+        use mikrom_proto::agent::CheckHealthResponse;
 
         if let Some(reply) = message.reply {
             let response = match result {
@@ -581,6 +645,9 @@ mod tests {
                     error_message: None,
                 },
             );
+            let started_at_ms =
+                (chrono::Utc::now().timestamp_millis() as u64).saturating_sub(1_000);
+            fc.seed_started_process_for_test(vm_id, started_at_ms).await;
         }
 
         // 4. Send health check request

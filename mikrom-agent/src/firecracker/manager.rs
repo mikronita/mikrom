@@ -11,7 +11,10 @@ use mikrom_proto::id::{AppId, VmId};
 use std::collections::{HashMap, VecDeque};
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+};
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
@@ -43,6 +46,13 @@ pub struct FirecrackerManager {
 }
 
 impl FirecrackerManager {
+    fn ipv6_route_prefix(ipv6: &str) -> Option<String> {
+        let addr: std::net::Ipv6Addr = ipv6.parse().ok()?;
+        let seg = addr.segments();
+        let prefix = std::net::Ipv6Addr::new(seg[0], seg[1], seg[2], seg[3], 0, 0, 0, 0);
+        Some(format!("{prefix}/64"))
+    }
+
     fn snapshot_create_body(snapshot_path: &str, mem_path: &str) -> String {
         serde_json::json!({
             "snapshot_type": "Full",
@@ -518,6 +528,8 @@ impl FirecrackerManager {
         guard.tap_name = tap_name.clone();
         guard.tap_ifindex = tap_ifindex;
         guard.chroot_dir = chroot_dir.clone().map(PathBuf::from);
+        guard.app_started = Arc::new(AtomicBool::new(false));
+        guard.app_started_at_ms = Arc::new(AtomicU64::new(0));
 
         // 7. Spawn Firecracker
         let mut child = tokio::process::Command::new(&exec_binary)
@@ -533,7 +545,16 @@ impl FirecrackerManager {
             })?;
 
         // 8. Capture logs
-        guard.log_task = Some(self.spawn_log_task(&vm_id, &app_id, &mut child).await);
+        guard.log_task = Some(
+            self.spawn_log_task(
+                &vm_id,
+                &app_id,
+                &mut child,
+                guard.app_started.clone(),
+                guard.app_started_at_ms.clone(),
+            )
+            .await,
+        );
         guard.child = Some(child);
 
         // 9. Wait for socket
@@ -556,6 +577,11 @@ impl FirecrackerManager {
             .try_restore_snapshot(&vm_id, &chroot_dir, &active_socket_path, &paths)
             .await?
         {
+            guard.app_started.store(true, Ordering::SeqCst);
+            guard.app_started_at_ms.store(
+                chrono::Utc::now().timestamp_millis() as u64,
+                Ordering::SeqCst,
+            );
             self.finalize_startup(guard).await?;
             return Ok(());
         }
@@ -606,6 +632,8 @@ impl FirecrackerManager {
         vm_id: &VmId,
         app_id: &AppId,
         child: &mut tokio::process::Child,
+        app_started: Arc<AtomicBool>,
+        app_started_at_ms: Arc<AtomicU64>,
     ) -> tokio::task::JoinHandle<()> {
         let stdout = child.stdout.take().expect("Failed to take stdout");
         let stderr = child.stderr.take().expect("Failed to take stderr");
@@ -615,6 +643,8 @@ impl FirecrackerManager {
             *app_id,
             self.nats_client.read().await.clone(),
             self.logs.clone(),
+            app_started,
+            app_started_at_ms,
         );
 
         shipper.spawn(stdout, stderr).await
@@ -811,12 +841,29 @@ impl FirecrackerManager {
         )
         .await?;
 
-        // 7. Add host route for IPv6
-        if let Some(ipv6) = &config.ipv6_address {
-            let _ = tokio::process::Command::new("ip")
-                .args(["-6", "route", "add", ipv6, "dev", "mikrom-br0"])
+        // 7. Add host route for the VM IPv6 prefix so the host can reach the guest directly.
+        if let Some(ipv6) = &config.ipv6_address
+            && let Some(prefix) = Self::ipv6_route_prefix(ipv6)
+        {
+            let output = tokio::process::Command::new("ip")
+                .args(["-6", "route", "replace", &prefix, "dev", "mikrom-br0"])
                 .output()
                 .await;
+
+            if let Ok(out) = output
+                && !out.status.success()
+            {
+                tracing::warn!(
+                    prefix = %prefix,
+                    stderr = %String::from_utf8_lossy(&out.stderr),
+                    "Failed to add IPv6 host route for VM"
+                );
+            } else {
+                tracing::info!(
+                    prefix = %prefix,
+                    "Added IPv6 host route for VM"
+                );
+            }
         }
 
         Ok(())
@@ -837,6 +884,63 @@ impl FirecrackerManager {
         self.processes.lock().await.insert(vm_id, vm_process);
         tracing::info!(vm_id = %vm_id, "Firecracker VM successfully started");
         Ok(())
+    }
+
+    pub async fn is_app_started(&self, vm_id: &VmId) -> bool {
+        let processes = self.processes.lock().await;
+        processes
+            .get(vm_id)
+            .map(|proc| proc.app_started.load(Ordering::SeqCst))
+            .unwrap_or(false)
+    }
+
+    pub async fn get_vm_started_at_ms(&self, vm_id: &VmId) -> Option<u64> {
+        let processes = self.processes.lock().await;
+        processes
+            .get(vm_id)
+            .map(|proc| proc.app_started_at_ms.load(Ordering::SeqCst))
+    }
+
+    #[cfg(test)]
+    pub async fn mark_vm_app_started(&self, vm_id: &VmId, started_at_ms: u64) -> bool {
+        let processes = self.processes.lock().await;
+        if let Some(proc) = processes.get(vm_id) {
+            proc.app_started.store(true, Ordering::SeqCst);
+            proc.app_started_at_ms
+                .store(started_at_ms, Ordering::SeqCst);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn seed_started_process_for_test(&self, vm_id: VmId, started_at_ms: u64) {
+        let child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("sleep 5")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("failed to spawn test child");
+
+        let log_task = tokio::spawn(async {});
+        let mut processes = self.processes.lock().await;
+        processes.insert(
+            vm_id,
+            VmProcess {
+                vm_id,
+                child,
+                socket_path: "/tmp/test.sock".to_string(),
+                metrics_path: None,
+                tap_name: None,
+                tap_ifindex: None,
+                log_task,
+                chroot_dir: None,
+                app_started: Arc::new(AtomicBool::new(true)),
+                app_started_at_ms: Arc::new(AtomicU64::new(started_at_ms)),
+            },
+        );
     }
 
     async fn prepare_rootfs(
@@ -1573,7 +1677,10 @@ impl FirecrackerManager {
         let chroot_kernel_path = root_dir.join(kernel_filename);
         let chroot_rootfs_path = root_dir.join(rootfs_filename);
 
-        self.ensure_file_at(kernel_host_path, &chroot_kernel_path.to_string_lossy())
+        // Never hard-link the kernel into the jailer chroot.
+        // The kernel must remain immutable on the host; otherwise chown/truncate
+        // operations inside the chroot can affect the source file under /opt/firecracker.
+        self.copy_file_at(kernel_host_path, &chroot_kernel_path.to_string_lossy())
             .await?;
 
         self.ensure_file_at(rootfs_host_path, &chroot_rootfs_path.to_string_lossy())
@@ -1640,6 +1747,19 @@ impl FirecrackerManager {
                 ))
             })?;
         }
+        Ok(())
+    }
+
+    async fn copy_file_at(&self, src: &str, dst: &str) -> Result<(), FirecrackerError> {
+        let canonical_src = tokio::fs::canonicalize(src).await.map_err(|e| {
+            FirecrackerError::ProcessError(format!("Failed to resolve path {src}: {e}"))
+        })?;
+
+        tokio::fs::copy(&canonical_src, dst).await.map_err(|e| {
+            FirecrackerError::ProcessError(format!(
+                "Failed to copy file from {canonical_src:?} to {dst}: {e}"
+            ))
+        })?;
         Ok(())
     }
 
@@ -1713,6 +1833,10 @@ impl FirecrackerManager {
                 tap_ifindex: None,
                 log_task,
                 chroot_dir: None,
+                app_started: Arc::new(AtomicBool::new(true)),
+                app_started_at_ms: Arc::new(AtomicU64::new(
+                    chrono::Utc::now().timestamp_millis() as u64
+                )),
             },
         );
         let mut vms = self.vms.write().await;
@@ -1740,6 +1864,12 @@ impl FirecrackerManager {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn test_ipv6_route_prefix_uses_guest_prefix() {
+        let prefix = FirecrackerManager::ipv6_route_prefix("fd40:b90d:fcaa:ac99::1").unwrap();
+        assert_eq!(prefix, "fd40:b90d:fcaa:ac99::/64");
+    }
 
     fn config() -> VmConfig {
         VmConfig {
@@ -2044,6 +2174,30 @@ mod tests {
         assert!(err.to_string().contains("Invalid kernel image"));
 
         let _ = tokio::fs::remove_file(&kernel_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_copy_file_at_creates_distinct_inode() {
+        use std::os::unix::fs::MetadataExt;
+
+        let src_path = temp_file_path("kernel-src");
+        let dst_path = temp_file_path("kernel-dst");
+        tokio::fs::write(&src_path, b"kernel-bytes").await.unwrap();
+
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        mgr.copy_file_at(src_path.to_str().unwrap(), dst_path.to_str().unwrap())
+            .await
+            .unwrap();
+
+        let src_meta = tokio::fs::metadata(&src_path).await.unwrap();
+        let dst_meta = tokio::fs::metadata(&dst_path).await.unwrap();
+
+        assert_ne!(src_meta.ino(), dst_meta.ino());
+        assert_eq!(tokio::fs::read(&src_path).await.unwrap(), b"kernel-bytes");
+        assert_eq!(tokio::fs::read(&dst_path).await.unwrap(), b"kernel-bytes");
+
+        let _ = tokio::fs::remove_file(&src_path).await;
+        let _ = tokio::fs::remove_file(&dst_path).await;
     }
 
     #[tokio::test]

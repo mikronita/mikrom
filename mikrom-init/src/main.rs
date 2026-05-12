@@ -6,6 +6,8 @@ use std::fs;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
+use tokio::net::TcpStream;
+use tokio::time::{Duration, Instant};
 
 const CONFIG_PATH: &str = "/etc/mikrom/init.json";
 const FALLBACK_SHELL: &str = "/bin/sh";
@@ -54,16 +56,30 @@ async fn main() -> Result<()> {
         config.entrypoint
     );
 
+    let port = config
+        .env
+        .get("PORT")
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(8080);
+
+    let mut child = spawn_application(config)?;
+
+    if let Err(e) = wait_for_port_ready(port, &mut child).await {
+        eprintln!("[mikrom-init] Application never became ready: {e}");
+        fallback_to_shell();
+    }
+
     // Marker to let mikrom-agent know that subsequent logs are from the application
     println!("__MIKROM_APP_START__");
 
-    let mut cmd = build_command(config)?;
-
-    // EXECUTE (Replacing mikrom-init as PID 1)
-    let err = cmd.exec();
-
-    // If exec() returns, it failed
-    eprintln!("[mikrom-init] Failed to execute application: {err}");
+    match child.wait().await {
+        Ok(status) => {
+            eprintln!("[mikrom-init] Application exited with status: {status}");
+        },
+        Err(e) => {
+            eprintln!("[mikrom-init] Failed while waiting for application exit: {e}");
+        },
+    }
 
     fallback_to_shell();
 }
@@ -232,6 +248,48 @@ fn build_command(config: InitConfig) -> Result<Command> {
     Ok(cmd)
 }
 
+fn spawn_application(config: InitConfig) -> Result<tokio::process::Child> {
+    let cmd = build_command(config)?;
+    let mut cmd: tokio::process::Command = cmd.into();
+    cmd.spawn()
+        .with_context(|| "Failed to spawn application process")
+}
+
+async fn wait_for_port_ready(port: u16, child: &mut tokio::process::Child) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .context("Failed to poll application process")?
+        {
+            return Err(anyhow!(
+                "Application exited before becoming ready: {status}"
+            ));
+        }
+
+        let attempts = [
+            TcpStream::connect(("127.0.0.1", port)),
+            TcpStream::connect(("::1", port)),
+        ];
+
+        for attempt in attempts {
+            if attempt.await.is_ok() {
+                println!("[mikrom-init] Application is accepting connections on port {port}");
+                return Ok(());
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return Err(anyhow!(
+                "Timed out waiting for application to accept connections on port {port}"
+            ));
+        }
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
 fn fallback_to_shell() -> ! {
     if Path::new(FALLBACK_SHELL).exists() {
         println!("[mikrom-init] Falling back to {FALLBACK_SHELL}...");
@@ -299,5 +357,25 @@ mod tests {
         };
         let _cmd = build_command(config).unwrap();
         let _ = fs::remove_dir_all("./target/test-app");
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_port_ready_detects_listener() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let mut child = tokio::process::Command::new("sleep")
+            .arg("1")
+            .spawn()
+            .unwrap();
+
+        wait_for_port_ready(port, &mut child).await.unwrap();
+        let _ = child.kill().await;
+        let _ = accept_task.await;
     }
 }

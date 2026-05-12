@@ -139,7 +139,7 @@ impl AgentClient for NatsAgentClient {
             .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
 
         let response = tokio::time::timeout(
-            Duration::from_secs(5),
+            Duration::from_secs(2),
             self.client.request(subject, payload.into()),
         )
         .await
@@ -149,7 +149,15 @@ impl AgentClient for NatsAgentClient {
         let res = mikrom_proto::agent::CheckHealthResponse::decode(&response.payload[..])
             .map_err(|e| DomainError::Infrastructure(format!("Decode failed: {e}")))?;
 
-        Ok(res.is_healthy)
+        if res.is_healthy {
+            Ok(true)
+        } else {
+            Err(DomainError::Infrastructure(if res.message.is_empty() {
+                "Unhealthy".to_string()
+            } else {
+                res.message
+            }))
+        }
     }
 
     async fn update_firewall(

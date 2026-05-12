@@ -111,22 +111,11 @@ async fn sync_deployment_state(
     db_status: &str,
     ipv6_address: &str,
 ) {
-    // Prevent status downgrades (e.g., RUNNING -> PENDING due to out-of-order NATS messages)
-    fn status_priority(status: &str) -> i32 {
-        match status {
-            "FAILED" | "CANCELLED" => 5, // Terminal states have highest priority
-            "RUNNING" | "PAUSED" | "STOPPED" => 4, // Allow transitions between running, paused and stopped
-            "SCHEDULED" => 3,
-            "PENDING" => 2,
-            "BUILDING" => 1,
-            _ => 0,
-        }
-    }
+    let active_app = state.app_repo.get_app(dep.app_id).await.ok().flatten();
+    let active_deployment_id = active_app.as_ref().and_then(|app| app.active_deployment_id);
 
-    let new_priority = status_priority(db_status);
-    let current_priority = status_priority(&dep.status);
-
-    let status_changed = db_status != dep.status && new_priority >= current_priority;
+    let status_changed =
+        should_apply_cluster_status(dep.status.as_str(), db_status, active_deployment_id, dep.id);
     let has_new_ipv6 =
         !ipv6_address.is_empty() && dep.ipv6_address.as_deref() != Some(ipv6_address);
 
@@ -160,7 +149,7 @@ async fn sync_deployment_state(
         state.deployment_events.send(dep.app_id).ok();
     }
 
-    if let Ok(Some(mut app)) = state.app_repo.get_app(dep.app_id).await {
+    if let Some(mut app) = active_app {
         let mut route_changed = deployment_changed;
 
         if app.active_deployment_id.is_none() && db_status == "RUNNING" {
@@ -198,5 +187,106 @@ async fn sync_deployment_state(
         if route_changed {
             let _ = state.notify_router(&app).await;
         }
+    }
+}
+
+fn should_apply_cluster_status(
+    current_status: &str,
+    incoming_status: &str,
+    active_deployment_id: Option<uuid::Uuid>,
+    dep_id: uuid::Uuid,
+) -> bool {
+    if current_status == incoming_status {
+        return false;
+    }
+
+    match (current_status, incoming_status) {
+        ("DRAINING", "RUNNING") => false,
+        ("DRAINING", "PENDING") | ("DRAINING", "SCHEDULED") | ("DRAINING", "BUILDING") => false,
+        ("DRAINING", "PAUSED" | "STOPPED") => true,
+        ("DRAINING", "FAILED" | "CANCELLED") => false,
+        ("PAUSED" | "STOPPED", "RUNNING") => active_deployment_id == Some(dep_id),
+        ("FAILED" | "CANCELLED", "RUNNING") => false,
+        _ => status_priority(incoming_status) >= status_priority(current_status),
+    }
+}
+
+fn status_priority(status: &str) -> i32 {
+    match status {
+        "FAILED" | "CANCELLED" => 5,
+        "RUNNING" | "DRAINING" | "PAUSED" | "STOPPED" => 4,
+        "SCHEDULED" => 3,
+        "PENDING" => 2,
+        "BUILDING" => 1,
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn draining_deployment_cannot_be_revived_by_running_heartbeat() {
+        let dep_id = Uuid::new_v4();
+
+        assert!(!should_apply_cluster_status(
+            "DRAINING",
+            "RUNNING",
+            Some(dep_id),
+            dep_id
+        ));
+
+        assert!(!should_apply_cluster_status(
+            "DRAINING",
+            "RUNNING",
+            Some(Uuid::new_v4()),
+            dep_id
+        ));
+    }
+
+    #[test]
+    fn paused_or_stopped_only_accept_running_when_it_is_the_active_deployment() {
+        let dep_id = Uuid::new_v4();
+
+        assert!(should_apply_cluster_status(
+            "PAUSED",
+            "RUNNING",
+            Some(dep_id),
+            dep_id
+        ));
+
+        assert!(!should_apply_cluster_status(
+            "PAUSED",
+            "RUNNING",
+            Some(Uuid::new_v4()),
+            dep_id
+        ));
+
+        assert!(should_apply_cluster_status(
+            "STOPPED",
+            "RUNNING",
+            Some(dep_id),
+            dep_id
+        ));
+    }
+
+    #[test]
+    fn draining_never_transitions_to_failed_from_late_cluster_events() {
+        let dep_id = Uuid::new_v4();
+
+        assert!(!should_apply_cluster_status(
+            "DRAINING",
+            "FAILED",
+            Some(dep_id),
+            dep_id
+        ));
+        assert!(!should_apply_cluster_status(
+            "DRAINING",
+            "CANCELLED",
+            Some(dep_id),
+            dep_id
+        ));
     }
 }

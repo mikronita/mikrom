@@ -441,6 +441,8 @@ mod tests {
                     tap_ifindex: None,
                     log_task,
                     chroot_dir: None,
+                    app_started: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                    app_started_at_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 },
             );
         }
