@@ -33,19 +33,37 @@ impl TlsAccept for MikromTlsHandler {
         let state = self.state.read().await;
 
         if let Some(cert_info) = state.certificates.get(&sni) {
-            // HIGH: Use pre-parsed native types for performance
-            if let Some(cert) = &cert_info.parsed_cert {
-                if let Err(e) = ssl.set_certificate(cert) {
+            // 1. Set Leaf Certificate and Chain
+            let mut chain_iter = cert_info.parsed_chain.iter();
+            if let Some(leaf) = chain_iter.next() {
+                if let Err(e) = ssl.set_certificate(leaf) {
                     error!("Failed to set certificate for {sni}: {e}");
                     return;
                 }
+
+                // Add remaining certs to chain
+                for cert in chain_iter {
+                    if let Err(e) = ssl.add_chain_cert(cert.clone()) {
+                        error!("Failed to add intermediate cert to chain for {sni}: {e}");
+                    }
+                }
             } else {
-                // Fallback to parsing if not pre-parsed (should not happen in prod)
-                match X509::from_pem(cert_info.cert_pem.as_bytes()) {
-                    Ok(cert) => {
-                        if let Err(e) = ssl.set_certificate(&cert) {
-                            error!("Failed to set certificate for {sni}: {e}");
-                            return;
+                // Fallback to parsing if not pre-parsed
+                match X509::stack_from_pem(cert_info.cert_pem.as_bytes()) {
+                    Ok(chain) => {
+                        let mut iter = chain.into_iter();
+                        if let Some(leaf) = iter.next() {
+                            if let Err(e) = ssl.set_certificate(&leaf) {
+                                error!("Failed to set certificate for {sni}: {e}");
+                                return;
+                            }
+                            for cert in iter {
+                                if let Err(e) = ssl.add_chain_cert(cert) {
+                                    error!(
+                                        "Failed to add intermediate cert to chain for {sni}: {e}"
+                                    );
+                                }
+                            }
                         }
                     },
                     Err(e) => {
@@ -55,6 +73,7 @@ impl TlsAccept for MikromTlsHandler {
                 }
             }
 
+            // 2. Set Private Key
             if let Some(pkey) = &cert_info.parsed_key {
                 if let Err(e) = ssl.set_private_key(pkey) {
                     error!("Failed to set private key for {sni}: {e}");
@@ -75,7 +94,9 @@ impl TlsAccept for MikromTlsHandler {
                     },
                 }
             }
-            debug!("Successfully loaded certificate for {sni}");
+            debug!("Successfully loaded certificate and chain for {sni}");
+        } else {
+            error!("No certificate found for SNI: {sni}. This will cause TLS handshake failure.");
         }
     }
 }

@@ -62,7 +62,8 @@ impl AgentServer {
             None => {
                 info!("WireGuard private key not provided, attempting to load or generate...");
                 self.wg_manager
-                    .load_or_generate_key(&self.firecracker.fc_config.data_dir)?
+                    .load_or_generate_key(&self.firecracker.fc_config.data_dir)
+                    .await?
             },
         };
 

@@ -20,6 +20,7 @@ pub struct Route {
     pub host: String,
     pub targets: Vec<String>,
     pub lb: Arc<LoadBalancer<RoundRobin>>,
+    pub use_tls: bool,
 }
 
 impl fmt::Debug for Route {
@@ -27,6 +28,7 @@ impl fmt::Debug for Route {
         f.debug_struct("Route")
             .field("host", &self.host)
             .field("targets", &self.targets)
+            .field("use_tls", &self.use_tls)
             .field("lb", &"LoadBalancer<RoundRobin>")
             .finish()
     }
@@ -37,7 +39,7 @@ pub struct Certificate {
     pub cert_pem: String,
     pub key_pem: String,
     #[serde(skip)]
-    pub parsed_cert: Option<X509>,
+    pub parsed_chain: Vec<X509>,
     #[serde(skip)]
     pub parsed_key: Option<PKey<Private>>,
 }
@@ -47,7 +49,8 @@ impl fmt::Debug for Certificate {
         f.debug_struct("Certificate")
             .field("cert_pem_len", &self.cert_pem.len())
             .field("key_pem_len", &self.key_pem.len())
-            .field("parsed", &self.parsed_cert.is_some())
+            .field("chain_len", &self.parsed_chain.len())
+            .field("has_key", &self.parsed_key.is_some())
             .finish_non_exhaustive()
     }
 }

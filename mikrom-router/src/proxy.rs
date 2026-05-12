@@ -73,7 +73,10 @@ impl MikromProxy {
         }
     }
 
-    pub async fn get_lb(&self, host: &str) -> Result<Arc<LoadBalancer<RoundRobin>>> {
+    pub async fn get_lb_and_tls(
+        &self,
+        host: &str,
+    ) -> Result<(Arc<LoadBalancer<RoundRobin>>, bool)> {
         let state = self.state.read().await;
 
         let res = state.routes.get(host).map_or_else(
@@ -83,10 +86,14 @@ impl MikromProxy {
                     format!("No route found for host: {host}"),
                 ))
             },
-            |route| Ok(route.lb.clone()),
+            |route| Ok((route.lb.clone(), route.use_tls)),
         );
         drop(state);
         res
+    }
+
+    pub async fn get_lb(&self, host: &str) -> Result<Arc<LoadBalancer<RoundRobin>>> {
+        self.get_lb_and_tls(host).await.map(|(lb, _)| lb)
     }
 }
 
@@ -171,6 +178,7 @@ impl ProxyHttp for MikromProxy {
         let host = session
             .get_header("Host")
             .and_then(|h| h.to_str().ok())
+            .or_else(|| session.req_header().uri.host())
             .unwrap_or("");
 
         let path = session.req_header().uri.path();
@@ -235,9 +243,10 @@ impl ProxyHttp for MikromProxy {
         let host = session
             .get_header("Host")
             .and_then(|h| h.to_str().ok())
+            .or_else(|| session.req_header().uri.host())
             .unwrap_or("");
 
-        let lb = self.get_lb(host).await?;
+        let (lb, use_tls) = self.get_lb_and_tls(host).await?;
 
         // Use client address as a hash seed for better distribution/stickiness if LB supports it
         let hash = session
@@ -251,9 +260,12 @@ impl ProxyHttp for MikromProxy {
             )
         })?;
 
-        info!("Selected upstream: {upstream:?}");
-        let peer = Box::new(HttpPeer::new(upstream.to_string(), false, host.to_string()));
-        Ok(peer)
+        info!("Selected upstream: {upstream:?}, use_tls: {use_tls}");
+        let mut peer = HttpPeer::new(upstream.to_string(), use_tls, host.to_string());
+        if use_tls {
+            peer.options.verify_cert = false;
+        }
+        Ok(Box::new(peer))
     }
 
     async fn upstream_request_filter(

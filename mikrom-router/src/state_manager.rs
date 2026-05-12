@@ -40,6 +40,7 @@ impl StateManager {
                                         host,
                                         targets,
                                         lb: Arc::new(lb),
+                                        use_tls: false,
                                     },
                                 );
                             }
@@ -52,8 +53,8 @@ impl StateManager {
                             use openssl::pkey::PKey;
                             use openssl::x509::X509;
 
-                            if let Ok(x509) = X509::from_pem(cert.cert_pem.as_bytes()) {
-                                cert.parsed_cert = Some(x509);
+                            if let Ok(chain) = X509::stack_from_pem(cert.cert_pem.as_bytes()) {
+                                cert.parsed_chain = chain;
                             }
                             if let Ok(pkey) = PKey::private_key_from_pem(cert.key_pem.as_bytes()) {
                                 cert.parsed_key = Some(pkey);
@@ -84,8 +85,8 @@ impl StateManager {
             use openssl::pkey::PKey;
             use openssl::x509::X509;
 
-            if let Ok(x509) = X509::from_pem(cert.cert_pem.as_bytes()) {
-                cert.parsed_cert = Some(x509);
+            if let Ok(chain) = X509::stack_from_pem(cert.cert_pem.as_bytes()) {
+                cert.parsed_chain = chain;
             }
             if let Ok(pkey) = PKey::private_key_from_pem(cert.key_pem.as_bytes()) {
                 cert.parsed_key = Some(pkey);
@@ -143,6 +144,7 @@ mod tests {
                 host: "test.mikrom.local".to_string(),
                 targets: targets.clone(),
                 lb: Arc::new(lb),
+                use_tls: false,
             },
         );
 
