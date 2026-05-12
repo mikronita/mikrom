@@ -16,6 +16,8 @@ const TELEMETRY_INTERVAL_SECS: u64 = 5;
 
 pub struct TelemetryLoop {
     nats_url: String,
+    nats_use_tls: bool,
+    nats_certs_dir: Option<String>,
     metrics_counters: Arc<RouterMetricsCounters>,
     router_id: String,
 }
@@ -23,11 +25,15 @@ pub struct TelemetryLoop {
 impl TelemetryLoop {
     pub fn new(
         nats_url: String,
+        nats_use_tls: bool,
+        nats_certs_dir: Option<String>,
         metrics_counters: Arc<RouterMetricsCounters>,
         router_id: String,
     ) -> Self {
         Self {
             nats_url,
+            nats_use_tls,
+            nats_certs_dir,
             metrics_counters,
             router_id,
         }
@@ -40,7 +46,13 @@ impl BackgroundService for TelemetryLoop {
         crate::init_tracing_once(&self.router_id);
         // Connect to NATS
         let nats = loop {
-            match async_nats::connect(&self.nats_url).await {
+            match crate::nats::connect_nats(
+                &self.nats_url,
+                self.nats_use_tls,
+                self.nats_certs_dir.as_deref(),
+            )
+            .await
+            {
                 Ok(client) => {
                     info!("Telemetry Loop: Connected to NATS.");
                     break client;

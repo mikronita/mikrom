@@ -29,6 +29,8 @@ use tracing::{error, info};
 pub struct ControlPlane {
     db_url: String,
     nats_url: String,
+    nats_use_tls: bool,
+    nats_certs_dir: Option<String>,
     master_key: String,
     state_manager: Arc<StateManager>,
     router_id: String,
@@ -43,6 +45,8 @@ impl ControlPlane {
     pub fn new(
         db_url: String,
         nats_url: String,
+        nats_use_tls: bool,
+        nats_certs_dir: Option<String>,
         master_key: String,
         state_manager: Arc<StateManager>,
         router_id: String,
@@ -53,6 +57,8 @@ impl ControlPlane {
         Self {
             db_url,
             nats_url,
+            nats_use_tls,
+            nats_certs_dir,
             master_key,
             state_manager,
             router_id,
@@ -206,7 +212,13 @@ impl BackgroundService for ControlPlane {
 
         // Connect to NATS
         let nats = loop {
-            match async_nats::connect(&self.nats_url).await {
+            match crate::nats::connect_nats(
+                &self.nats_url,
+                self.nats_use_tls,
+                self.nats_certs_dir.as_deref(),
+            )
+            .await
+            {
                 Ok(client) => {
                     info!("Control Plane: Connected to NATS.");
                     break client;
@@ -292,30 +304,48 @@ impl BackgroundService for ControlPlane {
                             subjects::ROUTER_CONFIG_UPDATED => {
                                 if let Ok(update) = RouterConfigUpdate::decode(&msg.payload[..]) {
                                     info!("Control Plane: Received route update for {}", update.hostname);
-                                    if let Some(target_url) = update.target_url {
-                                        sqlx::query(
-                                            "INSERT INTO routes (hostname, target_url) VALUES ($1, $2)
-                                             ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = NOW()"
-                                        )
-                                        .bind(&update.hostname)
-                                        .bind(&target_url)
-                                        .execute(&db)
-                                        .await
-                                        .ok();
-                                    } else {
-                                        sqlx::query("DELETE FROM routes WHERE hostname = $1")
+                                    match update.target_url {
+                                        Some(target_url) => {
+                                            match sqlx::query(
+                                                "INSERT INTO routes (hostname, target_url) VALUES ($1, $2)
+                                                 ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = NOW()"
+                                            )
                                             .bind(&update.hostname)
+                                            .bind(&target_url)
                                             .execute(&db)
                                             .await
-                                            .ok();
+                                            {
+                                                Ok(_) => {
+                                                    let _ = tx.try_send(());
+                                                },
+                                                Err(e) => error!(
+                                                    "Control Plane: Failed to persist route update for {}: {}",
+                                                    update.hostname, e
+                                                ),
+                                            }
+                                        },
+                                        None => {
+                                            match sqlx::query("DELETE FROM routes WHERE hostname = $1")
+                                                .bind(&update.hostname)
+                                                .execute(&db)
+                                                .await
+                                            {
+                                                Ok(_) => {
+                                                    let _ = tx.try_send(());
+                                                },
+                                                Err(e) => error!(
+                                                    "Control Plane: Failed to delete route {}: {}",
+                                                    update.hostname, e
+                                                ),
+                                            }
+                                        },
                                     }
-                                    let _ = tx.try_send(());
                                 }
                             }
                             subjects::ROUTER_TLS_CERT_UPDATED => {
                                 if let Ok(update) = TlsCertificateUpdate::decode(&msg.payload[..]) {
                                     info!("Control Plane: Received TLS certificate update for {}", update.hostname);
-                                    sqlx::query(
+                                    match sqlx::query(
                                         "INSERT INTO tls_certificates (hostname, cert_chain, private_key, expires_at)
                                          VALUES ($1, $2, $3, TO_TIMESTAMP($4))
                                          ON CONFLICT (hostname) DO UPDATE SET cert_chain = EXCLUDED.cert_chain, private_key = EXCLUDED.private_key, expires_at = EXCLUDED.expires_at, updated_at = NOW()"
@@ -326,22 +356,26 @@ impl BackgroundService for ControlPlane {
                                     .bind(update.expires_at)
                                     .execute(&db)
                                     .await
-                                    .ok();
-                                    if let Err(e) = self.sync_full_state(&db).await {
-                                        error!("Control Plane: Failed to refresh state after TLS cert update: {e}");
+                                    {
+                                        Ok(_) => {
+                                            if let Err(e) = self.sync_full_state(&db).await {
+                                                error!("Control Plane: Failed to refresh state after TLS cert update: {e}");
+                                            }
+                                            let _ = tx.try_send(());
+                                        },
+                                        Err(e) => error!(
+                                            "Control Plane: Failed to persist TLS certificate for {}: {}",
+                                            update.hostname, e
+                                        ),
                                     }
-                                    let _ = tx.try_send(());
                                 }
                             }
                             subjects::ROUTER_ACME_CHALLENGE_UPDATED => {
                                 if let Ok(update) = AcmeChallengeUpdate::decode(&msg.payload[..]) {
                                     info!("Control Plane: Received ACME challenge update: {}", update.token);
-                                    if update.is_delete {
+                                    let query = if update.is_delete {
                                         sqlx::query("DELETE FROM acme_challenges WHERE token = $1")
                                             .bind(&update.token)
-                                            .execute(&db)
-                                            .await
-                                            .ok();
                                     } else {
                                         sqlx::query(
                                             "INSERT INTO acme_challenges (token, key_auth) VALUES ($1, $2)
@@ -349,14 +383,19 @@ impl BackgroundService for ControlPlane {
                                         )
                                         .bind(&update.token)
                                         .bind(&update.key_auth)
-                                        .execute(&db)
-                                        .await
-                                        .ok();
+                                    };
+                                    match query.execute(&db).await {
+                                        Ok(_) => {
+                                            if let Err(e) = self.sync_full_state(&db).await {
+                                                error!("Control Plane: Failed to refresh state after ACME challenge update: {e}");
+                                            }
+                                            let _ = tx.try_send(());
+                                        },
+                                        Err(e) => error!(
+                                            "Control Plane: Failed to persist ACME challenge {}: {}",
+                                            update.token, e
+                                        ),
                                     }
-                                    if let Err(e) = self.sync_full_state(&db).await {
-                                        error!("Control Plane: Failed to refresh state after ACME challenge update: {e}");
-                                    }
-                                    let _ = tx.try_send(());
                                 }
                             }
                             _ => {}

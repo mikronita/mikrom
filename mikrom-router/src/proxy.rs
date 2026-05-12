@@ -261,10 +261,7 @@ impl ProxyHttp for MikromProxy {
         })?;
 
         info!("Selected upstream: {upstream:?}, use_tls: {use_tls}");
-        let mut peer = HttpPeer::new(upstream.to_string(), use_tls, host.to_string());
-        if use_tls {
-            peer.options.verify_cert = false;
-        }
+        let peer = HttpPeer::new(upstream.to_string(), use_tls, host.to_string());
         Ok(Box::new(peer))
     }
 

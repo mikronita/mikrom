@@ -276,7 +276,7 @@ impl WireGuardManager {
     async fn sync_routes(&self, route_targets: &[String]) -> anyhow::Result<()> {
         let desired: std::collections::HashSet<String> = route_targets
             .iter()
-            .map(|target| Self::route_key(target))
+            .map(|target| Self::route_compare_key(target))
             .collect();
 
         let current_output = Command::new("ip")
@@ -285,24 +285,31 @@ impl WireGuardManager {
             .await?;
 
         if current_output.status.success() {
-            let current_routes: Vec<String> = String::from_utf8_lossy(&current_output.stdout)
-                .lines()
-                .filter_map(|line| line.split_whitespace().next())
-                .filter(|target| !target.contains('/'))
-                .map(|target| target.to_string())
-                .collect();
+            let current_routes: Vec<(String, String)> =
+                String::from_utf8_lossy(&current_output.stdout)
+                    .lines()
+                    .filter_map(|line| line.split_whitespace().next())
+                    .map(|target| (target.to_string(), Self::route_compare_key(target)))
+                    .collect();
 
-            for current in current_routes {
-                if !desired.contains(&current) {
+            for (current_target, current_key) in current_routes {
+                if !desired.contains(&current_key) {
                     let status = Command::new("ip")
-                        .args(["-6", "route", "del", &current, "dev", &self.interface])
+                        .args([
+                            "-6",
+                            "route",
+                            "del",
+                            &current_target,
+                            "dev",
+                            &self.interface,
+                        ])
                         .status()
                         .await?;
 
                     if !status.success() {
                         return Err(anyhow::anyhow!(
                             "Failed to delete stale route {} on {}",
-                            current,
+                            current_target,
                             self.interface
                         ));
                     }
@@ -328,8 +335,14 @@ impl WireGuardManager {
         Ok(())
     }
 
-    fn route_key(target: &str) -> String {
-        target.split('/').next().unwrap_or(target).to_string()
+    fn route_compare_key(target: &str) -> String {
+        if target.contains('/') {
+            target.to_string()
+        } else if target.contains(':') {
+            format!("{target}/128")
+        } else {
+            format!("{target}/32")
+        }
     }
 }
 
@@ -356,6 +369,26 @@ mod tests {
                 "192.168.122.10/32".to_string(),
                 "192.168.122.11/32".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn route_compare_key_normalizes_host_routes() {
+        assert_eq!(
+            WireGuardManager::route_compare_key("fd00::1"),
+            "fd00::1/128"
+        );
+        assert_eq!(
+            WireGuardManager::route_compare_key("fd00::2/128"),
+            "fd00::2/128"
+        );
+        assert_eq!(
+            WireGuardManager::route_compare_key("192.168.122.10"),
+            "192.168.122.10/32"
+        );
+        assert_eq!(
+            WireGuardManager::route_compare_key("192.168.122.0/24"),
+            "192.168.122.0/24"
         );
     }
 }
