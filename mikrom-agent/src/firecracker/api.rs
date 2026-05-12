@@ -2,6 +2,8 @@ use crate::firecracker::config::FirecrackerError;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
+const MAX_RESPONSE_BODY_BYTES: usize = 10 * 1024 * 1024;
+
 /// Send a request to the Firecracker API socket and return Ok on 2xx.
 #[tracing::instrument(skip_all, fields(method = %method, api_path = %api_path))]
 pub async fn fc_request(
@@ -100,6 +102,12 @@ where
     let mut response_body = Vec::new();
     match content_length {
         Some(len) => {
+            if len > MAX_RESPONSE_BODY_BYTES {
+                return Err(FirecrackerError::ApiError {
+                    path: api_path.to_string(),
+                    msg: format!("response body too large: {len} bytes"),
+                });
+            }
             response_body.resize(len, 0);
             tokio::time::timeout(
                 Duration::from_secs(2),
@@ -116,9 +124,10 @@ where
             })?;
         },
         None => {
+            let mut limited_reader = reader.take(MAX_RESPONSE_BODY_BYTES as u64 + 1);
             tokio::time::timeout(
                 Duration::from_secs(2),
-                reader.read_to_end(&mut response_body),
+                limited_reader.read_to_end(&mut response_body),
             )
             .await
             .map_err(|_| FirecrackerError::ApiError {
@@ -129,6 +138,13 @@ where
                 path: api_path.to_string(),
                 msg: format!("body read: {e}"),
             })?;
+
+            if response_body.len() > MAX_RESPONSE_BODY_BYTES {
+                return Err(FirecrackerError::ApiError {
+                    path: api_path.to_string(),
+                    msg: format!("response body too large: {} bytes", response_body.len()),
+                });
+            }
         },
     }
 
