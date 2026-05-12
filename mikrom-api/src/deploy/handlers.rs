@@ -502,8 +502,33 @@ pub async fn activate_deployment_handler(
             use mikrom_proto::scheduler::{DeployResponse, DeployStatus};
 
             let (inner, cleanup_on_failure) =
-                if deployment.status == "STOPPED" || deployment.status == "FAILED" {
-                    info!(app = %app.name, "Deployment is not running, starting it first...");
+                if deployment.status == "PAUSED" || deployment.status == "STOPPED" {
+                    info!(app = %app.name, "Deployment is paused or stopped, resuming it first...");
+
+                    let job_id = deployment.job_id.clone().ok_or_else(|| {
+                        ApiError::BadRequest("Paused deployment is missing a job id".into())
+                    })?;
+
+                    let resume_ok = state
+                        .scheduler
+                        .resume_app(job_id.clone(), "system".to_string())
+                        .await
+                        .map_err(ApiError::Scheduler)?;
+
+                    if !resume_ok {
+                        return Err(ApiError::BadRequest("Failed to resume deployment".into()));
+                    }
+
+                    let inner = DeployResponse {
+                        job_id,
+                        status: DeployStatus::Running as i32,
+                        host_id: String::new(),
+                        vm_id: String::new(),
+                        message: "Resumed".to_string(),
+                    };
+                    (inner, true)
+                } else if deployment.status == "FAILED" {
+                    info!(app = %app.name, "Deployment is failed, starting it again...");
                     let env_vars: std::collections::HashMap<String, String> =
                         serde_json::from_value(deployment.env_vars.clone()).unwrap_or_default();
 
@@ -526,7 +551,7 @@ pub async fn activate_deployment_handler(
                             return Err(e);
                         },
                     };
-                    (inner, true) // Cleanup if it fails to start/be healthy now
+                    (inner, true)
                 } else {
                     let inner = DeployResponse {
                         job_id,

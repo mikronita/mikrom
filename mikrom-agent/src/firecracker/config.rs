@@ -69,7 +69,6 @@ pub struct VmConfig {
 pub struct FirecrackerConfig {
     pub kernel_path: Option<String>,
     pub binary: String,
-    pub fc_version: String,
     pub rootfs_path: String,
     pub data_dir: String,
     pub use_jailer: bool,
@@ -89,7 +88,6 @@ impl FirecrackerConfig {
             ),
             binary: std::env::var("FC_BINARY")
                 .unwrap_or_else(|_| "/usr/bin/firecracker".to_string()),
-            fc_version: std::env::var("FC_VERSION").unwrap_or_else(|_| "1.15.1".to_string()),
             rootfs_path: std::env::var("FC_ROOTFS_PATH")
                 .unwrap_or_else(|_| "/opt/firecracker/rootfs.ext4".to_string()),
             data_dir: std::env::var("FC_DATA_DIR")
@@ -115,7 +113,6 @@ impl FirecrackerConfig {
         Self {
             kernel_path: None,
             binary: String::new(),
-            fc_version: "1.15.1".to_string(),
             rootfs_path: String::new(),
             data_dir: "/tmp/mikrom-stub-data".to_string(),
             use_jailer: false,

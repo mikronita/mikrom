@@ -88,7 +88,7 @@ async fn test_zero_downtime_flow_success() {
         .with(
             eq(old_dep_id),
             mockall::predicate::function(|params: &UpdateDeploymentParams| {
-                params.status == Some("STOPPED".to_string())
+                params.status == Some("PAUSED".to_string())
             }),
         )
         .times(1)

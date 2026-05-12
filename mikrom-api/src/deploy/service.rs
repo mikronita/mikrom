@@ -235,6 +235,7 @@ impl DeploymentService {
             let result = async {
                 // 1. Polling for Health
                 let mut healthy = false;
+                let mut last_health_error: Option<String> = None;
                 let max_attempts = 60; // 120 seconds total
                 for attempt in 1..=max_attempts {
                     if attempt % 5 == 1 {
@@ -273,16 +274,34 @@ impl DeploymentService {
                             break;
                         },
                         Ok(resp) => {
+                            let message = resp.message.clone();
+                            last_health_error = Some(message.clone());
+                            tracing::warn!(
+                                app = %app.name,
+                                job_id = %inner.job_id,
+                                attempt = attempt,
+                                reason = %message,
+                                "Health check returned unhealthy"
+                            );
                             debug!(
                                 app = %app.name,
-                                message = %resp.message,
+                                message = %message,
                                 "Health check returned unhealthy"
                             );
                         },
                         Err(e) => {
+                            let message = e.to_string();
+                            last_health_error = Some(message.clone());
+                            tracing::warn!(
+                                app = %app.name,
+                                job_id = %inner.job_id,
+                                attempt = attempt,
+                                reason = %message,
+                                "Health check request failed"
+                            );
                             debug!(
                                 app = %app.name,
-                                error = %e,
+                                error = %message,
                                 "Health check request failed"
                             );
                         },
@@ -294,13 +313,31 @@ impl DeploymentService {
                     if cleanup_on_failure {
                         error!(
                             app = %app.name,
+                            reason = last_health_error.as_deref().unwrap_or("unknown"),
                             "Zero-downtime deployment failed: health check timeout. Cleaning up new VM."
                         );
+                        tracing::info!(
+                            app = %app.name,
+                            job_id = %inner.job_id,
+                            deployment_id = %deployment.id,
+                            origin = "zero_downtime_cleanup",
+                            user_id = "system",
+                            "Forwarding pause request to scheduler"
+                        );
+                        let job_id = inner.job_id.clone();
                         state
                             .scheduler
-                            .pause_app(inner.job_id, "system".to_string())
+                            .pause_app(job_id.clone(), "system".to_string())
                             .await
                             .map_err(|e| anyhow::anyhow!(e))?;
+                        tracing::info!(
+                            app = %app.name,
+                            job_id = %job_id,
+                            deployment_id = %deployment.id,
+                            origin = "zero_downtime_cleanup",
+                            user_id = "system",
+                            "Scheduler pause completed"
+                        );
                         state
                             .app_repo
                             .update_deployment(
@@ -369,18 +406,35 @@ impl DeploymentService {
                     #[allow(clippy::collapsible_if)]
                     if let Some(old_dep) = state.app_repo.get_deployment(old_id).await? {
                         if let Some(old_job_id) = old_dep.job_id {
+                            let job_id = old_job_id.clone();
                             info!(app = %app.name, job_id = %old_job_id, "Stopping old version");
+                            tracing::info!(
+                                app = %app.name,
+                                job_id = %job_id,
+                                deployment_id = %old_id,
+                                origin = "zero_downtime_drain",
+                                user_id = "system",
+                                "Forwarding pause request to scheduler"
+                            );
                             state
                                 .scheduler
-                                .pause_app(old_job_id, "system".to_string())
+                                .pause_app(job_id.clone(), "system".to_string())
                                 .await
                                 .map_err(|e| anyhow::anyhow!(e))?;
+                            tracing::info!(
+                                app = %app.name,
+                                job_id = %job_id,
+                                deployment_id = %old_id,
+                                origin = "zero_downtime_drain",
+                                user_id = "system",
+                                "Scheduler pause completed"
+                            );
                             state
                                 .app_repo
                                 .update_deployment(
                                     old_id,
                                     crate::repositories::app_repository::UpdateDeploymentParams {
-                                        status: Some("STOPPED".to_string()),
+                                        status: Some("PAUSED".to_string()),
                                         ..Default::default()
                                     },
                                 )

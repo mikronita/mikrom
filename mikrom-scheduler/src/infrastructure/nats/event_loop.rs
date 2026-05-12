@@ -229,10 +229,21 @@ impl NatsEventLoop {
             if let Ok(req) =
                 mikrom_proto::scheduler::CheckHealthRequest::decode(&message.payload[..])
             {
+                tracing::info!(
+                    job_id = %req.job_id,
+                    user_id = %req.user_id,
+                    "Received scheduler check-health request"
+                );
                 let result = server.check_health(req).await;
                 if let Some(reply) = message.reply {
                     let response = match result {
-                        Ok(resp) => resp,
+                        Ok(resp) => {
+                            tracing::info!(
+                                is_healthy = resp.is_healthy,
+                                "Scheduler check-health request completed"
+                            );
+                            resp
+                        },
                         Err(e) => mikrom_proto::scheduler::CheckHealthResponse {
                             is_healthy: false,
                             message: e.to_string(),
@@ -406,10 +417,23 @@ impl NatsEventLoop {
         let client = self.client.clone();
         tokio::spawn(async move {
             if let Ok(req) = DeployRequest::decode(&message.payload[..]) {
+                tracing::info!(
+                    app_id = %req.app_id,
+                    deployment_id = %req.deployment_id,
+                    user_id = %req.user_id,
+                    "Received scheduler deploy request"
+                );
                 let result = server.deploy_app(req).await;
                 if let Some(reply) = message.reply {
                     let response = match result {
-                        Ok(resp) => resp,
+                        Ok(resp) => {
+                            tracing::info!(
+                                job_id = %resp.job_id,
+                                status = %resp.status,
+                                "Scheduler deploy request completed"
+                            );
+                            resp
+                        },
                         Err(e) => mikrom_proto::scheduler::DeployResponse {
                             message: e.to_string(),
                             ..Default::default()
@@ -452,10 +476,20 @@ impl NatsEventLoop {
         let client = self.client.clone();
         tokio::spawn(async move {
             if let Ok(req) = ListAppsRequest::decode(&message.payload[..]) {
+                tracing::info!(
+                    user_id = %req.user_id,
+                    "Received scheduler list-apps request"
+                );
                 let result = server.list_apps(req).await;
                 if let Some(reply) = message.reply {
                     let response = match result {
-                        Ok(resp) => resp,
+                        Ok(resp) => {
+                            tracing::info!(
+                                apps_count = resp.apps.len(),
+                                "Scheduler list-apps request completed"
+                            );
+                            resp
+                        },
                         Err(_) => mikrom_proto::scheduler::ListAppsResponse { apps: vec![] },
                     };
                     let mut buf = Vec::new();
@@ -492,10 +526,23 @@ impl NatsEventLoop {
         let client = self.client.clone();
         tokio::spawn(async move {
             if let Ok(req) = PauseRequest::decode(&message.payload[..]) {
+                let job_id = req.job_id.clone();
+                tracing::info!(
+                    job_id = %job_id,
+                    user_id = %req.user_id,
+                    "Received scheduler pause request"
+                );
                 let result = server.pause_app(req).await;
                 if let Some(reply) = message.reply {
                     let response = match result {
-                        Ok(resp) => resp,
+                        Ok(resp) => {
+                            tracing::info!(
+                                job_id = %job_id,
+                                success = resp.success,
+                                "Scheduler pause request completed"
+                            );
+                            resp
+                        },
                         Err(e) => mikrom_proto::scheduler::PauseResponse {
                             success: false,
                             message: e.to_string(),
@@ -515,10 +562,23 @@ impl NatsEventLoop {
         let client = self.client.clone();
         tokio::spawn(async move {
             if let Ok(req) = ResumeRequest::decode(&message.payload[..]) {
+                let job_id = req.job_id.clone();
+                tracing::info!(
+                    job_id = %job_id,
+                    user_id = %req.user_id,
+                    "Received scheduler resume request"
+                );
                 let result = server.resume_app(req).await;
                 if let Some(reply) = message.reply {
                     let response = match result {
-                        Ok(resp) => resp,
+                        Ok(resp) => {
+                            tracing::info!(
+                                job_id = %job_id,
+                                success = resp.success,
+                                "Scheduler resume request completed"
+                            );
+                            resp
+                        },
                         Err(e) => mikrom_proto::scheduler::ResumeResponse {
                             success: false,
                             message: e.to_string(),
@@ -561,10 +621,21 @@ impl NatsEventLoop {
         let client = self.client.clone();
         tokio::spawn(async move {
             if let Ok(req) = DeleteAppRequest::decode(&message.payload[..]) {
+                tracing::info!(
+                    job_id = %req.job_id,
+                    user_id = %req.user_id,
+                    "Received scheduler delete request"
+                );
                 let result = server.delete_app(req).await;
                 if let Some(reply) = message.reply {
                     let response = match result {
-                        Ok(resp) => resp,
+                        Ok(resp) => {
+                            tracing::info!(
+                                success = resp.success,
+                                "Scheduler delete request completed"
+                            );
+                            resp
+                        },
                         Err(e) => mikrom_proto::scheduler::DeleteAppResponse {
                             success: false,
                             message: e.to_string(),
@@ -584,10 +655,21 @@ impl NatsEventLoop {
         let client = self.client.clone();
         tokio::spawn(async move {
             if let Ok(req) = DeleteAllByAppRequest::decode(&message.payload[..]) {
+                tracing::info!(
+                    app_id = %req.app_id,
+                    user_id = %req.user_id,
+                    "Received scheduler delete-all request"
+                );
                 let result = server.delete_all_by_app(req).await;
                 if let Some(reply) = message.reply {
                     let response = match result {
-                        Ok(resp) => resp,
+                        Ok(resp) => {
+                            tracing::info!(
+                                success = resp.success,
+                                "Scheduler delete-all request completed"
+                            );
+                            resp
+                        },
                         Err(e) => mikrom_proto::scheduler::DeleteAllByAppResponse {
                             success: false,
                             message: e.to_string(),

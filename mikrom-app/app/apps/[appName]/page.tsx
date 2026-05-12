@@ -115,7 +115,7 @@ const chartConfig = {
 function getStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
   if (s === "running") return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800";
-  if (s === "building" || s === "scheduled" || s === "pending") return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800";
+  if (s === "building" || s === "scheduled" || s === "pending" || s === "paused") return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800";
   if (s === "failed" || s === "cancelled") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800";
   return "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700";
 }
@@ -556,7 +556,7 @@ export default function AppDetailPage() {
                           // A deployment is "Currently in Prod" if it's the designated production one 
                           const isCurrentlyInProd = isProduction;
                           
-                          const canActivate = (["RUNNING", "STOPPED", "FAILED"].includes(dep.status)) && !isCurrentlyInProd;
+                          const canActivate = (["RUNNING", "PAUSED", "STOPPED", "FAILED"].includes(dep.status)) && !isCurrentlyInProd;
                           
                           const getButtonText = () => {
                             if (isCurrentlyInProd) return "Currently in Prod";
@@ -612,7 +612,7 @@ export default function AppDetailPage() {
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-muted-foreground text-xs font-medium">
-                                {dep.status === "RUNNING" || dep.status === "FAILED" || dep.status === "STOPPED" 
+                                {dep.status === "RUNNING" || dep.status === "FAILED" || dep.status === "PAUSED" || dep.status === "STOPPED" 
                                   ? formatDuration(dep.created_at, dep.updated_at)
                                   : "..."}
                               </TableCell>
@@ -656,7 +656,7 @@ export default function AppDetailPage() {
           </section>
 
           {/* Integrated Instance Monitoring */}
-          {activeDeployment && ["RUNNING", "STOPPED", "STARTING", "SCHEDULED"].includes(activeDeployment.status.toUpperCase()) && (
+          {activeDeployment && activeDeployment.status.toUpperCase() === "RUNNING" && (
             <div className="space-y-6 animate-in fade-in duration-500 pt-6 border-t">
               <h2 className="text-lg font-bold tracking-tight">
                 Live Performance
