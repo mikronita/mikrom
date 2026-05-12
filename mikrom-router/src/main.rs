@@ -2,6 +2,7 @@
 
 pub mod control_plane;
 pub mod crypto;
+pub mod nats;
 pub mod proxy;
 pub mod state;
 pub mod state_manager;
@@ -98,6 +99,10 @@ fn main() -> Result<()> {
 
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let nats_url = std::env::var("NATS_URL").expect("NATS_URL must be set");
+    let nats_use_tls = std::env::var("USE_TLS").unwrap_or_default() == "true";
+    let nats_certs_dir = std::env::var("NATS_CERTS_DIR")
+        .ok()
+        .or_else(|| std::env::var("CERTS_DIR").ok());
     let master_key = std::env::var("MASTER_KEY").expect("MASTER_KEY must be set");
     let wg_port = std::env::var("ROUTER_WG_PORT")
         .ok()
@@ -155,6 +160,8 @@ fn main() -> Result<()> {
     let cp = control_plane::ControlPlane::new(
         db_url,
         nats_url.clone(),
+        nats_use_tls,
+        nats_certs_dir.clone(),
         master_key,
         state_manager,
         router_id.clone(),
@@ -165,7 +172,13 @@ fn main() -> Result<()> {
     let cp_service = background_service("Control Plane", cp);
     server.add_service(cp_service);
 
-    let telemet = telemetry::TelemetryLoop::new(nats_url, metrics_counters.clone(), router_id);
+    let telemet = telemetry::TelemetryLoop::new(
+        nats_url,
+        nats_use_tls,
+        nats_certs_dir,
+        metrics_counters.clone(),
+        router_id,
+    );
     let telemet_service = background_service("Telemetry Loop", telemet);
     server.add_service(telemet_service);
 
