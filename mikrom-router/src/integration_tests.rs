@@ -91,6 +91,7 @@ async fn setup_test_env(rps_limit: isize, use_ipv6: bool) -> TestEnv {
             targets: targets.clone(),
             lb: lb_arc,
             use_tls: false,
+            tls_alternative_cn: None,
         };
 
         // Add all possible host variations that might come in the Host header

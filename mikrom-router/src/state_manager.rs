@@ -41,6 +41,7 @@ impl StateManager {
                                         targets,
                                         lb: Arc::new(lb),
                                         use_tls: false,
+                                        tls_alternative_cn: None,
                                     },
                                 );
                             }
@@ -145,6 +146,7 @@ mod tests {
                 targets: targets.clone(),
                 lb: Arc::new(lb),
                 use_tls: false,
+                tls_alternative_cn: None,
             },
         );
 

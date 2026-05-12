@@ -21,6 +21,7 @@ mod tests {
                 targets: targets.clone(),
                 lb: Arc::new(lb),
                 use_tls: false,
+                tls_alternative_cn: None,
             },
         );
 
@@ -58,6 +59,7 @@ mod tests {
                 targets: targets.clone(),
                 lb: Arc::new(lb),
                 use_tls: false,
+                tls_alternative_cn: None,
             },
         );
 
@@ -77,5 +79,44 @@ mod tests {
 
         assert_ne!(t1, t2);
         assert_eq!(t1, t3);
+    }
+
+    #[tokio::test]
+    async fn test_registry_route_accepts_host_with_port() {
+        let mut routes = HashMap::new();
+        let targets = vec!["192.168.122.67:443".to_string()];
+        let lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice()).unwrap();
+
+        routes.insert(
+            "registry.mikrom.spluca.org".to_string(),
+            Route {
+                host: "registry.mikrom.spluca.org".to_string(),
+                targets: targets.clone(),
+                lb: Arc::new(lb),
+                use_tls: true,
+                tls_alternative_cn: Some("registry.mikrom.es".to_string()),
+            },
+        );
+
+        let state = Arc::new(RwLock::new(State {
+            routes,
+            acme_tokens: HashMap::new(),
+            certificates: HashMap::new(),
+        }));
+
+        let metrics = Arc::new(RouterMetricsCounters::new());
+        let proxy = MikromProxy::new(state, false, None, metrics, 100);
+
+        let (lb, use_tls, alternative_cn) = proxy
+            .get_lb_and_tls("registry.mikrom.spluca.org:443")
+            .await
+            .unwrap();
+
+        assert!(use_tls);
+        assert_eq!(alternative_cn.as_deref(), Some("registry.mikrom.es"));
+        assert_eq!(
+            lb.select(b"", 256).unwrap().to_string(),
+            "192.168.122.67:443"
+        );
     }
 }

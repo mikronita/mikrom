@@ -10,7 +10,10 @@ pub fn load_upstream_ca(ca_certs_dir: Option<&str>) -> Result<Option<Arc<Box<[X5
 
     let ca_path = PathBuf::from(ca_certs_dir).join("ca.pem");
     if !ca_path.exists() {
-        return Ok(None);
+        anyhow::bail!(
+            "Upstream CA directory was configured but {} does not exist",
+            ca_path.display()
+        );
     }
 
     let ca_pem = std::fs::read(&ca_path)
@@ -19,7 +22,10 @@ pub fn load_upstream_ca(ca_certs_dir: Option<&str>) -> Result<Option<Arc<Box<[X5
         .with_context(|| format!("Failed to parse upstream CA from {}", ca_path.display()))?;
 
     if certs.is_empty() {
-        return Ok(None);
+        anyhow::bail!(
+            "Upstream CA file {} is empty or contains no certificates",
+            ca_path.display()
+        );
     }
 
     Ok(Some(Arc::new(certs.into_boxed_slice())))
@@ -73,5 +79,25 @@ mod tests {
         let loaded = load_upstream_ca(Some(dir.path().to_str().unwrap())).unwrap();
         assert!(loaded.is_some());
         assert_eq!(loaded.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn fails_when_explicit_ca_dir_is_missing_file() {
+        let dir = tempdir().unwrap();
+        let err = load_upstream_ca(Some(dir.path().to_str().unwrap())).unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn fails_when_explicit_ca_file_is_empty() {
+        let dir = tempdir().unwrap();
+        let ca_path = dir.path().join("ca.pem");
+        std::fs::write(&ca_path, b"").unwrap();
+
+        let err = load_upstream_ca(Some(dir.path().to_str().unwrap())).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("empty or contains no certificates")
+        );
     }
 }
