@@ -1,5 +1,9 @@
 use crate::firecracker::config::VmStatus;
 use mikrom_proto::id::{AppId, VmId};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64},
+};
 
 pub struct VmProcess {
     pub vm_id: VmId,
@@ -10,6 +14,8 @@ pub struct VmProcess {
     pub tap_ifindex: Option<u32>,
     pub log_task: tokio::task::JoinHandle<()>,
     pub chroot_dir: Option<String>,
+    pub app_started: Arc<AtomicBool>,
+    pub app_started_at_ms: Arc<AtomicU64>,
 }
 
 /// Abstraction over shell command execution, allowing tests to inject a mock

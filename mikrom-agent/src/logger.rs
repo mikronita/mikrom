@@ -3,6 +3,10 @@ use chrono::Utc;
 use mikrom_proto::id::{AppId, VmId};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::time::{Duration, interval};
 
@@ -23,6 +27,8 @@ pub struct LogShipper {
     flush_interval: Duration,
     /// Local cache for the API to query via SSE if needed, or for debugging
     logs_map: std::sync::Arc<dashmap::DashMap<VmId, VecDeque<String>>>,
+    app_started: Arc<AtomicBool>,
+    app_started_at_ms: Arc<AtomicU64>,
 }
 
 impl LogShipper {
@@ -31,6 +37,8 @@ impl LogShipper {
         app_id: AppId,
         nats_client: Option<Client>,
         logs_map: std::sync::Arc<dashmap::DashMap<VmId, VecDeque<String>>>,
+        app_started: Arc<AtomicBool>,
+        app_started_at_ms: Arc<AtomicU64>,
     ) -> Self {
         Self {
             vm_id,
@@ -39,6 +47,8 @@ impl LogShipper {
             batch_size: 50,
             flush_interval: Duration::from_millis(500),
             logs_map,
+            app_started,
+            app_started_at_ms,
         }
     }
 
@@ -61,6 +71,11 @@ impl LogShipper {
                             Ok(Some(line)) => {
                                 if !app_started && line == "__MIKROM_APP_START__" {
                                     app_started = true;
+                                    self.app_started.store(true, Ordering::SeqCst);
+                                    self.app_started_at_ms.store(
+                                        chrono::Utc::now().timestamp_millis() as u64,
+                                        Ordering::SeqCst,
+                                    );
                                     tracing::info!(app_id = %self.app_id, vm_id = %self.vm_id, "Application started marker received");
                                     continue;
                                 }
@@ -173,7 +188,14 @@ mod tests {
         let vm_id = VmId::new();
         let app_id = AppId::new();
         let logs_map = Arc::new(dashmap::DashMap::new());
-        let shipper = LogShipper::new(vm_id, app_id, None, logs_map.clone());
+        let shipper = LogShipper::new(
+            vm_id,
+            app_id,
+            None,
+            logs_map.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicU64::new(0)),
+        );
 
         let (mut stdout_writer, stdout_reader) = tokio::io::duplex(64);
         let (mut stderr_writer, stderr_reader) = tokio::io::duplex(64);
@@ -226,7 +248,14 @@ mod tests {
         let vm_id = VmId::new();
         let app_id = AppId::new();
         let logs_map = Arc::new(dashmap::DashMap::new());
-        let shipper = LogShipper::new(vm_id, app_id, None, logs_map.clone());
+        let shipper = LogShipper::new(
+            vm_id,
+            app_id,
+            None,
+            logs_map.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicU64::new(0)),
+        );
 
         let (mut stdout_writer, stdout_reader) = tokio::io::duplex(64);
         let (_stderr_writer, stderr_reader) = tokio::io::duplex(64);
@@ -259,7 +288,14 @@ mod tests {
         let vm_id = VmId::new();
         let app_id = AppId::new();
         let logs_map = Arc::new(dashmap::DashMap::new());
-        let shipper = LogShipper::new(vm_id, app_id, None, logs_map.clone());
+        let shipper = LogShipper::new(
+            vm_id,
+            app_id,
+            None,
+            logs_map.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicU64::new(0)),
+        );
 
         let (mut stdout_writer, stdout_reader) = tokio::io::duplex(1024);
         let (_stderr_writer, stderr_reader) = tokio::io::duplex(64);

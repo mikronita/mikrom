@@ -115,6 +115,7 @@ const chartConfig = {
 function getStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
   if (s === "running") return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800";
+  if (s === "draining") return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-200 dark:border-amber-800";
   if (s === "building" || s === "scheduled" || s === "pending" || s === "paused") return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800";
   if (s === "failed" || s === "cancelled") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800";
   return "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700";
@@ -547,11 +548,13 @@ export default function AppDetailPage() {
                       (() => {
                         const sortedDeps = [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
                         
-                        // Single source of truth for what we consider "Production" in the UI
+                        // Single source of truth for production ownership in the UI.
+                        // Prefer the app's active deployment, and only fall back to a live RUNNING deployment
+                        // when the app has not been promoted yet.
                         const productionDepId = app?.active_deployment_id || sortedDeps.find(d => d.status === "RUNNING")?.id;
 
                         return sortedDeps.map((dep) => {
-                          const isProduction = productionDepId === dep.id && dep.status === "RUNNING";
+                          const isProduction = productionDepId === dep.id;
                           
                           // A deployment is "Currently in Prod" if it's the designated production one 
                           const isCurrentlyInProd = isProduction;
@@ -560,6 +563,7 @@ export default function AppDetailPage() {
                           
                           const getButtonText = () => {
                             if (isCurrentlyInProd) return "Currently in Prod";
+                            if (dep.status === "DRAINING") return "Draining...";
                             if (dep.status === "BUILDING") return "Building...";
                             if (["STARTING", "SCHEDULED"].includes(dep.status)) return "Starting...";
                             return "Promote to Prod";
@@ -612,7 +616,7 @@ export default function AppDetailPage() {
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-muted-foreground text-xs font-medium">
-                                {dep.status === "RUNNING" || dep.status === "FAILED" || dep.status === "PAUSED" || dep.status === "STOPPED" 
+                                  {dep.status === "RUNNING" || dep.status === "FAILED" || dep.status === "PAUSED" || dep.status === "STOPPED" || dep.status === "DRAINING"
                                   ? formatDuration(dep.created_at, dep.updated_at)
                                   : "..."}
                               </TableCell>
@@ -638,8 +642,8 @@ export default function AppDetailPage() {
                                   className="ml-auto"
                                 >
                                   {getButtonText()}
-                                  {!isCurrentlyInProd && !["BUILDING", "STARTING", "SCHEDULED"].includes(dep.status) && <HiRocketLaunch className="ml-2 w-3 h-3" />}
-                                  {(dep.status === "BUILDING" || (activateMutation.isPending && activateMutation.variables?.deploymentId === dep.id)) && (
+                                  {!isCurrentlyInProd && !["BUILDING", "STARTING", "SCHEDULED", "DRAINING"].includes(dep.status) && <HiRocketLaunch className="ml-2 w-3 h-3" />}
+                                  {(dep.status === "BUILDING" || dep.status === "DRAINING" || (activateMutation.isPending && activateMutation.variables?.deploymentId === dep.id)) && (
                                     <Loader2 className="ml-2 w-3 h-3 animate-spin" />
                                   )}
                                 </Button>
@@ -656,7 +660,7 @@ export default function AppDetailPage() {
           </section>
 
           {/* Integrated Instance Monitoring */}
-          {activeDeployment && activeDeployment.status.toUpperCase() === "RUNNING" && (
+          {activeDeployment && ["RUNNING", "DRAINING"].includes(activeDeployment.status.toUpperCase()) && (
             <div className="space-y-6 animate-in fade-in duration-500 pt-6 border-t">
               <h2 className="text-lg font-bold tracking-tight">
                 Live Performance

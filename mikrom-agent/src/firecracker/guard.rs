@@ -1,6 +1,10 @@
 use crate::firecracker::process::VmProcess;
 use mikrom_proto::id::VmId;
 use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64},
+};
 use tokio::process::Child;
 use tokio::task::JoinHandle;
 
@@ -12,6 +16,8 @@ pub struct VmStartupGuard {
     pub tap_ifindex: Option<u32>,
     pub chroot_dir: Option<PathBuf>,
     pub log_task: Option<JoinHandle<()>>,
+    pub app_started: Arc<AtomicBool>,
+    pub app_started_at_ms: Arc<AtomicU64>,
     pub socket_path: PathBuf,
     pub metrics_path: Option<String>,
     committed: bool,
@@ -26,6 +32,8 @@ impl VmStartupGuard {
             tap_ifindex: None,
             chroot_dir: None,
             log_task: None,
+            app_started: Arc::new(AtomicBool::new(false)),
+            app_started_at_ms: Arc::new(AtomicU64::new(0)),
             socket_path,
             metrics_path: None,
             committed: false,
@@ -50,6 +58,8 @@ impl VmStartupGuard {
                 .chroot_dir
                 .take()
                 .map(|p| p.to_string_lossy().to_string()),
+            app_started: self.app_started.clone(),
+            app_started_at_ms: self.app_started_at_ms.clone(),
         }
     }
 }

@@ -233,10 +233,64 @@ impl DeploymentService {
             let _guard = _guard;
 
             let result = async {
+                // 0. Capture the current active deployment before we validate the new VM.
+                // If there is already a production deployment, mark it as draining right away
+                // so the UI does not keep showing two RUNNING deployments during validation.
+                let old_active_id = match state.app_repo.get_app(app.id).await {
+                    Ok(Some(a)) => a.active_deployment_id,
+                    _ => None,
+                };
+
+                if let Some(old_id) = old_active_id
+                    && let Some(old_dep) = state.app_repo.get_deployment(old_id).await?
+                {
+                    state
+                        .app_repo
+                        .update_deployment(
+                            old_id,
+                            UpdateDeploymentParams {
+                                status: Some("DRAINING".to_string()),
+                                ..Default::default()
+                            },
+                        )
+                        .await?;
+                    state.deployment_events.send(app.id).ok();
+                    if let Some(old_job_id) = old_dep.job_id {
+                        tracing::info!(
+                            app = %app.name,
+                            job_id = %old_job_id,
+                            deployment_id = %old_id,
+                            origin = "zero_downtime_drain",
+                            user_id = "system",
+                            "Marked previous deployment as draining"
+                        );
+                    } else {
+                        tracing::info!(
+                            app = %app.name,
+                            deployment_id = %old_id,
+                            origin = "zero_downtime_drain",
+                            user_id = "system",
+                            "Marked previous deployment as draining"
+                        );
+                    }
+                }
+
+                if cleanup_on_failure {
+                    let boot_grace = Duration::from_secs(10);
+                    info!(
+                        app = %app.name,
+                        job_id = %inner.job_id,
+                        boot_grace = boot_grace.as_secs(),
+                        "Waiting for the first VM boot before starting health checks"
+                    );
+                    tokio::time::sleep(boot_grace).await;
+                }
+
                 // 1. Polling for Health
                 let mut healthy = false;
                 let mut last_health_error: Option<String> = None;
-                let max_attempts = 60; // 120 seconds total
+                let max_attempts = 12;
+                let health_check_timeout = Duration::from_secs(3);
                 for attempt in 1..=max_attempts {
                     if attempt % 5 == 1 {
                         info!(
@@ -261,7 +315,7 @@ impl DeploymentService {
 
                     match state
                         .nats
-                        .with_timeout(Duration::from_secs(7))
+                        .with_timeout(health_check_timeout)
                         .request::<_, mikrom_proto::scheduler::CheckHealthResponse>(
                             "mikrom.scheduler.check_health",
                             health_req,
@@ -306,10 +360,23 @@ impl DeploymentService {
                             );
                         },
                     }
-                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
 
                 if !healthy {
+                    if let Some(old_id) = old_active_id {
+                        state
+                            .app_repo
+                            .update_deployment(
+                                old_id,
+                                UpdateDeploymentParams {
+                                    status: Some("RUNNING".to_string()),
+                                    ..Default::default()
+                                },
+                            )
+                            .await?;
+                    }
+
                     if cleanup_on_failure {
                         error!(
                             app = %app.name,
@@ -358,13 +425,7 @@ impl DeploymentService {
                     return Ok::<(), anyhow::Error>(());
                 }
 
-                // 2. Identify old deployment
-                let old_active_id = match state.app_repo.get_app(app.id).await {
-                    Ok(Some(a)) => a.active_deployment_id,
-                    _ => None,
-                };
-
-                // 3. Promote new deployment to active
+                // 2. Promote new deployment to active
                 info!(
                     app = %app.name,
                     deployment_id = %deployment.id,
@@ -375,7 +436,7 @@ impl DeploymentService {
                     .set_active_deployment(app.id, deployment.id)
                     .await?;
 
-                // 4. Notify router (atomic switch)
+                // 3. Notify router (atomic switch)
                 // We fetch the app again to ensure we have the newly active deployment state
                 if let Some(app_refreshed) = state.app_repo.get_app(app.id).await? {
                     if app_refreshed.active_deployment_id != Some(deployment.id) {
@@ -388,26 +449,16 @@ impl DeploymentService {
 
                 state.deployment_events.send(app.id).ok();
 
-                // 5. Drain Phase
+                // 4. Drain Phase
                 if let Some(old_id) = old_active_id {
-                    // Validate drain_timeout to avoid negative or extreme values
-                    let drain_secs = if app.drain_timeout < 0 {
-                        0u64
-                    } else {
-                        app.drain_timeout as u64
-                    };
-
-                    if drain_secs > 0 {
-                        info!(app = %app.name, "Waiting {}s for drain phase...", drain_secs);
-                        tokio::time::sleep(Duration::from_secs(drain_secs)).await;
-                    }
-
-                    // 6. Stop old VM
+                    // Stop the old VM immediately after the router switch.
+                    // We keep the zero-downtime flow focused on the validation window;
+                    // the old version should not remain RUNNING alongside the new one.
                     #[allow(clippy::collapsible_if)]
                     if let Some(old_dep) = state.app_repo.get_deployment(old_id).await? {
                         if let Some(old_job_id) = old_dep.job_id {
                             let job_id = old_job_id.clone();
-                            info!(app = %app.name, job_id = %old_job_id, "Stopping old version");
+                            info!(app = %app.name, job_id = %old_job_id, "Stopping old version immediately after promotion");
                             tracing::info!(
                                 app = %app.name,
                                 job_id = %job_id,
@@ -441,7 +492,6 @@ impl DeploymentService {
                                 .await?;
                         }
                     }
-
                 }
                 Ok(())
             }

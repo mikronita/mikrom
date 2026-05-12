@@ -3,6 +3,7 @@ use crate::auth::AuthUser;
 use crate::deploy::service::{DeployParams, DeploymentService};
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::Deployment;
+use crate::repositories::app_repository::UpdateDeploymentParams;
 use axum::{
     Json,
     extract::{Path, State},
@@ -489,17 +490,74 @@ pub async fn activate_deployment_handler(
         ));
     }
 
-    // Protect against concurrent flows before any scheduler interaction
-    let guard = state.try_start_flow(app.id.into()).ok_or_else(|| {
-        ApiError::BadRequest("A deployment flow is already in progress for this application".into())
-    })?;
-
     match deployment.job_id.clone() {
         Some(job_id) => {
             info!(job_id = %job_id, status = %deployment.status, "Activating deployment with zero-downtime flow...");
 
             use crate::deploy::service::{DeployParams, DeploymentService};
             use mikrom_proto::scheduler::{DeployResponse, DeployStatus};
+
+            if deployment.status == "RUNNING" {
+                info!(
+                    app = %app.name,
+                    deployment_id = %deployment.id,
+                    job_id = %job_id,
+                    "Promoting running deployment immediately"
+                );
+
+                let previous_active_id = app.active_deployment_id;
+                state
+                    .app_repo
+                    .set_active_deployment(app.id, deployment.id)
+                    .await
+                    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+                let mut updated_app = app;
+                updated_app.active_deployment_id = Some(deployment.id);
+                let _ = state.notify_router(&updated_app).await;
+                state.deployment_events.send(updated_app.id).ok();
+
+                if let Some(old_active_id) = previous_active_id.filter(|id| *id != deployment.id)
+                    && let Some(old_dep) = state
+                        .app_repo
+                        .get_deployment(old_active_id)
+                        .await
+                        .map_err(|e| ApiError::Internal(e.to_string()))?
+                    && let Some(old_job_id) = old_dep.job_id
+                {
+                    info!(
+                        app = %updated_app.name,
+                        job_id = %old_job_id,
+                        deployment_id = %old_active_id,
+                        "Pausing previous production deployment after immediate promotion"
+                    );
+                    let _ = state
+                        .scheduler
+                        .pause_app(old_job_id.clone(), "system".to_string())
+                        .await
+                        .map_err(ApiError::Scheduler)?;
+                    state
+                        .app_repo
+                        .update_deployment(
+                            old_active_id,
+                            UpdateDeploymentParams {
+                                status: Some("PAUSED".to_string()),
+                                ..Default::default()
+                            },
+                        )
+                        .await
+                        .map_err(|e| ApiError::Internal(e.to_string()))?;
+                }
+
+                return Ok(StatusCode::OK);
+            }
+
+            // Protect against concurrent flows before any scheduler interaction
+            let guard = state.try_start_flow(app.id.into()).ok_or_else(|| {
+                ApiError::BadRequest(
+                    "A deployment flow is already in progress for this application".into(),
+                )
+            })?;
 
             let (inner, cleanup_on_failure) =
                 if deployment.status == "PAUSED" || deployment.status == "STOPPED" {

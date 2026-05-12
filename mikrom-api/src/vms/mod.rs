@@ -340,7 +340,7 @@ pub async fn watch_deployments(
             for app in apps {
                 if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
                     for dep in deps {
-                        if ["RUNNING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                        if ["RUNNING", "DRAINING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
                             let data = serde_json::json!({
                                 "job_id": dep.job_id.clone().unwrap_or_default(),
                                 "deployment_id": dep.id.to_string(),
@@ -403,7 +403,7 @@ pub async fn watch_deployments(
                         state_clone.app_repo.list_deployments_by_app(app_id).await
                     }.await {
                         for dep in deps {
-                            if ["RUNNING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                            if ["RUNNING", "DRAINING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
                                 let data = serde_json::json!({
                                     "job_id": dep.job_id.clone().unwrap_or_default(),
                                     "deployment_id": dep.id.to_string(),
@@ -477,7 +477,7 @@ pub async fn watch_deployments(
                             for app in apps {
                                 if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
                                     for dep in deps {
-                                        if ["RUNNING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                                        if ["RUNNING", "DRAINING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
                                             let data = serde_json::json!({
                                                 "job_id": dep.job_id.clone().unwrap_or_default(),
                                                 "deployment_id": dep.id.to_string(),
