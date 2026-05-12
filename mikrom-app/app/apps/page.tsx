@@ -2,7 +2,16 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Boxes, Calendar, Cpu, ExternalLink, FolderPlus, GitBranch, HardDrive, Plus, TriangleAlert } from "lucide-react";
+import {
+  Boxes,
+  Calendar,
+  Cpu,
+  FolderPlus,
+  HardDrive,
+  Plus,
+  Radio,
+  TriangleAlert,
+} from "lucide-react";
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps } from "@/lib/hooks/use-apps";
@@ -118,7 +127,9 @@ export default function ApplicationsPage() {
             ) : (
               [...apps].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((app) => {
                 const appVm = vmsMap.get(app.id) || vmsMap.get(app.name);
-                const isRunning = !!appVm && appVm.status === "running";
+                const hasActiveDeployment = !!app.active_deployment_id;
+                const isRunningVm = appVm?.status?.toLowerCase() === "running";
+                const isActive = hasActiveDeployment || isRunningVm;
 
                 return (
                   <Link 
@@ -126,52 +137,52 @@ export default function ApplicationsPage() {
                     href={`/apps/${encodeURIComponent(app.name)}`}
                     className="block"
                   >
-                    <Card className="h-full transition-colors hover:bg-muted/30">
+                    <Card className="h-full overflow-hidden transition-colors hover:bg-muted/30">
                       <CardHeader>
                         <div className="flex items-start gap-4">
                           <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
-                            <GitBranch />
+                            <Boxes />
                           </div>
                           <div className="flex min-w-0 flex-1 flex-col gap-2">
                             <div className="flex min-w-0 items-center gap-2">
                               <CardTitle className="truncate text-base">
                                 {app.name}
                               </CardTitle>
-                              {isRunning && <Badge variant="success" className="uppercase">Live</Badge>}
                             </div>
-                            <CardDescription className="truncate font-mono text-xs">
-                              {app.git_url}
-                            </CardDescription>
+                            <CardDescription>Application workspace</CardDescription>
                           </div>
+                          <Badge variant={isActive ? "success" : "secondary"} className="shrink-0 gap-1.5 uppercase">
+                            <Radio />
+                            {isActive ? "Live" : "Idle"}
+                          </Badge>
                         </div>
                       </CardHeader>
                       
                       <CardContent className="flex flex-col gap-4">
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
                           <span className="inline-flex items-center gap-1.5">
                             <Calendar />
                             Created {formatDate(app.created_at)}
                           </span>
-                          {app.hostname && (
-                            <span className="inline-flex min-w-0 items-center gap-1.5">
-                              <ExternalLink />
-                              <span className="truncate">{app.hostname}</span>
-                            </span>
-                          )}
-                        </div>
-
-                        {isRunning && appVm && (
                           <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="secondary" className="gap-1.5">
-                              <Cpu />
-                              <span>{appVm.vcpus || 1} vCPU</span>
-                            </Badge>
-                            <Badge variant="secondary" className="gap-1.5">
-                              <HardDrive />
-                              <span>{appVm.memory_mib || 128} MB</span>
-                            </Badge>
+                            {isRunningVm && appVm ? (
+                              <>
+                                <Badge variant="secondary" className="gap-1.5">
+                                  <Cpu />
+                                  <span>{appVm.vcpus || 1} vCPU</span>
+                                </Badge>
+                                <Badge variant="secondary" className="gap-1.5">
+                                  <HardDrive />
+                                  <span>{appVm.memory_mib || 128} MB</span>
+                                </Badge>
+                              </>
+                            ) : hasActiveDeployment ? (
+                              <Badge variant="secondary">Active deployment</Badge>
+                            ) : (
+                              <Badge variant="outline">No active deployment</Badge>
+                            )}
                           </div>
-                        )}
+                        </div>
                       </CardContent>
                     </Card>
                   </Link>
