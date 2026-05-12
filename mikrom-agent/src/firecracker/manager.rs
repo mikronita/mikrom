@@ -16,6 +16,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Duration;
+use tokio::io::AsyncReadExt;
 use tokio::sync::{Mutex, RwLock};
 
 /// Orchestrator for managing the lifecycle of Firecracker microVMs on a single host.
@@ -1720,13 +1721,19 @@ impl FirecrackerManager {
     }
 
     async fn validate_kernel_image(&self, kernel_path: &str) -> Result<(), FirecrackerError> {
-        let kernel = tokio::fs::read(kernel_path).await.map_err(|e| {
+        let mut kernel = tokio::fs::File::open(kernel_path).await.map_err(|e| {
             FirecrackerError::ProcessError(format!(
-                "Failed to read kernel image at {kernel_path}: {e}"
+                "Failed to open kernel image at {kernel_path}: {e}"
+            ))
+        })?;
+        let mut magic = [0u8; 4];
+        kernel.read_exact(&mut magic).await.map_err(|e| {
+            FirecrackerError::ProcessError(format!(
+                "Failed to read kernel header at {kernel_path}: {e}"
             ))
         })?;
 
-        if kernel.len() < 4 || kernel[0..4] != [0x7f, b'E', b'L', b'F'] {
+        if magic != [0x7f, b'E', b'L', b'F'] {
             return Err(FirecrackerError::ProcessError(format!(
                 "Invalid kernel image at {kernel_path}: expected an uncompressed ELF Linux kernel, but the file does not start with ELF magic"
             )));

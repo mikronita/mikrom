@@ -275,17 +275,6 @@ impl DeploymentService {
                     }
                 }
 
-                if cleanup_on_failure {
-                    let boot_grace = Duration::from_secs(10);
-                    info!(
-                        app = %app.name,
-                        job_id = %inner.job_id,
-                        boot_grace = boot_grace.as_secs(),
-                        "Waiting for the first VM boot before starting health checks"
-                    );
-                    tokio::time::sleep(boot_grace).await;
-                }
-
                 // 1. Polling for Health
                 let mut healthy = false;
                 let mut last_health_error: Option<String> = None;
