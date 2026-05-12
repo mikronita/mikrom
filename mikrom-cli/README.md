@@ -9,7 +9,7 @@ The powerful command-line interface for the Mikrom PaaS. Control your applicatio
 cargo install --path mikrom-cli
 
 # Verify installation
-mikrom health
+mikrom system health
 ```
 
 ## Configuration
@@ -18,8 +18,23 @@ Mikrom stores its configuration in `~/.config/mikrom/config.toml`. Use the follo
 
 - `mikrom auth register`: Create a new Mikrom account.
 - `mikrom auth login`: Authenticate and save your JWT token.
-- `mikrom whoami`: Check your current identity.
-- `mikrom config`: View active CLI settings.
+- `mikrom auth whoami`: Check your current identity.
+- `mikrom config show`: View active CLI settings.
+
+## Output formats
+
+The CLI defaults to colorful tables with emojis for interactive use:
+
+```bash
+mikrom app list
+```
+
+For scripts and automation, use JSON:
+
+```bash
+mikrom --output json app list
+mikrom -o json system health
+```
 
 ## Core Commands
 
@@ -58,11 +73,11 @@ Mikrom stores its configuration in `~/.config/mikrom/config.toml`. Use the follo
 ## Advanced Usage
 
 ### Override API URL
-You can point the CLI at a specific Mikrom cluster using the `--api-url` flag or the `MIKROM_API_URL` environment variable:
+You can point the CLI at a specific Mikrom cluster with the config command:
 
 ```bash
-mikrom --api-url https://mikrom.production.es apps list
+mikrom config set api-url https://mikrom.production.es
 ```
 
 ### Scripting & Automation
-The CLI output is designed to be clean and predictable, making it suitable for CI/CD pipelines and administrative scripts.
+Use `--output json` for machine-readable output in CI/CD pipelines and administrative scripts.
