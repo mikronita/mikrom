@@ -16,7 +16,7 @@ import {
 } from "react-icons/hi2";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useMemo, useRef } from "react";
-import { Boxes, Rocket, GitBranch, Zap, User } from "lucide-react";
+import { Boxes, ExternalLink, GitBranch, Globe2, Rocket, User, Zap } from "lucide-react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -388,14 +388,18 @@ export default function AppDetailPage() {
                   <h1 className="text-2xl font-semibold tracking-tight">
                     {app?.name || decodedName}.apps.mikrom.spluca.org
                   </h1>
-                  <a 
-                    href={`https://${app?.name || decodedName}.apps.mikrom.spluca.org`} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-sm font-medium text-indigo-500 hover:underline flex items-center gap-1"
-                  >
-                    Visit site ↗
-                  </a>
+                  <Button variant="outline" size="sm" asChild className="shrink-0">
+                    <a
+                      href={`https://${app?.name || decodedName}.apps.mikrom.spluca.org`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Visit ${app?.name || decodedName} site`}
+                    >
+                      <Globe2 data-icon="inline-start" />
+                      <span className="hidden sm:inline">Visit site</span>
+                      <ExternalLink data-icon="inline-end" />
+                    </a>
+                  </Button>
                 </div>
                 <p className="text-muted-foreground text-sm mt-1">
                   Manage {app?.name || "application"} deployments and monitor production instances.
