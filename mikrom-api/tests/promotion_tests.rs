@@ -11,7 +11,7 @@ use tokio::time::Duration;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn test_promote_stopped_deployment_resumes_it() {
+async fn test_promote_paused_deployment_resumes_it() {
     let mut mock_app_repo = MockAppRepository::new();
     let mut mock_scheduler = MockScheduler::new();
 
@@ -32,7 +32,7 @@ async fn test_promote_stopped_deployment_resumes_it() {
         id: new_dep_id,
         app_id,
         user_id,
-        status: "STOPPED".to_string(),
+        status: "PAUSED".to_string(),
         job_id: Some("job-new".to_string()),
         image_tag: Some("v1".to_string()),
         vcpus: 1,

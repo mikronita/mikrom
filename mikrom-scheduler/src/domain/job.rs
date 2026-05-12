@@ -10,7 +10,8 @@ pub enum JobStatus {
     Running = 3,
     Failed = 4,
     Cancelled = 5,
-    Stopped = 6,
+    Paused = 6,
+    Stopped = 7,
 }
 
 impl JobStatus {
@@ -19,6 +20,7 @@ impl JobStatus {
             Self::Pending => "pending",
             Self::Scheduled => "scheduled",
             Self::Running => "running",
+            Self::Paused => "paused",
             Self::Stopped => "stopped",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",

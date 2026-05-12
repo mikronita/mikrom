@@ -119,6 +119,10 @@ mockall::mock! {
 
 #[must_use]
 pub fn status_name(code: i32) -> &'static str {
+    if code == 7 {
+        return "STOPPED";
+    }
+
     use mikrom_proto::scheduler::DeployStatus;
     match DeployStatus::try_from(code).unwrap_or(DeployStatus::Unspecified) {
         DeployStatus::Unspecified => "UNKNOWN",
@@ -127,7 +131,7 @@ pub fn status_name(code: i32) -> &'static str {
         DeployStatus::Running => "RUNNING",
         DeployStatus::Failed => "FAILED",
         DeployStatus::Cancelled => "CANCELLED",
-        DeployStatus::Paused => "STOPPED",
+        DeployStatus::Paused => "PAUSED",
     }
 }
 
@@ -143,7 +147,8 @@ mod tests {
         assert_eq!(status_name(3), "RUNNING");
         assert_eq!(status_name(4), "FAILED");
         assert_eq!(status_name(5), "CANCELLED");
-        assert_eq!(status_name(6), "STOPPED");
+        assert_eq!(status_name(6), "PAUSED");
+        assert_eq!(status_name(7), "STOPPED");
     }
 
     #[test]

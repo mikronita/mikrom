@@ -54,9 +54,21 @@ impl AppService {
     pub async fn pause_app(&self, job_id: &str, user_id: &str) -> DomainResult<()> {
         let job = self.get_app_status(job_id, user_id).await?;
 
-        if job.status == JobStatus::Stopped {
+        if matches!(job.status, JobStatus::Paused | JobStatus::Stopped) {
+            tracing::info!(
+                job_id = %job_id,
+                status = %job.status.as_str(),
+                "Pause requested for a job that is already paused or stopped"
+            );
             return Ok(());
         }
+
+        tracing::info!(
+            job_id = %job_id,
+            app_id = %job.app_id,
+            vm_id = ?job.vm_id,
+            "Pausing job"
+        );
 
         if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
             if let Err(e) = self.agent_client.pause_vm(host_id, vm_id).await {
@@ -68,14 +80,23 @@ impl AppService {
                 self.agent_client.stop_vm(host_id, vm_id).await?;
             }
             self.job_repo
-                .update_job_status(job_id, JobStatus::Stopped)
+                .update_job_status(job_id, JobStatus::Paused)
                 .await?;
         }
+
+        tracing::info!(job_id = %job_id, "Job paused successfully");
         Ok(())
     }
 
     pub async fn resume_app(&self, job_id: &str, user_id: &str) -> DomainResult<()> {
         let job = self.get_app_status(job_id, user_id).await?;
+
+        tracing::info!(
+            job_id = %job_id,
+            app_id = %job.app_id,
+            vm_id = ?job.vm_id,
+            "Resuming job"
+        );
 
         // Ensure exclusivity
         self.deployment
@@ -99,6 +120,8 @@ impl AppService {
                 .update_job_status(job_id, JobStatus::Running)
                 .await?;
         }
+
+        tracing::info!(job_id = %job_id, "Job resumed successfully");
         Ok(())
     }
 
@@ -205,8 +228,12 @@ impl AppService {
 mod tests {
     use super::*;
     use crate::domain::job::{Job, JobStatus, VmConfig};
-    use crate::domain::{AgentClient, DomainResult, JobRepository, Worker, WorkerRepository};
+    use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository};
+    use crate::domain::{
+        AgentClient, DomainError, DomainResult, JobRepository, Worker, WorkerRepository,
+    };
     use async_trait::async_trait;
+    use mockall::predicate::eq;
     use std::sync::Arc;
 
     struct DummyJobRepo {
@@ -355,5 +382,108 @@ mod tests {
 
         let res = service.check_health("job-1", "user-1").await.unwrap();
         assert!(res);
+    }
+
+    fn paused_job() -> Job {
+        let mut job = Job::new(
+            "job-1".to_string(),
+            "app-1".to_string(),
+            "app1".to_string(),
+            "img".to_string(),
+            VmConfig::default(),
+            "user-1".to_string(),
+            None,
+        );
+        job.schedule("host-1".to_string(), "vm-1".to_string());
+        job.status = JobStatus::Running;
+        job
+    }
+
+    #[tokio::test]
+    async fn test_pause_app_success_updates_status_without_stop() {
+        let job = paused_job();
+        let mut job_repo = MockJobRepository::new();
+        job_repo.expect_get_job().with(eq("job-1")).returning({
+            let job = job.clone();
+            move |_| Ok(Some(job.clone()))
+        });
+        job_repo
+            .expect_update_job_status()
+            .with(eq("job-1"), eq(JobStatus::Paused))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut agent_client = MockAgentClient::new();
+        agent_client
+            .expect_pause_vm()
+            .with(eq("host-1"), eq("vm-1"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+        agent_client.expect_stop_vm().times(0);
+
+        let worker_repo = Arc::new(MockWorkerRepository::new());
+        let job_repo = Arc::new(job_repo);
+        let agent_client = Arc::new(agent_client);
+        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
+
+        let service = AppService {
+            deployment: DeploymentService::new(
+                job_repo.clone(),
+                worker_repo.clone(),
+                agent_client.clone(),
+            ),
+            job_repo,
+            worker_repo,
+            agent_client,
+            pool,
+        };
+
+        service.pause_app("job-1", "user-1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_pause_app_fallback_stops_vm_on_pause_failure() {
+        let job = paused_job();
+        let mut job_repo = MockJobRepository::new();
+        job_repo.expect_get_job().with(eq("job-1")).returning({
+            let job = job.clone();
+            move |_| Ok(Some(job.clone()))
+        });
+        job_repo
+            .expect_update_job_status()
+            .with(eq("job-1"), eq(JobStatus::Paused))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut agent_client = MockAgentClient::new();
+        agent_client
+            .expect_pause_vm()
+            .with(eq("host-1"), eq("vm-1"))
+            .times(1)
+            .returning(|_, _| Err(DomainError::Infrastructure("boom".to_string())));
+        agent_client
+            .expect_stop_vm()
+            .with(eq("host-1"), eq("vm-1"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let worker_repo = Arc::new(MockWorkerRepository::new());
+        let job_repo = Arc::new(job_repo);
+        let agent_client = Arc::new(agent_client);
+        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
+
+        let service = AppService {
+            deployment: DeploymentService::new(
+                job_repo.clone(),
+                worker_repo.clone(),
+                agent_client.clone(),
+            ),
+            job_repo,
+            worker_repo,
+            agent_client,
+            pool,
+        };
+
+        service.pause_app("job-1", "user-1").await.unwrap();
     }
 }

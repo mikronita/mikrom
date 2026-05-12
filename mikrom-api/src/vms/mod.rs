@@ -340,7 +340,7 @@ pub async fn watch_deployments(
             for app in apps {
                 if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
                     for dep in deps {
-                        if ["RUNNING", "BUILDING", "SCHEDULED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                        if ["RUNNING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
                             let data = serde_json::json!({
                                 "job_id": dep.job_id.clone().unwrap_or_default(),
                                 "deployment_id": dep.id.to_string(),
@@ -403,7 +403,7 @@ pub async fn watch_deployments(
                         state_clone.app_repo.list_deployments_by_app(app_id).await
                     }.await {
                         for dep in deps {
-                            if ["RUNNING", "BUILDING", "SCHEDULED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                            if ["RUNNING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
                                 let data = serde_json::json!({
                                     "job_id": dep.job_id.clone().unwrap_or_default(),
                                     "deployment_id": dep.id.to_string(),
@@ -477,7 +477,7 @@ pub async fn watch_deployments(
                             for app in apps {
                                 if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
                                     for dep in deps {
-                                        if ["RUNNING", "BUILDING", "SCHEDULED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                                        if ["RUNNING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
                                             let data = serde_json::json!({
                                                 "job_id": dep.job_id.clone().unwrap_or_default(),
                                                 "deployment_id": dep.id.to_string(),
@@ -737,6 +737,14 @@ pub async fn pause_deployment(
     // Validate app ownership and deployment connection
     let (app, deployment) = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
 
+    tracing::info!(
+        app = %app.name,
+        job_id = %job_id,
+        user_id = %auth.user_id,
+        origin = "manual_pause",
+        "Forwarding pause request to scheduler"
+    );
+
     let success = state
         .scheduler
         .pause_app(job_id.clone(), auth.user_id.clone())
@@ -744,13 +752,20 @@ pub async fn pause_deployment(
         .map_err(ApiError::Scheduler)?;
 
     if success {
+        tracing::info!(
+            app = %app.name,
+            job_id = %job_id,
+            user_id = %auth.user_id,
+            origin = "manual_pause",
+            "Scheduler pause completed"
+        );
         // Update database status
         let _ = state
             .app_repo
             .update_deployment(
                 deployment.id,
                 UpdateDeploymentParams {
-                    status: Some("STOPPED".to_string()),
+                    status: Some("PAUSED".to_string()),
                     job_id: Some(job_id),
                     image_tag: deployment.image_tag,
                     build_id: deployment.build_id,

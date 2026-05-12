@@ -303,6 +303,7 @@ fn map_row_to_job(r: &sqlx::postgres::PgRow) -> Job {
         "pending" => JobStatus::Pending,
         "scheduled" => JobStatus::Scheduled,
         "running" => JobStatus::Running,
+        "paused" => JobStatus::Paused,
         "stopped" => JobStatus::Stopped,
         "failed" => JobStatus::Failed,
         "cancelled" => JobStatus::Cancelled,

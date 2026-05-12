@@ -115,7 +115,7 @@ async fn sync_deployment_state(
     fn status_priority(status: &str) -> i32 {
         match status {
             "FAILED" | "CANCELLED" => 5, // Terminal states have highest priority
-            "RUNNING" | "STOPPED" => 4,  // Allow transitions between running and stopped
+            "RUNNING" | "PAUSED" | "STOPPED" => 4, // Allow transitions between running, paused and stopped
             "SCHEDULED" => 3,
             "PENDING" => 2,
             "BUILDING" => 1,
@@ -164,24 +164,34 @@ async fn sync_deployment_state(
         let mut route_changed = deployment_changed;
 
         if app.active_deployment_id.is_none() && db_status == "RUNNING" {
-            match state.app_repo.set_active_deployment(app.id, dep.id).await {
-                Ok(_) => {
-                    app.active_deployment_id = Some(dep.id);
-                    route_changed = true;
-                    info!(
-                        app_id = %app.id,
-                        deployment_id = %dep.id,
-                        "Promoted first running deployment to active"
-                    );
-                },
-                Err(e) => {
-                    error!(
-                        app_id = %app.id,
-                        deployment_id = %dep.id,
-                        error = %e,
-                        "Failed to promote running deployment to active"
-                    );
-                },
+            let app_key: mikrom_proto::id::AppId = app.id.into();
+            if state.active_deployment_flows.contains(&app_key) {
+                info!(
+                    app_id = %app.id,
+                    deployment_id = %dep.id,
+                    current_active = ?app.active_deployment_id,
+                    "Skipping first-running deployment promotion because a deployment flow is still active"
+                );
+            } else {
+                match state.app_repo.set_active_deployment(app.id, dep.id).await {
+                    Ok(_) => {
+                        app.active_deployment_id = Some(dep.id);
+                        route_changed = true;
+                        info!(
+                            app_id = %app.id,
+                            deployment_id = %dep.id,
+                            "Promoted first running deployment to active"
+                        );
+                    },
+                    Err(e) => {
+                        error!(
+                            app_id = %app.id,
+                            deployment_id = %dep.id,
+                            error = %e,
+                            "Failed to promote running deployment to active"
+                        );
+                    },
+                }
             }
         }
 

@@ -173,6 +173,7 @@ impl DeploymentService {
             .filter(|j| {
                 j.app_id == app_id
                     && j.job_id != current_job_id
+                    && j.status != JobStatus::Paused
                     && j.status != JobStatus::Stopped
                     && j.status != JobStatus::Cancelled
                     && j.status != JobStatus::Failed
@@ -187,7 +188,7 @@ impl DeploymentService {
                     let _ = self.agent_client.pause_vm(host_id, vm_id).await;
                     let _ = self
                         .job_repo
-                        .update_job_status(&old_job.job_id, JobStatus::Stopped)
+                        .update_job_status(&old_job.job_id, JobStatus::Paused)
                         .await;
                 }
             }

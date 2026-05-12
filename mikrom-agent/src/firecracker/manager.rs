@@ -43,6 +43,45 @@ pub struct FirecrackerManager {
 }
 
 impl FirecrackerManager {
+    fn snapshot_create_body(snapshot_path: &str, mem_path: &str) -> String {
+        serde_json::json!({
+            "snapshot_type": "Full",
+            "snapshot_path": snapshot_path,
+            "mem_file_path": mem_path,
+        })
+        .to_string()
+    }
+
+    fn snapshot_paths(
+        &self,
+        vm_id: &VmId,
+        chroot_dir: Option<&str>,
+    ) -> (
+        std::path::PathBuf,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    ) {
+        let snapshot_dir = std::path::Path::new(&self.fc_config.data_dir).join("snapshots");
+        let host_snapshot_path = snapshot_dir.join(format!("{vm_id}.snapshot"));
+        let host_mem_path = snapshot_dir.join(format!("{vm_id}.mem"));
+
+        match chroot_dir {
+            Some(_) => (
+                host_snapshot_path,
+                host_mem_path,
+                std::path::PathBuf::from("/vm.snapshot"),
+                std::path::PathBuf::from("/vm.mem"),
+            ),
+            None => (
+                host_snapshot_path.clone(),
+                host_mem_path.clone(),
+                host_snapshot_path,
+                host_mem_path,
+            ),
+        }
+    }
+
     pub async fn get_vm_info(&self, vm_id: &VmId) -> Option<VmInfo> {
         let vms = self.vms.read().await;
         vms.get(vm_id).cloned()
@@ -337,6 +376,10 @@ impl FirecrackerManager {
                 self.set_failed(&vm_id, err_msg.clone()).await;
                 return Err(FirecrackerError::ProcessError(err_msg));
             }
+        }
+
+        if let Some(kernel_path) = &self.fc_config.kernel_path {
+            self.validate_kernel_image(kernel_path).await?;
         }
 
         // 4. Spawn the heavy work in background
@@ -758,6 +801,9 @@ impl FirecrackerManager {
         }
 
         // 6. Start Instance
+        // Firecracker applies API configuration asynchronously, so give it a brief moment
+        // to settle before triggering the start action.
+        tokio::time::sleep(Duration::from_millis(15)).await;
         fc_put(
             socket,
             "/actions",
@@ -983,18 +1029,29 @@ impl FirecrackerManager {
                 FirecrackerError::ProcessError(format!("Failed to create snapshots dir: {e}"))
             })?;
 
-        let snapshot_path = format!("{}/{vm_id}.snapshot", snapshot_dir.display());
-        let mem_path = format!("{}/{vm_id}.mem", snapshot_dir.display());
-
-        let snapshot_body = serde_json::json!({
-            "snapshot_type": "Full",
-            "snapshot_path": snapshot_path,
-            "mem_file_path": mem_path,
-            "version": self.fc_config.fc_version
-        })
-        .to_string();
+        let chroot_dir = proc.chroot_dir.clone();
+        let (host_snapshot_path, host_mem_path, snapshot_path, mem_path) =
+            self.snapshot_paths(vm_id, chroot_dir.as_deref());
+        let snapshot_body = Self::snapshot_create_body(
+            &snapshot_path.to_string_lossy(),
+            &mem_path.to_string_lossy(),
+        );
 
         fc_put(&proc.socket_path, "/snapshot/create", &snapshot_body).await?;
+
+        if chroot_dir.is_some() {
+            let chroot_root = self.get_chroot_dir(vm_id).join("root");
+            self.ensure_file_at(
+                &chroot_root.join("vm.snapshot").to_string_lossy(),
+                &host_snapshot_path.to_string_lossy(),
+            )
+            .await?;
+            self.ensure_file_at(
+                &chroot_root.join("vm.mem").to_string_lossy(),
+                &host_mem_path.to_string_lossy(),
+            )
+            .await?;
+        }
 
         // After snapshotting, we terminate the process to free up resources.
         // We keep the files (rootfs, snapshot, mem) to allow resumption later.
@@ -1555,6 +1612,22 @@ impl FirecrackerManager {
         ))
     }
 
+    async fn validate_kernel_image(&self, kernel_path: &str) -> Result<(), FirecrackerError> {
+        let kernel = tokio::fs::read(kernel_path).await.map_err(|e| {
+            FirecrackerError::ProcessError(format!(
+                "Failed to read kernel image at {kernel_path}: {e}"
+            ))
+        })?;
+
+        if kernel.len() < 4 || kernel[0..4] != [0x7f, b'E', b'L', b'F'] {
+            return Err(FirecrackerError::ProcessError(format!(
+                "Invalid kernel image at {kernel_path}: expected an uncompressed ELF Linux kernel, but the file does not start with ELF magic"
+            )));
+        }
+
+        Ok(())
+    }
+
     async fn ensure_file_at(&self, src: &str, dst: &str) -> Result<(), FirecrackerError> {
         let canonical_src = tokio::fs::canonicalize(src).await.map_err(|e| {
             FirecrackerError::ProcessError(format!("Failed to resolve path {src}: {e}"))
@@ -1666,6 +1739,7 @@ impl FirecrackerManager {
 #[allow(clippy::unwrap_used, clippy::get_unwrap)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn config() -> VmConfig {
         VmConfig {
@@ -1689,6 +1763,14 @@ mod tests {
         mgr.start_vm(*vm_id, AppId::new(), "nginx:latest".to_string(), config())
             .await
             .unwrap();
+    }
+
+    fn temp_file_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "mikrom-agent-{name}-{}-{}.bin",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ))
     }
 
     #[tokio::test]
@@ -1763,6 +1845,48 @@ mod tests {
         start(&mgr, &VmId::new()).await;
         start(&mgr, &VmId::new()).await;
         assert_eq!(mgr.list_vms().await.len(), 2);
+    }
+
+    #[test]
+    fn test_snapshot_create_body_omits_version() {
+        let body = FirecrackerManager::snapshot_create_body(
+            "/var/lib/mikrom/data/snapshots/vm.snapshot",
+            "/var/lib/mikrom/data/snapshots/vm.mem",
+        );
+
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+        assert_eq!(
+            parsed,
+            serde_json::json!({
+                "snapshot_type": "Full",
+                "snapshot_path": "/var/lib/mikrom/data/snapshots/vm.snapshot",
+                "mem_file_path": "/var/lib/mikrom/data/snapshots/vm.mem",
+            })
+        );
+        assert!(parsed.get("version").is_none());
+    }
+
+    #[test]
+    fn test_snapshot_paths_use_chroot_for_firecracker_when_jailer_is_enabled() {
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let vm_id = VmId::new();
+        let (host_snapshot, host_mem, snapshot_path, mem_path) =
+            mgr.snapshot_paths(&vm_id, Some("/srv/jailer/firecracker/test-vm"));
+
+        assert_eq!(
+            host_snapshot,
+            std::path::Path::new("/tmp/mikrom-stub-data")
+                .join("snapshots")
+                .join(format!("{vm_id}.snapshot"))
+        );
+        assert_eq!(
+            host_mem,
+            std::path::Path::new("/tmp/mikrom-stub-data")
+                .join("snapshots")
+                .join(format!("{vm_id}.mem"))
+        );
+        assert_eq!(snapshot_path, std::path::PathBuf::from("/vm.snapshot"));
+        assert_eq!(mem_path, std::path::PathBuf::from("/vm.mem"));
     }
 
     #[tokio::test]
@@ -1883,6 +2007,43 @@ mod tests {
         let result =
             wait_for_socket("/tmp/fc-nonexistent-socket.sock", Duration::from_millis(50)).await;
         assert!(matches!(result, Err(FirecrackerError::SocketTimeout(_))));
+    }
+
+    #[tokio::test]
+    async fn test_validate_kernel_image_accepts_elf_magic() {
+        let kernel_path = temp_file_path("kernel-valid");
+        tokio::fs::write(
+            &kernel_path,
+            [0x7f, b'E', b'L', b'F', 0x02, 0x01, 0x01, 0x00],
+        )
+        .await
+        .unwrap();
+
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        assert!(
+            mgr.validate_kernel_image(kernel_path.to_str().unwrap())
+                .await
+                .is_ok()
+        );
+
+        let _ = tokio::fs::remove_file(&kernel_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_validate_kernel_image_rejects_non_elf_files() {
+        let kernel_path = temp_file_path("kernel-invalid");
+        tokio::fs::write(&kernel_path, b"not-a-kernel")
+            .await
+            .unwrap();
+
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let err = mgr
+            .validate_kernel_image(kernel_path.to_str().unwrap())
+            .await
+            .expect_err("expected invalid kernel error");
+        assert!(err.to_string().contains("Invalid kernel image"));
+
+        let _ = tokio::fs::remove_file(&kernel_path).await;
     }
 
     #[tokio::test]

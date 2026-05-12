@@ -76,7 +76,7 @@ async fn test_promotion_back_and_forth() {
         id: dep2_id,
         app_id,
         user_id,
-        status: "STOPPED".to_string(),
+        status: "PAUSED".to_string(),
         job_id: Some("job-2".to_string()),
         ..Default::default()
     };
@@ -120,20 +120,20 @@ async fn test_promotion_back_and_forth() {
         .times(1)
         .returning(|_, _| Ok(true));
 
-    // Expect dep1 status update to STOPPED
+    // Expect dep1 status update to PAUSED
     mock_app_repo
         .expect_update_deployment()
         .with(
             eq(dep1_id),
             predicate::function(|params: &UpdateDeploymentParams| {
-                params.status == Some("STOPPED".to_string())
+                params.status == Some("PAUSED".to_string())
                     && params.job_id == Some("job-1".to_string())
             }),
         )
         .times(1)
         .returning(|_, _| Ok(()));
 
-    // Expect dep2 to be resumed (via deploy_to_scheduler)
+    // Expect dep2 to be resumed directly
     mock_scheduler
         .expect_resume_app()
         .with(eq("job-2".to_string()), eq("system".to_string()))
@@ -364,13 +364,13 @@ async fn test_promotion_pauses_previous_active() {
         .times(1)
         .returning(|_, _| Ok(true));
 
-    // 5. Mock update_deployment for the old deployment (marking it STOPPED)
+    // 5. Mock update_deployment for the old deployment (marking it PAUSED)
     mock_app_repo
         .expect_update_deployment()
         .with(
             eq(old_dep_id),
             predicate::function(|params: &UpdateDeploymentParams| {
-                params.status == Some("STOPPED".to_string())
+                params.status == Some("PAUSED".to_string())
             }),
         )
         .times(1)
@@ -496,7 +496,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
         id: dep_id,
         app_id,
         user_id,
-        status: "STOPPED".to_string(),
+        status: "PAUSED".to_string(),
         job_id: Some("job-stopped".to_string()),
         ..Default::default()
     };
@@ -524,7 +524,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
         .expect_list_deployments_by_app()
         .returning(move |_| Ok(vec![paused_dep_clone2.clone()]));
 
-    // Expect resumption (actually now it calls deploy_to_scheduler which calls resume_app)
+    // Expect resumption directly through the scheduler resume flow
     mock_scheduler
         .expect_resume_app()
         .with(eq("job-stopped".to_string()), eq("system".to_string()))
