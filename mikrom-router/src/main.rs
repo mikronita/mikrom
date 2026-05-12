@@ -8,6 +8,7 @@ pub mod state;
 pub mod state_manager;
 pub mod telemetry;
 pub mod tls;
+pub mod upstream_ca;
 pub mod wireguard;
 
 #[cfg(test)]
@@ -103,6 +104,7 @@ fn main() -> Result<()> {
     let nats_certs_dir = std::env::var("NATS_CERTS_DIR")
         .ok()
         .or_else(|| std::env::var("CERTS_DIR").ok());
+    let upstream_ca_certs_dir = std::env::var("UPSTREAM_CA_CERTS_DIR").ok();
     let master_key = std::env::var("MASTER_KEY").expect("MASTER_KEY must be set");
     let wg_port = std::env::var("ROUTER_WG_PORT")
         .ok()
@@ -182,8 +184,14 @@ fn main() -> Result<()> {
     let telemet_service = background_service("Telemetry Loop", telemet);
     server.add_service(telemet_service);
 
-    let proxy_instance =
-        proxy::MikromProxy::new(state.clone(), acme_staging, metrics_counters, rps_limit);
+    let upstream_ca = upstream_ca::load_upstream_ca(upstream_ca_certs_dir.as_deref())?;
+    let proxy_instance = proxy::MikromProxy::new(
+        state.clone(),
+        acme_staging,
+        upstream_ca,
+        metrics_counters,
+        rps_limit,
+    );
 
     let mut proxy_service = http_proxy_service(&server.configuration, proxy_instance);
     proxy_service.add_tcp("[::]:80");

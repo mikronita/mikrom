@@ -105,7 +105,7 @@ async fn setup_test_env(rps_limit: isize, use_ipv6: bool) -> TestEnv {
         drop(s);
     }
 
-    let proxy = MikromProxy::new(state.clone(), false, metrics, rps_limit);
+    let proxy = MikromProxy::new(state.clone(), false, None, metrics, rps_limit);
 
     std::thread::spawn(move || {
         let mut my_server = Server::new(None).expect("Failed to create server");
