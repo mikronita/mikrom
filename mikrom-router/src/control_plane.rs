@@ -26,6 +26,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, info};
 
+fn tls_alternative_cn_for_host(host: &str) -> Option<String> {
+    match host {
+        "registry.mikrom.spluca.org" => Some("registry.mikrom.es".to_string()),
+        _ => None,
+    }
+}
+
 pub struct ControlPlane {
     db_url: String,
     nats_url: String,
@@ -113,6 +120,7 @@ impl ControlPlane {
 
             lb.set_health_check(Box::new(hc));
             lb.health_check_frequency = Some(std::time::Duration::from_secs(5));
+            let tls_alternative_cn = tls_alternative_cn_for_host(&host);
 
             routes.insert(
                 host.clone(),
@@ -121,6 +129,7 @@ impl ControlPlane {
                     targets,
                     lb: Arc::new(lb),
                     use_tls,
+                    tls_alternative_cn,
                 },
             );
         }

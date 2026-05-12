@@ -15,6 +15,24 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+fn canonical_host(host: &str) -> String {
+    if let Some(rest) = host.strip_prefix('[')
+        && let Some((ipv6, suffix)) = rest.split_once(']')
+        && (suffix.is_empty() || suffix.starts_with(':'))
+    {
+        return format!("[{ipv6}]");
+    }
+
+    if let Some((name, port)) = host.rsplit_once(':')
+        && !name.contains(':')
+        && !port.contains(':')
+    {
+        return name.to_string();
+    }
+
+    host.to_string()
+}
+
 pub struct RouterMetricsCounters {
     pub requests_total: AtomicU64,
     pub responses_2xx: AtomicU64,
@@ -80,24 +98,36 @@ impl MikromProxy {
     pub async fn get_lb_and_tls(
         &self,
         host: &str,
-    ) -> Result<(Arc<LoadBalancer<RoundRobin>>, bool)> {
+    ) -> Result<(Arc<LoadBalancer<RoundRobin>>, bool, Option<String>)> {
+        let raw_host = host;
+        let host = canonical_host(raw_host);
         let state = self.state.read().await;
 
-        let res = state.routes.get(host).map_or_else(
+        let res = state
+            .routes
+            .get(host.as_str())
+            .or_else(|| state.routes.get(raw_host));
+        let res = res.map_or_else(
             || {
                 Err(Error::explain(
                     ErrorType::HTTPStatus(404),
                     format!("No route found for host: {host}"),
                 ))
             },
-            |route| Ok((route.lb.clone(), route.use_tls)),
+            |route| {
+                Ok((
+                    route.lb.clone(),
+                    route.use_tls,
+                    route.tls_alternative_cn.clone(),
+                ))
+            },
         );
         drop(state);
         res
     }
 
     pub async fn get_lb(&self, host: &str) -> Result<Arc<LoadBalancer<RoundRobin>>> {
-        self.get_lb_and_tls(host).await.map(|(lb, _)| lb)
+        self.get_lb_and_tls(host).await.map(|(lb, _, _)| lb)
     }
 }
 
@@ -184,6 +214,7 @@ impl ProxyHttp for MikromProxy {
             .and_then(|h| h.to_str().ok())
             .or_else(|| session.req_header().uri.host())
             .unwrap_or("");
+        let normalized_host = canonical_host(host);
 
         let path = session.req_header().uri.path();
 
@@ -225,9 +256,9 @@ impl ProxyHttp for MikromProxy {
 
         if !is_tls {
             let state = self.state.read().await;
-            if state.certificates.contains_key(host) {
+            if state.certificates.contains_key(normalized_host.as_str()) {
                 let mut redirect = ResponseHeader::build(301, None)?;
-                let location = format!("https://{host}{path}");
+                let location = format!("https://{normalized_host}{path}");
                 redirect.insert_header("Location", location)?;
                 session
                     .write_response_header(Box::new(redirect), true)
@@ -249,8 +280,9 @@ impl ProxyHttp for MikromProxy {
             .and_then(|h| h.to_str().ok())
             .or_else(|| session.req_header().uri.host())
             .unwrap_or("");
+        let normalized_host = canonical_host(host);
 
-        let (lb, use_tls) = self.get_lb_and_tls(host).await?;
+        let (lb, use_tls, alternative_cn) = self.get_lb_and_tls(host).await?;
 
         // Use client address as a hash seed for better distribution/stickiness if LB supports it
         let hash = session
@@ -260,18 +292,18 @@ impl ProxyHttp for MikromProxy {
         let upstream = lb.select(&hash, 256).ok_or_else(|| {
             Error::explain(
                 ErrorType::InternalError,
-                format!("No healthy upstreams for host: {host}"),
+                format!("No healthy upstreams for host: {normalized_host}"),
             )
         })?;
 
         info!("Selected upstream: {upstream:?}, use_tls: {use_tls}");
-        let mut peer = HttpPeer::new(upstream.to_string(), use_tls, host.to_string());
+        let mut peer = HttpPeer::new(upstream.to_string(), use_tls, normalized_host);
         if use_tls {
             if let Some(ca) = &self.upstream_ca {
                 peer.options.ca = Some(ca.clone());
             }
-            if host == "registry.mikrom.spluca.org" {
-                peer.options.alternative_cn = Some("registry.mikrom.es".to_string());
+            if let Some(alternative_cn) = alternative_cn {
+                peer.options.alternative_cn = Some(alternative_cn);
             }
         }
         Ok(Box::new(peer))

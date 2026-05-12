@@ -21,6 +21,7 @@ pub struct Route {
     pub targets: Vec<String>,
     pub lb: Arc<LoadBalancer<RoundRobin>>,
     pub use_tls: bool,
+    pub tls_alternative_cn: Option<String>,
 }
 
 impl fmt::Debug for Route {
@@ -29,6 +30,7 @@ impl fmt::Debug for Route {
             .field("host", &self.host)
             .field("targets", &self.targets)
             .field("use_tls", &self.use_tls)
+            .field("tls_alternative_cn", &self.tls_alternative_cn)
             .field("lb", &"LoadBalancer<RoundRobin>")
             .finish()
     }
