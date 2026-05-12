@@ -1,31 +1,40 @@
 use crate::client::MikromClient;
-use crate::commands::SystemCommands;
+use crate::commands::{OutputFormat, SystemCommands};
 use crate::ui;
 use anyhow::Result;
-use yansi::Paint;
 
-pub async fn handle(client: &MikromClient, cmd: SystemCommands) -> Result<()> {
+pub async fn handle(
+    client: &MikromClient,
+    cmd: SystemCommands,
+    output: OutputFormat,
+) -> Result<()> {
     match cmd {
-        SystemCommands::Health => health(client).await,
+        SystemCommands::Health => health(client, output).await,
         SystemCommands::Watch => watch(),
     }
 }
 
-async fn health(client: &MikromClient) -> Result<()> {
+async fn health(client: &MikromClient, output: OutputFormat) -> Result<()> {
     let health = client.health().await?;
-    ui::step(ui::INFO, &ui::bold_cyan("System Health Status"));
-    ui::label_value(ui::INFO, "Status:", &ui::green_label(&health.status));
-    ui::label_value(ui::INFO, "Version:", &health.version);
-
-    println!("\n  {}", ui::bold_cyan("Services:"));
-    for (name, status) in health.services {
-        let status_painted = if status == "ONLINE" {
-            Paint::new(&status).green()
-        } else {
-            Paint::new(&status).red()
-        };
-        println!("    {:<12} {}", name, status_painted);
+    if output == OutputFormat::Json {
+        return ui::print_json(&health);
     }
+
+    ui::step(ui::INFO, &ui::bold_cyan("System Health Status"));
+    ui::table(
+        "⚙️ API",
+        &["Field", "Value"],
+        &[
+            vec!["Status".to_string(), ui::status_label(&health.status)],
+            vec!["Version".to_string(), health.version],
+        ],
+    );
+    let rows = health
+        .services
+        .iter()
+        .map(|(name, status)| vec![name.clone(), ui::status_label(status)])
+        .collect::<Vec<_>>();
+    ui::table("🧩 Services", &["Service", "Status"], &rows);
     Ok(())
 }
 

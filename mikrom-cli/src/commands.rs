@@ -1,4 +1,10 @@
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum OutputFormat {
+    Table,
+    Json,
+}
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {

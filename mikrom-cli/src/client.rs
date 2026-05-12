@@ -8,25 +8,25 @@ pub struct MikromClient {
     token: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
     pub services: HashMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct RegisterResponse {
     pub message: String,
     pub user_id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct LoginResponse {
     pub token: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct DeployResponse {
     pub job_id: Option<String>,
     pub deployment_id: Option<String>,
@@ -34,7 +34,7 @@ pub struct DeployResponse {
     pub message: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AppInfo {
     pub id: String,
     pub name: String,
@@ -45,7 +45,7 @@ pub struct AppInfo {
     pub created_at: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct LiveDeploymentInfo {
     pub job_id: String,
     pub app_name: String,
@@ -55,7 +55,7 @@ pub struct LiveDeploymentInfo {
     pub ipv6_address: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct LiveDeploymentStatus {
     pub job_id: String,
     pub status: String,
@@ -67,7 +67,7 @@ pub struct LiveDeploymentStatus {
     pub ipv6_address: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct DeploymentInfo {
     pub id: String,
     pub image_tag: Option<String>,
@@ -75,7 +75,7 @@ pub struct DeploymentInfo {
     pub created_at: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct WhoamiResponse {
     #[serde(alias = "id")]
     pub user_id: String,

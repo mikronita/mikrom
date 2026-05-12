@@ -203,6 +203,100 @@ async fn test_client_deploy_app() {
 }
 
 #[tokio::test]
+async fn test_client_activate_deployment() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/apps/test-app/deployments/dep-123/activate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!(null)))
+        .mount(&server)
+        .await;
+
+    client
+        .activate_deployment("test-app", "dep-123")
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_client_stop_deployment() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("DELETE"))
+        .and(path("/v1/apps/test-app/deployments/job-123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true
+        })))
+        .mount(&server)
+        .await;
+
+    let res = client.stop_deployment("test-app", "job-123").await.unwrap();
+    assert_eq!(res["success"], true);
+}
+
+#[tokio::test]
+async fn test_client_pause_deployment() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/apps/test-app/deployments/job-123/pause"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true
+        })))
+        .mount(&server)
+        .await;
+
+    let res = client
+        .pause_deployment("test-app", "job-123")
+        .await
+        .unwrap();
+    assert_eq!(res["success"], true);
+}
+
+#[tokio::test]
+async fn test_client_resume_deployment() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/apps/test-app/deployments/job-123/resume"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true
+        })))
+        .mount(&server)
+        .await;
+
+    let res = client
+        .resume_deployment("test-app", "job-123")
+        .await
+        .unwrap();
+    assert_eq!(res["success"], true);
+}
+
+#[tokio::test]
+async fn test_client_delete_deployment_record() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("DELETE"))
+        .and(path("/v1/apps/test-app/deployments/job-123/delete"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true
+        })))
+        .mount(&server)
+        .await;
+
+    let res = client
+        .delete_deployment_record("test-app", "job-123")
+        .await
+        .unwrap();
+    assert_eq!(res["success"], true);
+}
+
+#[tokio::test]
 async fn test_client_get_deployment_status() {
     let server = MockServer::start().await;
     let client = MikromClient::new(server.uri(), Some("token".into()));
@@ -274,4 +368,21 @@ async fn test_client_error_handling() {
     assert!(res.is_err());
     let err_msg = res.unwrap_err().to_string();
     assert!(err_msg.contains("Invalid credentials"));
+}
+
+#[tokio::test]
+async fn test_client_error_handling_invalid_error_json() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), None);
+
+    Mock::given(method("POST"))
+        .and(path("/v1/auth/login"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("not json"))
+        .mount(&server)
+        .await;
+
+    let res = client.login("test@example.com", "wrong").await;
+    assert!(res.is_err());
+    let err_msg = res.unwrap_err().to_string();
+    assert!(err_msg.contains("Failed to parse error response"));
 }

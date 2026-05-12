@@ -1,84 +1,127 @@
 use crate::client::MikromClient;
-use crate::commands::AppCommands;
+use crate::commands::{AppCommands, OutputFormat};
 use crate::ui;
 use anyhow::Result;
-use yansi::Paint;
 
-pub async fn handle(client: &MikromClient, cmd: AppCommands) -> Result<()> {
+pub async fn handle(client: &MikromClient, cmd: AppCommands, output: OutputFormat) -> Result<()> {
     match cmd {
-        AppCommands::List => list(client).await,
-        AppCommands::Create { name, git_url } => create(client, &name, &git_url).await,
-        AppCommands::Delete { name } => delete(client, &name).await,
-        AppCommands::Deploy { name } => deploy(client, &name).await,
+        AppCommands::List => list(client, output).await,
+        AppCommands::Create { name, git_url } => create(client, &name, &git_url, output).await,
+        AppCommands::Delete { name } => delete(client, &name, output).await,
+        AppCommands::Deploy { name } => deploy(client, &name, output).await,
         AppCommands::Activate { app, deployment_id } => {
-            activate(client, &app, &deployment_id).await
+            activate(client, &app, &deployment_id, output).await
         },
-        AppCommands::Deployments { name } => list_deployments(client, &name).await,
+        AppCommands::Deployments { name } => list_deployments(client, &name, output).await,
         AppCommands::Watch { name } => watch(&name),
-        AppCommands::Secret { name } => show_secret(client, &name).await,
+        AppCommands::Secret { name } => show_secret(client, &name, output).await,
     }
 }
 
-async fn list(client: &MikromClient) -> Result<()> {
+async fn list(client: &MikromClient, output: OutputFormat) -> Result<()> {
     let apps = client.list_apps().await?;
+    if output == OutputFormat::Json {
+        return ui::print_json(&apps);
+    }
+
     if apps.is_empty() {
         ui::info("No applications found.");
     } else {
-        ui::step(ui::INFO, &ui::bold_cyan("Registered Applications"));
-        for app in apps {
-            let created = app.created_at.as_deref().unwrap_or("N/A");
-            let active = app.active_deployment_id.as_deref().unwrap_or("None");
-
-            println!("\n{} {}", ui::APP, ui::bold_cyan(&app.name));
-            ui::label_value(ui::KEY, "APP_ID:", &app.id);
-            ui::label_value(ui::PORT, "Port:", &app.port.to_string());
-            ui::label_value(ui::DEP, "Active Dep:", active);
-            ui::label_value(ui::CLOCK, "Created:", created);
-        }
+        let rows = apps
+            .iter()
+            .map(|app| {
+                vec![
+                    format!("{} {}", ui::APP, ui::bold_cyan(&app.name)),
+                    ui::status_label(if app.active_deployment_id.is_some() {
+                        "active"
+                    } else {
+                        "idle"
+                    }),
+                    app.port.to_string(),
+                    app.active_deployment_id
+                        .as_deref()
+                        .unwrap_or("—")
+                        .to_string(),
+                    app.created_at.as_deref().unwrap_or("—").to_string(),
+                ]
+            })
+            .collect::<Vec<_>>();
+        ui::table(
+            "📦 Registered Applications",
+            &["App", "Status", "Port", "Active deployment", "Created"],
+            &rows,
+        );
     }
     Ok(())
 }
 
-async fn create(client: &MikromClient, name: &str, git_url: &str) -> Result<()> {
-    ui::step(
-        ui::WAIT,
-        &format!("{} Creating app {}...", ui::APP, ui::bold_cyan(name)),
-    );
+async fn create(
+    client: &MikromClient,
+    name: &str,
+    git_url: &str,
+    output: OutputFormat,
+) -> Result<()> {
+    if output == OutputFormat::Table {
+        ui::step(
+            ui::WAIT,
+            &format!("{} Creating app {}...", ui::APP, ui::bold_cyan(name)),
+        );
+    }
     let app = client.create_app(name, git_url).await?;
-    ui::success("Application created successfully.");
-    ui::label_value(ui::APP, "Name:", &ui::bold_cyan(&app.name));
-    ui::label_value(ui::KEY, "APP_ID:", &app.id);
-    ui::label_value(ui::INFO, "Git URL:", &app.git_url);
-    if let Some(host) = app.hostname {
-        ui::label_value(ui::INFO, "Domain:", &host);
+    if output == OutputFormat::Json {
+        return ui::print_json(&app);
     }
+
+    ui::success("Application created successfully.");
+    ui::table(
+        "✨ New Application",
+        &["Name", "App ID", "Port", "Hostname"],
+        &[vec![
+            format!("{} {}", ui::APP, ui::bold_cyan(&app.name)),
+            app.id,
+            app.port.to_string(),
+            app.hostname.unwrap_or_else(|| "—".to_string()),
+        ]],
+    );
     Ok(())
 }
 
-async fn delete(client: &MikromClient, name: &str) -> Result<()> {
-    ui::step(
-        ui::WAIT,
-        &format!(
-            "{} Deleting application {}...",
-            ui::APP,
-            ui::red_label(name)
-        ),
-    );
+async fn delete(client: &MikromClient, name: &str, output: OutputFormat) -> Result<()> {
+    if output == OutputFormat::Table {
+        ui::step(
+            ui::WAIT,
+            &format!(
+                "{} Deleting application {}...",
+                ui::APP,
+                ui::red_label(name)
+            ),
+        );
+    }
     client.delete_app(name).await?;
+    if output == OutputFormat::Json {
+        return ui::print_json(&serde_json::json!({ "deleted": true, "app": name }));
+    }
+
     ui::step(ui::SUCCESS, &format!("Application {} deleted.", name));
     Ok(())
 }
 
-async fn deploy(client: &MikromClient, name: &str) -> Result<()> {
-    ui::step(
-        ui::WAIT,
-        &format!(
-            "{} Triggering deployment for {}...",
-            ui::ROCKET,
-            ui::bold_cyan(name)
-        ),
-    );
+async fn deploy(client: &MikromClient, name: &str, output: OutputFormat) -> Result<()> {
+    if output == OutputFormat::Table {
+        ui::step(
+            ui::WAIT,
+            &format!(
+                "{} Triggering deployment for {}...",
+                ui::ROCKET,
+                ui::bold_cyan(name)
+            ),
+        );
+    }
     let resp = client.deploy_app_version(name).await?;
+    if output == OutputFormat::Json {
+        return ui::print_json(&resp);
+    }
+
     if let Some(job_id) = resp.job_id {
         ui::step(
             ui::SUCCESS,
@@ -101,48 +144,59 @@ async fn deploy(client: &MikromClient, name: &str) -> Result<()> {
     Ok(())
 }
 
-async fn activate(client: &MikromClient, app: &str, deployment_id: &str) -> Result<()> {
-    ui::step(
-        ui::WAIT,
-        &format!(
-            "{} Activating deployment {} for app {}...",
-            ui::DEP,
-            ui::bold_cyan(deployment_id),
-            ui::bold_cyan(app)
-        ),
-    );
+async fn activate(
+    client: &MikromClient,
+    app: &str,
+    deployment_id: &str,
+    output: OutputFormat,
+) -> Result<()> {
+    if output == OutputFormat::Table {
+        ui::step(
+            ui::WAIT,
+            &format!(
+                "{} Activating deployment {} for app {}...",
+                ui::DEP,
+                ui::bold_cyan(deployment_id),
+                ui::bold_cyan(app)
+            ),
+        );
+    }
     client.activate_deployment(app, deployment_id).await?;
+    if output == OutputFormat::Json {
+        return ui::print_json(
+            &serde_json::json!({ "activated": true, "app": app, "deployment_id": deployment_id }),
+        );
+    }
+
     ui::success(&format!("Deployment {} is now active.", deployment_id));
     Ok(())
 }
 
-async fn list_deployments(client: &MikromClient, name: &str) -> Result<()> {
+async fn list_deployments(client: &MikromClient, name: &str, output: OutputFormat) -> Result<()> {
     let deployments = client.list_app_deployments(name).await?;
+    if output == OutputFormat::Json {
+        return ui::print_json(&deployments);
+    }
+
     if deployments.is_empty() {
         ui::info(&format!("No deployments found for app {}.", name));
     } else {
-        ui::step(
-            ui::INFO,
+        let rows = deployments
+            .iter()
+            .map(|dep| {
+                vec![
+                    format!("{} {}", ui::DEP, dep.id),
+                    ui::status_label(&dep.status),
+                    dep.image_tag.as_deref().unwrap_or("—").to_string(),
+                    dep.created_at.as_deref().unwrap_or("—").to_string(),
+                ]
+            })
+            .collect::<Vec<_>>();
+        ui::table(
             &format!("{} Deployment History", ui::bold_cyan(name)),
+            &["Deployment", "Status", "Image tag", "Created"],
+            &rows,
         );
-        for dep in deployments {
-            let status_painted = match dep.status.as_str() {
-                "Active" | "Succeeded" | "RUNNING" => Paint::new(&dep.status).green(),
-                "Pending" | "Building" | "SCHEDULED" => Paint::new(&dep.status).yellow(),
-                "Failed" | "FAILED" => Paint::new(&dep.status).red(),
-                _ => Paint::new(&dep.status),
-            };
-            let created = dep.created_at.as_deref().unwrap_or("N/A");
-
-            println!("\n{} Deployment {}", ui::DEP, ui::bold_cyan(&dep.id));
-            ui::label_value(ui::INFO, "Status:", &status_painted.to_string());
-            ui::label_value(
-                ui::APP,
-                "Image Tag:",
-                dep.image_tag.as_deref().unwrap_or("N/A"),
-            );
-            ui::label_value(ui::CLOCK, "Created:", created);
-        }
     }
     Ok(())
 }
@@ -163,8 +217,15 @@ fn watch(name: &str) -> Result<()> {
     Ok(())
 }
 
-async fn show_secret(client: &MikromClient, name: &str) -> Result<()> {
+async fn show_secret(client: &MikromClient, name: &str, output: OutputFormat) -> Result<()> {
     let secret = client.get_app_secret(name).await?;
+    if output == OutputFormat::Json {
+        return ui::print_json(&serde_json::json!({
+            "app": name,
+            "github_webhook_secret": if secret.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(secret) }
+        }));
+    }
+
     if secret.is_empty() {
         ui::info(&format!(
             "No webhook secret configured for app {}.",
