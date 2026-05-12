@@ -16,7 +16,19 @@ import {
 } from "react-icons/hi2";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useMemo, useRef } from "react";
-import { Boxes, ExternalLink, GitBranch, Globe2, Rocket, User, Zap } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Boxes,
+  Cpu,
+  ExternalLink,
+  GitBranch,
+  Globe2,
+  MemoryStick,
+  Rocket,
+  User,
+  Zap,
+} from "lucide-react";
 
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -73,6 +85,8 @@ import {
 } from "recharts";
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -140,6 +154,16 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+function formatMetricValue(name: string | number, value: unknown): string {
+  const numericValue = typeof value === "number" ? value : Number(value);
+
+  if (!Number.isFinite(numericValue)) return "--";
+  if (name === "cpu") return `${numericValue.toFixed(1)}%`;
+  if (name === "ram") return `${numericValue.toFixed(0)} MiB`;
+  if (name === "rx" || name === "tx") return formatNetworkRate(numericValue);
+  return numericValue.toLocaleString();
+}
+
 export default function AppDetailPage() {
   const { appName } = useParams() as { appName: string };
   const decodedName = decodeURIComponent(appName);
@@ -152,7 +176,6 @@ export default function AppDetailPage() {
   const { data: realSecret } = useAppSecret(decodedName);
 
   const [showSecret, setShowSecret] = useState(false);
-  const [activeChart, setActiveChart] = useState<"cpu" | "ram" | "network">("network");
   const [showWebhookModal, setShowWebhookModal] = useState(false);
   const [confirmDeleteApp, setConfirmDeleteApp] = useState(false);
 
@@ -373,7 +396,41 @@ export default function AppDetailPage() {
 
   const totalTraffic = latestMetrics.total_rx + latestMetrics.total_tx;
 
-  const latestNetworkValue = formatNetworkRate(latestMetrics.rx + latestMetrics.tx);
+  const metricCards = [
+    {
+      key: "cpu",
+      label: "CPU",
+      value: `${latestMetrics.cpu.toFixed(1)}%`,
+      detail: "Usage",
+      icon: Cpu,
+      color: "bg-[var(--color-cpu)]",
+    },
+    {
+      key: "ram",
+      label: "RAM",
+      value: `${latestMetrics.ram.toFixed(0)} MiB`,
+      detail: "Allocated",
+      icon: MemoryStick,
+      color: "bg-[var(--color-ram)]",
+    },
+    {
+      key: "rx",
+      label: "Network in",
+      value: formatNetworkRate(latestMetrics.rx),
+      detail: "Receive",
+      icon: ArrowDownToLine,
+      color: "bg-[var(--color-rx)]",
+    },
+    {
+      key: "tx",
+      label: "Network out",
+      value: formatNetworkRate(latestMetrics.tx),
+      detail: "Transmit",
+      icon: ArrowUpFromLine,
+      color: "bg-[var(--color-tx)]",
+    },
+  ];
+
   return (
     <AuthGuard>
       <DashboardLayout>
@@ -612,118 +669,149 @@ export default function AppDetailPage() {
                   </Card>
                 ) : (
                   <>
-                    {/* Interactive Chart */}
-                    <Card className="py-4 sm:py-0">
-                      <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
-                        <div className="flex flex-1 flex-col justify-center gap-1 px-6 pb-3 sm:pb-0">
-                          <CardTitle>System Performance</CardTitle>
-                          <CardDescription>
-                            {activeChart === "network" 
-                              ? `Total network usage: ${formatBytes(totalTraffic)}`
-                              : "Real-time CPU, RAM and network usage"}
-                          </CardDescription>
-                        </div>
-                        <div className="flex">
-                          {(["network", "cpu", "ram"] as const).map((key) => {
-                            return (
-                              <button
-                                key={key}
-                                data-active={activeChart === key}
-                                className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left even:border-l data-[active=true]:bg-muted/50 sm:border-t-0 sm:border-l sm:px-8 sm:py-6"
-                                onClick={() => setActiveChart(key)}
+                    <Card className="overflow-hidden">
+                      <CardHeader className="border-b bg-muted/20">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="flex flex-col gap-1.5">
+                            <CardTitle>System Performance</CardTitle>
+                            <CardDescription>
+                              Live CPU, RAM and network throughput. Total traffic: {formatBytes(totalTraffic)}.
+                            </CardDescription>
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                            {metricCards.map((metric) => (
+                              <div
+                                key={metric.key}
+                                className="min-w-36 rounded-lg border bg-background/80 p-3 shadow-sm"
                               >
-                                <span className="text-xs text-muted-foreground uppercase">
-                                  {key === "network" ? "Network (In/Out)" : chartConfig[key].label}
-                                </span>
-                                <span className="text-lg leading-none font-bold sm:text-3xl">
-                                  {key === "cpu" 
-                                    ? `${latestMetrics.cpu.toFixed(1)}%` 
-                                    : key === "ram"
-                                    ? `${latestMetrics.ram.toFixed(0)} MiB`
-                                    : latestNetworkValue}
-                                </span>
-                              </button>
-                            )
-                          })}
+                                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                                  <span className={cn("size-2 rounded-full", metric.color)} />
+                                  <metric.icon />
+                                  {metric.label}
+                                </div>
+                                <div className="mt-2 flex flex-col gap-1">
+                                  <span className="text-xl font-semibold tabular-nums">{metric.value}</span>
+                                  <span className="text-xs text-muted-foreground">{metric.detail}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </CardHeader>
-                      <CardContent className="px-2 sm:p-6">
-                        <div style={{ width: '100%', height: '250px' }}>
-                          <ChartContainer
-                            config={chartConfig}
+                      <CardContent className="p-4 sm:p-6">
+                        <ChartContainer config={chartConfig} className="h-[320px]">
+                          <LineChart
+                            data={metricsHistory}
+                            margin={{
+                              left: 0,
+                              right: 8,
+                              top: 12,
+                              bottom: 0,
+                            }}
                           >
-                            <LineChart
-                              data={metricsHistory}
-                              margin={{
-                                left: 0,
-                                right: 12,
-                                top: 10,
-                                bottom: 0,
+                            <CartesianGrid
+                              vertical={false}
+                              strokeDasharray="3 3"
+                              stroke="var(--border)"
+                              opacity={0.55}
+                            />
+                            <XAxis
+                              dataKey="time"
+                              tickLine={false}
+                              axisLine={false}
+                              tickMargin={10}
+                              minTickGap={32}
+                              tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                            />
+                            <YAxis
+                              yAxisId="percent"
+                              domain={[0, 100]}
+                              tickLine={false}
+                              axisLine={false}
+                              tickMargin={8}
+                              width={42}
+                              tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                              tickFormatter={(value) => `${value}%`}
+                            />
+                            <YAxis
+                              yAxisId="usage"
+                              orientation="right"
+                              tickLine={false}
+                              axisLine={false}
+                              tickMargin={8}
+                              width={62}
+                              tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                              tickFormatter={(value) => {
+                                if (value >= 1024) return `${(Number(value) / 1024).toFixed(1)}k`;
+                                return `${Number(value).toFixed(0)}`;
                               }}
-                            >
-                              <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" opacity={0.4} />
-                              <XAxis
-                                dataKey="time"
-                                tickLine={false}
-                                axisLine={false}
-                                tickMargin={8}
-                                minTickGap={32}
-                                tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
-                              />
-                              <YAxis 
-                                domain={activeChart === "cpu" ? [0, 100] : ['auto', 'auto']} 
-                                tickLine={false}
-                                axisLine={false}
-                                tickMargin={8}
-                                width={50}
-                                tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
-                                tickFormatter={(value) => {
-                                  if (activeChart === "cpu") return `${value}%`;
-                                  if (activeChart === "network") return formatNetworkRate(value);
-                                  return `${value}`;
-                                }}
-                              />
-                              <ChartTooltip
-                                content={
-                                  <ChartTooltipContent
-                                    className="w-[150px]"
-                                    nameKey={activeChart === "network" ? undefined : activeChart}
-                                    labelFormatter={(value) => value}
-                                  />
-                                }
-                              />
-                              {activeChart === "network" ? (
-                                <>
-                                  <Line
-                                    dataKey="rx"
-                                    type="monotone"
-                                    stroke="var(--color-rx)"
-                                    strokeWidth={2}
-                                    dot={false}
-                                    isAnimationActive={false}
-                                  />
-                                  <Line
-                                    dataKey="tx"
-                                    type="monotone"
-                                    stroke="var(--color-tx)"
-                                    strokeWidth={2}
-                                    dot={false}
-                                    isAnimationActive={false}
-                                  />
-                                </>
-                              ) : (
-                                <Line
-                                  dataKey={activeChart}
-                                  type="monotone"
-                                  stroke={`var(--color-${activeChart})`}
-                                  strokeWidth={2}
-                                  dot={false}
-                                  isAnimationActive={false}
+                            />
+                            <ChartTooltip
+                              content={
+                                <ChartTooltipContent
+                                  className="w-56"
+                                  indicator="line"
+                                  labelFormatter={(value) => value}
+                                  formatter={(value, name) => (
+                                    <>
+                                      <span className="text-muted-foreground">
+                                        {chartConfig[name as keyof typeof chartConfig]?.label || name || "Metric"}
+                                      </span>
+                                      <span className="ml-auto font-mono font-medium tabular-nums text-foreground">
+                                        {formatMetricValue(name || "metric", value)}
+                                      </span>
+                                    </>
+                                  )}
                                 />
-                              )}
-                            </LineChart>
-                          </ChartContainer>
-                        </div>
+                              }
+                            />
+                            <ChartLegend
+                              content={<ChartLegendContent className="flex-wrap gap-x-5 gap-y-2" />}
+                            />
+                            <Line
+                              yAxisId="percent"
+                              dataKey="cpu"
+                              type="monotone"
+                              stroke="var(--color-cpu)"
+                              strokeWidth={2.5}
+                              dot={false}
+                              activeDot={{ r: 4 }}
+                              isAnimationActive={false}
+                            />
+                            <Line
+                              yAxisId="usage"
+                              dataKey="ram"
+                              type="monotone"
+                              stroke="var(--color-ram)"
+                              strokeWidth={2.5}
+                              dot={false}
+                              activeDot={{ r: 4 }}
+                              isAnimationActive={false}
+                            />
+                            <Line
+                              yAxisId="usage"
+                              dataKey="rx"
+                              type="monotone"
+                              stroke="var(--color-rx)"
+                              strokeWidth={2}
+                              strokeDasharray="5 4"
+                              dot={false}
+                              activeDot={{ r: 4 }}
+                              isAnimationActive={false}
+                            />
+                            <Line
+                              yAxisId="usage"
+                              dataKey="tx"
+                              type="monotone"
+                              stroke="var(--color-tx)"
+                              strokeWidth={2}
+                              strokeDasharray="2 4"
+                              dot={false}
+                              activeDot={{ r: 4 }}
+                              isAnimationActive={false}
+                            />
+                          </LineChart>
+                        </ChartContainer>
                       </CardContent>
                     </Card>
 
