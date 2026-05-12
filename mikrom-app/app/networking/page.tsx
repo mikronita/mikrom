@@ -1,50 +1,25 @@
 "use client";
 
-import React, { useState } from "react";
-import { DashboardLayout } from "@/components/DashboardLayout";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { 
-  getUserProfile, 
-  listActiveDeployments, 
-  getMeshStatus, 
-  listApps, 
-  listSecurityRules, 
-  createSecurityRule, 
-  deleteSecurityRule,
-  CreateSecurityRuleRequest
-} from "@/lib/api";
-import { getToken } from "@/lib/auth";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  HiServer, 
-  HiOutlineGlobeAlt,
-  HiOutlineShieldCheck,
-  HiOutlineCube,
-  HiPlus,
-  HiTrash,
-  HiInformationCircle
-} from "react-icons/hi";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from "@/components/ui/table";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+  Boxes,
+  Globe2,
+  Loader2,
+  LockKeyhole,
+  Network,
+  Plus,
+  Server,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
+
+import { AuthGuard } from "@/components/AuthGuard";
+import { DashboardLayout } from "@/components/DashboardLayout";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -54,85 +29,141 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Network } from "lucide-react";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  CreateSecurityRuleRequest,
+  createSecurityRule,
+  deleteSecurityRule,
+  getMeshStatus,
+  getUserProfile,
+  listActiveDeployments,
+  listApps,
+  listSecurityRules,
+} from "@/lib/api";
+import { getToken } from "@/lib/auth";
+
+const defaultRule: CreateSecurityRuleRequest = {
+  protocol: "tcp",
+  port_start: 80,
+  port_end: 80,
+  action: "allow",
+};
+
+function formatPortRange(rule: { protocol: string; port_start: number; port_end: number }) {
+  if (rule.protocol === "any") return "All ports";
+  if (rule.port_start === rule.port_end) return rule.port_start;
+  return `${rule.port_start}-${rule.port_end}`;
+}
+
+function formatVmId(vmId: string) {
+  return vmId.length > 12 ? vmId.substring(0, 12) : vmId;
+}
 
 export default function NetworkingPage() {
   const token = getToken();
   const queryClient = useQueryClient();
   const [selectedApp, setSelectedApp] = useState<string | null>(null);
   const [isAddRuleOpen, setIsAddRuleOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  React.useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // Form state
-  const [newRule, setNewRule] = useState<CreateSecurityRuleRequest>({
-    protocol: "tcp",
-    port_start: 80,
-    port_end: 80,
-    action: "allow"
-  });
+  const [newRule, setNewRule] = useState<CreateSecurityRuleRequest>(defaultRule);
 
   const { data: profile, isLoading: profileLoading } = useQuery({
     queryKey: ["profile"],
-    queryFn: () => getUserProfile(token!).then(res => {
-      if (res.error) throw new Error(res.error);
-      return res.data;
-    }),
-    enabled: !!token && mounted,
+    queryFn: () =>
+      getUserProfile(token!).then((res) => {
+        if (res.error) throw new Error(res.error);
+        return res.data;
+      }),
+    enabled: !!token,
   });
 
   const { data: deployments, isLoading: deploymentsLoading } = useQuery({
     queryKey: ["active-deployments"],
-    queryFn: () => listActiveDeployments(token!).then(res => {
-      if (res.error) throw new Error(res.error);
-      return res.data;
-    }),
-    enabled: !!token && mounted,
+    queryFn: () =>
+      listActiveDeployments(token!).then((res) => {
+        if (res.error) throw new Error(res.error);
+        return res.data;
+      }),
+    enabled: !!token,
     refetchInterval: 5000,
   });
 
   const { data: mesh, isLoading: meshLoading } = useQuery({
     queryKey: ["mesh-status"],
-    queryFn: () => getMeshStatus(token!).then(res => {
-      if (res.error) throw new Error(res.error);
-      return res.data;
-    }),
-    enabled: !!token && mounted,
+    queryFn: () =>
+      getMeshStatus(token!).then((res) => {
+        if (res.error) throw new Error(res.error);
+        return res.data;
+      }),
+    enabled: !!token,
     refetchInterval: 10000,
   });
 
   const { data: apps } = useQuery({
     queryKey: ["apps"],
-    queryFn: () => listApps(token!).then(res => {
-      if (res.error) throw new Error(res.error);
-      return res.data;
-    }),
-    enabled: !!token && mounted,
+    queryFn: () =>
+      listApps(token!).then((res) => {
+        if (res.error) throw new Error(res.error);
+        return res.data;
+      }),
+    enabled: !!token,
   });
 
   const { data: rules, isLoading: rulesLoading } = useQuery({
     queryKey: ["security-rules", selectedApp],
-    queryFn: () => listSecurityRules(token!, selectedApp!).then(res => {
-      if (res.error) throw new Error(res.error);
-      return res.data;
-    }),
-    enabled: !!token && !!selectedApp && mounted,
+    queryFn: () =>
+      listSecurityRules(token!, selectedApp!).then((res) => {
+        if (res.error) throw new Error(res.error);
+        return res.data;
+      }),
+    enabled: !!token && !!selectedApp,
   });
+
+  const runningDeployments = deployments?.filter((deployment) => deployment.status === "RUNNING") || [];
 
   const createRuleMutation = useMutation({
     mutationFn: (data: CreateSecurityRuleRequest) => createSecurityRule(token!, selectedApp!, data),
     onSuccess: (res) => {
       if (res.error) {
         toast.error(res.error);
-      } else {
-        toast.success("Security rule created");
-        queryClient.invalidateQueries({ queryKey: ["security-rules", selectedApp] });
-        setIsAddRuleOpen(false);
+        return;
       }
-    }
+
+      toast.success("Security rule created");
+      queryClient.invalidateQueries({ queryKey: ["security-rules", selectedApp] });
+      setNewRule(defaultRule);
+      setIsAddRuleOpen(false);
+    },
   });
 
   const deleteRuleMutation = useMutation({
@@ -140,332 +171,392 @@ export default function NetworkingPage() {
     onSuccess: (res) => {
       if (res.error) {
         toast.error(res.error);
-      } else {
-        toast.success("Security rule deleted");
-        queryClient.invalidateQueries({ queryKey: ["security-rules", selectedApp] });
+        return;
       }
-    }
+
+      toast.success("Security rule deleted");
+      queryClient.invalidateQueries({ queryKey: ["security-rules", selectedApp] });
+    },
   });
 
-  if (!mounted) {
-    return (
-      <DashboardLayout>
-        <div className="flex flex-col gap-6">
-          <Skeleton className="h-10 w-64" />
-          <div className="grid gap-6 md:grid-cols-3">
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
-          </div>
-          <Skeleton className="h-64 w-full" />
-        </div>
-      </DashboardLayout>
-    );
-  }
+  const summaryCards = [
+    {
+      label: "VPC prefix",
+      value: profile?.vpc_ipv6_prefix || "Not assigned",
+      description: "Private IPv6 /40 prefix reserved for your applications.",
+      icon: Globe2,
+      loading: profileLoading,
+      valueClassName: "break-all font-mono text-lg",
+    },
+    {
+      label: "Active peers",
+      value: mesh?.total_workers ?? 0,
+      description: "Agent nodes currently participating in the mesh.",
+      icon: Server,
+      loading: meshLoading,
+      valueClassName: "text-3xl",
+    },
+    {
+      label: "Running workloads",
+      value: runningDeployments.length,
+      description: "MicroVMs currently reachable through 6PN.",
+      icon: Boxes,
+      loading: deploymentsLoading,
+      valueClassName: "text-3xl",
+    },
+  ];
 
   return (
-    <DashboardLayout>
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Network />
-            </div>
-            <h1 className="text-3xl font-semibold tracking-tight">
-              Networking (6PN)
-            </h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Manage your private L3 mesh network and security groups.
-          </p>
-        </div>
-
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          <Card className="overflow-hidden border-2 transition-all hover:border-primary/20">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 bg-muted/30">
-              <CardTitle className="text-sm font-medium">VPC prefix</CardTitle>
-              <HiOutlineGlobeAlt className="size-5 text-primary" />
-            </CardHeader>
-            <CardContent className="pt-4">
-              {profileLoading ? (
-                <Skeleton className="h-8 w-full" />
-              ) : (
-                <div className="break-all font-mono text-2xl font-semibold">
-                  {profile?.vpc_ipv6_prefix || "Not assigned"}
-                </div>
-              )}
-              <p className="text-xs text-muted-foreground mt-2 font-medium">
-                Your private IPv6 /40 prefix for all applications.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="overflow-hidden border-2 transition-all hover:border-primary/20">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 bg-muted/30">
-              <CardTitle className="text-sm font-medium">Active peers</CardTitle>
-              <HiServer className="size-5 text-primary" />
-            </CardHeader>
-            <CardContent className="pt-4">
-              {meshLoading ? (
-                <Skeleton className="h-8 w-16" />
-              ) : (
-                <div className="text-3xl font-semibold">{mesh?.total_workers || 0}</div>
-              )}
-              <p className="text-xs text-muted-foreground mt-2 font-medium">
-                Agent nodes currently in your mesh network.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="overflow-hidden border-2 transition-all hover:border-primary/20">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 bg-muted/30">
-              <CardTitle className="text-sm font-medium">Mesh status</CardTitle>
-              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 font-medium">
-                Encrypted
-              </Badge>
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-semibold">WireGuard</div>
-              <p className="text-xs text-muted-foreground mt-2 font-medium">
-                All internal traffic is secured via mTLS and WireGuard.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card className="border-2">
-          <CardHeader className="border-b bg-muted/30">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-lg font-bold flex items-center gap-2">
-                  <HiOutlineCube className="size-5" />
-                  Workload Connectivity
-                </CardTitle>
-                <CardDescription className="font-medium mt-1">
-                  IPv6 addresses for your running microVMs.
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent bg-muted/20">
-                  <TableHead className="h-10 px-6 font-medium">Application</TableHead>
-                  <TableHead className="h-10 font-medium">VM ID</TableHead>
-                  <TableHead className="h-10 font-medium">IPv6 address</TableHead>
-                  <TableHead className="h-10 font-medium">Host</TableHead>
-                  <TableHead className="h-10 pr-6 text-right font-medium">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {deploymentsLoading ? (
-                  Array.from({ length: 3 }).map((_, i) => (
-                    <TableRow key={i}>
-                      <TableCell colSpan={5} className="p-4">
-                        <Skeleton className="h-12 w-full" />
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (deployments?.filter(d => d.status === "RUNNING")?.length || 0) === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-32 text-center text-muted-foreground font-medium">
-                      No active workloads found.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  deployments?.filter(d => d.status === "RUNNING").map((deployment) => (
-                    <TableRow key={deployment.vm_id} className="group hover:bg-muted/50 transition-colors">
-                      <TableCell className="px-6 font-bold">{deployment.app_name}</TableCell>
-                      <TableCell className="font-mono text-xs">{deployment.vm_id.substring(0, 12)}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className="font-mono font-medium bg-primary/5 text-primary border-primary/10">
-                          {deployment.ipv6_address || "Assigning..."}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground font-medium">{deployment.host_id}</TableCell>
-                      <TableCell className="text-right pr-6">
-                        <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 font-medium capitalize">
-                          {deployment.status.toLowerCase()}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        <Card className="border-2">
-          <CardHeader className="border-b bg-muted/30">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <CardTitle className="text-lg font-bold flex items-center gap-2">
-                  <HiOutlineShieldCheck className="size-5" />
-                  Security groups
-                </CardTitle>
-                <CardDescription className="font-medium mt-1">
-                  Distributed L3/L4 firewalling powered by eBPF.
-                </CardDescription>
-              </div>
+    <AuthGuard>
+      <DashboardLayout>
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col gap-2">
               <div className="flex items-center gap-3">
-                <Select onValueChange={(val) => setSelectedApp(val)}>
-                  <SelectTrigger className="w-[200px] h-9 font-bold">
-                    <SelectValue placeholder="Select application" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {apps?.map(app => (
-                      <SelectItem key={app.id} value={app.name}>{app.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedApp && (
-                  <Dialog open={isAddRuleOpen} onOpenChange={setIsAddRuleOpen}>
-                    <DialogTrigger asChild>
-                      <Button size="sm" className="font-bold gap-2">
-                        <HiPlus className="size-4" />
-                        Add rule
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Add security rule</DialogTitle>
-                        <DialogDescription>
-                          Create a new firewall rule for <strong>{selectedApp}</strong>.
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="grid gap-4 py-4">
-                        <div className="grid gap-2">
-                          <Label htmlFor="protocol">Protocol</Label>
-                          <Select 
-                            value={newRule.protocol} 
-                            onValueChange={(val) => setNewRule({...newRule, protocol: val})}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="tcp">TCP</SelectItem>
-                              <SelectItem value="udp">UDP</SelectItem>
-                              <SelectItem value="any">Any</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="grid gap-2">
-                            <Label htmlFor="port_start">Port start</Label>
-                            <Input 
-                              id="port_start" 
-                              type="number" 
-                              value={newRule.port_start}
-                              onChange={(e) => setNewRule({...newRule, port_start: parseInt(e.target.value)})}
-                            />
-                          </div>
-                          <div className="grid gap-2">
-                            <Label htmlFor="port_end">Port end</Label>
-                            <Input 
-                              id="port_end" 
-                              type="number"
-                              value={newRule.port_end}
-                              onChange={(e) => setNewRule({...newRule, port_end: parseInt(e.target.value)})}
-                            />
-                          </div>
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="action">Action</Label>
-                          <Select 
-                            value={newRule.action} 
-                            onValueChange={(val) => setNewRule({...newRule, action: val})}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="allow">Allow</SelectItem>
-                              <SelectItem value="deny">Deny</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button 
-                          onClick={() => createRuleMutation.mutate(newRule)}
-                          disabled={createRuleMutation.isPending}
-                          className="font-bold w-full"
-                        >
-                          {createRuleMutation.isPending ? "Creating..." : "Create rule"}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                )}
+                <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  <Network />
+                </div>
+                <h1 className="text-3xl font-semibold tracking-tight">Networking</h1>
               </div>
+              <p className="max-w-2xl text-sm text-muted-foreground">
+                Monitor the private 6PN mesh, workload addresses and application security rules.
+              </p>
             </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            {!selectedApp ? (
-              <div className="flex flex-col items-center justify-center h-48 text-muted-foreground p-6 text-center">
-                <HiInformationCircle className="size-12 opacity-20 mb-4" />
-                <p className="font-bold">Select an application to manage its security group rules.</p>
-                <p className="text-sm mt-1">Rules are applied to all active microVMs of the selected app.</p>
-              </div>
-            ) : rulesLoading ? (
-              <div className="p-6 space-y-4">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : rules?.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-48 text-muted-foreground p-6 text-center">
-                <p className="font-bold">No rules defined for this application.</p>
-                <p className="text-sm mt-1">By default, all internal 6PN traffic is allowed.</p>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent bg-muted/20">
-                    <TableHead className="h-10 px-6 font-medium">Protocol</TableHead>
-                    <TableHead className="h-10 font-medium">Port range</TableHead>
-                    <TableHead className="h-10 font-medium">Action</TableHead>
-                    <TableHead className="h-10 pr-6 text-right font-medium">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rules?.map((rule) => (
-                    <TableRow key={rule.id} className="group hover:bg-muted/50 transition-colors">
-                      <TableCell className="px-6 font-medium">{rule.protocol}</TableCell>
-                      <TableCell className="font-mono">
-                        {rule.protocol === "any" ? "All ports" : rule.port_start === rule.port_end ? rule.port_start : `${rule.port_start}-${rule.port_end}`}
-                      </TableCell>
-                      <TableCell>
-                        <Badge 
-                          className={rule.action === "allow" 
-                            ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 font-medium"
-                            : "bg-destructive/10 text-destructive border-destructive/20 font-medium"
-                          }
-                        >
-                          {rule.action}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right pr-6">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                          onClick={() => deleteRuleMutation.mutate(rule.id)}
-                          disabled={deleteRuleMutation.isPending}
-                        >
-                          <HiTrash className="size-4" />
-                        </Button>
-                      </TableCell>
+            <Badge variant="secondary" className="w-fit gap-2 px-3 py-1.5">
+              <LockKeyhole />
+              WireGuard mesh
+            </Badge>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            {summaryCards.map((item) => (
+              <Card key={item.label}>
+                <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
+                  <div className="flex flex-col gap-1">
+                    <CardDescription>{item.label}</CardDescription>
+                    {item.loading ? (
+                      <Skeleton className="mt-1 h-8 w-32" />
+                    ) : (
+                      <CardTitle className={item.valueClassName}>{item.value}</CardTitle>
+                    )}
+                  </div>
+                  <div className="flex size-10 items-center justify-center rounded-md border bg-muted text-muted-foreground">
+                    <item.icon />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">{item.description}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(24rem,0.85fr)]">
+            <Card className="overflow-hidden">
+              <CardHeader className="border-b bg-muted/20">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex flex-col gap-1.5">
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Boxes />
+                      Workload connectivity
+                    </CardTitle>
+                    <CardDescription>
+                      Running microVMs reachable inside your private 6PN mesh.
+                    </CardDescription>
+                  </div>
+                  <Badge variant="secondary" className="w-fit gap-2">
+                    <Network />
+                    {runningDeployments.length} active
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="px-6">Workload</TableHead>
+                      <TableHead>6PN address</TableHead>
+                      <TableHead className="pr-6 text-right">Health</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </DashboardLayout>
+                  </TableHeader>
+                  <TableBody>
+                    {deploymentsLoading ? (
+                      Array.from({ length: 3 }).map((_, index) => (
+                        <TableRow key={index}>
+                          <TableCell colSpan={3} className="p-4">
+                            <Skeleton className="h-10 w-full" />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : runningDeployments.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={3} className="p-0">
+                          <Empty className="border-0 py-14">
+                            <EmptyHeader>
+                              <EmptyMedia variant="icon">
+                                <Network />
+                              </EmptyMedia>
+                              <EmptyTitle>No active workloads</EmptyTitle>
+                              <EmptyDescription>
+                                Running deployments will appear here with their private network address.
+                              </EmptyDescription>
+                            </EmptyHeader>
+                          </Empty>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      runningDeployments.map((deployment) => (
+                        <TableRow key={deployment.vm_id}>
+                          <TableCell className="px-6">
+                            <div className="flex items-center gap-3">
+                              <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
+                                <Boxes />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="truncate font-medium">{deployment.app_name}</div>
+                                <div className="font-mono text-xs text-muted-foreground">
+                                  vm-{formatVmId(deployment.vm_id)}
+                                </div>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              <span className="w-fit rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs">
+                                {deployment.ipv6_address || "Assigning address..."}
+                              </span>
+                              <span className="text-xs text-muted-foreground">Private mesh endpoint</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="pr-6 text-right">
+                            <Badge variant="success" className="capitalize">
+                              {deployment.status.toLowerCase()}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            <Card className="overflow-hidden">
+              <CardHeader className="border-b bg-muted/20">
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <ShieldCheck />
+                      Security groups
+                    </CardTitle>
+                    <CardDescription>
+                      L3/L4 rules applied to every active microVM for an application.
+                    </CardDescription>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Select onValueChange={(value) => setSelectedApp(value)}>
+                      <SelectTrigger className="sm:w-[220px]">
+                        <SelectValue placeholder="Select application" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {apps?.map((app) => (
+                            <SelectItem key={app.id} value={app.name}>
+                              {app.name}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    {selectedApp && (
+                      <Dialog open={isAddRuleOpen} onOpenChange={setIsAddRuleOpen}>
+                        <DialogTrigger asChild>
+                          <Button size="sm">
+                            <Plus data-icon="inline-start" />
+                            Add rule
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Add security rule</DialogTitle>
+                            <DialogDescription>
+                              Create a firewall rule for <strong>{selectedApp}</strong>.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <FieldGroup>
+                            <Field>
+                              <FieldLabel htmlFor="protocol">Protocol</FieldLabel>
+                              <Select
+                                value={newRule.protocol}
+                                onValueChange={(value) => setNewRule({ ...newRule, protocol: value })}
+                              >
+                                <SelectTrigger id="protocol">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectGroup>
+                                    <SelectItem value="tcp">TCP</SelectItem>
+                                    <SelectItem value="udp">UDP</SelectItem>
+                                    <SelectItem value="any">Any</SelectItem>
+                                  </SelectGroup>
+                                </SelectContent>
+                              </Select>
+                            </Field>
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <Field>
+                                <FieldLabel htmlFor="port_start">Port start</FieldLabel>
+                                <Input
+                                  id="port_start"
+                                  type="number"
+                                  min={0}
+                                  max={65535}
+                                  value={newRule.port_start}
+                                  disabled={newRule.protocol === "any"}
+                                  onChange={(event) =>
+                                    setNewRule({
+                                      ...newRule,
+                                      port_start: Number.parseInt(event.target.value, 10) || 0,
+                                    })
+                                  }
+                                />
+                              </Field>
+                              <Field>
+                                <FieldLabel htmlFor="port_end">Port end</FieldLabel>
+                                <Input
+                                  id="port_end"
+                                  type="number"
+                                  min={0}
+                                  max={65535}
+                                  value={newRule.port_end}
+                                  disabled={newRule.protocol === "any"}
+                                  onChange={(event) =>
+                                    setNewRule({
+                                      ...newRule,
+                                      port_end: Number.parseInt(event.target.value, 10) || 0,
+                                    })
+                                  }
+                                />
+                              </Field>
+                            </div>
+                            <Field>
+                              <FieldLabel htmlFor="action">Action</FieldLabel>
+                              <Select
+                                value={newRule.action}
+                                onValueChange={(value) => setNewRule({ ...newRule, action: value })}
+                              >
+                                <SelectTrigger id="action">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectGroup>
+                                    <SelectItem value="allow">Allow</SelectItem>
+                                    <SelectItem value="deny">Deny</SelectItem>
+                                  </SelectGroup>
+                                </SelectContent>
+                              </Select>
+                              <FieldDescription>
+                                Rules are evaluated by the control plane and distributed to active workers.
+                              </FieldDescription>
+                            </Field>
+                          </FieldGroup>
+                          <DialogFooter>
+                            <Button
+                              onClick={() => createRuleMutation.mutate(newRule)}
+                              disabled={createRuleMutation.isPending}
+                            >
+                              {createRuleMutation.isPending && (
+                                <Loader2 data-icon="inline-start" className="animate-spin" />
+                              )}
+                              Create rule
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {!selectedApp ? (
+                  <Empty className="border-0 py-14">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <ShieldCheck />
+                      </EmptyMedia>
+                      <EmptyTitle>Select an application</EmptyTitle>
+                      <EmptyDescription>
+                        Choose an app to inspect and manage its security group rules.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                ) : rulesLoading ? (
+                  <div className="flex flex-col gap-3 p-6">
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-10 w-full" />
+                  </div>
+                ) : rules?.length === 0 ? (
+                  <Empty className="border-0 py-14">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <ShieldCheck />
+                      </EmptyMedia>
+                      <EmptyTitle>No rules defined</EmptyTitle>
+                      <EmptyDescription>
+                        By default, internal 6PN traffic remains open for this application.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent>
+                      <Button size="sm" onClick={() => setIsAddRuleOpen(true)}>
+                        <Plus data-icon="inline-start" />
+                        Add first rule
+                      </Button>
+                    </EmptyContent>
+                  </Empty>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="px-6">Protocol</TableHead>
+                        <TableHead>Ports</TableHead>
+                        <TableHead>Action</TableHead>
+                        <TableHead className="pr-6 text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rules?.map((rule) => (
+                        <TableRow key={rule.id}>
+                          <TableCell className="px-6 font-medium uppercase">{rule.protocol}</TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground">
+                            {formatPortRange(rule)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={rule.action === "allow" ? "success" : "destructive"}>
+                              {rule.action}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="pr-6 text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:bg-destructive/10"
+                              onClick={() => deleteRuleMutation.mutate(rule.id)}
+                              disabled={deleteRuleMutation.isPending}
+                            >
+                              <Trash2 />
+                              <span className="sr-only">Delete rule</span>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </DashboardLayout>
+    </AuthGuard>
   );
 }
