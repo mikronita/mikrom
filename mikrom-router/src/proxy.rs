@@ -1,5 +1,6 @@
 use crate::state::State;
 use async_trait::async_trait;
+use openssl::x509::X509;
 use opentelemetry::propagation::{Extractor, Injector};
 use pingora::lb::LoadBalancer;
 use pingora::lb::selection::RoundRobin;
@@ -46,6 +47,7 @@ impl Default for RouterMetricsCounters {
 pub struct MikromProxy {
     state: Arc<RwLock<State>>,
     acme_staging: bool,
+    upstream_ca: Option<Arc<Box<[X509]>>>,
     pub metrics: Arc<RouterMetricsCounters>,
     rate_limiter: Rate,
     rps_limit: isize,
@@ -61,12 +63,14 @@ impl MikromProxy {
     pub fn new(
         state: Arc<RwLock<State>>,
         acme_staging: bool,
+        upstream_ca: Option<Arc<Box<[X509]>>>,
         metrics: Arc<RouterMetricsCounters>,
         rps_limit: isize,
     ) -> Self {
         Self {
             state,
             acme_staging,
+            upstream_ca,
             metrics,
             rate_limiter: Rate::new(Duration::from_secs(1)),
             rps_limit,
@@ -261,7 +265,15 @@ impl ProxyHttp for MikromProxy {
         })?;
 
         info!("Selected upstream: {upstream:?}, use_tls: {use_tls}");
-        let peer = HttpPeer::new(upstream.to_string(), use_tls, host.to_string());
+        let mut peer = HttpPeer::new(upstream.to_string(), use_tls, host.to_string());
+        if use_tls {
+            if let Some(ca) = &self.upstream_ca {
+                peer.options.ca = Some(ca.clone());
+            }
+            if host == "registry.mikrom.spluca.org" {
+                peer.options.alternative_cn = Some("registry.mikrom.es".to_string());
+            }
+        }
         Ok(Box::new(peer))
     }
 

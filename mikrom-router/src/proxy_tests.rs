@@ -31,7 +31,7 @@ mod tests {
         }));
 
         let metrics = Arc::new(RouterMetricsCounters::new());
-        let proxy = MikromProxy::new(state, false, metrics, 100);
+        let proxy = MikromProxy::new(state, false, None, metrics, 100);
 
         let lb = proxy.get_lb("app.mikrom.local").await.unwrap();
         let t1 = lb.select(b"", 256).unwrap();
@@ -68,7 +68,7 @@ mod tests {
         }));
 
         let metrics = Arc::new(RouterMetricsCounters::new());
-        let proxy = MikromProxy::new(state, false, metrics, 100);
+        let proxy = MikromProxy::new(state, false, None, metrics, 100);
 
         let lb = proxy.get_lb("app.mikrom.local").await.unwrap();
         let t1 = lb.select(b"", 256).unwrap().to_string();
