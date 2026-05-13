@@ -10,6 +10,11 @@ message RouterConfigUpdate {
   int64 timestamp = 3;
 }
 
+message RouterConfigAck {
+  bool success = 1;
+  string message = 2;
+}
+
 message TlsCertificateUpdate {
   string hostname = 1;
   string cert_chain = 2;

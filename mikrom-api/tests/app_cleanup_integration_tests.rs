@@ -2,6 +2,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use futures::StreamExt;
 use mockall::predicate::*;
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -12,7 +13,22 @@ use mikrom_api::create_app;
 use mikrom_api::models::app::App;
 use mikrom_api::repositories::{MockAppRepository, MockUserRepository};
 use mikrom_api::scheduler::MockScheduler;
-use mikrom_api::test_utils::TestDb;
+
+async fn connect_nats_or_skip() -> Option<async_nats::Client> {
+    let nats_url =
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
+
+    match async_nats::connect(nats_url).await {
+        Ok(client) => Some(client),
+        Err(err) => {
+            eprintln!(
+                "skipping delete app cleanup test: unable to connect to NATS: {}",
+                err
+            );
+            None
+        },
+    }
+}
 
 #[tokio::test]
 async fn test_delete_app_triggers_bulk_cleanup() {
@@ -43,6 +59,10 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         ..Default::default()
     };
 
+    let Some(nats_client) = connect_nats_or_skip().await else {
+        return;
+    };
+
     let app_clone = app.clone();
     mock_app_repo
         .expect_get_app_by_name()
@@ -62,13 +82,32 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         .with(eq(app_id.to_string()), eq(user_id.to_string()))
         .times(1)
         .returning(|_, _| Ok(true));
+    let nats_responder = nats_client.clone();
+    let mut route_sub = nats_responder
+        .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
+        .await
+        .unwrap();
+    tokio::spawn(async move {
+        use mikrom_proto::router::{RouterConfigAck, RouterConfigUpdate};
+        use prost::Message;
 
-    let db = TestDb::new().await;
-    let db_pool = db.pool().clone();
+        if let Some(msg) = route_sub.next().await
+            && let Ok(update) = RouterConfigUpdate::decode(&msg.payload[..])
+        {
+            assert_eq!(update.hostname, "test.example.com");
+            assert!(update.target_url.is_none());
 
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+            let ack = RouterConfigAck {
+                success: true,
+                message: "deleted".to_string(),
+            };
+            let mut buf = Vec::new();
+            ack.encode(&mut buf).unwrap();
+            if let Some(reply) = msg.reply {
+                let _ = nats_responder.publish(reply, buf.into()).await;
+            }
+        }
+    });
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -81,7 +120,7 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        api_db: db_pool,
+        api_db: sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,

@@ -12,7 +12,9 @@ use crate::wireguard::WireGuardManager;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use mikrom_proto::router::{AcmeChallengeUpdate, RouterConfigUpdate, TlsCertificateUpdate};
+use mikrom_proto::router::{
+    AcmeChallengeUpdate, RouterConfigAck, RouterConfigUpdate, TlsCertificateUpdate,
+};
 use mikrom_proto::scheduler::{NetworkMeshUpdate, RouterHeartbeat};
 use mikrom_proto::subjects;
 use pingora::lb::LoadBalancer;
@@ -311,13 +313,13 @@ impl BackgroundService for ControlPlane {
                     if let Some(msg) = msg {
                         match msg.subject.as_ref() {
                             subjects::ROUTER_CONFIG_UPDATED => {
-                                if let Ok(update) = RouterConfigUpdate::decode(&msg.payload[..]) {
-                                    info!("Control Plane: Received route update for {}", update.hostname);
-                                    match update.target_url {
-                                        Some(target_url) => {
+                                match RouterConfigUpdate::decode(&msg.payload[..]) {
+                                    Ok(update) => {
+                                        info!("Control Plane: Received route update for {}", update.hostname);
+                                        let response = if let Some(target_url) = update.target_url {
                                             match sqlx::query(
                                                 "INSERT INTO routes (hostname, target_url) VALUES ($1, $2)
-                                                 ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = NOW()"
+                                                 ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = NOW()",
                                             )
                                             .bind(&update.hostname)
                                             .bind(&target_url)
@@ -326,14 +328,24 @@ impl BackgroundService for ControlPlane {
                                             {
                                                 Ok(_) => {
                                                     let _ = tx.try_send(());
+                                                    RouterConfigAck {
+                                                        success: true,
+                                                        message: String::new(),
+                                                    }
                                                 },
-                                                Err(e) => error!(
-                                                    "Control Plane: Failed to persist route update for {}: {}",
-                                                    update.hostname, e
-                                                ),
+                                                Err(e) => {
+                                                    error!(
+                                                        "Control Plane: Failed to persist route update for {}: {}",
+                                                        update.hostname,
+                                                        e
+                                                    );
+                                                    RouterConfigAck {
+                                                        success: false,
+                                                        message: e.to_string(),
+                                                    }
+                                                },
                                             }
-                                        },
-                                        None => {
+                                        } else {
                                             match sqlx::query("DELETE FROM routes WHERE hostname = $1")
                                                 .bind(&update.hostname)
                                                 .execute(&db)
@@ -341,14 +353,33 @@ impl BackgroundService for ControlPlane {
                                             {
                                                 Ok(_) => {
                                                     let _ = tx.try_send(());
+                                                    RouterConfigAck {
+                                                        success: true,
+                                                        message: String::new(),
+                                                    }
                                                 },
-                                                Err(e) => error!(
-                                                    "Control Plane: Failed to delete route {}: {}",
-                                                    update.hostname, e
-                                                ),
+                                                Err(e) => {
+                                                    error!(
+                                                        "Control Plane: Failed to delete route {}: {}",
+                                                        update.hostname,
+                                                        e
+                                                    );
+                                                    RouterConfigAck {
+                                                        success: false,
+                                                        message: e.to_string(),
+                                                    }
+                                                },
                                             }
-                                        },
-                                    }
+                                        };
+
+                                        if let Some(reply) = msg.reply {
+                                            let mut buf = Vec::new();
+                                            if response.encode(&mut buf).is_ok() {
+                                                let _ = nats.publish(reply, buf.into()).await;
+                                            }
+                                        }
+                                    },
+                                    Err(e) => error!("Control Plane: Failed to decode RouterConfigUpdate: {}", e),
                                 }
                             }
                             subjects::ROUTER_TLS_CERT_UPDATED => {
@@ -385,10 +416,7 @@ impl BackgroundService for ControlPlane {
                                         .await
                                         {
                                             Ok(_) => {
-                                                // Eventual consistency check
-                                                if let Err(e) = self.sync_full_state(&db).await {
-                                                    error!("Control Plane: Failed to refresh state after TLS cert update: {e}");
-                                                }
+                                                // Signal eventual consistency check via background ticker
                                                 let _ = tx.try_send(());
                                             },
                                             Err(e) => error!(
@@ -401,41 +429,37 @@ impl BackgroundService for ControlPlane {
                                 }
                             }
                             subjects::ROUTER_ACME_CHALLENGE_UPDATED => {
-                                if let Ok(update) = AcmeChallengeUpdate::decode(&msg.payload[..]) {
-                                    info!("Control Plane: Received ACME challenge update: {}", update.token);
+                                match AcmeChallengeUpdate::decode(&msg.payload[..]) {
+                                    Ok(update) => {
+                                        info!("Control Plane: Received ACME challenge update: {}", update.token);
 
-                                    // FAST-PATH: Update in-memory state immediately
-                                    if update.is_delete {
-                                        let _ = self.state_manager.remove_acme_token(&update.token).await;
-                                    } else {
-                                        let _ = self.state_manager.add_acme_token(update.token.clone(), update.key_auth.clone()).await;
-                                    }
+                                        // FAST-PATH: Update in-memory state immediately
+                                        if update.is_delete {
+                                            let _ = self.state_manager.remove_acme_token(&update.token).await;
+                                        } else {
+                                            let _ = self.state_manager.add_acme_token(update.token.clone(), update.key_auth.clone()).await;
+                                        }
 
-                                    let query = if update.is_delete {
-                                        sqlx::query("DELETE FROM acme_challenges WHERE token = $1")
+                                        let query = if update.is_delete {
+                                            sqlx::query("DELETE FROM acme_challenges WHERE token = $1")
+                                                .bind(&update.token)
+                                        } else {
+                                            sqlx::query(
+                                                "INSERT INTO acme_challenges (token, key_auth, hostname) VALUES ($1, $2, $3)
+                                                 ON CONFLICT (token) DO UPDATE SET key_auth = EXCLUDED.key_auth, hostname = EXCLUDED.hostname"
+                                            )
                                             .bind(&update.token)
-                                    } else {
-                                        sqlx::query(
-                                            "INSERT INTO acme_challenges (token, key_auth, hostname) VALUES ($1, $2, $3)
-                                             ON CONFLICT (token) DO UPDATE SET key_auth = EXCLUDED.key_auth, hostname = EXCLUDED.hostname"
-                                        )
-                                        .bind(&update.token)
-                                        .bind(&update.key_auth)
-                                        .bind(&update.hostname)
-                                    };
-                                    match query.execute(&db).await {
-                                        Ok(_) => {
-                                            // Eventually consistent sync
-                                            if let Err(e) = self.sync_full_state(&db).await {
-                                                error!("Control Plane: Failed to refresh state after ACME challenge update: {e}");
-                                            }
-                                            let _ = tx.try_send(());
-                                        },
-                                        Err(e) => error!(
-                                            "Control Plane: Failed to persist ACME challenge {}: {}",
-                                            update.token, e
-                                        ),
-                                    }
+                                            .bind(&update.key_auth)
+                                            .bind(&update.hostname)
+                                        };
+                                        if let Err(e) = query.execute(&db).await {
+                                            error!(
+                                                "Control Plane: Failed to persist ACME challenge {}: {}",
+                                                update.token, e
+                                            );
+                                        }
+                                    },
+                                    Err(e) => error!("Control Plane: Failed to decode AcmeChallengeUpdate: {}", e),
                                 }
                             }
                             _ => {}
@@ -445,11 +469,14 @@ impl BackgroundService for ControlPlane {
                 // Mesh updates (peers)
                 msg = mesh_sub.next() => {
                     if let Some(msg) = msg {
-                        if let Ok(update) = NetworkMeshUpdate::decode(&msg.payload[..]) {
-                            info!("Control Plane: Received mesh update with {} peers", update.peers.len());
-                            if let Err(e) = self.wg_manager.update_peers(&update.peers, &priv_key, &self.router_id).await {
-                                error!("Control Plane: Failed to update WireGuard peers: {e}");
-                            }
+                        match NetworkMeshUpdate::decode(&msg.payload[..]) {
+                            Ok(update) => {
+                                info!("Control Plane: Received mesh update with {} peers", update.peers.len());
+                                if let Err(e) = self.wg_manager.update_peers(&update.peers, &priv_key, &self.router_id).await {
+                                    error!("Control Plane: Failed to update WireGuard peers: {e}");
+                                }
+                            },
+                            Err(e) => error!("Control Plane: Failed to decode NetworkMeshUpdate: {}", e),
                         }
                     }
                 }

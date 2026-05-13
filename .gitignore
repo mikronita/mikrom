@@ -3,3 +3,4 @@ target
 mikrom-router.deb
 .env
 *.log
+mikrom-app-sk
