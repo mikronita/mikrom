@@ -233,6 +233,8 @@ pub fn create_app_with_rate_limits(
     state: AppState,
     rate_limiter: Arc<crate::rate_limit::RateLimiter>,
 ) -> Router {
+    rate_limiter.start_cleanup_task();
+
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
