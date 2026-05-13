@@ -67,6 +67,7 @@ pub struct AppState {
     pub master_key: String,
     pub deployment_events: tokio::sync::broadcast::Sender<uuid::Uuid>,
     pub workspace_events: tokio::sync::broadcast::Sender<WorkspaceEvent>,
+    pub mesh_status: tokio::sync::watch::Sender<crate::vms::MeshStatus>,
     pub acme_email: String,
     pub acme_staging: bool,
     pub acme_check_interval: u64,
@@ -353,6 +354,9 @@ pub fn start_background_tasks(state: AppState) {
 
     // Start instant NATS job updates listener
     tokio::spawn(crate::sync::start_nats_job_listener(state.clone()));
+
+    // Track mesh status centrally and fan out updates to clients.
+    tokio::spawn(crate::vms::start_mesh_status_tracker(state.clone()));
 
     // Reconcile routes with router
     let state_for_router = state.clone();

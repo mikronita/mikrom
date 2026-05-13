@@ -1,4 +1,10 @@
 const TOKEN_KEY = "mikrom_token";
+const AUTH_EVENT = "mikrom-auth-change";
+
+function emitAuthChange() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(AUTH_EVENT));
+}
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -19,11 +25,13 @@ export function getToken(): string | null {
 export function setToken(token: string): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(TOKEN_KEY, token);
+  emitAuthChange();
 }
 
 export function removeToken(): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem(TOKEN_KEY);
+  emitAuthChange();
 }
 
 export function isAuthenticated(): boolean {

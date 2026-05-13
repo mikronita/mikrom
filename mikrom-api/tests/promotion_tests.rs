@@ -211,6 +211,7 @@ async fn test_promote_paused_deployment_resumes_it() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
+        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -349,6 +350,7 @@ async fn test_promote_running_deployment_while_flow_active_is_immediate() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
+        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -491,6 +493,7 @@ async fn test_promote_running_deployment_with_stale_db_status_uses_runtime_statu
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
+        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -617,6 +620,7 @@ async fn test_promote_unhealthy_deployment_no_cleanup() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
+        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
