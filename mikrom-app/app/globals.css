@@ -5,91 +5,131 @@
 :root,
 .light-theme {
   color-scheme: light;
+
+  /* Canvas & Backgrounds */
   --bg-default: #ffffff;
-  --bg-subtle: #e9eef5;
+  --bg-subtle: #f6f8fa;
   --bg-overlay: #ffffff;
-  --border-default: #bcc7d3;
+  --bg-inset: #eff1f3;
+
+  /* Typography */
   --text-primary: #1f2328;
-  --text-secondary: #334155;
-  --status-online: #116329;
-  --status-offline: #ae1b2b;
+  --text-secondary: #656d76;
+  --text-muted: #afb8c1;
+
+  /* Borders */
+  --border-default: #d0d7de;
+  --border-muted: #d8dee4;
+
+  /* Interaction & Accents */
+  --accent: #0969da;
+  --primary: #1f883d;
+
+  /* Status Colors (Primer) */
+  --status-online: #1a7f37;
+  --status-offline: #d1242f;
   --status-warning: #9a6700;
   --status-info: #0969da;
+
+  /* Charts */
+  --chart-1: var(--status-info);
+  --chart-2: var(--status-online);
+  --chart-3: var(--status-warning);
+  --chart-4: var(--status-offline);
+  --chart-5: #8250df;
+
+  /* Shadcn/UI mappings */
   --background: var(--bg-default);
   --foreground: var(--text-primary);
   --card: var(--bg-default);
   --card-foreground: var(--text-primary);
   --popover: var(--bg-default);
   --popover-foreground: var(--text-primary);
-  --primary: #1f883d;
   --primary-foreground: #ffffff;
   --secondary: var(--bg-subtle);
   --secondary-foreground: var(--text-primary);
   --muted: var(--bg-subtle);
   --muted-foreground: var(--text-secondary);
-  --accent: #e3eaf1;
-  --accent-foreground: var(--text-primary);
+  --accent-foreground: #ffffff;
   --destructive: var(--status-offline);
   --destructive-foreground: #ffffff;
   --border: var(--border-default);
   --input: var(--border-default);
-  --ring: var(--primary);
-  --chart-1: var(--status-info);
-  --chart-2: var(--status-online);
-  --chart-3: var(--status-warning);
-  --chart-4: var(--status-offline);
-  --chart-5: #8250df;
-  --radius: 0.625rem;
-  --sidebar: var(--bg-default);
+  --ring: var(--accent);
+
+  /* Sidebar Specific */
+  --sidebar: var(--bg-subtle);
   --sidebar-foreground: var(--text-primary);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e3eaf1;
+  --sidebar-accent: #ebedf0;
   --sidebar-accent-foreground: var(--text-primary);
   --sidebar-border: var(--border-default);
-  --sidebar-ring: var(--primary);
+  --sidebar-ring: var(--accent);
+
+  --radius: 0.375rem;
 }
 
 .dark {
   color-scheme: dark;
+
+  /* Canvas & Backgrounds */
   --bg-default: #0d1117;
+  --bg-subtle: #161b22;
   --bg-overlay: #161b22;
-  --border-default: #30363d;
+  --bg-inset: #010409;
+
+  /* Typography */
   --text-primary: #c9d1d9;
   --text-secondary: #8b949e;
+  --text-muted: #484f58;
+
+  /* Borders */
+  --border-default: #30363d;
+  --border-muted: #21262d;
+
+  /* Interaction & Accents */
+  --accent: #58a6ff;
+  --primary: #238636;
+
+  /* Status Colors (Primer Dark) */
   --status-online: #3fb950;
   --status-offline: #f85149;
   --status-warning: #d29922;
   --status-info: #58a6ff;
-  --accent: #58a6ff;
-  --accent-foreground: #ffffff;
-  --destructive: #f85149;
-  --destructive-foreground: #ffffff;
+
+  /* Charts */
+  --chart-1: var(--status-info);
+  --chart-2: var(--status-online);
+  --chart-3: var(--status-warning);
+  --chart-4: var(--status-offline);
+  --chart-5: #b392f0;
+
+  /* Shadcn/UI mappings */
   --background: var(--bg-default);
   --foreground: var(--text-primary);
   --card: var(--bg-overlay);
   --card-foreground: var(--text-primary);
   --popover: var(--bg-overlay);
   --popover-foreground: var(--text-primary);
-  --primary: var(--accent);
   --primary-foreground: #ffffff;
-  --secondary: #21262d;
+  --secondary: var(--bg-subtle);
   --secondary-foreground: var(--text-primary);
-  --muted: #21262d;
+  --muted: var(--bg-subtle);
   --muted-foreground: var(--text-secondary);
+  --accent-foreground: #ffffff;
+  --destructive: var(--status-offline);
+  --destructive-foreground: #ffffff;
   --border: var(--border-default);
   --input: var(--border-default);
   --ring: var(--accent);
-  --chart-1: var(--accent);
-  --chart-2: var(--status-online);
-  --chart-3: var(--status-warning);
-  --chart-4: var(--status-offline);
-  --chart-5: #b392f0;
+
+  /* Sidebar Specific */
   --sidebar: var(--bg-default);
   --sidebar-foreground: var(--text-primary);
-  --sidebar-primary: var(--accent);
+  --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #161b22;
+  --sidebar-accent: #21262d;
   --sidebar-accent-foreground: var(--text-primary);
   --sidebar-border: var(--border-default);
   --sidebar-ring: var(--accent);
@@ -99,14 +139,18 @@
   --color-bg-default: var(--bg-default);
   --color-bg-subtle: var(--bg-subtle);
   --color-bg-overlay: var(--bg-overlay);
-  --color-border-default: var(--border-default);
+  --color-bg-inset: var(--bg-inset);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-border-default: var(--border-default);
+  --color-border-muted: var(--border-muted);
   --color-status-online: var(--status-online);
   --color-status-offline: var(--status-offline);
   --color-status-warning: var(--status-warning);
   --color-status-info: var(--status-info);
   --color-btn-primary: var(--primary);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -126,15 +170,18 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -144,15 +191,28 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  --font-sans: ui-sans-serif, system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
-    @apply bg-background text-foreground font-sans;
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  pre {
+    @apply overflow-x-auto rounded-md bg-bg-inset px-4 py-3;
+  }
+
+  code {
+    @apply rounded-md bg-bg-inset px-1.5 py-0.5 font-mono text-[0.95em];
+  }
+
+  pre code {
+    @apply rounded-none bg-transparent p-0;
   }
 }
