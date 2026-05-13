@@ -1240,6 +1240,12 @@ impl FirecrackerManager {
         };
 
         if restart_from_snapshot {
+            {
+                let mut vms = self.vms.write().await;
+                if let Some(vm) = vms.get_mut(vm_id) {
+                    vm.status = VmStatus::Stopped;
+                }
+            }
             processes.remove(vm_id);
         }
         drop(processes);
@@ -1856,6 +1862,10 @@ impl FirecrackerManager {
         }
     }
 
+    pub async fn set_vm_for_test(&self, vm_id: &VmId, vm_info: VmInfo) {
+        self.vms.write().await.insert(*vm_id, vm_info);
+    }
+
     #[allow(dead_code)]
     pub(crate) async fn insert_process_for_test(
         &self,
@@ -2102,6 +2112,41 @@ mod tests {
         let restored: VmInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.vm_id, vm_id);
         assert_eq!(restored.status, VmStatus::Starting);
+    }
+
+    #[tokio::test]
+    async fn test_resume_vm_restores_stopped_state_before_restart() {
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let vm_id = VmId::new();
+
+        let child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("true")
+            .spawn()
+            .expect("failed to spawn test child");
+
+        mgr.insert_process_for_test(&vm_id, child, "/tmp/fake-socket.sock".to_string())
+            .await;
+        mgr.set_vm_for_test(
+            &vm_id,
+            VmInfo {
+                vm_id,
+                app_id: AppId::new(),
+                image: "test-image".to_string(),
+                config: config(),
+                status: VmStatus::Running,
+                started_at: None,
+                error_message: None,
+            },
+        )
+        .await;
+
+        mgr.resume_vm(&vm_id)
+            .await
+            .expect("resume_vm should restart from snapshot");
+
+        assert!(!mgr.has_process(&vm_id).await);
+        assert_ne!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Running);
     }
 
     #[tokio::test]
