@@ -162,20 +162,47 @@ impl AppState {
             timestamp: chrono::Utc::now().timestamp(),
         };
 
-        let ack: RouterConfigAck = self
-            .nats
-            .with_timeout(std::time::Duration::from_secs(5))
-            .request(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
-            .await?;
+        let mut last_error: Option<anyhow::Error> = None;
 
-        if !ack.success {
-            let message = if ack.message.is_empty() {
-                "router rejected route removal".to_string()
-            } else {
-                ack.message
-            };
-            return Err(anyhow::anyhow!(message));
+        for attempt in 1..=3 {
+            match self
+                .nats
+                .with_timeout(std::time::Duration::from_secs(15))
+                .request::<_, RouterConfigAck>(
+                    mikrom_proto::subjects::ROUTER_CONFIG_UPDATED,
+                    config.clone(),
+                )
+                .await
+            {
+                Ok(ack) if ack.success => return Ok(()),
+                Ok(ack) => {
+                    let message = if ack.message.is_empty() {
+                        "router rejected route removal".to_string()
+                    } else {
+                        ack.message
+                    };
+                    last_error = Some(anyhow::anyhow!(message));
+                },
+                Err(e) => {
+                    last_error = Some(e);
+                },
+            }
+
+            if attempt < 3 {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
         }
+
+        tracing::warn!(
+            hostname = %hostname,
+            error = ?last_error,
+            "Router route removal did not complete via request/reply; falling back to fire-and-forget publish"
+        );
+
+        self.nats
+            .publish(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to publish route removal fallback: {}", e))?;
 
         Ok(())
     }

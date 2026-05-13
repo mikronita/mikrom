@@ -1081,8 +1081,19 @@ impl FirecrackerManager {
     pub async fn delete_vm(&self, vm_id: &VmId) -> Result<(), FirecrackerError> {
         tracing::info!("Purging all resources for VM");
 
+        let ipv6_address = {
+            let vms = self.vms.read().await;
+            vms.get(vm_id).and_then(|vm| vm.config.ipv6_address.clone())
+        };
+
         // 1. Stop the VM if it's running
         let _ = self.stop_vm(vm_id).await;
+
+        // 1b. Remove the host route for the guest IPv6 prefix if it exists.
+        // This keeps deleted apps from leaving a stale route behind on mikrom-br0.
+        if let Some(ipv6) = ipv6_address.as_deref() {
+            self.cleanup_ipv6_route(ipv6).await;
+        }
 
         // 2. Remove VM info from memory
         {
@@ -1682,6 +1693,42 @@ impl FirecrackerManager {
             .args(["link", "delete", tap_name])
             .output()
             .await;
+    }
+
+    async fn cleanup_ipv6_route(&self, ipv6: &str) {
+        let Some(prefix) = Self::ipv6_route_prefix(ipv6) else {
+            return;
+        };
+
+        let attempts = [
+            vec!["-6", "route", "del", &prefix, "dev", "mikrom-br0"],
+            vec!["-6", "route", "del", &prefix],
+        ];
+
+        for args in attempts {
+            match tokio::process::Command::new("ip").args(args).output().await {
+                Ok(output) if output.status.success() => {
+                    tracing::info!(prefix = %prefix, "Removed IPv6 host route");
+                    return;
+                },
+                Ok(output) => {
+                    tracing::debug!(
+                        prefix = %prefix,
+                        stderr = %String::from_utf8_lossy(&output.stderr),
+                        "IPv6 host route removal attempt failed"
+                    );
+                },
+                Err(error) => {
+                    tracing::debug!(
+                        prefix = %prefix,
+                        error = %error,
+                        "Failed to execute IPv6 host route cleanup"
+                    );
+                },
+            }
+        }
+
+        tracing::warn!(prefix = %prefix, "IPv6 host route may still be present after delete");
     }
 
     /// Helper to get the jailer chroot directory for a VM.
@@ -2300,7 +2347,23 @@ mod tests {
         tokio::fs::write(&rootfs, b"fake").await.unwrap();
 
         // 2. Register VM in memory
-        mgr.set_status_for_test(&vm_id, VmStatus::Stopped).await;
+        mgr.set_vm_for_test(
+            &vm_id,
+            VmInfo {
+                vm_id,
+                app_id: AppId::new(),
+                image: "test-image".to_string(),
+                config: VmConfig {
+                    ipv6_address: Some("fd40:b90d:fcaa:ac99::42".to_string()),
+                    ipv6_gateway: Some("fe80::1".to_string()),
+                    ..config()
+                },
+                status: VmStatus::Stopped,
+                started_at: None,
+                error_message: None,
+            },
+        )
+        .await;
 
         // 3. Perform delete
         mgr.delete_vm(&vm_id).await.expect("delete_vm failed");
