@@ -23,18 +23,26 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let state = crate::AppState::from_ref(state);
 
-        // 1. Get token from Authorization header OR query parameter (for SSE)
-        let token = extract_token_from_headers_and_uri(&parts.headers, &parts.uri)?;
+        let claims = if let Some(claims) = parts.extensions.get::<crate::auth::jwt::Claims>() {
+            claims.clone()
+        } else {
+            // 1. Get token from Authorization header OR query parameter (for SSE)
+            let token = extract_token_from_headers_and_uri(&parts.headers, &parts.uri)?;
 
-        // 2. Decode and validate JWT
-        let claims = crate::auth::jwt::verify_token(&token, &state.jwt_secret)
-            .map_err(|_| ApiError::Auth("Invalid or expired token".into()))?;
+            // 2. Decode and validate JWT
+            crate::auth::jwt::verify_token(&token, &state.jwt_secret)
+                .map_err(|_| ApiError::Auth("Invalid or expired token".into()))?
+        };
 
-        Ok(AuthUser {
-            user_id: claims.sub,
-            email: claims.email,
-            role: claims.role,
-        })
+        Ok(auth_user_from_claims(claims))
+    }
+}
+
+fn auth_user_from_claims(claims: crate::auth::jwt::Claims) -> AuthUser {
+    AuthUser {
+        user_id: claims.sub,
+        email: claims.email,
+        role: claims.role,
     }
 }
 
@@ -139,6 +147,23 @@ mod tests {
         let auth_user = AuthUser::from_request_parts(&mut parts, &state)
             .await
             .unwrap();
+
+        assert_eq!(auth_user.user_id, user_id);
+        assert_eq!(auth_user.email, email);
+    }
+
+    #[tokio::test]
+    async fn test_auth_extractor_uses_claims_from_extensions() {
+        let user_id = uuid::Uuid::new_v4().to_string();
+        let email = "extension@example.com".to_string();
+        let claims = crate::auth::jwt::Claims {
+            sub: user_id.clone(),
+            email: email.clone(),
+            role: UserRole::User,
+            exp: 9_999_999_999,
+            iat: 1,
+        };
+        let auth_user = auth_user_from_claims(claims);
 
         assert_eq!(auth_user.user_id, user_id);
         assert_eq!(auth_user.email, email);

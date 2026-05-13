@@ -51,8 +51,8 @@ pub struct ApiConfig {
     #[serde(default = "default_rate_limit_entry_ttl_secs")]
     pub rate_limit_entry_ttl_secs: u64,
 
-    #[serde(default = "default_rate_limit_cleanup_every_requests")]
-    pub rate_limit_cleanup_every_requests: u64,
+    #[serde(default = "default_rate_limit_cleanup_interval_secs")]
+    pub rate_limit_cleanup_interval_secs: u64,
 
     #[serde(default = "default_rate_limit_trust_proxy_headers")]
     pub rate_limit_trust_proxy_headers: bool,
@@ -120,8 +120,8 @@ fn default_rate_limit_entry_ttl_secs() -> u64 {
     15 * 60
 }
 
-fn default_rate_limit_cleanup_every_requests() -> u64 {
-    512
+fn default_rate_limit_cleanup_interval_secs() -> u64 {
+    60
 }
 
 fn default_rate_limit_trust_proxy_headers() -> bool {

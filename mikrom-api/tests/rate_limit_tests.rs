@@ -69,7 +69,7 @@ async fn public_requests_are_limited_by_ip() {
             authenticated_write_rpm: 1,
             authenticated_stream_rpm: 1,
             entry_ttl: std::time::Duration::from_secs(60),
-            cleanup_every_requests: 1,
+            cleanup_interval: std::time::Duration::from_secs(1),
             trust_proxy_headers: false,
         },
     );
@@ -107,7 +107,7 @@ async fn authenticated_requests_are_limited_by_user() {
             authenticated_write_rpm: 1,
             authenticated_stream_rpm: 1,
             entry_ttl: std::time::Duration::from_secs(60),
-            cleanup_every_requests: 1,
+            cleanup_interval: std::time::Duration::from_secs(1),
             trust_proxy_headers: false,
         },
     );
@@ -162,7 +162,7 @@ async fn distinct_public_routes_do_not_share_buckets() {
             authenticated_write_rpm: 1,
             authenticated_stream_rpm: 1,
             entry_ttl: std::time::Duration::from_secs(60),
-            cleanup_every_requests: 1,
+            cleanup_interval: std::time::Duration::from_secs(1),
             trust_proxy_headers: false,
         },
     );
@@ -206,7 +206,7 @@ async fn route_specific_limits_override_defaults() {
             authenticated_write_rpm: 10,
             authenticated_stream_rpm: 10,
             entry_ttl: std::time::Duration::from_secs(60),
-            cleanup_every_requests: 1,
+            cleanup_interval: std::time::Duration::from_secs(1),
             trust_proxy_headers: false,
         },
     );

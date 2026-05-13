@@ -69,7 +69,7 @@ Mikrom uses PostgreSQL to track the state of the cluster:
 | `RATE_LIMIT_AUTHENTICATED_WRITE_RPM` | profile default | Requests per minute for authenticated write endpoints |
 | `RATE_LIMIT_AUTHENTICATED_STREAM_RPM` | profile default | Stream openings per minute for SSE/log endpoints |
 | `RATE_LIMIT_ENTRY_TTL_SECS` | `900` | Idle time before rate-limit buckets are evicted |
-| `RATE_LIMIT_CLEANUP_EVERY_REQUESTS` | `512` | How often the in-memory store scans for stale buckets |
+| `RATE_LIMIT_CLEANUP_INTERVAL_SECS` | `60` | How often the in-memory store scans for stale buckets |
 | `RATE_LIMIT_TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` or `X-Real-IP` for client identity |
 
 ### Recommended profiles
