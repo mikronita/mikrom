@@ -3093,6 +3093,9 @@ dependencies = [
  "envy",
  "futures",
  "mikrom-proto",
+ "opentelemetry 0.31.0",
+ "opentelemetry-otlp 0.31.1",
+ "opentelemetry_sdk 0.31.0",
  "prometheus",
  "prost 0.13.5",
  "reqwest 0.12.28",
@@ -3100,6 +3103,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "tracing-opentelemetry 0.32.1",
  "tracing-subscriber",
 ]
 

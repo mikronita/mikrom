@@ -31,7 +31,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -111,7 +111,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "Prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "expr": "mikrom_vm_cpu_usage",
@@ -126,7 +126,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -206,7 +206,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "Prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "expr": "mikrom_vm_ram_usage_bytes",
@@ -221,16 +221,16 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "Loki"
-      },
-      "gridPos": {
+        "uid": "loki"
+        },
+        "gridPos": {
         "h": 10,
         "w": 24,
         "x": 0,
         "y": 8
-      },
-      "id": 3,
-      "options": {
+        },
+        "id": 3,
+        "options": {
         "dedupStrategy": "none",
         "enableLogDetails": true,
         "prettifyLogMessage": false,
@@ -239,21 +239,57 @@
         "showTime": true,
         "sortOrder": "Descending",
         "wrapLogMessage": false
-      },
-      "targets": [
+        },
+        "targets": [
         {
           "datasource": {
             "type": "loki",
-            "uid": "Loki"
+            "uid": "loki"
           },
           "editorMode": "code",
           "expr": "{app_id=~\".+\"}",
           "queryType": "range",
           "refId": "A"
         }
+        ],
+        "title": "MicroVM Logs",
+        "type": "logs"
+        },
+        {
+        "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+        },
+        "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 18
+        },
+        "id": 4,
+        "options": {
+        "search": {
+          "filters": [
+            {
+              "id": "service-name",
+              "value": "mikrom-telemetry"
+            }
+          ]
+        }
+        },
+        "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          }
+,
+          "queryType": "traceql",
+          "refId": "A"
+        }
       ],
-      "title": "MicroVM Logs",
-      "type": "logs"
+      "title": "Recent Traces (Tempo)",
+      "type": "traces"
     }
   ],
   "refresh": "5s",

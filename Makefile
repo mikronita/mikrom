@@ -117,8 +117,8 @@ build-init: ## Build mikrom-init as a static binary (musl)
 	@mkdir -p target/release && cp target/x86_64-unknown-linux-musl/release/mikrom-init target/release/mikrom-init
 
 .PHONY: run-app
-run-app: ## Run mikrom-app dev server  (port 3000)
-	cd mikrom-app && pnpm dev
+run-app: ## Run mikrom-app dev server  (port 3001)
+	cd mikrom-app && pnpm run dev -p 3001
 
 .PHONY: dev
 dev: ## Launch all services in tmux windows
