@@ -114,11 +114,11 @@ const chartConfig = {
 
 function getStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
-  if (s === "running") return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800";
-  if (s === "draining") return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-200 dark:border-amber-800";
-  if (s === "building" || s === "scheduled" || s === "pending" || s === "paused") return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800";
-  if (s === "failed" || s === "cancelled") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800";
-  return "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700";
+  if (s === "running") return "bg-status-online/15 text-status-online border-status-online/30";
+  if (s === "draining") return "bg-status-warning/15 text-status-warning border-status-warning/30";
+  if (s === "building" || s === "scheduled" || s === "pending" || s === "paused") return "bg-status-warning/15 text-status-warning border-status-warning/30";
+  if (s === "failed" || s === "cancelled") return "bg-status-offline/15 text-status-offline border-status-offline/30";
+  return "bg-muted text-muted-foreground border-border";
 }
 
 interface MetricPoint {
@@ -601,7 +601,7 @@ export default function AppDetailPage() {
                                     <span className="font-mono">{dep.git_commit_hash?.substring(0, 7) || dep.id.split("-")[0]}</span>
                                     <span className="flex items-center gap-1">
                                       {dep.trigger_source === "github_webhook" ? (
-                                        <Zap className="w-3 h-3 fill-yellow-400 text-yellow-400" />
+                                        <Zap className="w-3 h-3 fill-status-warning text-status-warning" />
                                       ) : (
                                         <User className="w-3 h-3" />
                                       )}
@@ -625,7 +625,7 @@ export default function AppDetailPage() {
                               </TableCell>
                               <TableCell>
                                 {isCurrentlyInProd ? (
-                                  <div className="flex items-center gap-1.5 text-green-600 dark:text-green-400 font-semibold text-sm">
+                                  <div className="flex items-center gap-1.5 text-status-online font-semibold text-sm">
                                     <HiCheckCircle className="w-5 h-5" />
                                     <span>Production</span>
                                   </div>
