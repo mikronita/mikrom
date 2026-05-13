@@ -148,46 +148,6 @@ async fn sync_deployment_state(
             .await;
         state.deployment_events.send(dep.app_id).ok();
     }
-
-    if let Some(mut app) = active_app {
-        let mut route_changed = deployment_changed;
-
-        if app.active_deployment_id.is_none() && db_status == "RUNNING" {
-            let app_key: mikrom_proto::id::AppId = app.id.into();
-            if state.active_deployment_flows.contains(&app_key) {
-                info!(
-                    app_id = %app.id,
-                    deployment_id = %dep.id,
-                    current_active = ?app.active_deployment_id,
-                    "Skipping first-running deployment promotion because a deployment flow is still active"
-                );
-            } else {
-                match state.app_repo.set_active_deployment(app.id, dep.id).await {
-                    Ok(_) => {
-                        app.active_deployment_id = Some(dep.id);
-                        route_changed = true;
-                        info!(
-                            app_id = %app.id,
-                            deployment_id = %dep.id,
-                            "Promoted first running deployment to active"
-                        );
-                    },
-                    Err(e) => {
-                        error!(
-                            app_id = %app.id,
-                            deployment_id = %dep.id,
-                            error = %e,
-                            "Failed to promote running deployment to active"
-                        );
-                    },
-                }
-            }
-        }
-
-        if route_changed {
-            let _ = state.notify_router(&app).await;
-        }
-    }
 }
 
 fn should_apply_cluster_status(

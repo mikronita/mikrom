@@ -1,11 +1,16 @@
 use crate::AppState;
 use crate::deploy::worker::{BuildTask, start_build_polling};
+use crate::deploy::workflow::DeploymentPromotionWorkflow;
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::{App, Deployment};
 use crate::repositories::app_repository::UpdateDeploymentParams;
 use mikrom_proto::scheduler::{AppConfig, DeployRequest, DeployResponse};
 
 pub struct DeploymentService;
+
+const DEFAULT_ZERO_DOWNTIME_HEALTH_CHECK_MAX_ATTEMPTS: usize = 45;
+const DEFAULT_ZERO_DOWNTIME_HEALTH_CHECK_REQUEST_TIMEOUT_SECS: u64 = 2;
+pub(crate) const ZERO_DOWNTIME_HEALTH_CHECK_RETRY_DELAY_SECS: u64 = 1;
 
 pub struct DeployParams {
     pub image_tag: String,
@@ -16,6 +21,34 @@ pub struct DeployParams {
 }
 
 impl DeploymentService {
+    fn parse_usize_env(value: Option<String>, default: usize) -> usize {
+        value
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(default)
+    }
+
+    fn parse_u64_env(value: Option<String>, default: u64) -> u64 {
+        value
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(default)
+    }
+
+    pub(crate) fn zero_downtime_health_check_max_attempts() -> usize {
+        Self::parse_usize_env(
+            std::env::var("MIKROM_ZERO_DOWNTIME_HEALTH_CHECK_MAX_ATTEMPTS").ok(),
+            DEFAULT_ZERO_DOWNTIME_HEALTH_CHECK_MAX_ATTEMPTS,
+        )
+    }
+
+    pub(crate) fn zero_downtime_health_check_request_timeout() -> std::time::Duration {
+        let secs = Self::parse_u64_env(
+            std::env::var("MIKROM_ZERO_DOWNTIME_HEALTH_CHECK_TIMEOUT_SECS").ok(),
+            DEFAULT_ZERO_DOWNTIME_HEALTH_CHECK_REQUEST_TIMEOUT_SECS,
+        );
+
+        std::time::Duration::from_secs(secs)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn trigger_build(
         state: &AppState,
@@ -222,273 +255,52 @@ impl DeploymentService {
         cleanup_on_failure: bool,
         _guard: crate::DeploymentFlowGuard,
     ) {
-        use crate::repositories::app_repository::UpdateDeploymentParams;
-        use std::time::Duration;
-        use tracing::{debug, error, info};
+        DeploymentPromotionWorkflow::run_zero_downtime_flow(
+            state,
+            app,
+            deployment,
+            inner,
+            user_id,
+            cleanup_on_failure,
+            _guard,
+        );
+    }
+}
 
-        let app_id = app.id;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        tokio::spawn(async move {
-            // Keep the guard in this task
-            let _guard = _guard;
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn zero_downtime_defaults_cover_init_window() {
+        assert!(
+            DEFAULT_ZERO_DOWNTIME_HEALTH_CHECK_MAX_ATTEMPTS >= 35,
+            "Default zero-downtime health-check attempts should exceed mikrom-init's 30s wait"
+        );
+        assert_eq!(DEFAULT_ZERO_DOWNTIME_HEALTH_CHECK_REQUEST_TIMEOUT_SECS, 2);
+    }
 
-            let result = async {
-                // 0. Capture the current active deployment before we validate the new VM.
-                // If there is already a production deployment, mark it as draining right away
-                // so the UI does not keep showing two RUNNING deployments during validation.
-                let old_active_id = match state.app_repo.get_app(app.id).await {
-                    Ok(Some(a)) => a.active_deployment_id,
-                    _ => None,
-                };
+    #[test]
+    fn zero_downtime_env_parsing_falls_back_on_invalid_values() {
+        assert_eq!(DeploymentService::parse_usize_env(None, 9), 9);
+        assert_eq!(
+            DeploymentService::parse_usize_env(Some("7".to_string()), 9),
+            7
+        );
+        assert_eq!(
+            DeploymentService::parse_usize_env(Some("not-a-number".to_string()), 9),
+            9
+        );
 
-                if let Some(old_id) = old_active_id
-                    && let Some(old_dep) = state.app_repo.get_deployment(old_id).await?
-                {
-                    state
-                        .app_repo
-                        .update_deployment(
-                            old_id,
-                            UpdateDeploymentParams {
-                                status: Some("DRAINING".to_string()),
-                                ..Default::default()
-                            },
-                        )
-                        .await?;
-                    state.deployment_events.send(app.id).ok();
-                    if let Some(old_job_id) = old_dep.job_id {
-                        tracing::info!(
-                            app = %app.name,
-                            job_id = %old_job_id,
-                            deployment_id = %old_id,
-                            origin = "zero_downtime_drain",
-                            user_id = "system",
-                            "Marked previous deployment as draining"
-                        );
-                    } else {
-                        tracing::info!(
-                            app = %app.name,
-                            deployment_id = %old_id,
-                            origin = "zero_downtime_drain",
-                            user_id = "system",
-                            "Marked previous deployment as draining"
-                        );
-                    }
-                }
-
-                // 1. Polling for Health
-                let mut healthy = false;
-                let mut last_health_error: Option<String> = None;
-                let max_attempts = 12;
-                let health_check_timeout = Duration::from_secs(3);
-                for attempt in 1..=max_attempts {
-                    if attempt % 5 == 1 {
-                        info!(
-                            app = %app.name,
-                            job_id = %inner.job_id,
-                            attempt = attempt,
-                            "Checking health for zero-downtime deployment..."
-                        );
-                    } else {
-                        debug!(
-                            app = %app.name,
-                            job_id = %inner.job_id,
-                            attempt = attempt,
-                            "Checking health for zero-downtime deployment..."
-                        );
-                    }
-
-                    let health_req = mikrom_proto::scheduler::CheckHealthRequest {
-                        job_id: inner.job_id.clone(),
-                        user_id: user_id.clone(),
-                    };
-
-                    match state
-                        .nats
-                        .with_timeout(health_check_timeout)
-                        .request::<_, mikrom_proto::scheduler::CheckHealthResponse>(
-                            "mikrom.scheduler.check_health",
-                            health_req,
-                        )
-                        .await
-                    {
-                        Ok(resp) if resp.is_healthy => {
-                            healthy = true;
-                            info!(app = %app.name, "New deployment is healthy!");
-                            break;
-                        },
-                        Ok(resp) => {
-                            let message = resp.message.clone();
-                            last_health_error = Some(message.clone());
-                            tracing::warn!(
-                                app = %app.name,
-                                job_id = %inner.job_id,
-                                attempt = attempt,
-                                reason = %message,
-                                "Health check returned unhealthy"
-                            );
-                            debug!(
-                                app = %app.name,
-                                message = %message,
-                                "Health check returned unhealthy"
-                            );
-                        },
-                        Err(e) => {
-                            let message = e.to_string();
-                            last_health_error = Some(message.clone());
-                            tracing::warn!(
-                                app = %app.name,
-                                job_id = %inner.job_id,
-                                attempt = attempt,
-                                reason = %message,
-                                "Health check request failed"
-                            );
-                            debug!(
-                                app = %app.name,
-                                error = %message,
-                                "Health check request failed"
-                            );
-                        },
-                    }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-
-                if !healthy {
-                    if let Some(old_id) = old_active_id {
-                        state
-                            .app_repo
-                            .update_deployment(
-                                old_id,
-                                UpdateDeploymentParams {
-                                    status: Some("RUNNING".to_string()),
-                                    ..Default::default()
-                                },
-                            )
-                            .await?;
-                    }
-
-                    if cleanup_on_failure {
-                        error!(
-                            app = %app.name,
-                            reason = last_health_error.as_deref().unwrap_or("unknown"),
-                            "Zero-downtime deployment failed: health check timeout. Cleaning up new VM."
-                        );
-                        tracing::info!(
-                            app = %app.name,
-                            job_id = %inner.job_id,
-                            deployment_id = %deployment.id,
-                            origin = "zero_downtime_cleanup",
-                            user_id = "system",
-                            "Forwarding pause request to scheduler"
-                        );
-                        let job_id = inner.job_id.clone();
-                        state
-                            .scheduler
-                            .pause_app(job_id.clone(), "system".to_string())
-                            .await
-                            .map_err(|e| anyhow::anyhow!(e))?;
-                        tracing::info!(
-                            app = %app.name,
-                            job_id = %job_id,
-                            deployment_id = %deployment.id,
-                            origin = "zero_downtime_cleanup",
-                            user_id = "system",
-                            "Scheduler pause completed"
-                        );
-                        state
-                            .app_repo
-                            .update_deployment(
-                                deployment.id,
-                                UpdateDeploymentParams {
-                                    status: Some("FAILED".to_string()),
-                                    ..Default::default()
-                                },
-                            )
-                            .await?;
-                    } else {
-                        error!(
-                            app = %app.name,
-                            "Promotion failed: health check timeout. App remains in preview."
-                        );
-                    }
-                    state.deployment_events.send(app.id).ok();
-                    return Ok::<(), anyhow::Error>(());
-                }
-
-                // 2. Promote new deployment to active
-                info!(
-                    app = %app.name,
-                    deployment_id = %deployment.id,
-                    "Promoting new deployment to active"
-                );
-                state
-                    .app_repo
-                    .set_active_deployment(app.id, deployment.id)
-                    .await?;
-
-                // 3. Notify router (atomic switch)
-                // We fetch the app again to ensure we have the newly active deployment state
-                if let Some(app_refreshed) = state.app_repo.get_app(app.id).await? {
-                    if app_refreshed.active_deployment_id != Some(deployment.id) {
-                        return Err(anyhow::anyhow!("Failed to verify active deployment promotion in DB"));
-                    }
-                    state.notify_router(&app_refreshed).await?;
-                } else {
-                    return Err(anyhow::anyhow!("Application not found during promotion"));
-                }
-
-                state.deployment_events.send(app.id).ok();
-
-                // 4. Drain Phase
-                if let Some(old_id) = old_active_id {
-                    // Stop the old VM immediately after the router switch.
-                    // We keep the zero-downtime flow focused on the validation window;
-                    // the old version should not remain RUNNING alongside the new one.
-                    #[allow(clippy::collapsible_if)]
-                    if let Some(old_dep) = state.app_repo.get_deployment(old_id).await? {
-                        if let Some(old_job_id) = old_dep.job_id {
-                            let job_id = old_job_id.clone();
-                            info!(app = %app.name, job_id = %old_job_id, "Stopping old version immediately after promotion");
-                            tracing::info!(
-                                app = %app.name,
-                                job_id = %job_id,
-                                deployment_id = %old_id,
-                                origin = "zero_downtime_drain",
-                                user_id = "system",
-                                "Forwarding pause request to scheduler"
-                            );
-                            state
-                                .scheduler
-                                .pause_app(job_id.clone(), "system".to_string())
-                                .await
-                                .map_err(|e| anyhow::anyhow!(e))?;
-                            tracing::info!(
-                                app = %app.name,
-                                job_id = %job_id,
-                                deployment_id = %old_id,
-                                origin = "zero_downtime_drain",
-                                user_id = "system",
-                                "Scheduler pause completed"
-                            );
-                            state
-                                .app_repo
-                                .update_deployment(
-                                    old_id,
-                                    crate::repositories::app_repository::UpdateDeploymentParams {
-                                        status: Some("PAUSED".to_string()),
-                                        ..Default::default()
-                                    },
-                                )
-                                .await?;
-                        }
-                    }
-                }
-                Ok(())
-            }
-            .await;
-
-            if let Err(e) = result {
-                error!(app_id = %app_id, error = %e, "Zero-downtime deployment flow failed unexpectedly");
-            }
-        });
+        assert_eq!(DeploymentService::parse_u64_env(None, 11), 11);
+        assert_eq!(
+            DeploymentService::parse_u64_env(Some("13".to_string()), 11),
+            13
+        );
+        assert_eq!(
+            DeploymentService::parse_u64_env(Some("bad".to_string()), 11),
+            11
+        );
     }
 }

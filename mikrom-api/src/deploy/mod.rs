@@ -5,10 +5,14 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub mod handlers;
+pub mod orchestrator;
 pub mod service;
 pub mod webhooks;
 pub mod worker;
+pub mod workflow;
 pub use handlers::*;
+pub use orchestrator::DeploymentOrchestrator;
+pub use workflow::DeploymentPromotionWorkflow;
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct DeployRequestPayload {

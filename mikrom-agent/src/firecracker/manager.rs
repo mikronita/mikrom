@@ -1194,19 +1194,54 @@ impl FirecrackerManager {
 
     #[tracing::instrument(skip(self), fields(vm_id = %vm_id))]
     pub async fn resume_vm(&self, vm_id: &VmId) -> Result<(), FirecrackerError> {
-        let processes = self.processes.lock().await;
-        if let Some(proc) = processes.get(vm_id) {
-            let resume_body = serde_json::json!({ "state": "Resumed" }).to_string();
-            fc_patch(&proc.socket_path, "/vm", &resume_body).await?;
-
-            let mut vms = self.vms.write().await;
-            if let Some(vm) = vms.get_mut(vm_id) {
-                vm.status = VmStatus::Running;
+        let mut processes = self.processes.lock().await;
+        let restart_from_snapshot = if let Some(proc) = processes.get_mut(vm_id) {
+            match proc.child.try_wait() {
+                Ok(Some(status)) => {
+                    tracing::warn!(
+                        vm_id = %vm_id,
+                        status = ?status,
+                        "Found stale Firecracker process during resume, restarting from snapshot"
+                    );
+                    true
+                },
+                Ok(None) => {
+                    let resume_body = serde_json::json!({ "state": "Resumed" }).to_string();
+                    match fc_patch(&proc.socket_path, "/vm", &resume_body).await {
+                        Ok(_) => {
+                            let mut vms = self.vms.write().await;
+                            if let Some(vm) = vms.get_mut(vm_id) {
+                                vm.status = VmStatus::Running;
+                            }
+                            return Ok(());
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                vm_id = %vm_id,
+                                error = %e,
+                                "Failed to resume Firecracker process in place, restarting from snapshot"
+                            );
+                            true
+                        },
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        vm_id = %vm_id,
+                        error = %e,
+                        "Could not inspect Firecracker process during resume, restarting from snapshot"
+                    );
+                    true
+                },
             }
-            return Ok(());
-        }
+        } else {
+            tracing::info!(vm_id = %vm_id, "Process missing for resume, attempting restart from snapshot...");
+            true
+        };
 
-        tracing::info!(vm_id = %vm_id, "Process missing for resume, attempting restart from snapshot...");
+        if restart_from_snapshot {
+            processes.remove(vm_id);
+        }
         drop(processes);
 
         let vm_info = self
