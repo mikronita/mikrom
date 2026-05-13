@@ -137,6 +137,7 @@ async fn test_activate_deployment_endpoint() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -225,6 +226,7 @@ async fn test_activate_deployment_wrong_owner() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -343,6 +345,7 @@ async fn test_activate_deployment_not_running() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 

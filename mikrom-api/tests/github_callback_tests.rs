@@ -37,6 +37,7 @@ async fn create_test_state() -> AppState {
         github_private_key: Some("dummy-key".to_string()),
         github_app_slug: Some("test-app".to_string()),
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     }
 }

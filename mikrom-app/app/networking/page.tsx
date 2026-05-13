@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Boxes,
@@ -72,6 +72,7 @@ import {
   listActiveDeployments,
   listApps,
   listSecurityRules,
+  watchMeshStatus,
 } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 
@@ -117,7 +118,6 @@ export default function NetworkingPage() {
         return res.data;
       }),
     enabled: !!token,
-    refetchInterval: 5000,
   });
 
   const { data: mesh, isLoading: meshLoading } = useQuery({
@@ -128,8 +128,17 @@ export default function NetworkingPage() {
         return res.data;
       }),
     enabled: !!token,
-    refetchInterval: 10000,
   });
+
+  useEffect(() => {
+    if (!token) return;
+
+    const cleanup = watchMeshStatus(token, (data) => {
+      queryClient.setQueryData(["mesh-status"], data);
+    });
+
+    return () => cleanup();
+  }, [queryClient, token]);
 
   const { data: apps } = useQuery({
     queryKey: ["apps"],

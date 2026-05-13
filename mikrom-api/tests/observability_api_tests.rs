@@ -41,6 +41,7 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 

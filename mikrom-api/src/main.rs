@@ -27,6 +27,7 @@ async fn main() -> anyhow::Result<()> {
     let github_repo = mikrom_api::repositories::PostgresGithubRepository::new(db_pool.clone());
 
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
+    let (workspace_events, _) = tokio::sync::broadcast::channel(100);
 
     tracing::info!("Connecting to NATS at {}...", config.nats_url);
     let nats_client = async_nats::connect(&config.nats_url)
@@ -50,6 +51,7 @@ async fn main() -> anyhow::Result<()> {
         jwt_secret: config.jwt_secret,
         master_key: config.master_key,
         deployment_events: deployment_events.clone(),
+        workspace_events: workspace_events.clone(),
         acme_email: config.acme_email,
         acme_staging: config.acme_staging,
         acme_check_interval: config.acme_check_interval,

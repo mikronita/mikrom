@@ -46,6 +46,40 @@ export interface HealthResponse {
   services?: Record<string, string>;
 }
 
+export interface MeshStatus {
+  total_workers: number;
+  workers: Array<{
+    id: string;
+    host_id: string;
+    hostname: string;
+    advertise_address: string;
+    wireguard_pubkey: string | null;
+    wireguard_ip: string | null;
+    wireguard_port: number | null;
+    metrics: unknown | null;
+    registered_at: string;
+    last_seen_at: string;
+  }>;
+}
+
+export type WorkspaceEventKind =
+  | "app_created"
+  | "app_updated"
+  | "app_deleted"
+  | "deployment_changed"
+  | "profile_updated"
+  | "github_accounts_changed"
+  | "security_rules_changed";
+
+export interface WorkspaceEvent {
+  kind: WorkspaceEventKind;
+  user_id?: string | null;
+  app_id?: string | null;
+  app_name?: string | null;
+  deployment_id?: string | null;
+  resource_id?: string | null;
+}
+
 export interface LiveDeploymentInfo {
   job_id: string;
   deployment_id: string;
@@ -497,31 +531,6 @@ export interface CreateSecurityRuleRequest {
   action: string;
 }
 
-export interface MeshWorker {
-  id: string;
-  hostname: string;
-  wireguard_pubkey: string;
-  last_seen_at: string;
-}
-
-export interface MeshStatus {
-  total_workers: number;
-  workers: MeshWorker[];
-}
-
-export async function getMeshStatus(token: string): Promise<{ data?: MeshStatus; error?: string }> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/networking/mesh`, {
-      headers: authHeaders(token),
-    });
-    const result = await parseJson<MeshStatus>(response);
-    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch mesh status") };
-    return { data: result as MeshStatus };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Network error" };
-  }
-}
-
 export async function listSecurityRules(token: string, appName: string): Promise<{ data?: SecurityRule[]; error?: string }> {
   try {
     const response = await fetch(`${API_BASE_URL}/apps/${appName}/security-groups`, {
@@ -761,6 +770,63 @@ export function watchAppMetricsSSE(
   };
 }
 
+export async function getMeshStatus(token: string): Promise<{ data?: MeshStatus; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/networking/mesh`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<MeshStatus>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch mesh status") };
+    return { data: result as MeshStatus };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export function watchMeshStatusSSE(
+  token: string,
+  onMessage: (mesh: MeshStatus) => void
+): () => void {
+  const eventSource = new EventSource(`${API_BASE_URL}/networking/mesh/stream?token=${encodeURIComponent(token)}`);
+
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onMessage(data);
+    } catch (e) {
+      console.error("Failed to parse mesh status event", e);
+    }
+  };
+
+  return () => {
+    eventSource.onmessage = null;
+    eventSource.onerror = null;
+    eventSource.close();
+  };
+}
+
+export function watchWorkspaceEventsSSE(
+  token: string,
+  onMessage: (event: WorkspaceEvent) => void
+): () => void {
+  const eventSource = new EventSource(`${API_BASE_URL}/workspace/events?token=${encodeURIComponent(token)}`);
+
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onMessage(data);
+    } catch (e) {
+      console.error("Failed to parse workspace event", e);
+    }
+  };
+
+  return () => {
+    eventSource.onmessage = null;
+    eventSource.onerror = null;
+    eventSource.close();
+  };
+}
+
 export function watchAppLogsSSE(
   token: string,
   appName: string,
@@ -789,6 +855,8 @@ export const listVms = listActiveDeployments;
 export const watchVmsSSE = watchDeploymentsSSE;
 export const watchAppMetrics = watchAppMetricsSSE;
 export const watchAppLogs = watchAppLogsSSE;
+export const watchMeshStatus = watchMeshStatusSSE;
+export const watchWorkspaceEvents = watchWorkspaceEventsSSE;
 export const getVmStatus = getLiveDeploymentStatus;
 export const getVm = getVmStatus;
 export const getVmLogsSSE = getDeploymentLogsSSE;

@@ -4,6 +4,7 @@ use crate::deploy::workflow::DeploymentPromotionWorkflow;
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::{App, Deployment};
 use crate::repositories::app_repository::UpdateDeploymentParams;
+use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use mikrom_proto::scheduler::{AppConfig, DeployRequest, DeployResponse};
 
 pub struct DeploymentService;
@@ -92,6 +93,14 @@ impl DeploymentService {
         }
 
         state.deployment_events.send(app.id).ok();
+        state.publish_workspace_event(WorkspaceEvent {
+            kind: WorkspaceEventKind::DeploymentChanged,
+            user_id: Some(app.user_id),
+            app_id: Some(app.id),
+            app_name: Some(app.name.clone()),
+            deployment_id: Some(deployment.id),
+            resource_id: Some(deployment.id.to_string()),
+        });
 
         let mut git_auth_token = None;
         if let (Some(installation_id), Some(app_id), Some(private_key)) = (
@@ -222,6 +231,14 @@ impl DeploymentService {
                     )
                     .await;
                 state.deployment_events.send(app.id).ok();
+                state.publish_workspace_event(WorkspaceEvent {
+                    kind: WorkspaceEventKind::DeploymentChanged,
+                    user_id: Some(app.user_id),
+                    app_id: Some(app.id),
+                    app_name: Some(app.name.clone()),
+                    deployment_id: Some(deployment.id),
+                    resource_id: Some(deployment.id.to_string()),
+                });
                 return Err(e);
             },
         };
@@ -242,6 +259,14 @@ impl DeploymentService {
             .map_err(|e| ApiError::Internal(e.to_string()))?;
 
         state.deployment_events.send(app.id).ok();
+        state.publish_workspace_event(WorkspaceEvent {
+            kind: WorkspaceEventKind::DeploymentChanged,
+            user_id: Some(app.user_id),
+            app_id: Some(app.id),
+            app_name: Some(app.name.clone()),
+            deployment_id: Some(deployment.id),
+            resource_id: Some(deployment.id.to_string()),
+        });
 
         Ok(inner)
     }

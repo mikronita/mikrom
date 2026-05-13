@@ -14,7 +14,6 @@ export function useHealth() {
     queryFn: async () => {
       return await health();
     },
-    refetchInterval: 30000, // Background polling every 30s as a fallback
   });
 
   // Real-time updates via SSE

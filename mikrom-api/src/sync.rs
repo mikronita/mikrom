@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::repositories::app_repository::UpdateDeploymentParams;
+use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use futures::stream::{FuturesUnordered, StreamExt};
 use mikrom_proto::scheduler::{AppInfo, AppStatusRequest, AppStatusResponse};
 use tokio::time::{Duration, interval};
@@ -147,6 +148,16 @@ async fn sync_deployment_state(
             )
             .await;
         state.deployment_events.send(dep.app_id).ok();
+        if let Some(app) = active_app {
+            state.publish_workspace_event(WorkspaceEvent {
+                kind: WorkspaceEventKind::DeploymentChanged,
+                user_id: Some(app.user_id),
+                app_id: Some(app.id),
+                app_name: Some(app.name),
+                deployment_id: Some(dep.id),
+                resource_id: Some(dep.id.to_string()),
+            });
+        }
     }
 }
 

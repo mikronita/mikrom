@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::models::app::App;
 use crate::repositories::app_repository::UpdateDeploymentParams;
+use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use uuid::Uuid;
 
 pub struct DeploymentOrchestrator;
@@ -21,6 +22,14 @@ impl DeploymentOrchestrator {
         updated_app.active_deployment_id = Some(deployment_id);
         state.notify_router(&updated_app).await?;
         state.deployment_events.send(updated_app.id).ok();
+        state.publish_workspace_event(WorkspaceEvent {
+            kind: WorkspaceEventKind::DeploymentChanged,
+            user_id: Some(updated_app.user_id),
+            app_id: Some(updated_app.id),
+            app_name: Some(updated_app.name.clone()),
+            deployment_id: Some(deployment_id),
+            resource_id: Some(deployment_id.to_string()),
+        });
 
         Ok((updated_app, previous_active_id))
     }
@@ -42,6 +51,16 @@ impl DeploymentOrchestrator {
                 )
                 .await?;
             state.deployment_events.send(app_id).ok();
+            if let Ok(Some(app)) = state.app_repo.get_app(app_id).await {
+                state.publish_workspace_event(WorkspaceEvent {
+                    kind: WorkspaceEventKind::DeploymentChanged,
+                    user_id: Some(app.user_id),
+                    app_id: Some(app.id),
+                    app_name: Some(app.name),
+                    deployment_id: Some(old_id),
+                    resource_id: Some(old_id.to_string()),
+                });
+            }
         }
 
         Ok(())
@@ -54,46 +73,64 @@ impl DeploymentOrchestrator {
     ) -> anyhow::Result<()> {
         if let Some(old_id) = previous_active_id
             && let Some(old_dep) = state.app_repo.get_deployment(old_id).await?
-            && let Some(old_job_id) = old_dep.job_id
         {
-            let job_id = old_job_id.clone();
-            tracing::info!(
-                app = %app_name,
-                job_id = %old_job_id,
-                deployment_id = %old_id,
-                "Stopping old version immediately after promotion"
-            );
-            tracing::info!(
-                app = %app_name,
-                job_id = %job_id,
-                deployment_id = %old_id,
-                origin = "zero_downtime_drain",
-                user_id = "system",
-                "Forwarding pause request to scheduler"
-            );
-            state
-                .scheduler
-                .pause_app(job_id.clone(), "system".to_string())
-                .await
-                .map_err(|e| anyhow::anyhow!(e))?;
-            tracing::info!(
-                app = %app_name,
-                job_id = %job_id,
-                deployment_id = %old_id,
-                origin = "zero_downtime_drain",
-                user_id = "system",
-                "Scheduler pause completed"
-            );
-            state
+            let app = state
                 .app_repo
-                .update_deployment(
-                    old_id,
-                    UpdateDeploymentParams {
-                        status: Some("PAUSED".to_string()),
-                        ..Default::default()
-                    },
-                )
-                .await?;
+                .get_app(old_dep.app_id)
+                .await?
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Application missing while draining previous deployment")
+                })?;
+
+            if let Some(old_job_id) = old_dep.job_id.clone() {
+                let job_id = old_job_id.clone();
+                tracing::info!(
+                    app = %app_name,
+                    job_id = %old_job_id,
+                    deployment_id = %old_id,
+                    "Stopping old version immediately after promotion"
+                );
+                tracing::info!(
+                    app = %app_name,
+                    job_id = %job_id,
+                    deployment_id = %old_id,
+                    origin = "zero_downtime_drain",
+                    user_id = "system",
+                    "Forwarding pause request to scheduler"
+                );
+                state
+                    .scheduler
+                    .pause_app(job_id.clone(), "system".to_string())
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                tracing::info!(
+                    app = %app_name,
+                    job_id = %job_id,
+                    deployment_id = %old_id,
+                    origin = "zero_downtime_drain",
+                    user_id = "system",
+                    "Scheduler pause completed"
+                );
+                state
+                    .app_repo
+                    .update_deployment(
+                        old_id,
+                        UpdateDeploymentParams {
+                            status: Some("PAUSED".to_string()),
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
+            }
+
+            state.publish_workspace_event(WorkspaceEvent {
+                kind: WorkspaceEventKind::DeploymentChanged,
+                user_id: Some(app.user_id),
+                app_id: Some(app.id),
+                app_name: Some(app_name.to_string()),
+                deployment_id: Some(old_id),
+                resource_id: Some(old_id.to_string()),
+            });
         }
 
         Ok(())
@@ -119,6 +156,14 @@ impl DeploymentOrchestrator {
                 )
                 .await?;
             state.deployment_events.send(app_id).ok();
+            state.publish_workspace_event(WorkspaceEvent {
+                kind: WorkspaceEventKind::DeploymentChanged,
+                user_id: Some(old_dep.user_id),
+                app_id: Some(old_dep.app_id),
+                app_name: Some(app_name.to_string()),
+                deployment_id: Some(old_id),
+                resource_id: Some(old_id.to_string()),
+            });
             if let Some(old_job_id) = old_dep.job_id {
                 tracing::info!(
                     app = %app_name,
@@ -195,6 +240,20 @@ impl DeploymentOrchestrator {
             )
             .await?;
         state.deployment_events.send(app_id).ok();
+        state.publish_workspace_event(WorkspaceEvent {
+            kind: WorkspaceEventKind::DeploymentChanged,
+            user_id: state
+                .app_repo
+                .get_app(app_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|app| app.user_id),
+            app_id: Some(app_id),
+            app_name: Some(app_name.to_string()),
+            deployment_id: Some(deployment_id),
+            resource_id: Some(job_id.to_string()),
+        });
 
         Ok(())
     }
@@ -233,6 +292,7 @@ mod tests {
         let mut mock_app_repo = MockAppRepository::new();
         let old_dep_id = Uuid::new_v4();
         let app_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
 
         mock_app_repo
             .expect_update_deployment()
@@ -247,6 +307,19 @@ mod tests {
             .times(1)
             .returning(|_, _| Ok(()));
 
+        mock_app_repo
+            .expect_get_app()
+            .with(eq(app_id))
+            .times(1)
+            .returning(move |_| {
+                Ok(Some(crate::models::app::App {
+                    id: app_id,
+                    user_id,
+                    name: "test-app".to_string(),
+                    ..Default::default()
+                }))
+            });
+
         let state = AppState {
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(mock_app_repo),
@@ -259,6 +332,7 @@ mod tests {
             jwt_secret: "secret".to_string(),
             master_key: "key".to_string(),
             deployment_events: tokio::sync::broadcast::channel(100).0,
+            workspace_events: tokio::sync::broadcast::channel(100).0,
             acme_email: "test@example.com".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
@@ -289,6 +363,8 @@ mod tests {
         let mut mock_app_repo = MockAppRepository::new();
         let mut mock_scheduler = crate::scheduler::MockScheduler::new();
         let old_dep_id = Uuid::new_v4();
+        let app_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
 
         mock_app_repo
             .expect_get_deployment()
@@ -297,7 +373,21 @@ mod tests {
             .returning(move |_| {
                 Ok(Some(crate::models::app::Deployment {
                     id: old_dep_id,
+                    app_id,
                     job_id: Some("job-old".to_string()),
+                    ..Default::default()
+                }))
+            });
+
+        mock_app_repo
+            .expect_get_app()
+            .with(eq(app_id))
+            .times(1)
+            .returning(move |_| {
+                Ok(Some(crate::models::app::App {
+                    id: app_id,
+                    user_id,
+                    name: "test-app".to_string(),
                     ..Default::default()
                 }))
             });
@@ -333,6 +423,7 @@ mod tests {
             jwt_secret: "secret".to_string(),
             master_key: "key".to_string(),
             deployment_events: tokio::sync::broadcast::channel(100).0,
+            workspace_events: tokio::sync::broadcast::channel(100).0,
             acme_email: "test@example.com".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
@@ -402,6 +493,7 @@ mod tests {
             jwt_secret: "secret".to_string(),
             master_key: "key".to_string(),
             deployment_events: tokio::sync::broadcast::channel(100).0,
+            workspace_events: tokio::sync::broadcast::channel(100).0,
             acme_email: "test@example.com".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
@@ -437,6 +529,7 @@ mod tests {
         let old_dep_id = Uuid::new_v4();
         let new_dep_id = Uuid::new_v4();
         let app_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
 
         mock_app_repo
             .expect_update_deployment()
@@ -450,6 +543,19 @@ mod tests {
             )
             .times(1)
             .returning(|_, _| Ok(()));
+
+        mock_app_repo
+            .expect_get_app()
+            .with(eq(app_id))
+            .times(1)
+            .returning(move |_| {
+                Ok(Some(crate::models::app::App {
+                    id: app_id,
+                    user_id,
+                    name: "test-app".to_string(),
+                    ..Default::default()
+                }))
+            });
 
         mock_scheduler
             .expect_pause_app()
@@ -482,6 +588,7 @@ mod tests {
             jwt_secret: "secret".to_string(),
             master_key: "key".to_string(),
             deployment_events: tokio::sync::broadcast::channel(100).0,
+            workspace_events: tokio::sync::broadcast::channel(100).0,
             acme_email: "test@example.com".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,

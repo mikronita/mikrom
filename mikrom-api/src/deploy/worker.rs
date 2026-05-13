@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::deploy::service::{DeployParams, DeploymentService};
 use crate::repositories::app_repository::UpdateDeploymentParams;
+use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use async_trait::async_trait;
 use futures::StreamExt;
 use mikrom_proto::builder::{BuildStatus, GetBuildStatusRequest, GetBuildStatusResponse};
@@ -365,6 +366,16 @@ pub async fn poll_and_deploy(
                     )
                     .await?;
                 state.deployment_events.send(task.app_id).ok();
+                if let Ok(Some(app)) = state.app_repo.get_app(task.app_id).await {
+                    state.publish_workspace_event(WorkspaceEvent {
+                        kind: WorkspaceEventKind::DeploymentChanged,
+                        user_id: Some(app.user_id),
+                        app_id: Some(app.id),
+                        app_name: Some(app.name),
+                        deployment_id: Some(task.deployment_id),
+                        resource_id: Some(task.build_id.clone()),
+                    });
+                }
                 break;
             },
             _ => {
@@ -424,6 +435,7 @@ mod tests {
             jwt_secret: "secret".to_string(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,

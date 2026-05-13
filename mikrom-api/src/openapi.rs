@@ -14,6 +14,7 @@ use utoipa::{
     paths(
         crate::health,
         crate::health_stream,
+        crate::workspace::workspace_events_stream,
         register,
         login,
         get_profile,
@@ -41,7 +42,8 @@ use utoipa::{
         github_webhook_handler,
         github_webhook_handler_generic,
         app_logs_stream_handler,
-        app_metrics_stream_handler
+        app_metrics_stream_handler,
+        crate::vms::mesh_status_stream_handler
     ),
     components(
         schemas(
