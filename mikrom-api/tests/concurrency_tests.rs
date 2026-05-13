@@ -70,6 +70,7 @@ async fn test_concurrent_flows_prevented() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: Arc::new(dashmap::DashSet::new()),
     };
 

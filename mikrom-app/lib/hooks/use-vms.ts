@@ -56,18 +56,30 @@ export function useWatchVms() {
         token,
         (updatedVm) => {
           if (!isMounted) return;
-          queryClient.setQueryData<LiveDeploymentInfo[]>(vmsKeys.list(), (old = []) => {
-            const index = old.findIndex((vm) => 
-              vm.deployment_id === updatedVm.deployment_id || 
-              (vm.job_id === updatedVm.job_id && vm.job_id !== "")
+          const syncActiveDeploymentList = (old: LiveDeploymentInfo[] = []) => {
+            const index = old.findIndex(
+              (vm) =>
+                vm.deployment_id === updatedVm.deployment_id ||
+                (vm.job_id === updatedVm.job_id && vm.job_id !== "")
             );
+            const isRunning = updatedVm.status.toLowerCase() === "running";
+
+            if (!isRunning) {
+              if (index === -1) return old;
+              return old.filter((_, itemIndex) => itemIndex !== index);
+            }
+
             if (index === -1) {
               return [...old, updatedVm];
             }
+
             const next = [...old];
             next[index] = { ...old[index], ...updatedVm };
             return next;
-          });
+          };
+
+          queryClient.setQueryData<LiveDeploymentInfo[]>(vmsKeys.list(), syncActiveDeploymentList);
+          queryClient.setQueryData<LiveDeploymentInfo[]>(["active-deployments"], syncActiveDeploymentList);
 
           // Also update detail if it exists
           queryClient.setQueryData<LiveDeploymentStatus>(vmsKeys.detail(updatedVm.job_id), (old) => {

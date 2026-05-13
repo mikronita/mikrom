@@ -39,6 +39,7 @@ async fn test_openapi_json_endpoint() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
     let app = create_app(state);
@@ -90,6 +91,7 @@ async fn test_swagger_ui_endpoint() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
     let app = create_app(state);

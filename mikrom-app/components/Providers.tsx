@@ -4,6 +4,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { useState } from "react";
 import { ThemeProvider } from "next-themes";
+import { useWorkspaceEvents } from "@/lib/hooks/use-workspace-events";
+
+function WorkspaceEventBridge() {
+  useWorkspaceEvents();
+  return null;
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -27,6 +33,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         enableSystem
         enableColorScheme
       >
+        <WorkspaceEventBridge />
         {children}
         <ReactQueryDevtools initialIsOpen={false} />
       </ThemeProvider>

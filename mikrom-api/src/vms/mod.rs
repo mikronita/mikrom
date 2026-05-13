@@ -1,6 +1,7 @@
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::SecurityRule;
 use crate::repositories::app_repository::UpdateDeploymentParams;
+use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::{
     Json,
     extract::{Path, State},
@@ -736,6 +737,7 @@ pub async fn pause_deployment(
 ) -> ApiResult<Json<serde_json::Value>> {
     // Validate app ownership and deployment connection
     let (app, deployment) = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let job_id_for_event = job_id.clone();
 
     tracing::info!(
         app = %app.name,
@@ -777,6 +779,14 @@ pub async fn pause_deployment(
             )
             .await;
         state.deployment_events.send(app.id).ok();
+        state.publish_workspace_event(WorkspaceEvent {
+            kind: WorkspaceEventKind::DeploymentChanged,
+            user_id: Some(app.user_id),
+            app_id: Some(app.id),
+            app_name: Some(app.name.clone()),
+            deployment_id: Some(deployment.id),
+            resource_id: Some(job_id_for_event),
+        });
 
         Ok(Json(
             serde_json::json!({ "success": true, "message": "Paused" }),
@@ -811,6 +821,7 @@ pub async fn resume_deployment(
 ) -> ApiResult<Json<serde_json::Value>> {
     // Validate app ownership and deployment connection
     let (app, deployment) = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let job_id_for_event = job_id.clone();
 
     let success = state
         .scheduler
@@ -837,6 +848,14 @@ pub async fn resume_deployment(
             )
             .await;
         state.deployment_events.send(app.id).ok();
+        state.publish_workspace_event(WorkspaceEvent {
+            kind: WorkspaceEventKind::DeploymentChanged,
+            user_id: Some(app.user_id),
+            app_id: Some(app.id),
+            app_name: Some(app.name.clone()),
+            deployment_id: Some(deployment.id),
+            resource_id: Some(job_id_for_event),
+        });
 
         Ok(Json(
             serde_json::json!({ "success": true, "message": "Resumed" }),
@@ -871,6 +890,7 @@ pub async fn stop_deployment(
 ) -> ApiResult<Json<serde_json::Value>> {
     // Validate app ownership and deployment connection
     let (app, deployment) = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let job_id_for_event = job_id.clone();
 
     use mikrom_proto::scheduler::{CancelRequest, CancelResponse};
 
@@ -905,6 +925,14 @@ pub async fn stop_deployment(
             .await;
 
         state.deployment_events.send(app.id).ok();
+        state.publish_workspace_event(WorkspaceEvent {
+            kind: WorkspaceEventKind::DeploymentChanged,
+            user_id: Some(app.user_id),
+            app_id: Some(app.id),
+            app_name: Some(app.name.clone()),
+            deployment_id: Some(deployment.id),
+            resource_id: Some(job_id_for_event),
+        });
         Ok(Json(
             serde_json::json!({ "success": true, "message": inner.message }),
         ))
@@ -946,6 +974,14 @@ pub async fn delete_deployment_record(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     state.deployment_events.send(app.id).ok();
+    state.publish_workspace_event(WorkspaceEvent {
+        kind: WorkspaceEventKind::DeploymentChanged,
+        user_id: Some(app.user_id),
+        app_id: Some(app.id),
+        app_name: Some(app.name),
+        deployment_id: None,
+        resource_id: Some(job_id.clone()),
+    });
 
     Ok(Json(serde_json::json!({ "success": true })))
 }
@@ -972,6 +1008,10 @@ pub async fn get_mesh_status_handler(
     _auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
 ) -> ApiResult<Json<MeshStatus>> {
+    Ok(Json(fetch_mesh_status(&state).await?))
+}
+
+async fn fetch_mesh_status(state: &crate::AppState) -> ApiResult<MeshStatus> {
     use crate::models::worker::Worker;
 
     let workers = state
@@ -980,10 +1020,84 @@ pub async fn get_mesh_status_handler(
         .await
         .map_err(ApiError::Internal)?;
 
-    Ok(Json(MeshStatus {
+    Ok(MeshStatus {
         total_workers: workers.workers.len(),
         workers: workers.workers.into_iter().map(Worker::from).collect(),
-    }))
+    })
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/networking/mesh/stream",
+    responses(
+        (status = 200, description = "SSE stream of mesh status updates", content_type = "text/event-stream"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
+    ),
+    tag = "networking",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn mesh_status_stream_handler(
+    _auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    let mut worker_heartbeat_sub = state
+        .nats
+        .subscribe("mikrom.scheduler.worker.heartbeat")
+        .await
+        .map_err(|e| {
+            ApiError::Internal(format!("Failed to subscribe to worker heartbeats: {e}"))
+        })?;
+    let mut router_heartbeat_sub = state
+        .nats
+        .subscribe("mikrom.scheduler.router.heartbeat")
+        .await
+        .map_err(|e| {
+            ApiError::Internal(format!("Failed to subscribe to router heartbeats: {e}"))
+        })?;
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+
+    let stream = async_stream::stream! {
+        if let Ok(snapshot) = fetch_mesh_status(&state).await
+            && let Ok(data) = serde_json::to_string(&snapshot)
+        {
+            yield Ok(Event::default().data(data));
+        }
+
+        loop {
+            tokio::select! {
+                Some(_) = worker_heartbeat_sub.next() => {
+                    if let Ok(snapshot) = fetch_mesh_status(&state).await
+                        && let Ok(data) = serde_json::to_string(&snapshot)
+                    {
+                        yield Ok(Event::default().data(data));
+                    }
+                },
+                Some(_) = router_heartbeat_sub.next() => {
+                    if let Ok(snapshot) = fetch_mesh_status(&state).await
+                        && let Ok(data) = serde_json::to_string(&snapshot)
+                    {
+                        yield Ok(Event::default().data(data));
+                    }
+                },
+                _ = interval.tick() => {
+                    if let Ok(snapshot) = fetch_mesh_status(&state).await
+                        && let Ok(data) = serde_json::to_string(&snapshot)
+                    {
+                        yield Ok(Event::default().data(data));
+                    }
+                },
+                else => break,
+            }
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(10))
+            .text("keep-alive"),
+    ))
 }
 
 #[derive(Debug, serde::Deserialize, ToSchema)]
@@ -1088,6 +1202,15 @@ pub async fn create_security_rule_handler(
         .request("mikrom.scheduler.update_security_groups", nats_req)
         .await;
 
+    state.publish_workspace_event(WorkspaceEvent {
+        kind: WorkspaceEventKind::SecurityRulesChanged,
+        user_id: Some(app.user_id),
+        app_id: Some(app.id),
+        app_name: Some(app.name),
+        deployment_id: None,
+        resource_id: None,
+    });
+
     Ok((axum::http::StatusCode::CREATED, Json(rule)))
 }
 
@@ -1139,6 +1262,15 @@ pub async fn delete_security_rule_handler(
         .nats
         .request("mikrom.scheduler.update_security_groups", nats_req)
         .await;
+
+    state.publish_workspace_event(WorkspaceEvent {
+        kind: WorkspaceEventKind::SecurityRulesChanged,
+        user_id: Some(app.user_id),
+        app_id: Some(app.id),
+        app_name: Some(app.name),
+        deployment_id: None,
+        resource_id: Some(rule_id),
+    });
 
     Ok(Json(serde_json::json!({ "success": true })))
 }

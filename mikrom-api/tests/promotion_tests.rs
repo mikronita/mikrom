@@ -107,6 +107,7 @@ async fn test_promote_paused_deployment_resumes_it() {
         .returning(move |_| {
             Ok(Some(Deployment {
                 id: old_dep_id,
+                app_id,
                 job_id: Some("job-old".to_string()),
                 ..Default::default()
             }))
@@ -116,6 +117,11 @@ async fn test_promote_paused_deployment_resumes_it() {
     mock_app_repo
         .expect_update_deployment()
         .returning(|_, _| Ok(()));
+
+    mock_app_repo.expect_get_app().with(eq(app_id)).returning({
+        let a = app.clone();
+        move |_| Ok(Some(a.clone()))
+    });
 
     let job_id = format!("job-promotion-{}", Uuid::new_v4());
     let job_id_clone = job_id.clone();
@@ -204,6 +210,7 @@ async fn test_promote_paused_deployment_resumes_it() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -317,6 +324,11 @@ async fn test_promote_running_deployment_while_flow_active_is_immediate() {
         .expect_update_deployment()
         .returning(|_, _| Ok(()));
 
+    mock_app_repo.expect_get_app().with(eq(app_id)).returning({
+        let a = app.clone();
+        move |_| Ok(Some(a.clone()))
+    });
+
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
@@ -336,6 +348,7 @@ async fn test_promote_running_deployment_while_flow_active_is_immediate() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -477,6 +490,7 @@ async fn test_promote_running_deployment_with_stale_db_status_uses_runtime_statu
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -602,6 +616,7 @@ async fn test_promote_unhealthy_deployment_no_cleanup() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 

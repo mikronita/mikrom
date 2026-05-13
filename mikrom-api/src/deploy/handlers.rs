@@ -4,6 +4,7 @@ use crate::deploy::orchestrator::DeploymentOrchestrator;
 use crate::deploy::service::{DeployParams, DeploymentService};
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::Deployment;
+use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::{
     Json,
     extract::{Path, State},
@@ -137,6 +138,15 @@ pub async fn create_app_handler(
             drain_timeout: payload.drain_timeout,
         })
         .await?;
+
+    state.publish_workspace_event(WorkspaceEvent {
+        kind: WorkspaceEventKind::AppCreated,
+        user_id: Some(user_id),
+        app_id: Some(app.id),
+        app_name: Some(app.name.clone()),
+        deployment_id: app.active_deployment_id,
+        resource_id: None,
+    });
 
     // Automatically create GitHub Webhook if repo is connected
     tracing::info!(
@@ -333,6 +343,15 @@ pub async fn delete_app_handler(
         .delete_app(app.id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    state.publish_workspace_event(WorkspaceEvent {
+        kind: WorkspaceEventKind::AppDeleted,
+        user_id: Some(app.user_id),
+        app_id: Some(app.id),
+        app_name: Some(app.name),
+        deployment_id: app.active_deployment_id,
+        resource_id: None,
+    });
     Ok(StatusCode::NO_CONTENT)
 }
 

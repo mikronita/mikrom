@@ -3,6 +3,7 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::github::{GithubRepo, list_installation_repos};
 use crate::models::github::UserGithubAccount;
+use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::Redirect;
@@ -147,6 +148,15 @@ pub async fn github_callback(
     };
 
     state.github_repo.create_account(account).await?;
+
+    state.publish_workspace_event(WorkspaceEvent {
+        kind: WorkspaceEventKind::GithubAccountsChanged,
+        user_id: Some(user_id),
+        app_id: None,
+        app_name: None,
+        deployment_id: None,
+        resource_id: Some(query.installation_id.to_string()),
+    });
 
     // Redirect back to settings in the frontend
     Ok(Redirect::to(&format!("{}/settings", state.frontend_url)))

@@ -15,7 +15,7 @@ import {
 import { AuthGuard } from "@/components/AuthGuard";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useApps } from "@/lib/hooks/use-apps";
-import { useVms, useWatchVms } from "@/lib/hooks/use-vms";
+import { useVms } from "@/lib/hooks/use-vms";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +46,6 @@ const formatDate = (dateStr: string) => {
 export default function ApplicationsPage() {
   const { data: apps = [], isLoading: isLoadingApps, error: appsError } = useApps();
   const { data: vms = [], error: vmsError } = useVms();
-  useWatchVms();
   const [showCreateApp, setShowCreateApp] = useState(false);
 
   // Optimize VM lookup by creating a Map

@@ -26,6 +26,7 @@ pub mod repositories;
 pub mod scheduler;
 pub mod sync;
 pub mod vms;
+pub mod workspace;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
@@ -40,8 +41,8 @@ pub use scheduler::Scheduler;
 pub use vms::{
     create_security_rule_handler, delete_deployment_record, delete_security_rule_handler,
     get_deployment_logs, get_deployment_status, get_mesh_status_handler, list_active_deployments,
-    list_security_rules_handler, pause_deployment, resume_deployment, stop_deployment,
-    watch_deployments,
+    list_security_rules_handler, mesh_status_stream_handler, pause_deployment, resume_deployment,
+    stop_deployment, watch_deployments,
 };
 
 use mikrom_proto::router::{RouterConfigAck, RouterConfigUpdate};
@@ -50,6 +51,7 @@ use auth::{get_profile, login, register, update_profile};
 use github::handlers::{github_callback, github_install, list_repos};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
+pub use workspace::{WorkspaceEvent, WorkspaceEventKind};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -64,6 +66,7 @@ pub struct AppState {
     pub jwt_secret: String,
     pub master_key: String,
     pub deployment_events: tokio::sync::broadcast::Sender<uuid::Uuid>,
+    pub workspace_events: tokio::sync::broadcast::Sender<WorkspaceEvent>,
     pub acme_email: String,
     pub acme_staging: bool,
     pub acme_check_interval: u64,
@@ -206,6 +209,10 @@ impl AppState {
 
         Ok(())
     }
+
+    pub fn publish_workspace_event(&self, event: WorkspaceEvent) {
+        let _ = self.workspace_events.send(event);
+    }
 }
 
 pub fn create_app(state: AppState) -> Router {
@@ -270,6 +277,10 @@ pub fn create_app(state: AppState) -> Router {
             get(crate::vms::app_metrics_stream_handler),
         )
         .route(
+            "/workspace/events",
+            get(crate::workspace::workspace_events_stream),
+        )
+        .route(
             "/apps/:app_name/deployments/:deployment_id/activate",
             axum::routing::post(crate::deploy::activate_deployment_handler),
         )
@@ -302,6 +313,7 @@ pub fn create_app(state: AppState) -> Router {
             axum::routing::delete(delete_security_rule_handler),
         )
         .route("/networking/mesh", get(get_mesh_status_handler))
+        .route("/networking/mesh/stream", get(mesh_status_stream_handler))
         .route("/deployments/active", get(list_active_deployments))
         .route("/deployments/events", get(watch_deployments));
 

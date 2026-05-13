@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::error::{ApiError, ApiResult};
 use crate::repositories::user_repository::NewUser;
+use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::{Json, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -234,6 +235,15 @@ pub async fn update_profile(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    state.publish_workspace_event(WorkspaceEvent {
+        kind: WorkspaceEventKind::ProfileUpdated,
+        user_id: Some(user_uuid),
+        app_id: None,
+        app_name: None,
+        deployment_id: None,
+        resource_id: None,
+    });
+
     let user = state
         .user_repo
         .find_by_id(user_uuid)
@@ -295,6 +305,7 @@ mod tests {
             jwt_secret: "secret".to_string(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
@@ -354,6 +365,7 @@ mod tests {
             jwt_secret: "secret".to_string(),
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,

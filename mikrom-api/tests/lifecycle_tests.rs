@@ -248,6 +248,7 @@ async fn test_promotion_back_and_forth() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -422,6 +423,7 @@ async fn test_promotion_pauses_previous_active() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -628,6 +630,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -759,6 +762,7 @@ async fn test_delete_app_cleans_up_resources() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
