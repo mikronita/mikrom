@@ -15,10 +15,11 @@ pub async fn start_acme_worker(
     staging: bool,
     master_key: String,
     interval_secs: u64,
+    router_addr: String,
 ) {
     info!(
-        "Starting ACME worker (staging: {}, email: {})",
-        staging, email
+        "Starting ACME worker (staging: {}, email: {}, router: {})",
+        staging, email, router_addr
     );
 
     let url = if staging {
@@ -28,12 +29,61 @@ pub async fn start_acme_worker(
     };
 
     loop {
-        if let Err(e) = run_acme_iteration(&api_db, &nats, &email, url, staging, &master_key).await
+        if let Err(e) = run_acme_iteration(
+            &api_db,
+            &nats,
+            &email,
+            url,
+            staging,
+            &master_key,
+            &router_addr,
+        )
+        .await
         {
             error!("ACME iteration failed: {}", e);
         }
         tokio::time::sleep(Duration::from_secs(interval_secs)).await;
     }
+}
+
+pub async fn trigger_domain_certification(
+    state: &crate::AppState,
+    hostname: &str,
+) -> anyhow::Result<()> {
+    let url = if state.acme_staging {
+        LetsEncrypt::Staging.url()
+    } else {
+        LetsEncrypt::Production.url()
+    };
+
+    // Check if it needs certification first to avoid redundant work
+    let needs_cert = sqlx::query(
+        "SELECT 1 FROM apps WHERE hostname = $1 AND (cert_expires_at IS NULL OR cert_expires_at < NOW() + INTERVAL '30 days')"
+    )
+    .bind(hostname)
+    .fetch_optional(&state.api_db)
+    .await?
+    .is_some();
+
+    if !needs_cert {
+        return Ok(());
+    }
+
+    info!("Triggering immediate certificate issuance for {}", hostname);
+
+    let account =
+        get_or_create_acme_account(&state.api_db, &state.acme_email, url, state.acme_staging)
+            .await?;
+
+    certify_domain(
+        &state.api_db,
+        &state.nats,
+        &account,
+        hostname,
+        &state.master_key,
+        &state.router_addr,
+    )
+    .await
 }
 
 pub async fn run_acme_iteration(
@@ -43,6 +93,7 @@ pub async fn run_acme_iteration(
     acme_url: &str,
     is_staging: bool,
     master_key: &str,
+    router_addr: &str,
 ) -> anyhow::Result<()> {
     // 1. Find domains that need certificates (expired or expiring in < 30 days)
     let domains_to_certify = sqlx::query(
@@ -68,7 +119,9 @@ pub async fn run_acme_iteration(
 
         info!("Processing certificate renewal for {}", hostname);
 
-        if let Err(e) = certify_domain(api_db, nats, &account, &hostname, master_key).await {
+        if let Err(e) =
+            certify_domain(api_db, nats, &account, &hostname, master_key, router_addr).await
+        {
             error!("Failed to certify domain {}: {}", hostname, e);
         }
     }
@@ -134,6 +187,7 @@ async fn certify_domain(
     account: &Account,
     hostname: &str,
     master_key: &str,
+    router_addr: &str,
 ) -> anyhow::Result<()> {
     let mut order = account
         .new_order(&NewOrder::new(&[Identifier::Dns(hostname.to_string())]))
@@ -152,13 +206,16 @@ async fn certify_domain(
             // Publish challenge to NATS
             let update = AcmeChallengeUpdate {
                 token: token.clone(),
-                key_auth,
+                key_auth: key_auth.clone(),
                 hostname: hostname.to_string(),
                 is_delete: false,
             };
 
             nats.publish(subjects::ROUTER_ACME_CHALLENGE_UPDATED, update)
                 .await?;
+
+            // Wait for router to receive and apply challenge (eventual consistency)
+            verify_challenge_is_live(hostname, &token, &key_auth, router_addr).await?;
 
             // Trigger challenge
             challenge_handle.set_ready().await?;
@@ -264,6 +321,57 @@ async fn certify_domain(
     );
 
     Ok(())
+}
+
+async fn verify_challenge_is_live(
+    hostname: &str,
+    token: &str,
+    expected_auth: &str,
+    router_addr: &str,
+) -> anyhow::Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()?;
+
+    let url = format!("{}/.well-known/acme-challenge/{}", router_addr, token);
+
+    info!(
+        "Verifying ACME challenge is live: {} (via Host: {})",
+        url, hostname
+    );
+
+    let mut attempts = 0;
+    while attempts < 20 {
+        match client.get(&url).header("Host", hostname).send().await {
+            Ok(res) => {
+                if res.status().is_success() {
+                    let body = res.text().await?;
+                    if body.trim() == expected_auth {
+                        info!("ACME challenge verified successfully on router.");
+                        return Ok(());
+                    } else {
+                        tracing::warn!(
+                            "ACME challenge body mismatch: expected '{}', got '{}'",
+                            expected_auth,
+                            body
+                        );
+                    }
+                } else {
+                    tracing::debug!("ACME challenge not ready yet (status: {})", res.status());
+                }
+            },
+            Err(e) => {
+                tracing::debug!("Failed to connect to router for verification: {}", e);
+            },
+        }
+        attempts += 1;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    Err(anyhow::anyhow!(
+        "ACME challenge verification timed out for {}",
+        hostname
+    ))
 }
 
 fn parse_expiry(cert_pem: &str) -> anyhow::Result<DateTime<Utc>> {

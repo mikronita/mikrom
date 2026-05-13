@@ -154,6 +154,20 @@ impl DeploymentPromotionWorkflow {
                     )
                     .await?;
 
+                // Trigger immediate ACME certification if hostname is present
+                if let Some(hostname) = &app_after_promotion.hostname {
+                    let state_for_acme = state.clone();
+                    let hostname = hostname.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            crate::acme::trigger_domain_certification(&state_for_acme, &hostname)
+                                .await
+                        {
+                            tracing::error!(hostname = %hostname, error = %e, "Immediate ACME certification failed");
+                        }
+                    });
+                }
+
                 if let Some(old_id) = previous_active_id {
                     DeploymentOrchestrator::drain_previous_deployment_after_promotion(
                         &state,

@@ -95,14 +95,76 @@ impl StateManager {
         }
 
         // Persist to disk
+        self.persist_state(&new_state).await;
+
+        let mut state = self.state.write().await;
+        *state = new_state;
+        drop(state);
+        Ok(())
+    }
+
+    pub async fn add_acme_token(&self, token: String, key_auth: String) -> Result<()> {
+        let mut state = self.state.write().await;
+        state.acme_tokens.insert(token, key_auth);
+        let state_clone = state.clone();
+        drop(state);
+
+        self.persist_state(&state_clone).await;
+        Ok(())
+    }
+
+    pub async fn remove_acme_token(&self, token: &str) -> Result<()> {
+        let mut state = self.state.write().await;
+        state.acme_tokens.remove(token);
+        let state_clone = state.clone();
+        drop(state);
+
+        self.persist_state(&state_clone).await;
+        Ok(())
+    }
+
+    pub async fn add_certificate(
+        &self,
+        domain: String,
+        cert_pem: String,
+        key_pem: String,
+    ) -> Result<()> {
+        use openssl::pkey::PKey;
+        use openssl::x509::X509;
+
+        let mut cert = Certificate {
+            cert_pem,
+            key_pem,
+            parsed_chain: Vec::new(),
+            parsed_key: None,
+        };
+
+        // Pre-parse certificate
+        if let Ok(chain) = X509::stack_from_pem(cert.cert_pem.as_bytes()) {
+            cert.parsed_chain = chain;
+        }
+        if let Ok(pkey) = PKey::private_key_from_pem(cert.key_pem.as_bytes()) {
+            cert.parsed_key = Some(pkey);
+        }
+
+        let mut state = self.state.write().await;
+        state.certificates.insert(domain, cert);
+        let state_clone = state.clone();
+        drop(state);
+
+        self.persist_state(&state_clone).await;
+        Ok(())
+    }
+
+    async fn persist_state(&self, state: &State) {
         let s_state = SerializableState {
-            routes: new_state
+            routes: state
                 .routes
                 .iter()
                 .map(|(k, v)| (k.clone(), v.targets.clone()))
                 .collect(),
-            acme_tokens: new_state.acme_tokens.clone(),
-            certificates: new_state.certificates.clone(),
+            acme_tokens: state.acme_tokens.clone(),
+            certificates: state.certificates.clone(),
         };
 
         match serde_json::to_string_pretty(&s_state) {
@@ -113,11 +175,6 @@ impl StateManager {
             },
             Err(e) => error!("Failed to serialize state for cache: {e}"),
         }
-
-        let mut state = self.state.write().await;
-        *state = new_state;
-        drop(state);
-        Ok(())
     }
 }
 

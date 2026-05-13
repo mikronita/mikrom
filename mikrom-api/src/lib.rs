@@ -322,6 +322,7 @@ pub fn start_background_tasks(state: AppState) {
             state_for_acme.acme_staging,
             state_for_acme.master_key.clone(),
             state_for_acme.acme_check_interval,
+            state_for_acme.router_addr.clone(),
         )
         .await;
     });

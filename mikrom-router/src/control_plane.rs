@@ -352,49 +352,80 @@ impl BackgroundService for ControlPlane {
                                 }
                             }
                             subjects::ROUTER_TLS_CERT_UPDATED => {
-                                if let Ok(update) = TlsCertificateUpdate::decode(&msg.payload[..]) {
-                                    info!("Control Plane: Received TLS certificate update for {}", update.hostname);
-                                    match sqlx::query(
-                                        "INSERT INTO tls_certificates (hostname, cert_chain, private_key, expires_at)
-                                         VALUES ($1, $2, $3, TO_TIMESTAMP($4))
-                                         ON CONFLICT (hostname) DO UPDATE SET cert_chain = EXCLUDED.cert_chain, private_key = EXCLUDED.private_key, expires_at = EXCLUDED.expires_at, updated_at = NOW()"
-                                    )
-                                    .bind(&update.hostname)
-                                    .bind(&update.cert_chain)
-                                    .bind(&update.private_key)
-                                    .bind(update.expires_at)
-                                    .execute(&db)
-                                    .await
-                                    {
-                                        Ok(_) => {
-                                            if let Err(e) = self.sync_full_state(&db).await {
-                                                error!("Control Plane: Failed to refresh state after TLS cert update: {e}");
-                                            }
-                                            let _ = tx.try_send(());
-                                        },
-                                        Err(e) => error!(
-                                            "Control Plane: Failed to persist TLS certificate for {}: {}",
-                                            update.hostname, e
-                                        ),
-                                    }
+                                match TlsCertificateUpdate::decode(&msg.payload[..]) {
+                                    Ok(update) => {
+                                        info!("Control Plane: Received TLS certificate update for {}", update.hostname);
+
+                                        // FAST-PATH: Decrypt and update state immediately
+                                        match crate::crypto::decrypt(&update.private_key, &self.master_key) {
+                                            Ok(key_pem) => {
+                                                if let Err(e) = self.state_manager.add_certificate(
+                                                    update.hostname.clone(),
+                                                    update.cert_chain.clone(),
+                                                    key_pem
+                                                ).await {
+                                                    error!("Control Plane: Fast-path certificate update failed for {}: {}", update.hostname, e);
+                                                } else {
+                                                    info!("Control Plane: Successfully applied fast-path certificate for {}", update.hostname);
+                                                }
+                                            },
+                                            Err(e) => error!("Control Plane: Failed to decrypt received certificate for {}: {}", update.hostname, e),
+                                        }
+
+                                        match sqlx::query(
+                                            "INSERT INTO tls_certificates (hostname, cert_chain, private_key, expires_at)
+                                             VALUES ($1, $2, $3, TO_TIMESTAMP($4))
+                                             ON CONFLICT (hostname) DO UPDATE SET cert_chain = EXCLUDED.cert_chain, private_key = EXCLUDED.private_key, expires_at = EXCLUDED.expires_at, updated_at = NOW()"
+                                        )
+                                        .bind(&update.hostname)
+                                        .bind(&update.cert_chain)
+                                        .bind(&update.private_key)
+                                        .bind(update.expires_at)
+                                        .execute(&db)
+                                        .await
+                                        {
+                                            Ok(_) => {
+                                                // Eventual consistency check
+                                                if let Err(e) = self.sync_full_state(&db).await {
+                                                    error!("Control Plane: Failed to refresh state after TLS cert update: {e}");
+                                                }
+                                                let _ = tx.try_send(());
+                                            },
+                                            Err(e) => error!(
+                                                "Control Plane: Failed to persist TLS certificate for {}: {}",
+                                                update.hostname, e
+                                            ),
+                                        }
+                                    },
+                                    Err(e) => error!("Control Plane: Failed to decode TlsCertificateUpdate: {}", e),
                                 }
                             }
                             subjects::ROUTER_ACME_CHALLENGE_UPDATED => {
                                 if let Ok(update) = AcmeChallengeUpdate::decode(&msg.payload[..]) {
                                     info!("Control Plane: Received ACME challenge update: {}", update.token);
+
+                                    // FAST-PATH: Update in-memory state immediately
+                                    if update.is_delete {
+                                        let _ = self.state_manager.remove_acme_token(&update.token).await;
+                                    } else {
+                                        let _ = self.state_manager.add_acme_token(update.token.clone(), update.key_auth.clone()).await;
+                                    }
+
                                     let query = if update.is_delete {
                                         sqlx::query("DELETE FROM acme_challenges WHERE token = $1")
                                             .bind(&update.token)
                                     } else {
                                         sqlx::query(
-                                            "INSERT INTO acme_challenges (token, key_auth) VALUES ($1, $2)
-                                             ON CONFLICT (token) DO UPDATE SET key_auth = EXCLUDED.key_auth"
+                                            "INSERT INTO acme_challenges (token, key_auth, hostname) VALUES ($1, $2, $3)
+                                             ON CONFLICT (token) DO UPDATE SET key_auth = EXCLUDED.key_auth, hostname = EXCLUDED.hostname"
                                         )
                                         .bind(&update.token)
                                         .bind(&update.key_auth)
+                                        .bind(&update.hostname)
                                     };
                                     match query.execute(&db).await {
                                         Ok(_) => {
+                                            // Eventually consistent sync
                                             if let Err(e) = self.sync_full_state(&db).await {
                                                 error!("Control Plane: Failed to refresh state after ACME challenge update: {e}");
                                             }
