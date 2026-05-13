@@ -110,6 +110,17 @@ impl MikromClient {
         endpoint: &str,
         body: Option<B>,
     ) -> anyhow::Result<T> {
+        self.request_with_timeout(method, endpoint, body, std::time::Duration::from_secs(30))
+            .await
+    }
+
+    async fn request_with_timeout<T: DeserializeOwned, B: Serialize>(
+        &self,
+        method: reqwest::Method,
+        endpoint: &str,
+        body: Option<B>,
+        timeout: std::time::Duration,
+    ) -> anyhow::Result<T> {
         let url = format!(
             "{}/v1/{}",
             self.base_url.trim_end_matches('/'),
@@ -125,7 +136,7 @@ impl MikromClient {
             builder = builder.json(&body);
         }
 
-        let resp = builder.send().await?;
+        let resp = builder.timeout(timeout).send().await?;
 
         if resp.status().is_success() {
             Ok(resp.json().await?)
@@ -136,6 +147,41 @@ impl MikromClient {
             })?;
             bail!("{} (HTTP {})", err_body.error, status);
         }
+    }
+
+    async fn request_no_content_with_timeout<B: Serialize>(
+        &self,
+        method: reqwest::Method,
+        endpoint: &str,
+        body: Option<B>,
+        timeout: std::time::Duration,
+    ) -> anyhow::Result<()> {
+        let url = format!(
+            "{}/v1/{}",
+            self.base_url.trim_end_matches('/'),
+            endpoint.trim_start_matches('/')
+        );
+        let mut builder = self.http.request(method, url);
+
+        if let Some(token) = &self.token {
+            builder = builder.bearer_auth(token);
+        }
+
+        if let Some(body) = body {
+            builder = builder.json(&body);
+        }
+
+        let resp = builder.timeout(timeout).send().await?;
+
+        if resp.status().is_success() {
+            return Ok(());
+        }
+
+        let status = resp.status().as_u16();
+        let err_body: ErrorResponse = resp.json().await.map_err(|e| {
+            anyhow::anyhow!("Failed to parse error response (HTTP {}): {}", status, e)
+        })?;
+        bail!("{} (HTTP {})", err_body.error, status);
     }
 
     pub async fn health(&self) -> anyhow::Result<HealthResponse> {
@@ -279,10 +325,11 @@ impl MikromClient {
     }
 
     pub async fn delete_app(&self, app_id: &str) -> anyhow::Result<()> {
-        self.request(
+        self.request_no_content_with_timeout(
             reqwest::Method::DELETE,
             &format!("/apps/{}", app_id),
             None::<()>,
+            std::time::Duration::from_secs(120),
         )
         .await
     }
