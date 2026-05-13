@@ -215,7 +215,7 @@ export default function NetworkingPage() {
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-3">
-                <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                <div className="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
                   <Network />
                 </div>
                 <h1 className="text-3xl font-semibold tracking-tight">Networking</h1>
@@ -242,7 +242,7 @@ export default function NetworkingPage() {
                       <CardTitle className={item.valueClassName}>{item.value}</CardTitle>
                     )}
                   </div>
-                  <div className="flex size-10 items-center justify-center rounded-md border bg-muted text-muted-foreground">
+                  <div className="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
                     <item.icon />
                   </div>
                 </CardHeader>

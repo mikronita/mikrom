@@ -155,7 +155,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-3">
-                <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                <div className="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
                   <Settings />
                 </div>
                 <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
@@ -334,7 +334,7 @@ export default function SettingsPage() {
                   <div className="flex flex-col gap-4">
                     <div className="flex flex-col gap-4 rounded-lg border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center gap-4">
-                        <div className="flex size-10 items-center justify-center rounded-md bg-background text-primary">
+                        <div className="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
                           <CheckCircle2 />
                         </div>
                         <div className="min-w-0">
@@ -428,7 +428,7 @@ export default function SettingsPage() {
                             className="flex flex-col gap-4 rounded-lg border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between"
                           >
                             <div className="flex items-center gap-4">
-                              <div className="flex size-10 items-center justify-center rounded-md bg-background">
+                              <div className="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
                                 <FaGithub />
                               </div>
                               <div className="min-w-0">
@@ -452,7 +452,7 @@ export default function SettingsPage() {
                       ) : (
                         <div className="flex flex-col gap-4 rounded-lg border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
                           <div className="flex items-center gap-4">
-                            <div className="flex size-10 items-center justify-center rounded-md bg-background">
+                            <div className="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
                               <FaGithub />
                             </div>
                             <div className="min-w-0">

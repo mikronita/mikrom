@@ -105,7 +105,7 @@ export default function Page() {
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-3">
-                <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                <div className="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
                   <LayoutDashboard />
                 </div>
                 <h1 className="text-3xl font-semibold tracking-tight">
@@ -180,7 +180,7 @@ export default function Page() {
                 <CardHeader className="border-b">
                   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                     <div className="flex items-start gap-3">
-                      <div className="flex size-10 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground">
+                      <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
                         <Container />
                       </div>
                       <div className="flex flex-col gap-1.5">
@@ -223,7 +223,7 @@ export default function Page() {
                           <TableRow key={app.id}>
                             <TableCell className="pl-6">
                               <div className="flex min-w-0 items-center gap-3">
-                                <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground">
+                                <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
                                   <Server />
                                 </div>
                                 <div className="flex min-w-0 flex-col gap-1">

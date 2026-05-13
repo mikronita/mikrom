@@ -7,7 +7,7 @@ import { Loader2, AlertCircle, UserPlus } from "lucide-react";
 
 import { register } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -51,97 +51,97 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-muted/30 px-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="items-center text-center">
-          <div className="mb-2 flex justify-center">
-            <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <UserPlus />
-            </div>
+    <div className="flex min-h-screen flex-col bg-background px-4 py-10">
+      <div className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-6">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="flex size-10 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm">
+            <UserPlus />
           </div>
-          <CardTitle className="text-2xl font-semibold tracking-tight">Create an account</CardTitle>
-          <CardDescription>
-            Enter your details to get started with Mikrom
-          </CardDescription>
-        </CardHeader>
-        
-        <CardContent>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {error && (
-              <Alert variant="destructive">
-                <AlertCircle />
-                <AlertDescription>
-                  {error}
-                </AlertDescription>
-              </Alert>
-            )}
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-semibold tracking-tight">Create your Mikrom account</h1>
+            <p className="text-sm text-muted-foreground">
+              Set up access to deploy and manage your applications.
+            </p>
+          </div>
+        </div>
 
-            <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="email">Email address</FieldLabel>
-              <Input
-                id="email"
-                type="email"
-                placeholder="name@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={isLoading}
-                required
-              />
-            </Field>
+        <Card className="w-full">
+          <CardContent className="pt-5">
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+              {error && (
+                <Alert variant="destructive">
+                  <AlertCircle />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
 
-            <Field>
-              <FieldLabel htmlFor="password">Password</FieldLabel>
-              <Input
-                id="password"
-                type="password"
-                placeholder="At least 8 characters"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={isLoading}
-                required
-              />
-            </Field>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="email">Email address</FieldLabel>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="name@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={isLoading}
+                    required
+                  />
+                </Field>
 
-            <Field>
-              <FieldLabel htmlFor="confirmPassword">Confirm Password</FieldLabel>
-              <Input
-                id="confirmPassword"
-                type="password"
-                placeholder="Repeat your password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                disabled={isLoading}
-                required
-              />
-            </Field>
-            </FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="password">Password</FieldLabel>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="At least 8 characters"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={isLoading}
+                    required
+                  />
+                </Field>
 
-            <div className="flex flex-col gap-4 pt-2">
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? (
-                  <>
-                    <Loader2 data-icon="inline-start" className="animate-spin" />
-                    Creating account...
-                  </>
-                ) : (
-                  "Create Account"
-                )}
-              </Button>
-              <div className="text-center text-sm text-muted-foreground">
-                Already have an account?{" "}
-                <Link href="/auth/login" className="font-semibold text-foreground hover:underline">
-                  Sign in
-                </Link>
+                <Field>
+                  <FieldLabel htmlFor="confirmPassword">Confirm Password</FieldLabel>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    placeholder="Repeat your password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    disabled={isLoading}
+                    required
+                  />
+                </Field>
+              </FieldGroup>
+
+              <div className="flex flex-col gap-4 pt-2">
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading ? (
+                    <>
+                      <Loader2 data-icon="inline-start" className="animate-spin" />
+                      Creating account...
+                    </>
+                  ) : (
+                    "Create account"
+                  )}
+                </Button>
+                <div className="text-center text-sm text-muted-foreground">
+                  Already have an account?{" "}
+                  <Link href="/auth/login" className="font-medium text-foreground hover:underline">
+                    Sign in
+                  </Link>
+                </div>
               </div>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+            </form>
+          </CardContent>
+        </Card>
 
-      <p className="mt-8 text-center text-xs text-muted-foreground max-w-[300px]">
-        By clicking continue, you agree to our Terms of Service and Privacy Policy.
-      </p>
+        <p className="max-w-sm text-center text-xs leading-5 text-muted-foreground">
+          By continuing, you agree to Mikrom&apos;s terms and privacy policy.
+        </p>
+      </div>
     </div>
   );
 }
