@@ -1,4 +1,5 @@
 use axum::extract::ConnectInfo;
+use axum::middleware;
 use axum::response::sse::{Event, Sse};
 use axum::{Router, extract::State, routing::get};
 use futures::Stream;
@@ -22,6 +23,7 @@ pub mod github;
 pub mod models;
 pub mod nats;
 pub mod openapi;
+pub mod rate_limit;
 pub mod repositories;
 pub mod scheduler;
 pub mod sync;
@@ -217,14 +219,30 @@ impl AppState {
 }
 
 pub fn create_app(state: AppState) -> Router {
+    let rate_limiter = Arc::new(
+        crate::rate_limit::RateLimiter::new(
+            crate::rate_limit::RateLimitConfig::default(),
+            state.jwt_secret.clone(),
+        )
+        .expect("default rate limit config must be valid"),
+    );
+    create_app_with_rate_limits(state, rate_limiter)
+}
+
+pub fn create_app_with_rate_limits(
+    state: AppState,
+    rate_limiter: Arc<crate::rate_limit::RateLimiter>,
+) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-    let api_routes = Router::new()
+    let public_routes = Router::new()
         .route("/health", get(health))
-        .route("/health/stream", get(health_stream))
+        .route("/health/stream", get(health_stream));
+
+    let protected_routes = Router::new()
         .route("/auth/register", axum::routing::post(register))
         .route("/auth/login", axum::routing::post(login))
         .route(
@@ -318,12 +336,18 @@ pub fn create_app(state: AppState) -> Router {
         .route("/deployments/active", get(list_active_deployments))
         .route("/deployments/events", get(watch_deployments));
 
+    let protected_routes = protected_routes.route_layer(middleware::from_fn_with_state(
+        rate_limiter,
+        crate::rate_limit::rate_limit_middleware,
+    ));
+
     Router::new()
         .merge(SwaggerUi::new("/v1/docs").url(
             "/v1/api-docs/openapi.json",
             crate::openapi::ApiDoc::openapi(),
         ))
-        .nest("/v1", api_routes)
+        .nest("/v1", public_routes)
+        .nest("/v1", protected_routes)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &axum::http::Request<_>| {

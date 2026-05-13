@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use mikrom_api::AppState;
 use mikrom_api::config::ApiConfig;
-use mikrom_api::create_app;
+use mikrom_api::create_app_with_rate_limits;
 use mikrom_api::db;
 use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 
@@ -18,6 +18,10 @@ async fn main() -> anyhow::Result<()> {
 
     let db_pool = db::connect(&config.database_url).await?;
     db::run_migrations(&db_pool).await?;
+
+    let rate_limit_config = mikrom_api::rate_limit::RateLimitConfig::from_api_config(&config)?;
+    let jwt_secret = config.jwt_secret.clone();
+    let api_port = config.api_port;
 
     let user_repo = PostgresUserRepository::new(db_pool.clone());
     let app_repo = mikrom_api::repositories::PostgresAppRepository::new(
@@ -67,9 +71,14 @@ async fn main() -> anyhow::Result<()> {
     mikrom_api::vms::prime_mesh_status_cache(&state).await?;
     mikrom_api::start_background_tasks(state.clone());
 
-    let app = create_app(state);
+    let rate_limiter = Arc::new(mikrom_api::rate_limit::RateLimiter::new(
+        rate_limit_config,
+        jwt_secret,
+    )?);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], config.api_port));
+    let app = create_app_with_rate_limits(state, rate_limiter);
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], api_port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     tracing::info!("Server running on http://{}", addr);

@@ -149,3 +149,8 @@ required-features = ["test-utils"]
 name = "zero_downtime_deployments_tests"
 path = "tests/zero_downtime_deployments_tests.rs"
 required-features = ["test-utils"]
+
+[[test]]
+name = "rate_limit_tests"
+path = "tests/rate_limit_tests.rs"
+required-features = ["test-utils"]

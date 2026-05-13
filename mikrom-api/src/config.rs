@@ -23,6 +23,40 @@ pub struct ApiConfig {
     #[serde(default = "default_use_tls")]
     pub use_tls: bool,
 
+    #[serde(default = "default_deployment_env")]
+    pub deployment_env: String,
+
+    pub rate_limit_public_rpm: Option<u32>,
+
+    pub rate_limit_auth_login_rpm: Option<u32>,
+
+    pub rate_limit_auth_register_rpm: Option<u32>,
+
+    pub rate_limit_github_install_rpm: Option<u32>,
+
+    pub rate_limit_apps_create_rpm: Option<u32>,
+
+    pub rate_limit_apps_deploy_rpm: Option<u32>,
+
+    pub rate_limit_webhooks_github_generic_rpm: Option<u32>,
+
+    pub rate_limit_webhooks_github_named_rpm: Option<u32>,
+
+    pub rate_limit_authenticated_read_rpm: Option<u32>,
+
+    pub rate_limit_authenticated_write_rpm: Option<u32>,
+
+    pub rate_limit_authenticated_stream_rpm: Option<u32>,
+
+    #[serde(default = "default_rate_limit_entry_ttl_secs")]
+    pub rate_limit_entry_ttl_secs: u64,
+
+    #[serde(default = "default_rate_limit_cleanup_every_requests")]
+    pub rate_limit_cleanup_every_requests: u64,
+
+    #[serde(default = "default_rate_limit_trust_proxy_headers")]
+    pub rate_limit_trust_proxy_headers: bool,
+
     #[serde(default = "default_acme_email")]
     pub acme_email: String,
 
@@ -75,6 +109,22 @@ fn default_frontend_url() -> String {
 }
 
 fn default_use_tls() -> bool {
+    false
+}
+
+fn default_deployment_env() -> String {
+    "development".to_string()
+}
+
+fn default_rate_limit_entry_ttl_secs() -> u64 {
+    15 * 60
+}
+
+fn default_rate_limit_cleanup_every_requests() -> u64 {
+    512
+}
+
+fn default_rate_limit_trust_proxy_headers() -> bool {
     false
 }
 

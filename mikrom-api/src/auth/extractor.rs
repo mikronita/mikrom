@@ -2,7 +2,7 @@ use crate::error::ApiError;
 use axum::{
     async_trait,
     extract::{FromRef, FromRequestParts},
-    http::request::Parts,
+    http::{HeaderMap, Uri, request::Parts},
 };
 
 #[derive(Clone, Debug)]
@@ -24,30 +24,7 @@ where
         let state = crate::AppState::from_ref(state);
 
         // 1. Get token from Authorization header OR query parameter (for SSE)
-        let token = if let Some(auth_header) = parts
-            .headers
-            .get("Authorization")
-            .and_then(|h| h.to_str().ok())
-        {
-            if !auth_header.starts_with("Bearer ") {
-                return Err(ApiError::Auth("Invalid authorization header format".into()));
-            }
-            auth_header[7..].to_string()
-        } else {
-            // Fallback to query parameter "token" (for SSE)
-            parts
-                .uri
-                .query()
-                .and_then(|q| {
-                    q.split('&')
-                        .find(|pair| pair.starts_with("token="))
-                        .and_then(|pair| pair.get(6..))
-                        .map(|s| s.to_string())
-                })
-                .ok_or_else(|| {
-                    ApiError::Auth("Missing authorization header or token query parameter".into())
-                })?
-        };
+        let token = extract_token_from_headers_and_uri(&parts.headers, &parts.uri)?;
 
         // 2. Decode and validate JWT
         let claims = crate::auth::jwt::verify_token(&token, &state.jwt_secret)
@@ -59,6 +36,30 @@ where
             role: claims.role,
         })
     }
+}
+
+pub(crate) fn extract_token_from_headers_and_uri(
+    headers: &HeaderMap,
+    uri: &Uri,
+) -> Result<String, ApiError> {
+    if let Some(auth_header) = headers.get("Authorization").and_then(|h| h.to_str().ok()) {
+        if !auth_header.starts_with("Bearer ") {
+            return Err(ApiError::Auth("Invalid authorization header format".into()));
+        }
+
+        return Ok(auth_header[7..].to_string());
+    }
+
+    uri.query()
+        .and_then(|q| {
+            q.split('&')
+                .find(|pair| pair.starts_with("token="))
+                .and_then(|pair| pair.get(6..))
+                .map(|s| s.to_string())
+        })
+        .ok_or_else(|| {
+            ApiError::Auth("Missing authorization header or token query parameter".into())
+        })
 }
 
 pub struct AdminUser(pub AuthUser);
