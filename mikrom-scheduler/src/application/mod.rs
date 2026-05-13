@@ -123,18 +123,42 @@ impl AppService {
     pub async fn delete_all_by_app(&self, app_id: &str, user_id: &str) -> DomainResult<()> {
         let jobs = self.job_repo.list_jobs(Some(user_id), None, None).await?;
         let app_jobs: Vec<_> = jobs.into_iter().filter(|j| j.app_id == app_id).collect();
+        let mut failures = Vec::new();
 
         for job in app_jobs {
             #[allow(clippy::collapsible_if)]
             if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
                 if let Err(e) = self.agent_client.delete_vm(host_id, vm_id).await {
+                    let error_text = e.to_string();
+                    if Self::is_vm_already_gone(&error_text) {
+                        tracing::info!(
+                            vm_id = %vm_id,
+                            host_id = %host_id,
+                            "VM already absent during app cleanup; treating as success"
+                        );
+                        continue;
+                    }
+
                     tracing::error!("Failed to delete VM {} on host {}: {}", vm_id, host_id, e);
+                    failures.push(format!("{} on {}: {}", vm_id, host_id, e));
                 }
             }
         }
 
+        if !failures.is_empty() {
+            return Err(crate::domain::DomainError::Infrastructure(format!(
+                "Failed to delete one or more VMs for app {app_id}: {}",
+                failures.join("; ")
+            )));
+        }
+
         self.job_repo.remove_jobs_by_app(app_id).await?;
         Ok(())
+    }
+
+    fn is_vm_already_gone(error_text: &str) -> bool {
+        let normalized = error_text.to_lowercase();
+        normalized.contains("vm not found")
     }
 
     pub async fn check_health(&self, job_id: &str, user_id: &str) -> DomainResult<bool> {
@@ -469,5 +493,94 @@ mod tests {
         };
 
         service.pause_app("job-1", "user-1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_delete_all_by_app_treats_missing_vm_as_success() {
+        let job = paused_job();
+        let mut job_repo = MockJobRepository::new();
+        job_repo
+            .expect_list_jobs()
+            .returning(move |_, _, _| Ok(vec![job.clone()]));
+        job_repo
+            .expect_remove_jobs_by_app()
+            .with(eq("app-1"))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let mut agent_client = MockAgentClient::new();
+        agent_client
+            .expect_delete_vm()
+            .with(eq("host-1"), eq("vm-1"))
+            .times(1)
+            .returning(|_, _| {
+                Err(DomainError::Infrastructure(
+                    "VM not found: vm-1".to_string(),
+                ))
+            });
+
+        let worker_repo = Arc::new(MockWorkerRepository::new());
+        let job_repo = Arc::new(job_repo);
+        let agent_client = Arc::new(agent_client);
+        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
+
+        let service = AppService {
+            deployment: DeploymentService::new(
+                job_repo.clone(),
+                worker_repo.clone(),
+                agent_client.clone(),
+            ),
+            job_repo,
+            worker_repo,
+            agent_client,
+            pool,
+        };
+
+        service.delete_all_by_app("app-1", "user-1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_delete_all_by_app_returns_error_when_vm_delete_fails() {
+        let job = paused_job();
+        let mut job_repo = MockJobRepository::new();
+        job_repo
+            .expect_list_jobs()
+            .returning(move |_, _, _| Ok(vec![job.clone()]));
+        job_repo
+            .expect_remove_jobs_by_app()
+            .with(eq("app-1"))
+            .times(0)
+            .returning(|_| Ok(()));
+
+        let mut agent_client = MockAgentClient::new();
+        agent_client
+            .expect_delete_vm()
+            .with(eq("host-1"), eq("vm-1"))
+            .times(1)
+            .returning(|_, _| Err(DomainError::Infrastructure("boom".to_string())));
+
+        let worker_repo = Arc::new(MockWorkerRepository::new());
+        let job_repo = Arc::new(job_repo);
+        let agent_client = Arc::new(agent_client);
+        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
+
+        let service = AppService {
+            deployment: DeploymentService::new(
+                job_repo.clone(),
+                worker_repo.clone(),
+                agent_client.clone(),
+            ),
+            job_repo,
+            worker_repo,
+            agent_client,
+            pool,
+        };
+
+        let err = service
+            .delete_all_by_app("app-1", "user-1")
+            .await
+            .expect_err("cleanup should fail");
+
+        assert!(matches!(err, DomainError::Infrastructure(_)));
     }
 }

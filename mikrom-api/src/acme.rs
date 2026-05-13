@@ -189,6 +189,10 @@ async fn certify_domain(
     master_key: &str,
     router_addr: &str,
 ) -> anyhow::Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()?;
+
     let mut order = account
         .new_order(&NewOrder::new(&[Identifier::Dns(hostname.to_string())]))
         .await?;
@@ -215,7 +219,7 @@ async fn certify_domain(
                 .await?;
 
             // Wait for router to receive and apply challenge (eventual consistency)
-            verify_challenge_is_live(hostname, &token, &key_auth, router_addr).await?;
+            verify_challenge_is_live(&client, hostname, &token, &key_auth, router_addr).await?;
 
             // Trigger challenge
             challenge_handle.set_ready().await?;
@@ -324,15 +328,12 @@ async fn certify_domain(
 }
 
 async fn verify_challenge_is_live(
+    client: &reqwest::Client,
     hostname: &str,
     token: &str,
     expected_auth: &str,
     router_addr: &str,
 ) -> anyhow::Result<()> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()?;
-
     let url = format!("{}/.well-known/acme-challenge/{}", router_addr, token);
 
     info!(

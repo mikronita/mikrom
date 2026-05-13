@@ -44,7 +44,7 @@ pub use vms::{
     watch_deployments,
 };
 
-use mikrom_proto::router::RouterConfigUpdate;
+use mikrom_proto::router::{RouterConfigAck, RouterConfigUpdate};
 
 use auth::{get_profile, login, register, update_profile};
 use github::handlers::{github_callback, github_install, list_repos};
@@ -162,9 +162,20 @@ impl AppState {
             timestamp: chrono::Utc::now().timestamp(),
         };
 
-        self.nats
-            .publish(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
+        let ack: RouterConfigAck = self
+            .nats
+            .with_timeout(std::time::Duration::from_secs(5))
+            .request(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
             .await?;
+
+        if !ack.success {
+            let message = if ack.message.is_empty() {
+                "router rejected route removal".to_string()
+            } else {
+                ack.message
+            };
+            return Err(anyhow::anyhow!(message));
+        }
 
         Ok(())
     }

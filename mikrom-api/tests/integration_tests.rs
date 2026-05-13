@@ -26,6 +26,32 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         .expect_delete_all_by_app()
         .returning(|_, _| Ok(true));
 
+    // Simulate Router responding to NATS requests
+    let nats_clone = nats_client.clone();
+    tokio::spawn(async move {
+        use futures::StreamExt;
+        use mikrom_proto::router::RouterConfigAck;
+        use prost::Message;
+
+        if let Ok(mut sub) = nats_clone
+            .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
+            .await
+        {
+            while let Some(msg) = sub.next().await {
+                if let Some(reply) = msg.reply {
+                    let ack = RouterConfigAck {
+                        success: true,
+                        message: String::new(),
+                    };
+                    let mut buf = Vec::new();
+                    if ack.encode(&mut buf).is_ok() {
+                        let _ = nats_clone.publish(reply, buf.into()).await;
+                    }
+                }
+            }
+        }
+    });
+
     let state = AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
@@ -52,6 +78,9 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
 
 #[tokio::test]
 async fn test_all_auth_integration_flows() {
+    // Ensure rustls provider is installed
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let test_db = mikrom_api::test_utils::TestDb::new().await;
     let pool = test_db.pool().clone();
     let jwt_secret = "integration-test-secret";

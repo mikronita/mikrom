@@ -9,6 +9,13 @@ pub struct RouterConfigUpdate {
     pub timestamp: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RouterConfigAck {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TlsCertificateUpdate {
     #[prost(string, tag = "1")]
     pub hostname: ::prost::alloc::string::String,
