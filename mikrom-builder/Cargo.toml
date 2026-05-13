@@ -17,6 +17,6 @@ envy.workspace = true
 dotenvy = "0.15"
 dashmap = "6.1"
 
-mikrom-proto = { path = "../mikrom-proto" }
+mikrom-proto = { path = "../mikrom-proto", features = ["telemetry"] }
 git2 = "0.19"
 tempfile = "3.27"

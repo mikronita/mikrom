@@ -40,37 +40,23 @@ services:
     networks:
       - mikrom
 
-  loki:
-    image: grafana/loki:latest
+  otel-lgtm:
+    image: grafana/otel-lgtm:latest
     ports:
-      - "3100:3100"
-    command: -config.file=/etc/loki/local-config.yaml
-    networks:
-      - mikrom
-
-  prometheus:
-    image: prom/prometheus:latest
+      - "3000:3000" # Grafana
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+      - "9090:9090" # Prometheus
+      - "3100:3100" # Loki
+      - "3200:3200" # Tempo
     volumes:
-      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9091:9090"
+      - ./observability/prometheus.yml:/otel-lgtm/prometheus.yaml
+      - ./observability/grafana/provisioning/dashboards/dashboards.yml:/otel-lgtm/grafana/conf/provisioning/dashboards/custom.yaml
+      - ./observability/grafana/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/custom
     networks:
       - mikrom
-
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3001:3000"
-    volumes:
-      - ./observability/grafana/provisioning:/etc/grafana/provisioning
-      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    depends_on:
-      - prometheus
-      - loki
-    networks:
-      - mikrom
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   postgres_data:

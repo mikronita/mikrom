@@ -2,6 +2,7 @@ use anyhow::Result;
 use axum::{Router, routing::get};
 use futures::StreamExt;
 use mikrom_proto::router::RouterMetrics;
+use mikrom_proto::telemetry::LogEntry;
 use prometheus::{Encoder, GaugeVec, Opts, Registry, TextEncoder};
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -28,7 +29,7 @@ fn default_loki_url() -> String {
 }
 
 fn default_metrics_port() -> u16 {
-    9090
+    9091
 }
 
 impl Config {
@@ -40,15 +41,6 @@ impl Config {
             metrics_port: default_metrics_port(),
         })
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogEntry {
-    pub vm_id: String,
-    pub app_id: String,
-    pub source: String,
-    pub message: serde_json::Value,
-    pub timestamp: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -402,10 +394,12 @@ impl TelemetryService {
             });
 
             if let Some(values) = stream["values"].as_array_mut() {
-                values.push(serde_json::json!([
-                    entry.timestamp.to_string(),
-                    entry.message
-                ]));
+                let msg_str = if entry.message.is_string() {
+                    entry.message.as_str().unwrap_or("").to_string()
+                } else {
+                    entry.message.to_string()
+                };
+                values.push(serde_json::json!([entry.timestamp.to_string(), msg_str]));
             }
         }
 
@@ -448,7 +442,7 @@ impl TelemetryService {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    mikrom_proto::telemetry::init_telemetry("mikrom-telemetry", "0.1.0", Some("info"))?;
     let config = Config::from_env();
     let service = Arc::new(TelemetryService::new(config).await?);
     service.run().await
@@ -514,6 +508,6 @@ mod tests {
         };
         assert_eq!(config.nats_url, "nats://localhost:4222");
         assert_eq!(config.loki_url, "http://localhost:3100");
-        assert_eq!(config.metrics_port, 9090);
+        assert_eq!(config.metrics_port, 9091);
     }
 }

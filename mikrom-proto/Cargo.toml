@@ -38,3 +38,4 @@ futures = "0.3"
 default = ["build"]
 build = []
 sqlx-postgres = ["dep:sqlx"]
+telemetry = []

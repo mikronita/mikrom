@@ -18,8 +18,12 @@ chrono = "0.4"
 futures = "0.3"
 envy.workspace = true
 dotenvy = "0.15"
-mikrom-proto = { version = "0.1.1", path = "../mikrom-proto" }
+mikrom-proto = { version = "0.1.1", path = "../mikrom-proto", features = ["telemetry"] }
 prost.workspace = true
+opentelemetry = "0.31.0"
+opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.31.1", features = ["tonic", "grpc-tonic", "prost"] }
+tracing-opentelemetry = "0.32.1"
 
 [lints.clippy]
 unwrap_used = "deny"
