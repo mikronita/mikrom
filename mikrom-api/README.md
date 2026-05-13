@@ -12,6 +12,7 @@ The central management service for the Mikrom PaaS. It provides a REST API for a
 - **Automatic TLS**: Managing ACME accounts and certificates for secure application ingress.
 - **GitHub Integration**: Handling webhooks to trigger automatic builds on repository changes.
 - **Secret Management**: Storing and injecting encrypted environment variables into deployments.
+- **Abuse Protection**: Request rate limiting with separate policies for public, authenticated, and streaming endpoints.
 - **State Persistence**: Managing the PostgreSQL database for all system metadata.
 
 ## Endpoints
@@ -55,6 +56,33 @@ Mikrom uses PostgreSQL to track the state of the cluster:
 | `JWT_SECRET` | — | Secret used to sign/verify JWT tokens |
 | `NATS_URL` | `nats://127.0.0.1:4222` | URL of the NATS server |
 | `USE_TLS` | `false` | Enable mutual TLS for NATS communication |
+| `DEPLOYMENT_ENV` | `development` | Selects the default rate-limit profile: `development`, `staging`, or `production` |
+| `RATE_LIMIT_PUBLIC_RPM` | profile default | Requests per minute for unauthenticated public endpoints |
+| `RATE_LIMIT_AUTH_LOGIN_RPM` | profile default | Requests per minute for `/v1/auth/login` |
+| `RATE_LIMIT_AUTH_REGISTER_RPM` | profile default | Requests per minute for `/v1/auth/register` |
+| `RATE_LIMIT_GITHUB_INSTALL_RPM` | profile default | Requests per minute for `/v1/github/install` |
+| `RATE_LIMIT_APPS_CREATE_RPM` | profile default | Requests per minute for `POST /v1/apps` |
+| `RATE_LIMIT_APPS_DEPLOY_RPM` | profile default | Requests per minute for `POST /v1/apps/:app_name/deploy` |
+| `RATE_LIMIT_WEBHOOKS_GITHUB_GENERIC_RPM` | profile default | Requests per minute for `POST /v1/webhooks/github` |
+| `RATE_LIMIT_WEBHOOKS_GITHUB_NAMED_RPM` | profile default | Requests per minute for `POST /v1/webhooks/github/:app_name` |
+| `RATE_LIMIT_AUTHENTICATED_READ_RPM` | profile default | Requests per minute for authenticated read endpoints |
+| `RATE_LIMIT_AUTHENTICATED_WRITE_RPM` | profile default | Requests per minute for authenticated write endpoints |
+| `RATE_LIMIT_AUTHENTICATED_STREAM_RPM` | profile default | Stream openings per minute for SSE/log endpoints |
+| `RATE_LIMIT_ENTRY_TTL_SECS` | `900` | Idle time before rate-limit buckets are evicted |
+| `RATE_LIMIT_CLEANUP_EVERY_REQUESTS` | `512` | How often the in-memory store scans for stale buckets |
+| `RATE_LIMIT_TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` or `X-Real-IP` for client identity |
+
+### Recommended profiles
+
+| `DEPLOYMENT_ENV` | Public | Login | Register | GitHub Install | App Create | App Deploy | Webhooks | Read | Write | Streams |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `development` | `300` | `120` | `60` | `120` | `120` | `120` | `240` | `1200` | `600` | `120` |
+| `staging` | `120` | `20` | `20` | `30` | `20` | `30` | `30` / `60` | `600` | `240` | `60` |
+| `production` | `60` | `10` | `10` | `15` | `10` | `20` | `20` / `30` | `300` | `120` | `30` |
+
+The `webhooks` column shows generic/named webhook limits.
+
+For local deployment, use `.env.staging` and `.env.production` as ready-made templates and adjust secrets before using them in real environments.
 
 ## Development
 
