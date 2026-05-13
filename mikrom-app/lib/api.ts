@@ -69,7 +69,8 @@ export type WorkspaceEventKind =
   | "deployment_changed"
   | "profile_updated"
   | "github_accounts_changed"
-  | "security_rules_changed";
+  | "security_rules_changed"
+  | "refresh";
 
 export interface WorkspaceEvent {
   kind: WorkspaceEventKind;

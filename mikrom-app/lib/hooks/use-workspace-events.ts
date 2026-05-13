@@ -1,16 +1,25 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { getToken } from "@/lib/auth";
+import { useAuthToken } from "@/lib/hooks/use-auth-token";
 import { watchWorkspaceEvents, type WorkspaceEvent } from "@/lib/api";
 import { appsKeys } from "@/lib/hooks/use-apps";
 import { vmsKeys } from "@/lib/hooks/use-vms";
 
 export function useWorkspaceEvents() {
   const queryClient = useQueryClient();
-  const token = getToken();
+  const token = useAuthToken();
+  const invalidateAllWorkspaceState = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: appsKeys.all });
+    queryClient.invalidateQueries({ queryKey: vmsKeys.all });
+    queryClient.invalidateQueries({ queryKey: ["active-deployments"] });
+    queryClient.invalidateQueries({ queryKey: ["profile"] });
+    queryClient.invalidateQueries({ queryKey: ["github-accounts"] });
+    queryClient.invalidateQueries({ queryKey: ["github", "repos"] });
+    queryClient.invalidateQueries({ queryKey: ["security-rules"] });
+  }, [queryClient]);
 
   useEffect(() => {
     if (!token) return;
@@ -21,9 +30,7 @@ export function useWorkspaceEvents() {
         case "app_updated":
         case "app_deleted":
         case "deployment_changed":
-          queryClient.invalidateQueries({ queryKey: appsKeys.all });
-          queryClient.invalidateQueries({ queryKey: vmsKeys.all });
-          queryClient.invalidateQueries({ queryKey: ["active-deployments"] });
+          invalidateAllWorkspaceState();
           break;
         case "profile_updated":
           queryClient.invalidateQueries({ queryKey: ["profile"] });
@@ -35,6 +42,9 @@ export function useWorkspaceEvents() {
         case "security_rules_changed":
           queryClient.invalidateQueries({ queryKey: ["security-rules"] });
           break;
+        case "refresh":
+          invalidateAllWorkspaceState();
+          break;
         default:
           break;
       }
@@ -42,5 +52,5 @@ export function useWorkspaceEvents() {
 
     const cleanup = watchWorkspaceEvents(token, invalidateWorkspaceState);
     return () => cleanup();
-  }, [queryClient, token]);
+  }, [invalidateAllWorkspaceState, queryClient, token]);
 }

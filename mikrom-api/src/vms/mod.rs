@@ -986,7 +986,7 @@ pub async fn delete_deployment_record(
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
 pub struct MeshStatus {
     pub workers: Vec<crate::models::worker::Worker>,
     pub total_workers: usize,
@@ -1008,7 +1008,8 @@ pub async fn get_mesh_status_handler(
     _auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
 ) -> ApiResult<Json<MeshStatus>> {
-    Ok(Json(fetch_mesh_status(&state).await?))
+    let mesh_status = state.mesh_status.subscribe();
+    Ok(Json(mesh_status.borrow().clone()))
 }
 
 async fn fetch_mesh_status(state: &crate::AppState) -> ApiResult<MeshStatus> {
@@ -1024,6 +1025,65 @@ async fn fetch_mesh_status(state: &crate::AppState) -> ApiResult<MeshStatus> {
         total_workers: workers.workers.len(),
         workers: workers.workers.into_iter().map(Worker::from).collect(),
     })
+}
+
+pub async fn prime_mesh_status_cache(state: &crate::AppState) -> ApiResult<()> {
+    let snapshot = fetch_mesh_status(state).await?;
+    let _ = state.mesh_status.send(snapshot);
+    Ok(())
+}
+
+async fn refresh_mesh_status_cache(state: &crate::AppState) -> ApiResult<MeshStatus> {
+    let snapshot = fetch_mesh_status(state).await?;
+    let _ = state.mesh_status.send(snapshot.clone());
+    Ok(snapshot)
+}
+
+pub async fn start_mesh_status_tracker(state: crate::AppState) {
+    let mut worker_heartbeat_sub = match state
+        .nats
+        .subscribe("mikrom.scheduler.worker.heartbeat")
+        .await
+    {
+        Ok(sub) => sub,
+        Err(err) => {
+            tracing::error!("Failed to subscribe to worker heartbeats: {}", err);
+            return;
+        },
+    };
+    let mut router_heartbeat_sub = match state
+        .nats
+        .subscribe("mikrom.scheduler.router.heartbeat")
+        .await
+    {
+        Ok(sub) => sub,
+        Err(err) => {
+            tracing::error!("Failed to subscribe to router heartbeats: {}", err);
+            return;
+        },
+    };
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+
+    loop {
+        tokio::select! {
+            Some(_) = worker_heartbeat_sub.next() => {
+                if let Err(err) = refresh_mesh_status_cache(&state).await {
+                    tracing::warn!("failed to refresh mesh status after worker heartbeat: {}", err);
+                }
+            },
+            Some(_) = router_heartbeat_sub.next() => {
+                if let Err(err) = refresh_mesh_status_cache(&state).await {
+                    tracing::warn!("failed to refresh mesh status after router heartbeat: {}", err);
+                }
+            },
+            _ = interval.tick() => {
+                if let Err(err) = refresh_mesh_status_cache(&state).await {
+                    tracing::warn!("failed to refresh mesh status on interval: {}", err);
+                }
+            },
+            else => break,
+        }
+    }
 }
 
 #[utoipa::path(
@@ -1042,53 +1102,22 @@ pub async fn mesh_status_stream_handler(
     _auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    let mut worker_heartbeat_sub = state
-        .nats
-        .subscribe("mikrom.scheduler.worker.heartbeat")
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!("Failed to subscribe to worker heartbeats: {e}"))
-        })?;
-    let mut router_heartbeat_sub = state
-        .nats
-        .subscribe("mikrom.scheduler.router.heartbeat")
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!("Failed to subscribe to router heartbeats: {e}"))
-        })?;
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+    let mut rx = state.mesh_status.subscribe();
 
     let stream = async_stream::stream! {
-        if let Ok(snapshot) = fetch_mesh_status(&state).await
-            && let Ok(data) = serde_json::to_string(&snapshot)
-        {
+        let snapshot = rx.borrow().clone();
+        if let Ok(data) = serde_json::to_string(&snapshot) {
             yield Ok(Event::default().data(data));
         }
 
         loop {
-            tokio::select! {
-                Some(_) = worker_heartbeat_sub.next() => {
-                    if let Ok(snapshot) = fetch_mesh_status(&state).await
-                        && let Ok(data) = serde_json::to_string(&snapshot)
-                    {
-                        yield Ok(Event::default().data(data));
-                    }
-                },
-                Some(_) = router_heartbeat_sub.next() => {
-                    if let Ok(snapshot) = fetch_mesh_status(&state).await
-                        && let Ok(data) = serde_json::to_string(&snapshot)
-                    {
-                        yield Ok(Event::default().data(data));
-                    }
-                },
-                _ = interval.tick() => {
-                    if let Ok(snapshot) = fetch_mesh_status(&state).await
-                        && let Ok(data) = serde_json::to_string(&snapshot)
-                    {
-                        yield Ok(Event::default().data(data));
-                    }
-                },
-                else => break,
+            if rx.changed().await.is_err() {
+                break;
+            }
+
+            let snapshot = rx.borrow_and_update().clone();
+            if let Ok(data) = serde_json::to_string(&snapshot) {
+                yield Ok(Event::default().data(data));
             }
         }
     };

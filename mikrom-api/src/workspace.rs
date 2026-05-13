@@ -17,6 +17,7 @@ pub enum WorkspaceEventKind {
     ProfileUpdated,
     GithubAccountsChanged,
     SecurityRulesChanged,
+    Refresh,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -59,7 +60,20 @@ pub async fn workspace_events_stream(
                         yield Ok(Event::default().data(data));
                     }
                 },
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let refresh_event = WorkspaceEvent {
+                        kind: WorkspaceEventKind::Refresh,
+                        user_id: Some(auth_user_id),
+                        app_id: None,
+                        app_name: None,
+                        deployment_id: None,
+                        resource_id: Some("refresh".to_string()),
+                    };
+
+                    if let Ok(data) = serde_json::to_string(&refresh_event) {
+                        yield Ok(Event::default().data(data));
+                    }
+                },
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }

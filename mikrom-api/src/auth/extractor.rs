@@ -117,6 +117,7 @@ mod tests {
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
             workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
