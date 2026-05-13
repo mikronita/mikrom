@@ -98,22 +98,6 @@ impl AppService {
             "Resuming job"
         );
 
-        // Ensure exclusivity
-        self.deployment
-            .deploy_app(
-                // This is not quite right, we just need the exclusivity part
-                job.app_id.clone(),
-                job.app_name.clone(),
-                job.image.clone(),
-                job.user_id.clone(),
-                job.deployment_id.clone().unwrap_or_default(),
-                String::new(), // VPC prefix unknown during resume for now
-                job.config.clone(),
-                crate::domain::worker::SchedulingStrategy::LeastLoaded,
-            )
-            .await
-            .ok(); // This is a bit hacky for now, ideally exclusivity is its own service
-
         if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
             self.agent_client.resume_vm(host_id, vm_id).await?;
             self.job_repo

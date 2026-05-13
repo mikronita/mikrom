@@ -359,18 +359,9 @@ impl AgentServer {
             let ip = vm.config.ipv6_address.clone();
 
             if let Some(ip_addr) = ip {
-                if !fc.is_app_started(&vm_id).await {
-                    return Self::reply_health_check(
-                        message,
-                        nats,
-                        Err("VM application has not started yet".to_string()),
-                    )
-                    .await;
-                }
-
                 let started_at_ms = fc.get_vm_started_at_ms(&vm_id).await.unwrap_or_default();
                 let now_ms = chrono::Utc::now().timestamp_millis() as u64;
-                if started_at_ms > 0 {
+                if started_at_ms > 0 && fc.is_app_started(&vm_id).await {
                     let boot_grace_ms = Duration::from_millis(250).as_millis() as u64;
                     if now_ms.saturating_sub(started_at_ms) < boot_grace_ms {
                         tracing::info!(
@@ -402,9 +393,11 @@ impl AgentServer {
                     "Performing health check..."
                 );
 
-                match http_client.get(&url).send().await {
-                    Ok(resp) if resp.status().is_success() => Ok("Healthy".to_string()),
-                    Ok(resp) => {
+                match tokio::time::timeout(Duration::from_secs(2), http_client.get(&url).send())
+                    .await
+                {
+                    Ok(Ok(resp)) if resp.status().is_success() => Ok("Healthy".to_string()),
+                    Ok(Ok(resp)) => {
                         let status = resp.status();
                         tracing::warn!(
                             vm_id = %vm_id,
@@ -414,7 +407,7 @@ impl AgentServer {
                         );
                         Err(format!("Unhealthy: HTTP {}", status))
                     },
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         tracing::warn!(
                             vm_id = %vm_id,
                             url = %url,
@@ -422,6 +415,14 @@ impl AgentServer {
                             "Health check request failed"
                         );
                         Err(format!("Unhealthy: {e}"))
+                    },
+                    Err(_) => {
+                        tracing::warn!(
+                            vm_id = %vm_id,
+                            url = %url,
+                            "Health check request timed out"
+                        );
+                        Err("Unhealthy: request timed out".to_string())
                     },
                 }
             } else {

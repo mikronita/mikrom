@@ -1,9 +1,9 @@
 use crate::AppState;
 use crate::auth::AuthUser;
+use crate::deploy::orchestrator::DeploymentOrchestrator;
 use crate::deploy::service::{DeployParams, DeploymentService};
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::Deployment;
-use crate::repositories::app_repository::UpdateDeploymentParams;
 use axum::{
     Json,
     extract::{Path, State},
@@ -478,26 +478,62 @@ pub async fn activate_deployment_handler(
         .await?
         .ok_or(ApiError::NotFound("Deployment not found".into()))?;
 
-    if deployment.status == "FAILED" {
-        return Err(ApiError::BadRequest(
-            "Cannot activate a failed deployment".into(),
-        ));
-    }
-
     if deployment.app_id != app.id {
         return Err(ApiError::BadRequest(
             "Deployment does not belong to this application".into(),
         ));
     }
 
+    let runtime_status = if let Some(job_id) = deployment.job_id.clone() {
+        use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse};
+
+        let nats_req = AppStatusRequest {
+            job_id,
+            user_id: auth.user_id.clone(),
+        };
+
+        match state
+            .nats
+            .request::<_, AppStatusResponse>("mikrom.scheduler.get_job", nats_req)
+            .await
+        {
+            Ok(inner) => Some(crate::scheduler::status_name(inner.status).to_string()),
+            Err(e) => {
+                tracing::warn!(
+                    app_id = %app.id,
+                    deployment_id = %deployment.id,
+                    error = %e,
+                    "Failed to resolve runtime deployment status from scheduler, falling back to DB status"
+                );
+                None
+            },
+        }
+    } else {
+        None
+    };
+
+    let current_status = runtime_status
+        .as_deref()
+        .unwrap_or(deployment.status.as_str());
+
+    if current_status == "FAILED" {
+        return Err(ApiError::BadRequest(
+            "Cannot activate a failed deployment".into(),
+        ));
+    }
+
     match deployment.job_id.clone() {
         Some(job_id) => {
-            info!(job_id = %job_id, status = %deployment.status, "Activating deployment with zero-downtime flow...");
+            info!(
+                job_id = %job_id,
+                status = %current_status,
+                db_status = %deployment.status,
+                "Activating deployment with zero-downtime flow..."
+            );
 
-            use crate::deploy::service::{DeployParams, DeploymentService};
             use mikrom_proto::scheduler::{DeployResponse, DeployStatus};
 
-            if deployment.status == "RUNNING" {
+            if current_status == "RUNNING" {
                 info!(
                     app = %app.name,
                     deployment_id = %deployment.id,
@@ -505,51 +541,33 @@ pub async fn activate_deployment_handler(
                     "Promoting running deployment immediately"
                 );
 
-                let previous_active_id = app.active_deployment_id;
-                state
-                    .app_repo
-                    .set_active_deployment(app.id, deployment.id)
+                let (updated_app, previous_active_id) =
+                    DeploymentOrchestrator::promote_deployment_to_active(
+                        &state,
+                        app,
+                        deployment.id,
+                    )
                     .await
                     .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-                let mut updated_app = app;
-                updated_app.active_deployment_id = Some(deployment.id);
-                let _ = state.notify_router(&updated_app).await;
-                state.deployment_events.send(updated_app.id).ok();
-
-                if let Some(old_active_id) = previous_active_id.filter(|id| *id != deployment.id)
-                    && let Some(old_dep) = state
-                        .app_repo
-                        .get_deployment(old_active_id)
-                        .await
-                        .map_err(|e| ApiError::Internal(e.to_string()))?
-                    && let Some(old_job_id) = old_dep.job_id
-                {
-                    info!(
-                        app = %updated_app.name,
-                        job_id = %old_job_id,
-                        deployment_id = %old_active_id,
-                        "Pausing previous production deployment after immediate promotion"
-                    );
-                    let _ = state
-                        .scheduler
-                        .pause_app(old_job_id.clone(), "system".to_string())
-                        .await
-                        .map_err(ApiError::Scheduler)?;
-                    state
-                        .app_repo
-                        .update_deployment(
-                            old_active_id,
-                            UpdateDeploymentParams {
-                                status: Some("PAUSED".to_string()),
-                                ..Default::default()
-                            },
-                        )
-                        .await
-                        .map_err(|e| ApiError::Internal(e.to_string()))?;
+                if let Some(old_active_id) = previous_active_id.filter(|id| *id != deployment.id) {
+                    DeploymentOrchestrator::drain_previous_deployment_after_promotion(
+                        &state,
+                        &updated_app.name,
+                        Some(old_active_id),
+                    )
+                    .await
+                    .map_err(|e| ApiError::Internal(e.to_string()))?;
                 }
 
                 return Ok(StatusCode::OK);
+            }
+
+            if current_status != "PAUSED" && current_status != "STOPPED" {
+                return Err(ApiError::BadRequest(format!(
+                    "Deployment is not ready to promote yet (current status: {})",
+                    current_status
+                )));
             }
 
             // Protect against concurrent flows before any scheduler interaction
@@ -559,67 +577,30 @@ pub async fn activate_deployment_handler(
                 )
             })?;
 
-            let (inner, cleanup_on_failure) =
-                if deployment.status == "PAUSED" || deployment.status == "STOPPED" {
-                    info!(app = %app.name, "Deployment is paused or stopped, resuming it first...");
+            let job_id = deployment.job_id.clone().ok_or_else(|| {
+                ApiError::BadRequest("Paused deployment is missing a job id".into())
+            })?;
 
-                    let job_id = deployment.job_id.clone().ok_or_else(|| {
-                        ApiError::BadRequest("Paused deployment is missing a job id".into())
-                    })?;
+            info!(app = %app.name, "Deployment is paused or stopped, resuming it first...");
 
-                    let resume_ok = state
-                        .scheduler
-                        .resume_app(job_id.clone(), "system".to_string())
-                        .await
-                        .map_err(ApiError::Scheduler)?;
+            let resume_ok = state
+                .scheduler
+                .resume_app(job_id.clone(), "system".to_string())
+                .await
+                .map_err(ApiError::Scheduler)?;
 
-                    if !resume_ok {
-                        return Err(ApiError::BadRequest("Failed to resume deployment".into()));
-                    }
+            if !resume_ok {
+                return Err(ApiError::BadRequest("Failed to resume deployment".into()));
+            }
 
-                    let inner = DeployResponse {
-                        job_id,
-                        status: DeployStatus::Running as i32,
-                        host_id: String::new(),
-                        vm_id: String::new(),
-                        message: "Resumed".to_string(),
-                    };
-                    (inner, true)
-                } else if deployment.status == "FAILED" {
-                    info!(app = %app.name, "Deployment is failed, starting it again...");
-                    let env_vars: std::collections::HashMap<String, String> =
-                        serde_json::from_value(deployment.env_vars.clone()).unwrap_or_default();
-
-                    let inner = match DeploymentService::deploy_to_scheduler(
-                        &state,
-                        &app,
-                        &deployment,
-                        DeployParams {
-                            image_tag: deployment.image_tag.clone().unwrap_or_default(),
-                            vcpus: deployment.vcpus as u32,
-                            memory_mib: deployment.memory_mib as u32,
-                            disk_mib: deployment.disk_mib as u32,
-                            env: env_vars,
-                        },
-                    )
-                    .await
-                    {
-                        Ok(inner) => inner,
-                        Err(e) => {
-                            return Err(e);
-                        },
-                    };
-                    (inner, true)
-                } else {
-                    let inner = DeployResponse {
-                        job_id,
-                        status: DeployStatus::Running as i32,
-                        host_id: String::new(),
-                        vm_id: String::new(),
-                        message: "Activating".to_string(),
-                    };
-                    (inner, false) // Don't cleanup if it was already running
-                };
+            let inner = DeployResponse {
+                job_id,
+                status: DeployStatus::Running as i32,
+                host_id: String::new(),
+                vm_id: String::new(),
+                message: "Resumed".to_string(),
+            };
+            let cleanup_on_failure = true;
 
             DeploymentService::run_zero_downtime_flow(
                 state.clone(),
@@ -636,18 +617,10 @@ pub async fn activate_deployment_handler(
         None => {
             info!(app = %app.name, deployment_id = %deployment.id, "Activating deployment record only...");
 
-            state
-                .app_repo
-                .set_active_deployment(app.id, deployment_id)
-                .await
-                .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-            // Update local app for notify_router
-            let mut updated_app = app;
-            updated_app.active_deployment_id = Some(deployment_id);
-
-            let _ = state.notify_router(&updated_app).await;
-            state.deployment_events.send(updated_app.id).ok();
+            let _ =
+                DeploymentOrchestrator::promote_deployment_to_active(&state, app, deployment_id)
+                    .await
+                    .map_err(|e| ApiError::Internal(e.to_string()))?;
 
             Ok(StatusCode::OK)
         },
