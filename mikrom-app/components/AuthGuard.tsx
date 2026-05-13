@@ -26,8 +26,11 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
   if (isChecking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground">
-        <div>Loading...</div>
+      <div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">
+        <div className="flex items-center gap-3 rounded-md border bg-card px-4 py-3 shadow-sm">
+          <div className="size-3 animate-pulse rounded-full bg-primary" />
+          <span>Loading workspace...</span>
+        </div>
       </div>
     );
   }

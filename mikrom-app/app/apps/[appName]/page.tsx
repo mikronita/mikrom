@@ -440,7 +440,7 @@ export default function AppDetailPage() {
             <div className="flex items-center gap-4">
               <div>
                 <div className="flex items-center gap-3">
-                  <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
                     <Boxes />
                   </div>
                   <h1 className="text-2xl font-semibold tracking-tight">

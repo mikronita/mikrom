@@ -10,7 +10,7 @@
   --bg-default: #ffffff;
   --bg-subtle: #f6f8fa;
   --bg-overlay: #ffffff;
-  --bg-inset: #eff1f3;
+  --bg-inset: #f6f8fa;
 
   /* Typography */
   --text-primary: #1f2328;
@@ -58,11 +58,11 @@
   --ring: var(--accent);
 
   /* Sidebar Specific */
-  --sidebar: var(--bg-subtle);
+  --sidebar: var(--bg-default);
   --sidebar-foreground: var(--text-primary);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #ebedf0;
+  --sidebar-accent: #eaeef2;
   --sidebar-accent-foreground: var(--text-primary);
   --sidebar-border: var(--border-default);
   --sidebar-ring: var(--accent);
@@ -198,6 +198,10 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+
+  html {
+    background: var(--background);
   }
 
   body {

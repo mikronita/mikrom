@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, Moon, Search, Shield, Sun } from "lucide-react";
+import { Bell, Moon, Search, Sun } from "lucide-react";
 import { useWatchVms } from "@/lib/hooks/use-vms";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
@@ -21,35 +21,7 @@ import {
   SidebarInset,
   SidebarTrigger
 } from "@/components/ui/sidebar";
-import { Separator } from "@/components/ui/separator";
 import { AppSidebar } from "@/components/app-sidebar";
-
-const footerColumns = [
-  {
-    title: "Platform",
-    links: [
-      { label: "Applications", href: "/apps" },
-      { label: "Networking", href: "/networking" },
-      { label: "Settings", href: "/settings" },
-    ],
-  },
-  {
-    title: "Resources",
-    links: [
-      { label: "Documentation", href: "#" },
-      { label: "API Reference", href: "#" },
-      { label: "Status", href: "#" },
-    ],
-  },
-  {
-    title: "Company",
-    links: [
-      { label: "About", href: "#" },
-      { label: "Support", href: "#" },
-      { label: "Contact", href: "#" },
-    ],
-  },
-];
 
 function ThemeToggle() {
   const { theme, setTheme } = useTheme();
@@ -58,6 +30,7 @@ function ThemeToggle() {
     <Button
       variant="ghost"
       size="icon"
+      className="relative"
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
     >
       <Moon className="rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
@@ -77,7 +50,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
-        <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-4 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:px-6">
+        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:px-4">
           <SidebarTrigger />
           <div className="flex-1 overflow-hidden">
             <Breadcrumb>
@@ -115,76 +88,25 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               </BreadcrumbList>
             </Breadcrumb>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="hidden w-64 lg:block">
+          <div className="flex items-center gap-2">
+            <div className="hidden w-72 lg:block">
               <InputGroup>
                 <InputGroupAddon>
                   <Search />
                 </InputGroupAddon>
-                <InputGroupInput type="search" placeholder="Search..." />
+                <InputGroupInput type="search" placeholder="Search or jump to..." />
               </InputGroup>
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon">
-                <Bell />
-                <span className="sr-only">Notifications</span>
-              </Button>
-              <ThemeToggle />
-            </div>
+            <Button variant="ghost" size="icon">
+              <Bell />
+              <span className="sr-only">Notifications</span>
+            </Button>
+            <ThemeToggle />
           </div>
         </header>
-        <main className="flex-1 p-4 md:p-6">
-          <div className="mx-auto w-full max-w-7xl">
-            {children}
-          </div>
+        <main className="flex-1 p-3 md:p-4">
+          <div className="mx-auto w-full max-w-7xl">{children}</div>
         </main>
-        <footer className="px-4 pb-6 md:px-6">
-          <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 rounded-lg border bg-card p-6 text-card-foreground shadow-sm">
-            <div className="grid gap-8 lg:grid-cols-[1.2fr_2fr]">
-              <div className="flex max-w-sm flex-col gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex size-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                    <Shield />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-semibold leading-none">Mikrom</span>
-                    <span className="mt-1 text-xs text-muted-foreground">Cloud Platform</span>
-                  </div>
-                </div>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  Deploy, operate and observe microVM-backed applications from one focused control plane.
-                </p>
-              </div>
-              <div className="grid gap-8 sm:grid-cols-3">
-                {footerColumns.map((column) => (
-                  <div key={column.title} className="flex flex-col gap-3">
-                    <h2 className="text-sm font-medium">{column.title}</h2>
-                    <nav aria-label={column.title} className="flex flex-col gap-2">
-                      {column.links.map((link) => (
-                        <Link
-                          key={link.label}
-                          href={link.href}
-                          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-                        >
-                          {link.label}
-                        </Link>
-                      ))}
-                    </nav>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <Separator />
-            <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-              <p>© {new Date().getFullYear()} Mikrom. All rights reserved.</p>
-              <div className="flex flex-wrap gap-4">
-                <Link href="#" className="transition-colors hover:text-foreground">Privacy</Link>
-                <Link href="#" className="transition-colors hover:text-foreground">Terms</Link>
-                <Link href="#" className="transition-colors hover:text-foreground">Security</Link>
-              </div>
-            </div>
-          </div>
-        </footer>
       </SidebarInset>
     </SidebarProvider>
   );

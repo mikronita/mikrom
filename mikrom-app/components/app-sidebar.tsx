@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, ChevronsUpDown, LayoutDashboard, LogOut, Network, Settings, Shield } from "lucide-react";
+import { Boxes, ChevronsUpDown, LayoutDashboard, LogOut, Network, Settings } from "lucide-react";
 import { logout, getToken } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 import { getUserProfile } from "@/lib/api";
@@ -65,12 +65,12 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild className="md:h-12 group-data-[collapsible=icon]:!size-8">
               <Link href="/" className="flex items-center gap-3">
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                  <Shield />
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-sidebar-border bg-background text-sidebar-foreground">
+                  <Boxes />
                 </div>
                 <div className="flex flex-col overflow-hidden group-data-[collapsible=icon]:hidden">
                   <span className="whitespace-nowrap text-sm font-semibold leading-none">Mikrom</span>
-                  <span className="mt-1 text-xs text-muted-foreground">Cloud Platform</span>
+                  <span className="mt-1 text-xs text-muted-foreground">Control plane</span>
                 </div>
               </Link>
             </SidebarMenuButton>
@@ -79,9 +79,7 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>
-            Management
-          </SidebarGroupLabel>
+          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {navigation.map((item) => (
@@ -111,8 +109,8 @@ export function AppSidebar() {
                   size="lg"
                   className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                 >
-                  <Avatar className="size-8 shrink-0 rounded-lg">
-                    <AvatarFallback className="rounded-lg text-xs font-medium">{initials}</AvatarFallback>
+                  <Avatar className="size-8 shrink-0 rounded-md">
+                    <AvatarFallback className="rounded-md text-xs font-medium">{initials}</AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
                     <span className="truncate font-medium">{fullName}</span>
@@ -122,15 +120,15 @@ export function AppSidebar() {
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent
-                className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
+                className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-md"
                 side="bottom"
                 align="end"
                 sideOffset={4}
               >
                 <DropdownMenuLabel className="p-0 font-normal">
                   <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                    <Avatar className="h-8 w-8 rounded-lg">
-                      <AvatarFallback className="rounded-lg">{initials}</AvatarFallback>
+                    <Avatar className="size-8 rounded-md">
+                      <AvatarFallback className="rounded-md">{initials}</AvatarFallback>
                     </Avatar>
                     <div className="grid flex-1 text-left text-sm leading-tight">
                       <span className="truncate font-semibold">{fullName}</span>

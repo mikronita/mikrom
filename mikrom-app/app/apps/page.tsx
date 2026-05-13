@@ -59,7 +59,7 @@ export default function ApplicationsPage() {
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-3">
-                <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                <div className="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
                   <Boxes />
                 </div>
                 <h1 className="text-3xl font-semibold tracking-tight">
@@ -140,9 +140,9 @@ export default function ApplicationsPage() {
                     <Card className="h-full overflow-hidden transition-colors hover:bg-muted/30">
                       <CardHeader>
                         <div className="flex items-start gap-4">
-                          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
-                            <Boxes />
-                          </div>
+                      <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
+                        <Boxes />
+                      </div>
                           <div className="flex min-w-0 flex-1 flex-col gap-2">
                             <div className="flex min-w-0 items-center gap-2">
                               <CardTitle className="truncate text-base">
