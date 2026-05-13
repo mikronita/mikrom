@@ -59,6 +59,7 @@ async fn test_acme_worker_iteration_skips_if_no_domains() {
         "http://invalid-url",
         true,
         "master-key",
+        "http://localhost:80",
     )
     .await;
 
