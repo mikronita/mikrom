@@ -805,11 +805,18 @@ impl FirecrackerManager {
 
         // 5. Additional Volumes
         for vol in &config.volumes {
-            let vol_host_path = self.ensure_volume(&vol.volume_id, vol.size_mib).await?;
+            let vol_host_path = self.ensure_volume(vol).await?;
             let vol_api_path = if let Some(chroot) = chroot_dir {
                 let filename = format!("{}.ext4", vol.volume_id);
                 let c_path = format!("{chroot}/root/{filename}");
-                self.ensure_file_at(&vol_host_path, &c_path).await?;
+
+                if !vol.pool_name.is_empty() {
+                    // It's a block device, we need mknod
+                    self.mknod_at(&vol_host_path, &c_path).await?;
+                } else {
+                    self.ensure_file_at(&vol_host_path, &c_path).await?;
+                }
+
                 self.recursive_chown(
                     &c_path,
                     self.fc_config.jailer_uid,
@@ -821,14 +828,15 @@ impl FirecrackerManager {
                 vol_host_path
             };
 
+            let drive_id = vol.volume_id.replace('-', "_");
             let vol_json = serde_json::json!({
-                "drive_id": vol.volume_id,
+                "drive_id": drive_id,
                 "path_on_host": vol_api_path,
                 "is_root_device": false,
                 "is_read_only": vol.read_only
             })
             .to_string();
-            fc_put(socket, &format!("/drives/{}", vol.volume_id), &vol_json).await?;
+            fc_put(socket, &format!("/drives/{}", drive_id), &vol_json).await?;
         }
 
         // 6. Start Instance
@@ -1056,6 +1064,23 @@ impl FirecrackerManager {
                 tracing::info!(vm_id = %vm_id, chroot_dir = %chroot, "Cleaning up jailer chroot");
                 if let Err(e) = tokio::fs::remove_dir_all(&chroot).await {
                     tracing::error!("Failed to remove chroot directory {}: {}", chroot, e);
+                }
+            }
+
+            // RBD Unmap
+            let volumes = {
+                let vms = self.vms.read().await;
+                vms.get(vm_id)
+                    .map(|vm| vm.config.volumes.clone())
+                    .unwrap_or_default()
+            };
+
+            for vol in volumes {
+                if !vol.pool_name.is_empty() {
+                    let dev_path = format!("/dev/rbd/{}/{}", vol.pool_name, vol.volume_id);
+                    if let Err(e) = crate::ceph::CephRbd::unmap_volume(&dev_path) {
+                        tracing::warn!("Failed to unmap volume {}: {}", dev_path, e);
+                    }
                 }
             }
 
@@ -1309,25 +1334,76 @@ impl FirecrackerManager {
 
     async fn ensure_volume(
         &self,
-        volume_id: &str,
-        size_mib: u64,
+        vol: &crate::firecracker::config::Volume,
     ) -> Result<String, FirecrackerError> {
-        let vol_dir = format!("{}/volumes", self.fc_config.data_dir);
-        tokio::fs::create_dir_all(&vol_dir).await.map_err(|e| {
-            FirecrackerError::ProcessError(format!("Failed to create volumes dir: {e}"))
-        })?;
+        if !vol.pool_name.is_empty() {
+            // Ceph RBD Volume
+            if !crate::ceph::CephRbd::exists(&vol.pool_name, &vol.volume_id) {
+                crate::ceph::CephRbd::create_volume(
+                    &vol.pool_name,
+                    &vol.volume_id,
+                    vol.size_mib as i32,
+                )
+                .map_err(|e| {
+                    FirecrackerError::ProcessError(format!("Failed to create RBD volume: {e}"))
+                })?;
 
-        let vol_path = format!("{vol_dir}/{volume_id}.ext4");
-        if tokio::fs::metadata(&vol_path).await.is_err() {
-            let file = tokio::fs::File::create(&vol_path).await.map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to create volume file: {e}"))
+                // Formatear si es nuevo
+                let dev_path = crate::ceph::CephRbd::map_volume(&vol.pool_name, &vol.volume_id)
+                    .map_err(|e| {
+                        FirecrackerError::ProcessError(format!(
+                            "Failed to map RBD volume for formatting: {e}"
+                        ))
+                    })?;
+
+                let output = std::process::Command::new("mkfs.ext4")
+                    .arg(&dev_path)
+                    .output()
+                    .map_err(|e| {
+                        FirecrackerError::ProcessError(format!("Failed to execute mkfs.ext4: {e}"))
+                    })?;
+
+                if !output.status.success() {
+                    let err = String::from_utf8_lossy(&output.stderr);
+                    let _ = crate::ceph::CephRbd::unmap_volume(&dev_path);
+                    return Err(FirecrackerError::ProcessError(format!(
+                        "mkfs.ext4 failed: {err}"
+                    )));
+                }
+
+                crate::ceph::CephRbd::unmap_volume(&dev_path).map_err(|e| {
+                    FirecrackerError::ProcessError(format!(
+                        "Failed to unmap RBD volume after formatting: {e}"
+                    ))
+                })?;
+            }
+
+            let dev_path = crate::ceph::CephRbd::map_volume(&vol.pool_name, &vol.volume_id)
+                .map_err(|e| {
+                    FirecrackerError::ProcessError(format!("Failed to map RBD volume: {e}"))
+                })?;
+
+            Ok(dev_path)
+        } else {
+            // Local file volume (fallback)
+            let vol_dir = format!("{}/volumes", self.fc_config.data_dir);
+            tokio::fs::create_dir_all(&vol_dir).await.map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to create volumes dir: {e}"))
             })?;
-            file.set_len(size_mib * 1024 * 1024).await.map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to set volume size: {e}"))
-            })?;
+
+            let vol_path = format!("{vol_dir}/{}.ext4", vol.volume_id);
+            if tokio::fs::metadata(&vol_path).await.is_err() {
+                let file = tokio::fs::File::create(&vol_path).await.map_err(|e| {
+                    FirecrackerError::ProcessError(format!("Failed to create volume file: {e}"))
+                })?;
+                file.set_len(vol.size_mib * 1024 * 1024)
+                    .await
+                    .map_err(|e| {
+                        FirecrackerError::ProcessError(format!("Failed to set volume size: {e}"))
+                    })?;
+            }
+            Ok(vol_path)
         }
-
-        Ok(vol_path)
     }
 
     async fn set_failed(&self, vm_id: &VmId, msg: String) {
@@ -1824,6 +1900,61 @@ impl FirecrackerManager {
         if magic != [0x7f, b'E', b'L', b'F'] {
             return Err(FirecrackerError::ProcessError(format!(
                 "Invalid kernel image at {kernel_path}: expected an uncompressed ELF Linux kernel, but the file does not start with ELF magic"
+            )));
+        }
+
+        Ok(())
+    }
+
+    async fn mknod_at(&self, dev_path: &str, dst: &str) -> Result<(), FirecrackerError> {
+        tracing::info!("Creating block device node: {} -> {}", dev_path, dst);
+
+        // 1. Get major/minor
+        let output = std::process::Command::new("stat")
+            .arg("-c")
+            .arg("%t %T")
+            .arg(dev_path)
+            .output()
+            .map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to stat device {dev_path}: {e}"))
+            })?;
+
+        if !output.status.success() {
+            return Err(FirecrackerError::ProcessError(format!(
+                "stat failed for {dev_path}"
+            )));
+        }
+
+        let hex_ids = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let parts: Vec<&str> = hex_ids.split_whitespace().collect();
+        if parts.len() != 2 {
+            return Err(FirecrackerError::ProcessError(format!(
+                "Invalid stat output: {hex_ids}"
+            )));
+        }
+
+        let major = u32::from_str_radix(parts[0], 16)
+            .map_err(|e| FirecrackerError::ProcessError(format!("Invalid major hex: {e}")))?;
+        let minor = u32::from_str_radix(parts[1], 16)
+            .map_err(|e| FirecrackerError::ProcessError(format!("Invalid minor hex: {e}")))?;
+
+        // 2. Run mknod
+        let output = std::process::Command::new("mknod")
+            .arg(dst)
+            .arg("b")
+            .arg(major.to_string())
+            .arg(minor.to_string())
+            .output()
+            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to run mknod: {e}")))?;
+
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            if err.contains("File exists") {
+                // Already exists, ignore
+                return Ok(());
+            }
+            return Err(FirecrackerError::ProcessError(format!(
+                "mknod failed: {err}"
             )));
         }
 

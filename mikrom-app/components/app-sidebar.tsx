@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, ChevronsUpDown, LayoutDashboard, LogOut, Network, Settings } from "lucide-react";
+import { Boxes, ChevronsUpDown, HardDrive, LayoutDashboard, LogOut, Network, Settings } from "lucide-react";
 import { logout, getToken } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 import { getUserProfile } from "@/lib/api";
@@ -55,6 +55,7 @@ export function AppSidebar() {
     { name: "Dashboard", href: "/", icon: LayoutDashboard, active: pathname === "/" },
     { name: "Applications", href: "/apps", icon: Boxes, active: pathname.startsWith("/apps") },
     { name: "Networking", href: "/networking", icon: Network, active: pathname.startsWith("/networking") },
+    { name: "Storage", href: "/storage", icon: HardDrive, active: pathname.startsWith("/storage") },
     { name: "Settings", href: "/settings", icon: Settings, active: pathname === "/settings" },
   ];
 

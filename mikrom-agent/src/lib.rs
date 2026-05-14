@@ -1,4 +1,5 @@
 pub mod builder;
+pub mod ceph;
 pub mod config;
 pub mod ebpf;
 pub mod firecracker;

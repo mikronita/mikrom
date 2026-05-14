@@ -27,6 +27,9 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),

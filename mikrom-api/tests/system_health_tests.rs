@@ -23,6 +23,9 @@ async fn test_health_endpoint_structure() {
     let state = AppState {
         user_repo: Arc::new(mock_repo),
         app_repo,
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         scheduler: Arc::new(scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://127.0.0.1:8080".to_string(),
@@ -84,6 +87,9 @@ async fn test_health_stream_endpoint() {
     let state = AppState {
         user_repo: Arc::new(mock_repo),
         app_repo,
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         scheduler: Arc::new(scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://127.0.0.1:8080".to_string(),

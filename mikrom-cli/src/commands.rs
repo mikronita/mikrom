@@ -20,9 +20,49 @@ pub enum Commands {
     /// CLI Configuration
     #[command(subcommand)]
     Config(ConfigCommands),
+    /// Persistent Storage Management
+    #[command(subcommand)]
+    Volume(VolumeCommands),
     /// System Status
     #[command(subcommand)]
     System(SystemCommands),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum VolumeCommands {
+    /// List all volumes for an application
+    List {
+        #[arg(long, short, help = "Name of the application")]
+        app: String,
+    },
+    /// Create a new persistent volume for an application
+    Create {
+        #[arg(long, short, help = "Name of the application")]
+        app: String,
+        #[arg(long, short, help = "Display name for the volume")]
+        name: String,
+        #[arg(long, short, help = "Size in MiB")]
+        size: i32,
+    },
+    /// Create a snapshot of a volume
+    Snapshot {
+        #[arg(long, short, help = "Volume ID")]
+        volume_id: String,
+        #[arg(long, short, help = "Snapshot name")]
+        name: String,
+    },
+    /// Restore a volume to a specific snapshot
+    Restore {
+        #[arg(long, short, help = "Volume ID")]
+        volume_id: String,
+        #[arg(long, short, help = "Snapshot name to restore")]
+        snapshot: String,
+    },
+    /// Delete a volume
+    Delete {
+        #[arg(long, short, help = "Volume ID")]
+        volume_id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

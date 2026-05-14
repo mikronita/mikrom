@@ -86,6 +86,24 @@ pub struct WhoamiResponse {
     pub created_at: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Volume {
+    pub id: String,
+    pub app_id: String,
+    pub name: String,
+    pub size_mib: i32,
+    pub pool_name: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct VolumeSnapshot {
+    pub id: String,
+    pub volume_id: String,
+    pub name: String,
+    pub created_at: String,
+}
+
 #[derive(Deserialize)]
 struct ErrorResponse {
     error: String,
@@ -184,8 +202,90 @@ impl MikromClient {
         bail!("{} (HTTP {})", err_body.error, status);
     }
 
+    pub async fn list_volumes(&self, app_id: &str) -> anyhow::Result<Vec<Volume>> {
+        self.request(
+            reqwest::Method::GET,
+            &format!("apps/{}/volumes", app_id),
+            None::<()>,
+        )
+        .await
+    }
+
+    pub async fn create_volume(
+        &self,
+        app_id: &str,
+        name: &str,
+        size_mib: i32,
+    ) -> anyhow::Result<Volume> {
+        let body = serde_json::json!({
+            "name": name,
+            "size_mib": size_mib
+        });
+        self.request(
+            reqwest::Method::POST,
+            &format!("apps/{}/volumes", app_id),
+            Some(body),
+        )
+        .await
+    }
+
+    pub async fn create_volume_snapshot(
+        &self,
+        volume_id: &str,
+        name: &str,
+    ) -> anyhow::Result<VolumeSnapshot> {
+        let body = serde_json::json!({
+            "name": name
+        });
+        self.request(
+            reqwest::Method::POST,
+            &format!("volumes/{}/snapshots", volume_id),
+            Some(body),
+        )
+        .await
+    }
+
+    pub async fn restore_volume_snapshot(
+        &self,
+        volume_id: &str,
+        snapshot_name: &str,
+    ) -> anyhow::Result<()> {
+        let body = serde_json::json!({
+            "snapshot_name": snapshot_name
+        });
+        self.request_no_content_with_timeout(
+            reqwest::Method::POST,
+            &format!("volumes/{}/restore", volume_id),
+            Some(body),
+            std::time::Duration::from_secs(60),
+        )
+        .await
+    }
+
+    pub async fn delete_volume(&self, volume_id: &str) -> anyhow::Result<()> {
+        let url = format!(
+            "{}/v1/volumes/{}",
+            self.base_url.trim_end_matches('/'),
+            volume_id
+        );
+        let mut builder = self.http.request(reqwest::Method::DELETE, url);
+        if let Some(token) = &self.token {
+            builder = builder.bearer_auth(token);
+        }
+        let resp = builder.send().await?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status().as_u16();
+            let err_body: ErrorResponse = resp.json().await.map_err(|e| {
+                anyhow::anyhow!("Failed to parse error response (HTTP {}): {}", status, e)
+            })?;
+            bail!("{} (HTTP {})", err_body.error, status);
+        }
+    }
+
     pub async fn health(&self) -> anyhow::Result<HealthResponse> {
-        self.request(reqwest::Method::GET, "/health", None::<()>)
+        self.request(reqwest::Method::GET, "health", None::<()>)
             .await
     }
 

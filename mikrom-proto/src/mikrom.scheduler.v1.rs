@@ -45,6 +45,114 @@ pub struct Peer {
     pub wireguard_port: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CloneVolumeRequest {
+    #[prost(string, tag = "1")]
+    pub source_volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub snapshot_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub target_volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub pool_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub host_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CloneVolumeResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RestoreSnapshotRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub snapshot_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub pool_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub host_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RestoreSnapshotResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateVolumeRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "2")]
+    pub size_mib: u32,
+    #[prost(string, tag = "3")]
+    pub pool_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub host_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateVolumeResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteVolumeRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub pool_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub host_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteVolumeResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateSnapshotRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub snapshot_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub pool_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub host_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateSnapshotResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteSnapshotRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub snapshot_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub pool_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub host_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteSnapshotResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CheckHealthRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
@@ -280,6 +388,8 @@ pub struct Volume {
     pub size_mib: u64,
     #[prost(bool, tag = "3")]
     pub read_only: bool,
+    #[prost(string, tag = "4")]
+    pub pool_name: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppConfig {

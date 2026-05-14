@@ -230,6 +230,9 @@ async fn test_promotion_back_and_forth() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
@@ -406,6 +409,9 @@ async fn test_promotion_pauses_previous_active() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
@@ -614,6 +620,9 @@ async fn test_activate_stopped_deployment_resumes_it() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
@@ -741,12 +750,19 @@ async fn test_delete_app_cleans_up_resources() {
         .times(1)
         .returning(|_| Ok(()));
 
+    let mut mock_volume_repo =
+        mikrom_api::repositories::volume_repository::MockVolumeRepository::new();
+    mock_volume_repo
+        .expect_list_volumes_by_app()
+        .returning(|_| Ok(vec![]));
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(mock_volume_repo),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),

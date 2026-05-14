@@ -154,3 +154,8 @@ required-features = ["test-utils"]
 name = "rate_limit_tests"
 path = "tests/rate_limit_tests.rs"
 required-features = ["test-utils"]
+
+[[test]]
+name = "volume_api_tests"
+path = "tests/volume_api_tests.rs"
+required-features = ["test-utils"]

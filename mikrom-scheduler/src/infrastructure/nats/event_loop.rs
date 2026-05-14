@@ -72,6 +72,27 @@ impl NatsEventLoop {
                 "schedulers".to_string(),
             )
             .await?;
+        let mut create_volume_sub = client
+            .queue_subscribe("mikrom.scheduler.create_volume", "schedulers".to_string())
+            .await?;
+        let mut snapshot_sub = client
+            .queue_subscribe("mikrom.scheduler.create_snapshot", "schedulers".to_string())
+            .await?;
+        let mut delete_volume_sub = client
+            .queue_subscribe("mikrom.scheduler.delete_volume", "schedulers".to_string())
+            .await?;
+        let mut delete_snapshot_sub = client
+            .queue_subscribe("mikrom.scheduler.delete_snapshot", "schedulers".to_string())
+            .await?;
+        let mut restore_snapshot_sub = client
+            .queue_subscribe(
+                "mikrom.scheduler.restore_snapshot",
+                "schedulers".to_string(),
+            )
+            .await?;
+        let mut clone_volume_sub = client
+            .queue_subscribe("mikrom.scheduler.clone_volume", "schedulers".to_string())
+            .await?;
 
         tracing::info!("NATS Event Loop started, listening for messages...");
 
@@ -95,6 +116,13 @@ impl NatsEventLoop {
                 Some(msg) = delete_all_sub.next() => self.handle_delete_all(msg).await,
                 Some(msg) = health_sub.next() => self.handle_check_health(msg).await,
                 Some(msg) = security_sub.next() => self.handle_update_security_groups(msg).await,
+                Some(msg) = create_volume_sub.next() => self.handle_create_volume(msg).await,
+                Some(msg) = snapshot_sub.next() => self.handle_create_snapshot(msg).await,
+
+                Some(msg) = delete_volume_sub.next() => self.handle_delete_volume(msg).await,
+                Some(msg) = delete_snapshot_sub.next() => self.handle_delete_snapshot(msg).await,
+                Some(msg) = restore_snapshot_sub.next() => self.handle_restore_snapshot(msg).await,
+                Some(msg) = clone_volume_sub.next() => self.handle_clone_volume(msg).await,
             }
         }
     }
@@ -678,6 +706,192 @@ impl NatsEventLoop {
                     let mut buf = Vec::new();
                     if response.encode(&mut buf).is_ok() {
                         let _ = client.publish(reply, buf.into()).await;
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_create_volume(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::CreateVolumeRequest;
+            if let Ok(req) = CreateVolumeRequest::decode(&message.payload[..]) {
+                tracing::info!(volume_id = %req.volume_id, "Received scheduler create-volume request");
+                let result = server.create_volume(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::CreateVolumeResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_create_snapshot(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::CreateSnapshotRequest;
+            if let Ok(req) = CreateSnapshotRequest::decode(&message.payload[..]) {
+                tracing::info!(volume_id = %req.volume_id, snapshot_name = %req.snapshot_name, "Received scheduler create-snapshot request");
+                let result = server.create_snapshot(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::CreateSnapshotResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_delete_volume(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::DeleteVolumeRequest;
+            if let Ok(req) = DeleteVolumeRequest::decode(&message.payload[..]) {
+                tracing::info!(volume_id = %req.volume_id, "Received scheduler delete-volume request");
+                let result = server.delete_volume(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::DeleteVolumeResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_delete_snapshot(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::DeleteSnapshotRequest;
+            if let Ok(req) = DeleteSnapshotRequest::decode(&message.payload[..]) {
+                tracing::info!(volume_id = %req.volume_id, snapshot_name = %req.snapshot_name, "Received scheduler delete-snapshot request");
+                let result = server.delete_snapshot(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::DeleteSnapshotResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_restore_snapshot(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::RestoreSnapshotRequest;
+            if let Ok(req) = RestoreSnapshotRequest::decode(&message.payload[..]) {
+                tracing::info!(volume_id = %req.volume_id, snapshot_name = %req.snapshot_name, "Received scheduler restore-snapshot request");
+                let result = server.restore_snapshot(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::RestoreSnapshotResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_clone_volume(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::CloneVolumeRequest;
+            if let Ok(req) = CloneVolumeRequest::decode(&message.payload[..]) {
+                tracing::info!(source_volume_id = %req.source_volume_id, target_volume_id = %req.target_volume_id, "Received scheduler clone-volume request");
+                let result = server.clone_volume(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::CloneVolumeResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
                     }
                 }
             }

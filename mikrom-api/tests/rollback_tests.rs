@@ -121,6 +121,9 @@ async fn test_activate_deployment_endpoint() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
@@ -211,6 +214,9 @@ async fn test_activate_deployment_wrong_owner() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
@@ -331,6 +337,9 @@ async fn test_activate_deployment_not_running() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),

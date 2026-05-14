@@ -39,6 +39,7 @@ pub use error::{ApiError, ApiResult};
 pub use repositories::app_repository::AppRepository;
 pub use repositories::github_repository::GithubRepository;
 pub use repositories::user_repository::UserRepository;
+pub use repositories::volume_repository::VolumeRepository;
 pub use scheduler::Scheduler;
 pub use vms::{
     create_security_rule_handler, delete_deployment_record, delete_security_rule_handler,
@@ -47,7 +48,7 @@ pub use vms::{
     stop_deployment, watch_deployments,
 };
 
-use mikrom_proto::router::{RouterConfigAck, RouterConfigUpdate};
+use mikrom_proto::router::RouterConfigUpdate;
 
 use auth::{get_profile, login, register, update_profile};
 use github::handlers::{github_callback, github_install, list_repos};
@@ -60,6 +61,7 @@ pub struct AppState {
     pub user_repo: Arc<dyn UserRepository>,
     pub app_repo: Arc<dyn AppRepository>,
     pub github_repo: Arc<dyn GithubRepository>,
+    pub volume_repo: Arc<dyn VolumeRepository>,
     pub scheduler: Arc<dyn Scheduler>,
     pub nats: crate::nats::TypedNatsClient,
     pub router_addr: String,
@@ -168,47 +170,14 @@ impl AppState {
             timestamp: chrono::Utc::now().timestamp(),
         };
 
-        let mut last_error: Option<anyhow::Error> = None;
-
-        for attempt in 1..=3 {
-            match self
-                .nats
-                .with_timeout(std::time::Duration::from_secs(15))
-                .request::<_, RouterConfigAck>(
-                    mikrom_proto::subjects::ROUTER_CONFIG_UPDATED,
-                    config.clone(),
-                )
-                .await
-            {
-                Ok(ack) if ack.success => return Ok(()),
-                Ok(ack) => {
-                    let message = if ack.message.is_empty() {
-                        "router rejected route removal".to_string()
-                    } else {
-                        ack.message
-                    };
-                    last_error = Some(anyhow::anyhow!(message));
-                },
-                Err(e) => {
-                    last_error = Some(e);
-                },
-            }
-
-            if attempt < 3 {
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-        }
-
-        tracing::warn!(
-            hostname = %hostname,
-            error = ?last_error,
-            "Router route removal did not complete via request/reply; falling back to fire-and-forget publish"
-        );
-
+        // We use publish (fire-and-forget) for route removal because:
+        // 1. App deletion should be fast.
+        // 2. The router is eventually consistent and will sync state from DB on restart.
+        // 3. Waiting for a router ACK often causes timeouts if the router is busy.
         self.nats
             .publish(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
             .await
-            .map_err(|e| anyhow::anyhow!("failed to publish route removal fallback: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("failed to publish route removal: {}", e))?;
 
         Ok(())
     }
@@ -336,7 +305,33 @@ pub fn create_app_with_rate_limits(
         .route("/networking/mesh", get(get_mesh_status_handler))
         .route("/networking/mesh/stream", get(mesh_status_stream_handler))
         .route("/deployments/active", get(list_active_deployments))
-        .route("/deployments/events", get(watch_deployments));
+        .route("/deployments/events", get(watch_deployments))
+        .route(
+            "/apps/:app_id/volumes",
+            axum::routing::post(crate::vms::volumes::create_volume_handler)
+                .get(crate::vms::volumes::list_volumes_handler),
+        )
+        .route(
+            "/volumes/:volume_id/snapshots",
+            axum::routing::post(crate::vms::volumes::create_snapshot_handler)
+                .get(crate::vms::volumes::list_snapshots_handler),
+        )
+        .route(
+            "/volumes/:volume_id/restore",
+            axum::routing::post(crate::vms::volumes::restore_snapshot_handler),
+        )
+        .route(
+            "/volumes/:volume_id/clone",
+            axum::routing::post(crate::vms::volumes::clone_volume_handler),
+        )
+        .route(
+            "/volumes/:volume_id",
+            axum::routing::delete(crate::vms::volumes::delete_volume_handler),
+        )
+        .route(
+            "/snapshots/:snapshot_id",
+            axum::routing::delete(crate::vms::volumes::delete_snapshot_handler),
+        );
 
     let protected_routes = protected_routes.route_layer(middleware::from_fn_with_state(
         rate_limiter,

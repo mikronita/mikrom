@@ -37,7 +37,49 @@ message AgentCommand {
     ResumeVmRequest resume_vm = 4;
     DeleteVmRequest delete_vm = 5;
     UpdateFirewallRequest update_firewall = 6;
+    CreateSnapshotRequest create_snapshot = 7;
+    DeleteVolumeRequest delete_volume = 8;
+    DeleteSnapshotRequest delete_snapshot = 9;
+    CreateVolumeRequest create_volume = 10;
+    RestoreSnapshotRequest restore_snapshot = 11;
+    CloneVolumeRequest clone_volume = 12;
   }
+}
+
+message CloneVolumeRequest {
+  string source_volume_id = 1;
+  string snapshot_name = 2;
+  string target_volume_id = 3;
+  string pool_name = 4;
+}
+
+message RestoreSnapshotRequest {
+  string volume_id = 1;
+  string snapshot_name = 2;
+  string pool_name = 3;
+}
+
+message CreateVolumeRequest {
+  string volume_id = 1;
+  uint32 size_mib = 2;
+  string pool_name = 3;
+}
+
+message DeleteSnapshotRequest {
+  string volume_id = 1;
+  string snapshot_name = 2;
+  string pool_name = 3;
+}
+
+message CreateSnapshotRequest {
+  string volume_id = 1;
+  string snapshot_name = 2;
+  string pool_name = 3;
+}
+
+message DeleteVolumeRequest {
+  string volume_id = 1;
+  string pool_name = 2;
 }
 
 message FirewallRule {
@@ -178,6 +220,7 @@ message Volume {
   string volume_id = 1;
   uint64 size_mib = 2;
   bool read_only = 3;
+  string pool_name = 4;
 }
 
 message VmConfig {

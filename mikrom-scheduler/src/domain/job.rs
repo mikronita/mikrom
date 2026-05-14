@@ -33,6 +33,7 @@ pub struct Volume {
     pub volume_id: String,
     pub size_mib: u64,
     pub read_only: bool,
+    pub pool_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

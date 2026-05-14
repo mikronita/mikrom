@@ -1,20 +1,32 @@
 .DEFAULT_GOAL := help
 
+# ── Environment ───────────────────────────────────────────────────────────────
+
+CEPH_LIB_DIR := $(shell pwd)/target/ceph-libs
+CEPH_ENV := LIBRARY_PATH="$(CEPH_LIB_DIR)" RUSTFLAGS="-L $(CEPH_LIB_DIR)"
+
 # ── Rust workspace ────────────────────────────────────────────────────────────
 
+.PHONY: ceph-libs
+ceph-libs:
+	@mkdir -p $(CEPH_LIB_DIR)
+	@ln -sf /usr/lib/x86_64-linux-gnu/librados.so.2 $(CEPH_LIB_DIR)/librados.so 2>/dev/null || true
+	@ln -sf /usr/lib/x86_64-linux-gnu/librbd.so.1 $(CEPH_LIB_DIR)/librbd.so 2>/dev/null || true
+
 .PHONY: build
-build: ## Build all Rust crates (release)
-	cargo build --release
+build: ceph-libs ## Build all Rust crates (release)
+	$(CEPH_ENV) cargo build --release
 
 .PHONY: build-dev
-build-dev: ## Build all Rust crates (debug)
-	cargo build
+build-dev: ceph-libs ## Build all Rust crates (debug)
+	$(CEPH_ENV) cargo build
 
 .PHONY: deb-agent
-deb-agent: build-init ## Build Debian package for mikrom-agent
+deb-agent: build-init ceph-libs ## Build Debian package for mikrom-agent
 	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
-	cargo build --release -p mikrom-agent
-	cd mikrom-agent && cargo deb --no-build
+	$(CEPH_ENV) cargo build --release -p mikrom-agent
+	cd mikrom-agent && $(CEPH_ENV) cargo deb --no-build
+	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: deb-router
 deb-router: ## Build Debian package for mikrom-router (Rust/Pingora)
@@ -65,16 +77,16 @@ test-integration: ## Run integration tests (starts PostgreSQL via Docker)
 	TEST_NATS_URL=nats://localhost:4223 cargo nextest run --test integration -p mikrom-api --features test-utils
 
 .PHONY: test-all-crates
-test-all-crates: ## Run unit tests for all crates
+test-all-crates: ceph-libs ## Run unit tests for all crates
 	$(call check_nextest)
-	cargo nextest run -p mikrom-proto && \
-	cargo nextest run -p mikrom-scheduler && \
-	cargo nextest run -p mikrom-agent && \
-	cargo nextest run -p mikrom-builder && \
-	cargo nextest run -p mikrom-api --features test-utils && \
-	cargo nextest run -p mikrom-init && \
-	cargo nextest run -p mikrom-telemetry && \
-	cargo nextest run -p mikrom-router
+	$(CEPH_ENV) cargo nextest run -p mikrom-proto && \
+	$(CEPH_ENV) cargo nextest run -p mikrom-scheduler && \
+	$(CEPH_ENV) cargo nextest run -p mikrom-agent && \
+	$(CEPH_ENV) cargo nextest run -p mikrom-builder && \
+	$(CEPH_ENV) cargo nextest run -p mikrom-api --features test-utils && \
+	$(CEPH_ENV) cargo nextest run -p mikrom-init && \
+	$(CEPH_ENV) cargo nextest run -p mikrom-telemetry && \
+	$(CEPH_ENV) cargo nextest run -p mikrom-router
 
 .PHONY: test-all
 test-all: test-all-crates test-integration ## Run unit + integration tests
@@ -95,8 +107,8 @@ run-scheduler: ## Run mikrom-scheduler with watch
 	cd mikrom-scheduler && cargo watch -x run
 
 .PHONY: run-agent
-run-agent: ## Run mikrom-agent with watch (port 5003)
-	cd mikrom-agent && cargo watch -x run
+run-agent: ceph-libs ## Run mikrom-agent with watch (port 5003)
+	cd mikrom-agent && LIBRARY_PATH="$(shell pwd)/target/ceph-libs" RUSTFLAGS="-L $(shell pwd)/target/ceph-libs" cargo watch -x run
 
 .PHONY: run-builder
 run-builder: ## Run mikrom-builder with watch

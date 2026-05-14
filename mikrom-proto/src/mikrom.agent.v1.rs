@@ -13,7 +13,10 @@ pub struct CheckHealthResponse {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AgentCommand {
-    #[prost(oneof = "agent_command::Command", tags = "1, 2, 3, 4, 5, 6")]
+    #[prost(
+        oneof = "agent_command::Command",
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12"
+    )]
     pub command: ::core::option::Option<agent_command::Command>,
 }
 /// Nested message and enum types in `AgentCommand`.
@@ -32,7 +35,73 @@ pub mod agent_command {
         DeleteVm(super::DeleteVmRequest),
         #[prost(message, tag = "6")]
         UpdateFirewall(super::UpdateFirewallRequest),
+        #[prost(message, tag = "7")]
+        CreateSnapshot(super::CreateSnapshotRequest),
+        #[prost(message, tag = "8")]
+        DeleteVolume(super::DeleteVolumeRequest),
+        #[prost(message, tag = "9")]
+        DeleteSnapshot(super::DeleteSnapshotRequest),
+        #[prost(message, tag = "10")]
+        CreateVolume(super::CreateVolumeRequest),
+        #[prost(message, tag = "11")]
+        RestoreSnapshot(super::RestoreSnapshotRequest),
+        #[prost(message, tag = "12")]
+        CloneVolume(super::CloneVolumeRequest),
     }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CloneVolumeRequest {
+    #[prost(string, tag = "1")]
+    pub source_volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub snapshot_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub target_volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub pool_name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RestoreSnapshotRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub snapshot_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub pool_name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateVolumeRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "2")]
+    pub size_mib: u32,
+    #[prost(string, tag = "3")]
+    pub pool_name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteSnapshotRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub snapshot_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub pool_name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateSnapshotRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub snapshot_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub pool_name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteVolumeRequest {
+    #[prost(string, tag = "1")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub pool_name: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct FirewallRule {
@@ -236,6 +305,8 @@ pub struct Volume {
     pub size_mib: u64,
     #[prost(bool, tag = "3")]
     pub read_only: bool,
+    #[prost(string, tag = "4")]
+    pub pool_name: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct VmConfig {

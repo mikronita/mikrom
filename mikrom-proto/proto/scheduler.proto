@@ -50,6 +50,86 @@ service SchedulerService {
   rpc WatchApps(WatchAppsRequest) returns (stream WatchAppsResponse);
   rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse);
   rpc UpdateSecurityGroups(UpdateSecurityGroupsRequest) returns (UpdateSecurityGroupsResponse);
+  
+  // Storage operations
+  rpc CreateVolume(CreateVolumeRequest) returns (CreateVolumeResponse);
+  rpc DeleteVolume(DeleteVolumeRequest) returns (DeleteVolumeResponse);
+  rpc CreateSnapshot(CreateSnapshotRequest) returns (CreateSnapshotResponse);
+  rpc DeleteSnapshot(DeleteSnapshotRequest) returns (DeleteSnapshotResponse);
+  rpc RestoreSnapshot(RestoreSnapshotRequest) returns (RestoreSnapshotResponse);
+  rpc CloneVolume(CloneVolumeRequest) returns (CloneVolumeResponse);
+}
+
+message CloneVolumeRequest {
+  string source_volume_id = 1;
+  string snapshot_name = 2;
+  string target_volume_id = 3;
+  string pool_name = 4;
+  string host_id = 5;
+}
+
+message CloneVolumeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message RestoreSnapshotRequest {
+  string volume_id = 1;
+  string snapshot_name = 2;
+  string pool_name = 3;
+  string host_id = 4;
+}
+
+message RestoreSnapshotResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message CreateVolumeRequest {
+  string volume_id = 1;
+  uint32 size_mib = 2;
+  string pool_name = 3;
+  string host_id = 4;
+}
+
+message CreateVolumeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DeleteVolumeRequest {
+  string volume_id = 1;
+  string pool_name = 2;
+  string host_id = 3;
+}
+
+message DeleteVolumeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message CreateSnapshotRequest {
+  string volume_id = 1;
+  string snapshot_name = 2;
+  string pool_name = 3;
+  string host_id = 4;
+}
+
+message CreateSnapshotResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DeleteSnapshotRequest {
+  string volume_id = 1;
+  string snapshot_name = 2;
+  string pool_name = 3;
+  string host_id = 4;
+}
+
+message DeleteSnapshotResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message CheckHealthRequest {
@@ -105,8 +185,6 @@ message WorkerInfo {
   string wireguard_pubkey = 7;
   string advertise_address = 8;
 }
-
-// ... other messages ...
 
 message PauseRequest {
   string job_id = 1;
@@ -224,6 +302,7 @@ message Volume {
   string volume_id = 1;
   uint64 size_mib = 2;
   bool read_only = 3;
+  string pool_name = 4;
 }
 
 message AppConfig {

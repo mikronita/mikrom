@@ -109,6 +109,48 @@ pub trait AgentClient: Send + Sync {
         vm_id: &str,
         rules: Vec<mikrom_proto::scheduler::FirewallRule>,
     ) -> DomainResult<()>;
+    async fn create_volume(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        size_mib: u32,
+        pool_name: &str,
+    ) -> DomainResult<()>;
+    async fn create_snapshot(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        snapshot_name: &str,
+        pool_name: &str,
+    ) -> DomainResult<()>;
+    async fn delete_volume(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        pool_name: &str,
+    ) -> DomainResult<()>;
+    async fn delete_snapshot(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        snapshot_name: &str,
+        pool_name: &str,
+    ) -> DomainResult<()>;
+    async fn restore_snapshot(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        snapshot_name: &str,
+        pool_name: &str,
+    ) -> DomainResult<()>;
+    async fn clone_volume(
+        &self,
+        host_id: &str,
+        source_volume_id: &str,
+        snapshot_name: &str,
+        target_volume_id: &str,
+        pool_name: &str,
+    ) -> DomainResult<()>;
 }
 
 #[mockall::automock]

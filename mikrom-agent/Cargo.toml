@@ -34,6 +34,9 @@ hex = "0.4.3"
 rand = "0.8"
 rand_core = "0.6"
 base64 = "0.22.1"
+librados-sys = "0.1"
+librbd-sys = "0.1"
+libc = "0.2"
 
 [package.metadata.deb]
 maintainer = "Antonio Pardo <apardo@spluca.org>"

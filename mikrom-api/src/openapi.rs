@@ -43,7 +43,19 @@ use utoipa::{
         github_webhook_handler_generic,
         app_logs_stream_handler,
         app_metrics_stream_handler,
-        crate::vms::mesh_status_stream_handler
+        crate::vms::mesh_status_stream_handler,
+        crate::vms::get_mesh_status_handler,
+        crate::vms::list_security_rules_handler,
+        crate::vms::create_security_rule_handler,
+        crate::vms::delete_security_rule_handler,
+        crate::vms::volumes::create_volume_handler,
+        crate::vms::volumes::list_volumes_handler,
+        crate::vms::volumes::delete_volume_handler,
+        crate::vms::volumes::create_snapshot_handler,
+        crate::vms::volumes::list_snapshots_handler,
+        crate::vms::volumes::delete_snapshot_handler,
+        crate::vms::volumes::restore_snapshot_handler,
+        crate::vms::volumes::clone_volume_handler
     ),
     components(
         schemas(
@@ -62,7 +74,16 @@ use utoipa::{
             crate::repositories::user_repository::UserRole,
             crate::github::GithubRepo,
             crate::models::github::UserGithubAccount,
-            ErrorResponse
+            ErrorResponse,
+            crate::models::volume::Volume,
+            crate::models::volume::VolumeSnapshot,
+            crate::vms::volumes::CreateVolumeRequest,
+            crate::vms::volumes::CreateSnapshotRequest,
+            crate::vms::volumes::RestoreSnapshotRequest,
+            crate::vms::volumes::CloneVolumeRequest,
+            crate::vms::MeshStatus,
+            crate::models::app::SecurityRule,
+            crate::vms::CreateSecurityRuleRequest
         )
     ),
     modifiers(&SecurityAddon),
