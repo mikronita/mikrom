@@ -317,160 +317,160 @@ impl BackgroundService for ControlPlane {
                         let tx = tx.clone();
                         let master_key = self.master_key.clone();
 
-                        tokio::spawn(async move {
-                            match msg.subject.as_ref() {
-                                subjects::ROUTER_CONFIG_UPDATED => {
-                                    match RouterConfigUpdate::decode(&msg.payload[..]) {
-                                        Ok(update) => {
-                                            info!("Control Plane: Received route update for {}", update.hostname);
-                                            let response = if let Some(target_url) = update.target_url {
-                                                match sqlx::query(
-                                                    "INSERT INTO routes (hostname, target_url) VALUES ($1, $2)
-                                                     ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = NOW()",
-                                                )
-                                                .bind(&update.hostname)
-                                                .bind(&target_url)
-                                                .execute(&db)
-                                                .await
-                                                {
-                                                    Ok(_) => {
-                                                        let _ = tx.try_send(());
-                                                        RouterConfigAck {
-                                                            success: true,
-                                                            message: String::new(),
-                                                        }
-                                                    },
-                                                    Err(e) => {
-                                                        error!(
-                                                            "Control Plane: Failed to persist route update for {}: {}",
-                                                            update.hostname,
-                                                            e
-                                                        );
-                                                        RouterConfigAck {
-                                                            success: false,
-                                                            message: e.to_string(),
-                                                        }
-                                                    },
-                                                }
-                                            } else {
-                                                match sqlx::query("DELETE FROM routes WHERE hostname = $1")
-                                                    .bind(&update.hostname)
-                                                    .execute(&db)
-                                                    .await
-                                                {
-                                                    Ok(_) => {
-                                                        let _ = tx.try_send(());
-                                                        RouterConfigAck {
-                                                            success: true,
-                                                            message: String::new(),
-                                                        }
-                                                    },
-                                                    Err(e) => {
-                                                        error!(
-                                                            "Control Plane: Failed to delete route {}: {}",
-                                                            update.hostname,
-                                                            e
-                                                        );
-                                                        RouterConfigAck {
-                                                            success: false,
-                                                            message: e.to_string(),
-                                                        }
-                                                    },
-                                                }
-                                            };
-
-                                            if let Some(reply) = msg.reply {
-                                                let mut buf = Vec::new();
-                                                if response.encode(&mut buf).is_ok() {
-                                                    let _ = nats.publish(reply, buf.into()).await;
-                                                }
-                                            }
-                                        },
-                                        Err(e) => error!("Control Plane: Failed to decode RouterConfigUpdate: {}", e),
-                                    }
-                                }
-                                subjects::ROUTER_TLS_CERT_UPDATED => {
-                                    match TlsCertificateUpdate::decode(&msg.payload[..]) {
-                                        Ok(update) => {
-                                            info!("Control Plane: Received TLS certificate update for {}", update.hostname);
-
-                                            // FAST-PATH: Decrypt and update state immediately
-                                            match crate::crypto::decrypt(&update.private_key, &master_key) {
-                                                Ok(key_pem) => {
-                                                    if let Err(e) = state_manager.add_certificate(
-                                                        update.hostname.clone(),
-                                                        update.cert_chain.clone(),
-                                                        key_pem
-                                                    ).await {
-                                                        error!("Control Plane: Fast-path certificate update failed for {}: {}", update.hostname, e);
-                                                    } else {
-                                                        info!("Control Plane: Successfully applied fast-path certificate for {}", update.hostname);
-                                                    }
-                                                },
-                                                Err(e) => error!("Control Plane: Failed to decrypt received certificate for {}: {}", update.hostname, e),
-                                            }
-
+                        match msg.subject.as_ref() {
+                            subjects::ROUTER_CONFIG_UPDATED => {
+                                match RouterConfigUpdate::decode(&msg.payload[..]) {
+                                    Ok(update) => {
+                                        info!("Control Plane: Received route update for {}", update.hostname);
+                                        let response = if let Some(target_url) = update.target_url {
                                             match sqlx::query(
-                                                "INSERT INTO tls_certificates (hostname, cert_chain, private_key, expires_at)
-                                                 VALUES ($1, $2, $3, TO_TIMESTAMP($4))
-                                                 ON CONFLICT (hostname) DO UPDATE SET cert_chain = EXCLUDED.cert_chain, private_key = EXCLUDED.private_key, expires_at = EXCLUDED.expires_at, updated_at = NOW()"
+                                                "INSERT INTO routes (hostname, target_url) VALUES ($1, $2)
+                                                 ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = NOW()",
                                             )
                                             .bind(&update.hostname)
-                                            .bind(&update.cert_chain)
-                                            .bind(&update.private_key)
-                                            .bind(update.expires_at)
+                                            .bind(&target_url)
                                             .execute(&db)
                                             .await
                                             {
                                                 Ok(_) => {
                                                     let _ = tx.try_send(());
+                                                    RouterConfigAck {
+                                                        success: true,
+                                                        message: String::new(),
+                                                    }
                                                 },
-                                                Err(e) => error!(
-                                                    "Control Plane: Failed to persist TLS certificate for {}: {}",
-                                                    update.hostname, e
-                                                ),
+                                                Err(e) => {
+                                                    error!(
+                                                        "Control Plane: Failed to persist route update for {}: {}",
+                                                        update.hostname,
+                                                        e
+                                                    );
+                                                    RouterConfigAck {
+                                                        success: false,
+                                                        message: e.to_string(),
+                                                    }
+                                                },
                                             }
-                                        },
-                                        Err(e) => error!("Control Plane: Failed to decode TlsCertificateUpdate: {}", e),
-                                    }
-                                }
-                                subjects::ROUTER_ACME_CHALLENGE_UPDATED => {
-                                    match AcmeChallengeUpdate::decode(&msg.payload[..]) {
-                                        Ok(update) => {
-                                            info!("Control Plane: Received ACME challenge update: {}", update.token);
-
-                                            // FAST-PATH: Update in-memory state immediately
-                                            if update.is_delete {
-                                                let _ = state_manager.remove_acme_token(&update.token).await;
-                                            } else {
-                                                let _ = state_manager.add_acme_token(update.token.clone(), update.key_auth.clone()).await;
-                                            }
-
-                                            let query = if update.is_delete {
-                                                sqlx::query("DELETE FROM acme_challenges WHERE token = $1")
-                                                    .bind(&update.token)
-                                            } else {
-                                                sqlx::query(
-                                                    "INSERT INTO acme_challenges (token, key_auth, hostname) VALUES ($1, $2, $3)
-                                                     ON CONFLICT (token) DO UPDATE SET key_auth = EXCLUDED.key_auth, hostname = EXCLUDED.hostname"
-                                                )
-                                                .bind(&update.token)
-                                                .bind(&update.key_auth)
+                                        } else {
+                                            match sqlx::query("DELETE FROM routes WHERE hostname = $1")
                                                 .bind(&update.hostname)
-                                            };
-                                            if let Err(e) = query.execute(&db).await {
-                                                error!(
-                                                    "Control Plane: Failed to persist ACME challenge {}: {}",
-                                                    update.token, e
-                                                );
+                                                .execute(&db)
+                                                .await
+                                            {
+                                                Ok(_) => {
+                                                    let _ = tx.try_send(());
+                                                    RouterConfigAck {
+                                                        success: true,
+                                                        message: String::new(),
+                                                    }
+                                                },
+                                                Err(e) => {
+                                                    error!(
+                                                        "Control Plane: Failed to delete route {}: {}",
+                                                        update.hostname,
+                                                        e
+                                                    );
+                                                    RouterConfigAck {
+                                                        success: false,
+                                                        message: e.to_string(),
+                                                    }
+                                                },
                                             }
-                                        },
-                                        Err(e) => error!("Control Plane: Failed to decode AcmeChallengeUpdate: {}", e),
-                                    }
+                                        };
+
+                                        if let Some(reply) = msg.reply {
+                                            let mut buf = Vec::new();
+                                            if response.encode(&mut buf).is_ok() {
+                                                let _ = nats.publish(reply, buf.into()).await;
+                                            }
+                                        }
+                                    },
+                                    Err(e) => error!("Control Plane: Failed to decode RouterConfigUpdate: {}", e),
                                 }
-                                _ => {}
                             }
-                        });
+                            subjects::ROUTER_TLS_CERT_UPDATED => {
+                                match TlsCertificateUpdate::decode(&msg.payload[..]) {
+                                    Ok(update) => {
+                                        info!("Control Plane: Received TLS certificate update for {}", update.hostname);
+
+                                        // FAST-PATH: Decrypt and update state immediately
+                                        match crate::crypto::decrypt(&update.private_key, &master_key) {
+                                            Ok(key_pem) => {
+                                                if let Err(e) = state_manager.add_certificate(
+                                                    update.hostname.clone(),
+                                                    update.cert_chain.clone(),
+                                                    key_pem
+                                                ).await {
+                                                    error!("Control Plane: Fast-path certificate update failed for {}: {}", update.hostname, e);
+                                                } else {
+                                                    info!("Control Plane: Successfully applied fast-path certificate for {}", update.hostname);
+                                                }
+                                            },
+                                            Err(e) => error!("Control Plane: Failed to decrypt received certificate for {}: {}", update.hostname, e),
+                                        }
+
+                                        match sqlx::query(
+                                            "INSERT INTO tls_certificates (hostname, cert_chain, private_key, expires_at)
+                                             VALUES ($1, $2, $3, TO_TIMESTAMP($4))
+                                             ON CONFLICT (hostname) DO UPDATE SET cert_chain = EXCLUDED.cert_chain, private_key = EXCLUDED.private_key, expires_at = EXCLUDED.expires_at, updated_at = NOW()"
+                                        )
+                                        .bind(&update.hostname)
+                                        .bind(&update.cert_chain)
+                                        .bind(&update.private_key)
+                                        .bind(update.expires_at)
+                                        .execute(&db)
+                                        .await
+                                        {
+                                            Ok(_) => {
+                                                let _ = tx.try_send(());
+                                            },
+                                            Err(e) => error!(
+                                                "Control Plane: Failed to persist TLS certificate for {}: {}",
+                                                update.hostname, e
+                                            ),
+                                        }
+                                    },
+                                    Err(e) => error!("Control Plane: Failed to decode TlsCertificateUpdate: {}", e),
+                                }
+                            }
+                            subjects::ROUTER_ACME_CHALLENGE_UPDATED => {
+                                match AcmeChallengeUpdate::decode(&msg.payload[..]) {
+                                    Ok(update) => {
+                                        info!("Control Plane: Received ACME challenge update: {}", update.token);
+
+                                        // FAST-PATH: Update in-memory state immediately
+                                        if update.is_delete {
+                                            let _ = state_manager.remove_acme_token(&update.token).await;
+                                        } else {
+                                            let _ = state_manager.add_acme_token(update.token.clone(), update.key_auth.clone()).await;
+                                        }
+
+                                        let query = if update.is_delete {
+                                            sqlx::query("DELETE FROM acme_challenges WHERE token = $1")
+                                                .bind(&update.token)
+                                        } else {
+                                            sqlx::query(
+                                                "INSERT INTO acme_challenges (token, key_auth, hostname) VALUES ($1, $2, $3)
+                                                 ON CONFLICT (token) DO UPDATE SET key_auth = EXCLUDED.key_auth, hostname = EXCLUDED.hostname"
+                                            )
+                                            .bind(&update.token)
+                                            .bind(&update.key_auth)
+                                            .bind(&update.hostname)
+                                        };
+                                        if let Err(e) = query.execute(&db).await {
+                                            error!(
+                                                "Control Plane: Failed to persist ACME challenge {}: {}",
+                                                update.token, e
+                                            );
+                                        } else {
+                                            let _ = tx.try_send(());
+                                        }
+                                    },
+                                    Err(e) => error!("Control Plane: Failed to decode AcmeChallengeUpdate: {}", e),
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                 }
                 // Mesh updates (peers)

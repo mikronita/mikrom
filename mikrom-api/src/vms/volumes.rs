@@ -215,24 +215,41 @@ pub async fn create_snapshot_handler(
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
     let host_id = if let Some(dep_id) = app.active_deployment_id {
-        state
-            .app_repo
-            .get_deployment(dep_id)
-            .await?
-            .and_then(|d| d.job_id)
-            .and(
-                // We need the host_id from the job.
-                // For now, let's assume we can get it from the scheduler or we store it.
-                // In Mikrom, the scheduler knows.
-                None, // Fallback or implement lookup
-            )
+        if let Some(deployment) = state.app_repo.get_deployment(dep_id).await? {
+            if let Some(job_id) = deployment.job_id {
+                if job_id.starts_with("temp-") {
+                    None
+                } else {
+                    use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse};
+                    let inner: AppStatusResponse = state
+                        .nats
+                        .request(
+                            "mikrom.scheduler.get_job",
+                            AppStatusRequest {
+                                job_id,
+                                user_id: auth.user_id.clone(),
+                            },
+                        )
+                        .await
+                        .map_err(|e| {
+                            ApiError::Internal(format!("Scheduler request failed: {e}"))
+                        })?;
+
+                    if inner.host_id.is_empty() {
+                        None
+                    } else {
+                        Some(inner.host_id)
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     } else {
         None
     };
-
-    // If we don't have a host_id, we might need to pick any active worker?
-    // Actually, for Ceph RBD, any node with ceph-common can do it.
-    // Let's ask the scheduler to handle it.
 
     use mikrom_proto::scheduler::{
         CreateSnapshotRequest as SchedSnapReq, CreateSnapshotResponse as SchedSnapRes,
@@ -242,7 +259,7 @@ pub async fn create_snapshot_handler(
         volume_id: volume_id.to_string(),
         snapshot_name: req.name,
         pool_name: volume.pool_name,
-        host_id: host_id.unwrap_or_default(), // Scheduler will pick one if empty
+        host_id: host_id.unwrap_or_default(),
     };
 
     let scheduler_res: SchedSnapRes = state

@@ -68,7 +68,7 @@ impl CephRbd {
     fn connect(pool: &str) -> Result<IoCtx> {
         unsafe {
             let mut cluster: rados_t = ptr::null_mut();
-            let id = CString::new("admin").unwrap();
+            let id = CString::new("admin").map_err(|e| anyhow!("Invalid admin name: {}", e))?;
 
             let ret = rados_create(&mut cluster, id.as_ptr());
             if ret < 0 {
@@ -76,7 +76,8 @@ impl CephRbd {
             }
             let cluster = std::sync::Arc::new(RadosCluster(cluster));
 
-            let config = CString::new("/etc/ceph/ceph.conf").unwrap();
+            let config =
+                CString::new("/etc/ceph/ceph.conf").map_err(|e| anyhow!("Invalid path: {}", e))?;
             let ret = rados_conf_read_file(cluster.0, config.as_ptr());
             if ret < 0 {
                 return Err(anyhow!("Failed to read ceph.conf: {}", ret));
@@ -88,38 +89,9 @@ impl CephRbd {
             }
 
             let mut ioctx: rados_ioctx_t = ptr::null_mut();
-            let pool_name_c = CString::new(pool).unwrap();
-            let mut ret = rados_ioctx_create(cluster.0, pool_name_c.as_ptr(), &mut ioctx);
-
-            if ret == -2 {
-                // ENOENT: Pool not found
-                info!("Pool {} not found, creating it natively...", pool);
-                let ret_create = rados_pool_create(cluster.0, pool_name_c.as_ptr());
-                if ret_create < 0 {
-                    return Err(anyhow!("Failed to create pool {}: {}", pool, ret_create));
-                }
-
-                // Enable 'rbd' application on the pool
-                let app_name = CString::new("rbd").unwrap();
-                let ret_app =
-                    rados_application_enable(cluster.0, pool_name_c.as_ptr(), app_name.as_ptr(), 0);
-                if ret_app < 0 {
-                    warn!(
-                        "Failed to enable 'rbd' application on pool {}: {}",
-                        pool, ret_app
-                    );
-                }
-
-                // Re-attempt to open the ioctx
-                ret = rados_ioctx_create(cluster.0, pool_name_c.as_ptr(), &mut ioctx);
-                if ret == 0 {
-                    // Initialize pool for RBD
-                    let ret_init = rbd_pool_init(ioctx, 0);
-                    if ret_init < 0 {
-                        warn!("Failed to initialize RBD pool {}: {}", pool, ret_init);
-                    }
-                }
-            }
+            let pool_name_c =
+                CString::new(pool).map_err(|e| anyhow!("Invalid pool name: {}", e))?;
+            let ret = rados_ioctx_create(cluster.0, pool_name_c.as_ptr(), &mut ioctx);
 
             if ret < 0 {
                 return Err(anyhow!("Failed to open pool {}: {}", pool, ret));
@@ -132,13 +104,72 @@ impl CephRbd {
         }
     }
 
+    /// Provision a pool if it does not exist. Separated from connect to avoid side effects in every connection.
+    pub fn ensure_pool_exists(pool: &str) -> Result<()> {
+        unsafe {
+            let mut cluster: rados_t = ptr::null_mut();
+            let id = CString::new("admin").map_err(|e| anyhow!("Invalid admin name: {}", e))?;
+            let ret = rados_create(&mut cluster, id.as_ptr());
+            if ret < 0 {
+                return Err(anyhow!("Failed to create rados handle: {}", ret));
+            }
+            let cluster = RadosCluster(cluster);
+
+            let config =
+                CString::new("/etc/ceph/ceph.conf").map_err(|e| anyhow!("Invalid path: {}", e))?;
+            let _ = rados_conf_read_file(cluster.0, config.as_ptr());
+            let _ = rados_connect(cluster.0);
+
+            let mut ioctx: rados_ioctx_t = ptr::null_mut();
+            let pool_name_c =
+                CString::new(pool).map_err(|e| anyhow!("Invalid pool name: {}", e))?;
+            let ret = rados_ioctx_create(cluster.0, pool_name_c.as_ptr(), &mut ioctx);
+
+            if ret == -2 {
+                // ENOENT: Pool not found
+                info!("Pool {} not found, creating it natively...", pool);
+                let ret_create = rados_pool_create(cluster.0, pool_name_c.as_ptr());
+                if ret_create < 0 {
+                    return Err(anyhow!("Failed to create pool {}: {}", pool, ret_create));
+                }
+
+                // Enable 'rbd' application on the pool
+                let app_name =
+                    CString::new("rbd").map_err(|e| anyhow!("Invalid app name: {}", e))?;
+                let ret_app =
+                    rados_application_enable(cluster.0, pool_name_c.as_ptr(), app_name.as_ptr(), 0);
+                if ret_app < 0 {
+                    warn!(
+                        "Failed to enable 'rbd' application on pool {}: {}",
+                        pool, ret_app
+                    );
+                }
+
+                // Initialize pool for RBD
+                let ret_io = rados_ioctx_create(cluster.0, pool_name_c.as_ptr(), &mut ioctx);
+                if ret_io == 0 {
+                    let ret_init = rbd_pool_init(ioctx, 0);
+                    rados_ioctx_destroy(ioctx);
+                    if ret_init < 0 {
+                        warn!("Failed to initialize RBD pool {}: {}", pool, ret_init);
+                    }
+                }
+            } else if ret == 0 {
+                rados_ioctx_destroy(ioctx);
+            }
+            Ok(())
+        }
+    }
+
     pub fn create_volume(pool: &str, name: &str, size_mib: i32) -> Result<()> {
+        Self::ensure_pool_exists(pool)?;
+
         info!(
             "Creating RBD volume (native FFI): {}/{} ({} MiB)",
             pool, name, size_mib
         );
         let io = Self::connect(pool)?;
-        let name_c = CString::new(name).unwrap();
+        let name_c = CString::new(name).map_err(|e| anyhow!("Invalid volume name: {}", e))?;
         let size_bytes = (size_mib as u64) * 1024 * 1024;
 
         unsafe {
@@ -154,7 +185,7 @@ impl CephRbd {
     pub fn delete_volume(pool: &str, name: &str) -> Result<()> {
         info!("Deleting RBD volume (native FFI): {}/{}", pool, name);
         let io = Self::connect(pool)?;
-        let name_c = CString::new(name).unwrap();
+        let name_c = CString::new(name).map_err(|e| anyhow!("Invalid volume name: {}", e))?;
 
         unsafe {
             let ret = rbd_remove(io.handle, name_c.as_ptr());
@@ -171,8 +202,9 @@ impl CephRbd {
             pool, name, snapshot_name
         );
         let io = Self::connect(pool)?;
-        let name_c = CString::new(name).unwrap();
-        let snap_c = CString::new(snapshot_name).unwrap();
+        let name_c = CString::new(name).map_err(|e| anyhow!("Invalid volume name: {}", e))?;
+        let snap_c =
+            CString::new(snapshot_name).map_err(|e| anyhow!("Invalid snapshot name: {}", e))?;
 
         unsafe {
             let mut image: librbd_sys::rbd_image_t = ptr::null_mut();
@@ -201,8 +233,9 @@ impl CephRbd {
             pool, name, snapshot_name
         );
         let io = Self::connect(pool)?;
-        let name_c = CString::new(name).unwrap();
-        let snap_c = CString::new(snapshot_name).unwrap();
+        let name_c = CString::new(name).map_err(|e| anyhow!("Invalid volume name: {}", e))?;
+        let snap_c =
+            CString::new(snapshot_name).map_err(|e| anyhow!("Invalid snapshot name: {}", e))?;
 
         unsafe {
             let mut image: librbd_sys::rbd_image_t = ptr::null_mut();
@@ -252,8 +285,9 @@ impl CephRbd {
             pool, name, snapshot_name
         );
         let io = Self::connect(pool)?;
-        let name_c = CString::new(name).unwrap();
-        let snap_c = CString::new(snapshot_name).unwrap();
+        let name_c = CString::new(name).map_err(|e| anyhow!("Invalid volume name: {}", e))?;
+        let snap_c =
+            CString::new(snapshot_name).map_err(|e| anyhow!("Invalid snapshot name: {}", e))?;
 
         unsafe {
             let mut image: librbd_sys::rbd_image_t = ptr::null_mut();
@@ -305,9 +339,12 @@ impl CephRbd {
             pool, source_name, snapshot_name, target_name
         );
         let io = Self::connect(pool)?;
-        let source_c = CString::new(source_name).unwrap();
-        let snap_c = CString::new(snapshot_name).unwrap();
-        let target_c = CString::new(target_name).unwrap();
+        let source_c =
+            CString::new(source_name).map_err(|e| anyhow!("Invalid source volume name: {}", e))?;
+        let snap_c =
+            CString::new(snapshot_name).map_err(|e| anyhow!("Invalid snapshot name: {}", e))?;
+        let target_c =
+            CString::new(target_name).map_err(|e| anyhow!("Invalid target volume name: {}", e))?;
 
         unsafe {
             let mut image: librbd_sys::rbd_image_t = ptr::null_mut();
@@ -367,8 +404,9 @@ impl CephRbd {
     }
 
     pub fn exists(pool: &str, name: &str) -> bool {
-        if let Ok(io) = Self::connect(pool) {
-            let name_c = CString::new(name).unwrap();
+        if let Ok(io) = Self::connect(pool)
+            && let Ok(name_c) = CString::new(name)
+        {
             unsafe {
                 let mut image: librbd_sys::rbd_image_t = ptr::null_mut();
                 let ret = rbd_open(io.handle, name_c.as_ptr(), &mut image, ptr::null());
