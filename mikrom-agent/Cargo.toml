@@ -30,6 +30,7 @@ aya = { version = "0.13", features = ["async_tokio"] }
 aya-log = "0.2"
 mikrom-agent-ebpf-common = { path = "../mikrom-agent-ebpf-common", features = ["user"] }
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+rtnetlink = "0.14"
 hex = "0.4.3"
 rand = "0.8"
 rand_core = "0.6"
@@ -37,6 +38,10 @@ base64 = "0.22.1"
 librados-sys = "0.1"
 librbd-sys = "0.1"
 libc = "0.2"
+neli = { version = "0.7.4", features = ["async"] }
+bollard = "0.20.2"
+bytes = "1"
+tar = "0.4"
 
 [package.metadata.deb]
 maintainer = "Antonio Pardo <apardo@spluca.org>"

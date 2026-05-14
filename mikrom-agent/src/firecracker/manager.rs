@@ -9,6 +9,9 @@ use crate::logger::LogShipper;
 use mikrom_proto::id::{AppId, VmId};
 
 use std::collections::{HashMap, VecDeque};
+use std::ffi::CString;
+use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::sync::{
@@ -1655,21 +1658,9 @@ impl FirecrackerManager {
         }
 
         // 6. Enable forwarding
-        tokio::process::Command::new("sysctl")
-            .args(["-w", "net.ipv4.ip_forward=1"])
-            .output()
-            .await
-            .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to enable IPv4 forwarding: {e}"))
-            })?;
-
-        tokio::process::Command::new("sysctl")
-            .args(["-w", "net.ipv6.conf.all.forwarding=1"])
-            .output()
-            .await
-            .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to enable IPv6 forwarding: {e}"))
-            })?;
+        self.set_proc_sysctl("net/ipv4/ip_forward", "1").await?;
+        self.set_proc_sysctl("net/ipv6/conf/all/forwarding", "1")
+            .await?;
 
         // 7. Setup NAT
         let output = tokio::process::Command::new("iptables")
@@ -1698,6 +1689,16 @@ impl FirecrackerManager {
             );
         }
 
+        Ok(())
+    }
+
+    async fn set_proc_sysctl(&self, key: &str, value: &str) -> Result<(), FirecrackerError> {
+        let path = format!("/proc/sys/{key}");
+        tokio::fs::write(&path, value).await.map_err(|e| {
+            FirecrackerError::ProcessError(format!(
+                "Failed to write sysctl {key}={value} at {path}: {e}"
+            ))
+        })?;
         Ok(())
     }
 
@@ -1909,48 +1910,25 @@ impl FirecrackerManager {
     async fn mknod_at(&self, dev_path: &str, dst: &str) -> Result<(), FirecrackerError> {
         tracing::info!("Creating block device node: {} -> {}", dev_path, dst);
 
-        // 1. Get major/minor
-        let output = std::process::Command::new("stat")
-            .arg("-c")
-            .arg("%t %T")
-            .arg(dev_path)
-            .output()
-            .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to stat device {dev_path}: {e}"))
-            })?;
+        let metadata = fs::metadata(dev_path).map_err(|e| {
+            FirecrackerError::ProcessError(format!("Failed to stat device {dev_path}: {e}"))
+        })?;
+        let dev = metadata.rdev();
+        let major = libc::major(dev);
+        let minor = libc::minor(dev);
 
-        if !output.status.success() {
-            return Err(FirecrackerError::ProcessError(format!(
-                "stat failed for {dev_path}"
-            )));
-        }
+        let path = CString::new(dst).map_err(|e| {
+            FirecrackerError::ProcessError(format!("Invalid device node path {dst}: {e}"))
+        })?;
+        let mode = libc::S_IFBLK | 0o600;
+        let device = libc::makedev(major, minor);
 
-        let hex_ids = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let parts: Vec<&str> = hex_ids.split_whitespace().collect();
-        if parts.len() != 2 {
-            return Err(FirecrackerError::ProcessError(format!(
-                "Invalid stat output: {hex_ids}"
-            )));
-        }
-
-        let major = u32::from_str_radix(parts[0], 16)
-            .map_err(|e| FirecrackerError::ProcessError(format!("Invalid major hex: {e}")))?;
-        let minor = u32::from_str_radix(parts[1], 16)
-            .map_err(|e| FirecrackerError::ProcessError(format!("Invalid minor hex: {e}")))?;
-
-        // 2. Run mknod
-        let output = std::process::Command::new("mknod")
-            .arg(dst)
-            .arg("b")
-            .arg(major.to_string())
-            .arg(minor.to_string())
-            .output()
-            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to run mknod: {e}")))?;
-
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            if err.contains("File exists") {
-                // Already exists, ignore
+        // SAFETY: mknod is a thin wrapper around the libc syscall. The path and
+        // device values are derived from validated Rust values above.
+        let rc = unsafe { libc::mknod(path.as_ptr(), mode, device) };
+        if rc != 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::AlreadyExists {
                 return Ok(());
             }
             return Err(FirecrackerError::ProcessError(format!(

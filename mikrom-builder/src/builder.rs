@@ -1,11 +1,18 @@
 use anyhow::{Context, Result};
+use bollard::Docker;
+use bollard::body_full;
+use bollard::query_parameters::{BuildImageOptionsBuilder, PushImageOptionsBuilder};
+use bytes::Bytes;
+use futures::stream::StreamExt;
 use git2::{FetchOptions, RemoteCallbacks, Repository};
+use glob::Pattern;
 use std::path::Path;
 use std::process::Stdio;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::{info, instrument};
+use walkdir::WalkDir;
 
 pub struct AppBuilder {
     registry: String,
@@ -108,19 +115,26 @@ impl AppBuilder {
 
     async fn run_docker_build(&self, repo_path: &Path, image_tag: &str) -> Result<()> {
         info!(image_tag = %image_tag, "Dockerfile detected, using docker build");
-        let mut child = Command::new("docker")
-            .args(["build", "-t", image_tag, "."])
-            .current_dir(repo_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("Failed to spawn docker build")?;
-
-        Self::log_output(&mut child).await?;
-
-        let status = child.wait().await?;
-        if !status.success() {
-            anyhow::bail!("Docker build failed with status {}", status);
+        let docker = Docker::connect_with_local_defaults()
+            .context("Failed to connect to the local Docker daemon")?;
+        let context = Self::build_context(repo_path).await?;
+        let options = BuildImageOptionsBuilder::default()
+            .dockerfile("Dockerfile")
+            .t(image_tag)
+            .rm(true)
+            .build();
+        let mut stream = docker.build_image(options, None, Some(body_full(context)));
+        while let Some(message) = stream.next().await {
+            let message = message?;
+            if let Some(line) = message.stream.as_deref() {
+                info!("[DOCKER-BUILD] {}", line.trim_end());
+            }
+            if let Some(status) = message.status.as_deref() {
+                info!("[DOCKER-BUILD] {}", status.trim_end());
+            }
+            if let Some(error) = message.error_detail.and_then(|detail| detail.message) {
+                anyhow::bail!("Docker build failed: {}", error);
+            }
         }
         Ok(())
     }
@@ -150,18 +164,21 @@ impl AppBuilder {
 
     async fn push_to_registry(&self, image_tag: &str) -> Result<()> {
         info!(image_tag = %image_tag, "Pushing to registry...");
-        let mut child = Command::new("docker")
-            .args(["push", image_tag])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("Failed to spawn docker push")?;
-
-        Self::log_output(&mut child).await?;
-
-        let status = child.wait().await?;
-        if !status.success() {
-            anyhow::bail!("Docker push failed for {}", image_tag);
+        let docker = Docker::connect_with_local_defaults()
+            .context("Failed to connect to the local Docker daemon")?;
+        let mut stream = docker.push_image(
+            image_tag,
+            Some(PushImageOptionsBuilder::default().build()),
+            None,
+        );
+        while let Some(message) = stream.next().await {
+            let message = message?;
+            if let Some(status) = message.status.as_deref() {
+                info!("[DOCKER-PUSH] {}", status.trim_end());
+            }
+            if let Some(error) = message.error_detail.and_then(|detail| detail.message) {
+                anyhow::bail!("Docker push failed: {}", error);
+            }
         }
         Ok(())
     }
@@ -189,6 +206,7 @@ impl AppBuilder {
         Ok(())
     }
 
+    /// Safely logs stdout and stderr concurrently without data loss.
     fn extract_git_metadata(repo: &Repository) -> Result<GitMetadata> {
         let head = repo.head().context("Failed to get HEAD")?;
         let branch = head.shorthand().unwrap_or("unknown").to_string();
@@ -203,31 +221,108 @@ impl AppBuilder {
         })
     }
 
+    async fn build_context(repo_path: &Path) -> Result<Bytes> {
+        let repo_path = repo_path.to_path_buf();
+        let dockerignore = Self::load_dockerignore(&repo_path)?;
+        let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+            let mut buffer = Vec::new();
+            {
+                let mut builder = tar::Builder::new(&mut buffer);
+                for entry in WalkDir::new(&repo_path)
+                    .into_iter()
+                    .filter_map(|entry| entry.ok())
+                {
+                    let path = entry.path();
+                    if path == repo_path {
+                        continue;
+                    }
+
+                    let rel = path
+                        .strip_prefix(&repo_path)
+                        .context("Failed to normalize Docker build context path")?;
+                    if !Self::dockerignore_allows(&dockerignore, rel, path.is_dir()) {
+                        continue;
+                    }
+
+                    if path.is_dir() {
+                        builder
+                            .append_dir(rel, path)
+                            .context("Failed to append directory to Docker build context")?;
+                    } else {
+                        builder
+                            .append_path_with_name(path, rel)
+                            .context("Failed to append file to Docker build context")?;
+                    }
+                }
+                builder.finish().context("Failed to finish archive")?;
+            }
+            Ok(buffer)
+        })
+        .await
+        .context("Failed to build Docker context archive")??;
+
+        Ok(Bytes::from(archive))
+    }
+
+    fn load_dockerignore(repo_path: &Path) -> Result<Vec<(bool, Pattern)>> {
+        let path = repo_path.join(".dockerignore");
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+        let mut patterns = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+
+            let (negated, pattern) = if let Some(rest) = trimmed.strip_prefix('!') {
+                (true, rest.trim())
+            } else {
+                (false, trimmed)
+            };
+
+            if pattern.is_empty() {
+                continue;
+            }
+
+            let pattern = pattern.trim_start_matches('/').trim_end_matches('/');
+            patterns.push((
+                negated,
+                Pattern::new(pattern)
+                    .with_context(|| format!("Invalid .dockerignore pattern: {pattern}"))?,
+            ));
+        }
+
+        Ok(patterns)
+    }
+
+    fn dockerignore_allows(patterns: &[(bool, Pattern)], path: &Path, is_dir: bool) -> bool {
+        let mut path_str = path.to_string_lossy().replace('\\', "/");
+        if is_dir && !path_str.ends_with('/') {
+            path_str.push('/');
+        }
+
+        let mut allowed = true;
+        for (negated, pattern) in patterns {
+            if pattern.matches(&path_str) {
+                allowed = *negated;
+            }
+        }
+        allowed
+    }
+
     async fn detect_exposed_port(&self, image_tag: &str) -> Option<u32> {
-        let output = Command::new("docker")
-            .args([
-                "inspect",
-                "--format",
-                "{{json .Config.ExposedPorts}}",
-                image_tag,
-            ])
-            .output()
-            .await
-            .ok()?;
-
-        if !output.status.success() {
-            return None;
-        }
-
-        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if raw == "null" || raw.is_empty() || raw == "{}" {
-            return None;
-        }
-
-        // Expected format: {"80/tcp":{}, "8080/tcp":{}}
-        raw.split('"')
-            .find(|s| s.contains('/'))
-            .and_then(|s| s.split('/').next())
+        let docker = Docker::connect_with_local_defaults().ok()?;
+        let image = docker.inspect_image(image_tag).await.ok()?;
+        let ports = image.config?.exposed_ports?;
+        ports
+            .iter()
+            .find_map(|port| port.split('/').next())
             .and_then(|s| s.parse().ok())
     }
 

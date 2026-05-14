@@ -11,8 +11,64 @@
     clippy::redundant_closure_for_method_calls
 )]
 
-use tokio::process::Command;
-use tracing::{debug, info, warn};
+use anyhow::Context;
+use base64::Engine as _;
+use futures::stream::TryStreamExt;
+use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use tokio::net::lookup_host;
+use tracing::{debug, info};
+
+#[neli::neli_enum(serialized_type = "u8")]
+enum WgCmd {
+    GetDevice = 0,
+    SetDevice = 1,
+}
+
+impl neli::consts::genl::Cmd for WgCmd {}
+
+#[neli::neli_enum(serialized_type = "u16")]
+enum WgDeviceAttr {
+    Unspec = 0,
+    Ifindex = 1,
+    Ifname = 2,
+    PrivateKey = 3,
+    PublicKey = 4,
+    Flags = 5,
+    ListenPort = 6,
+    Fwmark = 7,
+    Peers = 8,
+}
+
+impl neli::consts::genl::NlAttrType for WgDeviceAttr {}
+
+#[neli::neli_enum(serialized_type = "u16")]
+enum WgPeerAttr {
+    Unspec = 0,
+    PublicKey = 1,
+    PresharedKey = 2,
+    Flags = 3,
+    Endpoint = 4,
+    PersistentKeepaliveInterval = 5,
+    LastHandshakeTime = 6,
+    RxBytes = 7,
+    TxBytes = 8,
+    AllowedIps = 9,
+    ProtocolVersion = 10,
+}
+
+impl neli::consts::genl::NlAttrType for WgPeerAttr {}
+
+#[neli::neli_enum(serialized_type = "u16")]
+enum WgAllowedIpAttr {
+    Unspec = 0,
+    Family = 1,
+    Ipaddr = 2,
+    CidrMask = 3,
+    Flags = 4,
+}
+
+impl neli::consts::genl::NlAttrType for WgAllowedIpAttr {}
 
 pub struct WireGuardManager {
     interface: String,
@@ -77,72 +133,18 @@ impl WireGuardManager {
     pub async fn init(&self, private_key: &str, host_id: &str) -> anyhow::Result<()> {
         let host_ipv6 = self.get_host_ipv6(host_id);
 
-        // 1. Create baseline config for wg setconf
-        let conf = format!(
-            "[Interface]\nPrivateKey = {}\nListenPort = {}\n",
-            private_key, self.listen_port
-        );
-
-        let conf_path = format!("{}/{}.conf", self.config_dir, self.interface);
-        let _ = tokio::fs::create_dir_all(&self.config_dir).await;
-
-        tokio::fs::write(&conf_path, &conf).await?;
-        use std::os::unix::fs::PermissionsExt;
-        tokio::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600)).await?;
-
-        // 2. Initialize interface with ip and wg
+        // 2. Initialize interface with rtnetlink and wg
         info!("Initializing WireGuard interface {}", self.interface);
 
-        // Remove if exists
-        let _ = Command::new("ip")
-            .args(["link", "del", "dev", &self.interface])
-            .status()
-            .await;
+        let handle = Self::rtnl_handle()?;
+        self.delete_link_if_exists(&handle).await?;
+        self.create_wireguard_link(&handle).await?;
 
-        // Add interface
-        let status = Command::new("ip")
-            .args(["link", "add", "dev", &self.interface, "type", "wireguard"])
-            .status()
+        let addr = host_ipv6.parse::<Ipv6Addr>()?;
+        self.configure_device(private_key, self.listen_port, &[], false)
             .await?;
-        if !status.success() {
-            return Err(anyhow::anyhow!(
-                "Failed to add wireguard interface {}",
-                self.interface
-            ));
-        }
-
-        // Set configuration
-        let status = Command::new("wg")
-            .args(["setconf", &self.interface, &conf_path])
-            .status()
-            .await?;
-        if !status.success() {
-            return Err(anyhow::anyhow!("Failed to setconf for {}", self.interface));
-        }
-
-        // Add IP address
-        let status = Command::new("ip")
-            .args([
-                "addr",
-                "add",
-                &format!("{}/64", host_ipv6),
-                "dev",
-                &self.interface,
-            ])
-            .status()
-            .await?;
-        if !status.success() {
-            // Might fail if already assigned, but since we deleted the link it should be fine.
-        }
-
-        // Set up
-        let status = Command::new("ip")
-            .args(["link", "set", "up", "dev", &self.interface])
-            .status()
-            .await?;
-        if !status.success() {
-            return Err(anyhow::anyhow!("Failed to bring up {}", self.interface));
-        }
+        self.add_address(&handle, IpAddr::V6(addr), 64).await?;
+        self.set_link_up(&handle).await?;
 
         info!(
             "WireGuard interface {} initialized with IP {}",
@@ -166,11 +168,421 @@ impl WireGuardManager {
         format!("fd00::{:x}:{:x}", s1, s2)
     }
 
+    fn rtnl_handle() -> anyhow::Result<rtnetlink::Handle> {
+        let (connection, handle, _) = rtnetlink::new_connection()?;
+        tokio::spawn(connection);
+        Ok(handle)
+    }
+
+    async fn delete_link_if_exists(&self, handle: &rtnetlink::Handle) -> anyhow::Result<()> {
+        if let Some(index) = self.link_index(handle).await? {
+            handle.link().del(index).execute().await?;
+        }
+        Ok(())
+    }
+
+    async fn create_wireguard_link(&self, handle: &rtnetlink::Handle) -> anyhow::Result<u32> {
+        handle
+            .link()
+            .add()
+            .wireguard(self.interface.clone())
+            .execute()
+            .await?;
+        self.link_index(handle).await?.ok_or_else(|| {
+            anyhow::anyhow!("WireGuard interface {} was not created", self.interface)
+        })
+    }
+
+    async fn link_index(&self, handle: &rtnetlink::Handle) -> anyhow::Result<Option<u32>> {
+        let mut links = handle
+            .link()
+            .get()
+            .match_name(self.interface.clone())
+            .execute();
+        Ok(links.try_next().await?.map(|msg| msg.header.index))
+    }
+
+    async fn add_address(
+        &self,
+        handle: &rtnetlink::Handle,
+        address: IpAddr,
+        prefix_len: u8,
+    ) -> anyhow::Result<()> {
+        let Some(index) = self.link_index(handle).await? else {
+            return Err(anyhow::anyhow!(
+                "WireGuard interface {} not found",
+                self.interface
+            ));
+        };
+
+        handle
+            .address()
+            .add(index, address, prefix_len)
+            .execute()
+            .await?;
+        Ok(())
+    }
+
+    async fn set_link_up(&self, handle: &rtnetlink::Handle) -> anyhow::Result<()> {
+        let Some(index) = self.link_index(handle).await? else {
+            return Err(anyhow::anyhow!(
+                "WireGuard interface {} not found",
+                self.interface
+            ));
+        };
+
+        handle.link().set(index).up().execute().await?;
+        Ok(())
+    }
+
+    async fn configure_device(
+        &self,
+        private_key: &str,
+        listen_port: u16,
+        peers: &[mikrom_proto::scheduler::Peer],
+        replace_peers: bool,
+    ) -> anyhow::Result<()> {
+        use neli::{
+            consts::{nl::NlmF, socket::NlFamily},
+            genl::{AttrTypeBuilder, GenlmsghdrBuilder, NlattrBuilder},
+            nl::NlPayload,
+            router::asynchronous::NlRouter,
+            types::GenlBuffer,
+            utils::Groups,
+        };
+
+        let (router, _) = NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
+        let family_id = router.resolve_genl_family("wireguard").await?;
+        let mut attrs = Vec::new();
+
+        attrs.push(
+            NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgDeviceAttr::Ifname)
+                        .build()?,
+                )
+                .nla_payload(self.interface.as_str())
+                .build()?,
+        );
+
+        let private_key_bytes = Self::decode_private_key(private_key)?;
+        attrs.push(
+            NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgDeviceAttr::PrivateKey)
+                        .build()?,
+                )
+                .nla_payload(private_key_bytes)
+                .build()?,
+        );
+
+        attrs.push(
+            NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgDeviceAttr::ListenPort)
+                        .build()?,
+                )
+                .nla_payload(listen_port)
+                .build()?,
+        );
+
+        if replace_peers {
+            attrs.push(
+                NlattrBuilder::default()
+                    .nla_type(
+                        AttrTypeBuilder::default()
+                            .nla_type(WgDeviceAttr::Flags)
+                            .build()?,
+                    )
+                    .nla_payload(1u32)
+                    .build()?,
+            );
+        }
+
+        if !peers.is_empty() {
+            let mut peers_attr = NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgDeviceAttr::Peers)
+                        .build()?,
+                )
+                .nla_payload(Vec::<u8>::new())
+                .build()?;
+
+            for peer in peers {
+                let peer_nla = Self::build_peer_attr(peer).await?;
+                peers_attr = peers_attr.nest(&peer_nla)?;
+            }
+
+            attrs.push(peers_attr);
+        }
+
+        let msg = GenlmsghdrBuilder::default()
+            .cmd(WgCmd::SetDevice)
+            .version(1)
+            .attrs(attrs.into_iter().collect::<GenlBuffer<_, _>>())
+            .build()?;
+
+        let mut recv = router
+            .send::<_, _, u16, neli::genl::Genlmsghdr<WgCmd, WgDeviceAttr>>(
+                family_id,
+                NlmF::ACK,
+                NlPayload::Payload(msg),
+            )
+            .await?;
+
+        while let Some(Ok(_msg)) = recv
+            .next::<u16, neli::genl::Genlmsghdr<WgCmd, WgDeviceAttr>>()
+            .await
+        {}
+
+        Ok(())
+    }
+
+    async fn build_peer_attr(
+        peer: &mikrom_proto::scheduler::Peer,
+    ) -> anyhow::Result<neli::genl::Nlattr<WgPeerAttr, neli::types::Buffer>> {
+        use neli::genl::{AttrTypeBuilder, NlattrBuilder};
+
+        let mut peer_attr = NlattrBuilder::default()
+            .nla_type(
+                AttrTypeBuilder::default()
+                    .nla_type(WgPeerAttr::Unspec)
+                    .build()?,
+            )
+            .nla_payload(Vec::<u8>::new())
+            .build()?;
+
+        let pubkey = Self::normalize_public_key(&peer.wireguard_pubkey)?;
+        peer_attr = peer_attr.nest(
+            &NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgPeerAttr::PublicKey)
+                        .build()?,
+                )
+                .nla_payload(pubkey)
+                .build()?,
+        )?;
+
+        peer_attr = peer_attr.nest(
+            &NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgPeerAttr::Flags)
+                        .build()?,
+                )
+                .nla_payload(2u32)
+                .build()?,
+        )?;
+
+        let endpoint = Self::peer_endpoint_bytes(&peer.endpoint, peer.wireguard_port).await?;
+        peer_attr = peer_attr.nest(
+            &NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgPeerAttr::Endpoint)
+                        .build()?,
+                )
+                .nla_payload(endpoint)
+                .build()?,
+        )?;
+
+        peer_attr = peer_attr.nest(
+            &NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgPeerAttr::PersistentKeepaliveInterval)
+                        .build()?,
+                )
+                .nla_payload(25u16)
+                .build()?,
+        )?;
+
+        if !peer.allowed_ips.is_empty() {
+            let mut allowedips_attr = NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgPeerAttr::AllowedIps)
+                        .build()?,
+                )
+                .nla_payload(Vec::<u8>::new())
+                .build()?;
+
+            for ip in &peer.allowed_ips {
+                let allowedip = Self::build_allowed_ip_attr(ip)?;
+                allowedips_attr = allowedips_attr.nest(&allowedip)?;
+            }
+
+            peer_attr = peer_attr.nest(&allowedips_attr)?;
+        }
+
+        Ok(peer_attr)
+    }
+
+    fn build_allowed_ip_attr(
+        ip: &str,
+    ) -> anyhow::Result<neli::genl::Nlattr<WgAllowedIpAttr, neli::types::Buffer>> {
+        use neli::genl::{AttrTypeBuilder, NlattrBuilder};
+
+        let (addr, prefix) = if let Some((addr, prefix)) = ip.split_once('/') {
+            (addr, prefix.parse::<u8>()?)
+        } else if ip.contains(':') {
+            (ip, 128)
+        } else {
+            (ip, 32)
+        };
+
+        let addr_ip = if addr.contains(':') {
+            IpAddr::V6(addr.parse::<Ipv6Addr>()?)
+        } else {
+            IpAddr::V4(addr.parse::<Ipv4Addr>()?)
+        };
+
+        let mut allowedip = NlattrBuilder::default()
+            .nla_type(
+                AttrTypeBuilder::default()
+                    .nla_type(WgAllowedIpAttr::Unspec)
+                    .build()?,
+            )
+            .nla_payload(Vec::<u8>::new())
+            .build()?;
+
+        let family = match addr_ip {
+            IpAddr::V4(_) => u16::try_from(libc::AF_INET).expect("AF_INET fits in u16"),
+            IpAddr::V6(_) => u16::try_from(libc::AF_INET6).expect("AF_INET6 fits in u16"),
+        };
+
+        allowedip = allowedip.nest(
+            &NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgAllowedIpAttr::Family)
+                        .build()?,
+                )
+                .nla_payload(family)
+                .build()?,
+        )?;
+
+        allowedip = allowedip.nest(
+            &NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgAllowedIpAttr::Ipaddr)
+                        .build()?,
+                )
+                .nla_payload(Self::ip_bytes(addr_ip))
+                .build()?,
+        )?;
+
+        allowedip = allowedip.nest(
+            &NlattrBuilder::default()
+                .nla_type(
+                    AttrTypeBuilder::default()
+                        .nla_type(WgAllowedIpAttr::CidrMask)
+                        .build()?,
+                )
+                .nla_payload(prefix)
+                .build()?,
+        )?;
+
+        Ok(allowedip)
+    }
+
+    async fn peer_endpoint_bytes(host: &str, port: i32) -> anyhow::Result<Vec<u8>> {
+        let port = u16::try_from(port).context("Invalid WireGuard peer port")?;
+        let mut addrs = lookup_host((host, port))
+            .await
+            .with_context(|| format!("Failed to resolve WireGuard peer endpoint {host}:{port}"))?;
+        let socket = addrs.next().ok_or_else(|| {
+            anyhow::anyhow!("WireGuard peer endpoint {host}:{port} resolved to no addresses")
+        })?;
+
+        Ok(match socket {
+            SocketAddr::V4(addr) => {
+                let sockaddr = libc::sockaddr_in {
+                    sin_family: u16::try_from(libc::AF_INET).expect("AF_INET fits in u16"),
+                    sin_port: addr.port().to_be(),
+                    sin_addr: libc::in_addr {
+                        s_addr: u32::from(*addr.ip()).to_be(),
+                    },
+                    sin_zero: [0; 8],
+                };
+                Self::struct_bytes(&sockaddr)
+            },
+            SocketAddr::V6(addr) => {
+                let sockaddr = libc::sockaddr_in6 {
+                    sin6_family: u16::try_from(libc::AF_INET6).expect("AF_INET6 fits in u16"),
+                    sin6_port: addr.port().to_be(),
+                    sin6_flowinfo: addr.flowinfo(),
+                    sin6_addr: libc::in6_addr {
+                        s6_addr: addr.ip().octets(),
+                    },
+                    sin6_scope_id: addr.scope_id(),
+                };
+                Self::struct_bytes(&sockaddr)
+            },
+        })
+    }
+
+    fn decode_private_key(private_key: &str) -> anyhow::Result<Vec<u8>> {
+        let key = base64::engine::general_purpose::STANDARD
+            .decode(private_key.trim())
+            .context("Failed to decode WireGuard private key")?;
+        if key.len() != 32 {
+            return Err(anyhow::anyhow!(
+                "Invalid WireGuard private key length: expected 32 bytes, got {}",
+                key.len()
+            ));
+        }
+        Ok(key)
+    }
+
+    fn normalize_public_key(public_key: &str) -> anyhow::Result<Vec<u8>> {
+        let normalized =
+            if public_key.len() == 64 && public_key.chars().all(|c| c.is_ascii_hexdigit()) {
+                hex::decode(public_key).context("Failed to decode hex WireGuard public key")?
+            } else {
+                base64::engine::general_purpose::STANDARD
+                    .decode(public_key.trim())
+                    .context("Failed to decode WireGuard public key")?
+            };
+
+        if normalized.len() != 32 {
+            return Err(anyhow::anyhow!(
+                "Invalid WireGuard public key length: expected 32 bytes, got {}",
+                normalized.len()
+            ));
+        }
+
+        Ok(normalized)
+    }
+
+    fn ip_bytes(ip: IpAddr) -> Vec<u8> {
+        match ip {
+            IpAddr::V4(addr) => addr.octets().to_vec(),
+            IpAddr::V6(addr) => addr.octets().to_vec(),
+        }
+    }
+
+    fn struct_bytes<T: Sized>(value: &T) -> Vec<u8> {
+        unsafe {
+            std::slice::from_raw_parts(
+                std::ptr::from_ref(value).cast::<u8>(),
+                std::mem::size_of::<T>(),
+            )
+            .to_vec()
+        }
+    }
+
     pub async fn update_peers(
         &self,
         peers: &[mikrom_proto::scheduler::Peer],
         private_key: &str,
-        host_id: &str,
+        _host_id: &str,
     ) -> anyhow::Result<()> {
         let mut conf = format!(
             "[Interface]\nPrivateKey = {}\nListenPort = {}\n\n",
@@ -237,22 +649,13 @@ impl WireGuardManager {
         use std::os::unix::fs::PermissionsExt;
         tokio::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600)).await?;
 
-        // Sync configuration using wg syncconf
-        let status = Command::new("wg")
-            .args(["syncconf", &self.interface, &conf_path])
-            .status()
+        self.configure_device(private_key, self.listen_port, peers, true)
             .await?;
-
-        if !status.success() {
-            warn!("Failed to sync WG configuration for {}", self.interface);
-            // Re-run init as fallback
-            return self.init(private_key, host_id).await;
-        }
 
         self.sync_routes(&route_targets).await?;
 
         info!(
-            "WireGuard mesh updated with {} peers via wg syncconf",
+            "WireGuard mesh updated with {} peers via netlink",
             peers.len()
         );
         Ok(())
@@ -279,56 +682,41 @@ impl WireGuardManager {
             .map(|target| Self::route_compare_key(target))
             .collect();
 
-        let current_output = Command::new("ip")
-            .args(["-6", "route", "show", "dev", &self.interface])
-            .output()
-            .await?;
+        let handle = Self::rtnl_handle()?;
+        let Some(index) = self.link_index(&handle).await? else {
+            return Err(anyhow::anyhow!(
+                "WireGuard interface {} not found",
+                self.interface
+            ));
+        };
 
-        if current_output.status.success() {
-            let current_routes: Vec<(String, String)> =
-                String::from_utf8_lossy(&current_output.stdout)
-                    .lines()
-                    .filter_map(|line| line.split_whitespace().next())
-                    .map(|target| (target.to_string(), Self::route_compare_key(target)))
-                    .collect();
-
-            for (current_target, current_key) in current_routes {
-                if !desired.contains(&current_key) {
-                    let status = Command::new("ip")
-                        .args([
-                            "-6",
-                            "route",
-                            "del",
-                            &current_target,
-                            "dev",
-                            &self.interface,
-                        ])
-                        .status()
-                        .await?;
-
-                    if !status.success() {
-                        return Err(anyhow::anyhow!(
-                            "Failed to delete stale route {} on {}",
-                            current_target,
-                            self.interface
-                        ));
-                    }
-                }
+        let current_routes = Self::current_routes_for_interface(&handle, index).await?;
+        for route in current_routes {
+            if let Some(key) = Self::route_message_key(&route)
+                && !desired.contains(&key)
+            {
+                handle.route().del(route).execute().await?;
             }
         }
 
         for target in route_targets {
-            let family = if target.contains(':') { "-6" } else { "-4" };
-            let status = Command::new("ip")
-                .args([family, "route", "replace", target, "dev", &self.interface])
-                .status()
-                .await?;
-
-            if !status.success() {
-                return Err(anyhow::anyhow!(
-                    "Failed to install route {target} on {}",
-                    self.interface
-                ));
+            let (addr, prefix) = Self::parse_route_target(target)?;
+            let req = handle.route().add().replace();
+            match addr {
+                IpAddr::V4(v4) => {
+                    req.v4()
+                        .destination_prefix(v4, prefix)
+                        .output_interface(index)
+                        .execute()
+                        .await?;
+                },
+                IpAddr::V6(v6) => {
+                    req.v6()
+                        .destination_prefix(v6, prefix)
+                        .output_interface(index)
+                        .execute()
+                        .await?;
+                },
             }
         }
 
@@ -343,6 +731,51 @@ impl WireGuardManager {
         } else {
             format!("{target}/32")
         }
+    }
+
+    fn route_message_key(route: &RouteMessage) -> Option<String> {
+        let prefix = route.header.destination_prefix_length;
+        route.attributes.iter().find_map(|attr| match attr {
+            RouteAttribute::Destination(RouteAddress::Inet(v4)) => Some(format!("{v4}/{prefix}")),
+            RouteAttribute::Destination(RouteAddress::Inet6(v6)) => Some(format!("{v6}/{prefix}")),
+            _ => None,
+        })
+    }
+
+    fn parse_route_target(target: &str) -> anyhow::Result<(IpAddr, u8)> {
+        if let Some((addr, prefix)) = target.split_once('/') {
+            let prefix = prefix.parse::<u8>()?;
+            if addr.contains(':') {
+                Ok((IpAddr::V6(addr.parse::<Ipv6Addr>()?), prefix))
+            } else {
+                Ok((IpAddr::V4(addr.parse::<Ipv4Addr>()?), prefix))
+            }
+        } else if target.contains(':') {
+            Ok((IpAddr::V6(target.parse::<Ipv6Addr>()?), 128))
+        } else {
+            Ok((IpAddr::V4(target.parse::<Ipv4Addr>()?), 32))
+        }
+    }
+
+    async fn current_routes_for_interface(
+        handle: &rtnetlink::Handle,
+        index: u32,
+    ) -> anyhow::Result<Vec<RouteMessage>> {
+        let v4 = handle.route().get(rtnetlink::IpVersion::V4).execute();
+        let v6 = handle.route().get(rtnetlink::IpVersion::V6).execute();
+
+        let routes_v4 = v4.try_collect::<Vec<_>>().await?;
+        let routes_v6 = v6.try_collect::<Vec<_>>().await?;
+
+        Ok(routes_v4
+            .into_iter()
+            .chain(routes_v6)
+            .filter(|route| {
+                route.attributes.iter().any(|attr| {
+                    matches!(attr, RouteAttribute::Oif(route_index) if *route_index == index)
+                })
+            })
+            .collect())
     }
 }
 
