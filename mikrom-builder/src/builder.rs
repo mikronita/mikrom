@@ -1,16 +1,18 @@
 use anyhow::{Context, Result};
-use bollard::Docker;
-use bollard::body_full;
 use bollard::query_parameters::{BuildImageOptionsBuilder, PushImageOptionsBuilder};
-use bytes::Bytes;
+use bollard::{Docker, body_stream};
 use futures::stream::StreamExt;
 use git2::{FetchOptions, RemoteCallbacks, Repository};
 use glob::Pattern;
+use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::process::Stdio;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{info, instrument};
 use walkdir::WalkDir;
 
@@ -123,7 +125,32 @@ impl AppBuilder {
             .t(image_tag)
             .rm(true)
             .build();
-        let mut stream = docker.build_image(options, None, Some(body_full(context)));
+        let (tx, rx) = mpsc::channel::<bytes::Bytes>(8);
+        let reader_task = tokio::task::spawn_blocking({
+            let context_path = context.path().to_path_buf();
+            move || -> Result<()> {
+                let mut file = fs::File::open(&context_path)
+                    .with_context(|| format!("Failed to open {}", context_path.display()))?;
+                let mut buffer = [0u8; 64 * 1024];
+                loop {
+                    let read = file
+                        .read(&mut buffer)
+                        .with_context(|| format!("Failed to read {}", context_path.display()))?;
+                    if read == 0 {
+                        break;
+                    }
+                    if tx
+                        .blocking_send(bytes::Bytes::copy_from_slice(&buffer[..read]))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(())
+            }
+        });
+        let mut stream =
+            docker.build_image(options, None, Some(body_stream(ReceiverStream::new(rx))));
         while let Some(message) = stream.next().await {
             let message = message?;
             if let Some(line) = message.stream.as_deref() {
@@ -136,6 +163,9 @@ impl AppBuilder {
                 anyhow::bail!("Docker build failed: {}", error);
             }
         }
+        reader_task
+            .await
+            .context("Docker build context reader failed")??;
         Ok(())
     }
 
@@ -221,14 +251,16 @@ impl AppBuilder {
         })
     }
 
-    async fn build_context(repo_path: &Path) -> Result<Bytes> {
+    async fn build_context(repo_path: &Path) -> Result<tempfile::NamedTempFile> {
         let repo_path = repo_path.to_path_buf();
         let dockerignore = Self::load_dockerignore(&repo_path)?;
-        let archive = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
-            let mut buffer = Vec::new();
+        let archive = tokio::task::spawn_blocking(move || -> Result<tempfile::NamedTempFile> {
+            let file = tempfile::NamedTempFile::new()
+                .context("Failed to create temporary Docker build context")?;
             {
-                let mut builder = tar::Builder::new(&mut buffer);
+                let mut builder = tar::Builder::new(file.as_file());
                 for entry in WalkDir::new(&repo_path)
+                    .follow_links(false)
                     .into_iter()
                     .filter_map(|entry| entry.ok())
                 {
@@ -244,7 +276,21 @@ impl AppBuilder {
                         continue;
                     }
 
-                    if path.is_dir() {
+                    let metadata = fs::symlink_metadata(path).with_context(|| {
+                        format!("Failed to read metadata for {}", path.display())
+                    })?;
+                    if metadata.file_type().is_symlink() {
+                        let target = fs::read_link(path).with_context(|| {
+                            format!("Failed to resolve symlink {}", path.display())
+                        })?;
+                        let mut header = tar::Header::new_gnu();
+                        header.set_entry_type(tar::EntryType::Symlink);
+                        header.set_size(0);
+                        header.set_cksum();
+                        builder
+                            .append_link(&mut header, rel, target)
+                            .context("Failed to append symlink to Docker build context")?;
+                    } else if metadata.is_dir() {
                         builder
                             .append_dir(rel, path)
                             .context("Failed to append directory to Docker build context")?;
@@ -256,12 +302,12 @@ impl AppBuilder {
                 }
                 builder.finish().context("Failed to finish archive")?;
             }
-            Ok(buffer)
+            Ok(file)
         })
         .await
         .context("Failed to build Docker context archive")??;
 
-        Ok(Bytes::from(archive))
+        Ok(archive)
     }
 
     fn load_dockerignore(repo_path: &Path) -> Result<Vec<(bool, Pattern)>> {

@@ -1910,33 +1910,39 @@ impl FirecrackerManager {
     async fn mknod_at(&self, dev_path: &str, dst: &str) -> Result<(), FirecrackerError> {
         tracing::info!("Creating block device node: {} -> {}", dev_path, dst);
 
-        let metadata = fs::metadata(dev_path).map_err(|e| {
-            FirecrackerError::ProcessError(format!("Failed to stat device {dev_path}: {e}"))
-        })?;
-        let dev = metadata.rdev();
-        let major = libc::major(dev);
-        let minor = libc::minor(dev);
+        let dev_path = dev_path.to_string();
+        let dst = dst.to_string();
+        tokio::task::spawn_blocking(move || -> Result<(), FirecrackerError> {
+            let metadata = fs::metadata(&dev_path).map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to stat device {dev_path}: {e}"))
+            })?;
+            let dev = metadata.rdev();
+            let major = libc::major(dev);
+            let minor = libc::minor(dev);
 
-        let path = CString::new(dst).map_err(|e| {
-            FirecrackerError::ProcessError(format!("Invalid device node path {dst}: {e}"))
-        })?;
-        let mode = libc::S_IFBLK | 0o600;
-        let device = libc::makedev(major, minor);
+            let path = CString::new(dst.as_str()).map_err(|e| {
+                FirecrackerError::ProcessError(format!("Invalid device node path {dst}: {e}"))
+            })?;
+            let mode = libc::S_IFBLK | 0o600;
+            let device = libc::makedev(major, minor);
 
-        // SAFETY: mknod is a thin wrapper around the libc syscall. The path and
-        // device values are derived from validated Rust values above.
-        let rc = unsafe { libc::mknod(path.as_ptr(), mode, device) };
-        if rc != 0 {
-            let err = std::io::Error::last_os_error();
-            if err.kind() == std::io::ErrorKind::AlreadyExists {
-                return Ok(());
+            // SAFETY: mknod is a thin wrapper around the libc syscall. The path and
+            // device values are derived from validated Rust values above.
+            let rc = unsafe { libc::mknod(path.as_ptr(), mode, device) };
+            if rc != 0 {
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::AlreadyExists {
+                    return Ok(());
+                }
+                return Err(FirecrackerError::ProcessError(format!(
+                    "mknod failed: {err}"
+                )));
             }
-            return Err(FirecrackerError::ProcessError(format!(
-                "mknod failed: {err}"
-            )));
-        }
 
-        Ok(())
+            Ok(())
+        })
+        .await
+        .map_err(|e| FirecrackerError::ProcessError(format!("Failed to create device node: {e}")))?
     }
 
     async fn ensure_file_at(&self, src: &str, dst: &str) -> Result<(), FirecrackerError> {

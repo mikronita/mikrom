@@ -196,7 +196,8 @@ impl ImageBuilder {
                 );
             }
 
-            fs::set_permissions(&dest_init_path, fs::Permissions::from_mode(0o755))
+            tokio::fs::set_permissions(&dest_init_path, fs::Permissions::from_mode(0o755))
+                .await
                 .context("Failed to mark mikrom-init executable")?;
 
             // Create /etc/mikrom/init.json

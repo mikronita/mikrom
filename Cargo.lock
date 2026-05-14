@@ -2980,6 +2980,7 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tracing",
  "uuid",
  "walkdir",
