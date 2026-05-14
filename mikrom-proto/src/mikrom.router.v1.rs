@@ -25,6 +25,8 @@ pub struct TlsCertificateUpdate {
     pub private_key: ::prost::alloc::string::String,
     #[prost(int64, tag = "4")]
     pub expires_at: i64,
+    #[prost(int64, tag = "5")]
+    pub timestamp: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AcmeChallengeUpdate {
@@ -36,6 +38,8 @@ pub struct AcmeChallengeUpdate {
     pub hostname: ::prost::alloc::string::String,
     #[prost(bool, tag = "4")]
     pub is_delete: bool,
+    #[prost(int64, tag = "5")]
+    pub timestamp: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RouterMetrics {

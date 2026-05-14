@@ -213,6 +213,7 @@ async fn certify_domain(
                 key_auth: key_auth.clone(),
                 hostname: hostname.to_string(),
                 is_delete: false,
+                timestamp: chrono::Utc::now().timestamp(),
             };
 
             nats.publish(subjects::ROUTER_ACME_CHALLENGE_UPDATED, update)
@@ -249,6 +250,7 @@ async fn certify_domain(
             key_auth: "".into(),
             hostname: "".into(),
             is_delete: true,
+            timestamp: chrono::Utc::now().timestamp(),
         };
         if let Err(e) = nats
             .publish(subjects::ROUTER_ACME_CHALLENGE_UPDATED, update)
@@ -314,6 +316,7 @@ async fn certify_domain(
         cert_chain: cert_chain_pem,
         private_key: encrypted_key,
         expires_at: expires_at.timestamp(),
+        timestamp: chrono::Utc::now().timestamp(),
     };
 
     nats.publish(subjects::ROUTER_TLS_CERT_UPDATED, update)

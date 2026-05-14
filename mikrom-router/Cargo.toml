@@ -23,6 +23,7 @@ pingora-openssl = "0.8.0"
 prost.workspace = true
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+dashmap = "6.1.0"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres"] }
 tokio = { workspace = true, features = ["full"] }
 tracing = "0.1.44"

@@ -113,6 +113,7 @@ async fn test_router_handles_nats_updates() {
         cert_chain: "CHAIN".into(),
         private_key: "KEY".into(),
         expires_at: 123456789,
+        timestamp: chrono::Utc::now().timestamp(),
     };
     nats_client
         .publish(

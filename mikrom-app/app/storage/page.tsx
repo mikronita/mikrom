@@ -342,7 +342,7 @@ export default function StoragePage() {
                       </EmptyMedia>
                       <EmptyTitle>No volumes found</EmptyTitle>
                       <EmptyDescription>
-                        This application doesn't have any persistent volumes yet.
+                        This application doesn&apos;t have any persistent volumes yet.
                       </EmptyDescription>
                     </EmptyHeader>
                     <EmptyContent>

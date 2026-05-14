@@ -322,7 +322,8 @@ pub async fn delete_app_handler(
 ) -> ApiResult<StatusCode> {
     let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
-    // 1. Clean up volumes and snapshots physically
+    // Collect volume cleanup targets before the app record is removed.
+    let mut cleanup_targets = Vec::new();
     let volumes = state
         .volume_repo
         .list_volumes_by_app(app.id)
@@ -338,50 +339,15 @@ pub async fn delete_app_handler(
                 ApiError::Internal(format!("Failed to list snapshots for cleanup: {}", e))
             })?;
 
-        // Delete snapshots first (Ceph requirement)
-        for snapshot in snapshots {
-            use mikrom_proto::scheduler::{DeleteSnapshotRequest, DeleteSnapshotResponse};
-            let nats_req = DeleteSnapshotRequest {
-                volume_id: volume.id.to_string(),
-                snapshot_name: snapshot.name,
-                pool_name: volume.pool_name.clone(),
-                host_id: String::new(),
-            };
-
-            let _: DeleteSnapshotResponse = state
-                .nats
-                .with_timeout(std::time::Duration::from_secs(10))
-                .request("mikrom.scheduler.delete_snapshot", nats_req)
-                .await
-                .map_err(|e| {
-                    ApiError::Internal(format!("Failed to request snapshot deletion: {}", e))
-                })?;
-        }
-
-        // Delete volume
-        use mikrom_proto::scheduler::{DeleteVolumeRequest, DeleteVolumeResponse};
-        let nats_req = DeleteVolumeRequest {
-            volume_id: volume.id.to_string(),
-            pool_name: volume.pool_name,
-            host_id: String::new(),
-        };
-
-        let _: DeleteVolumeResponse = state
-            .nats
-            .with_timeout(std::time::Duration::from_secs(10))
-            .request("mikrom.scheduler.delete_volume", nats_req)
-            .await
-            .map_err(|e| ApiError::Internal(format!("Failed to request volume deletion: {}", e)))?;
+        cleanup_targets.push((
+            volume.id.to_string(),
+            volume.pool_name,
+            snapshots
+                .into_iter()
+                .map(|snapshot| snapshot.name)
+                .collect::<Vec<_>>(),
+        ));
     }
-
-    // 2. Tell the scheduler to clean up ALL compute resources (VMs) for this app
-    state
-        .scheduler
-        .delete_all_by_app(app.id.to_string(), app.user_id.to_string())
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!("Failed to clean up scheduler resources: {}", e))
-        })?;
 
     #[allow(clippy::collapsible_if)]
     if let Some(hostname) = &app.hostname {
@@ -390,12 +356,60 @@ pub async fn delete_app_handler(
         })?;
     }
 
-    // 3. Delete from DB (this will cascade to volumes and snapshots table due to ON DELETE CASCADE)
+    // Delete from DB first; the physical cleanup runs in the background.
     state
         .app_repo
         .delete_app(app.id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let cleanup_state = state.clone();
+    let app_id = app.id.to_string();
+    let user_id = app.user_id.to_string();
+    tokio::spawn(async move {
+        if let Err(e) = cleanup_state
+            .scheduler
+            .delete_all_by_app(app_id.clone(), user_id.clone())
+            .await
+        {
+            tracing::error!(
+                app_id = %app_id,
+                error = %e,
+                "Failed to clean up scheduler resources in background"
+            );
+        }
+
+        for (volume_id, pool_name, snapshots) in cleanup_targets {
+            for snapshot_name in snapshots {
+                use mikrom_proto::scheduler::{DeleteSnapshotRequest, DeleteSnapshotResponse};
+                let nats_req = DeleteSnapshotRequest {
+                    volume_id: volume_id.clone(),
+                    snapshot_name,
+                    pool_name: pool_name.clone(),
+                    host_id: String::new(),
+                };
+
+                let _: Result<DeleteSnapshotResponse, _> = cleanup_state
+                    .nats
+                    .with_timeout(std::time::Duration::from_secs(10))
+                    .request("mikrom.scheduler.delete_snapshot", nats_req)
+                    .await;
+            }
+
+            use mikrom_proto::scheduler::{DeleteVolumeRequest, DeleteVolumeResponse};
+            let nats_req = DeleteVolumeRequest {
+                volume_id,
+                pool_name,
+                host_id: String::new(),
+            };
+
+            let _: Result<DeleteVolumeResponse, _> = cleanup_state
+                .nats
+                .with_timeout(std::time::Duration::from_secs(10))
+                .request("mikrom.scheduler.delete_volume", nats_req)
+                .await;
+        }
+    });
 
     state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::AppDeleted,
