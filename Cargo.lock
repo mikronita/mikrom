@@ -2858,6 +2858,8 @@ dependencies = [
  "aya",
  "aya-log",
  "base64 0.22.1",
+ "bollard",
+ "bytes",
  "chrono",
  "dashmap",
  "dotenvy",
@@ -2870,15 +2872,18 @@ dependencies = [
  "librbd-sys",
  "mikrom-agent-ebpf-common",
  "mikrom-proto",
+ "neli",
  "parking_lot",
  "prost 0.13.5",
  "rand 0.8.6",
  "rand_core 0.6.4",
  "reqwest 0.13.3",
+ "rtnetlink",
  "serde",
  "serde_json",
  "shlex",
  "sysinfo",
+ "tar",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2960,19 +2965,24 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-nats",
+ "bollard",
+ "bytes",
  "dashmap",
  "dotenvy",
  "envy",
  "futures",
  "git2",
+ "glob",
  "mikrom-proto",
  "prost 0.13.5",
  "serde",
  "serde_json",
+ "tar",
  "tempfile",
  "tokio",
  "tracing",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]
@@ -3045,11 +3055,15 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dashmap",
+ "futures",
  "futures-util",
  "hex",
  "hostname",
  "http 1.4.0",
+ "libc",
  "mikrom-proto",
+ "neli",
+ "netlink-packet-route",
  "openssl",
  "openssl-sys",
  "opentelemetry 0.27.1",
@@ -3061,6 +3075,7 @@ dependencies = [
  "prost 0.13.5",
  "rand 0.8.6",
  "reqwest 0.12.28",
+ "rtnetlink",
  "serde",
  "serde_json",
  "sha2",
@@ -3236,6 +3251,7 @@ dependencies = [
  "log",
  "neli-proc-macros",
  "parking_lot",
+ "tokio",
 ]
 
 [[package]]
@@ -5875,6 +5891,17 @@ checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "tar"
+version = "0.4.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22692a6476a21fa75fdfc11d452fda482af402c008cdbaf3476414e122040973"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
 ]
 
 [[package]]
