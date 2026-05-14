@@ -425,6 +425,8 @@ mod tests {
         AppState {
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(MockAppRepository::new()),
+            github_repo: Arc::new(crate::repositories::MockGithubRepository::default()),
+            volume_repo: Arc::new(crate::repositories::MockVolumeRepository::new()),
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
             nats,
             router_addr: "http://localhost:8080".to_string(),
@@ -440,7 +442,6 @@ mod tests {
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
-            github_repo: Arc::new(crate::repositories::MockGithubRepository::default()),
             github_app_id: None,
             github_private_key: None,
             github_app_slug: None,

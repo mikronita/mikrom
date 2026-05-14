@@ -23,6 +23,9 @@ async fn test_api_versioning_enforcement() {
     let state = AppState {
         user_repo: Arc::new(repositories::user_repository::MockUserRepository::new()),
         app_repo,
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),

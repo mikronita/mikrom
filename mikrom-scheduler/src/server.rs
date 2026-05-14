@@ -39,6 +39,7 @@ impl SchedulerServer {
                         volume_id: v.volume_id.clone(),
                         size_mib: v.size_mib,
                         read_only: v.read_only,
+                        pool_name: v.pool_name.clone(),
                     })
                     .collect(),
                 health_check_path: c.health_check_path,
@@ -284,6 +285,147 @@ impl SchedulerServer {
             Err(e) => Ok(UpdateSecurityGroupsResponse {
                 success: false,
                 message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn create_volume(
+        &self,
+        req: mikrom_proto::scheduler::CreateVolumeRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::CreateVolumeResponse> {
+        match self
+            .app_service
+            .create_volume(&req.host_id, &req.volume_id, req.size_mib, &req.pool_name)
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::CreateVolumeResponse {
+                success: true,
+                message: "Volume created successfully".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::CreateVolumeResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn create_snapshot(
+        &self,
+        req: mikrom_proto::scheduler::CreateSnapshotRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::CreateSnapshotResponse> {
+        match self
+            .app_service
+            .create_snapshot(
+                &req.host_id,
+                &req.volume_id,
+                &req.snapshot_name,
+                &req.pool_name,
+            )
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::CreateSnapshotResponse {
+                success: true,
+                message: "Snapshot created successfully".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::CreateSnapshotResponse {
+                success: false,
+                message: format!("Failed to create snapshot: {}", e),
+            }),
+        }
+    }
+
+    pub async fn delete_volume(
+        &self,
+        req: mikrom_proto::scheduler::DeleteVolumeRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::DeleteVolumeResponse> {
+        match self
+            .app_service
+            .delete_volume(&req.host_id, &req.volume_id, &req.pool_name)
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::DeleteVolumeResponse {
+                success: true,
+                message: "Volume deleted successfully".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::DeleteVolumeResponse {
+                success: false,
+                message: format!("Failed to delete volume: {}", e),
+            }),
+        }
+    }
+
+    pub async fn delete_snapshot(
+        &self,
+        req: mikrom_proto::scheduler::DeleteSnapshotRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::DeleteSnapshotResponse> {
+        match self
+            .app_service
+            .delete_snapshot(
+                &req.host_id,
+                &req.volume_id,
+                &req.snapshot_name,
+                &req.pool_name,
+            )
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::DeleteSnapshotResponse {
+                success: true,
+                message: "Snapshot deleted successfully".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::DeleteSnapshotResponse {
+                success: false,
+                message: format!("Failed to delete snapshot: {}", e),
+            }),
+        }
+    }
+
+    pub async fn restore_snapshot(
+        &self,
+        req: mikrom_proto::scheduler::RestoreSnapshotRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::RestoreSnapshotResponse> {
+        match self
+            .app_service
+            .restore_snapshot(
+                &req.host_id,
+                &req.volume_id,
+                &req.snapshot_name,
+                &req.pool_name,
+            )
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::RestoreSnapshotResponse {
+                success: true,
+                message: "Snapshot restored successfully".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::RestoreSnapshotResponse {
+                success: false,
+                message: format!("Failed to restore snapshot: {}", e),
+            }),
+        }
+    }
+
+    pub async fn clone_volume(
+        &self,
+        req: mikrom_proto::scheduler::CloneVolumeRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::CloneVolumeResponse> {
+        match self
+            .app_service
+            .clone_volume(
+                &req.host_id,
+                &req.source_volume_id,
+                &req.snapshot_name,
+                &req.target_volume_id,
+                &req.pool_name,
+            )
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::CloneVolumeResponse {
+                success: true,
+                message: "Volume cloned successfully".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::CloneVolumeResponse {
+                success: false,
+                message: format!("Failed to clone volume: {}", e),
             }),
         }
     }

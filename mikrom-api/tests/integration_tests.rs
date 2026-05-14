@@ -52,9 +52,16 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         }
     });
 
+    let mut mock_volume_repo =
+        mikrom_api::repositories::volume_repository::MockVolumeRepository::new();
+    mock_volume_repo
+        .expect_list_volumes_by_app()
+        .returning(|_| Ok(vec![]));
+
     let state = AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
+        volume_repo: Arc::new(mock_volume_repo),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),

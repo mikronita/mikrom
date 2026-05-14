@@ -190,6 +190,12 @@ impl DeploymentService {
 
         let vpc_ipv6_prefix = user.vpc_ipv6_prefix.unwrap_or_default();
 
+        let volumes = state
+            .volume_repo
+            .list_volumes_by_app(app.id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
         let nats_req = DeployRequest {
             app_id: app.id.to_string(),
             app_name: app.name.clone(),
@@ -202,6 +208,15 @@ impl DeploymentService {
                 port: app.port as u32,
                 env: params.env,
                 health_check_path: app.health_check_path.clone(),
+                volumes: volumes
+                    .into_iter()
+                    .map(|v| mikrom_proto::scheduler::Volume {
+                        volume_id: v.id.to_string(),
+                        size_mib: v.size_mib as u64,
+                        read_only: false, // Default to RW
+                        pool_name: v.pool_name,
+                    })
+                    .collect(),
                 ..Default::default()
             }),
             deployment_id: deployment.id.to_string(),

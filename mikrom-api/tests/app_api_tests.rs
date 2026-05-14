@@ -73,6 +73,9 @@ async fn test_create_app_endpoint() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
@@ -169,6 +172,9 @@ async fn test_create_app_duplicate_name() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
@@ -274,6 +280,9 @@ async fn test_list_apps_includes_secret() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
@@ -374,6 +383,9 @@ async fn test_get_app_secret_endpoint() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
@@ -470,6 +482,9 @@ async fn test_create_app_with_custom_config() {
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(

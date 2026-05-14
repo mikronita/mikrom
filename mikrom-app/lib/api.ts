@@ -851,6 +851,154 @@ export function watchAppLogsSSE(
   };
 }
 
+export interface Volume {
+  id: string;
+  app_id: string;
+  name: string;
+  size_mib: number;
+  pool_name: string;
+  created_at: string;
+}
+
+export interface VolumeSnapshot {
+  id: string;
+  volume_id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface CreateVolumeRequest {
+  name: string;
+  size_mib: number;
+}
+
+export interface CreateSnapshotRequest {
+  name: string;
+}
+
+export interface RestoreSnapshotRequest {
+  snapshot_name: string;
+}
+
+export interface CloneVolumeRequest {
+  name: string;
+  snapshot_name: string;
+}
+
+export async function listVolumes(token: string, appId: string): Promise<{ data?: Volume[]; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apps/${appId}/volumes`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<Volume[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch volumes") };
+    return { data: result as Volume[] };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function createVolume(token: string, appId: string, data: CreateVolumeRequest): Promise<{ data?: Volume; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apps/${appId}/volumes`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<Volume>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create volume") };
+    return { data: result as Volume };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function createVolumeSnapshot(token: string, volumeId: string, data: CreateSnapshotRequest): Promise<{ data?: VolumeSnapshot; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/volumes/${volumeId}/snapshots`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<VolumeSnapshot>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create snapshot") };
+    return { data: result as VolumeSnapshot };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function listVolumeSnapshots(token: string, volumeId: string): Promise<{ data?: VolumeSnapshot[]; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/volumes/${volumeId}/snapshots`, {
+      headers: authHeaders(token),
+    });
+    const result = await parseJson<VolumeSnapshot[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch snapshots") };
+    return { data: result as VolumeSnapshot[] };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function restoreVolumeSnapshot(token: string, volumeId: string, data: RestoreSnapshotRequest): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/volumes/${volumeId}/restore`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to restore snapshot") };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function cloneVolumeFromSnapshot(token: string, volumeId: string, data: CloneVolumeRequest): Promise<{ data?: Volume; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/volumes/${volumeId}/clone`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<Volume>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to clone volume") };
+    return { data: result as Volume };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function deleteVolumeSnapshot(token: string, snapshotId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/snapshots/${snapshotId}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to delete snapshot") };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
+export async function deleteVolume(token: string, volumeId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/volumes/${volumeId}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to delete volume") };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Network error" };
+  }
+}
+
 // Transitional aliases
 export const listVms = listActiveDeployments;
 export const watchVmsSSE = watchDeploymentsSSE;

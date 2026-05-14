@@ -29,6 +29,7 @@ async fn main() -> anyhow::Result<()> {
         config.master_key.clone(),
     );
     let github_repo = mikrom_api::repositories::PostgresGithubRepository::new(db_pool.clone());
+    let volume_repo = mikrom_api::repositories::PostgresVolumeRepository::new(db_pool.clone());
 
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
     let (workspace_events, _) = tokio::sync::broadcast::channel(100);
@@ -48,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
         github_repo: Arc::new(github_repo),
+        volume_repo: Arc::new(volume_repo),
         scheduler,
         nats,
         router_addr: config.router_addr,

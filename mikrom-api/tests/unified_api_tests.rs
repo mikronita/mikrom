@@ -94,6 +94,9 @@ async fn test_hierarchical_deployment_status_success() {
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
@@ -190,6 +193,9 @@ async fn test_hierarchical_security_cross_app_prevention() {
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),

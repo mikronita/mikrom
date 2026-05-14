@@ -23,6 +23,9 @@ async fn test_openapi_json_endpoint() {
     let state = AppState {
         user_repo: Arc::new(mock_repo),
         app_repo,
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
@@ -76,6 +79,9 @@ async fn test_swagger_ui_endpoint() {
     let state = AppState {
         user_repo: Arc::new(mock_repo),
         app_repo,
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
         scheduler: Arc::new(scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),

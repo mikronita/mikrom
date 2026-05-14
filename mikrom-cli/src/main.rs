@@ -33,6 +33,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::App(app_cmd) => handle_app(&client, app_cmd, cli.output).await?,
         Commands::Deployment(dep_cmd) => handle_deployment(&client, dep_cmd, cli.output).await?,
         Commands::Config(cfg_cmd) => handle_config(cfg_cmd, &mut cfg, cli.output).await?,
+        Commands::Volume(vol_cmd) => handle_volume(&client, vol_cmd, cli.output).await?,
         Commands::System(sys_cmd) => handle_system(&client, sys_cmd, cli.output).await?,
     }
 

@@ -150,6 +150,9 @@ async fn test_zero_downtime_flow_success() {
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
@@ -243,6 +246,9 @@ async fn test_activate_deployment_no_job_id() {
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),

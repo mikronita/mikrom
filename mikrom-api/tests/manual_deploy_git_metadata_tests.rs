@@ -23,6 +23,9 @@ async fn create_test_state(app_repo: MockAppRepository) -> AppState {
     AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(MockScheduler::new()),
         nats: TypedNatsClient::new(nats_client),

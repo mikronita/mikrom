@@ -194,6 +194,9 @@ async fn test_promote_paused_deployment_resumes_it() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
@@ -333,6 +336,9 @@ async fn test_promote_running_deployment_while_flow_active_is_immediate() {
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
@@ -476,6 +482,9 @@ async fn test_promote_running_deployment_with_stale_db_status_uses_runtime_statu
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
@@ -603,6 +612,9 @@ async fn test_promote_unhealthy_deployment_no_cleanup() {
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        volume_repo: Arc::new(
+            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+        ),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),

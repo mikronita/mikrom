@@ -1,3 +1,6 @@
+pub mod volumes;
+pub use volumes::*;
+
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::SecurityRule;
 use crate::repositories::app_repository::UpdateDeploymentParams;

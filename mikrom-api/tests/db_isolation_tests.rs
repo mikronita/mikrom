@@ -47,6 +47,9 @@ mod tests {
                 pool.clone(),
                 "test-key".to_string(),
             )),
+            volume_repo: Arc::new(
+                mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
+            ),
             github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
             scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
             nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),

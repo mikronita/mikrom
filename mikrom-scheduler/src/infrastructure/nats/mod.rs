@@ -5,8 +5,9 @@ pub use event_loop::NatsEventLoop;
 use crate::domain::{AgentClient, DomainError, DomainResult, VmConfig};
 use async_trait::async_trait;
 use mikrom_proto::agent::{
-    AgentCommand, AgentCommandResponse, DeleteVmRequest, PauseVmRequest, ResumeVmRequest,
-    StartVmRequest, StopVmRequest, UpdateFirewallRequest, VmConfig as ProtoVmConfig,
+    AgentCommand, AgentCommandResponse, DeleteVmRequest, PauseVmRequest, RestoreSnapshotRequest,
+    ResumeVmRequest, StartVmRequest, StopVmRequest, UpdateFirewallRequest,
+    VmConfig as ProtoVmConfig, Volume as ProtoVolume,
 };
 use prost::Message;
 use std::time::Duration;
@@ -26,6 +27,7 @@ impl NatsAgentClient {
         command: mikrom_proto::agent::agent_command::Command,
     ) -> DomainResult<()> {
         let subject = format!("mikrom.agent.{}.cmd", host_id);
+        tracing::debug!(?command, %subject, "Sending command to agent");
         let cmd = AgentCommand {
             command: Some(command),
         };
@@ -70,7 +72,16 @@ impl AgentClient for NatsAgentClient {
             disk_mib: config.disk_mib as u32,
             port: config.port,
             env: config.env.clone(),
-            volumes: vec![], // TODO
+            volumes: config
+                .volumes
+                .iter()
+                .map(|v| ProtoVolume {
+                    volume_id: v.volume_id.clone(),
+                    size_mib: v.size_mib,
+                    read_only: v.read_only,
+                    pool_name: v.pool_name.clone(),
+                })
+                .collect(),
             health_check_path: config.health_check_path.clone(),
             ipv6_address: config.ipv6_address.clone().unwrap_or_default(),
             ipv6_gateway: config.ipv6_gateway.clone().unwrap_or_default(),
@@ -166,7 +177,7 @@ impl AgentClient for NatsAgentClient {
         vm_id: &str,
         rules: Vec<mikrom_proto::scheduler::FirewallRule>,
     ) -> DomainResult<()> {
-        let agent_rules = rules
+        let proto_rules = rules
             .into_iter()
             .map(|r| mikrom_proto::agent::FirewallRule {
                 protocol: r.protocol,
@@ -180,8 +191,126 @@ impl AgentClient for NatsAgentClient {
             host_id,
             mikrom_proto::agent::agent_command::Command::UpdateFirewall(UpdateFirewallRequest {
                 vm_id: vm_id.to_string(),
-                rules: agent_rules,
+                rules: proto_rules,
             }),
+        )
+        .await
+    }
+
+    async fn create_volume(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        size_mib: u32,
+        pool_name: &str,
+    ) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::CreateVolume(
+                mikrom_proto::agent::CreateVolumeRequest {
+                    volume_id: volume_id.to_string(),
+                    size_mib,
+                    pool_name: pool_name.to_string(),
+                },
+            ),
+        )
+        .await
+    }
+
+    async fn create_snapshot(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        snapshot_name: &str,
+        pool_name: &str,
+    ) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::CreateSnapshot(
+                mikrom_proto::agent::CreateSnapshotRequest {
+                    volume_id: volume_id.to_string(),
+                    snapshot_name: snapshot_name.to_string(),
+                    pool_name: pool_name.to_string(),
+                },
+            ),
+        )
+        .await
+    }
+
+    async fn delete_volume(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        pool_name: &str,
+    ) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::DeleteVolume(
+                mikrom_proto::agent::DeleteVolumeRequest {
+                    volume_id: volume_id.to_string(),
+                    pool_name: pool_name.to_string(),
+                },
+            ),
+        )
+        .await
+    }
+
+    async fn delete_snapshot(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        snapshot_name: &str,
+        pool_name: &str,
+    ) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::DeleteSnapshot(
+                mikrom_proto::agent::DeleteSnapshotRequest {
+                    volume_id: volume_id.to_string(),
+                    snapshot_name: snapshot_name.to_string(),
+                    pool_name: pool_name.to_string(),
+                },
+            ),
+        )
+        .await
+    }
+
+    async fn restore_snapshot(
+        &self,
+        host_id: &str,
+        volume_id: &str,
+        snapshot_name: &str,
+        pool_name: &str,
+    ) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::RestoreSnapshot(RestoreSnapshotRequest {
+                volume_id: volume_id.to_string(),
+                snapshot_name: snapshot_name.to_string(),
+                pool_name: pool_name.to_string(),
+            }),
+        )
+        .await
+    }
+
+    async fn clone_volume(
+        &self,
+        host_id: &str,
+        source_volume_id: &str,
+        snapshot_name: &str,
+        target_volume_id: &str,
+        pool_name: &str,
+    ) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::CloneVolume(
+                mikrom_proto::agent::CloneVolumeRequest {
+                    source_volume_id: source_volume_id.to_string(),
+                    snapshot_name: snapshot_name.to_string(),
+                    target_volume_id: target_volume_id.to_string(),
+                    pool_name: pool_name.to_string(),
+                },
+            ),
         )
         .await
     }
