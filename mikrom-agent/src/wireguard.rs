@@ -313,10 +313,12 @@ impl WireGuardManager {
             )
             .await?;
 
-        while let Some(Ok(_msg)) = recv
+        while let Some(res) = recv
             .next::<u16, neli::genl::Genlmsghdr<WgCmd, WgDeviceAttr>>()
             .await
-        {}
+        {
+            res?;
+        }
 
         Ok(())
     }
