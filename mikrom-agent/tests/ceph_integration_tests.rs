@@ -3,6 +3,10 @@ use uuid::Uuid;
 
 #[tokio::test]
 async fn test_ceph_rbd_lifecycle_native() {
+    if !std::path::Path::new("/etc/ceph/ceph.conf").exists() {
+        println!("Skipping Ceph test: /etc/ceph/ceph.conf not found");
+        return;
+    }
     let pool = "rbd";
     let volume_id = format!("test-vol-{}", Uuid::new_v4());
     let snapshot_name = "snap1";
@@ -68,6 +72,10 @@ async fn test_ceph_rbd_lifecycle_native() {
 
 #[tokio::test]
 async fn test_ceph_restore_busy_image_failure() {
+    if !std::path::Path::new("/etc/ceph/ceph.conf").exists() {
+        println!("Skipping Ceph test: /etc/ceph/ceph.conf not found");
+        return;
+    }
     let pool = "rbd";
     let volume_id = format!("test-busy-vol-{}", Uuid::new_v4());
     let snapshot_name = "snap1";
