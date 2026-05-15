@@ -292,7 +292,7 @@ impl NatsEventLoop {
         tokio::spawn(async move {
             match RouterHeartbeat::decode(&message.payload[..]) {
                 Ok(heartbeat) => {
-                    tracing::info!(
+                    tracing::debug!(
                         "Received heartbeat from router {} with WG IP {}",
                         heartbeat.host_id,
                         heartbeat.wireguard_ip
@@ -333,7 +333,7 @@ impl NatsEventLoop {
         tokio::spawn(async move {
             match WorkerHeartbeat::decode(&message.payload[..]) {
                 Ok(heartbeat) => {
-                    tracing::info!(
+                    tracing::debug!(
                         "Received heartbeat from worker {} with WG IP {}",
                         heartbeat.host_id,
                         heartbeat.wireguard_ip

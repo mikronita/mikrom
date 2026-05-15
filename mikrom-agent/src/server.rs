@@ -170,7 +170,7 @@ impl AgentServer {
                 if let Ok(update) =
                     mikrom_proto::scheduler::NetworkMeshUpdate::decode(&msg.payload[..])
                 {
-                    info!("Received mesh update with {} peers", update.peers.len());
+                    tracing::debug!("Received mesh update with {} peers", update.peers.len());
                     if let Err(e) = wg_manager
                         .update_peers(&update.peers, &priv_key, &host_id)
                         .await
