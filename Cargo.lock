@@ -2851,7 +2851,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-agent"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -2895,7 +2895,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-agent-ebpf"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "aya-ebpf",
  "aya-log-ebpf",
@@ -2905,14 +2905,14 @@ dependencies = [
 
 [[package]]
 name = "mikrom-agent-ebpf-common"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "aya",
 ]
 
 [[package]]
 name = "mikrom-api"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2962,7 +2962,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-builder"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-nats",

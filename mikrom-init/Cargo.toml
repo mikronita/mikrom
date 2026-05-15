@@ -1,6 +1,6 @@
 [package]
 name = "mikrom-init"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 description = "Static init process (PID 1) for Mikrom microVMs"
 
