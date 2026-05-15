@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use bollard::auth::DockerCredentials;
-use bollard::query_parameters::{BuildImageOptionsBuilder, PushImageOptionsBuilder};
+use bollard::query_parameters::{
+    BuildImageOptionsBuilder, PushImageOptionsBuilder, RemoveImageOptionsBuilder,
+};
 use bollard::{Docker, body_stream};
 use futures::stream::StreamExt;
 use git2::{FetchOptions, RemoteCallbacks, Repository};
@@ -109,6 +111,18 @@ impl AppBuilder {
             .await
             .unwrap_or(8080);
         self.push_to_registry(&full_image_tag).await?;
+
+        // 5. Cleanup local image to free disk space
+        if let Ok(docker) = Docker::connect_with_local_defaults() {
+            let _ = docker
+                .remove_image(
+                    &full_image_tag,
+                    Some(RemoveImageOptionsBuilder::default().force(true).build()),
+                    None,
+                )
+                .await;
+            info!(image_tag = %full_image_tag, "Cleaned up local image after push");
+        }
 
         Ok(BuildResult {
             image_tag: full_image_tag,

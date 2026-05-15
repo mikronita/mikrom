@@ -3,6 +3,7 @@ use bollard::Docker;
 use bollard::auth::DockerCredentials;
 use bollard::query_parameters::{
     CreateContainerOptionsBuilder, CreateImageOptionsBuilder, RemoveContainerOptionsBuilder,
+    RemoveImageOptionsBuilder,
 };
 use futures::stream::StreamExt;
 use std::ffi::CString;
@@ -262,6 +263,13 @@ impl ImageBuilder {
             .remove_container(
                 &container_name,
                 Some(RemoveContainerOptionsBuilder::default().force(true).build()),
+            )
+            .await;
+        let _ = docker
+            .remove_image(
+                image,
+                Some(RemoveImageOptionsBuilder::default().force(true).build()),
+                None,
             )
             .await;
         let _ = tokio::fs::remove_file(&export_tar_path).await;
