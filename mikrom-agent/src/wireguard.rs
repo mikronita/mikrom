@@ -1,6 +1,7 @@
 use anyhow::Context;
 use base64::Engine as _;
 use futures::stream::TryStreamExt;
+use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use tokio::net::lookup_host;
 use tracing::{debug, info};
@@ -59,6 +60,7 @@ impl neli::consts::genl::NlAttrType for WgAllowedIpAttr {}
 pub struct WireGuardManager {
     interface: String,
     config_dir: String,
+    listen_port: u16,
 }
 
 impl WireGuardManager {
@@ -66,12 +68,22 @@ impl WireGuardManager {
         Self {
             interface: interface.to_string(),
             config_dir: "/etc/wireguard".to_string(),
+            listen_port: 51820,
         }
+    }
+
+    pub fn with_listen_port(mut self, port: u16) -> Self {
+        self.listen_port = port;
+        self
     }
 
     pub fn with_config_dir(mut self, dir: &str) -> Self {
         self.config_dir = dir.to_string();
         self
+    }
+
+    pub fn listen_port(&self) -> u16 {
+        self.listen_port
     }
 
     pub async fn load_or_generate_key(&self, data_dir: &str) -> anyhow::Result<String> {
@@ -120,9 +132,9 @@ impl WireGuardManager {
         self.create_wireguard_link(&handle).await?;
 
         let addr = host_ipv6.parse::<Ipv6Addr>()?;
-        self.configure_device(private_key, 51820, &[], false)
+        self.configure_device(private_key, self.listen_port, &[], false)
             .await?;
-        self.add_address(&handle, IpAddr::V6(addr), 64).await?;
+        self.add_address(&handle, IpAddr::V6(addr), 128).await?;
         self.set_link_up(&handle).await?;
 
         info!(
@@ -167,9 +179,15 @@ impl WireGuardManager {
             .wireguard(self.interface.clone())
             .execute()
             .await?;
-        self.link_index(handle).await?.ok_or_else(|| {
+
+        let index = self.link_index(handle).await?.ok_or_else(|| {
             anyhow::anyhow!("WireGuard interface {} was not created", self.interface)
-        })
+        })?;
+
+        // Set MTU 1420 for WireGuard to avoid fragmentation issues with 1500 TAP/Ethernet
+        handle.link().set(index).mtu(1420).execute().await?;
+
+        Ok(index)
     }
 
     async fn link_index(&self, handle: &rtnetlink::Handle) -> anyhow::Result<Option<u32>> {
@@ -560,17 +578,23 @@ impl WireGuardManager {
                 .to_vec()
         }
     }
-
     pub async fn update_peers(
         &self,
         peers: &[mikrom_proto::scheduler::Peer],
         private_key: &str,
-        _host_id: &str,
+        host_id: &str,
     ) -> anyhow::Result<()> {
         let mut conf = format!(
-            "[Interface]\nPrivateKey = {}\nListenPort = 51820\n\n",
-            private_key
+            "[Interface]\nPrivateKey = {}\nListenPort = {}\n\n",
+            private_key, self.listen_port
         );
+
+        let mut route_targets = Vec::new();
+
+        // Always include our own WireGuard IP in desired routes to prevent it from being deleted
+        // if the kernel/system added it to the routing table we are managing.
+        let own_ip = self.get_host_ipv6(host_id);
+        route_targets.push(format!("{}/128", own_ip));
 
         for peer in peers {
             if peer.wireguard_pubkey.is_empty() || peer.endpoint.is_empty() {
@@ -612,6 +636,8 @@ impl WireGuardManager {
                 formatted_allowed_ips.join(",")
             };
 
+            route_targets.extend(formatted_allowed_ips.iter().cloned());
+
             conf.push_str("[Peer]\n");
             conf.push_str(&format!("PublicKey = {}\n", pubkey));
             conf.push_str(&format!(
@@ -624,29 +650,129 @@ impl WireGuardManager {
 
         let conf_path = format!("{}/{}.conf", self.config_dir, self.interface);
 
-        // Idempotency check: if the config hasn't changed, do nothing
-        if let Ok(existing_conf) = tokio::fs::read_to_string(&conf_path).await
-            && existing_conf == conf
-        {
-            debug!(
-                "WireGuard config for {} is unchanged, skipping sync",
-                self.interface
-            );
-            return Ok(());
-        }
-
+        // Write the config file for debugging/persistence, but don't skip sync
+        // because the interface might have been recreated in the kernel.
         tokio::fs::write(&conf_path, &conf).await?;
         use std::os::unix::fs::PermissionsExt;
         tokio::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600)).await?;
 
-        self.configure_device(private_key, 51820, peers, true)
+        self.configure_device(private_key, self.listen_port, peers, true)
             .await?;
 
-        info!(
+        self.sync_routes(&route_targets).await?;
+
+        debug!(
             "WireGuard mesh updated with {} peers via netlink",
             peers.len()
         );
         Ok(())
+    }
+
+    async fn sync_routes(&self, route_targets: &[String]) -> anyhow::Result<()> {
+        let desired_keys: std::collections::HashSet<(IpAddr, u8)> = route_targets
+            .iter()
+            .filter_map(|target| Self::parse_route_target(target).ok())
+            .collect();
+
+        let handle = self.rtnl_handle().await?;
+        let Some(index) = self.link_index(&handle).await? else {
+            return Err(anyhow::anyhow!(
+                "WireGuard interface {} not found",
+                self.interface
+            ));
+        };
+
+        let current_routes = self.current_routes_for_interface(&handle, index).await?;
+        for route in current_routes {
+            if let Some(key) = Self::route_message_key(&route)
+                && !desired_keys.contains(&key)
+            {
+                let _ = handle.route().del(route).execute().await;
+            }
+        }
+
+        for target_key in &desired_keys {
+            let (addr, prefix) = *target_key;
+            let req = handle.route().add().replace();
+            let res = match addr {
+                IpAddr::V4(v4) => {
+                    req.v4()
+                        .destination_prefix(v4, prefix)
+                        .output_interface(index)
+                        .execute()
+                        .await
+                },
+                IpAddr::V6(v6) => {
+                    req.v6()
+                        .destination_prefix(v6, prefix)
+                        .output_interface(index)
+                        .execute()
+                        .await
+                },
+            };
+
+            if let Err(e) = res {
+                let err_str = e.to_string();
+                let is_exists = err_str.contains("File exists") || err_str.contains("os error 17");
+
+                if !is_exists {
+                    return Err(anyhow::anyhow!(
+                        "Failed to add route {}/{}: {}",
+                        addr,
+                        prefix,
+                        e
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn route_message_key(route: &RouteMessage) -> Option<(IpAddr, u8)> {
+        let prefix = route.header.destination_prefix_length;
+        route.attributes.iter().find_map(|attr| match attr {
+            RouteAttribute::Destination(RouteAddress::Inet(v4)) => Some((IpAddr::V4(*v4), prefix)),
+            RouteAttribute::Destination(RouteAddress::Inet6(v6)) => Some((IpAddr::V6(*v6), prefix)),
+            _ => None,
+        })
+    }
+
+    fn parse_route_target(target: &str) -> anyhow::Result<(IpAddr, u8)> {
+        if let Some((addr, prefix)) = target.split_once('/') {
+            let prefix = prefix.parse::<u8>()?;
+            if addr.contains(':') {
+                Ok((IpAddr::V6(addr.parse::<Ipv6Addr>()?), prefix))
+            } else {
+                Ok((IpAddr::V4(addr.parse::<Ipv4Addr>()?), prefix))
+            }
+        } else if target.contains(':') {
+            Ok((IpAddr::V6(target.parse::<Ipv6Addr>()?), 128))
+        } else {
+            Ok((IpAddr::V4(target.parse::<Ipv4Addr>()?), 32))
+        }
+    }
+
+    async fn current_routes_for_interface(
+        &self,
+        handle: &rtnetlink::Handle,
+        index: u32,
+    ) -> anyhow::Result<Vec<RouteMessage>> {
+        let v4 = handle.route().get(rtnetlink::IpVersion::V4).execute();
+        let v6 = handle.route().get(rtnetlink::IpVersion::V6).execute();
+
+        let routes_v4 = v4.try_collect::<Vec<_>>().await?;
+        let routes_v6 = v6.try_collect::<Vec<_>>().await?;
+
+        Ok(routes_v4
+            .into_iter()
+            .chain(routes_v6)
+            .filter(|route| {
+                route.attributes.iter().any(|attr| {
+                    matches!(attr, RouteAttribute::Oif(route_index) if *route_index == index)
+                })
+            })
+            .collect())
     }
 }
 

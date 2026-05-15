@@ -35,6 +35,11 @@ impl AgentServer {
             .build()
             .unwrap_or_default();
 
+        let mut wg_manager = crate::wireguard::WireGuardManager::new("wg0");
+        if let Some(port) = config.wireguard_port {
+            wg_manager = wg_manager.with_listen_port(port);
+        }
+
         Self {
             config: config.clone(),
             ip_address,
@@ -42,7 +47,7 @@ impl AgentServer {
             firecracker,
             shutdown_flag: Arc::new(RwLock::new(false)),
             http_client,
-            wg_manager: Arc::new(crate::wireguard::WireGuardManager::new("wg0")),
+            wg_manager: Arc::new(wg_manager),
         }
     }
 
@@ -592,6 +597,7 @@ impl AgentServer {
         let hostname = self.config.hostname();
         let wireguard_pubkey = pub_key;
         let wireguard_ip = self.wg_manager.get_host_ipv6(&host_id);
+        let wireguard_port = i32::from(self.wg_manager.listen_port());
         let metrics_collector = self.metrics_collector.clone();
         let advertise_address = self.ip_address.clone();
 
@@ -653,7 +659,7 @@ impl AgentServer {
                     }),
                     wireguard_pubkey: wireguard_pubkey.clone(),
                     wireguard_ip: wireguard_ip.clone(),
-                    wireguard_port: 51820,
+                    wireguard_port,
                     advertise_address: advertise_address.clone(),
                 };
 

@@ -2873,6 +2873,7 @@ dependencies = [
  "mikrom-agent-ebpf-common",
  "mikrom-proto",
  "neli",
+ "netlink-packet-route",
  "parking_lot",
  "prost 0.13.5",
  "rand 0.8.6",

@@ -23,6 +23,10 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::sync::{Mutex, RwLock};
 
+use futures::stream::TryStreamExt;
+use netlink_packet_route::route::{RouteAddress, RouteAttribute};
+use std::net::IpAddr;
+
 /// Orchestrator for managing the lifecycle of Firecracker microVMs on a single host.
 ///
 /// It handles networking, image conversion, jailer setup, and API communication
@@ -102,6 +106,96 @@ impl FirecrackerManager {
                 host_mem_path,
             ),
         }
+    }
+
+    async fn rtnl_handle(&self) -> Result<rtnetlink::Handle, FirecrackerError> {
+        let (connection, handle, _) = rtnetlink::new_connection().map_err(|e| {
+            FirecrackerError::ProcessError(format!("Failed to create netlink connection: {e}"))
+        })?;
+        tokio::spawn(connection);
+        Ok(handle)
+    }
+
+    async fn get_link_index(
+        &self,
+        handle: &rtnetlink::Handle,
+        name: &str,
+    ) -> Result<Option<u32>, FirecrackerError> {
+        let mut links = handle.link().get().match_name(name.to_string()).execute();
+        match links.try_next().await {
+            Ok(Some(msg)) => Ok(Some(msg.header.index)),
+            Ok(None) => Ok(None),
+            Err(e) => Err(FirecrackerError::ProcessError(format!(
+                "Failed to get link index for {name}: {e}"
+            ))),
+        }
+    }
+
+    async fn set_link_up(
+        &self,
+        handle: &rtnetlink::Handle,
+        index: u32,
+    ) -> Result<(), FirecrackerError> {
+        handle.link().set(index).up().execute().await.map_err(|e| {
+            FirecrackerError::ProcessError(format!("Failed to set link {index} up: {e}"))
+        })
+    }
+
+    async fn set_link_mtu(
+        &self,
+        handle: &rtnetlink::Handle,
+        index: u32,
+        mtu: u32,
+    ) -> Result<(), FirecrackerError> {
+        handle
+            .link()
+            .set(index)
+            .mtu(mtu)
+            .execute()
+            .await
+            .map_err(|e| {
+                FirecrackerError::ProcessError(format!(
+                    "Failed to set link {index} MTU to {mtu}: {e}"
+                ))
+            })
+    }
+
+    async fn add_ip_address(
+        &self,
+        handle: &rtnetlink::Handle,
+        index: u32,
+        address: IpAddr,
+        prefix_len: u8,
+    ) -> Result<(), FirecrackerError> {
+        match handle
+            .address()
+            .add(index, address, prefix_len)
+            .execute()
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str.contains("File exists") || err_str.contains("os error 17") {
+                    Ok(())
+                } else {
+                    Err(FirecrackerError::ProcessError(format!(
+                        "Failed to add address {address}/{prefix_len} to link {index}: {e}"
+                    )))
+                }
+            },
+        }
+    }
+
+    fn parse_ip_cidr(&self, cidr: &str) -> Result<(IpAddr, u8), FirecrackerError> {
+        let (ip_str, prefix_str) = cidr.split_once('/').unwrap_or((cidr, "32"));
+        let ip: IpAddr = ip_str.parse().map_err(|e| {
+            FirecrackerError::ProcessError(format!("Failed to parse IP address {ip_str}: {e}"))
+        })?;
+        let prefix: u8 = prefix_str.parse().map_err(|e| {
+            FirecrackerError::ProcessError(format!("Failed to parse prefix {prefix_str}: {e}"))
+        })?;
+        Ok((ip, prefix))
     }
 
     pub async fn get_vm_info(&self, vm_id: &VmId) -> Option<VmInfo> {
@@ -1042,23 +1136,40 @@ impl FirecrackerManager {
     async fn add_ipv6_host_route(&self, config: &VmConfig) {
         // This is a best-effort host route for direct guest reachability.
         if let Some(ipv6) = &config.ipv6_address
-            && let Some(prefix) = Self::ipv6_route_prefix(ipv6)
+            && let Some(prefix_str) = Self::ipv6_route_prefix(ipv6)
+            && let Ok(handle) = self.rtnl_handle().await
+            && let Ok(Some(index)) = self.get_link_index(&handle, "mikrom-br0").await
         {
-            let output = tokio::process::Command::new("ip")
-                .args(["-6", "route", "replace", &prefix, "dev", "mikrom-br0"])
-                .output()
-                .await;
+            let (addr, prefix) = match self.parse_ip_cidr(&prefix_str) {
+                Ok(res) => res,
+                Err(_) => return,
+            };
 
-            if let Ok(out) = output
-                && !out.status.success()
-            {
+            let req = handle.route().add().replace();
+            let res = match addr {
+                IpAddr::V4(v4) => {
+                    req.v4()
+                        .destination_prefix(v4, prefix)
+                        .output_interface(index)
+                        .execute()
+                        .await
+                },
+                IpAddr::V6(v6) => {
+                    req.v6()
+                        .destination_prefix(v6, prefix)
+                        .output_interface(index)
+                        .execute()
+                        .await
+                },
+            };
+
+            if let Err(e) = res {
                 tracing::warn!(
-                    prefix = %prefix,
-                    stderr = %String::from_utf8_lossy(&out.stderr),
-                    "Failed to add IPv6 host route for VM"
+                    prefix = %prefix_str,
+                    "Failed to add IPv6 host route for VM: {e}"
                 );
             } else {
-                tracing::info!(prefix = %prefix, "Added IPv6 host route for VM");
+                tracing::info!(prefix = %prefix_str, "Added IPv6 host route for VM");
             }
         }
     }
@@ -1687,87 +1798,56 @@ impl FirecrackerManager {
             bridge_ip
         );
 
-        self.run_ip_command_allowing_exists([
-            "link",
-            "add",
-            "name",
-            &bridge_name,
-            "type",
-            "bridge",
-        ])
-        .await
-        .map_err(|e| {
-            tracing::warn!("Failed to create bridge {}: {}", bridge_name, e);
-            e
-        })?;
+        let handle = self.rtnl_handle().await?;
 
-        self.run_ip_command(["link", "set", "dev", &bridge_name, "up"])
+        // 1. Create bridge if it doesn't exist
+        if self.get_link_index(&handle, &bridge_name).await?.is_none() {
+            handle
+                .link()
+                .add()
+                .bridge(bridge_name.clone())
+                .execute()
+                .await
+                .map_err(|e| {
+                    FirecrackerError::ProcessError(format!(
+                        "Failed to create bridge {}: {}",
+                        bridge_name, e
+                    ))
+                })?;
+        }
+
+        let Some(index) = self.get_link_index(&handle, &bridge_name).await? else {
+            return Err(FirecrackerError::ProcessError(format!(
+                "Failed to find bridge {bridge_name} after creation"
+            )));
+        };
+
+        // 2. Set MTU 1420 to match WireGuard overhead and avoid fragmentation
+        self.set_link_mtu(&handle, index, 1420).await?;
+
+        // 3. Set link UP
+        self.set_link_up(&handle, index).await?;
+
+        // 4. Add IPv4 address
+        let (v4_addr, v4_prefix) = self.parse_ip_cidr(&bridge_ip)?;
+        self.add_ip_address(&handle, index, v4_addr, v4_prefix)
             .await?;
 
-        // This is crucial if the agent was previously running with a /8 mask.
-        self.run_ip_command([
-            "-6",
-            "addr",
-            "flush",
-            "dev",
-            &bridge_name,
-            "scope",
-            "global",
-        ])
-        .await?;
-
-        self.run_ip_command_allowing_exists(["addr", "add", &bridge_ip, "dev", &bridge_name])
-            .await
-            .map_err(|e| {
-                tracing::warn!(
-                    "Failed to add IPv4 address {} to bridge {}: {}",
-                    bridge_ip,
-                    bridge_name,
-                    e
-                );
-                e
-            })?;
-
+        // 5. Add IPv6 addresses
         // Using /128 for the ULA address so it doesn't conflict with the WireGuard fd00::/8 route.
-        self.run_ip_command_allowing_exists([
-            "-6",
-            "addr",
-            "add",
-            "fd00::1/128",
-            "dev",
-            &bridge_name,
-        ])
-        .await
-        .map_err(|e| {
-            tracing::warn!(
-                "Failed to add IPv6 address fd00::1/128 to bridge {}: {}",
-                bridge_name,
-                e
-            );
-            e
-        })?;
+        self.add_ip_address(&handle, index, IpAddr::V6("fd00::1".parse().unwrap()), 128)
+            .await?;
 
-        self.run_ip_command_allowing_exists([
-            "-6",
-            "addr",
-            "add",
-            "fe80::1/64",
-            "dev",
-            &bridge_name,
-        ])
-        .await
-        .map_err(|e| {
-            tracing::warn!(
-                "Failed to add IPv6 link-local address fe80::1/64 to bridge {}: {}",
-                bridge_name,
-                e
-            );
-            e
-        })?;
+        self.add_ip_address(&handle, index, IpAddr::V6("fe80::1".parse().unwrap()), 64)
+            .await?;
 
         // 6. Enable forwarding
         self.set_proc_sysctl("net/ipv4/ip_forward", "1").await?;
         self.set_proc_sysctl("net/ipv6/conf/all/forwarding", "1")
+            .await?;
+        self.set_proc_sysctl("net/ipv6/conf/default/forwarding", "1")
+            .await?;
+        self.set_proc_sysctl(&format!("net/ipv6/conf/{}/forwarding", bridge_name), "1")
             .await?;
 
         self.run_iptables_command([
@@ -1786,45 +1866,6 @@ impl FirecrackerManager {
         .await;
 
         Ok(())
-    }
-
-    async fn run_ip_command<I, S>(&self, args: I) -> Result<(), FirecrackerError>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        let output = tokio::process::Command::new("ip")
-            .args(args.into_iter().map(|arg| arg.as_ref().to_string()))
-            .output()
-            .await
-            .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to execute ip command: {e}"))
-            })?;
-
-        if !output.status.success() {
-            return Err(FirecrackerError::ProcessError(
-                String::from_utf8_lossy(&output.stderr).to_string(),
-            ));
-        }
-
-        Ok(())
-    }
-
-    async fn run_ip_command_allowing_exists<I, S>(&self, args: I) -> Result<(), FirecrackerError>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        match self.run_ip_command(args).await {
-            Ok(()) => Ok(()),
-            Err(err) => {
-                if err.to_string().contains("File exists") {
-                    Ok(())
-                } else {
-                    Err(err)
-                }
-            },
-        }
     }
 
     async fn run_iptables_command<I, S>(&self, args: I)
@@ -1863,107 +1904,147 @@ impl FirecrackerManager {
     async fn setup_tap(&self, vm_id: &VmId) -> Result<(String, u32), FirecrackerError> {
         let tap_name = format!("m-tap-{}", &vm_id.to_string()[..8]);
 
-        let _ = tokio::process::Command::new("ip")
-            .args(["link", "del", &tap_name])
-            .output()
-            .await;
-
-        let output = tokio::process::Command::new("ip")
-            .args([
-                "tuntap",
-                "add",
-                "dev",
-                &tap_name,
-                "mode",
-                "tap",
-                "user",
-                &self.fc_config.jailer_uid.to_string(),
-            ])
-            .output()
-            .await
+        // 1. Create and configure TAP interface using native ioctl calls.
+        // This sets the mode to TAP, disables packet info (NO_PI), makes it persistent,
+        // and assigns ownership to the jailer's UID.
+        self.create_tap_native(&tap_name, self.fc_config.jailer_uid)
             .map_err(|e| FirecrackerError::ProcessError(format!("Failed to create TAP: {e}")))?;
 
-        if !output.status.success() {
+        let handle = self.rtnl_handle().await?;
+        let Some(index) = self.get_link_index(&handle, &tap_name).await? else {
             return Err(FirecrackerError::ProcessError(format!(
-                "TAP creation failed: {}",
-                String::from_utf8_lossy(&output.stderr)
+                "TAP {tap_name} not found after native creation"
             )));
-        }
-
-        let output = tokio::process::Command::new("ip")
-            .args(["link", "set", &tap_name, "up"])
-            .output()
-            .await
-            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to set TAP up: {e}")))?;
-
-        if !output.status.success() {
-            return Err(FirecrackerError::ProcessError(format!(
-                "Failed to set TAP up: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
-        }
-
-        let _ = tokio::process::Command::new("ip")
-            .args(["link", "set", &tap_name, "master", "mikrom-br0"])
-            .output()
-            .await;
-
-        // Get ifindex
-        let ifindex = std::fs::read_to_string(format!("/sys/class/net/{}/ifindex", tap_name))
-            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to read ifindex: {e}")))?
-            .trim()
-            .parse::<u32>()
-            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to parse ifindex: {e}")))?;
-
-        Ok((tap_name, ifindex))
-    }
-
-    async fn cleanup_tap(&self, tap_name: &str) {
-        let _ = tokio::process::Command::new("ip")
-            .args(["link", "set", tap_name, "nomaster"])
-            .output()
-            .await;
-
-        let _ = tokio::process::Command::new("ip")
-            .args(["link", "delete", tap_name])
-            .output()
-            .await;
-    }
-
-    async fn cleanup_ipv6_route(&self, ipv6: &str) {
-        let Some(prefix) = Self::ipv6_route_prefix(ipv6) else {
-            return;
         };
 
-        let attempts = [
-            vec!["-6", "route", "del", &prefix, "dev", "mikrom-br0"],
-            vec!["-6", "route", "del", &prefix],
-        ];
+        // 2. Set interface UP using rtnetlink
+        self.set_link_up(&handle, index).await?;
 
-        for args in attempts {
-            match tokio::process::Command::new("ip").args(args).output().await {
-                Ok(output) if output.status.success() => {
-                    tracing::info!(prefix = %prefix, "Removed IPv6 host route");
-                    return;
-                },
-                Ok(output) => {
-                    tracing::debug!(
-                        prefix = %prefix,
-                        stderr = %String::from_utf8_lossy(&output.stderr),
-                        "IPv6 host route removal attempt failed"
-                    );
-                },
-                Err(error) => {
-                    tracing::debug!(
-                        prefix = %prefix,
-                        error = %error,
-                        "Failed to execute IPv6 host route cleanup"
-                    );
-                },
+        // 3. Attach to bridge and set MTU using rtnetlink
+        let bridge_name = "mikrom-br0";
+        let Some(bridge_index) = self.get_link_index(&handle, bridge_name).await? else {
+            return Err(FirecrackerError::ProcessError(format!(
+                "Bridge {bridge_name} not found"
+            )));
+        };
+
+        handle
+            .link()
+            .set(index)
+            .controller(bridge_index)
+            .mtu(1420)
+            .execute()
+            .await
+            .map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to attach TAP to bridge: {e}"))
+            })?;
+
+        Ok((tap_name, index))
+    }
+
+    fn create_tap_native(&self, name: &str, uid: u32) -> Result<(), String> {
+        use std::os::unix::io::AsRawFd;
+        let iface_name = CString::new(name).map_err(|e| e.to_string())?;
+
+        // Open the TUN/TAP control device
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/net/tun")
+            .map_err(|e| format!("Failed to open /dev/net/tun: {e}"))?;
+
+        let fd = file.as_raw_fd();
+
+        // Prepare the ifreq structure for TUNSETIFF
+        let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
+        let name_bytes = iface_name.as_bytes();
+        if name_bytes.len() >= ifr.ifr_name.len() {
+            return Err("Interface name too long".to_string());
+        }
+        for (i, &byte) in name_bytes.iter().enumerate() {
+            ifr.ifr_name[i] = byte as libc::c_char;
+        }
+
+        // Set flags: TAP mode and NO_PI (no extra packet information header)
+        ifr.ifr_ifru.ifru_flags = (libc::IFF_TAP | libc::IFF_NO_PI) as i16;
+
+        unsafe {
+            // TUNSETIFF: Create or bind to the interface
+            if libc::ioctl(fd, 0x400454ca, &ifr) < 0 {
+                return Err(format!(
+                    "TUNSETIFF failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+
+            // TUNSETOWNER: Set persistent owner UID
+            if libc::ioctl(fd, 0x400454cc, uid as libc::c_ulong) < 0 {
+                return Err(format!(
+                    "TUNSETOWNER failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+
+            // TUNSETPERSIST: Ensure the interface stays after we close the FD
+            if libc::ioctl(fd, 0x400454cb, 1) < 0 {
+                return Err(format!(
+                    "TUNSETPERSIST failed: {}",
+                    std::io::Error::last_os_error()
+                ));
             }
         }
 
-        tracing::warn!(prefix = %prefix, "IPv6 host route may still be present after delete");
+        Ok(())
+    }
+
+    async fn cleanup_tap(&self, tap_name: &str) {
+        if let Ok(handle) = self.rtnl_handle().await
+            && let Ok(Some(index)) = self.get_link_index(&handle, tap_name).await
+        {
+            // Remove from bridge (set nocontroller)
+            let _ = handle.link().set(index).nocontroller().execute().await;
+            // Delete link
+            let _ = handle.link().del(index).execute().await;
+        }
+    }
+
+    async fn cleanup_ipv6_route(&self, ipv6: &str) {
+        let Some(prefix_str) = Self::ipv6_route_prefix(ipv6) else {
+            return;
+        };
+
+        if let Ok(handle) = self.rtnl_handle().await {
+            let (addr, prefix) = match self.parse_ip_cidr(&prefix_str) {
+                Ok(res) => res,
+                Err(_) => return,
+            };
+
+            let mut routes = handle.route().get(rtnetlink::IpVersion::V6).execute();
+            while let Ok(Some(route)) = routes.try_next().await {
+                if route.header.destination_prefix_length == prefix {
+                    let dest = route.attributes.iter().find_map(|attr| match attr {
+                        RouteAttribute::Destination(RouteAddress::Inet6(v6)) => {
+                            Some(IpAddr::V6(*v6))
+                        },
+                        _ => None,
+                    });
+
+                    if dest == Some(addr) {
+                        if let Err(e) = handle.route().del(route).execute().await {
+                            tracing::debug!(prefix = %prefix_str, "Failed to delete route: {e}");
+                        } else {
+                            tracing::info!(prefix = %prefix_str, "Removed IPv6 host route");
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        tracing::warn!(
+            prefix = %prefix_str,
+            "IPv6 host route may still be present after delete"
+        );
     }
 
     /// Helper to get the jailer chroot directory for a VM.

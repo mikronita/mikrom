@@ -18,7 +18,10 @@ async fn main() -> anyhow::Result<()> {
     mikrom_proto::telemetry::init_telemetry("mikrom-agent", env!("CARGO_PKG_VERSION"), None)?;
 
     let hostname = config.hostname();
-    let advertise_address = hostname.clone();
+    let advertise_address = config
+        .agent_advertise_address
+        .clone()
+        .unwrap_or(hostname.clone());
 
     tracing::info!(
         "Starting agent {} (hostname: {}, mtls: {})",
