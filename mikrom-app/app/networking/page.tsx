@@ -75,6 +75,7 @@ import {
   watchMeshStatus,
 } from "@/lib/api";
 import { getToken } from "@/lib/auth";
+import { useWatchVms } from "@/lib/hooks/use-vms";
 
 const defaultRule: CreateSecurityRuleRequest = {
   protocol: "tcp",
@@ -99,6 +100,8 @@ export default function NetworkingPage() {
   const [selectedApp, setSelectedApp] = useState<string | null>(null);
   const [isAddRuleOpen, setIsAddRuleOpen] = useState(false);
   const [newRule, setNewRule] = useState<CreateSecurityRuleRequest>(defaultRule);
+
+  useWatchVms();
 
   const { data: profile, isLoading: profileLoading } = useQuery({
     queryKey: ["profile"],

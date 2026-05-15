@@ -174,6 +174,7 @@ pub struct LiveDeploymentStatus {
     pub ram_used_bytes: u64,
     pub tx_bytes: u64,
     pub rx_bytes: u64,
+    pub ipv6_address: Option<String>,
     pub vcpus: i32,
     pub memory_mib: i64,
 }
@@ -354,6 +355,7 @@ pub async fn watch_deployments(
                                 "status": dep.status,
                                 "host_id": String::new(),
                                 "vm_id": String::new(),
+                                "ipv6_address": dep.ipv6_address,
                                 "cpu_usage": 0.0,
                                 "ram_used_bytes": 0,
                                 "scheduled_at": 0,
@@ -386,6 +388,7 @@ pub async fn watch_deployments(
                                 "status": crate::scheduler::status_name(job.status),
                                 "host_id": job.host_id,
                                 "vm_id": job.vm_id,
+                                "ipv6_address": job.ipv6_address,
                                 "cpu_usage": job.cpu_usage,
                                 "ram_used_bytes": job.ram_used_bytes,
                                 "tx_bytes": job.tx_bytes,
@@ -417,6 +420,7 @@ pub async fn watch_deployments(
                                     "status": dep.status,
                                     "host_id": String::new(),
                                     "vm_id": String::new(),
+                                    "ipv6_address": dep.ipv6_address,
                                     "cpu_usage": 0.0,
                                     "ram_used_bytes": 0,
                                     "tx_bytes": 0,
@@ -462,6 +466,7 @@ pub async fn watch_deployments(
                                 "status": crate::scheduler::status_name(job.status),
                                 "host_id": job.host_id,
                                 "vm_id": job.vm_id,
+                                "ipv6_address": job.ipv6_address,
                                 "cpu_usage": job.cpu_usage,
                                 "ram_used_bytes": job.ram_used_bytes,
                                 "tx_bytes": job.tx_bytes,
@@ -491,6 +496,7 @@ pub async fn watch_deployments(
                                                 "status": dep.status,
                                                 "host_id": String::new(),
                                                 "vm_id": String::new(),
+                                                "ipv6_address": dep.ipv6_address,
                                                 "cpu_usage": 0.0,
                                                 "ram_used_bytes": 0,
                                                 "scheduled_at": 0,
@@ -612,6 +618,7 @@ pub async fn get_deployment_status(
             rx_bytes: 0,
             vcpus: dep.vcpus,
             memory_mib: dep.memory_mib,
+            ipv6_address: dep.ipv6_address,
         }));
     }
 
@@ -643,6 +650,11 @@ pub async fn get_deployment_status(
         ram_used_bytes: inner.ram_used_bytes,
         tx_bytes: inner.tx_bytes,
         rx_bytes: inner.rx_bytes,
+        ipv6_address: if !inner.ipv6_address.is_empty() {
+            Some(inner.ipv6_address)
+        } else {
+            dep.ipv6_address
+        },
         vcpus: dep.vcpus,
         memory_mib: dep.memory_mib,
     };
