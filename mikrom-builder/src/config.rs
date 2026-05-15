@@ -8,6 +8,9 @@ pub struct Config {
     #[serde(default = "default_registry")]
     pub registry: String,
 
+    pub registry_user: Option<String>,
+    pub registry_pass: Option<String>,
+
     #[serde(default = "default_buildpack_builder")]
     pub buildpack_builder: String,
 

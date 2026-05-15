@@ -19,10 +19,15 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to NATS: {}", e))?;
 
-    let builder = AppBuilder::new(config.registry, config.buildpack_builder);
-    let builder_server = BuilderServer::new(builder);
-
     info!("mikrom-builder started");
+
+    let builder = AppBuilder::new(
+        config.registry,
+        config.buildpack_builder,
+        config.registry_user,
+        config.registry_pass,
+    );
+    let builder_server = BuilderServer::new(builder);
 
     if let Err(e) = builder_server.listen(nats_client).await {
         error!("Builder server listener failed: {}", e);
