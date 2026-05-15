@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use bollard::auth::DockerCredentials;
 use bollard::query_parameters::{BuildImageOptionsBuilder, PushImageOptionsBuilder};
 use bollard::{Docker, body_stream};
 use futures::stream::StreamExt;
@@ -18,6 +19,8 @@ use walkdir::WalkDir;
 
 pub struct AppBuilder {
     registry: String,
+    registry_user: Option<String>,
+    registry_pass: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -37,8 +40,17 @@ pub struct GitMetadata {
 }
 
 impl AppBuilder {
-    pub fn new(registry: String, _buildpack_builder: String) -> Self {
-        Self { registry }
+    pub fn new(
+        registry: String,
+        _buildpack_builder: String,
+        registry_user: Option<String>,
+        registry_pass: Option<String>,
+    ) -> Self {
+        Self {
+            registry,
+            registry_user,
+            registry_pass,
+        }
     }
 
     #[instrument(skip(self, metadata_tx))]
@@ -196,10 +208,30 @@ impl AppBuilder {
         info!(image_tag = %image_tag, "Pushing to registry...");
         let docker = Docker::connect_with_local_defaults()
             .context("Failed to connect to the local Docker daemon")?;
+
+        let auth_config =
+            if let (Some(username), Some(password)) = (&self.registry_user, &self.registry_pass) {
+                let serveraddress = image_tag.split('/').next().map(|s| s.to_string());
+                info!(
+                    username = %username,
+                    serveraddress = ?serveraddress,
+                    "Using registry credentials for push"
+                );
+                Some(DockerCredentials {
+                    username: Some(username.clone()),
+                    password: Some(password.clone()),
+                    serveraddress,
+                    ..Default::default()
+                })
+            } else {
+                info!("No registry credentials provided, pushing anonymously");
+                None
+            };
+
         let mut stream = docker.push_image(
             image_tag,
             Some(PushImageOptionsBuilder::default().build()),
-            None,
+            auth_config,
         );
         while let Some(message) = stream.next().await {
             let message = message?;
