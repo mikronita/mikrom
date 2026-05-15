@@ -87,7 +87,23 @@ impl ControlPlane {
     async fn sync_full_state(&self, db: &PgPool) -> Result<()> {
         info!("Performing full state sync from database...");
 
-        // Fetch routes
+        let routes = self.load_routes(db).await?;
+        let acme_tokens = self.load_acme_tokens(db).await?;
+        let certificates = self.load_certificates(db).await?;
+
+        let new_state = State {
+            routes,
+            acme_tokens,
+            certificates,
+        };
+
+        self.state_manager.update_state(new_state).await?;
+        info!("State sync complete.");
+
+        Ok(())
+    }
+
+    async fn load_routes(&self, db: &PgPool) -> Result<HashMap<String, Route>> {
         let route_rows = sqlx::query("SELECT hostname, target_url FROM routes")
             .fetch_all(db)
             .await?;
@@ -112,7 +128,6 @@ impl ControlPlane {
 
         let mut routes: HashMap<String, Route> = HashMap::new();
         for (host, (targets, use_tls)) in route_targets {
-            // Create Pingora Load Balancer with Health Check
             let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice())
                 .context("Failed to create load balancer from targets")?;
 
@@ -136,7 +151,10 @@ impl ControlPlane {
             );
         }
 
-        // Fetch ACME tokens
+        Ok(routes)
+    }
+
+    async fn load_acme_tokens(&self, db: &PgPool) -> Result<HashMap<String, String>> {
         let acme_rows = sqlx::query("SELECT token, key_auth FROM acme_challenges")
             .fetch_all(db)
             .await?;
@@ -149,7 +167,10 @@ impl ControlPlane {
             acme_tokens.insert(token, key_auth);
         }
 
-        // Fetch Certificates
+        Ok(acme_tokens)
+    }
+
+    async fn load_certificates(&self, db: &PgPool) -> Result<HashMap<String, Certificate>> {
         let cert_rows =
             sqlx::query("SELECT hostname, cert_chain, private_key FROM tls_certificates")
                 .fetch_all(db)
@@ -162,12 +183,10 @@ impl ControlPlane {
             let cert_pem: String = row.get("cert_chain");
             let encrypted_key: String = row.get("private_key");
 
-            // Decrypt key
             let key_pem = match crate::crypto::decrypt(&encrypted_key, &self.master_key) {
                 Ok(key) => key,
                 Err(e) => {
                     error!("Control Plane: Failed to decrypt private key for {domain}: {e}");
-                    // Fallback: assume it might be raw PEM for manual entries
                     encrypted_key
                 },
             };
@@ -183,16 +202,7 @@ impl ControlPlane {
             );
         }
 
-        let new_state = State {
-            routes,
-            acme_tokens,
-            certificates,
-        };
-
-        self.state_manager.update_state(new_state).await?;
-        info!("State sync complete.");
-
-        Ok(())
+        Ok(certificates)
     }
 }
 

@@ -156,6 +156,31 @@ impl AppService {
         Ok(())
     }
 
+    async fn resolve_storage_host(&self, host_id: &str) -> DomainResult<String> {
+        if !host_id.is_empty() {
+            return Ok(host_id.to_string());
+        }
+
+        self.pick_any_healthy_worker().await
+    }
+
+    async fn resolve_volume_host(&self, host_id: &str) -> DomainResult<String> {
+        if !host_id.is_empty() {
+            return Ok(host_id.to_string());
+        }
+
+        let workers = self
+            .worker_repo
+            .list_workers()
+            .await
+            .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+        Ok(workers
+            .first()
+            .ok_or_else(|| DomainError::Infrastructure("No active workers".to_string()))?
+            .host_id
+            .clone())
+    }
+
     fn is_vm_already_gone(error_text: &str) -> bool {
         let normalized = error_text.to_lowercase();
         normalized.contains("vm not found")
@@ -185,21 +210,7 @@ impl AppService {
         size_mib: u32,
         pool_name: &str,
     ) -> DomainResult<()> {
-        let target_host = if host_id.is_empty() {
-            // If no host specified, pick a random active worker
-            let workers = self
-                .worker_repo
-                .list_workers()
-                .await
-                .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
-            workers
-                .first()
-                .ok_or_else(|| DomainError::Infrastructure("No active workers".to_string()))?
-                .host_id
-                .clone()
-        } else {
-            host_id.to_string()
-        };
+        let target_host = self.resolve_volume_host(host_id).await?;
 
         self.agent_client
             .create_volume(&target_host, volume_id, size_mib, pool_name)
@@ -213,11 +224,7 @@ impl AppService {
         snapshot_name: &str,
         pool_name: &str,
     ) -> DomainResult<()> {
-        let target_host = if host_id.is_empty() {
-            self.pick_any_healthy_worker().await?
-        } else {
-            host_id.to_string()
-        };
+        let target_host = self.resolve_storage_host(host_id).await?;
 
         self.agent_client
             .create_snapshot(&target_host, volume_id, snapshot_name, pool_name)
@@ -230,11 +237,7 @@ impl AppService {
         volume_id: &str,
         pool_name: &str,
     ) -> DomainResult<()> {
-        let target_host = if host_id.is_empty() {
-            self.pick_any_healthy_worker().await?
-        } else {
-            host_id.to_string()
-        };
+        let target_host = self.resolve_storage_host(host_id).await?;
 
         self.agent_client
             .delete_volume(&target_host, volume_id, pool_name)
@@ -248,11 +251,7 @@ impl AppService {
         snapshot_name: &str,
         pool_name: &str,
     ) -> DomainResult<()> {
-        let target_host = if host_id.is_empty() {
-            self.pick_any_healthy_worker().await?
-        } else {
-            host_id.to_string()
-        };
+        let target_host = self.resolve_storage_host(host_id).await?;
 
         self.agent_client
             .delete_snapshot(&target_host, volume_id, snapshot_name, pool_name)
@@ -266,11 +265,7 @@ impl AppService {
         snapshot_name: &str,
         pool_name: &str,
     ) -> DomainResult<()> {
-        let target_host = if host_id.is_empty() {
-            self.pick_any_healthy_worker().await?
-        } else {
-            host_id.to_string()
-        };
+        let target_host = self.resolve_storage_host(host_id).await?;
 
         self.agent_client
             .restore_snapshot(&target_host, volume_id, snapshot_name, pool_name)
@@ -285,11 +280,7 @@ impl AppService {
         target_volume_id: &str,
         pool_name: &str,
     ) -> DomainResult<()> {
-        let target_host = if host_id.is_empty() {
-            self.pick_any_healthy_worker().await?
-        } else {
-            host_id.to_string()
-        };
+        let target_host = self.resolve_storage_host(host_id).await?;
 
         self.agent_client
             .clone_volume(
