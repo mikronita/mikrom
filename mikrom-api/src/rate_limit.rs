@@ -106,50 +106,44 @@ impl RateLimitConfig {
     }
 
     fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            self.public_rpm > 0,
-            "RATE_LIMIT_PUBLIC_RPM must be greater than 0"
-        );
-        anyhow::ensure!(
-            self.rate_limit_auth_login_rpm > 0,
-            "RATE_LIMIT_AUTH_LOGIN_RPM must be greater than 0"
-        );
-        anyhow::ensure!(
-            self.rate_limit_auth_register_rpm > 0,
-            "RATE_LIMIT_AUTH_REGISTER_RPM must be greater than 0"
-        );
-        anyhow::ensure!(
-            self.rate_limit_github_install_rpm > 0,
-            "RATE_LIMIT_GITHUB_INSTALL_RPM must be greater than 0"
-        );
-        anyhow::ensure!(
-            self.rate_limit_apps_create_rpm > 0,
-            "RATE_LIMIT_APPS_CREATE_RPM must be greater than 0"
-        );
-        anyhow::ensure!(
-            self.rate_limit_apps_deploy_rpm > 0,
-            "RATE_LIMIT_APPS_DEPLOY_RPM must be greater than 0"
-        );
-        anyhow::ensure!(
-            self.rate_limit_webhooks_github_generic_rpm > 0,
-            "RATE_LIMIT_WEBHOOKS_GITHUB_GENERIC_RPM must be greater than 0"
-        );
-        anyhow::ensure!(
-            self.rate_limit_webhooks_github_named_rpm > 0,
-            "RATE_LIMIT_WEBHOOKS_GITHUB_NAMED_RPM must be greater than 0"
-        );
-        anyhow::ensure!(
-            self.authenticated_read_rpm > 0,
-            "RATE_LIMIT_AUTHENTICATED_READ_RPM must be greater than 0"
-        );
-        anyhow::ensure!(
-            self.authenticated_write_rpm > 0,
-            "RATE_LIMIT_AUTHENTICATED_WRITE_RPM must be greater than 0"
-        );
-        anyhow::ensure!(
-            self.authenticated_stream_rpm > 0,
-            "RATE_LIMIT_AUTHENTICATED_STREAM_RPM must be greater than 0"
-        );
+        Self::ensure_positive(self.public_rpm, "RATE_LIMIT_PUBLIC_RPM")?;
+        Self::ensure_positive(self.rate_limit_auth_login_rpm, "RATE_LIMIT_AUTH_LOGIN_RPM")?;
+        Self::ensure_positive(
+            self.rate_limit_auth_register_rpm,
+            "RATE_LIMIT_AUTH_REGISTER_RPM",
+        )?;
+        Self::ensure_positive(
+            self.rate_limit_github_install_rpm,
+            "RATE_LIMIT_GITHUB_INSTALL_RPM",
+        )?;
+        Self::ensure_positive(
+            self.rate_limit_apps_create_rpm,
+            "RATE_LIMIT_APPS_CREATE_RPM",
+        )?;
+        Self::ensure_positive(
+            self.rate_limit_apps_deploy_rpm,
+            "RATE_LIMIT_APPS_DEPLOY_RPM",
+        )?;
+        Self::ensure_positive(
+            self.rate_limit_webhooks_github_generic_rpm,
+            "RATE_LIMIT_WEBHOOKS_GITHUB_GENERIC_RPM",
+        )?;
+        Self::ensure_positive(
+            self.rate_limit_webhooks_github_named_rpm,
+            "RATE_LIMIT_WEBHOOKS_GITHUB_NAMED_RPM",
+        )?;
+        Self::ensure_positive(
+            self.authenticated_read_rpm,
+            "RATE_LIMIT_AUTHENTICATED_READ_RPM",
+        )?;
+        Self::ensure_positive(
+            self.authenticated_write_rpm,
+            "RATE_LIMIT_AUTHENTICATED_WRITE_RPM",
+        )?;
+        Self::ensure_positive(
+            self.authenticated_stream_rpm,
+            "RATE_LIMIT_AUTHENTICATED_STREAM_RPM",
+        )?;
         anyhow::ensure!(
             self.entry_ttl > Duration::from_secs(0),
             "RATE_LIMIT_ENTRY_TTL_SECS must be greater than 0"
@@ -158,6 +152,11 @@ impl RateLimitConfig {
             self.cleanup_interval > Duration::from_secs(0),
             "RATE_LIMIT_CLEANUP_INTERVAL_SECS must be greater than 0"
         );
+        Ok(())
+    }
+
+    fn ensure_positive(value: u32, field: &str) -> anyhow::Result<()> {
+        anyhow::ensure!(value > 0, "{field} must be greater than 0");
         Ok(())
     }
 }
@@ -978,7 +977,34 @@ fn forwarded_for_ip(headers: &axum::http::HeaderMap) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::{Request, StatusCode};
+    use axum::http::{HeaderMap, Request, StatusCode};
+
+    fn default_config() -> RateLimitConfig {
+        RateLimitConfig {
+            public_rpm: 1,
+            rate_limit_auth_login_rpm: 1,
+            rate_limit_auth_register_rpm: 1,
+            rate_limit_github_install_rpm: 1,
+            rate_limit_apps_create_rpm: 1,
+            rate_limit_apps_deploy_rpm: 1,
+            rate_limit_webhooks_github_generic_rpm: 1,
+            rate_limit_webhooks_github_named_rpm: 1,
+            authenticated_read_rpm: 1,
+            authenticated_write_rpm: 1,
+            authenticated_stream_rpm: 1,
+            entry_ttl: Duration::from_secs(60),
+            cleanup_interval: Duration::from_secs(1),
+            trust_proxy_headers: false,
+        }
+    }
+
+    fn make_request(method: Method, uri: &str) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .body(Body::empty())
+            .expect("request should build")
+    }
 
     #[test]
     fn public_paths_are_classified_and_bucketed_separately() {
@@ -1142,37 +1168,35 @@ mod tests {
 
     #[test]
     fn stale_entries_are_cleaned_up() {
-        let limiter = RateLimiter::new(
-            RateLimitConfig {
-                public_rpm: 1,
-                rate_limit_auth_login_rpm: 1,
-                rate_limit_auth_register_rpm: 1,
-                rate_limit_github_install_rpm: 1,
-                rate_limit_apps_create_rpm: 1,
-                rate_limit_apps_deploy_rpm: 1,
-                rate_limit_webhooks_github_generic_rpm: 1,
-                rate_limit_webhooks_github_named_rpm: 1,
-                authenticated_read_rpm: 1,
-                authenticated_write_rpm: 1,
-                authenticated_stream_rpm: 1,
-                entry_ttl: Duration::from_millis(1),
-                cleanup_interval: Duration::from_secs(1),
-                trust_proxy_headers: false,
-            },
-            "secret".to_string(),
-        )
-        .unwrap();
-
-        let request = Request::builder()
-            .method("POST")
-            .uri("/v1/auth/login")
-            .body(Body::empty())
-            .unwrap();
+        let mut config = default_config();
+        config.entry_ttl = Duration::from_millis(1);
+        let limiter = RateLimiter::new(config, "secret".to_string()).unwrap();
+        let request = make_request(Method::POST, "/v1/auth/login");
 
         let _ = limiter.evaluate(&request).unwrap();
         std::thread::sleep(Duration::from_millis(10));
         limiter.cleanup_stale_entries();
         assert_eq!(limiter.entries.len(), 0);
+    }
+
+    #[test]
+    fn forwarded_for_ip_uses_first_forwarded_value_then_real_ip() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "203.0.113.1, 10.0.0.1".parse().unwrap());
+        headers.insert("x-real-ip", "198.51.100.2".parse().unwrap());
+        assert_eq!(forwarded_for_ip(&headers), Some("203.0.113.1".to_string()));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-real-ip", "198.51.100.2".parse().unwrap());
+        assert_eq!(forwarded_for_ip(&headers), Some("198.51.100.2".to_string()));
+    }
+
+    #[test]
+    fn validate_rejects_zero_limits() {
+        let mut config = default_config();
+        config.public_rpm = 0;
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("RATE_LIMIT_PUBLIC_RPM"));
     }
 
     #[test]

@@ -98,7 +98,9 @@ impl AgentServer {
                     }
                 }
 
-                let client = nats_client.as_ref().unwrap();
+                let Some(client) = nats_client.as_ref() else {
+                    continue;
+                };
 
                 // 1. Initialize FirecrackerExporter
                 let exporter = crate::metrics::FirecrackerExporter::new(
@@ -236,86 +238,53 @@ impl AgentServer {
         fc: &FirecrackerManager,
         nats: &async_nats::Client,
     ) {
-        use mikrom_proto::agent::{AgentCommand, AgentCommandResponse};
+        use mikrom_proto::agent::AgentCommand;
         let Ok(command) = AgentCommand::decode(&message.payload[..]) else {
             tracing::error!("Failed to decode AgentCommand");
             return;
         };
 
-        let command = command.command;
-        let result = match command {
+        let result = Self::dispatch_agent_command(command.command, fc).await;
+        Self::reply_agent_command(message, nats, result).await;
+    }
+
+    async fn dispatch_agent_command(
+        command: Option<mikrom_proto::agent::agent_command::Command>,
+        fc: &FirecrackerManager,
+    ) -> Result<String, crate::firecracker::config::FirecrackerError> {
+        match command {
             Some(mikrom_proto::agent::agent_command::Command::StartVm(req)) => {
-                let mut config = crate::firecracker::config::VmConfig::default();
-                if let Some(c) = req.config {
-                    config.vcpus = c.vcpus;
-                    config.memory_mib = u64::from(c.memory_mib);
-                    config.disk_mib = u64::from(c.disk_mib);
-                    config.port = c.port;
-                    config.env = c.env;
-                    config.ipv6_address = Some(c.ipv6_address).filter(|s| !s.is_empty());
-                    config.ipv6_gateway = Some(c.ipv6_gateway).filter(|s| !s.is_empty());
-                    config.volumes = c
-                        .volumes
-                        .into_iter()
-                        .map(|v| crate::firecracker::config::Volume {
-                            volume_id: v.volume_id,
-                            size_mib: v.size_mib,
-                            read_only: v.read_only,
-                            pool_name: v.pool_name,
-                        })
-                        .collect();
-                }
+                let config = Self::proto_vm_config(req.config);
+                let vm_id = Self::parse_vm_id(&req.vm_id)?;
+                let app_id = Self::parse_app_id(&req.app_id)?;
 
-                fc.start_vm(
-                    req.vm_id.parse().unwrap_or_default(),
-                    req.app_id.parse().unwrap_or_default(),
-                    req.image,
-                    config,
-                )
-                .await
-                .map(|_| "VM started".to_string())
+                fc.start_vm(vm_id, app_id, req.image, config)
+                    .await
+                    .map(|_| "VM started".to_string())
             },
-            Some(mikrom_proto::agent::agent_command::Command::StopVm(req)) => fc
-                .stop_vm(&req.vm_id.parse().unwrap_or_default())
-                .await
-                .map(|_| "VM stopped".to_string()),
-            Some(mikrom_proto::agent::agent_command::Command::PauseVm(req)) => fc
-                .pause_vm(&req.vm_id.parse().unwrap_or_default())
-                .await
-                .map(|_| "VM paused".to_string()),
-            Some(mikrom_proto::agent::agent_command::Command::ResumeVm(req)) => fc
-                .resume_vm(&req.vm_id.parse().unwrap_or_default())
-                .await
-                .map(|_| "VM resumed".to_string()),
-            Some(mikrom_proto::agent::agent_command::Command::DeleteVm(req)) => fc
-                .delete_vm(&req.vm_id.parse().unwrap_or_default())
-                .await
-                .map(|_| "VM resources purged".to_string()),
+            Some(mikrom_proto::agent::agent_command::Command::StopVm(req)) => {
+                let vm_id = Self::parse_vm_id(&req.vm_id)?;
+                fc.stop_vm(&vm_id).await.map(|_| "VM stopped".to_string())
+            },
+            Some(mikrom_proto::agent::agent_command::Command::PauseVm(req)) => {
+                let vm_id = Self::parse_vm_id(&req.vm_id)?;
+                fc.pause_vm(&vm_id).await.map(|_| "VM paused".to_string())
+            },
+            Some(mikrom_proto::agent::agent_command::Command::ResumeVm(req)) => {
+                let vm_id = Self::parse_vm_id(&req.vm_id)?;
+                fc.resume_vm(&vm_id).await.map(|_| "VM resumed".to_string())
+            },
+            Some(mikrom_proto::agent::agent_command::Command::DeleteVm(req)) => {
+                let vm_id = Self::parse_vm_id(&req.vm_id)?;
+                fc.delete_vm(&vm_id)
+                    .await
+                    .map(|_| "VM resources purged".to_string())
+            },
             Some(mikrom_proto::agent::agent_command::Command::UpdateFirewall(req)) => {
-                use mikrom_agent_ebpf_common::{Action, Protocol};
+                let vm_id = Self::parse_vm_id(&req.vm_id)?;
+                let rules = Self::map_firewall_rules(req.rules);
 
-                let rules: Vec<mikrom_agent_ebpf_common::FirewallRule> = req
-                    .rules
-                    .into_iter()
-                    .map(|r| mikrom_agent_ebpf_common::FirewallRule {
-                        protocol: match r.protocol.to_lowercase().as_str() {
-                            "tcp" => Protocol::Tcp,
-                            "udp" => Protocol::Udp,
-                            _ => Protocol::Any,
-                        },
-                        port_start: r.port_start as u16,
-                        port_end: r.port_end as u16,
-                        action: if r.action.to_lowercase() == "allow" {
-                            Action::Allow
-                        } else {
-                            Action::Deny
-                        },
-                        remote_ip: [0u8; 16],
-                        remote_prefix: 0,
-                    })
-                    .collect();
-
-                fc.update_vm_firewall(&req.vm_id.parse().unwrap_or_default(), rules)
+                fc.update_vm_firewall(&vm_id, rules)
                     .await
                     .map(|_| "Firewall rules updated".to_string())
                     .map_err(|e| {
@@ -388,15 +357,93 @@ impl AgentServer {
             None => Err(crate::firecracker::config::FirecrackerError::ProcessError(
                 "Empty command".to_string(),
             )),
-        };
+        }
+    }
 
+    fn proto_vm_config(
+        config: Option<mikrom_proto::agent::VmConfig>,
+    ) -> crate::firecracker::config::VmConfig {
+        let mut vm_config = crate::firecracker::config::VmConfig::default();
+        if let Some(c) = config {
+            vm_config.vcpus = c.vcpus;
+            vm_config.memory_mib = u64::from(c.memory_mib);
+            vm_config.disk_mib = u64::from(c.disk_mib);
+            vm_config.port = c.port;
+            vm_config.env = c.env;
+            vm_config.ipv6_address = Some(c.ipv6_address).filter(|s| !s.is_empty());
+            vm_config.ipv6_gateway = Some(c.ipv6_gateway).filter(|s| !s.is_empty());
+            vm_config.volumes = c
+                .volumes
+                .into_iter()
+                .map(|v| crate::firecracker::config::Volume {
+                    volume_id: v.volume_id,
+                    size_mib: v.size_mib,
+                    read_only: v.read_only,
+                    pool_name: v.pool_name,
+                })
+                .collect();
+        }
+        vm_config
+    }
+
+    fn map_firewall_rules(
+        rules: Vec<mikrom_proto::agent::FirewallRule>,
+    ) -> Vec<mikrom_agent_ebpf_common::FirewallRule> {
+        use mikrom_agent_ebpf_common::{Action, Protocol};
+
+        rules
+            .into_iter()
+            .map(|r| mikrom_agent_ebpf_common::FirewallRule {
+                protocol: match r.protocol.to_lowercase().as_str() {
+                    "tcp" => Protocol::Tcp,
+                    "udp" => Protocol::Udp,
+                    _ => Protocol::Any,
+                },
+                port_start: r.port_start as u16,
+                port_end: r.port_end as u16,
+                action: if r.action.to_lowercase() == "allow" {
+                    Action::Allow
+                } else {
+                    Action::Deny
+                },
+                remote_ip: [0u8; 16],
+                remote_prefix: 0,
+            })
+            .collect()
+    }
+
+    fn parse_vm_id(
+        vm_id: &str,
+    ) -> Result<mikrom_proto::id::VmId, crate::firecracker::config::FirecrackerError> {
+        vm_id.parse::<mikrom_proto::id::VmId>().map_err(|e| {
+            crate::firecracker::config::FirecrackerError::ProcessError(format!(
+                "Invalid vm_id '{vm_id}': {e}"
+            ))
+        })
+    }
+
+    fn parse_app_id(
+        app_id: &str,
+    ) -> Result<mikrom_proto::id::AppId, crate::firecracker::config::FirecrackerError> {
+        app_id.parse::<mikrom_proto::id::AppId>().map_err(|e| {
+            crate::firecracker::config::FirecrackerError::ProcessError(format!(
+                "Invalid app_id '{app_id}': {e}"
+            ))
+        })
+    }
+
+    async fn reply_agent_command(
+        message: async_nats::Message,
+        nats: &async_nats::Client,
+        result: Result<String, crate::firecracker::config::FirecrackerError>,
+    ) {
         if let Some(reply) = message.reply {
             let response = match result {
-                Ok(msg) => AgentCommandResponse {
+                Ok(msg) => mikrom_proto::agent::AgentCommandResponse {
                     success: true,
                     message: msg,
                 },
-                Err(e) => AgentCommandResponse {
+                Err(e) => mikrom_proto::agent::AgentCommandResponse {
                     success: false,
                     message: e.to_string(),
                 },

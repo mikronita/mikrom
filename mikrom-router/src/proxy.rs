@@ -129,6 +129,102 @@ impl MikromProxy {
     pub async fn get_lb(&self, host: &str) -> Result<Arc<LoadBalancer<RoundRobin>>> {
         self.get_lb_and_tls(host).await.map(|(lb, _, _)| lb)
     }
+
+    async fn write_text_response(
+        session: &mut Session,
+        status: u16,
+        headers: &[(&str, &str)],
+        body: &str,
+        end_stream: bool,
+    ) -> Result<bool> {
+        let mut response = ResponseHeader::build(status, Some(body.len()))?;
+        for (key, value) in headers {
+            response.insert_header((*key).to_string(), (*value).to_string())?;
+        }
+
+        session
+            .write_response_header(Box::new(response), end_stream)
+            .await?;
+        session
+            .write_response_body(Some(body.to_string().into()), true)
+            .await?;
+        Ok(true)
+    }
+
+    async fn maybe_handle_acme_challenge(
+        &self,
+        session: &mut Session,
+        host: &str,
+        path: &str,
+    ) -> Result<Option<bool>> {
+        let Some(token) = path.strip_prefix("/.well-known/acme-challenge/") else {
+            return Ok(None);
+        };
+
+        let key_auth = {
+            let state = self.state.read().await;
+            state.acme_tokens.get(token).cloned()
+        };
+
+        if let Some(key_auth) = key_auth {
+            if self.acme_staging {
+                tracing::info!(
+                    "ACME challenge received for host {host}: token={token}, responding with key_auth"
+                );
+            }
+
+            let result = Self::write_text_response(
+                session,
+                200,
+                &[("Content-Type", "text/plain")],
+                &key_auth,
+                false,
+            )
+            .await?;
+            return Ok(Some(result));
+        }
+
+        if self.acme_staging {
+            tracing::warn!(
+                "ACME challenge received for host {host} but token {token} not found in state"
+            );
+        }
+
+        Ok(None)
+    }
+
+    async fn maybe_redirect_http(
+        &self,
+        session: &mut Session,
+        normalized_host: &str,
+        path: &str,
+    ) -> Result<Option<bool>> {
+        let is_tls = session
+            .downstream_session
+            .digest()
+            .is_some_and(|d| d.ssl_digest.is_some());
+
+        if is_tls {
+            return Ok(None);
+        }
+
+        let has_certificate = {
+            let state = self.state.read().await;
+            state.certificates.contains_key(normalized_host)
+        };
+
+        if !has_certificate {
+            return Ok(None);
+        }
+
+        let location = format!("https://{normalized_host}{path}");
+        let mut redirect = ResponseHeader::build(301, None)?;
+        redirect.insert_header("Location", location)?;
+        session
+            .write_response_header(Box::new(redirect), true)
+            .await?;
+        Ok(Some(true))
+    }
 }
 
 struct PingoraHeaderInjector<'a>(&'a mut RequestHeader);
@@ -195,17 +291,14 @@ impl ProxyHttp for MikromProxy {
             let curr_window_requests = self.rate_limiter.observe(&ip, 1);
             if curr_window_requests > self.rps_limit {
                 warn!("Rate limit exceeded for IP: {ip} (requests: {curr_window_requests})");
-                let mut header = ResponseHeader::build(429, None)?;
-                header.insert_header("Content-Type", "text/plain")?;
-                header.insert_header("Retry-After", "1")?;
-
-                session
-                    .write_response_header(Box::new(header), false)
-                    .await?;
-                session
-                    .write_response_body(Some("Too Many Requests\n".into()), true)
-                    .await?;
-                return Ok(true); // Short-circuit
+                return Self::write_text_response(
+                    session,
+                    429,
+                    &[("Content-Type", "text/plain"), ("Retry-After", "1")],
+                    "Too Many Requests\n",
+                    false,
+                )
+                .await;
             }
         }
 
@@ -213,58 +306,26 @@ impl ProxyHttp for MikromProxy {
             .get_header("Host")
             .and_then(|h| h.to_str().ok())
             .or_else(|| session.req_header().uri.host())
-            .unwrap_or("");
-        let normalized_host = canonical_host(host);
+            .unwrap_or("")
+            .to_string();
+        let normalized_host = canonical_host(&host);
 
-        let path = session.req_header().uri.path();
+        let path = session.req_header().uri.path().to_string();
 
-        // 1. Handle ACME Challenge
-        if path.starts_with("/.well-known/acme-challenge/") {
-            let token = path.strip_prefix("/.well-known/acme-challenge/").unwrap();
-            let state = self.state.read().await;
-
-            if let Some(key_auth) = state.acme_tokens.get(token) {
-                if self.acme_staging {
-                    tracing::info!(
-                        "ACME challenge received for host {host}: token={token}, responding with key_auth"
-                    );
-                }
-
-                let mut response = ResponseHeader::build(200, Some(key_auth.len()))?;
-                response.insert_header("Content-Type", "text/plain")?;
-
-                session
-                    .write_response_header(Box::new(response), false)
-                    .await?;
-                session
-                    .write_response_body(Some(key_auth.clone().into()), true)
-                    .await?;
-                return Ok(true); // Short-circuit
-            } else if self.acme_staging {
-                tracing::warn!(
-                    "ACME challenge received for host {host} but token {token} not found in state"
-                );
-            }
+        if self
+            .maybe_handle_acme_challenge(session, &host, &path)
+            .await?
+            == Some(true)
+        {
+            return Ok(true);
         }
 
-        // 2. HTTP to HTTPS Redirection
-        // If we are not on TLS and the host has a certificate, redirect to 443
-        let is_tls = session
-            .downstream_session
-            .digest()
-            .is_some_and(|d| d.ssl_digest.is_some());
-
-        if !is_tls {
-            let state = self.state.read().await;
-            if state.certificates.contains_key(normalized_host.as_str()) {
-                let mut redirect = ResponseHeader::build(301, None)?;
-                let location = format!("https://{normalized_host}{path}");
-                redirect.insert_header("Location", location)?;
-                session
-                    .write_response_header(Box::new(redirect), true)
-                    .await?;
-                return Ok(true);
-            }
+        if self
+            .maybe_redirect_http(session, normalized_host.as_str(), path.as_str())
+            .await?
+            == Some(true)
+        {
+            return Ok(true);
         }
 
         Ok(false)

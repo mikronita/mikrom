@@ -43,6 +43,24 @@ unsafe extern "C" {
 
 pub struct CephRbd;
 
+pub trait StorageProvider: Send + Sync {
+    fn ensure_pool_exists(pool: &str) -> Result<()>;
+    fn create_volume(pool: &str, name: &str, size_mib: i32) -> Result<()>;
+    fn delete_volume(pool: &str, name: &str) -> Result<()>;
+    fn create_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()>;
+    fn delete_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()>;
+    fn restore_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()>;
+    fn clone_volume(
+        pool: &str,
+        source_name: &str,
+        snapshot_name: &str,
+        target_name: &str,
+    ) -> Result<()>;
+    fn exists(pool: &str, name: &str) -> bool;
+    fn map_volume(pool: &str, name: &str) -> Result<String>;
+    fn unmap_volume(device_path: &str) -> Result<()>;
+}
+
 /// RAII wrapper for RADOS cluster handle
 struct RadosCluster(rados_t);
 unsafe impl Send for RadosCluster {}
@@ -444,5 +462,52 @@ impl CephRbd {
             return Err(anyhow!("rbd unmap failed for {}", device_path));
         }
         Ok(())
+    }
+}
+
+impl StorageProvider for CephRbd {
+    fn ensure_pool_exists(pool: &str) -> Result<()> {
+        CephRbd::ensure_pool_exists(pool)
+    }
+
+    fn create_volume(pool: &str, name: &str, size_mib: i32) -> Result<()> {
+        CephRbd::create_volume(pool, name, size_mib)
+    }
+
+    fn delete_volume(pool: &str, name: &str) -> Result<()> {
+        CephRbd::delete_volume(pool, name)
+    }
+
+    fn create_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
+        CephRbd::create_snapshot(pool, name, snapshot_name)
+    }
+
+    fn delete_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
+        CephRbd::delete_snapshot(pool, name, snapshot_name)
+    }
+
+    fn restore_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
+        CephRbd::restore_snapshot(pool, name, snapshot_name)
+    }
+
+    fn clone_volume(
+        pool: &str,
+        source_name: &str,
+        snapshot_name: &str,
+        target_name: &str,
+    ) -> Result<()> {
+        CephRbd::clone_volume(pool, source_name, snapshot_name, target_name)
+    }
+
+    fn exists(pool: &str, name: &str) -> bool {
+        CephRbd::exists(pool, name)
+    }
+
+    fn map_volume(pool: &str, name: &str) -> Result<String> {
+        CephRbd::map_volume(pool, name)
+    }
+
+    fn unmap_volume(device_path: &str) -> Result<()> {
+        CephRbd::unmap_volume(device_path)
     }
 }
