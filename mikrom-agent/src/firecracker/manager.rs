@@ -27,6 +27,10 @@ use futures::stream::TryStreamExt;
 use netlink_packet_route::route::{RouteAddress, RouteAttribute};
 use std::net::IpAddr;
 
+const TUNSETIFF: libc::c_ulong = 0x400454ca;
+const TUNSETPERSIST: libc::c_ulong = 0x400454cb;
+const TUNSETOWNER: libc::c_ulong = 0x400454cc;
+
 /// Orchestrator for managing the lifecycle of Firecracker microVMs on a single host.
 ///
 /// It handles networking, image conversion, jailer setup, and API communication
@@ -188,14 +192,21 @@ impl FirecrackerManager {
     }
 
     fn parse_ip_cidr(&self, cidr: &str) -> Result<(IpAddr, u8), FirecrackerError> {
-        let (ip_str, prefix_str) = cidr.split_once('/').unwrap_or((cidr, "32"));
-        let ip: IpAddr = ip_str.parse().map_err(|e| {
-            FirecrackerError::ProcessError(format!("Failed to parse IP address {ip_str}: {e}"))
-        })?;
-        let prefix: u8 = prefix_str.parse().map_err(|e| {
-            FirecrackerError::ProcessError(format!("Failed to parse prefix {prefix_str}: {e}"))
-        })?;
-        Ok((ip, prefix))
+        if let Some((ip_str, prefix_str)) = cidr.split_once('/') {
+            let ip: IpAddr = ip_str.parse().map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to parse IP address {ip_str}: {e}"))
+            })?;
+            let prefix: u8 = prefix_str.parse().map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to parse prefix {prefix_str}: {e}"))
+            })?;
+            Ok((ip, prefix))
+        } else {
+            let ip: IpAddr = cidr.parse().map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to parse IP address {cidr}: {e}"))
+            })?;
+            let prefix = if ip.is_ipv6() { 128 } else { 32 };
+            Ok((ip, prefix))
+        }
     }
 
     pub async fn get_vm_info(&self, vm_id: &VmId) -> Option<VmInfo> {
@@ -1970,7 +1981,7 @@ impl FirecrackerManager {
 
         unsafe {
             // TUNSETIFF: Create or bind to the interface
-            if libc::ioctl(fd, 0x400454ca, &ifr) < 0 {
+            if libc::ioctl(fd, TUNSETIFF, &ifr) < 0 {
                 return Err(format!(
                     "TUNSETIFF failed: {}",
                     std::io::Error::last_os_error()
@@ -1978,7 +1989,7 @@ impl FirecrackerManager {
             }
 
             // TUNSETOWNER: Set persistent owner UID
-            if libc::ioctl(fd, 0x400454cc, uid as libc::c_ulong) < 0 {
+            if libc::ioctl(fd, TUNSETOWNER, uid as libc::c_ulong) < 0 {
                 return Err(format!(
                     "TUNSETOWNER failed: {}",
                     std::io::Error::last_os_error()
@@ -1986,7 +1997,7 @@ impl FirecrackerManager {
             }
 
             // TUNSETPERSIST: Ensure the interface stays after we close the FD
-            if libc::ioctl(fd, 0x400454cb, 1) < 0 {
+            if libc::ioctl(fd, TUNSETPERSIST, 1) < 0 {
                 return Err(format!(
                     "TUNSETPERSIST failed: {}",
                     std::io::Error::last_os_error()
