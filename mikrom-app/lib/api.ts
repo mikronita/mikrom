@@ -114,6 +114,7 @@ export interface LiveDeploymentStatus {
   ram_used_bytes: number;
   vcpus?: number;
   memory_mib?: number;
+  ipv6_address?: string;
 }
 
 export interface LogLine {
