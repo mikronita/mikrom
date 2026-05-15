@@ -1,3 +1,4 @@
+use crate::ceph::StorageProvider;
 use crate::firecracker::FirecrackerManager;
 use crate::metrics::MetricsCollector;
 use parking_lot::RwLock;
@@ -292,67 +293,63 @@ impl AgentServer {
                     })
             },
             Some(mikrom_proto::agent::agent_command::Command::CreateSnapshot(req)) => {
-                crate::ceph::CephRbd::create_snapshot(
-                    &req.pool_name,
-                    &req.volume_id,
-                    &req.snapshot_name,
-                )
-                .map(|_| "Snapshot created".to_string())
-                .map_err(|e| {
-                    crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                })
+                let storage = crate::ceph::CephRbd;
+                storage
+                    .create_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
+                    .map(|_| "Snapshot created".to_string())
+                    .map_err(|e| {
+                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
+                    })
             },
             Some(mikrom_proto::agent::agent_command::Command::DeleteVolume(req)) => {
-                crate::ceph::CephRbd::delete_volume(&req.pool_name, &req.volume_id)
+                let storage = crate::ceph::CephRbd;
+                storage
+                    .delete_volume(&req.pool_name, &req.volume_id)
                     .map(|_| "Volume deleted".to_string())
                     .map_err(|e| {
                         crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
                     })
             },
             Some(mikrom_proto::agent::agent_command::Command::DeleteSnapshot(req)) => {
-                crate::ceph::CephRbd::delete_snapshot(
-                    &req.pool_name,
-                    &req.volume_id,
-                    &req.snapshot_name,
-                )
-                .map(|_| "Snapshot deleted".to_string())
-                .map_err(|e| {
-                    crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                })
+                let storage = crate::ceph::CephRbd;
+                storage
+                    .delete_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
+                    .map(|_| "Snapshot deleted".to_string())
+                    .map_err(|e| {
+                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
+                    })
             },
             Some(mikrom_proto::agent::agent_command::Command::CreateVolume(req)) => {
-                crate::ceph::CephRbd::create_volume(
-                    &req.pool_name,
-                    &req.volume_id,
-                    req.size_mib as i32,
-                )
-                .map(|_| "Volume created".to_string())
-                .map_err(|e| {
-                    crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                })
+                let storage = crate::ceph::CephRbd;
+                storage
+                    .create_volume(&req.pool_name, &req.volume_id, req.size_mib as i32)
+                    .map(|_| "Volume created".to_string())
+                    .map_err(|e| {
+                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
+                    })
             },
             Some(mikrom_proto::agent::agent_command::Command::RestoreSnapshot(req)) => {
-                crate::ceph::CephRbd::restore_snapshot(
-                    &req.pool_name,
-                    &req.volume_id,
-                    &req.snapshot_name,
-                )
-                .map(|_| "Snapshot restored".to_string())
-                .map_err(|e| {
-                    crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                })
+                let storage = crate::ceph::CephRbd;
+                storage
+                    .restore_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
+                    .map(|_| "Snapshot restored".to_string())
+                    .map_err(|e| {
+                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
+                    })
             },
             Some(mikrom_proto::agent::agent_command::Command::CloneVolume(req)) => {
-                crate::ceph::CephRbd::clone_volume(
-                    &req.pool_name,
-                    &req.source_volume_id,
-                    &req.snapshot_name,
-                    &req.target_volume_id,
-                )
-                .map(|_| "Volume cloned".to_string())
-                .map_err(|e| {
-                    crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                })
+                let storage = crate::ceph::CephRbd;
+                storage
+                    .clone_volume(
+                        &req.pool_name,
+                        &req.source_volume_id,
+                        &req.snapshot_name,
+                        &req.target_volume_id,
+                    )
+                    .map(|_| "Volume cloned".to_string())
+                    .map_err(|e| {
+                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
+                    })
             },
             None => Err(crate::firecracker::config::FirecrackerError::ProcessError(
                 "Empty command".to_string(),

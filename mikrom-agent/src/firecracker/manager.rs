@@ -1,3 +1,4 @@
+use crate::ceph::StorageProvider;
 use crate::firecracker::api::{fc_patch, fc_put, wait_for_socket};
 use crate::firecracker::config::{FirecrackerConfig, FirecrackerError, VmConfig, VmInfo, VmStatus};
 use crate::firecracker::guard::VmStartupGuard;
@@ -352,17 +353,20 @@ impl FirecrackerManager {
             tracing::debug!("Failed to remove socket {}: {}", proc.socket_path, e);
         }
 
-        let rootfs_path = std::path::Path::new(&self.fc_config.data_dir)
-            .join(format!("fc-{}-{}-rootfs.ext4", self.agent_id, vm_id));
+        let paths = crate::firecracker::paths::VmPaths::new(
+            &self.fc_config.data_dir,
+            &self.agent_id,
+            *vm_id,
+        );
+        let rootfs_path = paths.rootfs_path();
         if let Err(e) = tokio::fs::remove_file(&rootfs_path).await
             && e.kind() != std::io::ErrorKind::NotFound
         {
             tracing::debug!("Failed to remove rootfs {:?}: {}", rootfs_path, e);
         }
 
-        let snapshot_dir = std::path::Path::new(&self.fc_config.data_dir).join("snapshots");
-        let snap_path = snapshot_dir.join(format!("{vm_id}.snapshot"));
-        let mem_path = snapshot_dir.join(format!("{vm_id}.mem"));
+        let snap_path = paths.snapshot_file();
+        let mem_path = paths.memory_file();
 
         if let Err(e) = tokio::fs::remove_file(&snap_path).await
             && e.kind() != std::io::ErrorKind::NotFound
@@ -393,10 +397,11 @@ impl FirecrackerManager {
                 .unwrap_or_default()
         };
 
+        let storage = crate::ceph::CephRbd;
         for vol in volumes {
             if !vol.pool_name.is_empty() {
                 let dev_path = format!("/dev/rbd/{}/{}", vol.pool_name, vol.volume_id);
-                if let Err(e) = crate::ceph::CephRbd::unmap_volume(&dev_path) {
+                if let Err(e) = storage.unmap_volume(&dev_path) {
                     tracing::warn!("Failed to unmap volume {}: {}", dev_path, e);
                 }
             }
@@ -1479,46 +1484,47 @@ impl FirecrackerManager {
         &self,
         vol: &crate::firecracker::config::Volume,
     ) -> Result<String, FirecrackerError> {
-        if !crate::ceph::CephRbd::exists(&vol.pool_name, &vol.volume_id) {
-            crate::ceph::CephRbd::create_volume(
-                &vol.pool_name,
-                &vol.volume_id,
-                vol.size_mib as i32,
-            )
-            .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to create RBD volume: {e}"))
-            })?;
+        let storage = crate::ceph::CephRbd;
+        if !storage.exists(&vol.pool_name, &vol.volume_id) {
+            storage
+                .create_volume(&vol.pool_name, &vol.volume_id, vol.size_mib as i32)
+                .map_err(|e| {
+                    FirecrackerError::ProcessError(format!("Failed to create RBD volume: {e}"))
+                })?;
 
-            let dev_path = crate::ceph::CephRbd::map_volume(&vol.pool_name, &vol.volume_id)
+            let dev_path = storage
+                .map_volume(&vol.pool_name, &vol.volume_id)
                 .map_err(|e| {
                     FirecrackerError::ProcessError(format!(
                         "Failed to map RBD volume for formatting: {e}"
                     ))
                 })?;
 
-            let output = std::process::Command::new("mkfs.ext4")
+            let output = tokio::process::Command::new("mkfs.ext4")
                 .arg(&dev_path)
                 .output()
+                .await
                 .map_err(|e| {
                     FirecrackerError::ProcessError(format!("Failed to execute mkfs.ext4: {e}"))
                 })?;
 
             if !output.status.success() {
                 let err = String::from_utf8_lossy(&output.stderr);
-                let _ = crate::ceph::CephRbd::unmap_volume(&dev_path);
+                let _ = storage.unmap_volume(&dev_path);
                 return Err(FirecrackerError::ProcessError(format!(
                     "mkfs.ext4 failed: {err}"
                 )));
             }
 
-            crate::ceph::CephRbd::unmap_volume(&dev_path).map_err(|e| {
+            storage.unmap_volume(&dev_path).map_err(|e| {
                 FirecrackerError::ProcessError(format!(
                     "Failed to unmap RBD volume after formatting: {e}"
                 ))
             })?;
         }
 
-        crate::ceph::CephRbd::map_volume(&vol.pool_name, &vol.volume_id)
+        storage
+            .map_volume(&vol.pool_name, &vol.volume_id)
             .map_err(|e| FirecrackerError::ProcessError(format!("Failed to map RBD volume: {e}")))
     }
 

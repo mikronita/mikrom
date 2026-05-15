@@ -169,16 +169,7 @@ impl AppService {
             return Ok(host_id.to_string());
         }
 
-        let workers = self
-            .worker_repo
-            .list_workers()
-            .await
-            .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
-        Ok(workers
-            .first()
-            .ok_or_else(|| DomainError::Infrastructure("No active workers".to_string()))?
-            .host_id
-            .clone())
+        self.pick_any_healthy_worker().await
     }
 
     fn is_vm_already_gone(error_text: &str) -> bool {
