@@ -18,7 +18,7 @@ chrono = "0.4"
 futures = "0.3"
 envy.workspace = true
 dotenvy = "0.15"
-mikrom-proto = { version = "0.1.1", path = "../mikrom-proto", features = ["telemetry"] }
+mikrom-proto = { version = "0.3.0", path = "../mikrom-proto", features = ["telemetry"] }
 prost.workspace = true
 opentelemetry = "0.31.0"
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"] }

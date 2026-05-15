@@ -2989,7 +2989,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-cli"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3008,7 +3008,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-init"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -3021,7 +3021,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-proto"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -3047,7 +3047,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-router"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3095,7 +3095,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-scheduler"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-telemetry"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-nats",

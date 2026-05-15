@@ -36,7 +36,7 @@ async-trait = "0.1"
 prost.workspace = true
 envy.workspace = true
 
-mikrom-proto = { path = "../mikrom-proto", features = ["sqlx-postgres", "telemetry"] }
+mikrom-proto = { version = "0.3.0", path = "../mikrom-proto", features = ["sqlx-postgres", "telemetry"] }
 instant-acme = { version = "0.8.5", features = ["rcgen"] }
 x509-parser = "0.16"
 aes-gcm = "0.10.3"

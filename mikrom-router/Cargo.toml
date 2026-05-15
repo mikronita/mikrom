@@ -11,7 +11,7 @@ chrono = "0.4.44"
 futures-util = "0.3.32"
 hostname = "0.4.2"
 http = "1.1"
-mikrom-proto = { version = "0.1.1", path = "../mikrom-proto" }
+mikrom-proto = { version = "0.3.0", path = "../mikrom-proto" }
 openssl = "0.10.79"
 openssl-sys = "0.9.115"
 opentelemetry = "0.27"
