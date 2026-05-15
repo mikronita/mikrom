@@ -401,7 +401,7 @@ impl FirecrackerManager {
         for vol in volumes {
             if !vol.pool_name.is_empty() {
                 let dev_path = format!("/dev/rbd/{}/{}", vol.pool_name, vol.volume_id);
-                if let Err(e) = storage.unmap_volume(&dev_path) {
+                if let Err(e) = storage.unmap_volume(&dev_path).await {
                     tracing::warn!("Failed to unmap volume {}: {}", dev_path, e);
                 }
             }
@@ -1485,15 +1485,17 @@ impl FirecrackerManager {
         vol: &crate::firecracker::config::Volume,
     ) -> Result<String, FirecrackerError> {
         let storage = crate::ceph::CephRbd;
-        if !storage.exists(&vol.pool_name, &vol.volume_id) {
+        if !storage.exists(&vol.pool_name, &vol.volume_id).await {
             storage
                 .create_volume(&vol.pool_name, &vol.volume_id, vol.size_mib as i32)
+                .await
                 .map_err(|e| {
                     FirecrackerError::ProcessError(format!("Failed to create RBD volume: {e}"))
                 })?;
 
             let dev_path = storage
                 .map_volume(&vol.pool_name, &vol.volume_id)
+                .await
                 .map_err(|e| {
                     FirecrackerError::ProcessError(format!(
                         "Failed to map RBD volume for formatting: {e}"
@@ -1510,13 +1512,13 @@ impl FirecrackerManager {
 
             if !output.status.success() {
                 let err = String::from_utf8_lossy(&output.stderr);
-                let _ = storage.unmap_volume(&dev_path);
+                let _ = storage.unmap_volume(&dev_path).await;
                 return Err(FirecrackerError::ProcessError(format!(
                     "mkfs.ext4 failed: {err}"
                 )));
             }
 
-            storage.unmap_volume(&dev_path).map_err(|e| {
+            storage.unmap_volume(&dev_path).await.map_err(|e| {
                 FirecrackerError::ProcessError(format!(
                     "Failed to unmap RBD volume after formatting: {e}"
                 ))
@@ -1525,6 +1527,7 @@ impl FirecrackerManager {
 
         storage
             .map_volume(&vol.pool_name, &vol.volume_id)
+            .await
             .map_err(|e| FirecrackerError::ProcessError(format!("Failed to map RBD volume: {e}")))
     }
 

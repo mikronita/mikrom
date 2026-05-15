@@ -296,6 +296,7 @@ impl AgentServer {
                 let storage = crate::ceph::CephRbd;
                 storage
                     .create_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
+                    .await
                     .map(|_| "Snapshot created".to_string())
                     .map_err(|e| {
                         crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
@@ -305,6 +306,7 @@ impl AgentServer {
                 let storage = crate::ceph::CephRbd;
                 storage
                     .delete_volume(&req.pool_name, &req.volume_id)
+                    .await
                     .map(|_| "Volume deleted".to_string())
                     .map_err(|e| {
                         crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
@@ -314,6 +316,7 @@ impl AgentServer {
                 let storage = crate::ceph::CephRbd;
                 storage
                     .delete_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
+                    .await
                     .map(|_| "Snapshot deleted".to_string())
                     .map_err(|e| {
                         crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
@@ -323,6 +326,7 @@ impl AgentServer {
                 let storage = crate::ceph::CephRbd;
                 storage
                     .create_volume(&req.pool_name, &req.volume_id, req.size_mib as i32)
+                    .await
                     .map(|_| "Volume created".to_string())
                     .map_err(|e| {
                         crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
@@ -332,6 +336,7 @@ impl AgentServer {
                 let storage = crate::ceph::CephRbd;
                 storage
                     .restore_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
+                    .await
                     .map(|_| "Snapshot restored".to_string())
                     .map_err(|e| {
                         crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
@@ -346,6 +351,7 @@ impl AgentServer {
                         &req.snapshot_name,
                         &req.target_volume_id,
                     )
+                    .await
                     .map(|_| "Volume cloned".to_string())
                     .map_err(|e| {
                         crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())

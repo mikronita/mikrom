@@ -5,8 +5,8 @@ use librados_sys::{
 };
 use librbd_sys::{rbd_close, rbd_create, rbd_open, rbd_remove, rbd_snap_create};
 use std::ffi::CString;
-use std::process::Command;
 use std::ptr;
+use tokio::process::Command;
 use tracing::{info, warn};
 
 // Missing FFI declarations from sys crates
@@ -43,23 +43,24 @@ unsafe extern "C" {
 
 pub struct CephRbd;
 
+#[allow(async_fn_in_trait)]
 pub trait StorageProvider: Send + Sync {
-    fn ensure_pool_exists(&self, pool: &str) -> Result<()>;
-    fn create_volume(&self, pool: &str, name: &str, size_mib: i32) -> Result<()>;
-    fn delete_volume(&self, pool: &str, name: &str) -> Result<()>;
-    fn create_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()>;
-    fn delete_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()>;
-    fn restore_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()>;
-    fn clone_volume(
+    async fn ensure_pool_exists(&self, pool: &str) -> Result<()>;
+    async fn create_volume(&self, pool: &str, name: &str, size_mib: i32) -> Result<()>;
+    async fn delete_volume(&self, pool: &str, name: &str) -> Result<()>;
+    async fn create_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()>;
+    async fn delete_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()>;
+    async fn restore_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()>;
+    async fn clone_volume(
         &self,
         pool: &str,
         source_name: &str,
         snapshot_name: &str,
         target_name: &str,
     ) -> Result<()>;
-    fn exists(&self, pool: &str, name: &str) -> bool;
-    fn map_volume(&self, pool: &str, name: &str) -> Result<String>;
-    fn unmap_volume(&self, device_path: &str) -> Result<()>;
+    async fn exists(&self, pool: &str, name: &str) -> bool;
+    async fn map_volume(&self, pool: &str, name: &str) -> Result<String>;
+    async fn unmap_volume(&self, device_path: &str) -> Result<()>;
 }
 
 /// RAII wrapper for RADOS cluster handle
@@ -124,7 +125,7 @@ impl CephRbd {
     }
 
     /// Provision a pool if it does not exist. Separated from connect to avoid side effects in every connection.
-    pub fn ensure_pool_exists(pool: &str) -> Result<()> {
+    pub async fn ensure_pool_exists(pool: &str) -> Result<()> {
         unsafe {
             let mut cluster: rados_t = ptr::null_mut();
             let id = CString::new("admin").map_err(|e| anyhow!("Invalid admin name: {}", e))?;
@@ -180,8 +181,8 @@ impl CephRbd {
         }
     }
 
-    pub fn create_volume(pool: &str, name: &str, size_mib: i32) -> Result<()> {
-        Self::ensure_pool_exists(pool)?;
+    pub async fn create_volume(pool: &str, name: &str, size_mib: i32) -> Result<()> {
+        Self::ensure_pool_exists(pool).await?;
 
         info!(
             "Creating RBD volume (native FFI): {}/{} ({} MiB)",
@@ -201,7 +202,7 @@ impl CephRbd {
         Ok(())
     }
 
-    pub fn delete_volume(pool: &str, name: &str) -> Result<()> {
+    pub async fn delete_volume(pool: &str, name: &str) -> Result<()> {
         info!("Deleting RBD volume (native FFI): {}/{}", pool, name);
         let io = Self::connect(pool)?;
         let name_c = CString::new(name).map_err(|e| anyhow!("Invalid volume name: {}", e))?;
@@ -215,7 +216,7 @@ impl CephRbd {
         Ok(())
     }
 
-    pub fn create_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
+    pub async fn create_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
         info!(
             "Creating RBD snapshot (native FFI): {}/{}@{}",
             pool, name, snapshot_name
@@ -246,7 +247,7 @@ impl CephRbd {
         Ok(())
     }
 
-    pub fn delete_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
+    pub async fn delete_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
         info!(
             "Deleting RBD snapshot (native FFI): {}/{}@{}",
             pool, name, snapshot_name
@@ -298,7 +299,7 @@ impl CephRbd {
         Ok(())
     }
 
-    pub fn restore_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
+    pub async fn restore_snapshot(pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
         info!(
             "Restoring RBD snapshot (native FFI): {}/{}@{}",
             pool, name, snapshot_name
@@ -347,7 +348,7 @@ impl CephRbd {
         Ok(())
     }
 
-    pub fn clone_volume(
+    pub async fn clone_volume(
         pool: &str,
         source_name: &str,
         snapshot_name: &str,
@@ -422,7 +423,7 @@ impl CephRbd {
         Ok(())
     }
 
-    pub fn exists(pool: &str, name: &str) -> bool {
+    pub async fn exists(pool: &str, name: &str) -> bool {
         if let Ok(io) = Self::connect(pool)
             && let Ok(name_c) = CString::new(name)
         {
@@ -438,12 +439,13 @@ impl CephRbd {
         false
     }
 
-    pub fn map_volume(pool: &str, name: &str) -> Result<String> {
+    pub async fn map_volume(pool: &str, name: &str) -> Result<String> {
         info!("Mapping RBD image to kernel: {}/{}", pool, name);
         let output = Command::new("rbd")
             .arg("map")
             .arg(format!("{}/{}", pool, name))
-            .output()?;
+            .output()
+            .await?;
 
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
@@ -455,9 +457,13 @@ impl CephRbd {
         Ok(device_path)
     }
 
-    pub fn unmap_volume(device_path: &str) -> Result<()> {
+    pub async fn unmap_volume(device_path: &str) -> Result<()> {
         info!("Unmapping RBD device: {}", device_path);
-        let status = Command::new("rbd").arg("unmap").arg(device_path).status()?;
+        let status = Command::new("rbd")
+            .arg("unmap")
+            .arg(device_path)
+            .status()
+            .await?;
 
         if !status.success() {
             return Err(anyhow!("rbd unmap failed for {}", device_path));
@@ -467,49 +473,49 @@ impl CephRbd {
 }
 
 impl StorageProvider for CephRbd {
-    fn ensure_pool_exists(&self, pool: &str) -> Result<()> {
-        CephRbd::ensure_pool_exists(pool)
+    async fn ensure_pool_exists(&self, pool: &str) -> Result<()> {
+        CephRbd::ensure_pool_exists(pool).await
     }
 
-    fn create_volume(&self, pool: &str, name: &str, size_mib: i32) -> Result<()> {
-        CephRbd::create_volume(pool, name, size_mib)
+    async fn create_volume(&self, pool: &str, name: &str, size_mib: i32) -> Result<()> {
+        CephRbd::create_volume(pool, name, size_mib).await
     }
 
-    fn delete_volume(&self, pool: &str, name: &str) -> Result<()> {
-        CephRbd::delete_volume(pool, name)
+    async fn delete_volume(&self, pool: &str, name: &str) -> Result<()> {
+        CephRbd::delete_volume(pool, name).await
     }
 
-    fn create_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
-        CephRbd::create_snapshot(pool, name, snapshot_name)
+    async fn create_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
+        CephRbd::create_snapshot(pool, name, snapshot_name).await
     }
 
-    fn delete_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
-        CephRbd::delete_snapshot(pool, name, snapshot_name)
+    async fn delete_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
+        CephRbd::delete_snapshot(pool, name, snapshot_name).await
     }
 
-    fn restore_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
-        CephRbd::restore_snapshot(pool, name, snapshot_name)
+    async fn restore_snapshot(&self, pool: &str, name: &str, snapshot_name: &str) -> Result<()> {
+        CephRbd::restore_snapshot(pool, name, snapshot_name).await
     }
 
-    fn clone_volume(
+    async fn clone_volume(
         &self,
         pool: &str,
         source_name: &str,
         snapshot_name: &str,
         target_name: &str,
     ) -> Result<()> {
-        CephRbd::clone_volume(pool, source_name, snapshot_name, target_name)
+        CephRbd::clone_volume(pool, source_name, snapshot_name, target_name).await
     }
 
-    fn exists(&self, pool: &str, name: &str) -> bool {
-        CephRbd::exists(pool, name)
+    async fn exists(&self, pool: &str, name: &str) -> bool {
+        CephRbd::exists(pool, name).await
     }
 
-    fn map_volume(&self, pool: &str, name: &str) -> Result<String> {
-        CephRbd::map_volume(pool, name)
+    async fn map_volume(&self, pool: &str, name: &str) -> Result<String> {
+        CephRbd::map_volume(pool, name).await
     }
 
-    fn unmap_volume(&self, device_path: &str) -> Result<()> {
-        CephRbd::unmap_volume(device_path)
+    async fn unmap_volume(&self, device_path: &str) -> Result<()> {
+        CephRbd::unmap_volume(device_path).await
     }
 }
