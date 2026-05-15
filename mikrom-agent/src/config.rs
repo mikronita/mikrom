@@ -24,6 +24,10 @@ pub struct AgentConfig {
 
     pub agent_hostname: Option<String>,
 
+    pub agent_advertise_address: Option<String>,
+
+    pub wireguard_port: Option<u16>,
+
     pub wireguard_pubkey: Option<String>,
 }
 

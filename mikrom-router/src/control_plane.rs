@@ -26,7 +26,7 @@ use prost::Message;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 fn tls_alternative_cn_for_host(host: &str) -> Option<String> {
     match host {
@@ -204,12 +204,28 @@ impl ControlPlane {
 
         Ok(certificates)
     }
+
+    async fn set_proc_sysctl(&self, key: &str, value: &str) -> Result<()> {
+        let path = format!("/proc/sys/{key}");
+        tokio::fs::write(&path, value)
+            .await
+            .with_context(|| format!("Failed to write sysctl {key}={value} at {path}"))?;
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl BackgroundService for ControlPlane {
     async fn start(&self, mut shutdown: ShutdownWatch) {
         crate::init_tracing_once("control-plane");
+
+        // 0. Enable IPv6 forwarding (essential for WireGuard 6PN routing)
+        if let Err(e) = self
+            .set_proc_sysctl("net/ipv6/conf/all/forwarding", "1")
+            .await
+        {
+            error!("Control Plane: Failed to enable IPv6 forwarding: {e}");
+        }
 
         // Connect to database
         let db = loop {
@@ -488,7 +504,7 @@ impl BackgroundService for ControlPlane {
                     if let Some(msg) = msg {
                         match NetworkMeshUpdate::decode(&msg.payload[..]) {
                             Ok(update) => {
-                                info!("Control Plane: Received mesh update with {} peers", update.peers.len());
+                                debug!("Control Plane: Received mesh update with {} peers", update.peers.len());
                                 if let Err(e) = self.wg_manager.update_peers(&update.peers, &priv_key, &self.router_id).await {
                                     error!("Control Plane: Failed to update WireGuard peers: {e}");
                                 }
