@@ -210,22 +210,26 @@ impl AppBuilder {
             .context("Failed to connect to the local Docker daemon")?;
 
         let auth_config =
-            if let (Some(username), Some(password)) = (&self.registry_user, &self.registry_pass) {
-                let serveraddress = image_tag.split('/').next().map(|s| s.to_string());
-                info!(
-                    username = %username,
-                    serveraddress = ?serveraddress,
-                    "Using registry credentials for push"
-                );
-                Some(DockerCredentials {
-                    username: Some(username.clone()),
-                    password: Some(password.clone()),
-                    serveraddress,
-                    ..Default::default()
-                })
-            } else {
-                info!("No registry credentials provided, pushing anonymously");
-                None
+            match (&self.registry_user, &self.registry_pass) {
+                (Some(username), Some(password)) => {
+                    let serveraddress = image_tag.split('/').next().map(|s| s.to_string());
+                    info!(
+                        username = %username,
+                        serveraddress = ?serveraddress,
+                        "Using registry credentials for push"
+                    );
+                    Some(DockerCredentials {
+                        username: Some(username.clone()),
+                        password: Some(password.clone()),
+                        serveraddress,
+                        ..Default::default()
+                    })
+                }
+                (None, None) => {
+                    info!("No registry credentials provided, pushing anonymously");
+                    None
+                }
+                _ => anyhow::bail!("Both registry_user and registry_pass must be provided for authenticated push"),
             };
 
         let mut stream = docker.push_image(
