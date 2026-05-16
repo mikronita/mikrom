@@ -110,19 +110,30 @@ impl AppBuilder {
             .detect_exposed_port(&full_image_tag)
             .await
             .unwrap_or(8080);
-        self.push_to_registry(&full_image_tag).await?;
+        let push_result = self.push_to_registry(&full_image_tag).await;
 
         // 5. Cleanup local image to free disk space
-        if let Ok(docker) = Docker::connect_with_local_defaults() {
-            let _ = docker
-                .remove_image(
-                    &full_image_tag,
-                    Some(RemoveImageOptionsBuilder::default().force(true).build()),
-                    None,
-                )
-                .await;
-            info!(image_tag = %full_image_tag, "Cleaned up local image after push");
+        match Docker::connect_with_local_defaults() {
+            Ok(docker) => {
+                let _ = docker
+                    .remove_image(
+                        &full_image_tag,
+                        Some(RemoveImageOptionsBuilder::default().force(true).build()),
+                        None,
+                    )
+                    .await;
+                info!(image_tag = %full_image_tag, "Cleaned up local image after push");
+            },
+            Err(e) => {
+                tracing::warn!(
+                    image_tag = %full_image_tag,
+                    error = %e,
+                    "Failed to connect to Docker for image cleanup"
+                );
+            },
         }
+
+        push_result?;
 
         Ok(BuildResult {
             image_tag: full_image_tag,
