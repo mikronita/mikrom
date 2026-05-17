@@ -22,6 +22,7 @@ impl ImageBuilder {
         Ok(Self)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn docker_to_ext4(
         &self,
         image: &str,

@@ -212,7 +212,10 @@ impl CephRbd {
             .await?;
 
         if !status.success() {
-            warn!("Failed to purge snapshots for {}/{} (they may not exist)", pool, name);
+            warn!(
+                "Failed to purge snapshots for {}/{} (they may not exist)",
+                pool, name
+            );
         }
         Ok(())
     }

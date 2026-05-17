@@ -624,13 +624,8 @@ impl FirecrackerManager {
 
         // 3. Prepare RootFS
         let rootfs_path = paths.rootfs_path();
-        self.prepare_rootfs(
-            &vm_id,
-            &image,
-            &rootfs_path.to_string_lossy(),
-            &config,
-        )
-        .await?;
+        self.prepare_rootfs(&vm_id, &image, &rootfs_path.to_string_lossy(), &config)
+            .await?;
 
         let (tap_name, tap_ifindex) = self.configure_vm_networking(&vm_id, &mut config).await?;
         let startup = self
@@ -1627,7 +1622,9 @@ impl FirecrackerManager {
         let dev_path = storage
             .map_volume(&vol.pool_name, &vol.volume_id)
             .await
-            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to map RBD volume: {e}")))?;
+            .map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to map RBD volume: {e}"))
+            })?;
 
         // Ensure the volume is formatted with ext4
         let check_fs = tokio::process::Command::new("blkid")
@@ -1638,26 +1635,44 @@ impl FirecrackerManager {
                 FirecrackerError::ProcessError(format!("Failed to check filesystem: {e}"))
             })?;
 
-        if !check_fs.status.success() || !String::from_utf8_lossy(&check_fs.stdout).contains("ext4")
-        {
-            tracing::info!(volume_id = %vol.volume_id, device = %dev_path, "Formatting volume with ext4...");
-            let output = tokio::process::Command::new("mkfs.ext4")
-                .arg("-F") // Force
-                .arg(&dev_path)
-                .output()
-                .await
-                .map_err(|e| {
-                    FirecrackerError::ProcessError(format!("Failed to execute mkfs.ext4: {e}"))
-                })?;
+        if !check_fs.status.success() {
+            // blkid returns non-zero if no filesystem is detected.
+            // Check if stdout is empty to be sure it's not a damaged filesystem.
+            if check_fs.stdout.is_empty() {
+                tracing::info!(volume_id = %vol.volume_id, device = %dev_path, "Device appears empty, formatting with ext4...");
+                let output = tokio::process::Command::new("mkfs.ext4")
+                    .arg("-F") // Force
+                    .arg(&dev_path)
+                    .output()
+                    .await
+                    .map_err(|e| {
+                        FirecrackerError::ProcessError(format!("Failed to execute mkfs.ext4: {e}"))
+                    })?;
 
-            if !output.status.success() {
-                let err = String::from_utf8_lossy(&output.stderr);
-                tracing::error!(volume_id = %vol.volume_id, error = %err, "mkfs.ext4 failed");
+                if !output.status.success() {
+                    let err = String::from_utf8_lossy(&output.stderr);
+                    tracing::error!(volume_id = %vol.volume_id, error = %err, "mkfs.ext4 failed");
+                    let _ = storage.unmap_volume(&dev_path).await;
+                    return Err(FirecrackerError::ProcessError(format!(
+                        "Failed to format volume: {err}"
+                    )));
+                }
+            } else {
+                let out = String::from_utf8_lossy(&check_fs.stdout);
+                tracing::error!(volume_id = %vol.volume_id, device = %dev_path, output = %out, "blkid failed but returned output; possible damaged filesystem. Refusing to format.");
                 let _ = storage.unmap_volume(&dev_path).await;
-                return Err(FirecrackerError::ProcessError(format!(
-                    "Failed to format volume: {err}"
-                )));
+                return Err(FirecrackerError::ProcessError(
+                    "Volume has unknown or damaged filesystem. Refusing to auto-format to prevent data loss.".to_string()
+                ));
             }
+        } else if !String::from_utf8_lossy(&check_fs.stdout).contains("ext4") {
+            let fs_info = String::from_utf8_lossy(&check_fs.stdout);
+            tracing::warn!(volume_id = %vol.volume_id, device = %dev_path, info = %fs_info, "Volume contains a non-ext4 filesystem. Refusing to auto-format.");
+            let _ = storage.unmap_volume(&dev_path).await;
+            return Err(FirecrackerError::ProcessError(
+                "Volume contains a non-ext4 filesystem. Only ext4 is supported for auto-mounting."
+                    .to_string(),
+            ));
         }
 
         Ok(dev_path)

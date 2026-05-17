@@ -357,33 +357,51 @@ fn setup_volume_mounts(config: &InitConfig) -> Result<()> {
                 if let Some(idx) = vol.index {
                     let letter = (b'a' + (idx as u8)) as char;
                     let dev = format!("/dev/vd{}", letter);
-                    println!("[mikrom-init] Serial discovery failed for {}, falling back to index {} -> {}", vol.drive_id, idx, dev);
+                    println!(
+                        "[mikrom-init] Serial discovery failed for {}, mapped by index {} -> {}",
+                        vol.drive_id, idx, dev
+                    );
                     dev
                 } else {
-                    eprintln!("[mikrom-init] Warning: Device not found for volume {} and no index provided", vol.drive_id);
+                    eprintln!(
+                        "[mikrom-init] Warning: Device not found for volume {} and no index provided",
+                        vol.drive_id
+                    );
                     continue;
                 }
-            }
+            },
         };
 
-        println!("[mikrom-init] Mounting {} to {}...", device, vol.mount_point);
+        println!(
+            "[mikrom-init] Mounting {} to {}...",
+            device, vol.mount_point
+        );
 
         // Ensure device node exists in /dev (devtmpfs might be slow)
         if !std::path::Path::new(&device).exists() {
-             eprintln!("[mikrom-init] Warning: Device node {} does not exist in /dev, wait-and-retry...", device);
-             // Brief wait
-             std::thread::sleep(std::time::Duration::from_millis(500));
+            eprintln!(
+                "[mikrom-init] Warning: Device node {} does not exist in /dev, wait-and-retry...",
+                device
+            );
+            // Brief wait
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
 
         // Ensure mount point exists
         if let Err(e) = fs::create_dir_all(&vol.mount_point) {
-            eprintln!("[mikrom-init] Warning: Failed to create mount point {}: {}", vol.mount_point, e);
+            eprintln!(
+                "[mikrom-init] Warning: Failed to create mount point {}: {}",
+                vol.mount_point, e
+            );
             continue;
         }
 
         // Mount the device
         if let Err(e) = mount_fs(&device, &vol.mount_point, "ext4", MsFlags::empty()) {
-            eprintln!("[mikrom-init] Warning: Failed to mount {} to {}: {}", device, vol.mount_point, e);
+            eprintln!(
+                "[mikrom-init] Warning: Failed to mount {} to {}: {}",
+                device, vol.mount_point, e
+            );
         }
     }
 
@@ -398,7 +416,10 @@ fn find_device_by_serial(drive_id: &str) -> Result<Option<String>> {
         drive_id
     };
 
-    println!("[mikrom-init] Looking for device with serial: {} (original: {})", target_serial, drive_id);
+    println!(
+        "[mikrom-init] Looking for device with serial: {} (original: {})",
+        target_serial, drive_id
+    );
 
     // Retry for up to 5 seconds as devices might take a moment to appear
     for attempt in 1..=10 {
@@ -411,7 +432,7 @@ fn find_device_by_serial(drive_id: &str) -> Result<Option<String>> {
             Err(e) => {
                 eprintln!("[mikrom-init] Warning: Failed to read /sys/block: {}", e);
                 continue;
-            }
+            },
         };
 
         for entry in block_dir {

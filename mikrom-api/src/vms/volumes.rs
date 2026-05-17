@@ -72,6 +72,25 @@ pub async fn create_volume_handler(
 
     let pool_name = format!("user_{}_volumes", app.user_id.to_string().replace('-', "_"));
 
+    // Validate mount point
+    if !req.mount_point.starts_with('/') {
+        return Err(ApiError::BadRequest(
+            "Mount point must be an absolute path starting with /".to_string(),
+        ));
+    }
+
+    let forbidden_paths = [
+        "/etc", "/proc", "/sys", "/dev", "/bin", "/sbin", "/lib", "/usr", "/root", "/boot",
+    ];
+    for path in forbidden_paths {
+        if req.mount_point == path || req.mount_point.starts_with(&format!("{}/", path)) {
+            return Err(ApiError::BadRequest(format!(
+                "Mount point {} is reserved by the system",
+                req.mount_point
+            )));
+        }
+    }
+
     let volume = state
         .volume_repo
         .create_volume(CreateVolumeParams {
