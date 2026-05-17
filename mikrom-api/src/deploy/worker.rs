@@ -14,6 +14,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 #[async_trait]
+#[cfg_attr(any(test, feature = "test-utils"), mockall::automock)]
 pub trait BuilderClient: Send + Sync {
     async fn get_build_status(
         &self,
@@ -29,6 +30,7 @@ pub trait BuilderClient: Send + Sync {
 }
 
 #[async_trait]
+#[cfg_attr(any(test, feature = "test-utils"), mockall::automock)]
 pub trait SchedulerClient: Send + Sync {
     async fn deploy_app(
         &self,
