@@ -388,6 +388,7 @@ impl AgentServer {
                     size_mib: v.size_mib,
                     read_only: v.read_only,
                     pool_name: v.pool_name,
+                    mount_point: v.mount_point,
                 })
                 .collect();
         }

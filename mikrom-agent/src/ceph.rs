@@ -202,8 +202,60 @@ impl CephRbd {
         Ok(())
     }
 
+    pub async fn purge_snapshots(pool: &str, name: &str) -> Result<()> {
+        info!("Purging all snapshots for RBD image: {}/{}", pool, name);
+        let status = Command::new("rbd")
+            .arg("snap")
+            .arg("purge")
+            .arg(format!("{}/{}", pool, name))
+            .status()
+            .await?;
+
+        if !status.success() {
+            warn!("Failed to purge snapshots for {}/{} (they may not exist)", pool, name);
+        }
+        Ok(())
+    }
+
+    pub async fn list_watchers(pool: &str, name: &str) -> Result<Vec<String>> {
+        let output = Command::new("rbd")
+            .arg("status")
+            .arg(format!("{}/{}", pool, name))
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            return Ok(vec![]);
+        }
+
+        let status_out = String::from_utf8_lossy(&output.stdout);
+        let watchers = status_out
+            .lines()
+            .filter(|line| line.contains("Watchers:"))
+            .map(|line| line.trim().to_string())
+            .collect();
+        Ok(watchers)
+    }
+
     pub async fn delete_volume(pool: &str, name: &str) -> Result<()> {
-        info!("Deleting RBD volume (native FFI): {}/{}", pool, name);
+        info!("Deleting RBD volume: {}/{}", pool, name);
+
+        // Check for active watchers first
+        let watchers = Self::list_watchers(pool, name).await?;
+        if !watchers.is_empty() {
+            return Err(anyhow!(
+                "Cannot delete volume: it is still in use by active watchers. {}",
+                watchers.join(", ")
+            ));
+        }
+
+        // Try to unmap first in case it's still mapped
+        let spec = format!("{pool}/{name}");
+        let _ = Self::unmap_volume(&spec).await;
+
+        // Purge snapshots before removing (Ceph requires this)
+        let _ = Self::purge_snapshots(pool, name).await;
+
         let io = Self::connect(pool)?;
         let name_c = CString::new(name).map_err(|e| anyhow!("Invalid volume name: {}", e))?;
 
@@ -457,16 +509,19 @@ impl CephRbd {
         Ok(device_path)
     }
 
-    pub async fn unmap_volume(device_path: &str) -> Result<()> {
-        info!("Unmapping RBD device: {}", device_path);
+    pub async fn unmap_volume(device_or_spec: &str) -> Result<()> {
+        info!("Unmapping RBD device/spec: {}", device_or_spec);
         let status = Command::new("rbd")
             .arg("unmap")
-            .arg(device_path)
+            .arg("-o")
+            .arg("force")
+            .arg(device_or_spec)
             .status()
             .await?;
 
         if !status.success() {
-            return Err(anyhow!("rbd unmap failed for {}", device_path));
+            // It might fail if it's not mapped, which is fine for a cleanup attempt
+            warn!("rbd unmap (force) failed for {}", device_or_spec);
         }
         Ok(())
     }

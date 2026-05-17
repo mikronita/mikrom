@@ -216,6 +216,7 @@ impl DeploymentService {
                         size_mib: v.size_mib as u64,
                         read_only: false, // Default to RW
                         pool_name: v.pool_name,
+                        mount_point: v.mount_point,
                     })
                     .collect(),
                 ..Default::default()

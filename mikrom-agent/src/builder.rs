@@ -30,10 +30,15 @@ impl ImageBuilder {
         port: u32,
         ipv6_addr: Option<String>,
         ipv6_gw: Option<String>,
+        volumes: &[crate::firecracker::config::Volume],
     ) -> anyhow::Result<()> {
         info!(
-            "Converting Docker image {} to ext4 at {:?} (port={}, base={})",
-            image, output_path, port, base_rootfs_path
+            "Converting Docker image {} to ext4 at {:?} (port={}, base={}, volumes={})",
+            image,
+            output_path,
+            port,
+            base_rootfs_path,
+            volumes.len()
         );
 
         let docker = Docker::connect_with_local_defaults()
@@ -274,11 +279,21 @@ impl ImageBuilder {
                 env_map.insert("IPV6_GW".to_string(), gw);
             }
 
+            let mut volumes_json = Vec::new();
+            for (idx, vol) in volumes.iter().enumerate() {
+                volumes_json.push(serde_json::json!({
+                    "drive_id": vol.volume_id.replace('-', "_"),
+                    "mount_point": vol.mount_point,
+                    "index": idx + 1 // vda is index 0 (rootfs), so vdb is 1, etc.
+                }));
+            }
+
             let init_config = serde_json::json!({
                 "env": env_map,
                 "workdir": workdir,
                 "entrypoint": entrypoint_list,
-                "cmd": cmd_list
+                "cmd": cmd_list,
+                "volumes": volumes_json
             });
 
             tokio::fs::write(
@@ -378,6 +393,7 @@ mod tests {
                 8080,
                 None,
                 None,
+                &[],
             )
             .await;
         assert!(result.is_err());

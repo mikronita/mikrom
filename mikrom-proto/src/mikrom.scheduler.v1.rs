@@ -390,6 +390,8 @@ pub struct Volume {
     pub read_only: bool,
     #[prost(string, tag = "4")]
     pub pool_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub mount_point: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppConfig {

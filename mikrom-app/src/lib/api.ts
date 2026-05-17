@@ -252,6 +252,7 @@ export interface Volume {
   name: string;
   size_mib: number;
   pool_name: string;
+  mount_point: string;
   created_at: string;
 }
 
@@ -265,6 +266,7 @@ export interface VolumeSnapshot {
 export interface CreateVolumeRequest {
   name: string;
   size_mib: number;
+  mount_point: string;
 }
 
 export interface CreateSnapshotRequest {

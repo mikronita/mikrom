@@ -31,7 +31,7 @@
   let restoreSnapshotName = "";
   let snapshotToClone = "";
   let cloneName = "";
-  let newVolume = { name: "", size_mib: 1024 };
+  let newVolume = { name: "", size_mib: 1024, mount_point: "/data" };
 
   async function loadVolumes(appName: string) {
     const token = getToken();
@@ -70,7 +70,7 @@
     const result = await createVolume(token, app.id, newVolume);
     if (result.error) return toast.error(result.error);
     toast.success("Volume created successfully");
-    newVolume = { name: "", size_mib: 1024 };
+    newVolume = { name: "", size_mib: 1024, mount_point: "/data" };
     showCreateVolume = false;
     await loadVolumes(selectedApp);
   }
@@ -188,6 +188,7 @@
               <tr class="border-b border-border text-left text-sm">
                 <th class="px-4 py-3">Name</th>
                 <th class="px-4 py-3">Size</th>
+                <th class="px-4 py-3">Mount Point</th>
                 <th class="px-4 py-3">Pool</th>
                 <th class="px-4 py-3">Created At</th>
                 <th class="px-4 py-3 text-right">Actions</th>
@@ -198,6 +199,7 @@
                 <tr class="border-b border-border">
                   <td class="px-4 py-4 font-medium"><div class="flex items-center gap-2"><Database class="size-4 text-muted-foreground" />{volume.name}</div></td>
                   <td class="px-4 py-4"><Badge variant="secondary">{formatSize(volume.size_mib)}</Badge></td>
+                  <td class="px-4 py-4"><code class="text-xs">{volume.mount_point}</code></td>
                   <td class="px-4 py-4 font-mono text-xs text-muted-foreground">{volume.pool_name}</td>
                   <td class="px-4 py-4 text-sm text-muted-foreground">{new Date(volume.created_at).toLocaleDateString()}</td>
                   <td class="px-4 py-4 text-right">
@@ -227,9 +229,13 @@
       <div class="space-y-4">
         <Field label="Volume name"><Input bind:value={newVolume.name} placeholder="my-data-volume" /></Field>
         <Field label="Size (MiB)"><Input type="number" bind:value={newVolume.size_mib} min={128} /></Field>
+        <Field label="Mount point"><Input bind:value={newVolume.mount_point} placeholder="/data" /></Field>
+        <p class="text-xs text-muted-foreground italic">
+          Note: This volume will be attached and mounted at this path during the <strong>next deployment</strong> of the application.
+        </p>
         <div class="flex justify-end gap-2">
           <Button variant="outline" onclick={() => (showCreateVolume = false)}>Cancel</Button>
-          <Button onclick={createNewVolume} disabled={!newVolume.name}>Create</Button>
+          <Button onclick={createNewVolume} disabled={!newVolume.name || !newVolume.mount_point}>Create</Button>
         </div>
       </div>
     </Modal>

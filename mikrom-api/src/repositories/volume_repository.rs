@@ -9,6 +9,7 @@ pub struct CreateVolumeParams {
     pub name: String,
     pub size_mib: i32,
     pub pool_name: String,
+    pub mount_point: String,
 }
 
 #[derive(Debug)]

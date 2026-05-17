@@ -505,9 +505,9 @@ impl FirecrackerManager {
         let storage = crate::ceph::CephRbd;
         for vol in volumes {
             if !vol.pool_name.is_empty() {
-                let dev_path = format!("/dev/rbd/{}/{}", vol.pool_name, vol.volume_id);
-                if let Err(e) = storage.unmap_volume(&dev_path).await {
-                    tracing::warn!("Failed to unmap volume {}: {}", dev_path, e);
+                let spec = format!("{}/{}", vol.pool_name, vol.volume_id);
+                if let Err(e) = storage.unmap_volume(&spec).await {
+                    tracing::warn!("Failed to unmap volume {}: {}", spec, e);
                 }
             }
         }
@@ -628,9 +628,7 @@ impl FirecrackerManager {
             &vm_id,
             &image,
             &rootfs_path.to_string_lossy(),
-            config.port,
-            config.ipv6_address.clone(),
-            config.ipv6_gateway.clone(),
+            &config,
         )
         .await?;
 
@@ -1264,9 +1262,7 @@ impl FirecrackerManager {
         vm_id: &VmId,
         image: &str,
         rootfs_path: &str,
-        port: u32,
-        ipv6_addr: Option<String>,
-        ipv6_gw: Option<String>,
+        config: &crate::firecracker::config::VmConfig,
     ) -> Result<(), FirecrackerError> {
         tracing::info!(vm_id = %vm_id, rootfs_path = %rootfs_path, "Preparing rootfs");
 
@@ -1297,9 +1293,10 @@ impl FirecrackerManager {
                     image,
                     dst_path,
                     &self.fc_config.base_rootfs_path,
-                    port,
-                    ipv6_addr,
-                    ipv6_gw,
+                    config.port,
+                    config.ipv6_address.clone(),
+                    config.ipv6_gateway.clone(),
+                    &config.volumes,
                 )
                 .await
                 .map_err(|e| {
@@ -1342,6 +1339,10 @@ impl FirecrackerManager {
             if let Some(ref tap) = proc.tap_name {
                 self.cleanup_tap(tap).await;
             }
+        } else {
+            // Even if the process is gone, clean up volumes and paths based on VM config
+            tracing::info!(vm_id = %vm_id, "Process already gone, performing best-effort cleanup of volumes and artifacts");
+            self.cleanup_process_volumes(vm_id).await;
         }
 
         let mut vms = self.vms.write().await;
@@ -1621,17 +1622,27 @@ impl FirecrackerManager {
                 .map_err(|e| {
                     FirecrackerError::ProcessError(format!("Failed to create RBD volume: {e}"))
                 })?;
+        }
 
-            let dev_path = storage
-                .map_volume(&vol.pool_name, &vol.volume_id)
-                .await
-                .map_err(|e| {
-                    FirecrackerError::ProcessError(format!(
-                        "Failed to map RBD volume for formatting: {e}"
-                    ))
-                })?;
+        let dev_path = storage
+            .map_volume(&vol.pool_name, &vol.volume_id)
+            .await
+            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to map RBD volume: {e}")))?;
 
+        // Ensure the volume is formatted with ext4
+        let check_fs = tokio::process::Command::new("blkid")
+            .arg(&dev_path)
+            .output()
+            .await
+            .map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to check filesystem: {e}"))
+            })?;
+
+        if !check_fs.status.success() || !String::from_utf8_lossy(&check_fs.stdout).contains("ext4")
+        {
+            tracing::info!(volume_id = %vol.volume_id, device = %dev_path, "Formatting volume with ext4...");
             let output = tokio::process::Command::new("mkfs.ext4")
+                .arg("-F") // Force
                 .arg(&dev_path)
                 .output()
                 .await
@@ -1641,23 +1652,15 @@ impl FirecrackerManager {
 
             if !output.status.success() {
                 let err = String::from_utf8_lossy(&output.stderr);
+                tracing::error!(volume_id = %vol.volume_id, error = %err, "mkfs.ext4 failed");
                 let _ = storage.unmap_volume(&dev_path).await;
                 return Err(FirecrackerError::ProcessError(format!(
-                    "mkfs.ext4 failed: {err}"
+                    "Failed to format volume: {err}"
                 )));
             }
-
-            storage.unmap_volume(&dev_path).await.map_err(|e| {
-                FirecrackerError::ProcessError(format!(
-                    "Failed to unmap RBD volume after formatting: {e}"
-                ))
-            })?;
         }
 
-        storage
-            .map_volume(&vol.pool_name, &vol.volume_id)
-            .await
-            .map_err(|e| FirecrackerError::ProcessError(format!("Failed to map RBD volume: {e}")))
+        Ok(dev_path)
     }
 
     async fn ensure_local_volume(
