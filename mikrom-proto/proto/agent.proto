@@ -221,6 +221,7 @@ message Volume {
   uint64 size_mib = 2;
   bool read_only = 3;
   string pool_name = 4;
+  string mount_point = 5;
 }
 
 message VmConfig {

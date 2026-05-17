@@ -13,6 +13,13 @@ const CONFIG_PATH: &str = "/etc/mikrom/init.json";
 const FALLBACK_SHELL: &str = "/bin/sh";
 
 #[derive(Debug, Serialize, Deserialize)]
+struct VolumeConfig {
+    pub drive_id: String,
+    pub mount_point: String,
+    pub index: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct InitConfig {
     #[serde(default)]
     env: HashMap<String, String>,
@@ -21,6 +28,8 @@ struct InitConfig {
     entrypoint: Vec<String>,
     #[serde(default)]
     cmd: Vec<String>,
+    #[serde(default)]
+    volumes: Vec<VolumeConfig>,
 }
 
 fn default_workdir() -> String {
@@ -49,6 +58,10 @@ async fn main() -> Result<()> {
 
     if let Err(e) = setup_networking(&config).await {
         eprintln!("[mikrom-init] Warning: Networking setup encountered errors: {e}");
+    }
+
+    if let Err(e) = setup_volume_mounts(&config) {
+        eprintln!("[mikrom-init] Warning: Volume mounting encountered errors: {e}");
     }
 
     // Start background services from the base image
@@ -324,6 +337,104 @@ fn halt_pid1() -> ! {
     loop {
         std::thread::park();
     }
+}
+
+fn setup_volume_mounts(config: &InitConfig) -> Result<()> {
+    if config.volumes.is_empty() {
+        return Ok(());
+    }
+
+    println!("[mikrom-init] Setting up volume mounts...");
+
+    for vol in &config.volumes {
+        // Try discovery by serial first
+        let device = match find_device_by_serial(&vol.drive_id)? {
+            Some(dev) => dev,
+            None => {
+                // Fallback: Firecracker attaches drives in order.
+                // rootfs is /dev/vda (index 0).
+                // First extra volume is /dev/vdb (index 1), etc.
+                if let Some(idx) = vol.index {
+                    let letter = (b'a' + (idx as u8)) as char;
+                    let dev = format!("/dev/vd{}", letter);
+                    println!("[mikrom-init] Serial discovery failed for {}, falling back to index {} -> {}", vol.drive_id, idx, dev);
+                    dev
+                } else {
+                    eprintln!("[mikrom-init] Warning: Device not found for volume {} and no index provided", vol.drive_id);
+                    continue;
+                }
+            }
+        };
+
+        println!("[mikrom-init] Mounting {} to {}...", device, vol.mount_point);
+
+        // Ensure device node exists in /dev (devtmpfs might be slow)
+        if !std::path::Path::new(&device).exists() {
+             eprintln!("[mikrom-init] Warning: Device node {} does not exist in /dev, wait-and-retry...", device);
+             // Brief wait
+             std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+
+        // Ensure mount point exists
+        if let Err(e) = fs::create_dir_all(&vol.mount_point) {
+            eprintln!("[mikrom-init] Warning: Failed to create mount point {}: {}", vol.mount_point, e);
+            continue;
+        }
+
+        // Mount the device
+        if let Err(e) = mount_fs(&device, &vol.mount_point, "ext4", MsFlags::empty()) {
+            eprintln!("[mikrom-init] Warning: Failed to mount {} to {}: {}", device, vol.mount_point, e);
+        }
+    }
+
+    Ok(())
+}
+
+fn find_device_by_serial(drive_id: &str) -> Result<Option<String>> {
+    // Virtio-blk serial IDs are often truncated to 20 characters in the guest kernel.
+    let target_serial = if drive_id.len() > 20 {
+        &drive_id[..20]
+    } else {
+        drive_id
+    };
+
+    println!("[mikrom-init] Looking for device with serial: {} (original: {})", target_serial, drive_id);
+
+    // Retry for up to 5 seconds as devices might take a moment to appear
+    for attempt in 1..=10 {
+        if attempt > 1 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+
+        let block_dir = match fs::read_dir("/sys/block") {
+            Ok(dir) => dir,
+            Err(e) => {
+                eprintln!("[mikrom-init] Warning: Failed to read /sys/block: {}", e);
+                continue;
+            }
+        };
+
+        for entry in block_dir {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.starts_with("vd") {
+                continue;
+            }
+
+            let serial_path = format!("/sys/block/{}/serial", name);
+            if let Ok(serial) = fs::read_to_string(&serial_path) {
+                let found_serial = serial.trim();
+                if found_serial == target_serial || drive_id.starts_with(found_serial) {
+                    return Ok(Some(format!("/dev/{}", name)));
+                }
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 fn mount_fs(source: &str, target: &str, fstype: &str, flags: MsFlags) -> Result<()> {

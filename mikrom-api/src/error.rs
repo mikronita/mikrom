@@ -88,11 +88,8 @@ impl IntoResponse for ApiError {
             Self::Conflict(msg) => (StatusCode::CONFLICT, msg),
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             Self::Scheduler(msg) => {
-                tracing::error!("Scheduler communication error: {}", msg);
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "Error communicating with scheduler".to_string(),
-                )
+                tracing::error!("Scheduler error: {}", msg);
+                (StatusCode::SERVICE_UNAVAILABLE, msg)
             },
             Self::Anyhow(err) => {
                 let msg = err.to_string();

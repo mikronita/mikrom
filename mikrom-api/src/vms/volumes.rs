@@ -15,6 +15,12 @@ use uuid::Uuid;
 pub struct CreateVolumeRequest {
     pub name: String,
     pub size_mib: i32,
+    #[serde(default = "default_mount_point")]
+    pub mount_point: String,
+}
+
+fn default_mount_point() -> String {
+    "/data".to_string()
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -74,6 +80,7 @@ pub async fn create_volume_handler(
             name: req.name,
             size_mib: req.size_mib,
             pool_name: pool_name.clone(),
+            mount_point: req.mount_point,
         })
         .await?;
 
@@ -232,7 +239,7 @@ pub async fn create_snapshot_handler(
                         )
                         .await
                         .map_err(|e| {
-                            ApiError::Internal(format!("Scheduler request failed: {e}"))
+                            ApiError::Scheduler(format!("Scheduler request failed: {e}"))
                         })?;
 
                     if inner.host_id.is_empty() {
@@ -267,10 +274,10 @@ pub async fn create_snapshot_handler(
         .with_timeout(std::time::Duration::from_secs(30))
         .request("mikrom.scheduler.create_snapshot", nats_req)
         .await
-        .map_err(|e| ApiError::Internal(format!("Scheduler request failed: {e}")))?;
+        .map_err(|e| ApiError::Scheduler(format!("Scheduler request failed: {e}")))?;
 
     if !scheduler_res.success {
-        return Err(ApiError::Internal(scheduler_res.message));
+        return Err(ApiError::Scheduler(scheduler_res.message));
     }
 
     Ok((StatusCode::CREATED, Json(snapshot)))
@@ -319,10 +326,10 @@ pub async fn delete_volume_handler(
         .with_timeout(std::time::Duration::from_secs(30))
         .request("mikrom.scheduler.delete_volume", nats_req)
         .await
-        .map_err(|e| ApiError::Internal(format!("Scheduler request failed: {e}")))?;
+        .map_err(|e| ApiError::Scheduler(format!("Scheduler request failed: {e}")))?;
 
     if !scheduler_res.success {
-        return Err(ApiError::Internal(scheduler_res.message));
+        return Err(ApiError::Scheduler(scheduler_res.message));
     }
 
     // 2. Delete from DB
@@ -379,10 +386,10 @@ pub async fn restore_snapshot_handler(
         .with_timeout(std::time::Duration::from_secs(30))
         .request("mikrom.scheduler.restore_snapshot", nats_req)
         .await
-        .map_err(|e| ApiError::Internal(format!("Scheduler request failed: {e}")))?;
+        .map_err(|e| ApiError::Scheduler(format!("Scheduler request failed: {e}")))?;
 
     if !scheduler_res.success {
-        return Err(ApiError::Internal(scheduler_res.message));
+        return Err(ApiError::Scheduler(scheduler_res.message));
     }
 
     Ok(StatusCode::OK.into_response())
@@ -438,10 +445,10 @@ pub async fn delete_snapshot_handler(
         .with_timeout(std::time::Duration::from_secs(30))
         .request("mikrom.scheduler.delete_snapshot", nats_req)
         .await
-        .map_err(|e| ApiError::Internal(format!("Scheduler request failed: {e}")))?;
+        .map_err(|e| ApiError::Scheduler(format!("Scheduler request failed: {e}")))?;
 
     if !scheduler_res.success {
-        return Err(ApiError::Internal(scheduler_res.message));
+        return Err(ApiError::Scheduler(scheduler_res.message));
     }
 
     // 2. Delete from DB
@@ -490,6 +497,7 @@ pub async fn clone_volume_handler(
             name: req.name,
             size_mib: source_volume.size_mib, // Clones usually keep the same size initially
             pool_name: source_volume.pool_name.clone(),
+            mount_point: source_volume.mount_point.clone(),
         })
         .await?;
 
@@ -511,14 +519,14 @@ pub async fn clone_volume_handler(
         .with_timeout(std::time::Duration::from_secs(30))
         .request("mikrom.scheduler.clone_volume", nats_req)
         .await
-        .map_err(|e| ApiError::Internal(format!("Scheduler request failed: {e}")))?;
+        .map_err(|e| ApiError::Scheduler(format!("Scheduler request failed: {e}")))?;
 
     if !scheduler_res.success {
         // Rollback DB entry if physical clone fails
         if let Err(e) = state.volume_repo.delete_volume(target_volume.id).await {
             tracing::error!(volume_id = %target_volume.id, error = %e, "Failed to rollback volume DB entry after physical clone failure");
         }
-        return Err(ApiError::Internal(scheduler_res.message));
+        return Err(ApiError::Scheduler(scheduler_res.message));
     }
 
     Ok((StatusCode::CREATED, Json(target_volume)))

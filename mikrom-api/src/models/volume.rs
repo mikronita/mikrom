@@ -12,6 +12,7 @@ pub struct Volume {
     pub name: String,
     pub size_mib: i32,
     pub pool_name: String,
+    pub mount_point: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

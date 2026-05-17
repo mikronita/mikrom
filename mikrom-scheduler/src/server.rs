@@ -40,6 +40,7 @@ impl SchedulerServer {
                         size_mib: v.size_mib,
                         read_only: v.read_only,
                         pool_name: v.pool_name.clone(),
+                        mount_point: v.mount_point.clone(),
                     })
                     .collect(),
                 health_check_path: c.health_check_path,

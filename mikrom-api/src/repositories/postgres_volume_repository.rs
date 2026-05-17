@@ -20,13 +20,14 @@ impl PostgresVolumeRepository {
 impl VolumeRepository for PostgresVolumeRepository {
     async fn create_volume(&self, params: CreateVolumeParams) -> anyhow::Result<Volume> {
         let volume = sqlx::query_as::<_, Volume>(
-            "INSERT INTO volumes (app_id, user_id, name, size_mib, pool_name) VALUES ($1, $2, $3, $4, $5) RETURNING *"
+            "INSERT INTO volumes (app_id, user_id, name, size_mib, pool_name, mount_point) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *"
         )
         .bind(params.app_id)
         .bind(params.user_id)
         .bind(params.name)
         .bind(params.size_mib)
         .bind(params.pool_name)
+        .bind(params.mount_point)
         .fetch_one(&self.pool)
         .await?;
 
