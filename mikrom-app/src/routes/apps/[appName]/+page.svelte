@@ -524,7 +524,7 @@
                 </div>
               </div>
             </CardHeader>
-            <CardContent class="p-4 sm:p-6">
+            <CardContent class="p-0">
               <MetricChart points={metricsHistory} />
             </CardContent>
           </Card>
