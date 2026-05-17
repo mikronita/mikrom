@@ -451,41 +451,38 @@ impl AppBuilder {
             }
         }
 
-        // 2. Dockerfile Port Enforcement (Default to 8080 if none found)
+        // 2. Dockerfile Port Enforcement (Coordinated with review feedback)
         let dockerfile_path = repo_path.join("Dockerfile");
         if dockerfile_path.exists() {
             let content = std::fs::read_to_string(&dockerfile_path)?;
-            let mut new_lines = Vec::new();
+            let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
             let mut expose_found = false;
 
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if trimmed.to_uppercase().starts_with("EXPOSE") {
+            // First pass: detect if EXPOSE is present anywhere
+            for line in &lines {
+                if line.trim().to_uppercase().starts_with("EXPOSE") {
                     expose_found = true;
-                }
-                new_lines.push(line.to_string());
-            }
-
-            // Inject ENV PORT=8080 to help apps bind to the right port
-            // but we don't force EXPOSE if it's already there
-            let mut final_content = Vec::new();
-            let mut env_injected = false;
-
-            for line in new_lines {
-                final_content.push(line.clone());
-                if !env_injected && line.trim().to_uppercase().starts_with("FROM") {
-                    info!("Injecting ENV PORT=8080 into Dockerfile");
-                    final_content.push("ENV PORT=8080".to_string());
-                    env_injected = true;
+                    break;
                 }
             }
 
+            // If EXPOSE is found, we respect the user's choice and do NOTHING.
+            // If NOT found, we inject both ENV and EXPOSE to the final stage (or all stages to be safe).
             if !expose_found {
-                info!("No EXPOSE found, adding EXPOSE 8080");
-                final_content.push("EXPOSE 8080".to_string());
+                info!("No EXPOSE found, injecting PORT 8080 defaults across all stages");
+                let mut final_lines = Vec::new();
+                for line in lines {
+                    final_lines.push(line.clone());
+                    // Inject after every FROM to ensure it persists in multi-stage builds
+                    if line.trim().to_uppercase().starts_with("FROM") {
+                        final_lines.push("ENV PORT=8080".to_string());
+                        final_lines.push("EXPOSE 8080".to_string());
+                    }
+                }
+                std::fs::write(&dockerfile_path, final_lines.join("\n"))?;
+            } else {
+                info!("EXPOSE detected in Dockerfile, respecting user port configuration");
             }
-
-            std::fs::write(&dockerfile_path, final_content.join("\n"))?;
         }
 
         Ok(())
@@ -531,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_prebuild_fixes_enforces_docker_port() {
+    fn test_apply_prebuild_fixes_respects_existing_expose() {
         let dir = tempdir().unwrap();
         let repo_path = dir.path();
 
@@ -542,6 +539,41 @@ mod tests {
 
         let new_content = fs::read_to_string(repo_path.join("Dockerfile")).unwrap();
         assert!(new_content.contains("EXPOSE 80"));
+        // Should NOT contain 8080 because EXPOSE was found
+        assert!(!new_content.contains("8080"));
+    }
+
+    #[test]
+    fn test_apply_prebuild_fixes_enforces_port_if_missing() {
+        let dir = tempdir().unwrap();
+        let repo_path = dir.path();
+
+        let dockerfile = "FROM node:20\nCMD [\"node\", \"index.js\"]";
+        fs::write(repo_path.join("Dockerfile"), dockerfile).unwrap();
+
+        AppBuilder::apply_prebuild_fixes(repo_path).unwrap();
+
+        let new_content = fs::read_to_string(repo_path.join("Dockerfile")).unwrap();
+        assert!(new_content.contains("EXPOSE 8080"));
         assert!(new_content.contains("ENV PORT=8080"));
+    }
+
+    #[test]
+    fn test_apply_prebuild_fixes_multi_stage_injection() {
+        let dir = tempdir().unwrap();
+        let repo_path = dir.path();
+
+        let dockerfile =
+            "FROM node:20 AS builder\nRUN build.sh\n\nFROM alpine\nCOPY --from=builder /app /app";
+        fs::write(repo_path.join("Dockerfile"), dockerfile).unwrap();
+
+        AppBuilder::apply_prebuild_fixes(repo_path).unwrap();
+
+        let new_content = fs::read_to_string(repo_path.join("Dockerfile")).unwrap();
+        // Should inject in both stages
+        let env_count = new_content.matches("ENV PORT=8080").count();
+        let expose_count = new_content.matches("EXPOSE 8080").count();
+        assert_eq!(env_count, 2);
+        assert_eq!(expose_count, 2);
     }
 }

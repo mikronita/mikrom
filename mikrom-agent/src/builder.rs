@@ -99,7 +99,10 @@ impl ImageBuilder {
                 .context("Failed to create temporary docker container")?;
 
             // 4. Prepare rootfs using Agent Overlay (Copy base-rootfs.ext4)
-            info!("Copying base rootfs from {} to {:?}...", base_rootfs_path, output_path);
+            info!(
+                "Copying base rootfs from {} to {:?}...",
+                base_rootfs_path, output_path
+            );
             tokio::fs::copy(base_rootfs_path, &output_path)
                 .await
                 .with_context(|| format!("Failed to copy base rootfs from {}", base_rootfs_path))?;
@@ -140,8 +143,11 @@ impl ImageBuilder {
 
             let mount_dir_str = mount_dir.to_string_lossy();
             let export_tar_str = export_tar_path.to_string_lossy();
-            
-            info!("Extracting container archive to {} (surgical system protection)...", mount_dir_str);
+
+            info!(
+                "Extracting container archive to {} (surgical system protection)...",
+                mount_dir_str
+            );
             let status = Command::new("tar")
                 .arg("-xf")
                 .arg(&*export_tar_str)
@@ -196,7 +202,10 @@ impl ImageBuilder {
             }
 
             // Fix authorized_keys permissions if they exist
-            let auth_keys_paths = ["root/.ssh/authorized_keys", "home/mikrom/.ssh/authorized_keys"];
+            let auth_keys_paths = [
+                "root/.ssh/authorized_keys",
+                "home/mikrom/.ssh/authorized_keys",
+            ];
             for path in auth_keys_paths {
                 let full_path = mount_dir.join(path);
                 if tokio::fs::metadata(&full_path).await.is_ok() {
