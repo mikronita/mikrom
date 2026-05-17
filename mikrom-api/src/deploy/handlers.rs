@@ -844,6 +844,7 @@ pub async fn deploy_app_version_handler(
                 vcpus,
                 memory_mib,
                 disk_mib,
+                port: app.port as u32,
                 env: env_vars.clone(),
             },
         )

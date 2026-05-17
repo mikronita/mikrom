@@ -18,6 +18,7 @@ pub struct DeployParams {
     pub vcpus: u32,
     pub memory_mib: u32,
     pub disk_mib: u32,
+    pub port: u32,
     pub env: std::collections::HashMap<String, String>,
 }
 
@@ -205,7 +206,7 @@ impl DeploymentService {
                 vcpus: params.vcpus,
                 memory_mib: params.memory_mib,
                 disk_mib: params.disk_mib,
-                port: app.port as u32,
+                port: params.port,
                 env: params.env,
                 health_check_path: app.health_check_path.clone(),
                 volumes: volumes
