@@ -26,13 +26,14 @@ impl ImageBuilder {
         &self,
         image: &str,
         output_path: &Path,
+        base_rootfs_path: &str,
         port: u32,
         ipv6_addr: Option<String>,
         ipv6_gw: Option<String>,
     ) -> anyhow::Result<()> {
         info!(
-            "Converting Docker image {} to ext4 at {:?} (port={})",
-            image, output_path, port
+            "Converting Docker image {} to ext4 at {:?} (port={}, base={})",
+            image, output_path, port, base_rootfs_path
         );
 
         let docker = Docker::connect_with_local_defaults()
@@ -97,22 +98,11 @@ impl ImageBuilder {
                 .await
                 .context("Failed to create temporary docker container")?;
 
-            // 4. Prepare empty ext4 file (1GB)
-            let size_bytes = 1024 * 1024 * 1024;
-            let file = tokio::fs::File::create(&output_path).await?;
-            file.set_len(size_bytes).await?;
-
-            // Format as ext4
-            info!("Formatting ext4 image...");
-            let status = Command::new("mkfs.ext4")
-                .arg("-F")
-                .arg(output_path)
-                .status()
-                .await?;
-
-            if !status.success() {
-                anyhow::bail!("Failed to format ext4 image");
-            }
+            // 4. Prepare rootfs using Agent Overlay (Copy base-rootfs.ext4)
+            info!("Copying base rootfs from {} to {:?}...", base_rootfs_path, output_path);
+            tokio::fs::copy(base_rootfs_path, &output_path)
+                .await
+                .with_context(|| format!("Failed to copy base rootfs from {}", base_rootfs_path))?;
 
             // 5. Mount and copy files
             tokio::fs::create_dir_all(&mount_dir).await?;
@@ -148,21 +138,75 @@ impl ImageBuilder {
                 .await
                 .context("Failed to flush export archive")?;
 
-            let mount_dir_for_unpack = mount_dir.clone();
-            let export_tar_for_unpack = export_tar_path.clone();
-            tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-                let file = std::fs::File::open(&export_tar_for_unpack)
-                    .context("Failed to open exported container archive")?;
-                let mut archive = tar::Archive::new(file);
-                archive
-                    .unpack(&mount_dir_for_unpack)
-                    .context("Failed to unpack container archive")?;
-                Ok(())
-            })
-            .await
-            .context("Failed to unpack exported container archive")??;
+            let mount_dir_str = mount_dir.to_string_lossy();
+            let export_tar_str = export_tar_path.to_string_lossy();
+            
+            info!("Extracting container archive to {} (surgical system protection)...", mount_dir_str);
+            let status = Command::new("tar")
+                .arg("-xf")
+                .arg(&*export_tar_str)
+                .arg("-C")
+                .arg(&*mount_dir_str)
+                .arg("--overwrite")
+                // Protect critical OS libraries (GLIBC) to prevent breaking sshd/system tools
+                .arg("--exclude=lib/x86_64-linux-gnu")
+                .arg("--exclude=lib64")
+                .arg("--exclude=usr/lib/x86_64-linux-gnu")
+                // Protect core identity and security config
+                .arg("--exclude=etc/passwd")
+                .arg("--exclude=etc/shadow")
+                .arg("--exclude=etc/group")
+                .arg("--exclude=etc/gshadow")
+                .arg("--exclude=etc/ssh")
+                .arg("--exclude=etc/hostname")
+                .arg("--exclude=etc/hosts")
+                .arg("--exclude=etc/resolv.conf")
+                // Standard system mount points and ephemeral data
+                .arg("--exclude=boot")
+                .arg("--exclude=dev")
+                .arg("--exclude=proc")
+                .arg("--exclude=sys")
+                .arg("--exclude=run")
+                .arg("--exclude=var/lib/dpkg")
+                .arg("--exclude=var/lib/apt")
+                .status()
+                .await
+                .context("Failed to execute tar command")?;
 
-            // 6. Setup Mikrom Init (Binario estático)
+            if !status.success() {
+                anyhow::bail!("Tar command failed with status {}", status);
+            }
+
+            // 6. Ensure critical system directories and permissions (Safeguard)
+            info!("Applying system permission safeguards...");
+            let critical_paths = [
+                ("/root", 0o700),
+                ("/root/.ssh", 0o700),
+                ("/home/mikrom", 0o755),
+                ("/home/mikrom/.ssh", 0o700),
+            ];
+
+            for (path, mode) in critical_paths {
+                let full_path = mount_dir.join(path.trim_start_matches('/'));
+                if tokio::fs::metadata(&full_path).await.is_ok() {
+                    tokio::fs::set_permissions(&full_path, fs::Permissions::from_mode(mode))
+                        .await
+                        .context(format!("Failed to set permissions for {}", path))?;
+                }
+            }
+
+            // Fix authorized_keys permissions if they exist
+            let auth_keys_paths = ["root/.ssh/authorized_keys", "home/mikrom/.ssh/authorized_keys"];
+            for path in auth_keys_paths {
+                let full_path = mount_dir.join(path);
+                if tokio::fs::metadata(&full_path).await.is_ok() {
+                    tokio::fs::set_permissions(&full_path, fs::Permissions::from_mode(0o600))
+                        .await
+                        .context(format!("Failed to set permissions for {}", path))?;
+                }
+            }
+
+            // 7. Setup Mikrom Init (Binario estático)
             info!("Setting up mikrom-init...");
 
             // Inject the binary into the rootfs
@@ -318,7 +362,14 @@ mod tests {
         let builder = ImageBuilder::new().unwrap();
         let temp_path = PathBuf::from("/tmp/test-invalid-image.ext4");
         let result = builder
-            .docker_to_ext4("nonexistent-image-12345", &temp_path, 8080, None, None)
+            .docker_to_ext4(
+                "nonexistent-image-12345",
+                &temp_path,
+                "/tmp/nonexistent-base.ext4",
+                8080,
+                None,
+                None,
+            )
             .await;
         assert!(result.is_err());
     }

@@ -1293,7 +1293,14 @@ impl FirecrackerManager {
                 "Image not found as local file, attempting docker pull/convert"
             );
             self.builder
-                .docker_to_ext4(image, dst_path, port, ipv6_addr, ipv6_gw)
+                .docker_to_ext4(
+                    image,
+                    dst_path,
+                    &self.fc_config.base_rootfs_path,
+                    port,
+                    ipv6_addr,
+                    ipv6_gw,
+                )
                 .await
                 .map_err(|e| {
                     FirecrackerError::ProcessError(format!("Image builder failed: {e}"))

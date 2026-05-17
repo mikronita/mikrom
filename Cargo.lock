@@ -2884,7 +2884,6 @@ dependencies = [
  "serde_json",
  "shlex",
  "sysinfo",
- "tar",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

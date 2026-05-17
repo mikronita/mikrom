@@ -51,6 +51,11 @@ async fn main() -> Result<()> {
         eprintln!("[mikrom-init] Warning: Networking setup encountered errors: {e}");
     }
 
+    // Start background services from the base image
+    if let Err(e) = start_background_services().await {
+        eprintln!("[mikrom-init] Warning: Failed to start background services: {e}");
+    }
+
     println!(
         "[mikrom-init] Starting application: {:?}",
         config.entrypoint
@@ -288,6 +293,21 @@ async fn wait_for_port_ready(port: u16, child: &mut tokio::process::Child) -> Re
 
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+}
+
+async fn start_background_services() -> Result<()> {
+    let sshd_path = "/usr/sbin/sshd";
+    if Path::new(sshd_path).exists() {
+        println!("[mikrom-init] Starting SSH daemon...");
+        let _ = fs::create_dir_all("/run/sshd");
+        
+        // Start sshd in background (don't wait for it)
+        if let Err(e) = Command::new(sshd_path).spawn() {
+            eprintln!("[mikrom-init] Warning: Failed to spawn sshd: {e}");
+        }
+    }
+
+    Ok(())
 }
 
 fn fallback_to_shell() -> ! {
