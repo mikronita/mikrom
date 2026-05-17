@@ -335,6 +335,7 @@ pub async fn poll_and_deploy(
                         vcpus: task.vcpus,
                         memory_mib: task.memory_mib as u32,
                         disk_mib: task.disk_mib as u32,
+                        port: final_port,
                         env: task.env.clone(),
                     },
                 )

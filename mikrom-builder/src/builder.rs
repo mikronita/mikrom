@@ -435,6 +435,7 @@ impl AppBuilder {
     }
 
     fn apply_prebuild_fixes(repo_path: &Path) -> Result<()> {
+        // 1. PNPM Railpack Fix
         let package_json_path = repo_path.join("package.json");
         let pnpm_lock_path = repo_path.join("pnpm-lock.yaml");
 
@@ -449,6 +450,44 @@ impl AppBuilder {
                 std::fs::write(&package_json_path, new_content)?;
             }
         }
+
+        // 2. Dockerfile Port Enforcement (Default to 8080 if none found)
+        let dockerfile_path = repo_path.join("Dockerfile");
+        if dockerfile_path.exists() {
+            let content = std::fs::read_to_string(&dockerfile_path)?;
+            let mut new_lines = Vec::new();
+            let mut expose_found = false;
+
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.to_uppercase().starts_with("EXPOSE") {
+                    expose_found = true;
+                }
+                new_lines.push(line.to_string());
+            }
+
+            // Inject ENV PORT=8080 to help apps bind to the right port
+            // but we don't force EXPOSE if it's already there
+            let mut final_content = Vec::new();
+            let mut env_injected = false;
+
+            for line in new_lines {
+                final_content.push(line.clone());
+                if !env_injected && line.trim().to_uppercase().starts_with("FROM") {
+                    info!("Injecting ENV PORT=8080 into Dockerfile");
+                    final_content.push("ENV PORT=8080".to_string());
+                    env_injected = true;
+                }
+            }
+
+            if !expose_found {
+                info!("No EXPOSE found, adding EXPOSE 8080");
+                final_content.push("EXPOSE 8080".to_string());
+            }
+
+            std::fs::write(&dockerfile_path, final_content.join("\n"))?;
+        }
+
         Ok(())
     }
 }
@@ -489,5 +528,20 @@ mod tests {
         let new_content = fs::read_to_string(repo_path.join("package.json")).unwrap();
         let pkg: serde_json::Value = serde_json::from_str(&new_content).unwrap();
         assert_eq!(pkg["packageManager"], "pnpm@8.0.0");
+    }
+
+    #[test]
+    fn test_apply_prebuild_fixes_enforces_docker_port() {
+        let dir = tempdir().unwrap();
+        let repo_path = dir.path();
+
+        let dockerfile = "FROM node:20\nEXPOSE 80\nCMD [\"node\", \"index.js\"]";
+        fs::write(repo_path.join("Dockerfile"), dockerfile).unwrap();
+
+        AppBuilder::apply_prebuild_fixes(repo_path).unwrap();
+
+        let new_content = fs::read_to_string(repo_path.join("Dockerfile")).unwrap();
+        assert!(new_content.contains("EXPOSE 80"));
+        assert!(new_content.contains("ENV PORT=8080"));
     }
 }
