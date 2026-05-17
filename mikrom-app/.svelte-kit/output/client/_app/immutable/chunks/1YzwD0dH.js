@@ -1,0 +1,1 @@
+import{a as c,i as l}from"./CFMDmYNZ.js";import"./BIhFgwN4.js";import{c as n}from"./CLUnmxSh.js";import{l as s}from"./j9I5wVj4.js";var $=l("<div></div>");function h(t,a){const o=s(a,["children","$$slots","$$events","$$legacy"]),e=s(o,[]),{class:i="",...p}=e;var r=$();n(r,()=>({class:`h-px w-full shrink-0 bg-border ${i}`,"aria-hidden":"true",...p})),c(t,r)}export{h as S};

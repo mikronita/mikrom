@@ -130,7 +130,7 @@ build-init: ## Build mikrom-init as a static binary (musl)
 
 .PHONY: run-app
 run-app: ## Run mikrom-app dev server  (port 3001)
-	cd mikrom-app && pnpm run dev -p 3001
+	cd mikrom-app && pnpm run dev --host
 
 .PHONY: dev
 dev: ## Launch all services in tmux windows

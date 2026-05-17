@@ -1,0 +1,750 @@
+import { browser } from "$app/environment";
+import { env } from "$env/dynamic/public";
+import { logout } from "$lib/auth";
+
+const PUBLIC_BASE = (
+  browser ? window.location.origin : env.PUBLIC_APP_URL || "http://localhost:5173"
+).replace(/\/+$/, "");
+
+const API_PROXY_BASE = "/api/v1";
+export const API_BASE_URL = `${PUBLIC_BASE}${API_PROXY_BASE}`;
+
+export interface ApiError {
+  error: string;
+}
+
+export interface RegisterRequest {
+  email: string;
+  password: string;
+}
+
+export interface RegisterResponse {
+  message: string;
+  user_id: string;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  token: string;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  role: string;
+  first_name: string | null;
+  last_name: string | null;
+  vpc_ipv6_prefix: string | null;
+}
+
+export interface UpdateProfileRequest {
+  first_name: string | null;
+  last_name: string | null;
+}
+
+export interface HealthResponse {
+  status: string;
+  version: string;
+  services?: Record<string, string>;
+}
+
+export interface MeshStatus {
+  total_workers: number;
+  workers: Array<{
+    id: string;
+    host_id: string;
+    hostname: string;
+    advertise_address: string;
+    wireguard_pubkey: string | null;
+    wireguard_ip: string | null;
+    wireguard_port: number | null;
+    metrics: unknown | null;
+    registered_at: string;
+    last_seen_at: string;
+  }>;
+}
+
+export type WorkspaceEventKind =
+  | "app_created"
+  | "app_updated"
+  | "app_deleted"
+  | "deployment_changed"
+  | "profile_updated"
+  | "github_accounts_changed"
+  | "security_rules_changed"
+  | "refresh";
+
+export interface WorkspaceEvent {
+  kind: WorkspaceEventKind;
+  user_id?: string | null;
+  app_id?: string | null;
+  app_name?: string | null;
+  deployment_id?: string | null;
+  resource_id?: string | null;
+}
+
+export interface LiveDeploymentInfo {
+  job_id: string;
+  deployment_id: string;
+  app_id: string;
+  app_name: string;
+  image: string;
+  status: string;
+  host_id: string;
+  vm_id: string;
+  vcpus?: number;
+  memory_mib?: number;
+  cpu_usage?: number;
+  ram_used_bytes?: number;
+  ipv6_address?: string;
+}
+
+export interface LiveDeploymentStatus extends LiveDeploymentInfo {
+  scheduled_at: number;
+  started_at: number;
+  stopped_at: number;
+  error_message: string;
+}
+
+export interface LogLine {
+  line: string;
+  timestamp: number;
+}
+
+export interface VmMetrics {
+  app_id: string;
+  job_id?: string;
+  deployment_id?: string;
+  vm_id: string;
+  cpu_usage: number;
+  ram_used_bytes: number;
+  tx_bytes?: number;
+  rx_bytes?: number;
+  status: string;
+  error_message?: string | null;
+  ipv6_address?: string | null;
+}
+
+export type VmMetricsResponse = VmMetrics;
+
+export interface PauseDeploymentResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface ResumeDeploymentResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface StopDeploymentResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface AppInfo {
+  id: string;
+  name: string;
+  git_url: string;
+  port: number;
+  hostname: string | null;
+  github_webhook_secret?: string;
+  github_installation_id?: number;
+  github_repo_id?: number;
+  github_repo_full_name?: string;
+  active_deployment_id: string | null;
+  created_at: string;
+}
+
+export interface CreateAppRequest {
+  name: string;
+  git_url: string;
+  github_installation_id?: number;
+  github_repo_id?: number;
+  github_repo_full_name?: string;
+}
+
+export interface GithubRepo {
+  id: number;
+  name: string;
+  full_name: string;
+  private: boolean;
+  html_url: string;
+  description: string | null;
+  installation_id?: number;
+}
+
+export interface DeploymentInfo {
+  id: string;
+  app_id: string;
+  build_id: string | null;
+  image_tag: string | null;
+  job_id?: string | null;
+  ipv6_address: string | null;
+  status: string;
+  vcpus: number;
+  memory_mib: number;
+  disk_mib: number;
+  port: number;
+  env_vars?: Record<string, string>;
+  git_commit_hash: string | null;
+  git_commit_message: string | null;
+  git_branch: string | null;
+  trigger_source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeployRequest {
+  app_name: string;
+  image: string;
+  git_url?: string;
+  port?: number;
+  vcpus?: number;
+  memory_mib?: number;
+  disk_mib?: number;
+  env?: Record<string, string>;
+}
+
+export interface DeployResponse {
+  job_id?: string;
+  deployment_id?: string;
+  status: string;
+  host_id?: string;
+  vm_id?: string;
+  image_tag?: string;
+  message: string;
+}
+
+export interface SecurityRule {
+  id: string;
+  app_id: string;
+  protocol: string;
+  port_start: number;
+  port_end: number;
+  action: string;
+  priority: number;
+  created_at: string;
+}
+
+export interface CreateSecurityRuleRequest {
+  protocol: string;
+  port_start: number;
+  port_end: number;
+  action: string;
+}
+
+export interface GithubAccount {
+  id: string;
+  user_id: string;
+  installation_id: number;
+  github_username: string;
+  created_at: string;
+}
+
+export interface Volume {
+  id: string;
+  app_id: string;
+  name: string;
+  size_mib: number;
+  pool_name: string;
+  created_at: string;
+}
+
+export interface VolumeSnapshot {
+  id: string;
+  volume_id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface CreateVolumeRequest {
+  name: string;
+  size_mib: number;
+}
+
+export interface CreateSnapshotRequest {
+  name: string;
+}
+
+export interface RestoreSnapshotRequest {
+  snapshot_name: string;
+}
+
+export interface CloneVolumeRequest {
+  name: string;
+  snapshot_name: string;
+}
+
+const authHeaders = (token: string) => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${token}`,
+});
+
+async function parseJson<T>(response: Response): Promise<T | ApiError> {
+  try {
+    return await response.json();
+  } catch {
+    return { error: "Invalid JSON response from server" };
+  }
+}
+
+function getErrorMessage(result: unknown, fallback: string) {
+  if (result !== null && typeof result === "object" && "error" in result && typeof (result as ApiError).error === "string") {
+    return (result as ApiError).error;
+  }
+  return fallback;
+}
+
+export async function register(data: RegisterRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<RegisterResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Registration failed") };
+    return { data: result as RegisterResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function login(data: LoginRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<LoginResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Login failed") };
+    return { data: result as LoginResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function health(): Promise<HealthResponse> {
+  const response = await fetch(`${API_PROXY_BASE}/health`);
+  return response.json();
+}
+
+export async function getUserProfile(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/me`, { headers: authHeaders(token) });
+    if (response.status === 401) logout();
+    const result = await parseJson<UserProfile>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch profile") };
+    return { data: result as UserProfile };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function getMeshStatus(token: string): Promise<{ data?: MeshStatus; error?: string }> {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/networking/mesh`, { headers: authHeaders(token) });
+    const result = await parseJson<MeshStatus>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch mesh status") };
+    return { data: result as MeshStatus };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function updateUserProfile(token: string, data: UpdateProfileRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/me`, {
+      method: "PUT",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<UserProfile>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to update profile") };
+    return { data: result as UserProfile };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listActiveDeployments(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/deployments/active`, { headers: authHeaders(token) });
+    if (response.status === 401) logout();
+    const result = await parseJson<LiveDeploymentInfo[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch active deployments") };
+    return { data: result as LiveDeploymentInfo[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function getLiveDeploymentStatus(token: string, appName: string, jobId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appName}/deployments/${jobId}`, { headers: authHeaders(token) });
+    const result = await parseJson<LiveDeploymentStatus>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch deployment status") };
+    return { data: result as LiveDeploymentStatus };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+function eventSourceStream(url: string, onMessage: (payload: unknown) => void) {
+  const source = new EventSource(url);
+  source.onmessage = (event) => {
+    try {
+      onMessage(JSON.parse(event.data));
+    } catch {
+      // Ignore malformed events.
+    }
+  };
+  source.onerror = () => {
+    console.debug("SSE connection error, EventSource will retry");
+  };
+  return () => source.close();
+}
+
+export function watchDeploymentsSSE(token: string, onMessage: (deployment: LiveDeploymentInfo) => void) {
+  return eventSourceStream(`${API_PROXY_BASE}/deployments/events?token=${encodeURIComponent(token)}`, (payload) =>
+    onMessage(payload as LiveDeploymentInfo)
+  );
+}
+
+export function watchAppMetricsSSE(token: string, appName: string, onMessage: (metrics: VmMetricsResponse) => void) {
+  return eventSourceStream(
+    `${API_PROXY_BASE}/apps/${encodeURIComponent(appName)}/metrics/stream?token=${encodeURIComponent(token)}`,
+    (payload) => onMessage(payload as VmMetricsResponse)
+  );
+}
+
+export function watchMeshStatusSSE(token: string, onMessage: (mesh: MeshStatus) => void) {
+  return eventSourceStream(`${API_PROXY_BASE}/networking/mesh/stream?token=${encodeURIComponent(token)}`, (payload) =>
+    onMessage(payload as MeshStatus)
+  );
+}
+
+export function watchWorkspaceEventsSSE(token: string, onMessage: (event: WorkspaceEvent) => void) {
+  return eventSourceStream(`${API_PROXY_BASE}/workspace/events?token=${encodeURIComponent(token)}`, (payload) =>
+    onMessage(payload as WorkspaceEvent)
+  );
+}
+
+export function watchAppLogsSSE(token: string, appName: string, onMessage: (logs: LogLine | LogLine[]) => void) {
+  return eventSourceStream(`${API_PROXY_BASE}/apps/${encodeURIComponent(appName)}/logs/stream?token=${encodeURIComponent(token)}`, (payload) =>
+    onMessage(payload as LogLine | LogLine[])
+  );
+}
+
+export async function listSecurityRules(token: string, appName: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appName}/security-groups`, { headers: authHeaders(token) });
+    const result = await parseJson<SecurityRule[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch security rules") };
+    return { data: result as SecurityRule[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function createSecurityRule(token: string, appName: string, data: CreateSecurityRuleRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appName}/security-groups`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<SecurityRule>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create security rule") };
+    return { data: result as SecurityRule };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function deleteSecurityRule(token: string, appName: string, ruleId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appName}/security-groups/${ruleId}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to delete security rule") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listApps(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps`, { headers: authHeaders(token) });
+    if (response.status === 401) logout();
+    const result = await parseJson<AppInfo[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch apps") };
+    return { data: result as AppInfo[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function getAppSecret(token: string, appName: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appName}/secret`, { headers: authHeaders(token) });
+    const result = await parseJson<{ github_webhook_secret: string | null }>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch app secret") };
+    return { data: result as { github_webhook_secret: string | null } };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function createApp(token: string, data: CreateAppRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<AppInfo>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create app") };
+    return { data: result as AppInfo };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function deleteApp(token: string, appName: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appName}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to delete app") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function deployApp(token: string, data: DeployRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/deploy`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<DeployResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to start deployment") };
+    return { data: result as DeployResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function deployAppVersion(token: string, appName: string, data: Partial<DeployRequest> = {}) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appName}/deploy`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<DeployResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to start deployment") };
+    return { data: result as DeployResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listDeployments(token: string, appName: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appName}/deployments`, { headers: authHeaders(token) });
+    const result = await parseJson<DeploymentInfo[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch deployments") };
+    return { data: result as DeploymentInfo[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function activateDeployment(token: string, appName: string, deploymentId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appName}/deployments/${deploymentId}/activate`, {
+      method: "POST",
+      headers: authHeaders(token),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to activate deployment") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listGithubAccounts(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/github/accounts`, { headers: authHeaders(token) });
+    const result = await parseJson<GithubAccount[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch GitHub accounts") };
+    return { data: result as GithubAccount[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listGithubRepos(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/github/repos`, { headers: authHeaders(token) });
+    const result = await parseJson<GithubRepo[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch GitHub repositories") };
+    return { data: result as GithubRepo[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function getGithubInstallUrl(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/github/install`, { headers: authHeaders(token) });
+    const result = await parseJson<{ url: string }>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to get GitHub installation URL") };
+    return { data: result as { url: string } };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listVolumes(token: string, appId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appId}/volumes`, { headers: authHeaders(token) });
+    const result = await parseJson<Volume[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch volumes") };
+    return { data: result as Volume[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function createVolume(token: string, appId: string, data: CreateVolumeRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appId}/volumes`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<Volume>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create volume") };
+    return { data: result as Volume };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function createVolumeSnapshot(token: string, volumeId: string, data: CreateSnapshotRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/volumes/${volumeId}/snapshots`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<VolumeSnapshot>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create snapshot") };
+    return { data: result as VolumeSnapshot };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listVolumeSnapshots(token: string, volumeId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/volumes/${volumeId}/snapshots`, { headers: authHeaders(token) });
+    const result = await parseJson<VolumeSnapshot[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch snapshots") };
+    return { data: result as VolumeSnapshot[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function restoreVolumeSnapshot(token: string, volumeId: string, data: RestoreSnapshotRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/volumes/${volumeId}/restore`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to restore snapshot") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function cloneVolumeFromSnapshot(token: string, volumeId: string, data: CloneVolumeRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/volumes/${volumeId}/clone`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<Volume>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to clone volume") };
+    return { data: result as Volume };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function deleteVolumeSnapshot(token: string, snapshotId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/snapshots/${snapshotId}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to delete snapshot") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function deleteVolume(token: string, volumeId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/volumes/${volumeId}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to delete volume") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listVms(token: string) {
+  return listActiveDeployments(token);
+}
+
+export const watchVmsSSE = watchDeploymentsSSE;
+export const watchAppMetrics = watchAppMetricsSSE;
+export const watchAppLogs = watchAppLogsSSE;
+export const watchMeshStatus = watchMeshStatusSSE;
+export const watchWorkspaceEvents = watchWorkspaceEventsSSE;
+export const getVmStatus = getLiveDeploymentStatus;
+export const getVm = getVmStatus;
+export const getVmLogsSSE = watchAppLogsSSE;
+export const pauseVm = async (_token: string, _appName: string, _jobId: string) => ({ success: false, error: "Not implemented" });
+export const resumeVm = async (_token: string, _appName: string, _jobId: string) => ({ success: false, error: "Not implemented" });
+export const stopVm = async (_token: string, _appName: string, _jobId: string) => ({ success: false, error: "Not implemented" });
+export const deleteVm = async (_token: string, _appName: string, _jobId: string) => ({ success: false, error: "Not implemented" });

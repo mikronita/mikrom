@@ -1,0 +1,13 @@
+{
+	"/": [],
+	"/api/v1/[...path]": [
+		"src/routes/api/v1/[...path]/+server.ts"
+	],
+	"/apps": [],
+	"/apps/[appName]": [],
+	"/auth/login": [],
+	"/auth/register": [],
+	"/networking": [],
+	"/settings": [],
+	"/storage": []
+}
