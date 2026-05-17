@@ -53,8 +53,9 @@ fi
 # Crear directorio de salida
 mkdir -p "$OUTPUT_DIR"
 
-# Crear directorio temporal de trabajo
-WORK_DIR=$(mktemp -d /tmp/mikrom-rootfs.XXXXXX)
+# Crear directorio de trabajo en la ubicación actual (evitar falta de espacio en /tmp)
+WORK_DIR="./.build-rootfs-work"
+mkdir -p "$WORK_DIR"
 ROOTFS_DIR="${WORK_DIR}/rootfs"
 mkdir -p "$ROOTFS_DIR"
 
@@ -196,6 +197,19 @@ rm -rf /var/lib/apt/lists/*
 rm -rf /tmp/*
 rm -rf /var/cache/debconf/*
 CHROOT_SCRIPT
+
+# Exportar a imagen local y subir al registro si está disponible
+echo "[+] Exporting rootfs to Docker image..."
+# Excluimos directorios de sistema para un import limpio
+tar -C "$ROOTFS_DIR" --exclude=./proc/* --exclude=./sys/* --exclude=./dev/* --exclude=./tmp/* -c . | docker import - mikrom-base:latest
+
+REGISTRY_URL="${REGISTRY_URL:-registry.mikrom.spluca.org/mikrom}"
+docker tag mikrom-base:latest "$REGISTRY_URL/mikrom-base:latest"
+if docker push "$REGISTRY_URL/mikrom-base:latest" 2>/dev/null; then
+  echo "[+] Imagen subida a $REGISTRY_URL/mikrom-base:latest"
+else
+  echo "[!] No se pudo subir la imagen al registro (ignorable si es desarrollo local)"
+fi
 
 # Desmontar filesystems
 echo "[+] Desmontando filesystems..."
