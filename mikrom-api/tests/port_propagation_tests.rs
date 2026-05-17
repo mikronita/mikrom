@@ -1,5 +1,7 @@
 use mikrom_api::AppState;
-use mikrom_api::deploy::worker::{BuildTask, MockBuilderClient, MockSchedulerClient, poll_and_deploy};
+use mikrom_api::deploy::worker::{
+    BuildTask, MockBuilderClient, MockSchedulerClient, poll_and_deploy,
+};
 use mikrom_api::models::app::{App, Deployment};
 use mikrom_api::nats::TypedNatsClient;
 use mikrom_api::repositories::MockGithubRepository;
@@ -52,7 +54,8 @@ async fn create_test_state(
 async fn test_port_propagation_from_builder_to_deployment() {
     let mut mock_repo = MockAppRepository::new();
     let mut mock_user_repo = MockUserRepository::new();
-    let mut mock_volume_repo = mikrom_api::repositories::volume_repository::MockVolumeRepository::new();
+    let mut mock_volume_repo =
+        mikrom_api::repositories::volume_repository::MockVolumeRepository::new();
     let mut mock_builder = MockBuilderClient::new();
     let _mock_scheduler = MockSchedulerClient::new();
 
@@ -81,27 +84,37 @@ async fn test_port_propagation_from_builder_to_deployment() {
 
     // 1. Mock Repository
     let app_clone = app.clone();
-    mock_repo.expect_get_app().returning(move |_| Ok(Some(app_clone.clone())));
-    
+    mock_repo
+        .expect_get_app()
+        .returning(move |_| Ok(Some(app_clone.clone())));
+
     let dep_clone = deployment.clone();
-    mock_repo.expect_get_deployment().returning(move |_| Ok(Some(dep_clone.clone())));
+    mock_repo
+        .expect_get_deployment()
+        .returning(move |_| Ok(Some(dep_clone.clone())));
 
     // Verify that the deployment port is updated to 80
-    mock_repo.expect_update_deployment_port()
-        .with(mockall::predicate::eq(deployment_id), mockall::predicate::eq(80))
+    mock_repo
+        .expect_update_deployment_port()
+        .with(
+            mockall::predicate::eq(deployment_id),
+            mockall::predicate::eq(80),
+        )
         .times(1)
         .returning(|_, _| Ok(()));
 
-    mock_repo.expect_update_deployment()
+    mock_repo
+        .expect_update_deployment()
         .returning(|_, _| Ok(()));
 
     // Mock volumes
-    mock_volume_repo.expect_list_volumes_by_app()
+    mock_volume_repo
+        .expect_list_volumes_by_app()
         .returning(|_| Ok(vec![]));
 
     // Mock user
-    mock_user_repo.expect_find_by_id()
-        .returning(move |id| Ok(Some(mikrom_api::repositories::user_repository::User {
+    mock_user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(mikrom_api::repositories::user_repository::User {
             id,
             email: "test@example.com".into(),
             password_hash: "hash".into(),
@@ -109,21 +122,25 @@ async fn test_port_propagation_from_builder_to_deployment() {
             first_name: None,
             last_name: None,
             vpc_ipv6_prefix: Some("fd00::/64".to_string()),
-        })));
+        }))
+    });
 
     // 2. Mock Builder to report port 80
-    mock_builder.expect_get_build_status()
+    mock_builder
+        .expect_get_build_status()
         .with(mockall::predicate::eq(build_id.clone()))
-        .returning(|_| Box::pin(async move {
-            Ok((
-                BuildStatus::Success,
-                "registry.mikrom.spluca.org/mikrom/test-app:latest".to_string(),
-                80, // DETECTED PORT 80
-                Some("hash".to_string()),
-                Some("msg".to_string()),
-                Some("branch".to_string()),
-            ))
-        }));
+        .returning(|_| {
+            Box::pin(async move {
+                Ok((
+                    BuildStatus::Success,
+                    "registry.mikrom.spluca.org/mikrom/test-app:latest".to_string(),
+                    80, // DETECTED PORT 80
+                    Some("hash".to_string()),
+                    Some("msg".to_string()),
+                    Some("branch".to_string()),
+                ))
+            })
+        });
 
     let state = create_test_state(mock_repo, mock_user_repo, mock_volume_repo).await;
 
@@ -145,10 +162,11 @@ async fn test_port_propagation_from_builder_to_deployment() {
         task,
         Arc::new(mock_builder),
         Arc::new(MockSchedulerClient::new()),
-        None
-    ).await;
+        None,
+    )
+    .await;
 
-    // It will probably fail because of deploy_to_scheduler (real NATS request), 
+    // It will probably fail because of deploy_to_scheduler (real NATS request),
     // but the port update check is done via MockAppRepository expectations.
-    assert!(result.is_err()); 
+    assert!(result.is_err());
 }

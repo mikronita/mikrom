@@ -300,7 +300,7 @@ async fn start_background_services() -> Result<()> {
     if Path::new(sshd_path).exists() {
         println!("[mikrom-init] Starting SSH daemon...");
         let _ = fs::create_dir_all("/run/sshd");
-        
+
         // Start sshd in background (don't wait for it)
         if let Err(e) = Command::new(sshd_path).spawn() {
             eprintln!("[mikrom-init] Warning: Failed to spawn sshd: {e}");
