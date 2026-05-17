@@ -485,6 +485,7 @@ mod tests {
             workdir: "./target/test-app".to_string(),
             entrypoint: vec!["/bin/sh".to_string(), "-c".to_string()],
             cmd: vec!["echo hello".to_string()],
+            volumes: vec![],
         };
         let _cmd = build_command(config).unwrap();
         let _ = fs::remove_dir_all("./target/test-app");

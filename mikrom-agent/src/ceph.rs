@@ -229,9 +229,9 @@ impl CephRbd {
         }
 
         let status_out = String::from_utf8_lossy(&output.stdout);
-        let watchers = status_out
+        let watchers: Vec<String> = status_out
             .lines()
-            .filter(|line| line.contains("Watchers:"))
+            .filter(|line| line.contains("Watchers:") && !line.contains("none"))
             .map(|line| line.trim().to_string())
             .collect();
         Ok(watchers)

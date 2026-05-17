@@ -60,6 +60,7 @@ async fn test_list_volume_snapshots_endpoint() {
                 name: "test-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
+                mount_point: "/data".to_string(),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -146,6 +147,7 @@ async fn test_create_volume_snapshot_endpoint() {
                 name: "test-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
+                mount_point: "/data".to_string(),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -279,6 +281,7 @@ async fn test_restore_volume_snapshot_endpoint() {
                 name: "test-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
+                mount_point: "/data".to_string(),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -394,6 +397,7 @@ async fn test_delete_snapshot_endpoint() {
                 name: "test-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
+                mount_point: "/data".to_string(),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -500,6 +504,7 @@ async fn test_clone_volume_endpoint() {
                 name: "source-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
+                mount_point: "/data".to_string(),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -515,6 +520,7 @@ async fn test_clone_volume_endpoint() {
                 name: params.name,
                 size_mib: params.size_mib,
                 pool_name: params.pool_name,
+                mount_point: params.mount_point,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             })
@@ -625,6 +631,7 @@ async fn test_restore_volume_snapshot_endpoint_failure() {
                 name: "test-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
+                mount_point: "/data".to_string(),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -694,7 +701,7 @@ async fn test_restore_volume_snapshot_endpoint_failure() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
