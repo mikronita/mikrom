@@ -3,3 +3,6 @@ target
 mikrom-router.deb
 .env
 *.log
+.codex
+.claude
+.gemini

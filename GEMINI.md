@@ -69,3 +69,8 @@ make test-all          # Complete test suite
 - **Concurrency Control**: Use the RAII **`DeploymentFlowGuard`** pattern (managed via `AppState::try_start_flow`) to prevent concurrent zero-downtime deployment flows for the same application. Guards should be acquired early in handlers and moved into background tasks to ensure consistent state and prevent "lock leaks" during panics.
 - **Agent Boot System**: Uses a dual-script system: `mikrom-init.sh` (PID 1) and `app-run.sh` (executes the app entrypoint).
 - **Environment**: Configuration is driven by environment variables. Check `.env.example` in `mikrom-api/` for reference.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->
