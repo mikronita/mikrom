@@ -159,3 +159,8 @@ required-features = ["test-utils"]
 name = "volume_api_tests"
 path = "tests/volume_api_tests.rs"
 required-features = ["test-utils"]
+
+[[test]]
+name = "port_propagation_tests"
+path = "tests/port_propagation_tests.rs"
+required-features = ["test-utils"]

@@ -398,4 +398,11 @@ mod tests {
         let _ = child.kill().await;
         let _ = accept_task.await;
     }
+
+    #[tokio::test]
+    async fn test_start_background_services_missing_sshd() {
+        // Should not panic or return error if sshd is missing
+        let result = start_background_services().await;
+        assert!(result.is_ok());
+    }
 }
