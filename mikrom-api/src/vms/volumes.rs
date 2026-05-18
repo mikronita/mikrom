@@ -73,17 +73,20 @@ pub async fn create_volume_handler(
     let pool_name = format!("user_{}_volumes", app.user_id.to_string().replace('-', "_"));
 
     // Validate mount point
-    if !req.mount_point.starts_with('/') {
+    if !req.mount_point.starts_with('/') || req.mount_point.contains("..") {
         return Err(ApiError::BadRequest(
-            "Mount point must be an absolute path starting with /".to_string(),
+            "Mount point must be an absolute path and cannot contain ..".to_string(),
         ));
     }
 
     let forbidden_paths = [
-        "/etc", "/proc", "/sys", "/dev", "/bin", "/sbin", "/lib", "/usr", "/root", "/boot",
+        "/", "/etc", "/proc", "/sys", "/dev", "/bin", "/sbin", "/lib", "/usr", "/root", "/boot",
+        "/var", "/tmp", "/home", "/run",
     ];
     for path in forbidden_paths {
-        if req.mount_point == path || req.mount_point.starts_with(&format!("{}/", path)) {
+        if req.mount_point == path
+            || (path != "/" && req.mount_point.starts_with(&format!("{}/", path)))
+        {
             return Err(ApiError::BadRequest(format!(
                 "Mount point {} is reserved by the system",
                 req.mount_point

@@ -223,6 +223,8 @@ impl CephRbd {
     pub async fn list_watchers(pool: &str, name: &str) -> Result<Vec<String>> {
         let output = Command::new("rbd")
             .arg("status")
+            .arg("--format")
+            .arg("json")
             .arg(format!("{}/{}", pool, name))
             .output()
             .await?;
@@ -231,12 +233,15 @@ impl CephRbd {
             return Ok(vec![]);
         }
 
-        let status_out = String::from_utf8_lossy(&output.stdout);
-        let watchers: Vec<String> = status_out
-            .lines()
-            .filter(|line| line.contains("Watchers:") && !line.contains("none"))
-            .map(|line| line.trim().to_string())
-            .collect();
+        let val: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let watchers = val["watchers"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(watchers)
     }
 
