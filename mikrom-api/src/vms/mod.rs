@@ -800,6 +800,7 @@ pub async fn pause_deployment(
             app_id: Some(app.id),
             app_name: Some(app.name.clone()),
             deployment_id: Some(deployment.id),
+            volume_id: None,
             resource_id: Some(job_id_for_event),
         });
 
@@ -869,6 +870,7 @@ pub async fn resume_deployment(
             app_id: Some(app.id),
             app_name: Some(app.name.clone()),
             deployment_id: Some(deployment.id),
+            volume_id: None,
             resource_id: Some(job_id_for_event),
         });
 
@@ -946,6 +948,7 @@ pub async fn stop_deployment(
             app_id: Some(app.id),
             app_name: Some(app.name.clone()),
             deployment_id: Some(deployment.id),
+            volume_id: None,
             resource_id: Some(job_id_for_event),
         });
         Ok(Json(
@@ -995,6 +998,7 @@ pub async fn delete_deployment_record(
         app_id: Some(app.id),
         app_name: Some(app.name),
         deployment_id: None,
+        volume_id: None,
         resource_id: Some(job_id.clone()),
     });
 
@@ -1252,6 +1256,7 @@ pub async fn create_security_rule_handler(
         app_id: Some(app.id),
         app_name: Some(app.name),
         deployment_id: None,
+        volume_id: None,
         resource_id: None,
     });
 
@@ -1313,6 +1318,7 @@ pub async fn delete_security_rule_handler(
         app_id: Some(app.id),
         app_name: Some(app.name),
         deployment_id: None,
+        volume_id: None,
         resource_id: Some(rule_id),
     });
 

@@ -17,6 +17,8 @@ pub enum WorkspaceEventKind {
     ProfileUpdated,
     GithubAccountsChanged,
     SecurityRulesChanged,
+    VolumeChanged,
+    SnapshotChanged,
     Refresh,
 }
 
@@ -27,6 +29,7 @@ pub struct WorkspaceEvent {
     pub app_id: Option<Uuid>,
     pub app_name: Option<String>,
     pub deployment_id: Option<Uuid>,
+    pub volume_id: Option<Uuid>,
     pub resource_id: Option<String>,
 }
 
@@ -67,6 +70,7 @@ pub async fn workspace_events_stream(
                         app_id: None,
                         app_name: None,
                         deployment_id: None,
+                        volume_id: None,
                         resource_id: Some("refresh".to_string()),
                     };
 

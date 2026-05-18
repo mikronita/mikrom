@@ -100,6 +100,7 @@ impl DeploymentService {
             app_id: Some(app.id),
             app_name: Some(app.name.clone()),
             deployment_id: Some(deployment.id),
+            volume_id: None,
             resource_id: Some(deployment.id.to_string()),
         });
 
@@ -254,6 +255,7 @@ impl DeploymentService {
                     app_id: Some(app.id),
                     app_name: Some(app.name.clone()),
                     deployment_id: Some(deployment.id),
+                    volume_id: None,
                     resource_id: Some(deployment.id.to_string()),
                 });
                 return Err(e);
@@ -282,6 +284,7 @@ impl DeploymentService {
             app_id: Some(app.id),
             app_name: Some(app.name.clone()),
             deployment_id: Some(deployment.id),
+            volume_id: None,
             resource_id: Some(deployment.id.to_string()),
         });
 

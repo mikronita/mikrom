@@ -11,48 +11,49 @@
   import Separator from "$lib/components/Separator.svelte";
   import { formatDate } from "$lib/utils";
   import { getToken } from "$lib/auth";
-  import { health, listApps, type AppInfo } from "$lib/api";
-  import { getCurrentVms, subscribeVms } from "$lib/stores/vms";
+  import { health, type AppInfo } from "$lib/api";
+  import { vmsStore, refreshVms } from "$lib/stores/vms";
+  import { appsStore, appsLoading, refreshApps } from "$lib/stores/apps";
+  import { derived } from "svelte/store";
 
-  let apps: AppInfo[] = [];
-  let vms = getCurrentVms();
   let healthData: Awaited<ReturnType<typeof health>> | null = null;
-  let loadingApps = true;
   let loadingHealth = true;
   let showCreate = false;
 
-  const unsubscribe = subscribeVms((next) => {
-    vms = next;
-  });
-
-  onDestroy(() => unsubscribe());
+  const runningCountStore = derived(vmsStore, ($vms) => $vms.filter((vm) => vm.status.toLowerCase() === "running").length);
+  const pendingCountStore = derived(vmsStore, ($vms) => $vms.filter((vm) => ["scheduled", "pending", "building"].includes(vm.status.toLowerCase())).length);
+  const appsWithStatusStore = derived([appsStore, vmsStore], ([$apps, $vms]) => 
+    [...$apps]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 5)
+      .map((app) => ({
+        ...app,
+        liveVm: $vms.find((vm) => vm.app_id === app.id || vm.app_name === app.name),
+        status: $vms.find((vm) => vm.app_id === app.id || vm.app_name === app.name)?.status || "Stopped",
+      }))
+  );
+  const hasUndeployedAppsStore = derived([appsStore, vmsStore], ([$apps, $vms]) => 
+    $apps.length > 0 && $apps.every((app) => !$vms.some((vm) => vm.app_id === app.id || vm.app_name === app.name))
+  );
 
   onMount(async () => {
     const token = getToken();
     if (!token) return;
 
-    const [appsResult, healthResult] = await Promise.all([listApps(token), health().catch(() => null)]);
-    if (appsResult.data) apps = appsResult.data;
-    loadingApps = false;
+    if ($appsStore.length === 0) {
+      void refreshApps();
+    }
+    
+    if ($vmsStore.length === 0) {
+      void refreshVms();
+    }
+
+    const healthResult = await health().catch(() => null);
     healthData = healthResult;
     loadingHealth = false;
   });
 
-  const runningCount = () => vms.filter((vm) => vm.status.toLowerCase() === "running").length;
-  const pendingCount = () =>
-    vms.filter((vm) => ["scheduled", "pending", "building"].includes(vm.status.toLowerCase())).length;
-  const appsWithStatus = () =>
-    [...apps]
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      .slice(0, 5)
-      .map((app) => ({
-        ...app,
-        liveVm: vms.find((vm) => vm.app_id === app.id || vm.app_name === app.name),
-        status: vms.find((vm) => vm.app_id === app.id || vm.app_name === app.name)?.status || "Stopped",
-      }));
-
-  const hasUndeployedApps = () => apps.length > 0 && apps.every((app) => !vms.some((vm) => vm.app_id === app.id || vm.app_name === app.name));
-  const offlineServices = () => Object.values(healthData?.services || {}).filter((status) => status !== "ONLINE").length;
+  $: offlineServices = Object.values(healthData?.services || {}).filter((status) => status !== "ONLINE").length;
   const hasHealthError = () => !loadingHealth && !healthData;
   const healthServices = [
     { name: "API", key: "API", icon: Cpu },
@@ -79,7 +80,7 @@
         </div>
         <p class="max-w-2xl text-sm text-muted-foreground">Monitor and manage your cloud infrastructure.</p>
       </div>
-      {#if !(!loadingApps && apps.length === 0)}
+      {#if !(!$appsLoading && $appsStore.length === 0)}
         <Button onclick={() => (showCreate = true)}>
           <Plus class="size-4" />
           New Application
@@ -87,7 +88,7 @@
       {/if}
     </div>
 
-    {#if hasUndeployedApps()}
+    {#if $hasUndeployedAppsStore}
       <Alert>
         <Rocket class="size-4 shrink-0" />
         <div class="flex w-full flex-wrap items-center justify-between gap-4">
@@ -95,7 +96,7 @@
             <div class="font-medium">Deploy your first app</div>
             <div>You have applications created but none are currently running in a microVM.</div>
           </div>
-          <Button size="sm" href={`/apps/${encodeURIComponent(apps[0].name)}`}>Deploy now</Button>
+          <Button size="sm" href={`/apps/${encodeURIComponent($appsStore[0].name)}`}>Deploy now</Button>
         </div>
       </Alert>
     {/if}
@@ -107,7 +108,7 @@
           <Container class="size-4 text-muted-foreground" />
         </div>
         <div class="p-5 pt-0">
-          <div class="text-3xl font-semibold">{apps.length}</div>
+          <div class="text-3xl font-semibold">{$appsStore.length}</div>
           <p class="text-xs text-muted-foreground">Git projects in the workspace</p>
         </div>
       </Card>
@@ -117,7 +118,7 @@
           <Activity class="size-4 text-muted-foreground" />
         </div>
         <div class="p-5 pt-0">
-          <div class="text-3xl font-semibold">{runningCount()}</div>
+          <div class="text-3xl font-semibold">{$runningCountStore}</div>
           <p class="text-xs text-muted-foreground">Instances currently serving traffic</p>
         </div>
       </Card>
@@ -127,13 +128,13 @@
           <Rocket class="size-4 text-muted-foreground" />
         </div>
         <div class="p-5 pt-0">
-          <div class="text-3xl font-semibold">{pendingCount()}</div>
+          <div class="text-3xl font-semibold">{$pendingCountStore}</div>
           <p class="text-xs text-muted-foreground">Builds or starts in progress</p>
         </div>
       </Card>
     </div>
 
-    {#if apps.length === 0 && !loadingApps}
+    {#if $appsStore.length === 0 && !$appsLoading}
         <EmptyState class="min-h-[420px] border">
           <Rocket class="size-10 text-muted-foreground" />
           <h2 class="text-xl font-semibold">No applications found</h2>
@@ -169,7 +170,7 @@
                 </tr>
               </thead>
               <tbody>
-                {#if loadingApps}
+                {#if $appsLoading && $appsStore.length === 0}
                   {#each Array.from({ length: 3 }) as _, i}
                     <tr class="border-b border-border">
                       <td class="px-4 py-4"><div class="h-9 w-44 animate-pulse rounded bg-muted"></div></td>
@@ -179,7 +180,7 @@
                     </tr>
                   {/each}
                 {:else}
-                  {#each appsWithStatus() as app}
+                  {#each $appsWithStatusStore as app}
                     <tr class="border-b border-border">
                       <td class="px-4 py-4">
                         <div class="flex min-w-0 items-center gap-3">
@@ -214,8 +215,8 @@
                 <h2 class="text-lg font-semibold">System Status</h2>
                 <p class="text-sm text-muted-foreground">Health of core services.</p>
               </div>
-              <Badge variant={hasHealthError() || offlineServices() > 0 ? "destructive" : "secondary"}>
-                {hasHealthError() || offlineServices() > 0 ? "Degraded" : "Operational"}
+              <Badge variant={hasHealthError() || offlineServices > 0 ? "destructive" : "secondary"}>
+                {hasHealthError() || offlineServices > 0 ? "Degraded" : "Operational"}
               </Badge>
             </div>
           </div>

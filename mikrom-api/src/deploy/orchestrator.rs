@@ -28,6 +28,7 @@ impl DeploymentOrchestrator {
             app_id: Some(updated_app.id),
             app_name: Some(updated_app.name.clone()),
             deployment_id: Some(deployment_id),
+            volume_id: None,
             resource_id: Some(deployment_id.to_string()),
         });
 
@@ -58,6 +59,7 @@ impl DeploymentOrchestrator {
                     app_id: Some(app.id),
                     app_name: Some(app.name),
                     deployment_id: Some(old_id),
+                    volume_id: None,
                     resource_id: Some(old_id.to_string()),
                 });
             }
@@ -129,6 +131,7 @@ impl DeploymentOrchestrator {
                 app_id: Some(app.id),
                 app_name: Some(app_name.to_string()),
                 deployment_id: Some(old_id),
+                volume_id: None,
                 resource_id: Some(old_id.to_string()),
             });
         }
@@ -162,6 +165,7 @@ impl DeploymentOrchestrator {
                 app_id: Some(old_dep.app_id),
                 app_name: Some(app_name.to_string()),
                 deployment_id: Some(old_id),
+                volume_id: None,
                 resource_id: Some(old_id.to_string()),
             });
             if let Some(old_job_id) = old_dep.job_id {
@@ -252,6 +256,7 @@ impl DeploymentOrchestrator {
             app_id: Some(app_id),
             app_name: Some(app_name.to_string()),
             deployment_id: Some(deployment_id),
+            volume_id: None,
             resource_id: Some(job_id.to_string()),
         });
 

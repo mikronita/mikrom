@@ -241,6 +241,7 @@ pub async fn update_profile(
         app_id: None,
         app_name: None,
         deployment_id: None,
+        volume_id: None,
         resource_id: None,
     });
 

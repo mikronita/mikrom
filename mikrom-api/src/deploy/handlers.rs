@@ -145,6 +145,7 @@ pub async fn create_app_handler(
         app_id: Some(app.id),
         app_name: Some(app.name.clone()),
         deployment_id: app.active_deployment_id,
+        volume_id: None,
         resource_id: None,
     });
 
@@ -417,6 +418,7 @@ pub async fn delete_app_handler(
         app_id: Some(app.id),
         app_name: Some(app.name),
         deployment_id: app.active_deployment_id,
+        volume_id: None,
         resource_id: None,
     });
     Ok(StatusCode::NO_CONTENT)

@@ -1,74 +1,77 @@
-import { onDestroy, onMount } from "svelte";
+import { writable } from "svelte/store";
 import { getToken } from "$lib/auth";
 import { listVms, watchVmsSSE, type LiveDeploymentInfo } from "$lib/api";
 
-let watchers = 0;
-const callbacks = new Set<(vms: LiveDeploymentInfo[]) => void>();
-let current: LiveDeploymentInfo[] = [];
-let cleanup: (() => void) | null = null;
+export const vmsStore = writable<LiveDeploymentInfo[]>([]);
+export const vmsLoading = writable<boolean>(false);
 
-function notify() {
-  for (const cb of callbacks) cb(current);
-}
+let currentVms: LiveDeploymentInfo[] = [];
+vmsStore.subscribe(value => {
+  currentVms = value;
+});
 
 export function getCurrentVms() {
-  return current;
-}
-
-export function setCurrentVms(vms: LiveDeploymentInfo[]) {
-  current = vms;
-  notify();
+  return currentVms;
 }
 
 export async function refreshVms() {
   const token = getToken();
   if (!token) return;
-  const result = await listVms(token);
-  if (result.data) {
-    current = result.data;
-    notify();
+
+  vmsLoading.set(true);
+  try {
+    const result = await listVms(token);
+    if (result.data) {
+      vmsStore.set(result.data);
+    }
+  } finally {
+    vmsLoading.set(false);
   }
 }
 
-export function useWatchVms() {
-  onMount(() => {
-    watchers += 1;
-    const token = getToken();
-    let localCleanup: (() => void) | null = null;
+let sseCleanup: (() => void) | null = null;
 
-    if (token) {
-      void refreshVms();
-      localCleanup = watchVmsSSE(token, (updatedVm) => {
-        const index = current.findIndex(
-          (vm) => vm.deployment_id === updatedVm.deployment_id || (vm.job_id === updatedVm.job_id && vm.job_id !== "")
-        );
-        const isRunning = updatedVm.status.toLowerCase() === "running";
-        if (!isRunning) {
-          if (index !== -1) current = current.filter((_, itemIndex) => itemIndex !== index);
-        } else if (index === -1) {
-          current = [...current, updatedVm];
-        } else {
-          const next = [...current];
-          next[index] = { ...next[index], ...updatedVm };
-          current = next;
-        }
-        notify();
-      });
-    }
+export function initVmsSSE() {
+  const token = getToken();
+  if (!token) return;
 
-    return () => {
-      watchers -= 1;
-      if (localCleanup) localCleanup();
-      if (watchers <= 0 && cleanup) {
-        cleanup();
-        cleanup = null;
+  if (sseCleanup) sseCleanup();
+
+  sseCleanup = watchVmsSSE(token, (updatedVm) => {
+    vmsStore.update(current => {
+      const index = current.findIndex(
+        (vm) => vm.deployment_id === updatedVm.deployment_id || (vm.job_id === updatedVm.job_id && vm.job_id !== "")
+      );
+      const isRunning = updatedVm.status.toLowerCase() === "running";
+      
+      if (!isRunning) {
+        if (index !== -1) return current.filter((_, itemIndex) => itemIndex !== index);
+        return current;
+      } else if (index === -1) {
+        return [...current, updatedVm];
+      } else {
+        const next = [...current];
+        next[index] = { ...next[index], ...updatedVm };
+        return next;
       }
-    };
+    });
   });
 }
 
+export function stopVmsSSE() {
+  if (sseCleanup) {
+    sseCleanup();
+    sseCleanup = null;
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("mikrom-auth-change", () => {
+    initVmsSSE();
+  });
+}
+
+// Deprecated in favor of store subscriptions
 export function subscribeVms(cb: (vms: LiveDeploymentInfo[]) => void) {
-  callbacks.add(cb);
-  cb(current);
-  return () => callbacks.delete(cb);
+  return vmsStore.subscribe(cb);
 }

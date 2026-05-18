@@ -76,6 +76,8 @@ export type WorkspaceEventKind =
   | "profile_updated"
   | "github_accounts_changed"
   | "security_rules_changed"
+  | "volume_changed"
+  | "snapshot_changed"
   | "refresh";
 
 export interface WorkspaceEvent {
@@ -84,6 +86,7 @@ export interface WorkspaceEvent {
   app_id?: string | null;
   app_name?: string | null;
   deployment_id?: string | null;
+  volume_id?: string | null;
   resource_id?: string | null;
 }
 
