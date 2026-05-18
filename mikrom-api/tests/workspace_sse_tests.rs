@@ -25,9 +25,20 @@ async fn setup_app() -> (
     let (workspace_events, _) = tokio::sync::broadcast::channel(100);
     let user_id = Uuid::new_v4();
 
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    struct DummyNats;
+    #[async_trait::async_trait]
+    impl mikrom_api::nats::NatsClient for DummyNats {
+        async fn request_raw(&self, _s: String, _p: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+            Err(anyhow::anyhow!("NATS not implemented in this test"))
+        }
+        async fn publish_raw(&self, _s: String, _p: Vec<u8>) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn subscribe_raw(&self, _s: String) -> anyhow::Result<async_nats::Subscriber> {
+            Err(anyhow::anyhow!("NATS not implemented in this test"))
+        }
+    }
+    let nats_client = mikrom_api::nats::TypedNatsClient::new_custom(Arc::new(DummyNats));
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -36,7 +47,7 @@ async fn setup_app() -> (
             mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
         ),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
+        nats: nats_client,
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
