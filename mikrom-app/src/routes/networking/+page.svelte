@@ -14,6 +14,7 @@
   import Modal from "$lib/components/Modal.svelte";
   import Field from "$lib/components/Field.svelte";
   import Input from "$lib/components/Input.svelte";
+  import Select from "$lib/components/Select.svelte";
   import { getToken } from "$lib/auth";
   import {
     createSecurityRule,
@@ -239,7 +240,7 @@
               <CardDescription>L3/L4 rules applied to every active microVM for an application.</CardDescription>
             </div>
             <div class="flex flex-col gap-2 sm:flex-row">
-              <select bind:value={selectedApp} class="h-9 w-full rounded-md border border-border bg-background px-3 text-sm" on:change={async () => {
+              <Select bind:value={selectedApp} on:change={async () => {
                 const token = getToken();
                 if (token && selectedApp) await loadRules(token, selectedApp);
               }}>
@@ -247,7 +248,7 @@
                 {#each $appsStore as app}
                   <option value={app.name}>{app.name}</option>
                 {/each}
-              </select>
+              </Select>
               {#if selectedApp}
                 <Button size="sm" onclick={() => (showRuleModal = true)}>
                   <Plus class="size-4" />
@@ -296,21 +297,21 @@
     <Modal bind:open={showRuleModal} title="Add security rule" description={`Create a firewall rule for ${selectedApp}.`}>
       <div class="space-y-4">
         <Field label="Protocol">
-          <select bind:value={rule.protocol} class="h-9 w-full rounded-md border border-border bg-background px-3 text-sm">
+          <Select bind:value={rule.protocol}>
             <option value="tcp">TCP</option>
             <option value="udp">UDP</option>
             <option value="any">Any</option>
-          </select>
+          </Select>
         </Field>
         <div class="grid gap-4 sm:grid-cols-2">
           <Field label="Port start"><Input type="number" bind:value={rule.port_start} min={0} max={65535} disabled={rule.protocol === "any"} /></Field>
           <Field label="Port end"><Input type="number" bind:value={rule.port_end} min={0} max={65535} disabled={rule.protocol === "any"} /></Field>
         </div>
         <Field label="Action">
-          <select bind:value={rule.action} class="h-9 w-full rounded-md border border-border bg-background px-3 text-sm">
+          <Select bind:value={rule.action}>
             <option value="allow">Allow</option>
             <option value="deny">Deny</option>
-          </select>
+          </Select>
         </Field>
         <div class="flex justify-end gap-2">
           <Button variant="outline" onclick={() => (showRuleModal = false)}>Cancel</Button>

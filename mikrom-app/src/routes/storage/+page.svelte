@@ -13,6 +13,7 @@
   import Modal from "$lib/components/Modal.svelte";
   import Field from "$lib/components/Field.svelte";
   import Input from "$lib/components/Input.svelte";
+  import Select from "$lib/components/Select.svelte";
   import { getToken } from "$lib/auth";
   import { createVolume, createVolumeSnapshot, cloneVolumeFromSnapshot, deleteVolume, deleteVolumeSnapshot, restoreVolumeSnapshot, type Volume, type VolumeSnapshot } from "$lib/api";
   import { toast } from "$lib/toast";
@@ -145,12 +146,12 @@
             </CardDescription>
           </div>
           <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <select bind:value={selectedApp} class="h-9 rounded-md border border-border bg-background px-3 text-sm sm:w-[220px]" on:change={async () => await loadVolumes(selectedApp)}>
+            <Select bind:value={selectedApp} class="sm:w-[220px]" on:change={async () => await loadVolumes(selectedApp)}>
               <option value="">Select application</option>
               {#each $appsStore as app}
                 <option value={app.name}>{app.name}</option>
               {/each}
-            </select>
+            </Select>
             {#if selectedApp}
               <Button size="sm" onclick={() => (showCreateVolume = true)}>
                 <Plus class="size-4" />
