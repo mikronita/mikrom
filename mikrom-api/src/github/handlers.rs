@@ -155,6 +155,7 @@ pub async fn github_callback(
         app_id: None,
         app_name: None,
         deployment_id: None,
+        volume_id: None,
         resource_id: Some(query.installation_id.to_string()),
     });
 

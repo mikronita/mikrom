@@ -14,15 +14,12 @@
   import Field from "$lib/components/Field.svelte";
   import Input from "$lib/components/Input.svelte";
   import { getToken } from "$lib/auth";
-  import { createVolume, createVolumeSnapshot, cloneVolumeFromSnapshot, deleteVolume, deleteVolumeSnapshot, listApps, listVolumeSnapshots, listVolumes, restoreVolumeSnapshot, type AppInfo, type Volume, type VolumeSnapshot } from "$lib/api";
+  import { createVolume, createVolumeSnapshot, cloneVolumeFromSnapshot, deleteVolume, deleteVolumeSnapshot, restoreVolumeSnapshot, type Volume, type VolumeSnapshot } from "$lib/api";
   import { toast } from "$lib/toast";
+  import { appsStore, refreshApps } from "$lib/stores/apps";
+  import { volumesStore, snapshotsStore, volumesLoading, snapshotsLoading, refreshVolumes, refreshSnapshots } from "$lib/stores/volumes";
 
-  let apps: AppInfo[] = [];
   let selectedApp = "";
-  let volumes: Volume[] = [];
-  let snapshots: VolumeSnapshot[] = [];
-  let volumesLoading = true;
-  let snapshotsLoading = false;
   let showCreateVolume = false;
   let volumeForSnapshots = "";
   let volumeToDelete = "";
@@ -34,45 +31,33 @@
   let newVolume = { name: "", size_mib: 1024, mount_point: "/data" };
 
   async function loadVolumes(appName: string) {
-    const token = getToken();
-    const app = apps.find((item) => item.name === appName);
-    if (!token || !app) return;
-    volumesLoading = true;
-    const result = await listVolumes(token, app.id);
-    if (result.data) volumes = result.data;
-    volumesLoading = false;
+    const app = $appsStore.find((item) => item.name === appName);
+    if (!app) return;
+    await refreshVolumes(app.id);
   }
 
   async function loadSnapshots(volumeId: string) {
-    const token = getToken();
-    if (!token || !volumeId) return;
-    snapshotsLoading = true;
-    const result = await listVolumeSnapshots(token, volumeId);
-    if (result.data) snapshots = result.data;
-    snapshotsLoading = false;
+    await refreshSnapshots(volumeId);
   }
 
   onMount(async () => {
-    const token = getToken();
-    if (!token) return;
-    const appsResult = await listApps(token);
-    if (appsResult.data) {
-      apps = appsResult.data;
-      selectedApp = apps[0]?.name || "";
-      if (selectedApp) await loadVolumes(selectedApp);
+    if ($appsStore.length === 0) {
+      await refreshApps();
     }
+    selectedApp = $appsStore[0]?.name || "";
+    if (selectedApp) await loadVolumes(selectedApp);
   });
 
   async function createNewVolume() {
     const token = getToken();
-    const app = apps.find((item) => item.name === selectedApp);
+    const app = $appsStore.find((item) => item.name === selectedApp);
     if (!token || !app) return;
     const result = await createVolume(token, app.id, newVolume);
     if (result.error) return toast.error(result.error);
     toast.success("Volume created successfully");
     newVolume = { name: "", size_mib: 1024, mount_point: "/data" };
     showCreateVolume = false;
-    await loadVolumes(selectedApp);
+    // SSE will trigger refreshVolumes
   }
 
   async function createSnapshot(volumeId: string) {
@@ -82,6 +67,7 @@
     const result = await createVolumeSnapshot(token, volumeId, { name: snapName });
     if (result.error) return toast.error(result.error);
     toast.success("Snapshot created");
+    // SSE will trigger refreshSnapshots (if implemented in workspace listener)
     await loadSnapshots(volumeId);
   }
 
@@ -92,7 +78,7 @@
     if (result.error) return toast.error(result.error);
     toast.success("Volume deleted");
     volumeToDelete = "";
-    await loadVolumes(selectedApp);
+    // SSE will trigger refreshVolumes
   }
 
   async function deleteSnapshotNow(id: string) {
@@ -161,7 +147,7 @@
           <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
             <select bind:value={selectedApp} class="h-9 rounded-md border border-border bg-background px-3 text-sm sm:w-[220px]" on:change={async () => await loadVolumes(selectedApp)}>
               <option value="">Select application</option>
-              {#each apps as app}
+              {#each $appsStore as app}
                 <option value={app.name}>{app.name}</option>
               {/each}
             </select>
@@ -178,9 +164,9 @@
       <CardContent class="p-0">
         {#if !selectedApp}
           <EmptyState><HardDrive class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">Select an application</h3><p class="text-sm text-muted-foreground">Choose an app to manage its persistent storage volumes.</p></EmptyState>
-        {:else if volumesLoading}
+        {:else if $volumesLoading}
           <div class="space-y-3 p-4"><div class="h-10 animate-pulse rounded bg-muted"></div><div class="h-10 animate-pulse rounded bg-muted"></div></div>
-        {:else if volumes.length === 0}
+        {:else if $volumesStore.length === 0}
           <EmptyState><HardDrive class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">No volumes found</h3><p class="text-sm text-muted-foreground">This application doesn't have any persistent volumes yet.</p><Button size="sm" onclick={() => (showCreateVolume = true)}><Plus class="size-4" />Create first volume</Button></EmptyState>
         {:else}
           <table class="w-full">
@@ -195,7 +181,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each volumes as volume}
+              {#each $volumesStore as volume}
                 <tr class="border-b border-border">
                   <td class="px-4 py-4 font-medium"><div class="flex items-center gap-2"><Database class="size-4 text-muted-foreground" />{volume.name}</div></td>
                   <td class="px-4 py-4"><Badge variant="secondary">{formatSize(volume.size_mib)}</Badge></td>
@@ -251,18 +237,18 @@
   {/if}
 
   {#if showSnapshotsModal}
-    <Modal open={showSnapshotsModal} title="Snapshot history" width="max-w-3xl" description={`Manage snapshots for volume ${volumes.find((v) => v.id === volumeForSnapshots)?.name || ""}.`} on:close={() => { showSnapshotsModal = false; volumeForSnapshots = ""; snapshots = []; }}>
+    <Modal open={showSnapshotsModal} title="Snapshot history" width="max-w-3xl" description={`Manage snapshots for volume ${$volumesStore.find((v) => v.id === volumeForSnapshots)?.name || ""}.`} on:close={() => { showSnapshotsModal = false; volumeForSnapshots = ""; snapshotsStore.set([]); }}>
       <div class="space-y-4">
-        {#if snapshotsLoading}
+        {#if $snapshotsLoading}
           <div class="flex justify-center p-8"><Loader2 class="size-6 animate-spin text-muted-foreground" /></div>
-        {:else if snapshots.length === 0}
+        {:else if $snapshotsStore.length === 0}
           <p class="py-8 text-center text-sm text-muted-foreground">No snapshots found for this volume.</p>
         {:else}
           <div class="overflow-x-auto">
             <table class="w-full">
               <thead><tr class="border-b border-border text-left text-sm"><th class="px-4 py-3">Name</th><th class="px-4 py-3">Created At</th><th class="px-4 py-3 text-right">Actions</th></tr></thead>
               <tbody>
-                {#each snapshots as snap}
+                {#each $snapshotsStore as snap}
                   <tr class="border-b border-border">
                     <td class="px-4 py-3 font-medium">{snap.name}</td>
                     <td class="px-4 py-3 text-sm text-muted-foreground">{new Date(snap.created_at).toLocaleString()}</td>
@@ -272,7 +258,7 @@
                           <RotateCcw class="size-3" />
                           Restore
                         </Button>
-                        <Button variant="outline" size="sm" onclick={() => { snapshotToClone = snap.volume_id; restoreSnapshotName = snap.name; cloneName = `${volumes.find((v) => v.id === snap.volume_id)?.name || "volume"}-clone`; }}>
+                        <Button variant="outline" size="sm" onclick={() => { snapshotToClone = snap.volume_id; restoreSnapshotName = snap.name; cloneName = `${$volumesStore.find((v) => v.id === snap.volume_id)?.name || "volume"}-clone`; }}>
                           <Copy class="size-3" />
                           Clone
                         </Button>

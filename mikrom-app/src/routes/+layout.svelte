@@ -2,8 +2,16 @@
   import "../app.css";
   import ToastViewport from "$lib/components/ToastViewport.svelte";
   import { initTheme } from "$lib/theme";
+  import { onMount } from "svelte";
+  import { initWorkspaceSSE } from "$lib/stores/workspace";
+  import { initVmsSSE } from "$lib/stores/vms";
 
   initTheme();
+
+  onMount(() => {
+    initWorkspaceSSE();
+    initVmsSSE();
+  });
 </script>
 
 <svelte:head>

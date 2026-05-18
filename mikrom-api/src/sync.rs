@@ -155,6 +155,7 @@ async fn sync_deployment_state(
                 app_id: Some(app.id),
                 app_name: Some(app.name),
                 deployment_id: Some(dep.id),
+                volume_id: None,
                 resource_id: Some(dep.id.to_string()),
             });
         }

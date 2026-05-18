@@ -5,10 +5,8 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
   import { useProfileBootstrap } from "$lib/stores/profile";
-  import { useWatchVms } from "$lib/stores/vms";
 
   useProfileBootstrap();
-  useWatchVms();
 
   const segmentName = (segment: string) => decodeURIComponent(segment).replace(/^\w/, (c) => c.toUpperCase());
 

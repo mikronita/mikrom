@@ -1,6 +1,7 @@
 use crate::error::{ApiError, ApiResult};
 use crate::models::volume::{Volume, VolumeSnapshot};
 use crate::repositories::volume_repository::{CreateSnapshotParams, CreateVolumeParams};
+use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::{
     Json,
     extract::{Path, State},
@@ -122,6 +123,19 @@ pub async fn create_volume_handler(
 
     if !resp.success {
         return Err(ApiError::Scheduler(resp.message));
+    }
+
+    // Emit workspace event
+    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+        kind: WorkspaceEventKind::VolumeChanged,
+        user_id: Some(app.user_id),
+        app_id: Some(app.id),
+        app_name: Some(app.name),
+        deployment_id: None,
+        volume_id: Some(volume.id),
+        resource_id: Some(volume.id.to_string()),
+    }) {
+        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
     }
 
     Ok((StatusCode::CREATED, Json(volume)))
@@ -302,6 +316,19 @@ pub async fn create_snapshot_handler(
         return Err(ApiError::Scheduler(scheduler_res.message));
     }
 
+    // Emit workspace event
+    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+        kind: WorkspaceEventKind::SnapshotChanged,
+        user_id: Some(volume.user_id),
+        app_id: Some(volume.app_id),
+        app_name: None,
+        deployment_id: None,
+        volume_id: Some(volume.id),
+        resource_id: Some(snapshot.id.to_string()),
+    }) {
+        tracing::warn!(error = %e, "Failed to broadcast SnapshotChanged event");
+    }
+
     Ok((StatusCode::CREATED, Json(snapshot)))
 }
 
@@ -356,6 +383,19 @@ pub async fn delete_volume_handler(
 
     // 2. Delete from DB
     state.volume_repo.delete_volume(volume_id).await?;
+
+    // Emit workspace event
+    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+        kind: WorkspaceEventKind::VolumeChanged,
+        user_id: Some(volume.user_id),
+        app_id: Some(volume.app_id),
+        app_name: None,
+        deployment_id: None,
+        volume_id: Some(volume_id),
+        resource_id: Some(volume_id.to_string()),
+    }) {
+        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
+    }
 
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -412,6 +452,19 @@ pub async fn restore_snapshot_handler(
 
     if !scheduler_res.success {
         return Err(ApiError::Scheduler(scheduler_res.message));
+    }
+
+    // Emit workspace event
+    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+        kind: WorkspaceEventKind::VolumeChanged,
+        user_id: Some(volume.user_id),
+        app_id: Some(volume.app_id),
+        app_name: None,
+        deployment_id: None,
+        volume_id: Some(volume_id),
+        resource_id: Some(volume_id.to_string()),
+    }) {
+        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
     }
 
     Ok(StatusCode::OK.into_response())
@@ -475,6 +528,19 @@ pub async fn delete_snapshot_handler(
 
     // 2. Delete from DB
     state.volume_repo.delete_snapshot(snapshot_id).await?;
+
+    // Emit workspace event
+    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+        kind: WorkspaceEventKind::SnapshotChanged,
+        user_id: Some(snapshot.user_id),
+        app_id: Some(volume.app_id),
+        app_name: None,
+        deployment_id: None,
+        volume_id: Some(volume.id),
+        resource_id: Some(snapshot_id.to_string()),
+    }) {
+        tracing::warn!(error = %e, "Failed to broadcast SnapshotChanged event");
+    }
 
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -549,6 +615,19 @@ pub async fn clone_volume_handler(
             tracing::error!(volume_id = %target_volume.id, error = %e, "Failed to rollback volume DB entry after physical clone failure");
         }
         return Err(ApiError::Scheduler(scheduler_res.message));
+    }
+
+    // Emit workspace event
+    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+        kind: WorkspaceEventKind::VolumeChanged,
+        user_id: Some(target_volume.user_id),
+        app_id: Some(target_volume.app_id),
+        app_name: None,
+        deployment_id: None,
+        volume_id: Some(target_volume.id),
+        resource_id: Some(target_volume.id.to_string()),
+    }) {
+        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
     }
 
     Ok((StatusCode::CREATED, Json(target_volume)))

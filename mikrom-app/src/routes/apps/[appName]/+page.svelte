@@ -44,21 +44,18 @@
     deleteApp,
     deployAppVersion,
     getAppSecret,
-    listApps,
     listDeployments,
-    type AppInfo,
     type DeploymentInfo,
-    type LiveDeploymentInfo,
     type VmMetricsResponse,
     watchAppMetrics,
     watchDeploymentsSSE,
   } from "$lib/api";
   import { toast } from "$lib/toast";
+  import { appsStore, refreshApps } from "$lib/stores/apps";
 
   const appName = decodeURIComponent($page.params.appName ?? "");
 
-  let apps: AppInfo[] = [];
-  let app: AppInfo | undefined;
+  $: app = $appsStore.find((item) => item.name === appName);
   let deployments: DeploymentInfo[] = [];
   let loading = true;
   let error = "";
@@ -169,21 +166,19 @@
     if (!token) return;
 
     void (async () => {
-      const [appsResult, deploymentsResult, secretResult] = await Promise.all([
-        listApps(token),
+      if ($appsStore.length === 0) {
+        await refreshApps();
+      }
+
+      const [deploymentsResult, secretResult] = await Promise.all([
         listDeployments(token, appName),
         getAppSecret(token, appName),
       ]);
 
-      if (appsResult.data) {
-        apps = appsResult.data;
-        app = apps.find((item) => item.name === appName);
-      }
-
       if (deploymentsResult.data) deployments = deploymentsResult.data;
       if (secretResult.data) secret = secretResult.data.github_webhook_secret;
-      if (appsResult.error || deploymentsResult.error) {
-        error = appsResult.error || deploymentsResult.error || "Failed to load deployments";
+      if (deploymentsResult.error) {
+        error = deploymentsResult.error || "Failed to load deployments";
       }
       loading = false;
     })();

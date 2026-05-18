@@ -14,13 +14,11 @@
   import CreateAppModal from "$lib/components/CreateAppModal.svelte";
   import { formatDate } from "$lib/utils";
   import { getToken } from "$lib/auth";
-  import { listApps, type AppInfo } from "$lib/api";
+  import { type AppInfo } from "$lib/api";
   import { getCurrentVms, subscribeVms } from "$lib/stores/vms";
+  import { appsStore, appsLoading, appsError, refreshApps } from "$lib/stores/apps";
 
-  let apps: AppInfo[] = [];
   let vms = getCurrentVms();
-  let loading = true;
-  let error = "";
   let showCreate = false;
 
   const unsubscribe = subscribeVms((next) => {
@@ -29,15 +27,9 @@
   onDestroy(() => unsubscribe());
 
   onMount(async () => {
-    const token = getToken();
-    if (!token) return;
-    const result = await listApps(token);
-    if (result.error) {
-      error = result.error;
-    } else if (result.data) {
-      apps = result.data;
+    if ($appsStore.length === 0) {
+      await refreshApps();
     }
-    loading = false;
   });
 
   const vmsMap = () => new Map(vms.map((vm) => [vm.app_id || vm.app_name, vm]));
@@ -65,15 +57,15 @@
       </Button>
     </div>
 
-    {#if error}
+    {#if $appsError}
       <Alert variant="destructive">
         <TriangleAlert class="size-4 shrink-0" />
-        <div>{error}</div>
+        <div>{$appsError}</div>
       </Alert>
     {/if}
 
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-    {#if loading && apps.length === 0}
+    {#if $appsLoading && $appsStore.length === 0}
       {#each Array.from({ length: 6 }) as _}
         <Card class="overflow-hidden">
           <CardHeader>
@@ -97,7 +89,7 @@
           </CardContent>
         </Card>
       {/each}
-      {:else if apps.length === 0}
+      {:else if $appsStore.length === 0}
         <div class="col-span-full">
           <EmptyState class="py-16">
             <FolderPlus class="size-10 text-muted-foreground" />
@@ -110,7 +102,7 @@
           </EmptyState>
         </div>
       {:else}
-        {#each [...apps].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) as app}
+        {#each [...$appsStore].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) as app}
           {@const appVm = vmsMap().get(app.id) || vmsMap().get(app.name)}
           {@const hasActiveDeployment = !!app.active_deployment_id}
           {@const isRunningVm = appVm?.status?.toLowerCase() === "running"}

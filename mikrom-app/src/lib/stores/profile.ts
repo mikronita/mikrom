@@ -31,21 +31,11 @@ function writeCachedProfile(profile: UserProfile | null) {
 
 const { subscribe, set } = writable<UserProfile | null>(readCachedProfile());
 
-let workspaceCleanup: (() => void) | null = null;
-
-function stopWorkspaceWatch() {
-  if (workspaceCleanup) {
-    workspaceCleanup();
-    workspaceCleanup = null;
-  }
-}
-
-async function refreshProfile() {
+export async function refreshProfile() {
   const token = getToken();
   if (!token) {
     set(null);
     writeCachedProfile(null);
-    stopWorkspaceWatch();
     return;
   }
 
@@ -56,18 +46,6 @@ async function refreshProfile() {
   } else {
     set(null);
     writeCachedProfile(null);
-  }
-
-  if (!workspaceCleanup) {
-    workspaceCleanup = watchWorkspaceEvents(token, async (event) => {
-      if (event.kind === "profile_updated" || event.kind === "github_accounts_changed") {
-        const refreshed = await getUserProfile(token);
-        if (refreshed.data) {
-          set(refreshed.data);
-          writeCachedProfile(refreshed.data);
-        }
-      }
-    });
   }
 }
 
@@ -85,7 +63,6 @@ export function useProfileBootstrap() {
 
     return () => {
       window.removeEventListener("mikrom-auth-change", handleAuthChange);
-      stopWorkspaceWatch();
     };
   });
 }

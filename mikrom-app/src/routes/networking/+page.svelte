@@ -31,17 +31,16 @@
   } from "$lib/api";
   import { getCurrentVms, subscribeVms } from "$lib/stores/vms";
   import { toast } from "$lib/toast";
+  import { appsStore, refreshApps } from "$lib/stores/apps";
+  import { profile, refreshProfile } from "$lib/stores/profile";
+  import { securityRulesStore, securityRulesLoading, refreshSecurityRules } from "$lib/stores/networking";
 
   const defaultRule: CreateSecurityRuleRequest = { protocol: "tcp", port_start: 80, port_end: 80, action: "allow" };
 
-  let apps: AppInfo[] = [];
-  let profile: Awaited<ReturnType<typeof getUserProfile>>["data"] | null = null;
   let mesh: MeshStatus | null = null;
   let deployments = getCurrentVms();
-  let rules: SecurityRule[] = [];
   let selectedApp = "";
   let loading = true;
-  let rulesLoading = false;
   let showRuleModal = false;
   let rule: CreateSecurityRuleRequest = defaultRule;
   let error = "";
@@ -61,10 +60,7 @@
   }
 
   async function loadRules(token: string, appName: string) {
-    rulesLoading = true;
-    const result = await listSecurityRules(token, appName);
-    if (result.data) rules = result.data;
-    rulesLoading = false;
+    await refreshSecurityRules(appName);
   }
 
   onMount(() => {
@@ -72,23 +68,19 @@
     if (!token) return;
 
     void (async () => {
-      const [profileResult, meshResult, appsResult, deploymentsResult] = await Promise.all([
-        getUserProfile(token),
+      const results = await Promise.all([
+        refreshProfile(),
         getMeshStatus(token),
-        listApps(token),
-        listActiveDeployments(token),
+        refreshApps(),
       ]);
 
-      if (profileResult.data) profile = profileResult.data;
+      const meshResult = results[1];
       if (meshResult.data) mesh = meshResult.data;
-      if (appsResult.data) apps = appsResult.data;
-      if (deploymentsResult.data) deployments = deploymentsResult.data;
-      if (appsResult.data?.[0]) {
-        selectedApp = appsResult.data[0].name;
+      if ($appsStore.length > 0) {
+        selectedApp = $appsStore[0].name;
         await loadRules(token, selectedApp);
       }
       loading = false;
-      error = profileResult.error || meshResult.error || appsResult.error || deploymentsResult.error || "";
     })();
 
     const cleanupMesh = watchMeshStatus(token, (data) => {
@@ -160,7 +152,7 @@
 
     <div class="grid gap-4 md:grid-cols-3">
       {#each [
-        { label: "VPC prefix", value: profile?.vpc_ipv6_prefix || "Not assigned", description: "Private IPv6 /40 prefix reserved for your applications.", icon: Globe2, loading: !profile, valueClass: "break-all font-mono text-lg" },
+        { label: "VPC prefix", value: $profile?.vpc_ipv6_prefix || "Not assigned", description: "Private IPv6 /40 prefix reserved for your applications.", icon: Globe2, loading: !$profile, valueClass: "break-all font-mono text-lg" },
         { label: "Active peers", value: mesh?.total_workers ?? 0, description: "Agent nodes currently participating in the mesh.", icon: Server, loading: !mesh, valueClass: "text-3xl" },
         { label: "Running workloads", value: runningDeployments.length, description: "MicroVMs currently reachable through 6PN.", icon: Boxes, loading: loading, valueClass: "text-3xl" },
       ] as card}
@@ -252,7 +244,7 @@
                 if (token && selectedApp) await loadRules(token, selectedApp);
               }}>
                 <option value="">Select application</option>
-                {#each apps as app}
+                {#each $appsStore as app}
                   <option value={app.name}>{app.name}</option>
                 {/each}
               </select>
@@ -269,17 +261,17 @@
         <CardContent class="p-4">
           {#if !selectedApp}
             <EmptyState><ShieldCheck class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">Select an application</h3><p class="text-sm text-muted-foreground">Choose an app to inspect and manage its security group rules.</p></EmptyState>
-          {:else if rulesLoading}
+          {:else if $securityRulesLoading}
             <div class="space-y-3">
               <div class="h-10 animate-pulse rounded bg-muted"></div>
               <div class="h-10 animate-pulse rounded bg-muted"></div>
               <div class="h-10 animate-pulse rounded bg-muted"></div>
             </div>
-          {:else if rules.length === 0}
+          {:else if $securityRulesStore.length === 0}
             <EmptyState><ShieldCheck class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">No security rules</h3><p class="text-sm text-muted-foreground">Create the first firewall rule for this application.</p></EmptyState>
           {:else}
             <div class="space-y-2">
-              {#each rules as item}
+              {#each $securityRulesStore as item}
                 <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/20 p-3">
                   <div>
                     <div class="font-medium">{item.protocol.toUpperCase()} {formatPortRange(item)}</div>

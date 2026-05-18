@@ -376,6 +376,7 @@ pub async fn poll_and_deploy(
                         app_id: Some(app.id),
                         app_name: Some(app.name),
                         deployment_id: Some(task.deployment_id),
+                        volume_id: None,
                         resource_id: Some(task.build_id.clone()),
                     });
                 }
