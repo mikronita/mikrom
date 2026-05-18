@@ -5,6 +5,7 @@
   import Modal from "$lib/components/Modal.svelte";
   import Button from "$lib/components/Button.svelte";
   import Input from "$lib/components/Input.svelte";
+  import Select from "$lib/components/Select.svelte";
   import Field from "$lib/components/Field.svelte";
   import { createApp, getGithubInstallUrl, listGithubRepos, type GithubRepo, type CreateAppRequest } from "$lib/api";
   import { getToken } from "$lib/auth";
@@ -131,18 +132,12 @@
             Loading repositories...
           </div>
         {:else if githubRepos.length > 0}
-          <div class="relative">
-            <select
-              id="github_repo"
-              bind:value={selectedRepoId}
-              class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-none transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <option value="">Select a repository</option>
-              {#each githubRepos as repo}
-                <option value={repo.id.toString()}>{repo.full_name}{repo.private ? " (private)" : ""}</option>
-              {/each}
-            </select>
-          </div>
+          <Select id="github_repo" bind:value={selectedRepoId}>
+            <option value="">Select a repository</option>
+            {#each githubRepos as repo}
+              <option value={repo.id.toString()}>{repo.full_name}{repo.private ? " (private)" : ""}</option>
+            {/each}
+          </Select>
         {:else}
           <div class="flex flex-col items-center gap-4 rounded-md border border-border p-6 text-center">
             <p class="text-sm text-muted-foreground">No GitHub accounts connected.</p>
