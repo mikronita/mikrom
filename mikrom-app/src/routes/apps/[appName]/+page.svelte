@@ -21,7 +21,6 @@
     Trash2,
     Cog,
     CheckCircle2,
-    AlertCircle,
     Info,
   } from "lucide-svelte";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
@@ -32,7 +31,6 @@
   import CardContent from "$lib/components/CardContent.svelte";
   import Badge from "$lib/components/Badge.svelte";
   import Button from "$lib/components/Button.svelte";
-  import Alert from "$lib/components/Alert.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import Input from "$lib/components/Input.svelte";
@@ -127,6 +125,9 @@
 
   function handleMetrics(sample: VmMetricsResponse) {
     liveMetrics = sample;
+    if (sample.error_message) {
+      toast.error(`Termination Error: ${sample.error_message}`);
+    }
 
     const txBytes = sample.tx_bytes || 0;
     const rxBytes = sample.rx_bytes || 0;
@@ -178,7 +179,7 @@
       if (deploymentsResult.data) deployments = deploymentsResult.data;
       if (secretResult.data) secret = secretResult.data.github_webhook_secret;
       if (deploymentsResult.error) {
-        error = deploymentsResult.error || "Failed to load deployments";
+        toast.error(deploymentsResult.error || "Failed to load deployments");
       }
       loading = false;
     })();
@@ -392,12 +393,6 @@
     <section class="space-y-4">
       <h2 class="text-lg font-bold tracking-tight">Deployment History</h2>
       <Card class="overflow-hidden">
-        {#if error}
-          <Alert variant="destructive">
-            <AlertCircle class="size-4 shrink-0" />
-            <div>{error}</div>
-          </Alert>
-        {/if}
 
         <div class="overflow-x-auto">
           <table class="min-w-[900px] w-full">
@@ -523,16 +518,6 @@
               <MetricChart points={metricsHistory} />
             </CardContent>
           </Card>
-
-          {#if liveMetrics.error_message}
-            <Alert variant="destructive">
-              <AlertCircle class="size-4 shrink-0" />
-              <div class="space-y-0.5">
-                <div class="text-xs font-bold">Termination Error</div>
-                <div class="text-[10px] break-words">{liveMetrics.error_message}</div>
-              </div>
-            </Alert>
-          {/if}
         {/if}
       </div>
     {/if}

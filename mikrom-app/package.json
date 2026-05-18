@@ -15,7 +15,8 @@
     "@sveltejs/adapter-auto": "^6.0.0",
     "@sveltejs/kit": "^2.19.0",
     "lucide-svelte": "^0.542.0",
-    "svelte": "^5.0.0"
+    "svelte": "^5.0.0",
+    "svelte-sonner": "^1.1.1"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

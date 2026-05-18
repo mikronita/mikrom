@@ -14,7 +14,6 @@
   import Button from "$lib/components/Button.svelte";
   import Field from "$lib/components/Field.svelte";
   import Input from "$lib/components/Input.svelte";
-  import Alert from "$lib/components/Alert.svelte";
   import Separator from "$lib/components/Separator.svelte";
   import Switch from "$lib/components/Switch.svelte";
   import { getToken } from "$lib/auth";

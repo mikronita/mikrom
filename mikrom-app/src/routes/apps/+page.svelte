@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { Boxes, Calendar, Cpu, FolderPlus, HardDrive, Plus, Radio, TriangleAlert } from "lucide-svelte";
+  import { Boxes, Calendar, Cpu, FolderPlus, HardDrive, Plus, Radio } from "lucide-svelte";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import Card from "$lib/components/Card.svelte";
   import CardHeader from "$lib/components/CardHeader.svelte";
@@ -9,7 +9,6 @@
   import CardContent from "$lib/components/CardContent.svelte";
   import Badge from "$lib/components/Badge.svelte";
   import Button from "$lib/components/Button.svelte";
-  import Alert from "$lib/components/Alert.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import CreateAppModal from "$lib/components/CreateAppModal.svelte";
   import { formatDate } from "$lib/utils";
@@ -17,6 +16,7 @@
   import { type AppInfo } from "$lib/api";
   import { getCurrentVms, subscribeVms } from "$lib/stores/vms";
   import { appsStore, appsLoading, appsError, refreshApps } from "$lib/stores/apps";
+  import { toast } from "$lib/toast";
 
   let vms = getCurrentVms();
   let showCreate = false;
@@ -31,6 +31,10 @@
       await refreshApps();
     }
   });
+
+  $: if ($appsError) {
+    toast.error($appsError);
+  }
 
   const vmsMap = () => new Map(vms.map((vm) => [vm.app_id || vm.app_name, vm]));
 </script>
@@ -56,13 +60,6 @@
         New Application
       </Button>
     </div>
-
-    {#if $appsError}
-      <Alert variant="destructive">
-        <TriangleAlert class="size-4 shrink-0" />
-        <div>{$appsError}</div>
-      </Alert>
-    {/if}
 
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
     {#if $appsLoading && $appsStore.length === 0}

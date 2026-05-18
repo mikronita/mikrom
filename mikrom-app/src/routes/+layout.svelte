@@ -1,6 +1,6 @@
 <script lang="ts">
   import "../app.css";
-  import ToastViewport from "$lib/components/ToastViewport.svelte";
+  import { Toaster } from "svelte-sonner";
   import { initTheme } from "$lib/theme";
   import { onMount } from "svelte";
   import { initWorkspaceSSE } from "$lib/stores/workspace";
@@ -20,4 +20,4 @@
 </svelte:head>
 
 <slot />
-<ToastViewport />
+<Toaster position="bottom-right" richColors />
