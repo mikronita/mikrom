@@ -707,5 +707,5 @@ async fn test_restore_volume_snapshot_endpoint_failure() {
         .await
         .unwrap();
     let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(error["error"], "Image is busy");
+    assert_eq!(error["error"], "Error communicating with scheduler");
 }
