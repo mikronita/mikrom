@@ -9,7 +9,6 @@
   import CardContent from "$lib/components/CardContent.svelte";
   import Badge from "$lib/components/Badge.svelte";
   import Button from "$lib/components/Button.svelte";
-  import Alert from "$lib/components/Alert.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import Field from "$lib/components/Field.svelte";
@@ -44,7 +43,6 @@
   let loading = true;
   let showRuleModal = false;
   let rule: CreateSecurityRuleRequest = defaultRule;
-  let error = "";
 
   const unsubscribe = subscribeVms((next) => {
     deployments = next;
@@ -69,19 +67,26 @@
     if (!token) return;
 
     void (async () => {
-      const results = await Promise.all([
-        refreshProfile(),
-        getMeshStatus(token),
-        refreshApps(),
-      ]);
+      try {
+        const results = await Promise.all([
+          refreshProfile(),
+          getMeshStatus(token),
+          refreshApps(),
+        ]);
 
-      const meshResult = results[1];
-      if (meshResult.data) mesh = meshResult.data;
-      if ($appsStore.length > 0) {
-        selectedApp = $appsStore[0].name;
-        await loadRules(token, selectedApp);
+        const meshResult = results[1];
+        if (meshResult.data) mesh = meshResult.data;
+        if (meshResult.error) toast.error(meshResult.error);
+
+        if ($appsStore.length > 0) {
+          selectedApp = $appsStore[0].name;
+          await loadRules(token, selectedApp);
+        }
+      } catch (err) {
+        toast.error("Failed to load networking data");
+      } finally {
+        loading = false;
       }
-      loading = false;
     })();
 
     const cleanupMesh = watchMeshStatus(token, (data) => {
@@ -143,13 +148,6 @@
         WireGuard mesh
       </Badge>
     </div>
-
-    {#if error}
-      <Alert variant="destructive">
-        <Network class="size-4 shrink-0" />
-        <div>{error}</div>
-      </Alert>
-    {/if}
 
     <div class="grid gap-4 md:grid-cols-3">
       {#each [

@@ -1,35 +1,33 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { tick } from "svelte";
-  import { Loader2, AlertCircle, UserPlus } from "lucide-svelte";
+  import { Loader2, UserPlus } from "lucide-svelte";
   import Card from "$lib/components/Card.svelte";
   import Field from "$lib/components/Field.svelte";
   import Input from "$lib/components/Input.svelte";
-  import Alert from "$lib/components/Alert.svelte";
   import { register } from "$lib/api";
+  import { toast } from "$lib/toast";
 
   let email = "";
   let password = "";
   let confirmPassword = "";
-  let error = "";
   let loading = false;
 
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
-    error = "";
 
     if (!email || !password) {
-      error = "Email and password are required";
+      toast.error("Email and password are required");
       return;
     }
 
     if (password.length < 8) {
-      error = "Password must be at least 8 characters";
+      toast.error("Password must be at least 8 characters");
       return;
     }
 
     if (password !== confirmPassword) {
-      error = "Passwords do not match";
+      toast.error("Passwords do not match");
       return;
     }
 
@@ -38,7 +36,7 @@
     loading = false;
 
     if (result.error) {
-      error = result.error;
+      toast.error(result.error);
       return;
     }
 
@@ -68,13 +66,6 @@
     <Card class="w-full">
       <div class="p-5 pt-5">
         <form class="flex flex-col gap-4" on:submit|preventDefault={handleSubmit}>
-          {#if error}
-            <Alert variant="destructive">
-              <AlertCircle class="size-4" />
-              <div>{error}</div>
-            </Alert>
-          {/if}
-
           <Field label="Email address" forId="email">
             <Input id="email" type="email" bind:value={email} placeholder="name@example.com" required disabled={loading} />
           </Field>

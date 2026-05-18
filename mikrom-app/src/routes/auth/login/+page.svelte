@@ -2,30 +2,30 @@
   import { goto } from "$app/navigation";
   import { tick } from "svelte";
   import { onMount } from "svelte";
-  import { CheckCircle2, Loader2, AlertCircle, Box } from "lucide-svelte";
+  import { Loader2, Box } from "lucide-svelte";
   import Card from "$lib/components/Card.svelte";
   import Field from "$lib/components/Field.svelte";
   import Input from "$lib/components/Input.svelte";
-  import Alert from "$lib/components/Alert.svelte";
   import { login } from "$lib/api";
   import { setToken } from "$lib/auth";
+  import { toast } from "$lib/toast";
 
   let email = "";
   let password = "";
-  let error = "";
   let loading = false;
-  let registered = false;
 
   onMount(() => {
-    registered = new URLSearchParams(window.location.search).get("registered") === "true";
+    const registered = new URLSearchParams(window.location.search).get("registered") === "true";
+    if (registered) {
+      toast.success("Account created! You can now sign in.");
+    }
   });
 
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
-    error = "";
 
     if (!email || !password) {
-      error = "Email and password are required";
+      toast.error("Email and password are required");
       return;
     }
 
@@ -34,7 +34,7 @@
     loading = false;
 
     if (result.error) {
-      error = result.error;
+      toast.error(result.error);
       return;
     }
 
@@ -74,20 +74,6 @@
       </div>
       <div class="p-5">
         <form class="flex flex-col gap-4" on:submit|preventDefault={handleSubmit}>
-          {#if registered}
-            <Alert>
-              <CheckCircle2 class="size-4" />
-              <div>Account created! You can now sign in.</div>
-            </Alert>
-          {/if}
-
-          {#if error}
-            <Alert variant="destructive">
-              <AlertCircle class="size-4" />
-              <div>{error}</div>
-            </Alert>
-          {/if}
-
           <Field label="Email address" forId="email">
             <Input id="email" type="email" bind:value={email} placeholder="name@example.com" required disabled={loading} />
           </Field>

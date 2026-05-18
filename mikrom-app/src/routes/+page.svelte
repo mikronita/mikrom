@@ -5,7 +5,6 @@
   import Card from "$lib/components/Card.svelte";
   import Badge from "$lib/components/Badge.svelte";
   import Button from "$lib/components/Button.svelte";
-  import Alert from "$lib/components/Alert.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import CreateAppModal from "$lib/components/CreateAppModal.svelte";
   import Separator from "$lib/components/Separator.svelte";
@@ -14,6 +13,7 @@
   import { health, type AppInfo } from "$lib/api";
   import { vmsStore, refreshVms } from "$lib/stores/vms";
   import { appsStore, appsLoading, refreshApps } from "$lib/stores/apps";
+  import { toast } from "$lib/toast";
   import { derived } from "svelte/store";
 
   let healthData: Awaited<ReturnType<typeof health>> | null = null;
@@ -36,6 +36,8 @@
     $apps.length > 0 && $apps.every((app) => !$vms.some((vm) => vm.app_id === app.id || vm.app_name === app.name))
   );
 
+  let unsubscribeUndeployed: () => void;
+
   onMount(async () => {
     const token = getToken();
     if (!token) return;
@@ -51,6 +53,24 @@
     const healthResult = await health().catch(() => null);
     healthData = healthResult;
     loadingHealth = false;
+
+    // Check for undeployed apps and notify
+    unsubscribeUndeployed = hasUndeployedAppsStore.subscribe($hasUndeployedApps => {
+      if ($hasUndeployedApps && $appsStore.length > 0) {
+        toast.info("You have undeployed applications. Deploy your first app now!", {
+          action: {
+            label: "Deploy",
+            onClick: () => {
+              window.location.href = `/apps/${encodeURIComponent($appsStore[0].name)}`;
+            }
+          }
+        });
+      }
+    });
+  });
+
+  onDestroy(() => {
+    if (unsubscribeUndeployed) unsubscribeUndeployed();
   });
 
   $: offlineServices = Object.values(healthData?.services || {}).filter((status) => status !== "ONLINE").length;
@@ -87,19 +107,6 @@
         </Button>
       {/if}
     </div>
-
-    {#if $hasUndeployedAppsStore}
-      <Alert>
-        <Rocket class="size-4 shrink-0" />
-        <div class="flex w-full flex-wrap items-center justify-between gap-4">
-          <div class="space-y-1">
-            <div class="font-medium">Deploy your first app</div>
-            <div>You have applications created but none are currently running in a microVM.</div>
-          </div>
-          <Button size="sm" href={`/apps/${encodeURIComponent($appsStore[0].name)}`}>Deploy now</Button>
-        </div>
-      </Alert>
-    {/if}
 
     <div class="grid gap-4 md:grid-cols-3">
       <Card>
