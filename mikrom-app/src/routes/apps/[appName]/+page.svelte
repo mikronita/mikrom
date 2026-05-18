@@ -190,7 +190,13 @@
       if (index === -1) {
         deployments = [...deployments, { ...(deployment as unknown as DeploymentInfo), id: deployment.deployment_id ?? deployment.vm_id } as DeploymentInfo];
       } else {
-        deployments = deployments.map((dep, depIndex) => (depIndex === index ? { ...dep, ...deployment } : dep));
+        deployments = deployments.map((dep, depIndex) => (depIndex === index ? { 
+          ...dep, 
+          ...deployment,
+          git_commit_hash: deployment.git_commit_hash ?? dep.git_commit_hash,
+          git_commit_message: deployment.git_commit_message ?? dep.git_commit_message,
+          git_branch: deployment.git_branch ?? dep.git_branch,
+        } : dep));
       }
     });
 

@@ -286,7 +286,7 @@ pub async fn poll_and_deploy(
             BuildStatus::Success => {
                 info!(build_id = %task.build_id, "Build successful, triggering deployment...");
 
-                let (image_tag, port, _hash, _msg, _branch) = (
+                let (image_tag, port, hash, msg, branch) = (
                     current_status.1,
                     current_status.2,
                     current_status.3,
@@ -307,6 +307,22 @@ pub async fn poll_and_deploy(
                     .get_deployment(task.deployment_id)
                     .await?
                     .ok_or(anyhow::anyhow!("Deployment not found"))?;
+
+                // Update deployment with git metadata if available
+                state
+                    .app_repo
+                    .update_deployment(
+                        task.deployment_id,
+                        UpdateDeploymentParams {
+                            git_commit_hash: hash,
+                            git_commit_message: msg,
+                            git_branch: branch,
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
+
+                state.deployment_events.send(task.app_id).ok();
 
                 if final_port != task.port {
                     state
