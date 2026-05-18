@@ -408,36 +408,37 @@ pub async fn watch_deployments(
                 },
                 // 2. Local events from DB
                 res = local_stream.next() => {
-                    if let Some(Ok(app_id)) = res
-                        && let Ok(Some(app)) = state_clone.app_repo.get_app(app_id).await
-                        && let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app_id).await
-                    {
-                        for dep in deps {
-                            if ["RUNNING", "DRAINING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
-                                let data = serde_json::json!({
-                                    "job_id": dep.job_id.clone().unwrap_or_default(),
-                                    "deployment_id": dep.id.to_string(),
-                                    "app_id": dep.app_id.to_string(),
-                                    "app_name": app.name.clone(),
-                                    "image": dep.image_tag.clone().unwrap_or_default(),
-                                    "status": dep.status,
-                                    "git_commit_hash": dep.git_commit_hash,
-                                    "git_commit_message": dep.git_commit_message,
-                                    "git_branch": dep.git_branch,
-                                    "host_id": String::new(),
-                                    "vm_id": String::new(),
-                                    "ipv6_address": dep.ipv6_address,
-                                    "cpu_usage": 0.0,
-                                    "ram_used_bytes": 0,
-                                    "tx_bytes": 0,
-                                    "rx_bytes": 0,
-                                    "scheduled_at": 0,
-                                    "started_at": 0,
-                                    "stopped_at": 0,
-                                    "error_message": "",
-                                });
-                                if let Ok(json) = serde_json::to_string(&data) {
-                                    yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
+                    if let Some(Ok(app_id)) = res {
+                        if let Ok(Some(app)) = state_clone.app_repo.get_app(app_id).await {
+                            if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app_id).await {
+                                for dep in deps {
+                                    if ["RUNNING", "DRAINING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                                        let data = serde_json::json!({
+                                            "job_id": dep.job_id.clone().unwrap_or_default(),
+                                            "deployment_id": dep.id.to_string(),
+                                            "app_id": dep.app_id.to_string(),
+                                            "app_name": app.name.clone(),
+                                            "image": dep.image_tag.clone().unwrap_or_default(),
+                                            "status": dep.status,
+                                            "git_commit_hash": dep.git_commit_hash,
+                                            "git_commit_message": dep.git_commit_message,
+                                            "git_branch": dep.git_branch,
+                                            "host_id": String::new(),
+                                            "vm_id": String::new(),
+                                            "ipv6_address": dep.ipv6_address,
+                                            "cpu_usage": 0.0,
+                                            "ram_used_bytes": 0,
+                                            "tx_bytes": 0,
+                                            "rx_bytes": 0,
+                                            "scheduled_at": 0,
+                                            "started_at": 0,
+                                            "stopped_at": 0,
+                                            "error_message": "",
+                                        });
+                                        if let Ok(json) = serde_json::to_string(&data) {
+                                            yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
+                                        }
+                                    }
                                 }
                             }
                         }
