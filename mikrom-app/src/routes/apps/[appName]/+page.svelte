@@ -22,6 +22,7 @@
     Cog,
     CheckCircle2,
     Info,
+    Network,
   } from "lucide-svelte";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import Card from "$lib/components/Card.svelte";
@@ -51,14 +52,11 @@
   import { toast } from "$lib/toast";
   import { appsStore, refreshApps } from "$lib/stores/apps";
 
-  const appName = decodeURIComponent($page.params.appName ?? "");
-
-  $: app = $appsStore.find((item) => item.name === appName);
   let deployments: DeploymentInfo[] = [];
   let loading = true;
   let error = "";
   let liveMetrics: VmMetricsResponse | null = null;
-  let metricsHistory: Array<{ time: string; cpu: number; ram: number; rx: number; tx: number }> = [];
+  let metricsHistory: Array<{ time: string; cpu: number; ram: number; rx: number; tx: number; total_rx: number; total_tx: number }> = [];
   let secret: string | null = null;
   let showSecret = false;
   let showWebhookModal = false;
@@ -66,6 +64,9 @@
   let deployingApp = false;
   let deletingApp = false;
   let activatingDeploymentId: string | null = null;
+
+  $: appName = decodeURIComponent($page.params.appName ?? "");
+  $: app = $appsStore.find((item) => item.name === appName);
 
   type MetricsSnapshot = {
     time: string;
@@ -83,35 +84,51 @@
   }
 
   function formatNetworkRate(kibPerSecond: number) {
-    if (kibPerSecond === 0) return "0 KiB/s";
+    if (!kibPerSecond || kibPerSecond <= 0) return "0 KiB/s";
     if (kibPerSecond < 0.1) return `${(kibPerSecond * 1024).toFixed(0)} B/s`;
     if (kibPerSecond >= 1024) return `${(kibPerSecond / 1024).toFixed(1)} MiB/s`;
     return `${kibPerSecond.toFixed(1)} KiB/s`;
   }
 
   function formatBytes(bytes: number) {
-    if (bytes === 0) return "0 B";
+    if (!bytes || bytes <= 0) return "0 B";
     const unit = 1024;
     const sizes = ["B", "KiB", "MiB", "GiB", "TiB"];
     const index = Math.floor(Math.log(bytes) / Math.log(unit));
+    if (index < 0) return "0 B";
     return `${(bytes / Math.pow(unit, index)).toFixed(1)} ${sizes[index]}`;
   }
 
   let lastNetwork = new Map<string, { tx: number; rx: number; time: number }>();
 
   function activeDeployment() {
-    return (
-      deployments.find((dep) => dep.id === app?.active_deployment_id) ||
-      [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).find((dep) => dep.status === "RUNNING")
-    );
+    if (!deployments.length) return null;
+    
+    // 1. Try to find the one explicitly marked as active by the app
+    const activeById = app?.active_deployment_id ? deployments.find((dep) => dep.id === app.active_deployment_id) : null;
+    if (activeById) return activeById;
+    
+    // 2. Fallback to any running/draining deployment
+    const running = [...deployments]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .find((dep) => ["RUNNING", "DRAINING", "HEALTHY", "STARTING"].includes((dep.status || "").toUpperCase()));
+    if (running) return running;
+    
+    // 3. Fallback to the most recent deployment
+    return [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
   }
 
   function productionDepId() {
-    return app?.active_deployment_id || [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).find((d) => d.status === "RUNNING")?.id;
+    return (
+      app?.active_deployment_id ||
+      [...deployments]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .find((d) => (d.status || "").toUpperCase() === "RUNNING")?.id
+    );
   }
 
   function getStatusClass(status: string) {
-    const s = status.toLowerCase();
+    const s = (status || "").toLowerCase();
     if (s === "running") return "success";
     if (["building", "scheduled", "pending", "paused", "draining"].includes(s)) return "warning";
     if (["failed", "cancelled"].includes(s)) return "destructive";
@@ -124,6 +141,7 @@
   }
 
   function handleMetrics(sample: VmMetricsResponse) {
+    if (!sample) return;
     liveMetrics = sample;
     if (sample.error_message) {
       toast.error(`Termination Error: ${sample.error_message}`);
@@ -150,30 +168,39 @@
       lastNetwork.set(key, { tx: txBytes, rx: rxBytes, time: now });
     }
 
-    metricsHistory = [
-      ...metricsHistory.slice(-29),
-      {
-        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-        cpu: normalizeCpuUsage(sample.cpu_usage),
-        ram: (sample.ram_used_bytes || 0) / (1024 * 1024),
-        rx: rxRate,
-        tx: txRate,
-      },
-    ];
+    const newPoint = {
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      cpu: normalizeCpuUsage(sample.cpu_usage),
+      ram: (sample.ram_used_bytes || 0) / (1024 * 1024),
+      rx: rxRate,
+      tx: txRate,
+      total_rx: rxBytes,
+      total_tx: txBytes,
+    };
+
+    metricsHistory = [...metricsHistory.slice(-29), newPoint];
   }
 
   onMount(() => {
     const token = getToken();
     if (!token) return;
 
-    void (async () => {
+    let cleanupDeployments: (() => void) | null = null;
+    let cleanupMetrics: (() => void) | null = null;
+
+    const init = async (currentAppName: string) => {
+      loading = true;
+      liveMetrics = null;
+      metricsHistory = [];
+      lastNetwork.clear();
+
       if ($appsStore.length === 0) {
         await refreshApps();
       }
 
       const [deploymentsResult, secretResult] = await Promise.all([
-        listDeployments(token, appName),
-        getAppSecret(token, appName),
+        listDeployments(token, currentAppName),
+        getAppSecret(token, currentAppName),
       ]);
 
       if (deploymentsResult.data) deployments = deploymentsResult.data;
@@ -182,29 +209,39 @@
         toast.error(deploymentsResult.error || "Failed to load deployments");
       }
       loading = false;
-    })();
 
-    const cleanupDeployments = watchDeploymentsSSE(token, (deployment) => {
-      if (deployment.app_name !== appName) return;
-      const index = deployments.findIndex((dep) => dep.id === deployment.deployment_id || dep.job_id === deployment.job_id);
-      if (index === -1) {
-        deployments = [...deployments, { ...(deployment as unknown as DeploymentInfo), id: deployment.deployment_id ?? deployment.vm_id } as DeploymentInfo];
-      } else {
-        deployments = deployments.map((dep, depIndex) => (depIndex === index ? { 
-          ...dep, 
-          ...deployment,
-          git_commit_hash: deployment.git_commit_hash ?? dep.git_commit_hash,
-          git_commit_message: deployment.git_commit_message ?? dep.git_commit_message,
-          git_branch: deployment.git_branch ?? dep.git_branch,
-        } : dep));
-      }
+      if (cleanupDeployments) cleanupDeployments();
+      if (cleanupMetrics) cleanupMetrics();
+
+      cleanupDeployments = watchDeploymentsSSE(token, (deployment) => {
+        if (deployment.app_name !== currentAppName) return;
+        const index = deployments.findIndex((dep) => dep.id === deployment.deployment_id || dep.job_id === deployment.job_id);
+        if (index === -1) {
+          deployments = [...deployments, { ...(deployment as unknown as DeploymentInfo), id: deployment.deployment_id ?? deployment.vm_id } as DeploymentInfo];
+        } else {
+          deployments = deployments.map((dep, depIndex) => (depIndex === index ? { 
+            ...dep, 
+            ...deployment,
+            git_commit_hash: deployment.git_commit_hash ?? dep.git_commit_hash,
+            git_commit_message: deployment.git_commit_message ?? dep.git_commit_message,
+            git_branch: deployment.git_branch ?? dep.git_branch,
+          } : dep));
+        }
+      });
+
+      cleanupMetrics = watchAppMetrics(token, currentAppName, handleMetrics);
+    };
+
+    // Use a reactive block for appName changes
+    const unsub = page.subscribe(($page) => {
+      const name = decodeURIComponent($page.params.appName ?? "");
+      if (name) init(name);
     });
 
-    const cleanupMetrics = watchAppMetrics(token, appName, handleMetrics);
-
     return () => {
-      cleanupDeployments();
-      cleanupMetrics();
+      unsub();
+      if (cleanupDeployments) cleanupDeployments();
+      if (cleanupMetrics) cleanupMetrics();
     };
   });
 
@@ -257,8 +294,26 @@
     }
   }
 
-  const latestMetrics = (): MetricsSnapshot =>
-    (metricsHistory.at(-1) as MetricsSnapshot | undefined) || (liveMetrics ? {
+  $: active = ((_deps, _app) => {
+    if (!deployments || deployments.length === 0) return null;
+    const activeById = app?.active_deployment_id ? deployments.find((dep) => dep.id === app.active_deployment_id) : null;
+    if (activeById) return activeById;
+    return [...deployments]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .find((dep) => ["RUNNING", "DRAINING", "HEALTHY", "STARTING"].includes((dep.status || "").toUpperCase())) 
+      || deployments[0];
+  })(deployments, app);
+
+  $: prodId = ((_deps, _app) => {
+    return (
+      app?.active_deployment_id ||
+      [...deployments]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .find((d) => (d.status || "").toUpperCase() === "RUNNING")?.id
+    );
+  })(deployments, app);
+
+  $: latestMetrics = (metricsHistory.length > 0 ? metricsHistory[metricsHistory.length - 1] : null) || (liveMetrics ? {
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
       cpu: normalizeCpuUsage(liveMetrics.cpu_usage),
       ram: (liveMetrics.ram_used_bytes || 0) / (1024 * 1024),
@@ -268,19 +323,14 @@
       total_tx: liveMetrics.tx_bytes || 0,
     } : { time: "", cpu: 0, ram: 0, rx: 0, tx: 0, total_rx: 0, total_tx: 0 });
 
-  const active = () => activeDeployment();
-  const prodId = () => productionDepId();
-  const totalTrafficBytes = () => {
-    const metrics = latestMetrics();
-    return metrics.total_rx + metrics.total_tx;
-  };
+  $: totalTrafficBytes = (latestMetrics.total_rx || 0) + (latestMetrics.total_tx || 0);
 
-  const metricCards = [
+  $: metricCards = [
     {
       key: "cpu",
       label: "CPU",
       detail: "Usage",
-      value: () => `${latestMetrics().cpu.toFixed(1)}%`,
+      value: `${(latestMetrics.cpu || 0).toFixed(1)}%`,
       icon: Cpu,
       color: "bg-[var(--chart-1)]",
     },
@@ -288,7 +338,7 @@
       key: "ram",
       label: "RAM",
       detail: "Allocated",
-      value: () => `${latestMetrics().ram.toFixed(0)} MiB`,
+      value: `${(latestMetrics.ram || 0).toFixed(0)} MiB`,
       icon: MemoryStick,
       color: "bg-[var(--chart-2)]",
     },
@@ -296,7 +346,7 @@
       key: "rx",
       label: "Network in",
       detail: "Receive",
-      value: () => formatNetworkRate(latestMetrics().rx),
+      value: formatNetworkRate(latestMetrics.rx || 0),
       icon: ArrowDownToLine,
       color: "bg-[var(--chart-3)]",
     },
@@ -304,11 +354,11 @@
       key: "tx",
       label: "Network out",
       detail: "Transmit",
-      value: () => formatNetworkRate(latestMetrics().tx),
+      value: formatNetworkRate(latestMetrics.tx || 0),
       icon: ArrowUpFromLine,
       color: "bg-[var(--chart-4)]",
     },
-  ] as const;
+  ];
 
   function getStatusBadgeClass(status: string): string {
     const s = status.toLowerCase();
@@ -431,7 +481,7 @@
                 </tr>
               {:else}
                 {#each [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) as dep}
-                  {@const isProduction = prodId() === dep.id}
+                  {@const isProduction = prodId === dep.id}
                   {@const canActivate = ["RUNNING", "PAUSED", "STOPPED", "FAILED"].includes(dep.status) && !isProduction}
                   <tr class="border-b border-border">
                     <td class="px-4 py-4">
@@ -486,7 +536,7 @@
       </Card>
     </section>
 
-    {#if active() && ["RUNNING", "DRAINING"].includes(active()!.status.toUpperCase())}
+    {#if active && (["RUNNING", "DRAINING", "STARTING", "HEALTHY"].includes(active.status.toUpperCase()) || liveMetrics)}
       <div class="space-y-6 animate-in fade-in duration-500 border-t border-border pt-6">
         <h2 class="text-lg font-bold tracking-tight">Live Performance</h2>
 
@@ -501,7 +551,7 @@
               <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div class="flex flex-col gap-1.5">
                   <CardTitle>System Performance</CardTitle>
-                  <CardDescription>Live CPU, RAM and network throughput. Total traffic: {formatBytes(totalTrafficBytes())}.</CardDescription>
+                  <CardDescription>Live CPU, RAM and network throughput. Total traffic: {formatBytes(totalTrafficBytes)}.</CardDescription>
                 </div>
                 <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                   {#each metricCards as metric}
@@ -512,7 +562,7 @@
                         {metric.label}
                       </div>
                       <div class="mt-2 flex flex-col gap-1">
-                        <span class="text-xl font-semibold tabular-nums">{metric.value()}</span>
+                        <span class="text-xl font-semibold tabular-nums">{metric.value}</span>
                         <span class="text-xs text-muted-foreground">{metric.detail}</span>
                       </div>
                     </div>
