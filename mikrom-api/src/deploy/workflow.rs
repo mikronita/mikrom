@@ -177,6 +177,22 @@ impl DeploymentPromotionWorkflow {
                     .await?;
                 }
 
+                // NEW: After promotion, ensure we scale to the desired number of replicas
+                info!(
+                    app = %app_after_promotion.name,
+                    desired = %app_after_promotion.desired_replicas,
+                    "Ensuring desired replicas after promotion"
+                );
+                state
+                    .scheduler
+                    .scale_app(
+                        app_after_promotion.id.to_string(),
+                        app_after_promotion.desired_replicas as u32,
+                        app_after_promotion.user_id.to_string(),
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Post-promotion scaling failed: {}", e))?;
+
                 Ok(())
             }
             .await;

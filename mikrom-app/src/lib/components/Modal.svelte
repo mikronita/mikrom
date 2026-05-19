@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from "svelte";
   import { X } from "lucide-svelte";
+  import { cn } from "$lib/utils";
 
   export let open = false;
   export let title = "";
@@ -29,8 +30,8 @@
 {#if open}
   <div class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-3 backdrop-blur-[1px] sm:p-0" role="presentation" on:click={(event) => event.target === event.currentTarget && close()}>
     <div class="w-full">
-      <div class={`relative mx-auto grid max-h-[calc(100vh-1.5rem)] gap-4 overflow-y-auto rounded-md border border-border bg-background p-6 shadow-xl ${width}`} role="dialog" aria-modal="true" aria-label={title}>
-        <div class="flex flex-col space-y-1.5 text-center sm:text-left">
+      <div class={cn("relative mx-auto grid max-h-[calc(100vh-1.5rem)] gap-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-xl", width)} role="dialog" aria-modal="true" aria-label={title}>
+        <div class="flex flex-col gap-1.5 text-center sm:text-left">
           <h2 class="text-lg font-semibold leading-none tracking-tight">{title}</h2>
           {#if description}
             <p class="text-sm text-muted-foreground">{description}</p>

@@ -329,4 +329,82 @@ mod tests {
             _ => panic!("expected config set"),
         }
     }
+
+    #[test]
+    fn test_cli_app_scale_parses() {
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "app",
+            "scale",
+            "--name",
+            "my-app",
+            "--replicas",
+            "3",
+            "--auto",
+            "true",
+            "--min",
+            "2",
+            "--max",
+            "5",
+            "--cpu",
+            "75.5",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::App(AppCommands::Scale {
+                name,
+                replicas,
+                auto,
+                min,
+                max,
+                cpu,
+                mem,
+            }) => {
+                assert_eq!(name, "my-app");
+                assert_eq!(replicas, Some(3));
+                assert_eq!(auto, Some(true));
+                assert_eq!(min, Some(2));
+                assert_eq!(max, Some(5));
+                assert_eq!(cpu, Some(75.5));
+                assert_eq!(mem, None);
+            },
+            _ => panic!("expected app scale"),
+        }
+    }
+
+    #[test]
+    fn test_cli_volume_create_parses_new_fields() {
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "volume",
+            "create",
+            "--app",
+            "my-app",
+            "--name",
+            "data",
+            "--size",
+            "1024",
+            "--mount",
+            "/mnt/data",
+            "--mode",
+            "1",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Volume(mikrom_cli::commands::VolumeCommands::Create {
+                app,
+                name,
+                size,
+                mount,
+                mode,
+            }) => {
+                assert_eq!(app, "my-app");
+                assert_eq!(name, "data");
+                assert_eq!(size, 1024);
+                assert_eq!(mount, "/mnt/data");
+                assert_eq!(mode, 1);
+            },
+            _ => panic!("expected volume create"),
+        }
+    }
 }

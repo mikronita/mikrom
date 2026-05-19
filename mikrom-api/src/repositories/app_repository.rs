@@ -48,6 +48,12 @@ pub struct CreateAppParams {
     pub github_repo_full_name: Option<String>,
     pub health_check_path: Option<String>,
     pub drain_timeout: Option<i32>,
+    pub desired_replicas: Option<i32>,
+    pub min_replicas: Option<i32>,
+    pub max_replicas: Option<i32>,
+    pub autoscaling_enabled: Option<bool>,
+    pub cpu_threshold: Option<f64>,
+    pub mem_threshold: Option<f64>,
 }
 
 impl Default for CreateAppParams {
@@ -64,6 +70,12 @@ impl Default for CreateAppParams {
             github_repo_full_name: None,
             health_check_path: None,
             drain_timeout: None,
+            desired_replicas: None,
+            min_replicas: None,
+            max_replicas: None,
+            autoscaling_enabled: None,
+            cpu_threshold: None,
+            mem_threshold: None,
         }
     }
 }
@@ -79,6 +91,16 @@ pub trait AppRepository: Send + Sync {
     async fn list_apps_by_user(&self, user_id: Option<Uuid>) -> anyhow::Result<Vec<App>>;
     async fn set_active_deployment(&self, app_id: Uuid, deployment_id: Uuid) -> anyhow::Result<()>;
     async fn update_app_port(&self, id: Uuid, port: i32) -> anyhow::Result<()>;
+    async fn update_app_scaling(&self, id: Uuid, desired_replicas: i32) -> anyhow::Result<()>;
+    async fn update_app_autoscaling(
+        &self,
+        id: Uuid,
+        min_replicas: i32,
+        max_replicas: i32,
+        enabled: bool,
+        cpu_threshold: Option<f64>,
+        mem_threshold: Option<f64>,
+    ) -> anyhow::Result<()>;
 
     async fn create_deployment(&self, data: NewDeployment) -> anyhow::Result<Deployment>;
     async fn update_deployment(

@@ -140,19 +140,29 @@
   $: activeIndex = hoveredIndex;
   $: activePoint = activeIndex !== null ? visiblePoints[activeIndex] : null;
   $: activeX = activeIndex !== null ? plotLeft + xStep * activeIndex : null;
+  
+  // Calculate tooltip alignment and position
+  $: tooltipXOffset = activeIndex !== null && visiblePoints.length > 0
+    ? activeIndex < visiblePoints.length / 4 
+      ? "0%" // Align to the left
+      : activeIndex > (visiblePoints.length * 3) / 4
+        ? "-100%" // Align to the right
+        : "-50%"  // Center
+    : "-50%";
+
   $: tooltipLeft = activeX !== null ? `${(activeX / width) * 100}%` : "0%";
   $: tooltipTop =
     activePoint && activeIndex !== null
       ? `${Math.max(
-          8,
+          12,
           Math.min(
-            plotBottom - 24,
+            plotBottom - 100,
             Math.min(
               ...series.map((config) => {
                 const bounds = seriesBounds[config.key];
                 return plotBottom - normalize(activePoint[config.key], bounds.min, bounds.max) * plotHeight;
               })
-            ) - 92
+            ) - 24
           )
         )}px`
       : "24px";
@@ -224,8 +234,8 @@
 
       {#if activePoint && activeIndex !== null}
         <div
-          class="pointer-events-none absolute z-10 min-w-56 -translate-x-1/2 -translate-y-full rounded-lg border border-border bg-popover/95 px-3 py-2 shadow-lg backdrop-blur"
-          style={`left: ${tooltipLeft}; top: ${tooltipTop};`}
+          class="pointer-events-none absolute z-10 min-w-56 -translate-y-full rounded-lg border border-border bg-popover/95 px-3 py-2 shadow-lg backdrop-blur"
+          style={`left: ${tooltipLeft}; top: ${tooltipTop}; transform: translate(${tooltipXOffset}, -100%);`}
         >
           <div class="text-xs font-medium text-muted-foreground">{activePoint.time}</div>
           <div class="mt-2 grid gap-2">

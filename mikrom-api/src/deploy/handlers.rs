@@ -31,6 +31,10 @@ pub struct CreateAppRequest {
     pub github_repo_full_name: Option<String>,
     pub health_check_path: Option<String>,
     pub drain_timeout: Option<i32>,
+    pub desired_replicas: Option<i32>,
+    pub min_replicas: Option<i32>,
+    pub max_replicas: Option<i32>,
+    pub autoscaling_enabled: Option<bool>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -80,7 +84,23 @@ pub struct AppResponse {
     pub active_deployment_id: Option<Uuid>,
     pub health_check_path: String,
     pub drain_timeout: i32,
+    pub desired_replicas: i32,
+    pub min_replicas: i32,
+    pub max_replicas: i32,
+    pub autoscaling_enabled: bool,
+    pub cpu_threshold: f64,
+    pub mem_threshold: f64,
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ScaleAppRequest {
+    pub desired_replicas: Option<i32>,
+    pub min_replicas: Option<i32>,
+    pub max_replicas: Option<i32>,
+    pub autoscaling_enabled: Option<bool>,
+    pub cpu_threshold: Option<f64>,
+    pub mem_threshold: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -112,15 +132,30 @@ pub async fn create_app_handler(
     Json(payload): Json<CreateAppRequest>,
 ) -> ApiResult<(StatusCode, Json<AppResponse>)> {
     let port = payload.port.unwrap_or(8080);
+
+    // Validate replicas limit
+    if payload.desired_replicas.unwrap_or(0) > 3
+        || payload.max_replicas.unwrap_or(0) > 3
+        || payload.min_replicas.unwrap_or(0) > 3
+    {
+        return Err(ApiError::BadRequest(
+            "Maximum number of replicas is 3".to_string(),
+        ));
+    }
     let hostname = format!(
         "{}.apps.mikrom.spluca.org",
         payload.name.to_lowercase().replace(' ', "-")
     );
 
-    let webhook_secret = Alphanumeric.sample_string(&mut rand::rng(), 32);
-
     let user_id =
-        uuid::Uuid::parse_str(&auth.user_id).map_err(|e| ApiError::Internal(e.to_string()))?;
+        Uuid::parse_str(&auth.user_id).map_err(|_| ApiError::Auth("Invalid user ID".into()))?;
+    let user = state
+        .user_repo
+        .find_by_id(user_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("User not found".into()))?;
+
+    let webhook_secret = Alphanumeric.sample_string(&mut rand::rng(), 32);
 
     let app = state
         .app_repo
@@ -136,6 +171,7 @@ pub async fn create_app_handler(
             github_repo_full_name: payload.github_repo_full_name.clone(),
             health_check_path: payload.health_check_path,
             drain_timeout: payload.drain_timeout,
+            ..Default::default()
         })
         .await?;
 
@@ -148,6 +184,22 @@ pub async fn create_app_handler(
         volume_id: None,
         resource_id: None,
     });
+
+    // Notify Scheduler about initial scaling config
+    let _ = state
+        .scheduler
+        .update_app_scaling_config(mikrom_proto::scheduler::UpdateAppScalingConfigRequest {
+            app_id: app.id.to_string(),
+            user_id: app.user_id.to_string(),
+            min_replicas: app.min_replicas as u32,
+            max_replicas: app.max_replicas as u32,
+            autoscaling_enabled: app.autoscaling_enabled,
+            cpu_threshold: app.cpu_threshold,
+            mem_threshold: app.mem_threshold,
+            vpc_ipv6_prefix: user.vpc_ipv6_prefix.clone().unwrap_or_default(),
+            desired_replicas: app.desired_replicas as u32,
+        })
+        .await;
 
     // Automatically create GitHub Webhook if repo is connected
     tracing::info!(
@@ -247,6 +299,12 @@ pub async fn create_app_handler(
             active_deployment_id: app.active_deployment_id,
             health_check_path: app.health_check_path,
             drain_timeout: app.drain_timeout,
+            desired_replicas: app.desired_replicas,
+            min_replicas: app.min_replicas,
+            max_replicas: app.max_replicas,
+            autoscaling_enabled: app.autoscaling_enabled,
+            cpu_threshold: app.cpu_threshold,
+            mem_threshold: app.mem_threshold,
             created_at: app.created_at,
         }),
     ))
@@ -294,6 +352,12 @@ pub async fn list_apps_handler(
                 active_deployment_id: a.active_deployment_id,
                 health_check_path: a.health_check_path,
                 drain_timeout: a.drain_timeout,
+                desired_replicas: a.desired_replicas,
+                min_replicas: a.min_replicas,
+                max_replicas: a.max_replicas,
+                autoscaling_enabled: a.autoscaling_enabled,
+                cpu_threshold: a.cpu_threshold,
+                mem_threshold: a.mem_threshold,
                 created_at: a.created_at,
             })
             .collect(),
@@ -422,6 +486,121 @@ pub async fn delete_app_handler(
         resource_id: None,
     });
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    patch,
+    path = "/v1/apps/{app_name}/scale",
+    request_body = ScaleAppRequest,
+    params(
+        ("app_name" = String, Path, description = "Application name")
+    ),
+    responses(
+        (status = 200, description = "Scaling configuration updated"),
+        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
+        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
+    ),
+    tag = "apps",
+    security(
+        ("jwt" = [])
+    )
+)]
+pub async fn scale_app_handler(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(app_name): Path<String>,
+    Json(payload): Json<ScaleAppRequest>,
+) -> ApiResult<StatusCode> {
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+
+    let user_uuid =
+        Uuid::parse_str(&auth.user_id).map_err(|_| ApiError::Auth("Invalid user ID".into()))?;
+    let user = state
+        .user_repo
+        .find_by_id(user_uuid)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("User not found".into()))?;
+
+    // Validate replicas limit
+    if payload.desired_replicas.unwrap_or(0) > 3
+        || payload.max_replicas.unwrap_or(0) > 3
+        || payload.min_replicas.unwrap_or(0) > 3
+    {
+        return Err(ApiError::BadRequest(
+            "Maximum number of replicas is 3".to_string(),
+        ));
+    }
+
+    // 1. Update DB (partial updates supported)
+    if let Some(replicas) = payload.desired_replicas {
+        state
+            .app_repo
+            .update_app_scaling(app.id, replicas)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    }
+
+    if payload.autoscaling_enabled.is_some()
+        || payload.min_replicas.is_some()
+        || payload.max_replicas.is_some()
+        || payload.cpu_threshold.is_some()
+        || payload.mem_threshold.is_some()
+    {
+        state
+            .app_repo
+            .update_app_autoscaling(
+                app.id,
+                payload.min_replicas.unwrap_or(app.min_replicas),
+                payload.max_replicas.unwrap_or(app.max_replicas),
+                payload
+                    .autoscaling_enabled
+                    .unwrap_or(app.autoscaling_enabled),
+                payload.cpu_threshold,
+                payload.mem_threshold,
+            )
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    }
+
+    // 2. Fetch updated app state to notify scheduler
+    let updated_app = state
+        .app_repo
+        .get_app(app.id)
+        .await?
+        .ok_or_else(|| ApiError::Internal("App disappeared after update".into()))?;
+
+    // 3. Notify Scheduler
+    // Case A: Manual scaling (if autoscaling is disabled or we just disabled it)
+    if !updated_app.autoscaling_enabled {
+        state
+            .scheduler
+            .scale_app(
+                updated_app.id.to_string(),
+                updated_app.desired_replicas as u32,
+                updated_app.user_id.to_string(),
+            )
+            .await
+            .map_err(ApiError::Scheduler)?;
+    }
+
+    // Case B: Update autoscaling config in scheduler cache
+    state
+        .scheduler
+        .update_app_scaling_config(mikrom_proto::scheduler::UpdateAppScalingConfigRequest {
+            app_id: updated_app.id.to_string(),
+            user_id: updated_app.user_id.to_string(),
+            min_replicas: updated_app.min_replicas as u32,
+            max_replicas: updated_app.max_replicas as u32,
+            autoscaling_enabled: updated_app.autoscaling_enabled,
+            cpu_threshold: updated_app.cpu_threshold,
+            mem_threshold: updated_app.mem_threshold,
+            vpc_ipv6_prefix: user.vpc_ipv6_prefix.clone().unwrap_or_default(),
+            desired_replicas: updated_app.desired_replicas as u32,
+        })
+        .await
+        .map_err(ApiError::Scheduler)?;
+
+    Ok(StatusCode::OK)
 }
 
 #[utoipa::path(
@@ -973,4 +1152,133 @@ async fn get_app_by_name_and_auth(
     }
 
     Ok(app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::AppState;
+    use crate::auth::AuthUser;
+    use crate::repositories::app_repository::MockAppRepository;
+    use crate::repositories::user_repository::{MockUserRepository, User, UserRole};
+    use crate::scheduler::MockScheduler;
+    use axum::extract::{Path, State};
+    use axum::http::StatusCode;
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    struct MockNats;
+    #[async_trait::async_trait]
+    impl crate::nats::NatsClient for MockNats {
+        async fn request_raw(&self, _s: String, _p: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+            Ok(vec![])
+        }
+        async fn publish_raw(&self, _s: String, _p: Vec<u8>) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn subscribe_raw(&self, _s: String) -> anyhow::Result<async_nats::Subscriber> {
+            Err(anyhow::anyhow!("Mock subscriber not implemented"))
+        }
+    }
+
+    async fn create_test_state() -> AppState {
+        let user_repo = Arc::new(MockUserRepository::new());
+        let app_repo = Arc::new(MockAppRepository::new());
+        let github_repo =
+            Arc::new(crate::repositories::github_repository::MockGithubRepository::default());
+        let volume_repo =
+            Arc::new(crate::repositories::volume_repository::MockVolumeRepository::new());
+        let scheduler = Arc::new(MockScheduler::new());
+
+        AppState {
+            user_repo,
+            app_repo,
+            github_repo,
+            volume_repo,
+            scheduler,
+            nats: crate::nats::TypedNatsClient::new_custom(Arc::new(MockNats)),
+            router_addr: String::new(),
+            frontend_url: String::new(),
+            api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".to_string(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            acme_email: String::new(),
+            acme_staging: true,
+            acme_check_interval: 0,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: Arc::new(dashmap::DashSet::new()),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_scale_app_validation_limit() {
+        let mut state = create_test_state().await;
+
+        let user_id = Uuid::new_v4();
+        let auth = AuthUser {
+            user_id: user_id.to_string(),
+            email: "test@example.com".to_string(),
+            role: UserRole::User,
+        };
+
+        let app = crate::models::app::App {
+            id: Uuid::new_v4(),
+            user_id,
+            name: "test-app".to_string(),
+            ..crate::models::app::App::default()
+        };
+
+        // Mock app repo
+        let mut mock_app_repo = MockAppRepository::new();
+        mock_app_repo
+            .expect_get_app_by_name()
+            .returning(move |_| Ok(Some(app.clone())));
+        state.app_repo = Arc::new(mock_app_repo);
+
+        // Mock user repo
+        let mut mock_user_repo = MockUserRepository::new();
+        mock_user_repo.expect_find_by_id().returning(move |_| {
+            Ok(Some(User {
+                id: user_id,
+                email: "test@example.com".to_string(),
+                password_hash: "hash".to_string(),
+                role: UserRole::User,
+                first_name: None,
+                last_name: None,
+                vpc_ipv6_prefix: None,
+            }))
+        });
+        state.user_repo = Arc::new(mock_user_repo);
+
+        // Request too many replicas
+        let payload = ScaleAppRequest {
+            desired_replicas: Some(4), // LIMIT IS 3
+            min_replicas: None,
+            max_replicas: None,
+            autoscaling_enabled: None,
+            cpu_threshold: None,
+            mem_threshold: None,
+        };
+
+        let result = scale_app_handler(
+            auth,
+            State(state),
+            Path("test-app".to_string()),
+            axum::Json(payload),
+        )
+        .await;
+
+        match result {
+            Err(ApiError::BadRequest(msg)) => {
+                assert!(msg.contains("Maximum number of replicas is 3"))
+            },
+            _ => panic!("Expected BadRequest error, got {:?}", result),
+        }
+    }
 }

@@ -3,13 +3,15 @@ pub mod deployment;
 pub use deployment::DeploymentService;
 
 use crate::domain::{
-    AgentClient, DomainError, DomainResult, Job, JobRepository, JobStatus, WorkerRepository,
+    AgentClient, AppRepository, DomainError, DomainResult, Job, JobRepository, JobStatus,
+    WorkerRepository,
 };
 use std::sync::Arc;
 
 pub struct AppService {
     pub deployment: DeploymentService,
     pub job_repo: Arc<dyn JobRepository>,
+    pub app_repo: Arc<dyn AppRepository>,
     pub worker_repo: Arc<dyn WorkerRepository>,
     pub agent_client: Arc<dyn AgentClient>,
     pub pool: sqlx::PgPool,
@@ -18,6 +20,7 @@ pub struct AppService {
 impl AppService {
     pub fn new(
         job_repo: Arc<dyn JobRepository>,
+        app_repo: Arc<dyn AppRepository>,
         worker_repo: Arc<dyn WorkerRepository>,
         agent_client: Arc<dyn AgentClient>,
         pool: sqlx::PgPool,
@@ -29,6 +32,7 @@ impl AppService {
                 agent_client.clone(),
             ),
             job_repo,
+            app_repo,
             worker_repo,
             agent_client,
             pool,
@@ -153,6 +157,241 @@ impl AppService {
         }
 
         self.job_repo.remove_jobs_by_app(app_id).await?;
+        Ok(())
+    }
+
+    pub async fn scale_app(
+        &self,
+        app_id: &str,
+        desired_replicas: u32,
+        user_id: &str,
+    ) -> DomainResult<()> {
+        let jobs = self.job_repo.list_jobs(Some(user_id), None, None).await?;
+        let active_jobs: Vec<_> = jobs
+            .into_iter()
+            .filter(|j| {
+                j.app_id == app_id
+                    && matches!(
+                        j.status,
+                        JobStatus::Pending | JobStatus::Scheduled | JobStatus::Running
+                    )
+            })
+            .collect();
+
+        let current_count = active_jobs.len() as u32;
+
+        if current_count == desired_replicas {
+            return Ok(());
+        }
+
+        if current_count < desired_replicas {
+            let to_add = desired_replicas - current_count;
+            tracing::info!(app_id = %app_id, to_add = %to_add, "Scaling up app");
+
+            // Fetch app config to get the VPC prefix
+            let app_config = self.app_repo.get_app_config(app_id).await?;
+            let vpc_prefix = app_config.map(|c| c.vpc_ipv6_prefix).unwrap_or_default();
+
+            // Find a template job to clone
+            let template_job = active_jobs.first().cloned();
+
+            let template_job = match template_job {
+                Some(t) => t,
+                None => {
+                    // Try to list ALL jobs for this app to find a template
+                    let all_jobs = self
+                        .job_repo
+                        .list_jobs(Some(user_id), Some(app_id), None)
+                        .await?;
+                    all_jobs.first().cloned().ok_or_else(|| {
+                        DomainError::Infrastructure(format!(
+                            "No template job found for app {app_id} to scale up"
+                        ))
+                    })?
+                },
+            };
+
+            for _ in 0..to_add {
+                self.deployment
+                    .deploy_app(
+                        template_job.app_id.clone(),
+                        template_job.app_name.clone(),
+                        template_job.image.clone(),
+                        template_job.user_id.clone(),
+                        template_job.deployment_id.clone().unwrap_or_default(),
+                        vpc_prefix.clone(),
+                        template_job.config.clone(),
+                        crate::domain::worker::SchedulingStrategy::LeastLoaded,
+                    )
+                    .await?;
+            }
+        } else {
+            let to_remove = current_count - desired_replicas;
+            tracing::info!(app_id = %app_id, to_remove = %to_remove, "Scaling down app");
+
+            // Sort jobs by status: Pending first, then Scheduled, then Running
+            let mut jobs_to_kill = active_jobs;
+            jobs_to_kill.sort_by_key(|j| match j.status {
+                JobStatus::Pending => 0,
+                JobStatus::Scheduled => 1,
+                JobStatus::Running => 2,
+                _ => 3,
+            });
+
+            for i in 0..to_remove as usize {
+                let job = &jobs_to_kill[i];
+                self.delete_app(&job.job_id, user_id).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn start_autoscaler(self: Arc<Self>) {
+        tracing::info!("Starting background autoscaler loop");
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+
+        loop {
+            interval.tick().await;
+            if let Err(e) = self.reconcile_apps().await {
+                tracing::error!("App reconciliation failed: {}", e);
+            }
+        }
+    }
+
+    async fn reconcile_apps(&self) -> DomainResult<()> {
+        // 1. Get all app configurations
+        let apps = self
+            .app_repo
+            .list_all_apps()
+            .await
+            .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+
+        if apps.is_empty() {
+            return Ok(());
+        }
+
+        // 2. Get all running jobs grouped by app_id
+        let all_jobs = self
+            .job_repo
+            .list_jobs(None, None, Some(JobStatus::Running))
+            .await?;
+
+        let mut app_running_counts: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
+        let mut app_metrics: std::collections::HashMap<String, (f32, f32)> =
+            std::collections::HashMap::new();
+
+        for job in all_jobs {
+            let count = app_running_counts.entry(job.app_id.clone()).or_insert(0);
+            *count += 1;
+
+            if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
+                if let Ok(worker) = self.worker_repo.get_worker(host_id).await {
+                    if let Some(metrics) = worker.and_then(|w| w.metrics) {
+                        if let Some(vm_metrics) = metrics.vms.get(vm_id) {
+                            let entry = app_metrics.entry(job.app_id.clone()).or_insert((0.0, 0.0));
+                            entry.0 += vm_metrics.cpu_usage;
+                            entry.1 += (vm_metrics.ram_used_bytes as f32
+                                / job.config.memory_mib as f32
+                                / 1024.0
+                                / 1024.0)
+                                * 100.0;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Evaluate each app
+        for app in apps {
+            let current_count = *app_running_counts.get(&app.id).unwrap_or(&0);
+
+            if app.autoscaling_enabled {
+                if let Some((total_cpu, total_mem)) = app_metrics.get(&app.id) {
+                    if current_count == 0 {
+                        continue;
+                    }
+                    let avg_cpu = total_cpu / (current_count as f32);
+                    let avg_mem = total_mem / (current_count as f32);
+
+                    tracing::debug!(
+                        app_id = %app.id,
+                        avg_cpu = %avg_cpu,
+                        avg_mem = %avg_mem,
+                        count = %current_count,
+                        "Evaluating autoscaling"
+                    );
+
+                    let mut desired = current_count;
+
+                    if (avg_cpu as f64) > app.cpu_threshold || (avg_mem as f64) > app.mem_threshold
+                    {
+                        if desired < app.max_replicas {
+                            desired += 1;
+                            tracing::info!(
+                                app_id = %app.id,
+                                avg_cpu = %avg_cpu,
+                                avg_mem = %avg_mem,
+                                "Scale up triggered (auto)"
+                            );
+                        }
+                    } else if (avg_cpu as f64) < (app.cpu_threshold * 0.5)
+                        && (avg_mem as f64) < (app.mem_threshold * 0.5)
+                    {
+                        if desired > app.min_replicas {
+                            desired -= 1;
+                            tracing::info!(
+                                app_id = %app.id,
+                                avg_cpu = %avg_cpu,
+                                avg_mem = %avg_mem,
+                                "Scale down triggered (auto)"
+                            );
+                        }
+                    }
+
+                    if desired != current_count {
+                        if let Err(e) = self.scale_app(&app.id, desired, &app.user_id).await {
+                            tracing::error!("Failed to autoscale app {}: {}", app.id, e);
+                        }
+                    }
+                } else if app.min_replicas > 0 {
+                    // App has no running instances but min_replicas > 0, scale up to min
+                    tracing::info!(app_id = %app.id, "Scaling up to min_replicas");
+                    if let Err(e) = self
+                        .scale_app(&app.id, app.min_replicas, &app.user_id)
+                        .await
+                    {
+                        tracing::error!("Failed to scale app {} to min: {}", app.id, e);
+                    }
+                }
+            } else {
+                // Manual scaling reconciliation
+                if current_count != app.desired_replicas && current_count > 0 {
+                    tracing::info!(
+                        app_id = %app.id,
+                        current = %current_count,
+                        desired = %app.desired_replicas,
+                        "Reconciling manual scaling"
+                    );
+                    if let Err(e) = self
+                        .scale_app(&app.id, app.desired_replicas, &app.user_id)
+                        .await
+                    {
+                        tracing::error!("Failed to reconcile app {}: {}", app.id, e);
+                    }
+                } else if current_count == 0 && app.desired_replicas > 0 {
+                    // This is handled by the first deployment usually, but if all instances died, we might want to recover.
+                    // However, we need a template job. scale_app handles that.
+                    tracing::debug!(app_id = %app.id, "App has 0 instances but desired > 0. Waiting for first deploy or historical template.");
+                    // We try scale_app anyway, it will fail if no template exists.
+                    let _ = self
+                        .scale_app(&app.id, app.desired_replicas, &app.user_id)
+                        .await;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -326,7 +565,8 @@ mod tests {
     use crate::domain::job::{Job, JobStatus, VmConfig};
     use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository};
     use crate::domain::{
-        AgentClient, DomainError, DomainResult, JobRepository, Worker, WorkerRepository,
+        AgentClient, AppConfig, AppRepository, DomainError, DomainResult, JobRepository, Worker,
+        WorkerRepository,
     };
     use async_trait::async_trait;
     use mockall::predicate::eq;
@@ -398,6 +638,23 @@ mod tests {
             Ok(vec![])
         }
         async fn get_available_workers(&self, _t: i64) -> DomainResult<Vec<Worker>> {
+            Ok(vec![])
+        }
+    }
+
+    struct DummyAppRepo;
+    #[async_trait]
+    impl AppRepository for DummyAppRepo {
+        async fn update_app_config(&self, _config: AppConfig) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn get_app_config(&self, _app_id: &str) -> anyhow::Result<Option<AppConfig>> {
+            Ok(None)
+        }
+        async fn list_all_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
+            Ok(vec![])
+        }
+        async fn list_autoscaling_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
             Ok(vec![])
         }
     }
@@ -518,6 +775,7 @@ mod tests {
         job.schedule("host-1".to_string(), "vm-1".to_string());
 
         let job_repo = Arc::new(DummyJobRepo { job });
+        let app_repo = Arc::new(DummyAppRepo);
         let worker_repo = Arc::new(DummyWorkerRepo);
         let agent_client = Arc::new(DummyAgentClient { healthy: true });
 
@@ -531,6 +789,7 @@ mod tests {
                 agent_client.clone(),
             ),
             job_repo,
+            app_repo,
             worker_repo,
             agent_client,
             pool,
@@ -578,6 +837,7 @@ mod tests {
         agent_client.expect_stop_vm().times(0);
 
         let worker_repo = Arc::new(MockWorkerRepository::new());
+        let app_repo = Arc::new(DummyAppRepo);
         let job_repo = Arc::new(job_repo);
         let agent_client = Arc::new(agent_client);
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
@@ -589,6 +849,7 @@ mod tests {
                 agent_client.clone(),
             ),
             job_repo,
+            app_repo,
             worker_repo,
             agent_client,
             pool,
@@ -624,6 +885,7 @@ mod tests {
             .returning(|_, _| Ok(()));
 
         let worker_repo = Arc::new(MockWorkerRepository::new());
+        let app_repo = Arc::new(DummyAppRepo);
         let job_repo = Arc::new(job_repo);
         let agent_client = Arc::new(agent_client);
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
@@ -635,6 +897,7 @@ mod tests {
                 agent_client.clone(),
             ),
             job_repo,
+            app_repo,
             worker_repo,
             agent_client,
             pool,
@@ -668,6 +931,7 @@ mod tests {
             });
 
         let worker_repo = Arc::new(MockWorkerRepository::new());
+        let app_repo = Arc::new(DummyAppRepo);
         let job_repo = Arc::new(job_repo);
         let agent_client = Arc::new(agent_client);
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
@@ -679,6 +943,7 @@ mod tests {
                 agent_client.clone(),
             ),
             job_repo,
+            app_repo,
             worker_repo,
             agent_client,
             pool,
@@ -708,6 +973,7 @@ mod tests {
             .returning(|_, _| Err(DomainError::Infrastructure("boom".to_string())));
 
         let worker_repo = Arc::new(MockWorkerRepository::new());
+        let app_repo = Arc::new(DummyAppRepo);
         let job_repo = Arc::new(job_repo);
         let agent_client = Arc::new(agent_client);
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
@@ -719,6 +985,7 @@ mod tests {
                 agent_client.clone(),
             ),
             job_repo,
+            app_repo,
             worker_repo,
             agent_client,
             pool,

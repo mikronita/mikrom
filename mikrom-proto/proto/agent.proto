@@ -222,6 +222,13 @@ message Volume {
   bool read_only = 3;
   string pool_name = 4;
   string mount_point = 5;
+  AccessMode access_mode = 6;
+}
+
+enum AccessMode {
+  ACCESS_MODE_READ_WRITE_ONCE = 0;
+  ACCESS_MODE_READ_WRITE_MANY = 1;
+  ACCESS_MODE_READ_ONLY_MANY = 2;
 }
 
 message VmConfig {

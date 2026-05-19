@@ -25,4 +25,10 @@ impl From<sqlx::Error> for DomainError {
     }
 }
 
+impl From<anyhow::Error> for DomainError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Infrastructure(e.to_string())
+    }
+}
+
 pub type DomainResult<T> = Result<T, DomainError>;

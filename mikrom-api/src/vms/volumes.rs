@@ -18,6 +18,8 @@ pub struct CreateVolumeRequest {
     pub size_mib: i32,
     #[serde(default = "default_mount_point")]
     pub mount_point: String,
+    #[serde(default)]
+    pub access_mode: i32,
 }
 
 fn default_mount_point() -> String {
@@ -104,6 +106,7 @@ pub async fn create_volume_handler(
             size_mib: req.size_mib,
             pool_name: pool_name.clone(),
             mount_point: req.mount_point,
+            access_mode: req.access_mode,
         })
         .await?;
 
@@ -586,6 +589,7 @@ pub async fn clone_volume_handler(
             size_mib: source_volume.size_mib, // Clones usually keep the same size initially
             pool_name: source_volume.pool_name.clone(),
             mount_point: source_volume.mount_point.clone(),
+            access_mode: source_volume.access_mode,
         })
         .await?;
 

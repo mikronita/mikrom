@@ -10,9 +10,13 @@ pub async fn handle(
 ) -> Result<()> {
     match cmd {
         VolumeCommands::List { app } => list(client, &app, output).await,
-        VolumeCommands::Create { app, name, size } => {
-            create(client, &app, &name, size, output).await
-        },
+        VolumeCommands::Create {
+            app,
+            name,
+            size,
+            mount,
+            mode,
+        } => create(client, &app, &name, size, &mount, mode, output).await,
         VolumeCommands::Snapshot { volume_id, name } => {
             snapshot(client, &volume_id, &name, output).await
         },
@@ -42,14 +46,20 @@ async fn list(client: &MikromClient, app_name: &str, output: OutputFormat) -> Re
                     vol.name.clone(),
                     vol.id.clone(),
                     format!("{} MiB", vol.size_mib),
-                    vol.pool_name.clone(),
+                    vol.mount_point.clone(),
+                    match vol.access_mode {
+                        0 => "RWO (Single Node)".to_string(),
+                        1 => "RWX (Shared Mesh)".to_string(),
+                        2 => "ROX (Shared Read)".to_string(),
+                        _ => "Unknown".to_string(),
+                    },
                     vol.created_at.clone(),
                 ]
             })
             .collect::<Vec<_>>();
         ui::table(
             &format!("💾 Volumes for {}", ui::bold_cyan(app_name)),
-            &["Name", "ID", "Size", "Pool", "Created"],
+            &["Name", "ID", "Size", "Mount", "Mode", "Created"],
             &rows,
         );
     }
@@ -61,27 +71,35 @@ async fn create(
     app_name: &str,
     name: &str,
     size: i32,
+    mount_point: &str,
+    access_mode: i32,
     output: OutputFormat,
 ) -> Result<()> {
     if output == OutputFormat::Table {
         ui::step(
             ui::WAIT,
             &format!(
-                "Creating volume {} for {}...",
+                "Creating volume {} for {} (mode {})...",
                 ui::bold_cyan(name),
-                ui::bold_cyan(app_name)
+                ui::bold_cyan(app_name),
+                access_mode
             ),
         );
     }
 
     let app = find_app_by_name(client, app_name).await?;
-    let volume = client.create_volume(&app.id, name, size).await?;
+    let volume = client
+        .create_volume(&app.id, name, size, mount_point, access_mode)
+        .await?;
 
     if output == OutputFormat::Json {
         return ui::print_json(&volume);
     }
 
-    ui::success(&format!("Volume created: {} ({})", volume.name, volume.id));
+    ui::success(&format!(
+        "Volume created: {} ({}) mounted at {}",
+        volume.name, volume.id, volume.mount_point
+    ));
     Ok(())
 }
 

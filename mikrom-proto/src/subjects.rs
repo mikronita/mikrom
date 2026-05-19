@@ -34,6 +34,12 @@ pub const SCHEDULER_RESUME_APP: &str = "mikrom.scheduler.resume_app";
 /// Scheduler delete app subject (request/reply).
 pub const SCHEDULER_DELETE_APP: &str = "mikrom.scheduler.delete_app";
 
+/// Scheduler scale app subject (request/reply).
+pub const SCHEDULER_SCALE_APP: &str = "mikrom.scheduler.scale_app";
+
+/// Scheduler update app scaling config subject (request/reply).
+pub const SCHEDULER_UPDATE_APP_SCALING_CONFIG: &str = "mikrom.scheduler.update_app_scaling_config";
+
 /// Scheduler cancel app subject (request/reply).
 pub const SCHEDULER_CANCEL_APP: &str = "mikrom.scheduler.cancel_app";
 

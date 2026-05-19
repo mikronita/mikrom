@@ -12,9 +12,11 @@
   import Avatar from "$lib/components/Avatar.svelte";
   import AvatarFallback from "$lib/components/AvatarFallback.svelte";
   import Button from "$lib/components/Button.svelte";
+  import CardSkeleton from "$lib/components/CardSkeleton.svelte";
   import Field from "$lib/components/Field.svelte";
   import Input from "$lib/components/Input.svelte";
   import Separator from "$lib/components/Separator.svelte";
+  import Skeleton from "$lib/components/Skeleton.svelte";
   import Switch from "$lib/components/Switch.svelte";
   import { getToken } from "$lib/auth";
   import { getGithubInstallUrl, getUserProfile, listGithubAccounts, updateUserProfile, type GithubAccount, type UserProfile } from "$lib/api";
@@ -137,8 +139,25 @@
         </CardHeader>
         <CardContent>
           {#if loading}
-            <div class="flex min-h-64 items-center justify-center">
-              <Loader2 class="size-6 animate-spin text-muted-foreground" />
+            <div class="flex flex-col gap-8">
+              <CardSkeleton
+                showBadge={false}
+                iconClassName="size-20 rounded-full"
+                titleClassName="w-36"
+                descriptionClassName="w-56"
+                footerLineClassName=""
+                footerPills={["w-24", "w-20"]}
+              />
+
+              <Separator />
+
+              <div class="grid gap-6 md:grid-cols-2">
+                <Skeleton className="h-20 w-full" />
+                <Skeleton className="h-20 w-full" />
+                <div class="md:col-span-2">
+                  <Skeleton className="h-20 w-full" />
+                </div>
+              </div>
             </div>
           {:else}
             <div class="flex flex-col gap-8">
@@ -219,7 +238,7 @@
                 <CardTitle>Two-factor authentication</CardTitle>
                 <CardDescription>Add an extra layer of security to your account.</CardDescription>
               </div>
-              <Badge variant="warning">
+              <Badge variant="outline">
                 <ShieldCheck class="size-4" />
                 Not enabled
               </Badge>
@@ -282,7 +301,7 @@
                 <CardTitle class="text-2xl">Pro developer</CardTitle>
                 <p class="text-sm text-muted-foreground">$29 / month</p>
               </div>
-              <Badge variant="secondary">Active</Badge>
+              <Badge variant="outline" className="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">Active</Badge>
             </div>
           </CardHeader>
           <CardContent class="pt-6">
@@ -339,8 +358,23 @@
 
             <div class="mt-4 space-y-4">
               {#if loadingGithub}
-                <div class="flex justify-center p-4">
-                  <Loader2 class="size-5 animate-spin text-muted-foreground" />
+                <div class="flex flex-col gap-4">
+                  <CardSkeleton
+                    compact
+                    showBadge={false}
+                    iconClassName="size-10 rounded-lg"
+                    titleClassName="w-32"
+                    descriptionClassName="w-44"
+                    footerLineClassName=""
+                  />
+                  <CardSkeleton
+                    compact
+                    showBadge={false}
+                    iconClassName="size-10 rounded-lg"
+                    titleClassName="w-32"
+                    descriptionClassName="w-44"
+                    footerLineClassName=""
+                  />
                 </div>
               {:else if githubAccounts.length > 0}
                 {#each githubAccounts as account}

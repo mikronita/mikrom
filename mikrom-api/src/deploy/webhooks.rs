@@ -270,17 +270,8 @@ mod tests {
             name: "test-app".to_string(),
             git_url: "https://github.com/owner/test-repo".into(),
             port: 8080,
-            hostname: None,
-            user_id: Uuid::new_v4(),
             github_webhook_secret: Some(secret.to_string()),
-            github_installation_id: None,
-            github_repo_id: None,
-            github_repo_full_name: None,
-            active_deployment_id: None,
-            health_check_path: "/".to_string(),
-            drain_timeout: 10,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            ..App::default()
         };
 
         mock_repo
@@ -344,17 +335,8 @@ mod tests {
             name: "test-app".to_string(),
             git_url: "".into(),
             port: 8080,
-            hostname: None,
-            user_id: Uuid::new_v4(),
             github_webhook_secret: Some(secret.to_string()),
-            github_installation_id: None,
-            github_repo_id: None,
-            github_repo_full_name: None,
-            active_deployment_id: None,
-            health_check_path: "/".to_string(),
-            drain_timeout: 10,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            ..App::default()
         };
 
         mock_repo
@@ -391,17 +373,8 @@ mod tests {
             name: "test-repo".to_string(),
             git_url: "https://github.com/owner/test-repo".into(),
             port: 8080,
-            hostname: None,
-            user_id: Uuid::new_v4(),
             github_webhook_secret: Some(secret.to_string()),
-            github_installation_id: None,
-            github_repo_id: None,
-            github_repo_full_name: None,
-            active_deployment_id: None,
-            health_check_path: "/".to_string(),
-            drain_timeout: 10,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            ..App::default()
         };
 
         mock_repo
@@ -441,17 +414,10 @@ mod tests {
             name: "generic-app".to_string(),
             git_url: "https://github.com/owner/generic-repo".into(),
             port: 8080,
-            hostname: None,
-            user_id: Uuid::new_v4(),
             github_webhook_secret: Some(secret.to_string()),
-            github_installation_id: None,
             github_repo_id: Some(repo_id),
             github_repo_full_name: Some("owner/generic-repo".to_string()),
-            active_deployment_id: None,
-            health_check_path: "/".to_string(),
-            drain_timeout: 10,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            ..App::default()
         };
 
         mock_repo
@@ -489,17 +455,10 @@ mod tests {
             name: "metadata-app".to_string(),
             git_url: "https://github.com/owner/metadata-repo".into(),
             port: 8080,
-            hostname: None,
-            user_id: Uuid::new_v4(),
             github_webhook_secret: Some(secret.to_string()),
-            github_installation_id: None,
             github_repo_id: Some(repo_id),
             github_repo_full_name: Some("owner/metadata-repo".to_string()),
-            active_deployment_id: None,
-            health_check_path: "/".to_string(),
-            drain_timeout: 10,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            ..App::default()
         };
 
         mock_repo

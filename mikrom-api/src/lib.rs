@@ -114,28 +114,38 @@ impl AppState {
             None => return Ok(()),
         };
 
-        let target_url = if let Some(dep_id) = app.active_deployment_id {
-            if let Some(dep) = self.app_repo.get_deployment(dep_id).await? {
-                let ip = dep
-                    .ipv6_address
-                    .filter(|ipv6| !ipv6.is_empty())
-                    .map(|ipv6| format!("[{}]", ipv6));
+        let mut target_urls = Vec::new();
 
-                if let Some(ip_addr) = ip {
-                    Some(format!("http://{}:{}", ip_addr, dep.port))
+        // Get all running deployments (replicas) for this app
+        let jobs = self
+            .scheduler
+            .list_apps(mikrom_proto::scheduler::ListAppsRequest {
+                user_id: app.user_id.to_string(),
+                status: Some(mikrom_proto::scheduler::DeployStatus::Running as i32),
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to list running jobs from scheduler: {}", e))?;
+
+        for job in jobs.apps {
+            if job.app_id == app.id.to_string() && !job.ipv6_address.is_empty() {
+                // Determine port: prefer deployment port if available, fallback to app port
+                let port = if let Some(dep_id) = app.active_deployment_id {
+                    if let Ok(Some(dep)) = self.app_repo.get_deployment(dep_id).await {
+                        dep.port
+                    } else {
+                        app.port
+                    }
                 } else {
-                    None
-                }
-            } else {
-                None
+                    app.port
+                };
+
+                target_urls.push(format!("http://[{}]:{}", job.ipv6_address, port));
             }
-        } else {
-            None
-        };
+        }
 
         let config = RouterConfigUpdate {
             hostname: hostname.clone(),
-            target_url,
+            target_urls,
             timestamp: chrono::Utc::now().timestamp(),
         };
 
@@ -166,7 +176,7 @@ impl AppState {
     pub async fn remove_route(&self, hostname: &str) -> anyhow::Result<()> {
         let config = RouterConfigUpdate {
             hostname: hostname.to_string(),
-            target_url: None,
+            target_urls: vec![],
             timestamp: chrono::Utc::now().timestamp(),
         };
 
@@ -245,6 +255,10 @@ pub fn create_app_with_rate_limits(
         .route(
             "/apps/:app_name/secret",
             get(crate::deploy::get_app_secret_handler),
+        )
+        .route(
+            "/apps/:app_name/scale",
+            axum::routing::patch(crate::deploy::scale_app_handler),
         )
         .route(
             "/apps/:app_name/deploy",

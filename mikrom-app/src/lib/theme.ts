@@ -1,6 +1,10 @@
-const THEME_KEY = "mikrom_theme";
+import { writable } from "svelte/store";
 
-function applyTheme(theme: "light" | "dark") {
+const THEME_KEY = "mikrom_theme";
+export type Theme = "light" | "dark";
+export const themeStore = writable<Theme>("light");
+
+function applyTheme(theme: Theme) {
   if (typeof document === "undefined") return;
   document.documentElement.classList.toggle("dark", theme === "dark");
   document.documentElement.classList.toggle("light-theme", theme === "light");
@@ -14,6 +18,7 @@ export function initTheme() {
   const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
   const next = stored === "light" || stored === "dark" ? stored : prefersDark ? "dark" : "light";
   applyTheme(next);
+  themeStore.set(next);
   localStorage.setItem(THEME_KEY, next);
 }
 
@@ -23,9 +28,10 @@ export function getTheme() {
   return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
 }
 
-export function setTheme(theme: "light" | "dark") {
+export function setTheme(theme: Theme) {
   if (typeof document === "undefined") return;
   applyTheme(theme);
+  themeStore.set(theme);
   localStorage.setItem(THEME_KEY, theme);
 }
 

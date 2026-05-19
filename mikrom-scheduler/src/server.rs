@@ -4,8 +4,8 @@ use mikrom_proto::scheduler::{
     AppInfo, AppStatusResponse, CancelRequest, CancelResponse, DeleteAllByAppRequest,
     DeleteAllByAppResponse, DeleteAppRequest, DeleteAppResponse, DeployRequest, DeployResponse,
     ListAppsRequest, ListAppsResponse, ListWorkersRequest, ListWorkersResponse, PauseRequest,
-    PauseResponse, ResumeRequest, ResumeResponse, UpdateSecurityGroupsRequest,
-    UpdateSecurityGroupsResponse,
+    PauseResponse, ResumeRequest, ResumeResponse, UpdateAppScalingConfigRequest,
+    UpdateAppScalingConfigResponse, UpdateSecurityGroupsRequest, UpdateSecurityGroupsResponse,
 };
 use mikrom_proto::tls::ServiceCerts;
 use std::sync::Arc;
@@ -41,6 +41,11 @@ impl SchedulerServer {
                         read_only: v.read_only,
                         pool_name: v.pool_name.clone(),
                         mount_point: v.mount_point.clone(),
+                        access_mode: match v.access_mode {
+                            1 => crate::domain::job::AccessMode::ReadWriteMany,
+                            2 => crate::domain::job::AccessMode::ReadOnlyMany,
+                            _ => crate::domain::job::AccessMode::ReadWriteOnce,
+                        },
                     })
                     .collect(),
                 health_check_path: c.health_check_path,
@@ -217,6 +222,60 @@ impl SchedulerServer {
                 message: "All app jobs deleted successfully".to_string(),
             }),
             Err(e) => Ok(DeleteAllByAppResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn scale_app(
+        &self,
+        req: mikrom_proto::scheduler::ScaleAppRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::ScaleAppResponse> {
+        match self
+            .app_service
+            .scale_app(&req.app_id, req.desired_replicas, &req.user_id)
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::ScaleAppResponse {
+                success: true,
+                message: format!("App scaled to {} replicas", req.desired_replicas),
+            }),
+            Err(e) => {
+                tracing::error!(app_id = %req.app_id, error = %e, "Scale operation failed");
+                Ok(mikrom_proto::scheduler::ScaleAppResponse {
+                    success: false,
+                    message: format!("Failed to scale app: {}", e),
+                })
+            },
+        }
+    }
+
+    pub async fn update_app_scaling_config(
+        &self,
+        req: UpdateAppScalingConfigRequest,
+    ) -> anyhow::Result<UpdateAppScalingConfigResponse> {
+        match self
+            .app_service
+            .app_repo
+            .update_app_config(crate::domain::AppConfig {
+                id: req.app_id,
+                user_id: req.user_id,
+                vpc_ipv6_prefix: req.vpc_ipv6_prefix,
+                desired_replicas: req.desired_replicas,
+                min_replicas: req.min_replicas,
+                max_replicas: req.max_replicas,
+                autoscaling_enabled: req.autoscaling_enabled,
+                cpu_threshold: req.cpu_threshold,
+                mem_threshold: req.mem_threshold,
+            })
+            .await
+        {
+            Ok(_) => Ok(UpdateAppScalingConfigResponse {
+                success: true,
+                message: "App scaling config updated".to_string(),
+            }),
+            Err(e) => Ok(UpdateAppScalingConfigResponse {
                 success: false,
                 message: e.to_string(),
             }),

@@ -86,9 +86,15 @@ impl AppRepository for PostgresAppRepository {
 
         let health_check_path = params.health_check_path.unwrap_or_else(|| "/".to_string());
         let drain_timeout = params.drain_timeout.unwrap_or(10);
+        let desired_replicas = params.desired_replicas.unwrap_or(1);
+        let min_replicas = params.min_replicas.unwrap_or(1);
+        let max_replicas = params.max_replicas.unwrap_or(1);
+        let autoscaling_enabled = params.autoscaling_enabled.unwrap_or(false);
+        let cpu_threshold = params.cpu_threshold.unwrap_or(80.0);
+        let mem_threshold = params.mem_threshold.unwrap_or(80.0);
 
         let result = sqlx::query_as::<_, App>(
-            "INSERT INTO apps (name, git_url, port, hostname, user_id, github_webhook_secret, github_installation_id, github_repo_id, github_repo_full_name, health_check_path, drain_timeout) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *"
+            "INSERT INTO apps (name, git_url, port, hostname, user_id, github_webhook_secret, github_installation_id, github_repo_id, github_repo_full_name, health_check_path, drain_timeout, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *"
         )
         .bind(&params.name)
         .bind(&params.git_url)
@@ -101,6 +107,12 @@ impl AppRepository for PostgresAppRepository {
         .bind(&params.github_repo_full_name)
         .bind(health_check_path)
         .bind(drain_timeout)
+        .bind(desired_replicas)
+        .bind(min_replicas)
+        .bind(max_replicas)
+        .bind(autoscaling_enabled)
+        .bind(cpu_threshold)
+        .bind(mem_threshold)
         .fetch_one(&self.pool)
         .await;
 
@@ -205,6 +217,40 @@ impl AppRepository for PostgresAppRepository {
             .bind(id)
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+
+    async fn update_app_scaling(&self, id: Uuid, desired_replicas: i32) -> anyhow::Result<()> {
+        sqlx::query("UPDATE apps SET desired_replicas = $1, updated_at = NOW() WHERE id = $2")
+            .bind(desired_replicas)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn update_app_autoscaling(
+        &self,
+        id: Uuid,
+        min_replicas: i32,
+        max_replicas: i32,
+        enabled: bool,
+        cpu_threshold: Option<f64>,
+        mem_threshold: Option<f64>,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE apps SET min_replicas = $1, max_replicas = $2, autoscaling_enabled = $3, \
+             cpu_threshold = COALESCE($4, cpu_threshold), mem_threshold = COALESCE($5, mem_threshold), \
+             updated_at = NOW() WHERE id = $6",
+        )
+        .bind(min_replicas)
+        .bind(max_replicas)
+        .bind(enabled)
+        .bind(cpu_threshold)
+        .bind(mem_threshold)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -452,6 +498,7 @@ mod tests {
                 github_repo_full_name: None,
                 health_check_path: None,
                 drain_timeout: None,
+                ..Default::default()
             })
             .await
             .expect("failed to create app");
@@ -547,6 +594,7 @@ mod tests {
                 github_repo_full_name: None,
                 health_check_path: None,
                 drain_timeout: None,
+                ..Default::default()
             })
             .await
             .unwrap();

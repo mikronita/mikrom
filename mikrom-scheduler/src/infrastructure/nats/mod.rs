@@ -81,6 +81,7 @@ impl AgentClient for NatsAgentClient {
                     read_only: v.read_only,
                     pool_name: v.pool_name.clone(),
                     mount_point: v.mount_point.clone(),
+                    access_mode: v.access_mode as i32,
                 })
                 .collect(),
             health_check_path: config.health_check_path.clone(),

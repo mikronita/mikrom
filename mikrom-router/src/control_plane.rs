@@ -348,59 +348,49 @@ impl BackgroundService for ControlPlane {
                                 match RouterConfigUpdate::decode(&msg.payload[..]) {
                                     Ok(update) => {
                                         info!("Control Plane: Received route update for {}", update.hostname);
-                                        let response = if let Some(target_url) = update.target_url {
-                                            match sqlx::query(
-                                                "INSERT INTO routes (hostname, target_url) VALUES ($1, $2)
-                                                 ON CONFLICT (hostname) DO UPDATE SET target_url = EXCLUDED.target_url, updated_at = NOW()",
-                                            )
+
+                                        // First, delete existing targets for this host to maintain eventual consistency with the desired state
+                                        let _ = sqlx::query("DELETE FROM routes WHERE hostname = $1")
                                             .bind(&update.hostname)
-                                            .bind(&target_url)
                                             .execute(&db)
-                                            .await
-                                            {
-                                                Ok(_) => {
-                                                    let _ = tx.try_send(());
-                                                    RouterConfigAck {
-                                                        success: true,
-                                                        message: String::new(),
-                                                    }
-                                                },
-                                                Err(e) => {
-                                                    error!(
-                                                        "Control Plane: Failed to persist route update for {}: {}",
-                                                        update.hostname,
-                                                        e
-                                                    );
-                                                    RouterConfigAck {
-                                                        success: false,
-                                                        message: e.to_string(),
-                                                    }
-                                                },
+                                            .await;
+
+                                        let response = if !update.target_urls.is_empty() {
+                                            let mut success = true;
+                                            let mut last_error = String::new();
+
+                                            for target_url in &update.target_urls {
+                                                if let Err(e) = sqlx::query(
+                                                    "INSERT INTO routes (hostname, target_url) VALUES ($1, $2)",
+                                                )
+                                                .bind(&update.hostname)
+                                                .bind(target_url)
+                                                .execute(&db)
+                                                .await {
+                                                    error!("Control Plane: Failed to persist target {} for {}: {}", target_url, update.hostname, e);
+                                                    success = false;
+                                                    last_error = e.to_string();
+                                                }
+                                            }
+
+                                            if success {
+                                                let _ = tx.try_send(());
+                                                RouterConfigAck {
+                                                    success: true,
+                                                    message: String::new(),
+                                                }
+                                            } else {
+                                                RouterConfigAck {
+                                                    success: false,
+                                                    message: last_error,
+                                                }
                                             }
                                         } else {
-                                            match sqlx::query("DELETE FROM routes WHERE hostname = $1")
-                                                .bind(&update.hostname)
-                                                .execute(&db)
-                                                .await
-                                            {
-                                                Ok(_) => {
-                                                    let _ = tx.try_send(());
-                                                    RouterConfigAck {
-                                                        success: true,
-                                                        message: String::new(),
-                                                    }
-                                                },
-                                                Err(e) => {
-                                                    error!(
-                                                        "Control Plane: Failed to delete route {}: {}",
-                                                        update.hostname,
-                                                        e
-                                                    );
-                                                    RouterConfigAck {
-                                                        success: false,
-                                                        message: e.to_string(),
-                                                    }
-                                                },
+                                            // targets are empty, we already deleted them above
+                                            let _ = tx.try_send(());
+                                            RouterConfigAck {
+                                                success: true,
+                                                message: String::new(),
                                             }
                                         };
 

@@ -61,6 +61,7 @@ async fn test_list_volume_snapshots_endpoint() {
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
                 mount_point: "/data".to_string(),
+                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -148,6 +149,7 @@ async fn test_create_volume_snapshot_endpoint() {
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
                 mount_point: "/data".to_string(),
+                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -282,6 +284,7 @@ async fn test_restore_volume_snapshot_endpoint() {
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
                 mount_point: "/data".to_string(),
+                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -398,6 +401,7 @@ async fn test_delete_snapshot_endpoint() {
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
                 mount_point: "/data".to_string(),
+                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -505,6 +509,7 @@ async fn test_clone_volume_endpoint() {
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
                 mount_point: "/data".to_string(),
+                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -521,6 +526,7 @@ async fn test_clone_volume_endpoint() {
                 size_mib: params.size_mib,
                 pool_name: params.pool_name,
                 mount_point: params.mount_point,
+                access_mode: params.access_mode,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             })
@@ -632,6 +638,7 @@ async fn test_restore_volume_snapshot_endpoint_failure() {
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
                 mount_point: "/data".to_string(),
+                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))

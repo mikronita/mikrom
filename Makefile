@@ -150,7 +150,7 @@ run-cli: ## Run mikrom-cli  →  make run-cli ARGS="health"
 install-cli: ## Install the mikrom binary to ~/.cargo/bin
 	cargo install --path mikrom-cli
 
-# ── Next.js ───────────────────────────────────────────────────────────────────
+# ── Frontends ────────────────────────────────────────────────────────────────
 
 .PHONY: app-install
 app-install: ## Install mikrom-app dependencies
@@ -163,6 +163,18 @@ app-build: ## Build mikrom-app for production
 .PHONY: app-lint
 app-lint: ## Lint mikrom-app
 	cd mikrom-app && pnpm lint
+
+.PHONY: landing-dev
+landing-dev: ## Run mikrom-landing dev server
+	cd mikrom-landing && pnpm run dev
+
+.PHONY: landing-build
+landing-build: ## Build mikrom-landing
+	cd mikrom-landing && ./node_modules/.bin/astro build
+
+.PHONY: landing-preview
+landing-preview: ## Preview mikrom-landing build
+	cd mikrom-landing && pnpm run preview
 
 # ── Docker ────────────────────────────────────────────────────────────────────
 

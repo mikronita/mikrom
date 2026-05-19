@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { GitPullRequest, Globe, Loader2, Lock } from "lucide-svelte";
+  import { GitPullRequest, Globe } from "lucide-svelte";
   import Modal from "$lib/components/Modal.svelte";
   import Button from "$lib/components/Button.svelte";
   import Input from "$lib/components/Input.svelte";
   import Select from "$lib/components/Select.svelte";
   import Field from "$lib/components/Field.svelte";
+  import Skeleton from "$lib/components/Skeleton.svelte";
   import { createApp, getGithubInstallUrl, listGithubRepos, type GithubRepo, type CreateAppRequest } from "$lib/api";
   import { getToken } from "$lib/auth";
   import { toast } from "$lib/toast";
@@ -127,9 +128,9 @@
     {:else}
       <Field label="Select Repository" forId="github_repo">
         {#if loadingRepos}
-          <div class="flex items-center justify-center gap-2 rounded-md border border-border p-4 text-sm text-muted-foreground">
-            <Loader2 class="size-4 animate-spin" />
-            Loading repositories...
+          <div class="flex flex-col gap-2 rounded-md border border-border p-4">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-10 w-full" />
           </div>
         {:else if githubRepos.length > 0}
           <Select id="github_repo" bind:value={selectedRepoId}>

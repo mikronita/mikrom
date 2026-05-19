@@ -1,6 +1,6 @@
 use mikrom_scheduler::application::AppService;
 use mikrom_scheduler::config::SchedulerConfig;
-use mikrom_scheduler::infrastructure::db::{PgJobRepository, PgWorkerRepository};
+use mikrom_scheduler::infrastructure::db::{PgAppRepository, PgJobRepository, PgWorkerRepository};
 use mikrom_scheduler::infrastructure::nats::{NatsAgentClient, NatsEventLoop};
 use mikrom_scheduler::server::SchedulerServer;
 use sqlx::postgres::PgPoolOptions;
@@ -37,17 +37,19 @@ async fn main() -> anyhow::Result<()> {
 
     // Dependency Injection
     let job_repo = Arc::new(PgJobRepository::new(pool.clone()));
+    let app_repo = Arc::new(PgAppRepository::new(pool.clone()));
     let worker_repo = Arc::new(PgWorkerRepository::new(pool.clone()));
     let agent_client = Arc::new(NatsAgentClient::new(nats_client.clone()));
 
     let app_service = Arc::new(AppService::new(
         job_repo,
+        app_repo,
         worker_repo,
         agent_client,
         pool.clone(),
     ));
 
-    let server = SchedulerServer::new(app_service, certs);
+    let server = SchedulerServer::new(app_service.clone(), certs);
 
     // Start background cleanup task
     let pool_clone = pool.clone();
@@ -74,6 +76,12 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => tracing::error!("Failed to cleanup stale workers: {}", e),
             }
         }
+    });
+
+    // Start autoscaler
+    let app_service_clone = app_service.clone();
+    tokio::spawn(async move {
+        app_service_clone.start_autoscaler().await;
     });
 
     // Start NATS event loop

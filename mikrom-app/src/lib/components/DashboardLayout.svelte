@@ -9,6 +9,7 @@
   useProfileBootstrap();
 
   const segmentName = (segment: string) => decodeURIComponent(segment).replace(/^\w/, (c) => c.toUpperCase());
+  const breadcrumbHref = (index: number) => `/${pathParts.slice(0, index + 1).map(encodeURIComponent).join("/")}`;
 
   let pathParts: string[] = [];
   let sidebarCollapsed = false;
@@ -39,9 +40,15 @@
           {#if pathParts.length}
             {#each pathParts as part, index}
               <span class="hidden md:block">/</span>
-              <span class={index === pathParts.length - 1 ? "max-w-[140px] truncate font-medium text-foreground sm:max-w-none" : "hidden sm:block"}>
-                {segmentName(part)}
-              </span>
+              {#if index === pathParts.length - 1}
+                <span class="max-w-[140px] truncate font-medium text-foreground sm:max-w-none">
+                  {segmentName(part)}
+                </span>
+              {:else}
+                <a href={breadcrumbHref(index)} class="hidden font-medium text-foreground hover:underline sm:block">
+                  {segmentName(part)}
+                </a>
+              {/if}
             {/each}
           {/if}
         </div>

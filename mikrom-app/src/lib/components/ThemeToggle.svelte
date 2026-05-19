@@ -1,28 +1,9 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { Moon, Sun } from "lucide-svelte";
-  import { getTheme, setTheme } from "$lib/theme";
-
-  let theme = getTheme();
-
-  onMount(() => {
-    const syncTheme = () => {
-      theme = getTheme();
-    };
-
-    syncTheme();
-    window.addEventListener("storage", syncTheme);
-    window.addEventListener("mikrom-theme-change", syncTheme);
-
-    return () => {
-      window.removeEventListener("storage", syncTheme);
-      window.removeEventListener("mikrom-theme-change", syncTheme);
-    };
-  });
+  import { setTheme, themeStore } from "$lib/theme";
 
   function toggle() {
-    theme = theme === "dark" ? "light" : "dark";
-    setTheme(theme as "light" | "dark");
+    setTheme($themeStore === "dark" ? "light" : "dark");
   }
 </script>
 
@@ -32,6 +13,9 @@
   aria-label="Toggle theme"
   on:click={toggle}
 >
-  <Moon class={`size-4 transition-all ${theme === "dark" ? "rotate-0 scale-100" : "rotate-90 scale-0"}`} />
-  <Sun class={`absolute size-4 transition-all ${theme === "dark" ? "-rotate-90 scale-0" : "rotate-0 scale-100"}`} />
+  {#if $themeStore === "dark"}
+    <Sun class="size-4" />
+  {:else}
+    <Moon class="size-4" />
+  {/if}
 </button>

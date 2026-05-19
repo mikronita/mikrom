@@ -110,6 +110,11 @@ impl DeploymentService {
             let ipv6 = mikrom_proto::sixpn::SixPn::allocate_vm_ipv6(prefix, job_id);
             config.ipv6_address = Some(ipv6.to_string());
             config.ipv6_gateway = Some("fe80::1".to_string());
+        } else {
+            // If no prefix is provided, we must clear any inherited IPv6 to avoid conflicts
+            // with the template job we might have cloned.
+            config.ipv6_address = None;
+            config.ipv6_gateway = None;
         }
 
         config
