@@ -25,6 +25,9 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
     mock_scheduler
         .expect_delete_all_by_app()
         .returning(|_, _| Ok(true));
+    mock_scheduler
+        .expect_update_app_scaling_config()
+        .returning(|_| Ok(true));
 
     // Simulate Router responding to NATS requests
     let nats_clone = nats_client.clone();

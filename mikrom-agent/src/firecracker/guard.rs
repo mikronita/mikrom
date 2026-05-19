@@ -20,6 +20,7 @@ pub struct VmStartupGuard {
     pub app_started_at_ms: Arc<AtomicU64>,
     pub socket_path: PathBuf,
     pub metrics_path: Option<String>,
+    pub vfs_processes: Vec<Child>,
     committed: bool,
 }
 
@@ -36,6 +37,7 @@ impl VmStartupGuard {
             app_started_at_ms: Arc::new(AtomicU64::new(0)),
             socket_path,
             metrics_path: None,
+            vfs_processes: Vec::new(),
             committed: false,
         }
     }
@@ -60,6 +62,7 @@ impl VmStartupGuard {
                 .map(|p| p.to_string_lossy().to_string()),
             app_started: self.app_started.clone(),
             app_started_at_ms: self.app_started_at_ms.clone(),
+            vfs_processes: std::mem::take(&mut self.vfs_processes),
         }
     }
 }
@@ -72,9 +75,14 @@ impl Drop for VmStartupGuard {
             let tap_name = self.tap_name.take();
             let chroot_dir = self.chroot_dir.take();
             let log_task = self.log_task.take();
+            let vfs_processes = std::mem::take(&mut self.vfs_processes);
 
             tokio::spawn(async move {
                 tracing::warn!(vm_id = %vm_id, "Startup failed or guard dropped, cleaning up resources...");
+
+                for mut vfs in vfs_processes {
+                    let _ = vfs.kill().await;
+                }
 
                 if let Some(mut c) = child {
                     let _ = c.kill().await;

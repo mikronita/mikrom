@@ -685,6 +685,7 @@ impl FirecrackerManager {
             &startup.chroot_dir,
             &startup.active_socket_path,
             tap_name.as_deref(),
+            &mut guard,
         )
         .await?;
 
@@ -952,6 +953,7 @@ impl FirecrackerManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn configure_vm_api(
         &self,
         config: &VmConfig,
@@ -960,6 +962,7 @@ impl FirecrackerManager {
         chroot_dir: &Option<String>,
         active_socket_path: &str,
         tap_name: Option<&str>,
+        guard: &mut crate::firecracker::guard::VmStartupGuard,
     ) -> Result<(), FirecrackerError> {
         let socket = active_socket_path;
 
@@ -970,7 +973,7 @@ impl FirecrackerManager {
             .await?;
         self.apply_network_interface(socket, config, tap_name)
             .await?;
-        self.apply_additional_volumes(socket, config, chroot_dir)
+        self.apply_additional_volumes(socket, config, chroot_dir, guard)
             .await?;
         self.start_instance(socket).await?;
         self.add_ipv6_host_route(config).await;
@@ -1076,23 +1079,99 @@ impl FirecrackerManager {
         socket: &str,
         config: &VmConfig,
         chroot_dir: &Option<String>,
+        guard: &mut crate::firecracker::guard::VmStartupGuard,
     ) -> Result<(), FirecrackerError> {
         for vol in &config.volumes {
             let vol_host_path = self.ensure_volume(vol).await?;
-            let vol_api_path = self
-                .volume_api_path(vol, &vol_host_path, chroot_dir)
-                .await?;
-            let drive_id = vol.volume_id.replace('-', "_");
-            let vol_json = serde_json::json!({
-                "drive_id": drive_id,
-                "path_on_host": vol_api_path,
-                "is_root_device": false,
-                "is_read_only": vol.read_only
-            })
-            .to_string();
-            fc_put(socket, &format!("/drives/{}", drive_id), &vol_json).await?;
+
+            use mikrom_proto::agent::AccessMode;
+            if vol.access_mode == AccessMode::ReadWriteMany as i32 {
+                // RWX: Use virtio-fs
+                let vfs_tag = vol.volume_id.replace('-', "_");
+                let paths = VmPaths::new(&self.fc_config.data_dir, &self.agent_id, guard.vm_id);
+                let socket_path = paths.vfs_socket_path(&vol.volume_id);
+
+                // Start virtiofsd
+                let vfs_child = self
+                    .start_virtiofsd(&guard.vm_id, &vol.volume_id, &vol_host_path, &socket_path)
+                    .await?;
+                guard.vfs_processes.push(vfs_child);
+
+                // Configure VFS in Firecracker
+                let vfs_socket_api_path = if let Some(chroot) = chroot_dir {
+                    let filename = format!("vfs_{}.socket", vol.volume_id);
+                    let c_path = format!("{chroot}/root/{filename}");
+                    self.mknod_at(&socket_path.to_string_lossy(), &c_path)
+                        .await?;
+                    format!("/{filename}")
+                } else {
+                    socket_path.to_string_lossy().to_string()
+                };
+
+                let vfs_json = serde_json::json!({
+                    "vfs_id": vfs_tag,
+                    "socket_path": vfs_socket_api_path
+                })
+                .to_string();
+
+                fc_put(socket, &format!("/vfs/{}", vfs_tag), &vfs_json).await?;
+            } else {
+                // RWO: Use RBD block device
+                let vol_api_path = self
+                    .volume_api_path(vol, &vol_host_path, chroot_dir)
+                    .await?;
+                let drive_id = vol.volume_id.replace('-', "_");
+                let vol_json = serde_json::json!({
+                    "drive_id": drive_id,
+                    "path_on_host": vol_api_path,
+                    "is_root_device": false,
+                    "is_read_only": vol.read_only
+                })
+                .to_string();
+                fc_put(socket, &format!("/drives/{}", drive_id), &vol_json).await?;
+            }
         }
         Ok(())
+    }
+
+    async fn start_virtiofsd(
+        &self,
+        vm_id: &VmId,
+        vol_id: &str,
+        shared_dir: &str,
+        socket_path: &std::path::Path,
+    ) -> Result<tokio::process::Child, FirecrackerError> {
+        let binary = &self.fc_config.virtiofsd_path;
+
+        if tokio::fs::metadata(binary).await.is_err() {
+            return Err(FirecrackerError::ProcessError(format!(
+                "virtiofsd binary not found at {binary}"
+            )));
+        }
+
+        // Ensure parent dir for socket exists
+        if let Some(parent) = socket_path.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        let _ = tokio::fs::remove_file(socket_path).await;
+
+        let mut cmd = tokio::process::Command::new(binary);
+        cmd.arg("--socket-path").arg(socket_path);
+        cmd.arg("--shared-dir").arg(shared_dir);
+        cmd.arg("--sandbox").arg("none"); // Required for FUSE in some environments
+
+        tracing::info!(
+            vm_id = %vm_id,
+            vol_id = %vol_id,
+            shared_dir = %shared_dir,
+            "Spawning virtiofsd"
+        );
+
+        let child = cmd.spawn().map_err(|e| {
+            FirecrackerError::ProcessError(format!("Failed to spawn virtiofsd: {e}"))
+        })?;
+
+        Ok(child)
     }
 
     async fn volume_api_path(
@@ -1248,6 +1327,7 @@ impl FirecrackerManager {
                 chroot_dir: None,
                 app_started: Arc::new(AtomicBool::new(true)),
                 app_started_at_ms: Arc::new(AtomicU64::new(started_at_ms)),
+                vfs_processes: Vec::new(),
             },
         );
     }
@@ -1354,7 +1434,18 @@ impl FirecrackerManager {
     async fn stop_running_process(&self, vm_id: &VmId, proc: &mut VmProcess) {
         proc.log_task.abort();
 
-        tracing::info!(vm_id = %vm_id, "Sending kill signal to Firecracker process for stopping");
+        // 1. Terminate all virtio-fs daemons
+        for mut vfs_child in proc.vfs_processes.drain(..) {
+            if let Err(e) = vfs_child.kill().await {
+                tracing::error!(vm_id = %vm_id, error = %e, "Failed to kill virtiofsd process");
+            }
+            let _ = vfs_child.wait().await;
+        }
+
+        tracing::info!(
+            vm_id = %vm_id,
+            "Sending kill signal to Firecracker process for stopping"
+        );
         if let Err(e) = proc.child.kill().await {
             tracing::error!(vm_id = %vm_id, "Failed to send kill signal to Firecracker: {}", e);
         }
@@ -2268,40 +2359,44 @@ impl FirecrackerManager {
         uid: u32,
         gid: u32,
     ) -> Result<(), FirecrackerError> {
-        use std::os::unix::fs as unix_fs;
-        let mut stack = vec![std::path::PathBuf::from(path)];
+        let path = std::path::PathBuf::from(path);
+        tokio::task::spawn_blocking(move || -> Result<(), FirecrackerError> {
+            use std::os::unix::fs as unix_fs;
+            let mut stack = vec![path];
 
-        while let Some(current_path) = stack.pop() {
-            // Use lchown to avoid following symlinks
-            unix_fs::lchown(&current_path, Some(uid), Some(gid)).map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to chown {current_path:?}: {e}"))
-            })?;
+            while let Some(current_path) = stack.pop() {
+                // Use lchown to avoid following symlinks
+                unix_fs::lchown(&current_path, Some(uid), Some(gid)).map_err(|e| {
+                    FirecrackerError::ProcessError(format!("Failed to chown {current_path:?}: {e}"))
+                })?;
 
-            let metadata = tokio::fs::symlink_metadata(&current_path)
-                .await
-                .map_err(|e| {
+                let metadata = std::fs::symlink_metadata(&current_path).map_err(|e| {
                     FirecrackerError::ProcessError(format!(
                         "Failed to get metadata for {current_path:?}: {e}"
                     ))
                 })?;
 
-            if metadata.is_dir() {
-                let mut entries = tokio::fs::read_dir(&current_path).await.map_err(|e| {
-                    FirecrackerError::ProcessError(format!(
-                        "Failed to read directory {current_path:?}: {e}"
-                    ))
-                })?;
+                if metadata.is_dir() {
+                    let entries = std::fs::read_dir(&current_path).map_err(|e| {
+                        FirecrackerError::ProcessError(format!(
+                            "Failed to read directory {current_path:?}: {e}"
+                        ))
+                    })?;
 
-                while let Some(entry) = entries.next_entry().await.map_err(|e| {
-                    FirecrackerError::ProcessError(format!(
-                        "Failed to get next entry in {current_path:?}: {e}"
-                    ))
-                })? {
-                    stack.push(entry.path());
+                    for entry in entries {
+                        let entry = entry.map_err(|e| {
+                            FirecrackerError::ProcessError(format!(
+                                "Failed to get next entry in {current_path:?}: {e}"
+                            ))
+                        })?;
+                        stack.push(entry.path());
+                    }
                 }
             }
-        }
-        Ok(())
+            Ok(())
+        })
+        .await
+        .map_err(|e| FirecrackerError::ProcessError(format!("Blocking task failed: {e}")))?
     }
 }
 
@@ -2339,6 +2434,7 @@ impl FirecrackerManager {
                 app_started_at_ms: Arc::new(AtomicU64::new(
                     chrono::Utc::now().timestamp_millis() as u64
                 )),
+                vfs_processes: Vec::new(),
             },
         );
         let mut vms = self.vms.write().await;

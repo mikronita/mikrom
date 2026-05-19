@@ -95,7 +95,7 @@ async fn test_delete_app_triggers_bulk_cleanup() {
             && let Ok(update) = RouterConfigUpdate::decode(&msg.payload[..])
         {
             assert_eq!(update.hostname, "test.example.com");
-            assert!(update.target_url.is_none());
+            assert!(update.target_urls.is_empty());
 
             let ack = RouterConfigAck {
                 success: true,

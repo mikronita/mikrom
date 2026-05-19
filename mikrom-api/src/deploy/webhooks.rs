@@ -214,7 +214,6 @@ mod tests {
     use crate::models::app::App;
     use crate::repositories::app_repository::MockAppRepository;
     use crate::repositories::user_repository::MockUserRepository;
-    use chrono::Utc;
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     use std::sync::Arc;

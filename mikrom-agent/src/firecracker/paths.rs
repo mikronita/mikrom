@@ -58,4 +58,9 @@ impl VmPaths {
             .join("snapshots")
             .join(format!("{}.mem", self.vm_id))
     }
+
+    pub fn vfs_socket_path(&self, vol_id: &str) -> PathBuf {
+        self.data_dir
+            .join(format!("vfs-{}-{}.socket", self.vm_id, vol_id))
+    }
 }

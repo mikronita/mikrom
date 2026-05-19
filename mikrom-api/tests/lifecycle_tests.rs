@@ -2,7 +2,6 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use chrono::Utc;
 use futures::StreamExt;
 use mockall::predicate::{self, *};
 use std::sync::Arc;
@@ -50,20 +49,11 @@ async fn test_promotion_back_and_forth() {
 
     let app = App {
         id: app_id,
-        name: "test-app".to_string(),
-        git_url: "git".to_string(),
-        port: 8080,
-        hostname: None,
         user_id,
-        github_webhook_secret: None,
-        github_installation_id: None,
-        github_repo_id: None,
-        github_repo_full_name: None,
-        active_deployment_id: Some(dep1_id),
-        health_check_path: "/".to_string(),
-        drain_timeout: 10,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        name: "test-app".to_string(),
+        git_url: "".to_string(),
+        port: 80,
+        ..App::default()
     };
 
     // We simulate activating dep2.
@@ -324,21 +314,14 @@ async fn test_promotion_pauses_previous_active() {
     // 1. Mock get_app_by_name
     let app = App {
         id: app_id,
-        name: "test-app".to_string(),
-        git_url: "git".to_string(),
-        port: 8080,
-        hostname: None,
         user_id,
-        github_webhook_secret: None,
-        github_installation_id: None,
-        github_repo_id: None,
-        github_repo_full_name: None,
+        name: "test-app".to_string(),
+        git_url: "".to_string(),
+        port: 80,
         active_deployment_id: Some(old_dep_id),
-        health_check_path: "/".to_string(),
-        drain_timeout: 10,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        ..App::default()
     };
+
     let app_for_mock = app.clone();
     mock_app_repo
         .expect_get_app_by_name()
@@ -488,21 +471,13 @@ async fn test_activate_stopped_deployment_resumes_it() {
     // 1. Mock get_app_by_name
     let app = App {
         id: app_id,
-        name: "test-app".to_string(),
-        git_url: "git".to_string(),
-        port: 8080,
-        hostname: None,
         user_id,
-        github_webhook_secret: None,
-        github_installation_id: None,
-        github_repo_id: None,
-        github_repo_full_name: None,
-        active_deployment_id: None,
-        health_check_path: "/".to_string(),
-        drain_timeout: 10,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        name: "test-app".to_string(),
+        git_url: "".to_string(),
+        port: 80,
+        ..App::default()
     };
+
     let app_for_mock = app.clone();
     mock_app_repo
         .expect_get_app_by_name()
@@ -702,21 +677,13 @@ async fn test_delete_app_cleans_up_resources() {
     // 1. Mock get_app_by_name
     let app = App {
         id: app_id,
-        name: "test-app".to_string(),
-        git_url: "git".to_string(),
-        port: 8080,
-        hostname: None,
         user_id,
-        github_webhook_secret: None,
-        github_installation_id: None,
-        github_repo_id: None,
-        github_repo_full_name: None,
-        active_deployment_id: None,
-        health_check_path: "/".to_string(),
-        drain_timeout: 10,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        name: "test-app".to_string(),
+        git_url: "".to_string(),
+        port: 80,
+        ..App::default()
     };
+
     let app_for_mock = app.clone();
     mock_app_repo
         .expect_get_app_by_name()

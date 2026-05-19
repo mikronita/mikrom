@@ -193,7 +193,7 @@ impl WorkerRepository for MockScalingWorkerRepo {
             metrics: Some(mikrom_scheduler::domain::HostMetrics {
                 cpu_usage: 10.0,
                 ram_total_bytes: 10 * 1024 * 1024 * 1024,
-                ram_used_bytes: 1 * 1024 * 1024 * 1024,
+                ram_used_bytes: 1024 * 1024 * 1024,
                 disk_total_bytes: 100 * 1024 * 1024 * 1024,
                 disk_used_bytes: 10 * 1024 * 1024 * 1024,
                 apps_count: 1,

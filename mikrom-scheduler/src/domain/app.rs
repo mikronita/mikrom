@@ -14,6 +14,7 @@ pub struct AppConfig {
 }
 
 #[async_trait::async_trait]
+#[mockall::automock]
 pub trait AppRepository: Send + Sync {
     async fn update_app_config(&self, config: AppConfig) -> anyhow::Result<()>;
     async fn get_app_config(&self, app_id: &str) -> anyhow::Result<Option<AppConfig>>;

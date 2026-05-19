@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct DeploymentService {
     job_repo: Arc<dyn JobRepository>,
     worker_repo: Arc<dyn WorkerRepository>,

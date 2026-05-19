@@ -24,6 +24,7 @@ async fn test_scheduler_storage_nats_dispatch() {
     // Correct way: AppService needs the REAL mocked repos
     let mut app_service = AppService::new(
         Arc::new(job_repo),
+        Arc::new(mikrom_scheduler::domain::app::MockAppRepository::new()),
         Arc::new(MockWorkerRepository::new()), // Will re-mock below
         Arc::new(mikrom_scheduler::infrastructure::nats::NatsAgentClient::new(client.clone())),
         sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),

@@ -14,7 +14,6 @@ use axum::{
     },
 };
 use serde::Serialize;
-use std::collections::HashMap;
 use tokio_stream::StreamExt;
 use utoipa::ToSchema;
 
@@ -223,8 +222,21 @@ pub async fn list_active_deployments(
     // 2. Filter for RUNNING and map to LiveDeploymentInfo
     let mut active_deployments = Vec::new();
 
-    // We cache deployment info to avoid redundant DB calls if multiple jobs share a deployment
-    let mut deployment_cache = HashMap::new();
+    // Optimization: Fetch all deployments for the user once to enrich the scheduler list
+    let mut user_deployments = std::collections::HashMap::new();
+    if let (Ok(_user_uuid), Ok(deps)) = (
+        uuid::Uuid::parse_str(&auth.user_id),
+        state
+            .app_repo
+            .list_deployments_by_user(Some(
+                uuid::Uuid::parse_str(&auth.user_id).unwrap_or_default(),
+            ))
+            .await,
+    ) {
+        for dep in deps {
+            user_deployments.insert(dep.id.to_string(), dep);
+        }
+    }
 
     for sch_app in scheduler_apps {
         // Only include RUNNING jobs
@@ -232,22 +244,10 @@ pub async fn list_active_deployments(
             continue;
         }
 
-        // Try to enrich with DB data
-        let mut vcpus = 1;
-        let mut memory_mib = 128;
-
-        if let Ok(dep_id) = uuid::Uuid::parse_str(&sch_app.deployment_id) {
-            if !deployment_cache.contains_key(&dep_id) {
-                if let Ok(Some(dep)) = state.app_repo.get_deployment(dep_id).await {
-                    deployment_cache.insert(dep_id, dep);
-                }
-            }
-
-            if let Some(dep) = deployment_cache.get(&dep_id) {
-                vcpus = dep.vcpus;
-                memory_mib = dep.memory_mib;
-            }
-        }
+        // Enrich using the pre-fetched deployments
+        let dep = user_deployments.get(&sch_app.deployment_id);
+        let vcpus = dep.map(|d| d.vcpus).unwrap_or(1);
+        let memory_mib = dep.map(|d| d.memory_mib).unwrap_or(128);
 
         active_deployments.push(LiveDeploymentInfo {
             job_id: sch_app.job_id,
@@ -268,7 +268,7 @@ pub async fn list_active_deployments(
                 Some(sch_app.ipv6_address)
             },
             vcpus,
-            memory_mib: memory_mib as i64,
+            memory_mib,
         });
     }
 
@@ -328,11 +328,9 @@ pub async fn watch_deployments(
 
         // Optimization: Fetch all deployments for the user once to enrich the scheduler list
         let mut user_deployments = std::collections::HashMap::new();
-        if let Some(user_uuid) = auth_user_uuid {
-            if let Ok(deps) = state_clone.app_repo.list_deployments_by_user(Some(user_uuid)).await {
-                for dep in deps {
-                    user_deployments.insert(dep.id.to_string(), dep);
-                }
+        if let Ok(deps) = state_clone.app_repo.list_deployments_by_user(auth_user_uuid).await {
+            for dep in deps {
+                user_deployments.insert(dep.id.to_string(), dep);
             }
         }
 
@@ -388,11 +386,12 @@ pub async fn watch_deployments(
                             let mut vcpus = 1;
                             let mut memory_mib = 128;
 
-                            if let Ok(dep_id) = uuid::Uuid::parse_str(&job.deployment_id) {
-                                if let Ok(Some(dep)) = state_clone.app_repo.get_deployment(dep_id).await {
-                                    vcpus = dep.vcpus;
-                                    memory_mib = dep.memory_mib;
-                                }
+                            if let Ok(Some(dep)) = match uuid::Uuid::parse_str(&job.deployment_id) {
+                                Ok(id) => state_clone.app_repo.get_deployment(id).await,
+                                Err(_) => Ok(None),
+                            } {
+                                vcpus = dep.vcpus;
+                                memory_mib = dep.memory_mib;
                             }
 
                             let data = serde_json::json!({
@@ -424,37 +423,38 @@ pub async fn watch_deployments(
                 // 2. Local events from DB
                 res = local_stream.next() => {
                     if let Some(Ok(app_id)) = res {
-                        if let Ok(Some(app)) = state_clone.app_repo.get_app(app_id).await {
-                            if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app_id).await {
-                                for dep in deps {
-                                    if ["RUNNING", "DRAINING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
-                                        let data = serde_json::json!({
-                                            "job_id": dep.job_id.clone().unwrap_or_default(),
-                                            "deployment_id": dep.id.to_string(),
-                                            "app_id": dep.app_id.to_string(),
-                                            "app_name": app.name.clone(),
-                                            "image": dep.image_tag.clone().unwrap_or_default(),
-                                            "status": dep.status,
-                                            "git_commit_hash": dep.git_commit_hash,
-                                            "git_commit_message": dep.git_commit_message,
-                                            "git_branch": dep.git_branch,
-                                            "host_id": String::new(),
-                                            "vm_id": String::new(),
-                                            "ipv6_address": dep.ipv6_address,
-                                            "vcpus": dep.vcpus,
-                                            "memory_mib": dep.memory_mib,
-                                            "cpu_usage": 0.0,
-                                            "ram_used_bytes": 0,
-                                            "tx_bytes": 0,
-                                            "rx_bytes": 0,
-                                            "scheduled_at": 0,
-                                            "started_at": 0,
-                                            "stopped_at": 0,
-                                            "error_message": "",
-                                        });
-                                        if let Ok(json) = serde_json::to_string(&data) {
-                                            yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
-                                        }
+                        let app_res = state_clone.app_repo.get_app(app_id).await;
+                        let deps_res = state_clone.app_repo.list_deployments_by_app(app_id).await;
+
+                        if let (Ok(Some(app)), Ok(deps)) = (app_res, deps_res) {
+                            for dep in deps {
+                                if ["RUNNING", "DRAINING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
+                                    let data = serde_json::json!({
+                                        "job_id": dep.job_id.clone().unwrap_or_default(),
+                                        "deployment_id": dep.id.to_string(),
+                                        "app_id": dep.app_id.to_string(),
+                                        "app_name": app.name.clone(),
+                                        "image": dep.image_tag.clone().unwrap_or_default(),
+                                        "status": dep.status,
+                                        "git_commit_hash": dep.git_commit_hash,
+                                        "git_commit_message": dep.git_commit_message,
+                                        "git_branch": dep.git_branch,
+                                        "host_id": String::new(),
+                                        "vm_id": String::new(),
+                                        "ipv6_address": dep.ipv6_address,
+                                        "vcpus": dep.vcpus,
+                                        "memory_mib": dep.memory_mib,
+                                        "cpu_usage": 0.0,
+                                        "ram_used_bytes": 0,
+                                        "tx_bytes": 0,
+                                        "rx_bytes": 0,
+                                        "scheduled_at": 0,
+                                        "started_at": 0,
+                                        "stopped_at": 0,
+                                        "error_message": "",
+                                    });
+                                    if let Ok(json) = serde_json::to_string(&data) {
+                                        yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
                                     }
                                 }
                             }
@@ -479,11 +479,9 @@ pub async fn watch_deployments(
                     if let Ok(inner) = scheduler_res {
                         // Batch fetch deployments for enrichment
                         let mut user_deployments = std::collections::HashMap::new();
-                        if let Some(user_uuid) = auth_user_uuid {
-                            if let Ok(deps) = state_clone.app_repo.list_deployments_by_user(Some(user_uuid)).await {
-                                for dep in deps {
-                                    user_deployments.insert(dep.id.to_string(), dep);
-                                }
+                        if let Ok(deps) = state_clone.app_repo.list_deployments_by_user(auth_user_uuid).await {
+                            for dep in deps {
+                                user_deployments.insert(dep.id.to_string(), dep);
                             }
                         }
 
