@@ -48,7 +48,7 @@ async fn list(client: &MikromClient, output: OutputFormat) -> Result<()> {
                     }),
                     app.port.to_string(),
                     if app.autoscaling_enabled {
-                        format!("Auto ({}–{})", app.min_replicas, app.max_replicas)
+                        format!("Auto ({}/{})", app.desired_replicas, app.max_replicas)
                     } else {
                         format!("Fixed ({})", app.desired_replicas)
                     },

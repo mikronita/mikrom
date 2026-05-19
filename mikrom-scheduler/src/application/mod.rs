@@ -3,10 +3,25 @@ pub mod deployment;
 pub use deployment::DeploymentService;
 
 use crate::domain::{
-    AgentClient, AppRepository, DomainError, DomainResult, Job, JobRepository, JobStatus, Worker,
-    WorkerRepository,
+    AgentClient, AppConfig, AppRepository, DomainError, DomainResult, Job, JobRepository,
+    JobStatus, Worker, WorkerRepository,
 };
 use std::sync::Arc;
+
+fn autoscale_next_replicas(app: &AppConfig, current_count: u32, avg_cpu: f32, avg_mem: f32) -> u32 {
+    let mut desired = current_count;
+
+    if (avg_cpu as f64) > app.cpu_threshold || (avg_mem as f64) > app.mem_threshold {
+        desired = desired.saturating_add(1).min(app.max_replicas);
+    } else if (avg_cpu as f64) < app.cpu_threshold
+        && (avg_mem as f64) < app.mem_threshold
+        && desired > app.min_replicas
+    {
+        desired -= 1;
+    }
+
+    desired
+}
 
 pub struct AppService {
     pub deployment: DeploymentService,
@@ -366,24 +381,16 @@ impl AppService {
                         "Evaluating autoscaling"
                     );
 
-                    let mut desired = current_count;
+                    let desired = autoscale_next_replicas(&app, current_count, avg_cpu, avg_mem);
 
-                    if (avg_cpu as f64) > app.cpu_threshold || (avg_mem as f64) > app.mem_threshold
-                    {
-                        if desired < app.max_replicas {
-                            desired += 1;
-                            tracing::info!(
-                                app_id = %app.id,
-                                avg_cpu = %avg_cpu,
-                                avg_mem = %avg_mem,
-                                "Scale up triggered (auto)"
-                            );
-                        }
-                    } else if (avg_cpu as f64) < (app.cpu_threshold * 0.5)
-                        && (avg_mem as f64) < (app.mem_threshold * 0.5)
-                        && desired > app.min_replicas
-                    {
-                        desired -= 1;
+                    if desired > current_count {
+                        tracing::info!(
+                            app_id = %app.id,
+                            avg_cpu = %avg_cpu,
+                            avg_mem = %avg_mem,
+                            "Scale up triggered (auto)"
+                        );
+                    } else if desired < current_count {
                         tracing::info!(
                             app_id = %app.id,
                             avg_cpu = %avg_cpu,
@@ -392,14 +399,29 @@ impl AppService {
                         );
                     }
 
-                    if desired != current_count
-                        && self
-                            .scale_app(&app.id, desired, &app.user_id)
+                    if desired != current_count {
+                        if let Err(e) = self.scale_app(&app.id, desired, &app.user_id).await {
+                            tracing::error!(
+                                app_id = %app.id,
+                                desired = %desired,
+                                error = %e,
+                                "Failed to reconcile autoscaling"
+                            );
+                        } else if let Err(e) = self
+                            .app_repo
+                            .update_app_config(AppConfig {
+                                desired_replicas: desired,
+                                ..app.clone()
+                            })
                             .await
-                            .is_err()
-                    {
-                        // Re-fetch or handle error if needed, but here we just log
-                        // Actually, I need the error for logging.
+                        {
+                            tracing::error!(
+                                app_id = %app.id,
+                                desired = %desired,
+                                error = %e,
+                                "Failed to persist autoscaling target"
+                            );
+                        }
                     }
                 } else if app.min_replicas > 0 {
                     // App has no running instances but min_replicas > 0, scale up to min
@@ -409,6 +431,20 @@ impl AppService {
                         .await
                     {
                         tracing::error!("Failed to scale app {} to min: {}", app.id, e);
+                    } else if let Err(e) = self
+                        .app_repo
+                        .update_app_config(AppConfig {
+                            desired_replicas: app.min_replicas,
+                            ..app.clone()
+                        })
+                        .await
+                    {
+                        tracing::error!(
+                            app_id = %app.id,
+                            desired = %app.min_replicas,
+                            error = %e,
+                            "Failed to persist min_replicas target"
+                        );
                     }
                 }
             } else {
@@ -1043,5 +1079,43 @@ mod tests {
             .expect_err("cleanup should fail");
 
         assert!(matches!(err, DomainError::Infrastructure(_)));
+    }
+
+    #[test]
+    fn autoscaling_target_scales_down_when_usage_is_below_hysteresis_band() {
+        let app = AppConfig {
+            id: "app-1".to_string(),
+            user_id: "user-1".to_string(),
+            vpc_ipv6_prefix: "fd00::".to_string(),
+            desired_replicas: 3,
+            min_replicas: 1,
+            max_replicas: 3,
+            autoscaling_enabled: true,
+            cpu_threshold: 80.0,
+            mem_threshold: 80.0,
+        };
+
+        let target = autoscale_next_replicas(&app, 3, 30.0, 25.0);
+
+        assert_eq!(target, 2);
+    }
+
+    #[test]
+    fn autoscaling_target_keeps_current_size_when_usage_matches_threshold() {
+        let app = AppConfig {
+            id: "app-1".to_string(),
+            user_id: "user-1".to_string(),
+            vpc_ipv6_prefix: "fd00::".to_string(),
+            desired_replicas: 2,
+            min_replicas: 1,
+            max_replicas: 3,
+            autoscaling_enabled: true,
+            cpu_threshold: 80.0,
+            mem_threshold: 80.0,
+        };
+
+        let target = autoscale_next_replicas(&app, 2, 80.0, 80.0);
+
+        assert_eq!(target, 2);
     }
 }

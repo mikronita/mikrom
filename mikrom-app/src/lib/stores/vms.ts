@@ -33,33 +33,35 @@ let sseCleanup: (() => void) | null = null;
 
 export function initVmsSSE() {
   const token = getToken();
-  if (!token) return;
+  if (!token) {
+    stopVmsSSE();
+    return;
+  }
 
-  if (sseCleanup) sseCleanup();
+  if (sseCleanup) return;
+
+  // Seed the store once so the UI can render immediately, then keep it live via SSE.
+  void refreshVms();
 
   sseCleanup = watchVmsSSE(token, (updatedVm) => {
-    vmsStore.update(current => {
-      // Prioritize matching by Job ID as it is the unique identifier for a running instance
-      const index = current.findIndex(
-        (vm) => (updatedVm.job_id !== "" && vm.job_id === updatedVm.job_id) || 
-                (updatedVm.job_id === "" && vm.deployment_id === updatedVm.deployment_id)
-      );
-      
+    vmsStore.update((current) => {
+      const key = updatedVm.job_id || updatedVm.deployment_id;
+      if (!key) return current;
+
+      const index = current.findIndex((vm) => vm.job_id === updatedVm.job_id || vm.deployment_id === updatedVm.deployment_id);
       const isRunning = updatedVm.status.toLowerCase() === "running";
-      
+
       if (!isRunning) {
-        // If it's no longer running, remove it from the active VMs list
-        if (index !== -1) return current.filter((_, itemIndex) => itemIndex !== index);
-        return current;
-      } else if (index === -1) {
-        // New running VM
-        return [...current, updatedVm];
-      } else {
-        // Update existing VM status/metrics
-        const next = [...current];
-        next[index] = { ...next[index], ...updatedVm };
-        return next;
+        return index === -1 ? current : current.filter((_, itemIndex) => itemIndex !== index);
       }
+
+      if (index === -1) {
+        return [...current, updatedVm];
+      }
+
+      const next = [...current];
+      next[index] = { ...next[index], ...updatedVm };
+      return next;
     });
   });
 }
