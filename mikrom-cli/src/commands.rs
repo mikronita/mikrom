@@ -43,6 +43,15 @@ pub enum VolumeCommands {
         name: String,
         #[arg(long, short, help = "Size in MiB")]
         size: i32,
+        #[arg(long, short, help = "Mount point inside the VM (e.g. /data)")]
+        mount: String,
+        #[arg(
+            long,
+            short = 'A',
+            help = "Access mode: 0 (RWO), 1 (RWX), 2 (ROX)",
+            default_value = "0"
+        )]
+        mode: i32,
     },
     /// Create a snapshot of a volume
     Snapshot {
@@ -134,6 +143,31 @@ pub enum AppCommands {
     Secret {
         #[arg(long, short, help = "Name of the application")]
         name: String,
+    },
+    /// Configure scaling and autoscaling for an application
+    Scale {
+        #[arg(long, short, help = "Name of the application")]
+        name: String,
+        #[arg(
+            long,
+            short = 'r',
+            help = "Desired fixed replicas (0-3, disables autoscaling if set)"
+        )]
+        replicas: Option<i32>,
+        #[arg(long, help = "Enable/disable autoscaling (--auto true/false)")]
+        auto: Option<bool>,
+        #[arg(long, short = 'm', help = "Minimum replicas for autoscaling (1-3)")]
+        min: Option<i32>,
+        #[arg(long, short = 'M', help = "Maximum replicas for autoscaling (1-3)")]
+        max: Option<i32>,
+        #[arg(long, short = 'c', help = "CPU threshold percentage for autoscaling")]
+        cpu: Option<f64>,
+        #[arg(
+            long,
+            short = 'e',
+            help = "Memory threshold percentage for autoscaling"
+        )]
+        mem: Option<f64>,
     },
 }
 

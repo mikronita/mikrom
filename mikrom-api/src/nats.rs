@@ -21,19 +21,26 @@ struct AsyncNatsClientWrapper(Client);
 #[async_trait::async_trait]
 impl NatsClient for AsyncNatsClientWrapper {
     async fn request_raw(&self, subject: String, payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
-        let response = self.0.request(subject, payload.into()).await
+        let response = self
+            .0
+            .request(subject, payload.into())
+            .await
             .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
         Ok(response.payload.to_vec())
     }
 
     async fn publish_raw(&self, subject: String, payload: Vec<u8>) -> anyhow::Result<()> {
-        self.0.publish(subject, payload.into()).await
+        self.0
+            .publish(subject, payload.into())
+            .await
             .map_err(|e| anyhow::anyhow!("NATS publish failed: {}", e))?;
         Ok(())
     }
 
     async fn subscribe_raw(&self, subject: String) -> anyhow::Result<async_nats::Subscriber> {
-        self.0.subscribe(subject).await
+        self.0
+            .subscribe(subject)
+            .await
             .map_err(|e| anyhow::anyhow!("NATS subscribe failed: {}", e))
     }
 }
@@ -73,12 +80,10 @@ impl TypedNatsClient {
         let mut buf = Vec::new();
         request.encode(&mut buf)?;
 
-        let payload = tokio::time::timeout(
-            self.timeout,
-            self.client.request_raw(subject.clone(), buf),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("NATS request timed out on subject: {}", subject))??;
+        let payload =
+            tokio::time::timeout(self.timeout, self.client.request_raw(subject.clone(), buf))
+                .await
+                .map_err(|_| anyhow::anyhow!("NATS request timed out on subject: {}", subject))??;
 
         let res = Res::decode(&payload[..]).map_err(|e| {
             anyhow::anyhow!("Failed to decode NATS response from {}: {}", subject, e)

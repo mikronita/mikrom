@@ -6,18 +6,17 @@
   import Badge from "$lib/components/Badge.svelte";
   import Button from "$lib/components/Button.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
+  import Skeleton from "$lib/components/Skeleton.svelte";
   import CreateAppModal from "$lib/components/CreateAppModal.svelte";
   import Separator from "$lib/components/Separator.svelte";
   import { formatDate } from "$lib/utils";
   import { getToken } from "$lib/auth";
-  import { health, type AppInfo } from "$lib/api";
-  import { vmsStore, refreshVms } from "$lib/stores/vms";
+  import { vmsStore, vmsLoading, refreshVms } from "$lib/stores/vms";
   import { appsStore, appsLoading, refreshApps } from "$lib/stores/apps";
+  import { healthStore, healthLoading, initHealthPolling } from "$lib/stores/health";
   import { toast } from "$lib/toast";
   import { derived } from "svelte/store";
 
-  let healthData: Awaited<ReturnType<typeof health>> | null = null;
-  let loadingHealth = true;
   let showCreate = false;
 
   const runningCountStore = derived(vmsStore, ($vms) => $vms.filter((vm) => vm.status.toLowerCase() === "running").length);
@@ -36,6 +35,7 @@
     $apps.length > 0 && $apps.every((app) => !$vms.some((vm) => vm.app_id === app.id || vm.app_name === app.name))
   );
 
+  let unsubscribeHealth: (() => void) | undefined;
   let unsubscribeUndeployed: () => void;
 
   onMount(async () => {
@@ -50,13 +50,12 @@
       void refreshVms();
     }
 
-    const healthResult = await health().catch(() => null);
-    healthData = healthResult;
-    loadingHealth = false;
+    unsubscribeHealth = initHealthPolling();
 
     // Check for undeployed apps and notify
     unsubscribeUndeployed = hasUndeployedAppsStore.subscribe($hasUndeployedApps => {
-      if ($hasUndeployedApps && $appsStore.length > 0) {
+      if ($appsLoading || $vmsLoading) return;
+      if ($hasUndeployedApps && $appsStore.length > 0 && $vmsStore.length === 0) {
         toast.info("You have undeployed applications. Deploy your first app now!", {
           action: {
             label: "Deploy",
@@ -71,10 +70,11 @@
 
   onDestroy(() => {
     if (unsubscribeUndeployed) unsubscribeUndeployed();
+    if (unsubscribeHealth) unsubscribeHealth();
   });
 
-  $: offlineServices = Object.values(healthData?.services || {}).filter((status) => status !== "ONLINE").length;
-  const hasHealthError = () => !loadingHealth && !healthData;
+  $: offlineServices = Object.values($healthStore?.services || {}).filter((status) => status !== "ONLINE").length;
+  const hasHealthError = () => !$healthLoading && !$healthStore;
   const healthServices = [
     { name: "API", key: "API", icon: Cpu },
     { name: "Agents", key: "Agents", icon: Bot },
@@ -82,6 +82,32 @@
     { name: "Builder", key: "Builder", icon: Hammer },
     { name: "Router", key: "Router", icon: Router },
   ] as const;
+
+  function getAppStatusVariant(status: string) {
+    const normalized = status.toLowerCase();
+    if (normalized === "running") return "outline";
+    if (["building", "pending", "scheduled", "starting", "draining"].includes(normalized)) return "secondary";
+    if (["failed", "cancelled", "offline", "error"].includes(normalized)) return "destructive";
+    return "outline";
+  }
+
+  function getHealthVariant(status: string) {
+    if (status === "ONLINE") return "outline";
+    if (status === "CHECKING") return "outline";
+    return "destructive";
+  }
+
+  function getAppStatusClass(status: string) {
+    return status.toLowerCase() === "running"
+      ? "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]"
+      : "";
+  }
+
+  function getHealthClass(status: string) {
+    return status === "ONLINE"
+      ? "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]"
+      : "";
+  }
 </script>
 
 <svelte:head>
@@ -178,12 +204,12 @@
               </thead>
               <tbody>
                 {#if $appsLoading && $appsStore.length === 0}
-                  {#each Array.from({ length: 3 }) as _, i}
+                  {#each Array.from({ length: 3 }) as _}
                     <tr class="border-b border-border">
-                      <td class="px-4 py-4"><div class="h-9 w-44 animate-pulse rounded bg-muted"></div></td>
-                      <td class="px-4 py-4"><div class="h-5 w-20 animate-pulse rounded bg-muted"></div></td>
-                      <td class="hidden px-4 py-4 xl:table-cell"><div class="h-5 w-24 animate-pulse rounded bg-muted"></div></td>
-                      <td class="px-4 py-4 text-right"><div class="ml-auto h-8 w-20 animate-pulse rounded bg-muted"></div></td>
+                      <td class="px-4 py-4"><Skeleton className="h-9 w-44" /></td>
+                      <td class="px-4 py-4"><Skeleton className="h-5 w-20" /></td>
+                      <td class="hidden px-4 py-4 xl:table-cell"><Skeleton className="h-5 w-24" /></td>
+                      <td class="px-4 py-4 text-right"><Skeleton className="ml-auto h-8 w-20" /></td>
                     </tr>
                   {/each}
                 {:else}
@@ -201,7 +227,7 @@
                         </div>
                       </td>
                       <td class="px-4 py-4">
-                        <Badge variant={app.status.toLowerCase() === "running" ? "success" : app.status.toLowerCase() === "building" || app.status.toLowerCase() === "pending" ? "warning" : "secondary"} className="capitalize">{app.status}</Badge>
+                        <Badge variant={getAppStatusVariant(app.status)} className={`capitalize ${getAppStatusClass(app.status)}`}>{app.status}</Badge>
                       </td>
                       <td class="hidden px-4 py-4 text-sm text-muted-foreground xl:table-cell">{formatDate(app.created_at)}</td>
                       <td class="px-4 py-4 text-right">
@@ -222,7 +248,7 @@
                 <h2 class="text-lg font-semibold">System Status</h2>
                 <p class="text-sm text-muted-foreground">Health of core services.</p>
               </div>
-              <Badge variant={hasHealthError() || offlineServices > 0 ? "destructive" : "secondary"}>
+              <Badge variant={hasHealthError() || offlineServices > 0 ? "destructive" : "outline"} className={hasHealthError() || offlineServices > 0 ? "" : getHealthClass("ONLINE")}>
                 {hasHealthError() || offlineServices > 0 ? "Degraded" : "Operational"}
               </Badge>
             </div>
@@ -230,7 +256,7 @@
           <div class="flex flex-col gap-4 p-5">
             {#each healthServices as service, index}
               {@const ServiceIcon = service.icon}
-              {@const status = healthData?.services?.[service.key] || (hasHealthError() ? "OFFLINE" : "CHECKING")}
+              {@const status = $healthStore?.services?.[service.key] || (hasHealthError() ? "OFFLINE" : "CHECKING")}
               {@const isOnline = status === "ONLINE"}
               {@const isChecking = status === "CHECKING"}
               <div class="flex flex-col gap-4">
@@ -239,7 +265,7 @@
                     <ServiceIcon class="size-4 text-muted-foreground" />
                     <span class="text-sm font-medium">{service.name}</span>
                   </div>
-                  <Badge variant={isOnline ? "secondary" : isChecking ? "outline" : "destructive"} className="uppercase">
+                  <Badge variant={getHealthVariant(status)} className={`uppercase ${getHealthClass(status)}`}>
                     {status}
                   </Badge>
                 </div>
@@ -250,7 +276,7 @@
             {/each}
           </div>
           <div class="border-t border-border p-5 pt-4">
-            <p class="text-xs text-muted-foreground">Version {healthData?.version || "0.0.0"}</p>
+            <p class="text-xs text-muted-foreground">Version {$healthStore?.version || "0.0.0"}</p>
           </div>
         </Card>
       </div>

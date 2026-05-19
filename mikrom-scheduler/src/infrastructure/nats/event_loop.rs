@@ -63,12 +63,24 @@ impl NatsEventLoop {
                 "schedulers".to_string(),
             )
             .await?;
+        let mut scale_sub = client
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_SCALE_APP,
+                "schedulers".to_string(),
+            )
+            .await?;
         let mut health_sub = client
             .queue_subscribe("mikrom.scheduler.check_health", "schedulers".to_string())
             .await?;
         let mut security_sub = client
             .queue_subscribe(
                 "mikrom.scheduler.update_security_groups",
+                "schedulers".to_string(),
+            )
+            .await?;
+        let mut update_scaling_sub = client
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_UPDATE_APP_SCALING_CONFIG,
                 "schedulers".to_string(),
             )
             .await?;
@@ -114,8 +126,10 @@ impl NatsEventLoop {
                 Some(msg) = cancel_sub.next() => self.handle_cancel(msg).await,
                 Some(msg) = delete_sub.next() => self.handle_delete(msg).await,
                 Some(msg) = delete_all_sub.next() => self.handle_delete_all(msg).await,
+                Some(msg) = scale_sub.next() => self.handle_scale(msg).await,
                 Some(msg) = health_sub.next() => self.handle_check_health(msg).await,
                 Some(msg) = security_sub.next() => self.handle_update_security_groups(msg).await,
+                Some(msg) = update_scaling_sub.next() => self.handle_update_app_scaling_config(msg).await,
                 Some(msg) = create_volume_sub.next() => self.handle_create_volume(msg).await,
                 Some(msg) = snapshot_sub.next() => self.handle_create_snapshot(msg).await,
 
@@ -237,6 +251,30 @@ impl NatsEventLoop {
                     let response = match result {
                         Ok(resp) => resp,
                         Err(e) => mikrom_proto::scheduler::UpdateSecurityGroupsResponse {
+                            success: false,
+                            message: e.to_string(),
+                        },
+                    };
+                    let mut buf = Vec::new();
+                    if response.encode(&mut buf).is_ok() {
+                        let _ = client.publish(reply, buf.into()).await;
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_update_app_scaling_config(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::UpdateAppScalingConfigRequest;
+            if let Ok(req) = UpdateAppScalingConfigRequest::decode(&message.payload[..]) {
+                let result = server.update_app_scaling_config(req).await;
+                if let Some(reply) = message.reply {
+                    let response = match result {
+                        Ok(resp) => resp,
+                        Err(e) => mikrom_proto::scheduler::UpdateAppScalingConfigResponse {
                             success: false,
                             message: e.to_string(),
                         },
@@ -712,6 +750,42 @@ impl NatsEventLoop {
         });
     }
 
+    async fn handle_scale(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::ScaleAppRequest;
+            if let Ok(req) = ScaleAppRequest::decode(&message.payload[..]) {
+                tracing::info!(
+                    app_id = %req.app_id,
+                    desired_replicas = %req.desired_replicas,
+                    user_id = %req.user_id,
+                    "Received scheduler scale request"
+                );
+                let result = server.scale_app(req).await;
+                if let Some(reply) = message.reply {
+                    let response = match result {
+                        Ok(resp) => {
+                            tracing::info!(
+                                success = resp.success,
+                                "Scheduler scale request completed"
+                            );
+                            resp
+                        },
+                        Err(e) => mikrom_proto::scheduler::ScaleAppResponse {
+                            success: false,
+                            message: e.to_string(),
+                        },
+                    };
+                    let mut buf = Vec::new();
+                    if response.encode(&mut buf).is_ok() {
+                        let _ = client.publish(reply, buf.into()).await;
+                    }
+                }
+            }
+        });
+    }
+
     async fn handle_create_volume(&self, message: async_nats::Message) {
         let server = self.server.clone();
         let client = self.client.clone();
@@ -959,10 +1033,33 @@ mod tests {
         let deployment =
             DeploymentService::new(job_repo.clone(), worker_repo.clone(), agent_client.clone());
 
+        // Dummy AppRepo for tests
+        #[derive(Debug)]
+        struct DummyAppRepo;
+        #[async_trait::async_trait]
+        impl crate::domain::AppRepository for DummyAppRepo {
+            async fn update_app_config(&self, _: crate::domain::AppConfig) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn get_app_config(
+                &self,
+                _: &str,
+            ) -> anyhow::Result<Option<crate::domain::AppConfig>> {
+                Ok(None)
+            }
+            async fn list_all_apps(&self) -> anyhow::Result<Vec<crate::domain::AppConfig>> {
+                Ok(vec![])
+            }
+            async fn list_autoscaling_apps(&self) -> anyhow::Result<Vec<crate::domain::AppConfig>> {
+                Ok(vec![])
+            }
+        }
+
         let app_service = Arc::new(AppService {
             deployment,
             worker_repo,
             job_repo,
+            app_repo: Arc::new(DummyAppRepo),
             agent_client,
             pool,
         });

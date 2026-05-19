@@ -33,6 +33,8 @@ pub struct LiveDeploymentInfo {
     pub tx_bytes: u64,
     pub rx_bytes: u64,
     pub ipv6_address: Option<String>,
+    pub vcpus: i32,
+    pub memory_mib: i64,
 }
 
 use futures::Stream;
@@ -196,24 +198,12 @@ pub async fn list_active_deployments(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
 ) -> ApiResult<Json<Vec<LiveDeploymentInfo>>> {
-    let user_id =
-        uuid::Uuid::parse_str(&auth.user_id).map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // 1. Get all deployments for this user from DB
-    let deployments = state
-        .app_repo
-        .list_deployments_by_user(Some(user_id))
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // 2. Try to get real-time status from scheduler for active ones
-    let mut scheduler_apps = HashMap::new();
-
+    // 1. Get all running jobs from scheduler via NATS
     use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
 
     let nats_req = ListAppsRequest {
         user_id: auth.user_id.clone(),
-        status: None,
+        status: None, // We'll filter for RUNNING status
     };
 
     let scheduler_res: anyhow::Result<ListAppsResponse> = state
@@ -222,83 +212,63 @@ pub async fn list_active_deployments(
         .request("mikrom.scheduler.list_apps", nats_req)
         .await;
 
-    if let Ok(inner) = scheduler_res {
-        for app in inner.apps {
-            scheduler_apps.insert(app.job_id.clone(), app);
-        }
-    }
+    let scheduler_apps = match scheduler_res {
+        Ok(inner) => inner.apps,
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to fetch active apps from scheduler");
+            Vec::new()
+        },
+    };
 
-    // 3. Map deployments to LiveDeploymentInfo, using scheduler data if available
+    // 2. Filter for RUNNING and map to LiveDeploymentInfo
     let mut active_deployments = Vec::new();
-    for dep in deployments {
-        let (status, host_id, vm_id, cpu_usage, ram_used_bytes, tx_bytes, rx_bytes, ipv6_address) =
-            if let Some(job_id_real) = &dep.job_id {
-                if let Some(sch_app) = scheduler_apps.get(job_id_real) {
-                    (
-                        crate::scheduler::status_name(sch_app.status).to_string(),
-                        sch_app.host_id.clone(),
-                        sch_app.vm_id.clone(),
-                        sch_app.cpu_usage,
-                        sch_app.ram_used_bytes,
-                        sch_app.tx_bytes,
-                        sch_app.rx_bytes,
-                        if sch_app.ipv6_address.is_empty() {
-                            dep.ipv6_address.clone()
-                        } else {
-                            Some(sch_app.ipv6_address.clone())
-                        },
-                    )
-                } else {
-                    (
-                        dep.status.clone(),
-                        String::new(),
-                        String::new(),
-                        0.0,
-                        0,
-                        0,
-                        0,
-                        dep.ipv6_address.clone(),
-                    )
-                }
-            } else {
-                (
-                    dep.status.clone(),
-                    String::new(),
-                    String::new(),
-                    0.0,
-                    0,
-                    0,
-                    0,
-                    dep.ipv6_address.clone(),
-                )
-            };
 
-        // Only include deployments that are actually RUNNING in the cluster or marked as RUNNING in DB
-        if status != "RUNNING" {
+    // We cache deployment info to avoid redundant DB calls if multiple jobs share a deployment
+    let mut deployment_cache = HashMap::new();
+
+    for sch_app in scheduler_apps {
+        // Only include RUNNING jobs
+        if crate::scheduler::status_name(sch_app.status) != "RUNNING" {
             continue;
         }
 
-        // Get app name from repo
-        let app_name = if let Ok(Some(app)) = state.app_repo.get_app(dep.app_id).await {
-            app.name
-        } else {
-            "Unknown".to_string()
-        };
+        // Try to enrich with DB data
+        let mut vcpus = 1;
+        let mut memory_mib = 128;
+
+        if let Ok(dep_id) = uuid::Uuid::parse_str(&sch_app.deployment_id) {
+            if !deployment_cache.contains_key(&dep_id) {
+                if let Ok(Some(dep)) = state.app_repo.get_deployment(dep_id).await {
+                    deployment_cache.insert(dep_id, dep);
+                }
+            }
+
+            if let Some(dep) = deployment_cache.get(&dep_id) {
+                vcpus = dep.vcpus;
+                memory_mib = dep.memory_mib;
+            }
+        }
 
         active_deployments.push(LiveDeploymentInfo {
-            job_id: dep.job_id.unwrap_or_default(),
-            deployment_id: dep.id.to_string(),
-            app_id: dep.app_id.to_string(),
-            app_name,
-            image: dep.image_tag.unwrap_or_default(),
-            status,
-            host_id,
-            vm_id,
-            cpu_usage,
-            ram_used_bytes,
-            tx_bytes,
-            rx_bytes,
-            ipv6_address,
+            job_id: sch_app.job_id,
+            deployment_id: sch_app.deployment_id,
+            app_id: sch_app.app_id,
+            app_name: sch_app.app_name,
+            image: sch_app.image,
+            status: "RUNNING".to_string(),
+            host_id: sch_app.host_id,
+            vm_id: sch_app.vm_id,
+            cpu_usage: sch_app.cpu_usage,
+            ram_used_bytes: sch_app.ram_used_bytes,
+            tx_bytes: sch_app.tx_bytes,
+            rx_bytes: sch_app.rx_bytes,
+            ipv6_address: if sch_app.ipv6_address.is_empty() {
+                None
+            } else {
+                Some(sch_app.ipv6_address)
+            },
+            vcpus,
+            memory_mib: memory_mib as i64,
         });
     }
 
@@ -338,40 +308,73 @@ pub async fn watch_deployments(
         let mut nats_stream = nats_sub;
         let mut local_stream = tokio_stream::wrappers::BroadcastStream::new(local_rx);
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
-
-        // 0. Initial yield: send current state of all active deployments for the user
         let auth_user_uuid = uuid::Uuid::parse_str(&auth_user_id).ok();
-        if let Ok(apps) = state_clone.app_repo.list_apps_by_user(auth_user_uuid).await {
-            for app in apps {
-                if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
-                    for dep in deps {
-                        if ["RUNNING", "DRAINING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
-                            let data = serde_json::json!({
-                                "job_id": dep.job_id.clone().unwrap_or_default(),
-                                "deployment_id": dep.id.to_string(),
-                                "app_id": dep.app_id.to_string(),
-                                "app_name": app.name.clone(),
-                                "image": dep.image_tag.clone().unwrap_or_default(),
-                                "status": dep.status,
-                                "git_commit_hash": dep.git_commit_hash,
-                                "git_commit_message": dep.git_commit_message,
-                                "git_branch": dep.git_branch,
-                                "host_id": String::new(),
-                                "vm_id": String::new(),
-                                "ipv6_address": dep.ipv6_address,
-                                "cpu_usage": 0.0,
-                                "ram_used_bytes": 0,
-                                "scheduled_at": 0,
-                                "started_at": 0,
-                                "stopped_at": 0,
-                                "error_message": "",
-                            });
-                            if let Ok(json) = serde_json::to_string(&data) {
-                                yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
-                            }
-                        }
-                    }
+
+        // 0. Initial yield: send current state from scheduler (source of truth)
+        use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
+        let nats_req = ListAppsRequest {
+            user_id: auth_user_id.clone(),
+            status: None,
+        };
+
+        let scheduler_apps = state_clone
+            .nats
+            .with_timeout(std::time::Duration::from_secs(2))
+            .request::<ListAppsRequest, ListAppsResponse>("mikrom.scheduler.list_apps", nats_req)
+            .await
+            .ok()
+            .map(|r| r.apps)
+            .unwrap_or_default();
+
+        // Optimization: Fetch all deployments for the user once to enrich the scheduler list
+        let mut user_deployments = std::collections::HashMap::new();
+        if let Some(user_uuid) = auth_user_uuid {
+            if let Ok(deps) = state_clone.app_repo.list_deployments_by_user(Some(user_uuid)).await {
+                for dep in deps {
+                    user_deployments.insert(dep.id.to_string(), dep);
                 }
+            }
+        }
+
+        for job in scheduler_apps {
+            if crate::scheduler::status_name(job.status) != "RUNNING" {
+                continue;
+            }
+
+            // Enrich using the pre-fetched deployments
+            let dep = user_deployments.get(&job.deployment_id);
+            let git_hash = dep.and_then(|d| d.git_commit_hash.clone());
+            let git_msg = dep.and_then(|d| d.git_commit_message.clone());
+            let git_branch = dep.and_then(|d| d.git_branch.clone());
+            let vcpus = dep.map(|d| d.vcpus).unwrap_or(1);
+            let memory_mib = dep.map(|d| d.memory_mib).unwrap_or(128);
+
+            let data = serde_json::json!({
+                "job_id": job.job_id,
+                "deployment_id": job.deployment_id,
+                "app_id": job.app_id,
+                "app_name": job.app_name,
+                "image": job.image,
+                "status": "RUNNING",
+                "git_commit_hash": git_hash,
+                "git_commit_message": git_msg,
+                "git_branch": git_branch,
+                "host_id": job.host_id,
+                "vm_id": job.vm_id,
+                "ipv6_address": job.ipv6_address,
+                "vcpus": vcpus,
+                "memory_mib": memory_mib,
+                "cpu_usage": job.cpu_usage,
+                "ram_used_bytes": job.ram_used_bytes,
+                "tx_bytes": job.tx_bytes,
+                "rx_bytes": job.rx_bytes,
+                "scheduled_at": 0,
+                "started_at": 0,
+                "stopped_at": 0,
+                "error_message": "",
+            });
+            if let Ok(json) = serde_json::to_string(&data) {
+                yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
             }
         }
 
@@ -382,6 +385,16 @@ pub async fn watch_deployments(
                     use prost::Message;
                     use mikrom_proto::scheduler::AppInfo;
                     if let Some(job) = AppInfo::decode(&msg.payload[..]).ok().filter(|j| j.user_id == auth_user_id) {
+                            let mut vcpus = 1;
+                            let mut memory_mib = 128;
+
+                            if let Ok(dep_id) = uuid::Uuid::parse_str(&job.deployment_id) {
+                                if let Ok(Some(dep)) = state_clone.app_repo.get_deployment(dep_id).await {
+                                    vcpus = dep.vcpus;
+                                    memory_mib = dep.memory_mib;
+                                }
+                            }
+
                             let data = serde_json::json!({
                                 "job_id": job.job_id,
                                 "deployment_id": job.deployment_id,
@@ -392,6 +405,8 @@ pub async fn watch_deployments(
                                 "host_id": job.host_id,
                                 "vm_id": job.vm_id,
                                 "ipv6_address": job.ipv6_address,
+                                "vcpus": vcpus,
+                                "memory_mib": memory_mib,
                                 "cpu_usage": job.cpu_usage,
                                 "ram_used_bytes": job.ram_used_bytes,
                                 "tx_bytes": job.tx_bytes,
@@ -426,6 +441,8 @@ pub async fn watch_deployments(
                                             "host_id": String::new(),
                                             "vm_id": String::new(),
                                             "ipv6_address": dep.ipv6_address,
+                                            "vcpus": dep.vcpus,
+                                            "memory_mib": dep.memory_mib,
                                             "cpu_usage": 0.0,
                                             "ram_used_bytes": 0,
                                             "tx_bytes": 0,
@@ -453,27 +470,42 @@ pub async fn watch_deployments(
                         status: None,
                     };
 
-                    let scheduler_apps = state_clone
+                    let scheduler_res = state_clone
                         .nats
                         .with_timeout(std::time::Duration::from_secs(2))
                         .request::<ListAppsRequest, ListAppsResponse>("mikrom.scheduler.list_apps", nats_req)
-                        .await
-                        .ok()
-                        .map(|r| r.apps)
-                        .unwrap_or_default();
+                        .await;
 
-                    if !scheduler_apps.is_empty() {
-                        for job in scheduler_apps {
+                    if let Ok(inner) = scheduler_res {
+                        // Batch fetch deployments for enrichment
+                        let mut user_deployments = std::collections::HashMap::new();
+                        if let Some(user_uuid) = auth_user_uuid {
+                            if let Ok(deps) = state_clone.app_repo.list_deployments_by_user(Some(user_uuid)).await {
+                                for dep in deps {
+                                    user_deployments.insert(dep.id.to_string(), dep);
+                                }
+                            }
+                        }
+
+                        for job in inner.apps {
+                             let status = crate::scheduler::status_name(job.status);
+
+                             let dep = user_deployments.get(&job.deployment_id);
+                             let vcpus = dep.map(|d| d.vcpus).unwrap_or(1);
+                             let memory_mib = dep.map(|d| d.memory_mib).unwrap_or(128);
+
                              let data = serde_json::json!({
                                 "job_id": job.job_id,
                                 "deployment_id": job.deployment_id,
                                 "app_id": job.app_id,
                                 "app_name": job.app_name,
                                 "image": job.image,
-                                "status": crate::scheduler::status_name(job.status),
+                                "status": status,
                                 "host_id": job.host_id,
                                 "vm_id": job.vm_id,
                                 "ipv6_address": job.ipv6_address,
+                                "vcpus": vcpus,
+                                "memory_mib": memory_mib,
                                 "cpu_usage": job.cpu_usage,
                                 "ram_used_bytes": job.ram_used_bytes,
                                 "tx_bytes": job.tx_bytes,
@@ -488,7 +520,7 @@ pub async fn watch_deployments(
                             }
                         }
                     } else {
-                        // Fallback to DB if scheduler is unreachable or returns nothing
+                        // Fallback to DB ONLY if scheduler is unreachable
                         if let Ok(apps) = state_clone.app_repo.list_apps_by_user(auth_user_uuid).await {
                             for app in apps {
                                 if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
@@ -504,6 +536,8 @@ pub async fn watch_deployments(
                                                 "host_id": String::new(),
                                                 "vm_id": String::new(),
                                                 "ipv6_address": dep.ipv6_address,
+                                                "vcpus": dep.vcpus,
+                                                "memory_mib": dep.memory_mib,
                                                 "cpu_usage": 0.0,
                                                 "ram_used_bytes": 0,
                                                 "scheduled_at": 0,

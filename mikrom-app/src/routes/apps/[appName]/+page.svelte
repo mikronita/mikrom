@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { browser } from "$app/environment";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import {
@@ -23,6 +24,7 @@
     CheckCircle2,
     Info,
     Network,
+    Scale,
   } from "lucide-svelte";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import Card from "$lib/components/Card.svelte";
@@ -32,25 +34,33 @@
   import CardContent from "$lib/components/CardContent.svelte";
   import Badge from "$lib/components/Badge.svelte";
   import Button from "$lib/components/Button.svelte";
+  import ButtonGroup from "$lib/components/ButtonGroup.svelte";
+  import AlertDialog from "$lib/components/AlertDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import Input from "$lib/components/Input.svelte";
   import MetricChart from "$lib/components/MetricChart.svelte";
+  import Skeleton from "$lib/components/Skeleton.svelte";
+  import ScaleAppModal from "$lib/components/ScaleAppModal.svelte";
   import { getToken } from "$lib/auth";
   import {
-    API_BASE_URL,
     activateDeployment,
     deleteApp,
     deployAppVersion,
     getAppSecret,
     listDeployments,
     type DeploymentInfo,
+    type LiveDeploymentInfo,
     type VmMetricsResponse,
     watchAppMetrics,
     watchDeploymentsSSE,
   } from "$lib/api";
   import { toast } from "$lib/toast";
   import { appsStore, refreshApps } from "$lib/stores/apps";
+
+  const webhookBaseUrl = browser
+    ? `${window.location.protocol}//${window.location.hostname}:5001/v1`
+    : "http://localhost:5001/v1";
 
   let deployments: DeploymentInfo[] = [];
   let loading = true;
@@ -60,9 +70,11 @@
   let secret: string | null = null;
   let showSecret = false;
   let showWebhookModal = false;
-  let confirmDeleteApp = false;
+  let showScaleModal = false;
+  let showDeleteAppDialog = false;
   let deployingApp = false;
   let deletingApp = false;
+  let showHistory = false;
   let activatingDeploymentId: string | null = null;
 
   $: appName = decodeURIComponent($page.params.appName ?? "");
@@ -99,7 +111,7 @@
     return `${(bytes / Math.pow(unit, index)).toFixed(1)} ${sizes[index]}`;
   }
 
-  let lastNetwork = new Map<string, { tx: number; rx: number; time: number }>();
+  let lastNetwork = new Map<string, { tx: number; rx: number; time: number; txRate: number; rxRate: number }>();
 
   function activeDeployment() {
     if (!deployments.length) return null;
@@ -129,29 +141,43 @@
 
   function getStatusClass(status: string) {
     const s = (status || "").toLowerCase();
-    if (s === "running") return "success";
-    if (["building", "scheduled", "pending", "paused", "draining"].includes(s)) return "warning";
+    if (s === "running") return "default";
+    if (["building", "scheduled", "pending", "paused", "draining"].includes(s)) return "secondary";
     if (["failed", "cancelled"].includes(s)) return "destructive";
-    return "secondary";
+    return "outline";
   }
 
   function copy(text: string) {
     if (!text) return;
-    navigator.clipboard.writeText(text).then(() => toast.success("Copied to clipboard!")).catch(() => toast.error("Failed to copy to clipboard"));
+    navigator.clipboard
+      .writeText(text)
+      .then(() => toast.success("Copied to clipboard!"))
+      .catch(() => toast.error("Failed to copy to clipboard"));
   }
+
+  let replicaSamples = new Map<
+    string,
+    {
+      cpu: number;
+      ram: number;
+      rx: number;
+      tx: number;
+      total_rx: number;
+      total_tx: number;
+      lastUpdate: number;
+    }
+  >();
 
   function handleMetrics(sample: VmMetricsResponse) {
     if (!sample) return;
-    liveMetrics = sample;
-    if (sample.error_message) {
-      toast.error(`Termination Error: ${sample.error_message}`);
-    }
 
+    // 1. Calculate rates for this specific replica
     const txBytes = sample.tx_bytes || 0;
     const rxBytes = sample.rx_bytes || 0;
     const now = Date.now();
-    const key = sample.deployment_id || sample.job_id || sample.vm_id || "current";
+    const key = sample.job_id || sample.vm_id || "default";
     const prev = lastNetwork.get(key);
+
     let txRate = 0;
     let rxRate = 0;
 
@@ -160,25 +186,56 @@
       if (deltaTime > 0.8) {
         txRate = Math.max(0, txBytes - prev.tx) / deltaTime / 1024;
         rxRate = Math.max(0, rxBytes - prev.rx) / deltaTime / 1024;
-        lastNetwork.set(key, { tx: txBytes, rx: rxBytes, time: now });
+        lastNetwork.set(key, { tx: txBytes, rx: rxBytes, time: now, txRate, rxRate });
       } else {
-        return;
+        // Reuse previous rates to avoid jitter, but we'll still update CPU/RAM below
+        txRate = prev.txRate || 0;
+        rxRate = prev.rxRate || 0;
       }
     } else {
-      lastNetwork.set(key, { tx: txBytes, rx: rxBytes, time: now });
+      lastNetwork.set(key, { tx: txBytes, rx: rxBytes, time: now, txRate: 0, rxRate: 0 });
     }
 
-    const newPoint = {
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    // 2. Update this replica's state in our map
+    replicaSamples.set(key, {
       cpu: normalizeCpuUsage(sample.cpu_usage),
       ram: (sample.ram_used_bytes || 0) / (1024 * 1024),
       rx: rxRate,
       tx: txRate,
       total_rx: rxBytes,
       total_tx: txBytes,
+      lastUpdate: now,
+    });
+
+    // 3. Clean up stale replicas (no data for > 15s)
+    for (const [replicaKey, data] of replicaSamples.entries()) {
+      if (now - data.lastUpdate > 15000) {
+        replicaSamples.delete(replicaKey);
+      }
+    }
+
+    // 4. Calculate aggregated metrics across all active replicas
+    const activeReplicas = Array.from(replicaSamples.values());
+    if (activeReplicas.length === 0) return;
+
+    const count = activeReplicas.length;
+    const aggregated = {
+      time: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+      cpu: activeReplicas.reduce((sum, r) => sum + r.cpu, 0) / count, // Average CPU
+      ram: activeReplicas.reduce((sum, r) => sum + r.ram, 0), // Total RAM
+      rx: activeReplicas.reduce((sum, r) => sum + r.rx, 0), // Total RX Rate
+      tx: activeReplicas.reduce((sum, r) => sum + r.tx, 0), // Total TX Rate
+      total_rx: activeReplicas.reduce((sum, r) => sum + r.total_rx, 0),
+      total_tx: activeReplicas.reduce((sum, r) => sum + r.total_tx, 0),
     };
 
-    metricsHistory = [...metricsHistory.slice(-29), newPoint];
+    // 5. Update history and live view
+    liveMetrics = sample; // Keep the last sample for miscellaneous info
+    metricsHistory = [...metricsHistory.slice(-29), aggregated];
   }
 
   onMount(() => {
@@ -192,6 +249,7 @@
       loading = true;
       liveMetrics = null;
       metricsHistory = [];
+      replicaSamples.clear();
       lastNetwork.clear();
 
       if ($appsStore.length === 0) {
@@ -203,7 +261,7 @@
         getAppSecret(token, currentAppName),
       ]);
 
-      if (deploymentsResult.data) deployments = deploymentsResult.data;
+      if (deploymentsResult.data) deployments = sortDeployments(deploymentsResult.data.map((dep) => normalizeDeployment(dep)));
       if (secretResult.data) secret = secretResult.data.github_webhook_secret;
       if (deploymentsResult.error) {
         toast.error(deploymentsResult.error || "Failed to load deployments");
@@ -215,17 +273,37 @@
 
       cleanupDeployments = watchDeploymentsSSE(token, (deployment) => {
         if (deployment.app_name !== currentAppName) return;
-        const index = deployments.findIndex((dep) => dep.id === deployment.deployment_id || dep.job_id === deployment.job_id);
+        
+        // Find if we already have this deployment (by ID or Job ID)
+        const depId = "deployment_id" in deployment ? deployment.deployment_id : null;
+        const jobId = deployment.job_id;
+        
+        const index = deployments.findIndex((dep) => 
+          (depId && dep.id === depId) || 
+          (jobId && dep.job_id === jobId)
+        );
+
+        // NEW: If deployment is no longer running, remove it from active metrics aggregation
+        if (deployment.status !== "RUNNING" && jobId) {
+          if (replicaSamples.has(jobId)) {
+            replicaSamples.delete(jobId);
+            // Trigger a re-calculation of aggregated metrics if possible
+            // By deleting it here, the next metric sample from any OTHER replica will produce the correct total
+          }
+        }
+
         if (index === -1) {
-          deployments = [...deployments, { ...(deployment as unknown as DeploymentInfo), id: deployment.deployment_id ?? deployment.vm_id } as DeploymentInfo];
+          // Only add if it's a new one we don't know about
+          deployments = sortDeployments([normalizeDeployment(deployment), ...deployments]);
         } else {
-          deployments = deployments.map((dep, depIndex) => (depIndex === index ? { 
-            ...dep, 
-            ...deployment,
-            git_commit_hash: deployment.git_commit_hash ?? dep.git_commit_hash,
-            git_commit_message: deployment.git_commit_message ?? dep.git_commit_message,
-            git_branch: deployment.git_branch ?? dep.git_branch,
-          } : dep));
+          // Update existing one
+          deployments = sortDeployments(
+            deployments.map((dep, depIndex) =>
+              depIndex === index
+                ? normalizeDeployment(deployment, dep)
+                : dep,
+            ),
+          );
         }
       });
 
@@ -304,15 +382,6 @@
       || deployments[0];
   })(deployments, app);
 
-  $: prodId = ((_deps, _app) => {
-    return (
-      app?.active_deployment_id ||
-      [...deployments]
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-        .find((d) => (d.status || "").toUpperCase() === "RUNNING")?.id
-    );
-  })(deployments, app);
-
   $: latestMetrics = (metricsHistory.length > 0 ? metricsHistory[metricsHistory.length - 1] : null) || (liveMetrics ? {
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
       cpu: normalizeCpuUsage(liveMetrics.cpu_usage),
@@ -322,6 +391,10 @@
       total_rx: liveMetrics.rx_bytes || 0,
       total_tx: liveMetrics.tx_bytes || 0,
     } : { time: "", cpu: 0, ram: 0, rx: 0, tx: 0, total_rx: 0, total_tx: 0 });
+
+  $: inFlight = deployments.find(d => ["HEALTH_CHECKING", "STARTING", "BUILDING", "SCHEDULED"].includes(d.status));
+
+  $: recentDeploymentsList = sortDeployments(deployments).slice(0, 5);
 
   $: totalTrafficBytes = (latestMetrics.total_rx || 0) + (latestMetrics.total_tx || 0);
 
@@ -360,13 +433,30 @@
     },
   ];
 
-  function getStatusBadgeClass(status: string): string {
+  function getDeploymentBadgeProps(status: string) {
     const s = status.toLowerCase();
-    if (s === "running") return "success";
-    if (s === "draining") return "warning";
-    if (s === "building" || s === "scheduled" || s === "pending" || s === "paused") return "warning";
-    if (s === "failed" || s === "cancelled") return "destructive";
-    return "secondary";
+    if (s === "running") {
+      return {
+        variant: "outline" as const,
+        className: "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]",
+      };
+    }
+    if (s === "draining" || s === "building" || s === "scheduled" || s === "pending" || s === "paused") {
+      return {
+        variant: "outline" as const,
+        className: "border-transparent bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] text-[var(--status-warning)]",
+      };
+    }
+    if (s === "failed" || s === "cancelled") {
+      return {
+        variant: "destructive" as const,
+        className: "",
+      };
+    }
+    return {
+      variant: "outline" as const,
+      className: "",
+    };
   }
 
   function formatMetricValue(name: string | number, value: unknown): string {
@@ -387,7 +477,10 @@
   }
 
   function formatDuration(start: string, end: string) {
-    const diff = new Date(end).getTime() - new Date(start).getTime();
+    const startTime = new Date(start).getTime();
+    const endTime = new Date(end).getTime();
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return "--";
+    const diff = endTime - startTime;
     if (diff < 0) return "--";
     if (diff < 1000) return `${diff}ms`;
     const seconds = Math.floor(diff / 1000);
@@ -397,6 +490,61 @@
     }
     const minutes = Math.floor(seconds / 60);
     return `${minutes}m ${seconds % 60}s`;
+  }
+
+  function sortDeployments(list: DeploymentInfo[]) {
+    return [...list].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+
+  function recentDeployments(list: DeploymentInfo[]) {
+    return sortDeployments(list).slice(0, 5);
+  }
+
+  function formatDeploymentDate(dateStr: string) {
+    const value = new Date(dateStr);
+    if (Number.isNaN(value.getTime())) return "--";
+    return value.toLocaleString();
+  }
+
+  function nowIso() {
+    return new Date().toISOString();
+  }
+
+  function normalizeDeployment(
+    deployment: DeploymentInfo | LiveDeploymentInfo,
+    previous?: DeploymentInfo,
+  ): DeploymentInfo {
+    const full = deployment as Partial<DeploymentInfo>;
+    const live = deployment as LiveDeploymentInfo;
+    const fallbackTime = previous?.created_at ?? previous?.updated_at ?? nowIso();
+    
+    // Canonical ID is the deployment_id if present, otherwise deployment.id, otherwise job_id
+    const canonicalId = ("deployment_id" in deployment ? live.deployment_id : null) 
+      ?? ("id" in deployment ? full.id : null)
+      ?? deployment.job_id 
+      ?? previous?.id 
+      ?? "";
+
+    return {
+      id: canonicalId,
+      app_id: full.app_id ?? live.app_id,
+      build_id: full.build_id ?? previous?.build_id ?? null,
+      image_tag: full.image_tag ?? previous?.image_tag ?? null,
+      job_id: deployment.job_id ?? previous?.job_id ?? null,
+      ipv6_address: deployment.ipv6_address ?? previous?.ipv6_address ?? null,
+      status: deployment.status ?? previous?.status ?? "UNKNOWN",
+      vcpus: full.vcpus ?? previous?.vcpus ?? 0,
+      memory_mib: full.memory_mib ?? previous?.memory_mib ?? 0,
+      disk_mib: full.disk_mib ?? previous?.disk_mib ?? 0,
+      port: full.port ?? previous?.port ?? 0,
+      env_vars: full.env_vars ?? previous?.env_vars ?? {},
+      git_commit_hash: full.git_commit_hash ?? previous?.git_commit_hash ?? null,
+      git_commit_message: full.git_commit_message ?? previous?.git_commit_message ?? null,
+      git_branch: full.git_branch ?? previous?.git_branch ?? null,
+      trigger_source: full.trigger_source ?? previous?.trigger_source ?? "manual",
+      created_at: previous?.created_at ?? full.created_at ?? fallbackTime,
+      updated_at: previous?.updated_at ?? full.updated_at ?? fallbackTime,
+    };
   }
 </script>
 
@@ -431,32 +579,37 @@
           {/if}
           Deploy Now
         </Button>
+        <Button size="sm" variant="outline" onclick={() => (showScaleModal = true)}>
+          <Scale class="size-4" />
+          Scaling
+        </Button>
         <Button size="sm" variant="outline" onclick={() => (showWebhookModal = true)}>
           <Cog class="size-4" />
           Auto-deploy
         </Button>
-        <Button size="sm" variant="destructive" onclick={() => (confirmDeleteApp ? handleDeleteApp() : (confirmDeleteApp = true))} disabled={deletingApp}>
+        <Button size="sm" variant="destructive" onclick={() => (showDeleteAppDialog = true)} disabled={deletingApp}>
           {#if deletingApp}
             <Loader2 class="size-4 animate-spin" />
           {:else}
             <Trash2 class="size-4" />
           {/if}
-          {confirmDeleteApp ? "Confirm Delete?" : "Delete App"}
+          Delete App
         </Button>
       </div>
     </div>
 
     <section class="space-y-4">
-      <h2 class="text-lg font-bold tracking-tight">Deployment History</h2>
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-bold tracking-tight">Deployment History</h2>
+      </div>
       <Card class="overflow-hidden">
-
         <div class="overflow-x-auto">
           <table class="min-w-[900px] w-full">
             <thead>
               <tr class="border-b border-border text-left text-sm">
-                <th class="px-4 py-3">Deployment</th>
+                <th class="px-4 py-3">Version</th>
                 <th class="px-4 py-3">Status</th>
-                <th class="px-4 py-3">Duration</th>
+                <th class="px-4 py-3">Replicas</th>
                 <th class="px-4 py-3">Created</th>
                 <th class="px-4 py-3">Environment</th>
                 <th class="px-4 py-3 text-right">Actions</th>
@@ -466,7 +619,7 @@
               {#if loading && deployments.length === 0}
                 {#each Array.from({ length: 3 }) as _}
                   <tr class="border-b border-border">
-                    <td class="px-4 py-4" colspan="6"><div class="h-8 animate-pulse rounded bg-muted"></div></td>
+                    <td class="px-4 py-4" colspan="6"><Skeleton className="h-8 w-full" /></td>
                   </tr>
                 {/each}
               {:else if deployments.length === 0}
@@ -474,16 +627,21 @@
                   <td class="py-10" colspan="6">
                     <EmptyState>
                       <Rocket class="size-10 text-muted-foreground" />
-                      <h3 class="text-xl font-semibold">No deployments yet</h3>
-                      <p class="text-sm text-muted-foreground">Deployments for this application will appear here.</p>
+                      <h3 class="text-xl font-semibold">No active deployment</h3>
+                      <p class="text-sm text-muted-foreground">Deploy your application to see its status here.</p>
                     </EmptyState>
                   </td>
                 </tr>
               {:else}
-                {#each [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) as dep}
-                  {@const isProduction = prodId === dep.id}
+                {#each recentDeploymentsList as dep}
+                  {@const isProduction = active?.id === dep.id}
+                  {@const isCurrentTarget = inFlight ? inFlight.id === dep.id : isProduction}
                   {@const canActivate = ["RUNNING", "PAUSED", "STOPPED", "FAILED"].includes(dep.status) && !isProduction}
-                  <tr class="border-b border-border">
+                  {@const deploymentBadge = getDeploymentBadgeProps(dep.status)}
+                  <tr
+                    class="border-b border-border"
+                    style={isProduction ? "background-color: color-mix(in srgb, var(--accent) 12%, var(--background));" : undefined}
+                  >
                     <td class="px-4 py-4">
                       <div class="flex flex-col gap-1">
                         <span class="max-w-[300px] truncate text-sm font-semibold line-clamp-1">
@@ -503,12 +661,18 @@
                         </div>
                       </div>
                     </td>
-                    <td class="px-4 py-4"><Badge variant={getStatusBadgeClass(dep.status) as "default" | "secondary" | "outline" | "success" | "warning" | "destructive"} className="font-semibold capitalize">{dep.status}</Badge></td>
-                    <td class="px-4 py-4 text-xs font-medium text-muted-foreground">{dep.status === "RUNNING" || dep.status === "FAILED" || dep.status === "PAUSED" || dep.status === "STOPPED" || dep.status === "DRAINING" ? formatDuration(dep.created_at, dep.updated_at) : "..."}</td>
-                    <td class="whitespace-nowrap px-4 py-4 text-xs text-muted-foreground">{new Date(dep.created_at).toLocaleString()}</td>
+                    <td class="px-4 py-4"><Badge variant={deploymentBadge.variant} className={`font-semibold capitalize ${deploymentBadge.className}`}>{dep.status}</Badge></td>
+                    <td class="px-4 py-4 text-xs font-medium text-muted-foreground">
+                      {#if app && isCurrentTarget}
+                        {app.autoscaling_enabled ? `${app.min_replicas}–${app.max_replicas}` : app.desired_replicas}
+                      {:else}
+                        0
+                      {/if}
+                    </td>
+                    <td class="whitespace-nowrap px-4 py-4 text-xs text-muted-foreground">{formatDeploymentDate(dep.created_at)}</td>
                     <td class="px-4 py-4">
                       {#if isProduction}
-                        <div class="flex items-center gap-1.5 text-sm font-semibold text-status-online">
+                        <div class="flex items-center gap-1.5 text-sm font-semibold text-status-info">
                           <CheckCircle2 class="size-5" />
                           <span>Production</span>
                         </div>
@@ -517,15 +681,29 @@
                       {/if}
                     </td>
                     <td class="px-4 py-4 text-right">
-                      <Button size="sm" variant={isProduction ? "outline" : "default"} disabled={!canActivate || activatingDeploymentId !== null} onclick={() => handleActivate(dep.id)} className="ml-auto">
-                        {getDeploymentButtonText(dep, isProduction)}
-                        {#if !isProduction && !["BUILDING", "STARTING", "SCHEDULED", "DRAINING"].includes(dep.status)}
-                          <Rocket class="ml-2 size-3" />
+                      <ButtonGroup className="ml-auto">
+                        {#if isProduction}
+                          <Button size="sm" variant="outline" disabled>
+                            Currently in Prod
+                          </Button>
+                        {:else}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)] hover:bg-[color-mix(in_srgb,var(--status-info)_18%,transparent)]"
+                            disabled={!canActivate || activatingDeploymentId !== null}
+                            onclick={() => handleActivate(dep.id)}
+                          >
+                            {getDeploymentButtonText(dep, isProduction)}
+                            {#if !["BUILDING", "STARTING", "SCHEDULED", "DRAINING"].includes(dep.status)}
+                              <Rocket class="ml-2 size-3" />
+                            {/if}
+                            {#if dep.status === "BUILDING" || dep.status === "DRAINING" || activatingDeploymentId === dep.id}
+                              <Loader2 class="ml-2 size-3 animate-spin" />
+                            {/if}
+                          </Button>
                         {/if}
-                        {#if dep.status === "BUILDING" || dep.status === "DRAINING" || activatingDeploymentId === dep.id}
-                          <Loader2 class="ml-2 size-3 animate-spin" />
-                        {/if}
-                      </Button>
+                      </ButtonGroup>
                     </td>
                   </tr>
                 {/each}
@@ -541,9 +719,22 @@
         <h2 class="text-lg font-bold tracking-tight">Live Performance</h2>
 
         {#if !liveMetrics}
-          <Card class="p-12 flex flex-col items-center justify-center text-center space-y-4">
-            <Loader2 class="size-8 animate-spin text-muted-foreground" />
-            <p class="text-muted-foreground">Connecting to instance metrics...</p>
+          <Card class="p-12">
+            <div class="flex flex-col gap-4">
+              <Skeleton className="h-6 w-44" />
+              <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {#each Array.from({ length: 4 }) as _}
+                  <div class="rounded-lg border bg-background/80 p-3 shadow-sm">
+                    <Skeleton className="h-4 w-24" />
+                    <div class="mt-3 flex flex-col gap-2">
+                      <Skeleton className="h-6 w-20" />
+                      <Skeleton className="h-3 w-28" />
+                    </div>
+                  </div>
+                {/each}
+              </div>
+              <Skeleton className="h-48 w-full" />
+            </div>
           </Card>
         {:else}
           <Card class="overflow-hidden">
@@ -594,8 +785,8 @@
           <div class="space-y-1.5">
             <p class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Payload URL</p>
             <div class="flex items-center gap-2">
-              <Input className="flex-1 font-mono text-xs" readOnly value={`${API_BASE_URL}/webhooks/github/${appName}`} />
-              <Button variant="outline" size="sm" className="h-9 px-3" onclick={() => copy(`${API_BASE_URL}/webhooks/github/${appName}`)}>
+              <Input className="flex-1 font-mono text-xs" readOnly value={`${webhookBaseUrl}/webhooks/github/${appName}`} />
+              <Button variant="outline" size="sm" className="h-9 px-3" onclick={() => copy(`${webhookBaseUrl}/webhooks/github/${appName}`)}>
                 <Clipboard class="size-4" />
               </Button>
             </div>
@@ -631,5 +822,21 @@
       </div>
     </Modal>
   {/if}
+
+  {#if app && showScaleModal}
+    <ScaleAppModal bind:open={showScaleModal} {app} />
+  {/if}
+
+  <AlertDialog
+    open={showDeleteAppDialog}
+    title="Delete application?"
+    description={`This will permanently delete ${app?.name || appName} and all of its deployments, volumes and security rules.`}
+    confirmLabel="Delete App"
+    on:close={() => (showDeleteAppDialog = false)}
+    on:confirm={async () => {
+      showDeleteAppDialog = false;
+      await handleDeleteApp();
+    }}
+  />
 
 </DashboardLayout>

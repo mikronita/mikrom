@@ -15,6 +15,15 @@ pub async fn handle(client: &MikromClient, cmd: AppCommands, output: OutputForma
         AppCommands::Deployments { name } => list_deployments(client, &name, output).await,
         AppCommands::Watch { name } => watch(&name),
         AppCommands::Secret { name } => show_secret(client, &name, output).await,
+        AppCommands::Scale {
+            name,
+            replicas,
+            auto,
+            min,
+            max,
+            cpu,
+            mem,
+        } => scale(client, &name, replicas, auto, min, max, cpu, mem, output).await,
     }
 }
 
@@ -38,6 +47,11 @@ async fn list(client: &MikromClient, output: OutputFormat) -> Result<()> {
                         "idle"
                     }),
                     app.port.to_string(),
+                    if app.autoscaling_enabled {
+                        format!("Auto ({}–{})", app.min_replicas, app.max_replicas)
+                    } else {
+                        format!("Fixed ({})", app.desired_replicas)
+                    },
                     app.active_deployment_id
                         .as_deref()
                         .unwrap_or("—")
@@ -48,7 +62,14 @@ async fn list(client: &MikromClient, output: OutputFormat) -> Result<()> {
             .collect::<Vec<_>>();
         ui::table(
             "📦 Registered Applications",
-            &["App", "Status", "Port", "Active deployment", "Created"],
+            &[
+                "App",
+                "Status",
+                "Port",
+                "Scaling",
+                "Active deployment",
+                "Created",
+            ],
             &rows,
         );
     }
@@ -214,6 +235,47 @@ fn watch(name: &str) -> Result<()> {
         "     Use 'mikrom app deployments {}' to poll manually.",
         name
     );
+    Ok(())
+}
+
+async fn scale(
+    client: &MikromClient,
+    name: &str,
+    replicas: Option<i32>,
+    auto: Option<bool>,
+    min: Option<i32>,
+    max: Option<i32>,
+    cpu: Option<f64>,
+    mem: Option<f64>,
+    output: OutputFormat,
+) -> Result<()> {
+    if output == OutputFormat::Table {
+        ui::step(
+            ui::WAIT,
+            &format!(
+                "{} Configuring scaling for {}...",
+                ui::APP,
+                ui::bold_cyan(name)
+            ),
+        );
+    }
+
+    let req = crate::client::ScaleRequest {
+        desired_replicas: replicas,
+        autoscaling_enabled: auto,
+        min_replicas: min,
+        max_replicas: max,
+        cpu_threshold: cpu,
+        mem_threshold: mem,
+    };
+
+    client.scale_app(name, req).await?;
+
+    if output == OutputFormat::Json {
+        return ui::print_json(&serde_json::json!({ "scaled": true, "app": name }));
+    }
+
+    ui::success(&format!("Scaling configuration updated for {}.", name));
     Ok(())
 }
 

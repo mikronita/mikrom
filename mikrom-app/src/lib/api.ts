@@ -163,7 +163,22 @@ export interface AppInfo {
   github_repo_id?: number;
   github_repo_full_name?: string;
   active_deployment_id: string | null;
+  desired_replicas: number;
+  min_replicas: number;
+  max_replicas: number;
+  autoscaling_enabled: boolean;
+  cpu_threshold: number;
+  mem_threshold: number;
   created_at: string;
+}
+
+export interface ScaleAppRequest {
+  desired_replicas?: number;
+  min_replicas?: number;
+  max_replicas?: number;
+  autoscaling_enabled?: boolean;
+  cpu_threshold?: number;
+  mem_threshold?: number;
 }
 
 export interface CreateAppRequest {
@@ -259,6 +274,7 @@ export interface Volume {
   size_mib: number;
   pool_name: string;
   mount_point: string;
+  access_mode: number;
   created_at: string;
 }
 
@@ -273,6 +289,7 @@ export interface CreateVolumeRequest {
   name: string;
   size_mib: number;
   mount_point: string;
+  access_mode: number;
 }
 
 export interface CreateSnapshotRequest {
@@ -525,6 +542,21 @@ export async function createApp(token: string, data: CreateAppRequest) {
     return { data: result as AppInfo };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function scaleApp(token: string, appName: string, data: ScaleAppRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appName}/scale`, {
+      method: "PATCH",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to scale app") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
   }
 }
 

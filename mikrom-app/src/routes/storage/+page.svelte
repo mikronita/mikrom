@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Camera, Copy, Database, HardDrive, History, Loader2, Plus, RotateCcw, Trash2 } from "lucide-svelte";
+  import { Camera, Copy, Database, HardDrive, History, Plus, RotateCcw, Trash2 } from "lucide-svelte";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import Card from "$lib/components/Card.svelte";
   import CardHeader from "$lib/components/CardHeader.svelte";
@@ -9,11 +9,16 @@
   import CardContent from "$lib/components/CardContent.svelte";
   import Badge from "$lib/components/Badge.svelte";
   import Button from "$lib/components/Button.svelte";
+  import AlertDialog from "$lib/components/AlertDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
+  import Skeleton from "$lib/components/Skeleton.svelte";
+  import TableSkeleton from "$lib/components/TableSkeleton.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import Field from "$lib/components/Field.svelte";
+  import FieldGroup from "$lib/components/FieldGroup.svelte";
   import Input from "$lib/components/Input.svelte";
   import Select from "$lib/components/Select.svelte";
+
   import { getToken } from "$lib/auth";
   import { createVolume, createVolumeSnapshot, cloneVolumeFromSnapshot, deleteVolume, deleteVolumeSnapshot, restoreVolumeSnapshot, type Volume, type VolumeSnapshot } from "$lib/api";
   import { toast } from "$lib/toast";
@@ -23,13 +28,13 @@
   let selectedApp = "";
   let showCreateVolume = false;
   let volumeForSnapshots = "";
-  let volumeToDelete = "";
-  let snapshotToDelete = "";
+  let volumeToDelete: Volume | null = null;
+  let snapshotToDelete: VolumeSnapshot | null = null;
   let showSnapshotsModal = false;
   let restoreSnapshotName = "";
   let snapshotToClone = "";
   let cloneName = "";
-  let newVolume = { name: "", size_mib: 1024, mount_point: "/data" };
+  let newVolume = { name: "", size_mib: 1024, mount_point: "/data", access_mode: 0 };
 
   async function loadVolumes(appName: string) {
     const app = $appsStore.find((item) => item.name === appName);
@@ -56,7 +61,7 @@
     const result = await createVolume(token, app.id, newVolume);
     if (result.error) return toast.error(result.error);
     toast.success("Volume created successfully");
-    newVolume = { name: "", size_mib: 1024, mount_point: "/data" };
+    newVolume = { name: "", size_mib: 1024, mount_point: "/data", access_mode: 0 };
     showCreateVolume = false;
     // SSE will trigger refreshVolumes
   }
@@ -78,7 +83,6 @@
     const result = await deleteVolume(token, id);
     if (result.error) return toast.error(result.error);
     toast.success("Volume deleted");
-    volumeToDelete = "";
     // SSE will trigger refreshVolumes
   }
 
@@ -88,8 +92,21 @@
     const result = await deleteVolumeSnapshot(token, id);
     if (result.error) return toast.error(result.error);
     toast.success("Snapshot deleted");
-    snapshotToDelete = "";
     await loadSnapshots(volumeForSnapshots);
+  }
+
+  async function confirmDeleteVolume() {
+    if (!volumeToDelete) return;
+    const target = volumeToDelete;
+    volumeToDelete = null;
+    await deleteVolumeNow(target.id);
+  }
+
+  async function confirmDeleteSnapshot() {
+    if (!snapshotToDelete) return;
+    const target = snapshotToDelete;
+    snapshotToDelete = null;
+    await deleteSnapshotNow(target.id);
   }
 
   async function restoreSnapshot() {
@@ -166,7 +183,10 @@
         {#if !selectedApp}
           <EmptyState><HardDrive class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">Select an application</h3><p class="text-sm text-muted-foreground">Choose an app to manage its persistent storage volumes.</p></EmptyState>
         {:else if $volumesLoading}
-          <div class="space-y-3 p-4"><div class="h-10 animate-pulse rounded bg-muted"></div><div class="h-10 animate-pulse rounded bg-muted"></div></div>
+          <div class="flex flex-col gap-3 p-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
         {:else if $volumesStore.length === 0}
           <EmptyState><HardDrive class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">No volumes found</h3><p class="text-sm text-muted-foreground">This application doesn't have any persistent volumes yet.</p><Button size="sm" onclick={() => (showCreateVolume = true)}><Plus class="size-4" />Create first volume</Button></EmptyState>
         {:else}
@@ -176,19 +196,26 @@
                 <th class="px-4 py-3">Name</th>
                 <th class="px-4 py-3">Size</th>
                 <th class="px-4 py-3">Mount Point</th>
+                <th class="px-4 py-3">Mode</th>
                 <th class="px-4 py-3">Pool</th>
-                <th class="px-4 py-3">Created At</th>
                 <th class="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {#each $volumesStore as volume}
-                <tr class="border-b border-border">
+                <tr class="border-b border-border text-sm">
                   <td class="px-4 py-4 font-medium"><div class="flex items-center gap-2"><Database class="size-4 text-muted-foreground" />{volume.name}</div></td>
                   <td class="px-4 py-4"><Badge variant="secondary">{formatSize(volume.size_mib)}</Badge></td>
                   <td class="px-4 py-4"><code class="text-xs">{volume.mount_point}</code></td>
-                  <td class="px-4 py-4 font-mono text-xs text-muted-foreground">{volume.pool_name}</td>
-                  <td class="px-4 py-4 text-sm text-muted-foreground">{new Date(volume.created_at).toLocaleDateString()}</td>
+                  <td class="px-4 py-4">
+                    <Badge
+                      variant={volume.access_mode === 1 ? "outline" : volume.access_mode === 2 ? "outline" : "secondary"}
+                      className={volume.access_mode === 1 ? "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]" : ""}
+                    >
+                      {volume.access_mode === 1 ? "RWX (Mesh)" : volume.access_mode === 2 ? "ROX (Shared)" : "RWO (Single)"}
+                    </Badge>
+                  </td>
+                  <td class="px-4 py-4 font-mono text-[10px] text-muted-foreground">{volume.pool_name}</td>
                   <td class="px-4 py-4 text-right">
                     <div class="flex justify-end gap-2">
                       <Button variant="ghost" size="icon" onclick={async () => { volumeForSnapshots = volume.id; showSnapshotsModal = true; await loadSnapshots(volume.id); }}>
@@ -197,7 +224,7 @@
                       <Button variant="ghost" size="icon" onclick={() => createSnapshot(volume.id)}>
                         <Camera class="size-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onclick={() => (volumeToDelete = volume.id)}>
+                      <Button variant="ghost" size="icon" onclick={() => (volumeToDelete = volume)}>
                         <Trash2 class="size-4 text-destructive" />
                       </Button>
                     </div>
@@ -213,35 +240,56 @@
 
   {#if showCreateVolume}
     <Modal bind:open={showCreateVolume} title="Create new volume" description={`The volume will be created for ${selectedApp}.`}>
-      <div class="space-y-4">
+      <FieldGroup className="pt-2">
         <Field label="Volume name"><Input bind:value={newVolume.name} placeholder="my-data-volume" /></Field>
         <Field label="Size (MiB)"><Input type="number" bind:value={newVolume.size_mib} min={128} /></Field>
         <Field label="Mount point"><Input bind:value={newVolume.mount_point} placeholder="/data" /></Field>
+        <Field label="Access Mode">
+          <Select bind:value={newVolume.access_mode}>
+            <option value={0}>RWO - ReadWriteOnce (Single Node)</option>
+            <option value={1}>RWX - ReadWriteMany (Shared Mesh)</option>
+            <option value={2}>ROX - ReadOnlyMany (Shared Read)</option>
+          </Select>
+        </Field>
         <p class="text-xs text-muted-foreground italic">
-          Note: This volume will be attached and mounted at this path during the <strong>next deployment</strong> of the application.
+          Note: This volume will be attached and mounted at this path during the <strong>next deployment</strong> of the application. 
+          {#if newVolume.access_mode === 1}
+            <span class="text-status-online font-semibold">RWX mode uses CephFS for multi-node sharing.</span>
+          {/if}
         </p>
         <div class="flex justify-end gap-2">
           <Button variant="outline" onclick={() => (showCreateVolume = false)}>Cancel</Button>
           <Button onclick={createNewVolume} disabled={!newVolume.name || !newVolume.mount_point}>Create</Button>
         </div>
-      </div>
+      </FieldGroup>
     </Modal>
   {/if}
 
-  {#if volumeToDelete}
-    <Modal open={Boolean(volumeToDelete)} title="Delete volume?" description="This action cannot be undone." on:close={() => (volumeToDelete = "")}>
-      <div class="flex justify-end gap-2">
-        <Button variant="outline" onclick={() => (volumeToDelete = "")}>Cancel</Button>
-        <Button variant="destructive" onclick={() => deleteVolumeNow(volumeToDelete)}>Delete Volume</Button>
-      </div>
-    </Modal>
-  {/if}
+  <AlertDialog
+    open={Boolean(volumeToDelete)}
+    title="Delete volume?"
+    description={`This will permanently delete ${volumeToDelete?.name || "this volume"} and cannot be undone.`}
+    confirmLabel="Delete Volume"
+    on:close={() => (volumeToDelete = null)}
+    on:confirm={confirmDeleteVolume}
+  />
 
   {#if showSnapshotsModal}
     <Modal open={showSnapshotsModal} title="Snapshot history" width="max-w-3xl" description={`Manage snapshots for volume ${$volumesStore.find((v) => v.id === volumeForSnapshots)?.name || ""}.`} on:close={() => { showSnapshotsModal = false; volumeForSnapshots = ""; snapshotsStore.set([]); }}>
       <div class="space-y-4">
         {#if $snapshotsLoading}
-          <div class="flex justify-center p-8"><Loader2 class="size-6 animate-spin text-muted-foreground" /></div>
+          <table class="w-full">
+            <TableSkeleton
+              rows={3}
+              rowClassName="border-b border-border"
+              cellClassName="px-4 py-3"
+              columns={[
+                { skeletonClassName: "h-5 w-40" },
+                { skeletonClassName: "h-5 w-32" },
+                { skeletonClassName: "ml-auto h-8 w-28", cellClassName: "text-right" },
+              ]}
+            />
+          </table>
         {:else if $snapshotsStore.length === 0}
           <p class="py-8 text-center text-sm text-muted-foreground">No snapshots found for this volume.</p>
         {:else}
@@ -263,7 +311,7 @@
                           <Copy class="size-3" />
                           Clone
                         </Button>
-                        <Button variant="ghost" size="icon" onclick={() => (snapshotToDelete = snap.id)}>
+                        <Button variant="ghost" size="icon" onclick={() => (snapshotToDelete = snap)}>
                           <Trash2 class="size-4 text-destructive" />
                         </Button>
                       </div>
@@ -298,12 +346,12 @@
     </Modal>
   {/if}
 
-  {#if snapshotToDelete}
-    <Modal open={Boolean(snapshotToDelete)} title="Delete snapshot?" description="This will remove the snapshot from Ceph." on:close={() => (snapshotToDelete = "")}>
-      <div class="flex justify-end gap-2">
-        <Button variant="outline" onclick={() => (snapshotToDelete = "")}>Cancel</Button>
-        <Button variant="destructive" onclick={() => deleteSnapshotNow(snapshotToDelete)}>Delete Snapshot</Button>
-      </div>
-    </Modal>
-  {/if}
+  <AlertDialog
+    open={Boolean(snapshotToDelete)}
+    title="Delete snapshot?"
+    description={`This will permanently delete ${snapshotToDelete?.name || "this snapshot"} from Ceph and cannot be undone.`}
+    confirmLabel="Delete Snapshot"
+    on:close={() => (snapshotToDelete = null)}
+    on:confirm={confirmDeleteSnapshot}
+  />
 </DashboardLayout>

@@ -6,6 +6,20 @@ pub trait Scheduler: Send + Sync {
     async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
     async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
     async fn delete_all_by_app(&self, app_id: String, user_id: String) -> Result<bool, String>;
+    async fn scale_app(
+        &self,
+        app_id: String,
+        desired_replicas: u32,
+        user_id: String,
+    ) -> Result<bool, String>;
+    async fn list_apps(
+        &self,
+        req: mikrom_proto::scheduler::ListAppsRequest,
+    ) -> Result<mikrom_proto::scheduler::ListAppsResponse, String>;
+    async fn update_app_scaling_config(
+        &self,
+        req: mikrom_proto::scheduler::UpdateAppScalingConfigRequest,
+    ) -> Result<bool, String>;
     async fn list_workers(&self) -> Result<ListWorkersResponse, String>;
 }
 
@@ -88,6 +102,75 @@ impl Scheduler for NatsScheduler {
         Ok(inner.success)
     }
 
+    async fn scale_app(
+        &self,
+        app_id: String,
+        desired_replicas: u32,
+        user_id: String,
+    ) -> Result<bool, String> {
+        use mikrom_proto::scheduler::{ScaleAppRequest, ScaleAppResponse};
+        use prost::Message;
+        let nats_req = ScaleAppRequest {
+            app_id,
+            desired_replicas,
+            user_id,
+        };
+        let mut buf = Vec::new();
+        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
+
+        let response = self
+            .client
+            .request(mikrom_proto::subjects::SCHEDULER_SCALE_APP, buf.into())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let inner = ScaleAppResponse::decode(&response.payload[..]).map_err(|e| e.to_string())?;
+
+        Ok(inner.success)
+    }
+
+    async fn list_apps(
+        &self,
+        req: mikrom_proto::scheduler::ListAppsRequest,
+    ) -> Result<mikrom_proto::scheduler::ListAppsResponse, String> {
+        use mikrom_proto::scheduler::ListAppsResponse;
+        use prost::Message;
+        let mut buf = Vec::new();
+        req.encode(&mut buf).map_err(|e| e.to_string())?;
+
+        let response = self
+            .client
+            .request(mikrom_proto::subjects::SCHEDULER_LIST_APPS, buf.into())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        ListAppsResponse::decode(&response.payload[..]).map_err(|e| e.to_string())
+    }
+
+    async fn update_app_scaling_config(
+        &self,
+        req: mikrom_proto::scheduler::UpdateAppScalingConfigRequest,
+    ) -> Result<bool, String> {
+        use mikrom_proto::scheduler::UpdateAppScalingConfigResponse;
+        use prost::Message;
+        let mut buf = Vec::new();
+        req.encode(&mut buf).map_err(|e| e.to_string())?;
+
+        let response = self
+            .client
+            .request(
+                mikrom_proto::subjects::SCHEDULER_UPDATE_APP_SCALING_CONFIG,
+                buf.into(),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let inner = UpdateAppScalingConfigResponse::decode(&response.payload[..])
+            .map_err(|e| e.to_string())?;
+
+        Ok(inner.success)
+    }
+
     async fn list_workers(&self) -> Result<ListWorkersResponse, String> {
         use mikrom_proto::scheduler::ListWorkersRequest;
         use prost::Message;
@@ -113,6 +196,20 @@ mockall::mock! {
         async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
         async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
         async fn delete_all_by_app(&self, app_id: String, user_id: String) -> Result<bool, String>;
+        async fn scale_app(
+            &self,
+            app_id: String,
+            desired_replicas: u32,
+            user_id: String,
+        ) -> Result<bool, String>;
+        async fn list_apps(
+            &self,
+            req: mikrom_proto::scheduler::ListAppsRequest,
+        ) -> Result<mikrom_proto::scheduler::ListAppsResponse, String>;
+        async fn update_app_scaling_config(
+            &self,
+            req: mikrom_proto::scheduler::UpdateAppScalingConfigRequest,
+        ) -> Result<bool, String>;
         async fn list_workers(&self) -> Result<ListWorkersResponse, String>;
     }
 }

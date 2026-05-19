@@ -28,6 +28,20 @@ impl JobStatus {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessMode {
+    ReadWriteOnce = 0,
+    ReadWriteMany = 1,
+    ReadOnlyMany = 2,
+}
+
+impl Default for AccessMode {
+    fn default() -> Self {
+        Self::ReadWriteOnce
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Volume {
     pub volume_id: String,
@@ -35,6 +49,7 @@ pub struct Volume {
     pub read_only: bool,
     pub pool_name: String,
     pub mount_point: String,
+    pub access_mode: AccessMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

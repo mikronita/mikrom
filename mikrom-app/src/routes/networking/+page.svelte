@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
-  import { Boxes, Globe2, LockKeyhole, Network, Plus, Server, ShieldCheck, Trash2, Loader2 } from "lucide-svelte";
+  import { onMount } from "svelte";
+  import { Boxes, Globe2, LockKeyhole, Network, Plus, Server, ShieldCheck, Trash2 } from "lucide-svelte";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import Card from "$lib/components/Card.svelte";
   import CardHeader from "$lib/components/CardHeader.svelte";
@@ -9,7 +9,9 @@
   import CardContent from "$lib/components/CardContent.svelte";
   import Badge from "$lib/components/Badge.svelte";
   import Button from "$lib/components/Button.svelte";
+  import AlertDialog from "$lib/components/AlertDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
+  import Skeleton from "$lib/components/Skeleton.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import Field from "$lib/components/Field.svelte";
   import Input from "$lib/components/Input.svelte";
@@ -29,7 +31,7 @@
     type SecurityRule,
     watchMeshStatus,
   } from "$lib/api";
-  import { getCurrentVms, subscribeVms } from "$lib/stores/vms";
+  import { vmsStore } from "$lib/stores/vms";
   import { toast } from "$lib/toast";
   import { appsStore, refreshApps } from "$lib/stores/apps";
   import { profile, refreshProfile } from "$lib/stores/profile";
@@ -38,16 +40,11 @@
   const defaultRule: CreateSecurityRuleRequest = { protocol: "tcp", port_start: 80, port_end: 80, action: "allow" };
 
   let mesh: MeshStatus | null = null;
-  let deployments = getCurrentVms();
   let selectedApp = "";
   let loading = true;
   let showRuleModal = false;
   let rule: CreateSecurityRuleRequest = defaultRule;
-
-  const unsubscribe = subscribeVms((next) => {
-    deployments = next;
-  });
-  onDestroy(() => unsubscribe());
+  let ruleToDelete: SecurityRule | null = null;
 
   function formatVmId(vmId: string) {
     return vmId.length > 12 ? vmId.substring(0, 12) : vmId;
@@ -56,6 +53,26 @@
   function formatPortRange(item: { protocol: string; port_start: number; port_end: number }) {
     if (item.protocol === "any") return "All ports";
     return item.port_start === item.port_end ? `${item.port_start}` : `${item.port_start}-${item.port_end}`;
+  }
+
+  function getDeploymentBadgeProps(status: string) {
+    const s = status.toLowerCase();
+    if (s === "running") {
+      return {
+        variant: "outline" as const,
+        className: "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]",
+      };
+    }
+    if (s === "draining" || s === "building" || s === "scheduled" || s === "pending" || s === "paused") {
+      return {
+        variant: "outline" as const,
+        className: "border-transparent bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] text-[var(--status-warning)]",
+      };
+    }
+    if (s === "failed" || s === "cancelled") {
+      return { variant: "destructive" as const, className: "" };
+    }
+    return { variant: "outline" as const, className: "" };
   }
 
   async function loadRules(token: string, appName: string) {
@@ -98,7 +115,7 @@
     };
   });
 
-  $: runningDeployments = deployments.filter((deployment) => deployment.status === "RUNNING");
+  $: runningDeployments = $vmsStore.filter((deployment) => deployment.status === "RUNNING");
 
   async function createRule() {
     const token = getToken();
@@ -125,6 +142,13 @@
     toast.success("Security rule deleted");
     await loadRules(token, selectedApp);
   }
+
+  async function confirmDeleteRule() {
+    if (!ruleToDelete) return;
+    const target = ruleToDelete;
+    ruleToDelete = null;
+    await removeRule(target.id);
+  }
 </script>
 
 <svelte:head>
@@ -143,7 +167,7 @@
         </div>
         <p class="max-w-2xl text-sm text-muted-foreground">Monitor the private 6PN mesh, workload addresses and application security rules.</p>
       </div>
-      <Badge variant="secondary" className="w-fit gap-2 px-3 py-1.5">
+      <Badge variant="outline" className="w-fit gap-2 px-3 py-1.5 border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">
         <LockKeyhole class="size-4" />
         WireGuard mesh
       </Badge>
@@ -152,7 +176,7 @@
     <div class="grid gap-4 md:grid-cols-3">
       {#each [
         { label: "VPC prefix", value: $profile?.vpc_ipv6_prefix || "Not assigned", description: "Private IPv6 /40 prefix reserved for your applications.", icon: Globe2, loading: !$profile, valueClass: "break-all font-mono text-lg" },
-        { label: "Active peers", value: mesh?.total_workers ?? 0, description: "Agent nodes currently participating in the mesh.", icon: Server, loading: !mesh, valueClass: "text-3xl" },
+        { label: "Active peers", value: (mesh?.total_workers ?? 0) + runningDeployments.length, description: "Total nodes and microVMs participating in the mesh.", icon: Server, loading: !mesh || loading, valueClass: "text-3xl" },
         { label: "Running workloads", value: runningDeployments.length, description: "MicroVMs currently reachable through 6PN.", icon: Boxes, loading: loading, valueClass: "text-3xl" },
       ] as card}
         <Card>
@@ -160,7 +184,7 @@
             <div class="flex flex-col gap-1">
               <CardDescription>{card.label}</CardDescription>
               {#if card.loading}
-                <div class={`mt-1 h-8 animate-pulse rounded bg-muted ${card.valueClass.includes("break-all") ? "w-32" : "w-24"}`}></div>
+                <Skeleton className={`mt-1 h-8 ${card.valueClass.includes("break-all") ? "w-32" : "w-24"}`} />
               {:else}
                 <CardTitle class={card.valueClass}>{card.value}</CardTitle>
               {/if}
@@ -184,7 +208,7 @@
               <CardTitle>Workload connectivity</CardTitle>
               <CardDescription>Running microVMs reachable inside your private 6PN mesh.</CardDescription>
             </div>
-            <Badge variant="secondary"><Network class="size-4" />{runningDeployments.length} active</Badge>
+            <Badge variant="outline" className="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]"><Network class="size-4" />{runningDeployments.length} active</Badge>
           </div>
         </CardHeader>
         <div class="overflow-x-auto">
@@ -199,12 +223,15 @@
             <tbody>
               {#if loading}
                 {#each Array.from({ length: 3 }) as _}
-                  <tr class="border-b border-border"><td class="p-4" colspan="3"><div class="h-10 w-full animate-pulse rounded bg-muted"></div></td></tr>
+                  <tr class="border-b border-border">
+                    <td class="p-4" colspan="3"><Skeleton className="h-10 w-full" /></td>
+                  </tr>
                 {/each}
               {:else if runningDeployments.length === 0}
                 <tr><td colspan="3"><EmptyState><Network class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">No active workloads</h3><p class="text-sm text-muted-foreground">Running deployments will appear here with their private network address.</p></EmptyState></td></tr>
               {:else}
                 {#each runningDeployments as deployment}
+                  {@const deploymentBadge = getDeploymentBadgeProps(deployment.status)}
                   <tr class="border-b border-border">
                     <td class="px-4 py-4">
                       <a href={`/apps/${encodeURIComponent(deployment.app_name)}`} class="flex items-center gap-3 hover:opacity-80">
@@ -221,7 +248,7 @@
                         <span class="text-xs text-muted-foreground">Private mesh endpoint</span>
                       </div>
                     </td>
-                    <td class="px-4 py-4 text-right"><Badge variant="success">{deployment.status.toLowerCase()}</Badge></td>
+                    <td class="px-4 py-4 text-right"><Badge variant={deploymentBadge.variant} className={`capitalize ${deploymentBadge.className}`}>{deployment.status.toLowerCase()}</Badge></td>
                   </tr>
                 {/each}
               {/if}
@@ -257,14 +284,14 @@
           </div>
         </CardHeader>
 
-        <CardContent class="p-4">
+          <CardContent class="p-4">
           {#if !selectedApp}
             <EmptyState><ShieldCheck class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">Select an application</h3><p class="text-sm text-muted-foreground">Choose an app to inspect and manage its security group rules.</p></EmptyState>
           {:else if $securityRulesLoading}
-            <div class="space-y-3">
-              <div class="h-10 animate-pulse rounded bg-muted"></div>
-              <div class="h-10 animate-pulse rounded bg-muted"></div>
-              <div class="h-10 animate-pulse rounded bg-muted"></div>
+            <div class="flex flex-col gap-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
             </div>
           {:else if $securityRulesStore.length === 0}
             <EmptyState><ShieldCheck class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">No security rules</h3><p class="text-sm text-muted-foreground">Create the first firewall rule for this application.</p></EmptyState>
@@ -277,8 +304,8 @@
                     <div class="text-xs text-muted-foreground">Priority {item.priority}</div>
                   </div>
                   <div class="flex items-center gap-2">
-                    <Badge variant={item.action === "allow" ? "success" : "destructive"}>{item.action}</Badge>
-                    <Button variant="ghost" size="icon" onclick={() => removeRule(item.id)}>
+                    <Badge variant={item.action === "allow" ? "outline" : "destructive"} className={item.action === "allow" ? "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]" : ""}>{item.action}</Badge>
+                    <Button variant="ghost" size="icon" onclick={() => (ruleToDelete = item)}>
                       <Trash2 class="size-4" />
                     </Button>
                   </div>
@@ -318,4 +345,13 @@
       </div>
     </Modal>
   {/if}
+
+  <AlertDialog
+    open={Boolean(ruleToDelete)}
+    title="Delete security rule?"
+    description={`This will remove the ${ruleToDelete?.protocol.toUpperCase() || "selected"} rule for ${selectedApp} and cannot be undone.`}
+    confirmLabel="Delete rule"
+    on:close={() => (ruleToDelete = null)}
+    on:confirm={confirmDeleteRule}
+  />
 </DashboardLayout>

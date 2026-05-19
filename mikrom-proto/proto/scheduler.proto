@@ -45,12 +45,14 @@ service SchedulerService {
   rpc ResumeApp(ResumeRequest) returns (ResumeResponse);
   rpc DeleteApp(DeleteAppRequest) returns (DeleteAppResponse);
   rpc DeleteAllByApp(DeleteAllByAppRequest) returns (DeleteAllByAppResponse);
+  rpc ScaleApp(ScaleAppRequest) returns (ScaleAppResponse);
   rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
   rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse);
   rpc WatchApps(WatchAppsRequest) returns (stream WatchAppsResponse);
   rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse);
   rpc UpdateSecurityGroups(UpdateSecurityGroupsRequest) returns (UpdateSecurityGroupsResponse);
-  
+  rpc UpdateAppScalingConfig(UpdateAppScalingConfigRequest) returns (UpdateAppScalingConfigResponse);
+
   // Storage operations
   rpc CreateVolume(CreateVolumeRequest) returns (CreateVolumeResponse);
   rpc DeleteVolume(DeleteVolumeRequest) returns (DeleteVolumeResponse);
@@ -186,6 +188,17 @@ message WorkerInfo {
   string advertise_address = 8;
 }
 
+message ScaleAppRequest {
+  string app_id = 1;
+  uint32 desired_replicas = 2;
+  string user_id = 3;
+}
+
+message ScaleAppResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 message PauseRequest {
   string job_id = 1;
   string user_id = 2;
@@ -304,6 +317,13 @@ message Volume {
   bool read_only = 3;
   string pool_name = 4;
   string mount_point = 5;
+  AccessMode access_mode = 6;
+}
+
+enum AccessMode {
+  ACCESS_MODE_READ_WRITE_ONCE = 0;
+  ACCESS_MODE_READ_WRITE_MANY = 1;
+  ACCESS_MODE_READ_ONLY_MANY = 2;
 }
 
 message AppConfig {
@@ -395,4 +415,21 @@ message AppInfo {
   string ipv6_address = 12;
   uint64 tx_bytes = 13;
   uint64 rx_bytes = 14;
+}
+
+message UpdateAppScalingConfigRequest {
+  string app_id = 1;
+  string user_id = 2;
+  uint32 min_replicas = 3;
+  uint32 max_replicas = 4;
+  bool autoscaling_enabled = 5;
+  double cpu_threshold = 6;
+  double mem_threshold = 7;
+  string vpc_ipv6_prefix = 8;
+  uint32 desired_replicas = 9;
+}
+
+message UpdateAppScalingConfigResponse {
+  bool success = 1;
+  string message = 2;
 }

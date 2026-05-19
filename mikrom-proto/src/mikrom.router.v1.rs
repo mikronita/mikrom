@@ -3,8 +3,8 @@
 pub struct RouterConfigUpdate {
     #[prost(string, tag = "1")]
     pub hostname: ::prost::alloc::string::String,
-    #[prost(string, optional, tag = "2")]
-    pub target_url: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "2")]
+    pub target_urls: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(int64, tag = "3")]
     pub timestamp: i64,
 }

@@ -42,6 +42,18 @@ pub struct AppInfo {
     pub port: i32,
     pub hostname: Option<String>,
     pub active_deployment_id: Option<String>,
+    #[serde(default)]
+    pub desired_replicas: i32,
+    #[serde(default)]
+    pub min_replicas: i32,
+    #[serde(default)]
+    pub max_replicas: i32,
+    #[serde(default)]
+    pub autoscaling_enabled: bool,
+    #[serde(default)]
+    pub cpu_threshold: f64,
+    #[serde(default)]
+    pub mem_threshold: f64,
     pub created_at: Option<String>,
 }
 
@@ -93,7 +105,19 @@ pub struct Volume {
     pub name: String,
     pub size_mib: i32,
     pub pool_name: String,
+    pub mount_point: String,
+    pub access_mode: i32,
     pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScaleRequest {
+    pub desired_replicas: Option<i32>,
+    pub min_replicas: Option<i32>,
+    pub max_replicas: Option<i32>,
+    pub autoscaling_enabled: Option<bool>,
+    pub cpu_threshold: Option<f64>,
+    pub mem_threshold: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -216,15 +240,29 @@ impl MikromClient {
         app_id: &str,
         name: &str,
         size_mib: i32,
+        mount_point: &str,
+        access_mode: i32,
     ) -> anyhow::Result<Volume> {
         let body = serde_json::json!({
             "name": name,
-            "size_mib": size_mib
+            "size_mib": size_mib,
+            "mount_point": mount_point,
+            "access_mode": access_mode,
         });
         self.request(
             reqwest::Method::POST,
             &format!("apps/{}/volumes", app_id),
             Some(body),
+        )
+        .await
+    }
+
+    pub async fn scale_app(&self, app_id: &str, req: ScaleRequest) -> anyhow::Result<()> {
+        self.request_no_content_with_timeout(
+            reqwest::Method::PATCH,
+            &format!("apps/{}/scale", app_id),
+            Some(req),
+            std::time::Duration::from_secs(30),
         )
         .await
     }

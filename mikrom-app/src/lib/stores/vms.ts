@@ -39,17 +39,23 @@ export function initVmsSSE() {
 
   sseCleanup = watchVmsSSE(token, (updatedVm) => {
     vmsStore.update(current => {
+      // Prioritize matching by Job ID as it is the unique identifier for a running instance
       const index = current.findIndex(
-        (vm) => vm.deployment_id === updatedVm.deployment_id || (vm.job_id === updatedVm.job_id && vm.job_id !== "")
+        (vm) => (updatedVm.job_id !== "" && vm.job_id === updatedVm.job_id) || 
+                (updatedVm.job_id === "" && vm.deployment_id === updatedVm.deployment_id)
       );
+      
       const isRunning = updatedVm.status.toLowerCase() === "running";
       
       if (!isRunning) {
+        // If it's no longer running, remove it from the active VMs list
         if (index !== -1) return current.filter((_, itemIndex) => itemIndex !== index);
         return current;
       } else if (index === -1) {
+        // New running VM
         return [...current, updatedVm];
       } else {
+        // Update existing VM status/metrics
         const next = [...current];
         next[index] = { ...next[index], ...updatedVm };
         return next;

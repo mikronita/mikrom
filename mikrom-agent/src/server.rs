@@ -389,6 +389,7 @@ impl AgentServer {
                     read_only: v.read_only,
                     pool_name: v.pool_name,
                     mount_point: v.mount_point,
+                    access_mode: v.access_mode,
                 })
                 .collect();
         }

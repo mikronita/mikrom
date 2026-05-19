@@ -48,6 +48,7 @@ pub struct Volume {
     pub read_only: bool,
     pub pool_name: String,
     pub mount_point: String,
+    pub access_mode: i32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]

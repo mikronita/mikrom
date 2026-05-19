@@ -229,6 +229,22 @@ pub struct WorkerInfo {
     pub advertise_address: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ScaleAppRequest {
+    #[prost(string, tag = "1")]
+    pub app_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "2")]
+    pub desired_replicas: u32,
+    #[prost(string, tag = "3")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ScaleAppResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PauseRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
@@ -392,6 +408,8 @@ pub struct Volume {
     pub pool_name: ::prost::alloc::string::String,
     #[prost(string, tag = "5")]
     pub mount_point: ::prost::alloc::string::String,
+    #[prost(enumeration = "AccessMode", tag = "6")]
+    pub access_mode: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppConfig {
@@ -523,6 +541,34 @@ pub struct AppInfo {
     #[prost(uint64, tag = "14")]
     pub rx_bytes: u64,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateAppScalingConfigRequest {
+    #[prost(string, tag = "1")]
+    pub app_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "3")]
+    pub min_replicas: u32,
+    #[prost(uint32, tag = "4")]
+    pub max_replicas: u32,
+    #[prost(bool, tag = "5")]
+    pub autoscaling_enabled: bool,
+    #[prost(double, tag = "6")]
+    pub cpu_threshold: f64,
+    #[prost(double, tag = "7")]
+    pub mem_threshold: f64,
+    #[prost(string, tag = "8")]
+    pub vpc_ipv6_prefix: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "9")]
+    pub desired_replicas: u32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateAppScalingConfigResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum VmStatus {
@@ -560,6 +606,35 @@ impl VmStatus {
             "VM_STATUS_STOPPED" => Some(Self::Stopped),
             "VM_STATUS_FAILED" => Some(Self::Failed),
             "VM_STATUS_PAUSED" => Some(Self::Paused),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum AccessMode {
+    ReadWriteOnce = 0,
+    ReadWriteMany = 1,
+    ReadOnlyMany = 2,
+}
+impl AccessMode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::ReadWriteOnce => "ACCESS_MODE_READ_WRITE_ONCE",
+            Self::ReadWriteMany => "ACCESS_MODE_READ_WRITE_MANY",
+            Self::ReadOnlyMany => "ACCESS_MODE_READ_ONLY_MANY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "ACCESS_MODE_READ_WRITE_ONCE" => Some(Self::ReadWriteOnce),
+            "ACCESS_MODE_READ_WRITE_MANY" => Some(Self::ReadWriteMany),
+            "ACCESS_MODE_READ_ONLY_MANY" => Some(Self::ReadOnlyMany),
             _ => None,
         }
     }

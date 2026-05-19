@@ -218,6 +218,7 @@ impl DeploymentService {
                         read_only: false, // Default to RW
                         pool_name: v.pool_name,
                         mount_point: v.mount_point,
+                        access_mode: v.access_mode,
                     })
                     .collect(),
                 ..Default::default()

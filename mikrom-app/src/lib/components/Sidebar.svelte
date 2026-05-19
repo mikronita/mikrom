@@ -3,6 +3,7 @@
   import { page } from "$app/stores";
   import {
     Boxes,
+    Database,
     ChevronsUpDown,
     HardDrive,
     LayoutDashboard,
@@ -25,6 +26,7 @@
   const nav = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/apps", label: "Applications", icon: Boxes },
+    { href: "/databases", label: "Databases", icon: Database },
     { href: "/networking", label: "Networking", icon: Network },
     { href: "/storage", label: "Storage", icon: HardDrive },
     { href: "/settings", label: "Settings", icon: Settings },
@@ -115,10 +117,10 @@
       style={`width: ${collapsed ? "3rem" : "14rem"}`}
     >
       <div class="flex h-full w-full flex-col bg-card text-card-foreground">
-        <div class="flex h-16 items-center border-b border-border p-2">
+        <div class="flex h-14 items-center border-b border-border p-2">
           <a
             href="/"
-            class={`flex h-12 w-full items-center rounded-md p-2 transition-colors hover:bg-muted ${collapsed ? "justify-center gap-0" : "gap-3"}`}
+            class={`flex h-10 w-full items-center rounded-md px-2 transition-colors hover:bg-muted ${collapsed ? "justify-center gap-0" : "gap-3"}`}
           >
             <div
               class="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground"

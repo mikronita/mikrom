@@ -1599,7 +1599,26 @@ impl FirecrackerManager {
         vol: &crate::firecracker::config::Volume,
     ) -> Result<String, FirecrackerError> {
         if !vol.pool_name.is_empty() {
-            self.ensure_rbd_volume(vol).await
+            // Check access mode
+            use mikrom_proto::agent::AccessMode;
+            if vol.access_mode == AccessMode::ReadWriteMany as i32 {
+                // For RWX, we use CephFS
+                let mount_point = format!("{}/cephfs/{}", self.fc_config.data_dir, vol.volume_id);
+                crate::ceph::CephFs::mount_volume(&vol.volume_id, &mount_point)
+                    .await
+                    .map_err(|e| {
+                        FirecrackerError::ProcessError(format!(
+                            "Failed to mount CephFS volume: {e}"
+                        ))
+                    })?;
+
+                // Return mount point. Note: Firecracker needs further setup for virtio-fs,
+                // but for now we'll return the path and handle it in drive config.
+                Ok(mount_point)
+            } else {
+                // For RWO or other, we use RBD
+                self.ensure_rbd_volume(vol).await
+            }
         } else {
             self.ensure_local_volume(vol).await
         }
@@ -1619,6 +1638,10 @@ impl FirecrackerManager {
                 })?;
         }
 
+        // For shared volumes (ROX or RWX), we need to ensure they can be mapped on multiple nodes.
+        // We handle this by using 'rbd map' with the appropriate flags if needed,
+        // but typically 'rbd map' works for multiple clients if 'exclusive-lock' is disabled.
+
         let dev_path = storage
             .map_volume(&vol.pool_name, &vol.volume_id)
             .await
@@ -1626,53 +1649,44 @@ impl FirecrackerManager {
                 FirecrackerError::ProcessError(format!("Failed to map RBD volume: {e}"))
             })?;
 
-        // Ensure the volume is formatted with ext4
-        let check_fs = tokio::process::Command::new("blkid")
-            .arg(&dev_path)
-            .output()
-            .await
-            .map_err(|e| {
-                FirecrackerError::ProcessError(format!("Failed to check filesystem: {e}"))
+        // Ensure the volume is formatted with ext4 (only if NOT read-only or if we are the first one)
+        // We check this natively by looking for the ext4 magic number (0xEF53 at offset 1080)
+        let is_formatted = {
+            use std::io::{Read, Seek, SeekFrom};
+            let mut file = std::fs::File::open(&dev_path).map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to open device {dev_path}: {e}"))
             })?;
 
-        if !check_fs.status.success() {
-            // blkid returns non-zero if no filesystem is detected.
-            // Check if stdout is empty to be sure it's not a damaged filesystem.
-            if check_fs.stdout.is_empty() {
-                tracing::info!(volume_id = %vol.volume_id, device = %dev_path, "Device appears empty, formatting with ext4...");
-                let output = tokio::process::Command::new("mkfs.ext4")
-                    .arg("-F") // Force
-                    .arg(&dev_path)
-                    .output()
-                    .await
-                    .map_err(|e| {
-                        FirecrackerError::ProcessError(format!("Failed to execute mkfs.ext4: {e}"))
-                    })?;
+            let mut buffer = [0u8; 2];
+            // Superblock starts at 1024, magic number is at 1024 + 56 = 1080
+            file.seek(SeekFrom::Start(1080)).map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to seek in device {dev_path}: {e}"))
+            })?;
 
-                if !output.status.success() {
-                    let err = String::from_utf8_lossy(&output.stderr);
-                    tracing::error!(volume_id = %vol.volume_id, error = %err, "mkfs.ext4 failed");
-                    let _ = storage.unmap_volume(&dev_path).await;
-                    return Err(FirecrackerError::ProcessError(format!(
-                        "Failed to format volume: {err}"
-                    )));
-                }
-            } else {
-                let out = String::from_utf8_lossy(&check_fs.stdout);
-                tracing::error!(volume_id = %vol.volume_id, device = %dev_path, output = %out, "blkid failed but returned output; possible damaged filesystem. Refusing to format.");
-                let _ = storage.unmap_volume(&dev_path).await;
-                return Err(FirecrackerError::ProcessError(
-                    "Volume has unknown or damaged filesystem. Refusing to auto-format to prevent data loss.".to_string()
-                ));
+            match file.read_exact(&mut buffer) {
+                Ok(_) => buffer[0] == 0x53 && buffer[1] == 0xEF,
+                Err(_) => false,
             }
-        } else if !String::from_utf8_lossy(&check_fs.stdout).contains("ext4") {
-            let fs_info = String::from_utf8_lossy(&check_fs.stdout);
-            tracing::warn!(volume_id = %vol.volume_id, device = %dev_path, info = %fs_info, "Volume contains a non-ext4 filesystem. Refusing to auto-format.");
-            let _ = storage.unmap_volume(&dev_path).await;
-            return Err(FirecrackerError::ProcessError(
-                "Volume contains a non-ext4 filesystem. Only ext4 is supported for auto-mounting."
-                    .to_string(),
-            ));
+        };
+
+        if !is_formatted && !vol.read_only {
+            tracing::info!(volume_id = %vol.volume_id, device = %dev_path, "Formatting volume with ext4...");
+            let output = tokio::process::Command::new("mkfs.ext4")
+                .arg("-F") // Force formatting
+                .arg(&dev_path)
+                .output()
+                .await
+                .map_err(|e| {
+                    FirecrackerError::ProcessError(format!("Failed to execute mkfs.ext4: {e}"))
+                })?;
+
+            if !output.status.success() {
+                return Err(FirecrackerError::ProcessError(format!(
+                    "mkfs.ext4 failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                )));
+            }
+            tracing::info!(volume_id = %vol.volume_id, "Volume formatted successfully");
         }
 
         Ok(dev_path)

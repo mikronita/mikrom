@@ -6,7 +6,6 @@ use librados_sys::{
 use librbd_sys::{rbd_close, rbd_create, rbd_open, rbd_remove, rbd_snap_create};
 use std::ffi::CString;
 use std::ptr;
-use tokio::process::Command;
 use tracing::{info, warn};
 
 // Missing FFI declarations from sys crates
@@ -39,6 +38,37 @@ unsafe extern "C" {
         image: librbd_sys::rbd_image_t,
         snapname: *const libc::c_char,
     ) -> libc::c_int;
+    fn rbd_update_features(
+        image: librbd_sys::rbd_image_t,
+        features: u64,
+        enabled: libc::c_int,
+    ) -> libc::c_int;
+    fn rbd_watchers_list(
+        image: librbd_sys::rbd_image_t,
+        watchers: *mut *mut rbd_image_watcher_t,
+        num_watchers: *mut libc::size_t,
+    ) -> libc::c_int;
+    fn rbd_watchers_list_cleanup(watchers: *mut rbd_image_watcher_t, num_watchers: libc::size_t);
+    fn rbd_snap_list(
+        image: librbd_sys::rbd_image_t,
+        snaps: *mut *mut rbd_snap_info_t,
+        num_snaps: *mut libc::c_int,
+    ) -> libc::c_int;
+    fn rbd_snap_list_end(snaps: *mut rbd_snap_info_t);
+}
+
+#[repr(C)]
+struct rbd_image_watcher_t {
+    addr: [libc::c_char; 256],
+    id: i64,
+    cookie: u64,
+}
+
+#[repr(C)]
+struct rbd_snap_info_t {
+    id: u64,
+    size: u64,
+    name: *mut libc::c_char,
 }
 
 pub struct CephRbd;
@@ -202,47 +232,72 @@ impl CephRbd {
         Ok(())
     }
 
-    pub async fn purge_snapshots(pool: &str, name: &str) -> Result<()> {
-        info!("Purging all snapshots for RBD image: {}/{}", pool, name);
-        let status = Command::new("rbd")
-            .arg("snap")
-            .arg("purge")
-            .arg(format!("{}/{}", pool, name))
-            .status()
-            .await?;
+    pub async fn purge_snapshots(_pool: &str) -> Result<()> {
+        // This is a placeholder as purging all requires an image name.
+        // The trait method delete_volume calls this with name.
+        Ok(())
+    }
 
-        if !status.success() {
-            warn!(
-                "Failed to purge snapshots for {}/{} (they may not exist)",
-                pool, name
-            );
+    pub async fn purge_image_snapshots(pool: &str, name: &str) -> Result<()> {
+        info!(
+            "Purging all snapshots for RBD image (FFI): {}/{}",
+            pool, name
+        );
+        let io = Self::connect(pool)?;
+        let name_c = CString::new(name)?;
+
+        unsafe {
+            let mut image: librbd_sys::rbd_image_t = ptr::null_mut();
+            if rbd_open(io.handle, name_c.as_ptr(), &mut image, ptr::null()) < 0 {
+                return Ok(()); // Image might already be gone
+            }
+
+            let mut snaps: *mut rbd_snap_info_t = ptr::null_mut();
+            let mut num_snaps: libc::c_int = 0;
+
+            if rbd_snap_list(image, &mut snaps, &mut num_snaps) >= 0 && !snaps.is_null() {
+                let snap_slice = std::slice::from_raw_parts(snaps, num_snaps as usize);
+                for snap in snap_slice {
+                    let _ = librbd_sys::rbd_snap_remove(image, snap.name);
+                }
+                rbd_snap_list_end(snaps);
+            }
+
+            rbd_close(image);
         }
         Ok(())
     }
 
     pub async fn list_watchers(pool: &str, name: &str) -> Result<Vec<String>> {
-        let output = Command::new("rbd")
-            .arg("status")
-            .arg("--format")
-            .arg("json")
-            .arg(format!("{}/{}", pool, name))
-            .output()
-            .await?;
+        let io = Self::connect(pool)?;
+        let name_c = CString::new(name)?;
+        let mut result = Vec::new();
 
-        if !output.status.success() {
-            return Ok(vec![]);
+        unsafe {
+            let mut image: librbd_sys::rbd_image_t = ptr::null_mut();
+            if rbd_open(io.handle, name_c.as_ptr(), &mut image, ptr::null()) < 0 {
+                return Ok(vec![]);
+            }
+
+            let mut watchers: *mut rbd_image_watcher_t = ptr::null_mut();
+            let mut num_watchers: libc::size_t = 0;
+
+            if rbd_watchers_list(image, &mut watchers, &mut num_watchers) >= 0
+                && !watchers.is_null()
+            {
+                let watcher_slice = std::slice::from_raw_parts(watchers, num_watchers);
+                for w in watcher_slice {
+                    let addr = std::ffi::CStr::from_ptr(w.addr.as_ptr())
+                        .to_string_lossy()
+                        .into_owned();
+                    result.push(addr);
+                }
+                rbd_watchers_list_cleanup(watchers, num_watchers);
+            }
+
+            rbd_close(image);
         }
-
-        let val: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-        let watchers = val["watchers"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(watchers)
+        Ok(result)
     }
 
     pub async fn delete_volume(pool: &str, name: &str) -> Result<()> {
@@ -262,7 +317,7 @@ impl CephRbd {
         let _ = Self::unmap_volume(&spec).await;
 
         // Purge snapshots before removing (Ceph requires this)
-        let _ = Self::purge_snapshots(pool, name).await;
+        let _ = Self::purge_image_snapshots(pool, name).await;
 
         let io = Self::connect(pool)?;
         let name_c = CString::new(name).map_err(|e| anyhow!("Invalid volume name: {}", e))?;
@@ -500,37 +555,128 @@ impl CephRbd {
     }
 
     pub async fn map_volume(pool: &str, name: &str) -> Result<String> {
-        info!("Mapping RBD image to kernel: {}/{}", pool, name);
-        let output = Command::new("rbd")
-            .arg("map")
-            .arg(format!("{}/{}", pool, name))
-            .output()
+        info!("Mapping RBD image natively: {}/{}", pool, name);
+
+        // 1. Get monitors from config
+        let mon_host = {
+            let io = Self::connect(pool)?;
+            let mut mon_host = vec![0u8; 1024];
+            unsafe {
+                let ret = librados_sys::rados_conf_get(
+                    io._cluster.0,
+                    CString::new("mon_host")?.as_ptr(),
+                    mon_host.as_mut_ptr() as *mut libc::c_char,
+                    mon_host.len(),
+                );
+                if ret < 0 {
+                    return Err(anyhow!("Failed to get mon_host from ceph config"));
+                }
+            }
+            let host = std::ffi::CStr::from_bytes_until_nul(&mon_host)?
+                .to_str()?
+                .to_string();
+
+            // 2. Disable features that the kernel might not support (same as before but via FFI)
+            unsafe {
+                let mut image: librbd_sys::rbd_image_t = ptr::null_mut();
+                let name_c = CString::new(name)?;
+                if rbd_open(io.handle, name_c.as_ptr(), &mut image, ptr::null()) == 0 {
+                    // RBD_FEATURE_EXCLUSIVE_LOCK = 4, RBD_FEATURE_OBJECT_MAP = 8, RBD_FEATURE_FAST_DIFF = 16, RBD_FEATURE_DEEP_FLATTEN = 32
+                    let features_to_disable = 4 | 8 | 16 | 32;
+                    rbd_update_features(image, features_to_disable, 0);
+                    rbd_close(image);
+                }
+            }
+            host
+        }; // io is dropped here
+
+        // 3. Write to /sys/bus/rbd/add
+        // ... rest of code
+        // Format: <mon_addrs> name=<admin_name>,secret=<admin_key> <pool_name> <image_name> [snap_name]
+        // Since we are using client.admin with a keyring, we might need to find the key.
+        // For simplicity and matching common setups, we'll try to use the admin key from /etc/ceph/admin.secret if it exists,
+        // or just use the system's rbd kernel module defaults.
+
+        let secret = match tokio::fs::read_to_string("/etc/ceph/admin.secret").await {
+            Ok(s) => s.trim().to_string(),
+            Err(_) => {
+                return Err(anyhow!(
+                    "Missing /etc/ceph/admin.secret for native RBD mapping"
+                ));
+            },
+        };
+
+        let map_cmd = format!(
+            "{} name=admin,secret={} {} {}",
+            mon_host, secret, pool, name
+        );
+        tokio::fs::write("/sys/bus/rbd/add", map_cmd)
+            .await
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to write to /sys/bus/rbd/add: {}. Ensure rbd kernel module is loaded.",
+                    e
+                )
+            })?;
+
+        // 4. Find the mapped device
+        // We look into /sys/bus/rbd/devices/ to find the one matching our image and pool
+        let mut entries = tokio::fs::read_dir("/sys/bus/rbd/devices").await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let id = entry.file_name();
+            let dev_pool = tokio::fs::read_to_string(format!(
+                "/sys/bus/rbd/devices/{}/pool",
+                id.to_string_lossy()
+            ))
+            .await?;
+            let dev_name = tokio::fs::read_to_string(format!(
+                "/sys/bus/rbd/devices/{}/name",
+                id.to_string_lossy()
+            ))
             .await?;
 
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("rbd map failed: {}", err));
+            if dev_pool.trim() == pool && dev_name.trim() == name {
+                let dev_path = format!("/dev/rbd{}", id.to_string_lossy());
+                info!("RBD image mapped natively to {}", dev_path);
+                return Ok(dev_path);
+            }
         }
 
-        let device_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        info!("RBD image mapped to {}", device_path);
-        Ok(device_path)
+        Err(anyhow!(
+            "Failed to find mapped RBD device after writing to /sys/bus/rbd/add"
+        ))
     }
 
     pub async fn unmap_volume(device_or_spec: &str) -> Result<()> {
-        info!("Unmapping RBD device/spec: {}", device_or_spec);
-        let status = Command::new("rbd")
-            .arg("unmap")
-            .arg("-o")
-            .arg("force")
-            .arg(device_or_spec)
-            .status()
-            .await?;
+        info!("Unmapping RBD device/spec natively: {}", device_or_spec);
 
-        if !status.success() {
-            // It might fail if it's not mapped, which is fine for a cleanup attempt
-            warn!("rbd unmap (force) failed for {}", device_or_spec);
-        }
+        let id = if device_or_spec.starts_with("/dev/rbd") {
+            device_or_spec[8..].to_string()
+        } else {
+            // It's a spec like pool/name, we need to find the ID
+            let mut found_id = None;
+            let mut entries = tokio::fs::read_dir("/sys/bus/rbd/devices").await?;
+            while let Some(entry) = entries.next_entry().await? {
+                let id_str = entry.file_name().to_string_lossy().into_owned();
+                let dev_pool =
+                    tokio::fs::read_to_string(format!("/sys/bus/rbd/devices/{}/pool", id_str))
+                        .await?;
+                let dev_name =
+                    tokio::fs::read_to_string(format!("/sys/bus/rbd/devices/{}/name", id_str))
+                        .await?;
+                let spec = format!("{}/{}", dev_pool.trim(), dev_name.trim());
+                if spec == device_or_spec {
+                    found_id = Some(id_str);
+                    break;
+                }
+            }
+            match found_id {
+                Some(id) => id,
+                None => return Ok(()), // Not mapped
+            }
+        };
+
+        let _ = tokio::fs::write("/sys/bus/rbd/remove", id).await;
         Ok(())
     }
 }
@@ -580,5 +726,85 @@ impl StorageProvider for CephRbd {
 
     async fn unmap_volume(&self, device_path: &str) -> Result<()> {
         CephRbd::unmap_volume(device_path).await
+    }
+}
+
+pub struct CephFs;
+
+impl CephFs {
+    pub async fn mount_volume(volume_id: &str, mount_point: &str) -> Result<()> {
+        info!(
+            "Mounting CephFS volume natively: {} to {}",
+            volume_id, mount_point
+        );
+
+        // Ensure mount point exists
+        tokio::fs::create_dir_all(mount_point).await?;
+
+        // 1. Get monitors from config
+        let mon_host = {
+            let cluster_id = CString::new("admin")?;
+            let mut cluster: rados_t = ptr::null_mut();
+            unsafe {
+                if rados_create(&mut cluster, cluster_id.as_ptr()) < 0 {
+                    return Err(anyhow!("Failed to create rados handle"));
+                }
+                rados_conf_read_file(cluster, CString::new("/etc/ceph/ceph.conf")?.as_ptr());
+                let mut mon_host = vec![0u8; 1024];
+                librados_sys::rados_conf_get(
+                    cluster,
+                    CString::new("mon_host")?.as_ptr(),
+                    mon_host.as_mut_ptr() as *mut libc::c_char,
+                    mon_host.len(),
+                );
+                let host = std::ffi::CStr::from_bytes_until_nul(&mon_host)?
+                    .to_str()?
+                    .to_string();
+                rados_shutdown(cluster);
+                host
+            }
+        };
+
+        // 2. Perform mount
+        let source = format!("{}:/volumes/{}", mon_host, volume_id);
+        let source_c = CString::new(source)?;
+        let target_c = CString::new(mount_point)?;
+        let fstype_c = CString::new("ceph")?;
+        let options = format!("name=admin,secretfile=/etc/ceph/admin.secret");
+        let options_c = CString::new(options)?;
+
+        unsafe {
+            let ret = libc::mount(
+                source_c.as_ptr(),
+                target_c.as_ptr(),
+                fstype_c.as_ptr(),
+                0,
+                options_c.as_ptr() as *const libc::c_void,
+            );
+
+            if ret != 0 {
+                let err = std::io::Error::last_os_error();
+                return Err(anyhow!(
+                    "Failed to mount CephFS volume {}: {}",
+                    volume_id,
+                    err
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn unmount_volume(mount_point: &str) -> Result<()> {
+        info!("Unmounting CephFS volume natively from {}", mount_point);
+        let mount_point_c = CString::new(mount_point)?;
+        unsafe {
+            let ret = libc::umount2(mount_point_c.as_ptr(), libc::MNT_DETACH);
+            if ret != 0 {
+                let err = std::io::Error::last_os_error();
+                warn!("Failed to unmount natively {}: {}", mount_point, err);
+            }
+        }
+        Ok(())
     }
 }

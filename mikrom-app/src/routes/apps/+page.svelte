@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount } from "svelte";
   import { Boxes, Calendar, Cpu, FolderPlus, HardDrive, Plus, Radio } from "lucide-svelte";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import Card from "$lib/components/Card.svelte";
@@ -10,21 +10,16 @@
   import Badge from "$lib/components/Badge.svelte";
   import Button from "$lib/components/Button.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
+  import CardSkeleton from "$lib/components/CardSkeleton.svelte";
   import CreateAppModal from "$lib/components/CreateAppModal.svelte";
   import { formatDate } from "$lib/utils";
   import { getToken } from "$lib/auth";
   import { type AppInfo } from "$lib/api";
-  import { getCurrentVms, subscribeVms } from "$lib/stores/vms";
+  import { vmsStore } from "$lib/stores/vms";
   import { appsStore, appsLoading, appsError, refreshApps } from "$lib/stores/apps";
   import { toast } from "$lib/toast";
 
-  let vms = getCurrentVms();
   let showCreate = false;
-
-  const unsubscribe = subscribeVms((next) => {
-    vms = next;
-  });
-  onDestroy(() => unsubscribe());
 
   onMount(async () => {
     if ($appsStore.length === 0) {
@@ -36,7 +31,20 @@
     toast.error($appsError);
   }
 
-  const vmsMap = () => new Map(vms.map((vm) => [vm.app_id || vm.app_name, vm]));
+  function getAppResources(appId: string, appName: string) {
+    const appVms = $vmsStore.filter((vm) => (vm.app_id === appId || vm.app_name === appName) && vm.status.toLowerCase() === "running");
+    return {
+      vcpus: appVms.reduce((total, vm) => total + (vm.vcpus || 1), 0),
+      memory_mib: appVms.reduce((total, vm) => total + (vm.memory_mib || 128), 0),
+      count: appVms.length
+    };
+  }
+
+  function getLiveBadgeClass(isLive: boolean) {
+    return isLive
+      ? "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]"
+      : "";
+  }
 </script>
 
 <svelte:head>
@@ -64,27 +72,12 @@
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
     {#if $appsLoading && $appsStore.length === 0}
       {#each Array.from({ length: 6 }) as _}
-        <Card class="overflow-hidden">
-          <CardHeader>
-            <div class="flex items-start gap-4">
-              <div class="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-foreground">
-                <div class="size-5 animate-pulse rounded bg-muted"></div>
-              </div>
-              <div class="flex flex-1 flex-col gap-2">
-                <div class="h-5 w-32 animate-pulse rounded bg-muted"></div>
-                <div class="h-4 w-full animate-pulse rounded bg-muted"></div>
-              </div>
-              <div class="h-6 w-14 animate-pulse rounded-full bg-muted"></div>
-            </div>
-          </CardHeader>
-          <CardContent class="flex flex-col gap-3">
-            <div class="h-4 w-40 animate-pulse rounded bg-muted"></div>
-            <div class="flex gap-2">
-              <div class="h-6 w-20 animate-pulse rounded-full bg-muted"></div>
-              <div class="h-6 w-24 animate-pulse rounded-full bg-muted"></div>
-            </div>
-          </CardContent>
-        </Card>
+        <CardSkeleton
+          titleClassName="w-32"
+          descriptionClassName="w-full"
+          footerLineClassName="w-40"
+          footerPills={["w-20", "w-24"]}
+        />
       {/each}
       {:else if $appsStore.length === 0}
         <div class="col-span-full">
@@ -100,10 +93,10 @@
         </div>
       {:else}
         {#each [...$appsStore].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) as app}
-          {@const appVm = vmsMap().get(app.id) || vmsMap().get(app.name)}
+          {@const resources = getAppResources(app.id, app.name)}
           {@const hasActiveDeployment = !!app.active_deployment_id}
-          {@const isRunningVm = appVm?.status?.toLowerCase() === "running"}
-          {@const isActive = hasActiveDeployment || isRunningVm}
+          {@const isRunning = resources.count > 0}
+          {@const isActive = hasActiveDeployment || isRunning}
           <a class="block" href={`/apps/${encodeURIComponent(app.name)}`}>
             <Card class="h-full overflow-hidden transition-colors hover:bg-muted/30">
               <CardHeader>
@@ -117,7 +110,7 @@
                     </div>
                     <CardDescription>Application workspace</CardDescription>
                   </div>
-                  <Badge variant={isActive ? "success" : "secondary"} className="shrink-0 gap-1.5 uppercase">
+                  <Badge variant={isActive ? "outline" : "outline"} className={`shrink-0 gap-1.5 uppercase ${getLiveBadgeClass(isActive)}`}>
                     <Radio class="size-3" />
                     {isActive ? "Live" : "Idle"}
                   </Badge>
@@ -130,17 +123,22 @@
                     Created {formatDate(app.created_at)}
                   </span>
                   <div class="flex flex-wrap items-center gap-2">
-                    {#if isRunningVm && appVm}
-                      <Badge variant="secondary" className="gap-1.5">
+                    {#if isRunning}
+                      <Badge variant="outline" className="gap-1.5">
                         <Cpu class="size-3" />
-                        <span>{appVm.vcpus || 1} vCPU</span>
+                        <span>{resources.vcpus} vCPU</span>
                       </Badge>
-                      <Badge variant="secondary" className="gap-1.5">
+                      <Badge variant="outline" className="gap-1.5">
                         <HardDrive class="size-3" />
-                        <span>{appVm.memory_mib || 128} MB</span>
+                        <span>{resources.memory_mib} MB</span>
                       </Badge>
+                      {#if resources.count > 1}
+                        <Badge variant="outline" className="bg-status-online/10 text-status-online border-status-online/20 gap-1.5">
+                          <span>{resources.count} replicas</span>
+                        </Badge>
+                      {/if}
                     {:else if hasActiveDeployment}
-                      <Badge variant="secondary">Active deployment</Badge>
+                      <Badge variant="outline">Active deployment</Badge>
                     {:else}
                       <Badge variant="outline">No active deployment</Badge>
                     {/if}

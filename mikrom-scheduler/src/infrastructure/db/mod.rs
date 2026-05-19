@@ -1,5 +1,6 @@
 use crate::domain::{
-    DomainResult, HostMetrics, Job, JobRepository, JobStatus, VmConfig, Worker, WorkerRepository,
+    AppConfig, AppRepository, DomainResult, HostMetrics, Job, JobRepository, JobStatus, VmConfig,
+    Worker, WorkerRepository,
 };
 use async_trait::async_trait;
 use sqlx::{PgPool, Row};
@@ -354,5 +355,96 @@ fn map_row_to_worker(r: &sqlx::postgres::PgRow) -> Worker {
         metrics,
         registered_at: r.get("registered_at"),
         last_heartbeat: r.get("last_heartbeat"),
+    }
+}
+
+pub struct PgAppRepository {
+    pool: PgPool,
+}
+
+impl PgAppRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl AppRepository for PgAppRepository {
+    async fn update_app_config(&self, config: AppConfig) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO apps (
+                id, user_id, vpc_ipv6_prefix, desired_replicas, min_replicas, max_replicas, autoscaling_enabled,
+                cpu_threshold, mem_threshold, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+                vpc_ipv6_prefix = EXCLUDED.vpc_ipv6_prefix,
+                desired_replicas = EXCLUDED.desired_replicas,
+                min_replicas = EXCLUDED.min_replicas,
+                max_replicas = EXCLUDED.max_replicas,
+                autoscaling_enabled = EXCLUDED.autoscaling_enabled,
+                cpu_threshold = EXCLUDED.cpu_threshold,
+                mem_threshold = EXCLUDED.mem_threshold,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&config.id)
+        .bind(&config.user_id)
+        .bind(&config.vpc_ipv6_prefix)
+        .bind(config.desired_replicas as i32)
+        .bind(config.min_replicas as i32)
+        .bind(config.max_replicas as i32)
+        .bind(config.autoscaling_enabled)
+        .bind(config.cpu_threshold)
+        .bind(config.mem_threshold)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn get_app_config(&self, app_id: &str) -> anyhow::Result<Option<AppConfig>> {
+        let row = sqlx::query(
+            "SELECT id, user_id, vpc_ipv6_prefix, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold FROM apps WHERE id = $1"
+        )
+        .bind(app_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| map_row_to_app_config(&r)))
+    }
+
+    async fn list_all_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, vpc_ipv6_prefix, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold FROM apps"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(map_row_to_app_config).collect())
+    }
+
+    async fn list_autoscaling_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, vpc_ipv6_prefix, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold FROM apps WHERE autoscaling_enabled = TRUE"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(map_row_to_app_config).collect())
+    }
+}
+
+fn map_row_to_app_config(r: &sqlx::postgres::PgRow) -> AppConfig {
+    AppConfig {
+        id: r.get("id"),
+        user_id: r.get("user_id"),
+        vpc_ipv6_prefix: r.get("vpc_ipv6_prefix"),
+        desired_replicas: r.get::<i32, _>("desired_replicas") as u32,
+        min_replicas: r.get::<i32, _>("min_replicas") as u32,
+        max_replicas: r.get::<i32, _>("max_replicas") as u32,
+        autoscaling_enabled: r.get("autoscaling_enabled"),
+        cpu_threshold: r.get("cpu_threshold"),
+        mem_threshold: r.get("mem_threshold"),
     }
 }
