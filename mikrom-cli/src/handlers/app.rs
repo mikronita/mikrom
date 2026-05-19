@@ -238,6 +238,7 @@ fn watch(name: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn scale(
     client: &MikromClient,
     name: &str,

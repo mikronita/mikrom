@@ -28,18 +28,13 @@ impl JobStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Copy)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Copy, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AccessMode {
+    #[default]
     ReadWriteOnce = 0,
     ReadWriteMany = 1,
     ReadOnlyMany = 2,
-}
-
-impl Default for AccessMode {
-    fn default() -> Self {
-        Self::ReadWriteOnce
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

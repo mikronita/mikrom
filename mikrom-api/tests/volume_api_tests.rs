@@ -162,16 +162,7 @@ async fn test_create_volume_snapshot_endpoint() {
             name: "test-app".to_string(),
             git_url: "".to_string(),
             port: 80,
-            hostname: None,
-            github_webhook_secret: None,
-            github_installation_id: None,
-            github_repo_id: None,
-            github_repo_full_name: None,
-            active_deployment_id: None,
-            health_check_path: "/".to_string(),
-            drain_timeout: 30,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            ..mikrom_api::models::app::App::default()
         }))
     });
 

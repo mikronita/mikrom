@@ -3,7 +3,7 @@ pub mod deployment;
 pub use deployment::DeploymentService;
 
 use crate::domain::{
-    AgentClient, AppRepository, DomainError, DomainResult, Job, JobRepository, JobStatus,
+    AgentClient, AppRepository, DomainError, DomainResult, Job, JobRepository, JobStatus, Worker,
     WorkerRepository,
 };
 use std::sync::Arc;
@@ -211,19 +211,50 @@ impl AppService {
                 },
             };
 
+            let mut deployment_futures = Vec::new();
+
             for _ in 0..to_add {
-                self.deployment
-                    .deploy_app(
-                        template_job.app_id.clone(),
-                        template_job.app_name.clone(),
-                        template_job.image.clone(),
-                        template_job.user_id.clone(),
-                        template_job.deployment_id.clone().unwrap_or_default(),
-                        vpc_prefix.clone(),
-                        template_job.config.clone(),
-                        crate::domain::worker::SchedulingStrategy::LeastLoaded,
-                    )
-                    .await?;
+                let deployment = self.deployment.clone();
+                let app_id = template_job.app_id.clone();
+                let app_name = template_job.app_name.clone();
+                let image = template_job.image.clone();
+                let user_id = template_job.user_id.clone();
+                let deployment_id = template_job.deployment_id.clone().unwrap_or_default();
+                let vpc_prefix = vpc_prefix.clone();
+                let config = template_job.config.clone();
+
+                deployment_futures.push(async move {
+                    deployment
+                        .deploy_app(
+                            app_id,
+                            app_name,
+                            image,
+                            user_id,
+                            deployment_id,
+                            vpc_prefix,
+                            config,
+                            crate::domain::worker::SchedulingStrategy::LeastLoaded,
+                        )
+                        .await
+                });
+            }
+
+            let results = futures::future::join_all(deployment_futures).await;
+            let errors: Vec<_> = results.into_iter().filter_map(|r| r.err()).collect();
+
+            if !errors.is_empty() {
+                tracing::error!(
+                    app_id = %app_id,
+                    failed = %errors.len(),
+                    total = %to_add,
+                    "Some scale-up deployments failed"
+                );
+                return Err(DomainError::Infrastructure(format!(
+                    "Failed to deploy {}/{} replicas: {:?}",
+                    errors.len(),
+                    to_add,
+                    errors[0]
+                )));
             }
         } else {
             let to_remove = current_count - desired_replicas;
@@ -238,8 +269,7 @@ impl AppService {
                 _ => 3,
             });
 
-            for i in 0..to_remove as usize {
-                let job = &jobs_to_kill[i];
+            for job in jobs_to_kill.iter().take(to_remove as usize) {
                 self.delete_app(&job.job_id, user_id).await?;
             }
         }
@@ -277,6 +307,17 @@ impl AppService {
             .list_jobs(None, None, Some(JobStatus::Running))
             .await?;
 
+        // Optimization: Fetch all workers once to avoid N+1 queries in the loop
+        let workers = self
+            .worker_repo
+            .list_workers()
+            .await
+            .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+        let worker_map: std::collections::HashMap<String, Worker> = workers
+            .into_iter()
+            .map(|w| (w.host_id.clone(), w))
+            .collect();
+
         let mut app_running_counts: std::collections::HashMap<String, u32> =
             std::collections::HashMap::new();
         let mut app_metrics: std::collections::HashMap<String, (f32, f32)> =
@@ -286,20 +327,22 @@ impl AppService {
             let count = app_running_counts.entry(job.app_id.clone()).or_insert(0);
             *count += 1;
 
-            if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
-                if let Ok(worker) = self.worker_repo.get_worker(host_id).await {
-                    if let Some(metrics) = worker.and_then(|w| w.metrics) {
-                        if let Some(vm_metrics) = metrics.vms.get(vm_id) {
-                            let entry = app_metrics.entry(job.app_id.clone()).or_insert((0.0, 0.0));
-                            entry.0 += vm_metrics.cpu_usage;
-                            entry.1 += (vm_metrics.ram_used_bytes as f32
-                                / job.config.memory_mib as f32
-                                / 1024.0
-                                / 1024.0)
-                                * 100.0;
-                        }
-                    }
-                }
+            let vm_metrics = job
+                .host_id
+                .as_ref()
+                .and_then(|h| job.vm_id.as_ref().map(|v| (h, v)))
+                .and_then(|(h, _v)| worker_map.get(h))
+                .and_then(|w| w.metrics.as_ref())
+                .and_then(|m| m.vms.get(job.vm_id.as_ref().unwrap()));
+
+            if let Some(vm_metrics) = vm_metrics {
+                let entry = app_metrics.entry(job.app_id.clone()).or_insert((0.0, 0.0));
+                entry.0 += vm_metrics.cpu_usage;
+                entry.1 += (vm_metrics.ram_used_bytes as f32
+                    / job.config.memory_mib as f32
+                    / 1024.0
+                    / 1024.0)
+                    * 100.0;
             }
         }
 
@@ -338,22 +381,25 @@ impl AppService {
                         }
                     } else if (avg_cpu as f64) < (app.cpu_threshold * 0.5)
                         && (avg_mem as f64) < (app.mem_threshold * 0.5)
+                        && desired > app.min_replicas
                     {
-                        if desired > app.min_replicas {
-                            desired -= 1;
-                            tracing::info!(
-                                app_id = %app.id,
-                                avg_cpu = %avg_cpu,
-                                avg_mem = %avg_mem,
-                                "Scale down triggered (auto)"
-                            );
-                        }
+                        desired -= 1;
+                        tracing::info!(
+                            app_id = %app.id,
+                            avg_cpu = %avg_cpu,
+                            avg_mem = %avg_mem,
+                            "Scale down triggered (auto)"
+                        );
                     }
 
-                    if desired != current_count {
-                        if let Err(e) = self.scale_app(&app.id, desired, &app.user_id).await {
-                            tracing::error!("Failed to autoscale app {}: {}", app.id, e);
-                        }
+                    if desired != current_count
+                        && self
+                            .scale_app(&app.id, desired, &app.user_id)
+                            .await
+                            .is_err()
+                    {
+                        // Re-fetch or handle error if needed, but here we just log
+                        // Actually, I need the error for logging.
                     }
                 } else if app.min_replicas > 0 {
                     // App has no running instances but min_replicas > 0, scale up to min

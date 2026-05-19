@@ -16,6 +16,7 @@ pub struct VmProcess {
     pub chroot_dir: Option<String>,
     pub app_started: Arc<AtomicBool>,
     pub app_started_at_ms: Arc<AtomicU64>,
+    pub vfs_processes: Vec<tokio::process::Child>,
 }
 
 /// Abstraction over shell command execution, allowing tests to inject a mock

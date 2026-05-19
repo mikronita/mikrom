@@ -7,7 +7,6 @@ use std::sync::Arc;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use chrono::Utc;
 use mikrom_api::AppState;
 use mikrom_api::create_app;
 use mikrom_api::models::app::App;
@@ -18,7 +17,18 @@ use mikrom_api::test_utils::TestDb;
 
 #[tokio::test]
 async fn test_create_app_endpoint() {
-    let mock_user_repo = MockUserRepository::new();
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(mikrom_api::repositories::user_repository::User {
+            id,
+            email: "test@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            role: mikrom_api::repositories::user_repository::UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
     let mut mock_app_repo = MockAppRepository::new();
 
     let user_id = Uuid::new_v4();
@@ -59,8 +69,7 @@ async fn test_create_app_endpoint() {
                 active_deployment_id: None,
                 health_check_path: params.health_check_path.unwrap_or_else(|| "/".to_string()),
                 drain_timeout: params.drain_timeout.unwrap_or(10),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
+                ..App::default()
             })
         });
 
@@ -70,6 +79,10 @@ async fn test_create_app_endpoint() {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    mock_scheduler
+        .expect_update_app_scaling_config()
+        .returning(|_| Ok(true));
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
@@ -77,7 +90,7 @@ async fn test_create_app_endpoint() {
             mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
         ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
@@ -137,7 +150,18 @@ async fn test_create_app_endpoint() {
 
 #[tokio::test]
 async fn test_create_app_duplicate_name() {
-    let mock_user_repo = mikrom_api::repositories::user_repository::MockUserRepository::new();
+    let mut mock_user_repo = mikrom_api::repositories::user_repository::MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(mikrom_api::repositories::user_repository::User {
+            id,
+            email: "test@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            role: mikrom_api::repositories::user_repository::UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
     let mut mock_app_repo = MockAppRepository::new();
 
     let user_id = Uuid::new_v4();
@@ -169,6 +193,10 @@ async fn test_create_app_duplicate_name() {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    mock_scheduler
+        .expect_update_app_scaling_config()
+        .returning(|_| Ok(true));
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
@@ -176,7 +204,7 @@ async fn test_create_app_duplicate_name() {
             mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
         ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
@@ -230,7 +258,18 @@ async fn test_create_app_duplicate_name() {
 
 #[tokio::test]
 async fn test_list_apps_includes_secret() {
-    let mock_user_repo = MockUserRepository::new();
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(mikrom_api::repositories::user_repository::User {
+            id,
+            email: "test@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            role: mikrom_api::repositories::user_repository::UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
     let mut mock_app_repo = MockAppRepository::new();
 
     let user_id = Uuid::new_v4();
@@ -266,8 +305,7 @@ async fn test_list_apps_includes_secret() {
                 active_deployment_id: None,
                 health_check_path: "/".to_string(),
                 drain_timeout: 10,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
+                ..App::default()
             }])
         });
 
@@ -277,6 +315,10 @@ async fn test_list_apps_includes_secret() {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    mock_scheduler
+        .expect_update_app_scaling_config()
+        .returning(|_| Ok(true));
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
@@ -284,7 +326,7 @@ async fn test_list_apps_includes_secret() {
             mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
         ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
@@ -333,7 +375,18 @@ async fn test_list_apps_includes_secret() {
 
 #[tokio::test]
 async fn test_get_app_secret_endpoint() {
-    let mock_user_repo = MockUserRepository::new();
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(mikrom_api::repositories::user_repository::User {
+            id,
+            email: "test@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            role: mikrom_api::repositories::user_repository::UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
     let mut mock_app_repo = MockAppRepository::new();
 
     let user_id = Uuid::new_v4();
@@ -369,8 +422,7 @@ async fn test_get_app_secret_endpoint() {
                 active_deployment_id: None,
                 health_check_path: "/".to_string(),
                 drain_timeout: 10,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
+                ..App::default()
             }))
         });
 
@@ -380,6 +432,10 @@ async fn test_get_app_secret_endpoint() {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    mock_scheduler
+        .expect_update_app_scaling_config()
+        .returning(|_| Ok(true));
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
@@ -387,7 +443,7 @@ async fn test_get_app_secret_endpoint() {
             mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
         ),
         github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
@@ -454,6 +510,7 @@ async fn test_create_app_with_custom_config() {
         github_repo_full_name: None,
         health_check_path: Some("/healthz".to_string()),
         drain_timeout: Some(60),
+        ..Default::default()
     };
 
     mock_app_repo
@@ -479,14 +536,31 @@ async fn test_create_app_with_custom_config() {
             })
         });
 
+    let mut mock_scheduler = MockScheduler::new();
+    mock_scheduler
+        .expect_update_app_scaling_config()
+        .returning(|_| Ok(true));
+    let mut mock_user_repo = MockUserRepository::new();
+    mock_user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(mikrom_api::repositories::user_repository::User {
+            id,
+            email: "test@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            role: mikrom_api::repositories::user_repository::UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: None,
+        }))
+    });
+
     let state = AppState {
-        user_repo: Arc::new(MockUserRepository::new()),
+        user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         volume_repo: Arc::new(
             mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
         ),
         github_repo: Arc::new(MockGithubRepository::default()),
-        scheduler: Arc::new(MockScheduler::new()),
+        scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(
             async_nats::connect("nats://localhost:4223").await.unwrap(),
         ),

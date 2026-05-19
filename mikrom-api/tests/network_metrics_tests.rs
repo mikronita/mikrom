@@ -1,4 +1,5 @@
 #![cfg(feature = "test-utils")]
+use tower::ServiceExt;
 
 use axum::{
     body::Body,
@@ -13,11 +14,15 @@ use mikrom_api::repositories::user_repository::{MockUserRepository, UserRole};
 use mikrom_api::scheduler::MockScheduler;
 use std::sync::Arc;
 use tower::Service;
+
 use uuid::Uuid;
 
 const JWT_SECRET: &str = "test-secret";
 
-async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
+async fn setup_app(
+    mock_app_repo: MockAppRepository,
+    mock_scheduler: MockScheduler,
+) -> (axum::Router, async_nats::Client) {
     let mock_user_repo = MockUserRepository::new();
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
     let nats_url =
@@ -31,8 +36,8 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
             mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
         ),
         github_repo: Arc::new(MockGithubRepository::default()),
-        scheduler: Arc::new(MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
+        scheduler: Arc::new(mock_scheduler),
+        nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
         api_db: sqlx::postgres::PgPoolOptions::new()
@@ -53,39 +58,91 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
-    create_app(state)
+    (create_app(state), nats_client)
 }
 
 #[tokio::test]
 async fn test_active_deployments_endpoint_responds() {
-    let mut mock_app_repo = MockAppRepository::new();
-
     let user_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
+    let dep_id = Uuid::new_v4();
+    let job_id = "job-1".to_string();
 
-    // Mock getting active deployments from DB
+    let mut mock_app_repo = MockAppRepository::new();
+    let job_id_for_db = job_id.clone();
     mock_app_repo
         .expect_list_deployments_by_user()
         .returning(move |_| {
             Ok(vec![mikrom_api::models::app::Deployment {
-                id: Uuid::new_v4(),
+                id: dep_id,
                 app_id,
                 user_id,
                 status: "RUNNING".to_string(),
-                job_id: Some("job-1".to_string()),
+                job_id: Some(job_id_for_db.clone()),
                 ..Default::default()
             }])
         });
 
-    mock_app_repo.expect_get_app().returning(move |_| {
-        Ok(Some(mikrom_api::models::app::App {
-            id: app_id,
-            name: "test-app".to_string(),
-            ..Default::default()
-        }))
+    let mut mock_scheduler = MockScheduler::new();
+    let job_id_for_sch = job_id.clone();
+    let user_id_str = user_id.to_string();
+    let user_id_for_mock = user_id_str.clone();
+    mock_scheduler.expect_list_apps().returning(move |_| {
+        Ok(mikrom_proto::scheduler::ListAppsResponse {
+            apps: vec![mikrom_proto::scheduler::AppInfo {
+                job_id: job_id_for_sch.clone(),
+                deployment_id: dep_id.to_string(),
+                app_id: app_id.to_string(),
+                user_id: user_id_for_mock.clone(),
+                app_name: "test-app".to_string(),
+                status: 3, // RUNNING
+                ipv6_address: "fd00::1".to_string(),
+                tx_bytes: 0,
+                rx_bytes: 0,
+                ..Default::default()
+            }],
+        })
     });
 
-    let mut router = setup_app(mock_app_repo).await;
+    let (router, nats_client) = setup_app(mock_app_repo, mock_scheduler).await;
+
+    // Simulate Scheduler responding to NATS requests
+    let job_id_responder = job_id.clone();
+    let dep_id_responder = dep_id.to_string();
+    let app_id_responder = app_id.to_string();
+    let user_id_responder = user_id_str.clone();
+
+    tokio::spawn(async move {
+        use futures::StreamExt;
+        use mikrom_proto::scheduler::{AppInfo, ListAppsResponse};
+        use prost::Message;
+
+        if let Ok(mut sub) = nats_client.subscribe("mikrom.scheduler.list_apps").await {
+            while let Some(msg) = sub.next().await {
+                if let Some(reply) = msg.reply {
+                    let response = ListAppsResponse {
+                        apps: vec![AppInfo {
+                            job_id: job_id_responder.clone(),
+                            deployment_id: dep_id_responder.clone(),
+                            app_id: app_id_responder.clone(),
+                            user_id: user_id_responder.clone(),
+                            app_name: "test-app".to_string(),
+                            status: 3, // RUNNING
+                            ipv6_address: "fd00::1".to_string(),
+                            tx_bytes: 0,
+                            rx_bytes: 0,
+                            ..Default::default()
+                        }],
+                    };
+                    let mut buf = Vec::new();
+                    response.encode(&mut buf).unwrap();
+                    let _ = nats_client.publish(reply, buf.into()).await;
+                }
+            }
+        }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
     let token = create_token(
         &user_id.to_string(),
         "test@test.com",
@@ -101,7 +158,7 @@ async fn test_active_deployments_endpoint_responds() {
         .body(Body::empty())
         .unwrap();
 
-    let response = router.call(req).await.unwrap();
+    let response = router.oneshot(req).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), 10000)
@@ -111,15 +168,14 @@ async fn test_active_deployments_endpoint_responds() {
 
     // Verify JSON contains network fields
     let deployments = json.as_array().expect("Response should be an array");
+    assert!(
+        !deployments.is_empty(),
+        "Should have at least one active deployment"
+    );
     let dep = &deployments[0];
     assert!(dep.get("tx_bytes").is_some(), "tx_bytes field missing");
     assert!(dep.get("rx_bytes").is_some(), "rx_bytes field missing");
-    assert_eq!(
-        dep["tx_bytes"], 0,
-        "tx_bytes should be 0 in DB fallback case"
-    );
 }
-
 #[tokio::test]
 async fn test_deployment_status_endpoint_responds() {
     let mut mock_app_repo = MockAppRepository::new();
@@ -150,7 +206,7 @@ async fn test_deployment_status_endpoint_responds() {
             }))
         });
 
-    let mut router = setup_app(mock_app_repo).await;
+    let (mut router, _) = setup_app(mock_app_repo, MockScheduler::new()).await;
     let token = create_token(
         &user_id.to_string(),
         "test@test.com",

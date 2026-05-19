@@ -107,36 +107,53 @@ impl MetricsCollector {
         let mut metrics = SystemMetrics::default();
         let now = chrono::Utc::now().timestamp();
 
-        {
-            let mut sys = self.sys.write();
-            sys.refresh_all();
+        let sys = self.sys.clone();
+        let disks = self.disks.clone();
+        let apps_count = *self.apps_count.read();
 
-            metrics.cpu_usage = sys.global_cpu_usage();
-            metrics.ram_used_bytes = sys.used_memory();
-            metrics.ram_total_bytes = sys.total_memory();
+        let (cpu, ram_used, ram_total, disk_used, disk_total, load_avg) =
+            tokio::task::spawn_blocking(move || {
+                let mut sys = sys.write();
+                sys.refresh_all();
 
-            // Disk metrics
-            let mut disks = self.disks.write();
-            disks.refresh_list();
+                let cpu = sys.global_cpu_usage();
+                let ram_used = sys.used_memory();
+                let ram_total = sys.total_memory();
 
-            let mut total_disk = 0;
-            let mut available_disk = 0;
-            for disk in disks.iter_mut() {
-                disk.refresh();
-                total_disk += disk.total_space();
-                available_disk += disk.available_space();
-            }
-            metrics.disk_total_bytes = total_disk;
-            metrics.disk_used_bytes = total_disk.saturating_sub(available_disk);
+                let mut disks = disks.write();
+                disks.refresh_list();
+                let mut total_disk = 0;
+                let mut available_disk = 0;
+                for disk in disks.iter_mut() {
+                    disk.refresh();
+                    total_disk += disk.total_space();
+                    available_disk += disk.available_space();
+                }
 
-            let load_avg = sysinfo::System::load_average();
-            metrics.load_avg_1 = load_avg.one as f32;
-            metrics.load_avg_5 = load_avg.five as f32;
-            metrics.load_avg_15 = load_avg.fifteen as f32;
+                let load_avg = sysinfo::System::load_average();
 
-            metrics.apps_count = *self.apps_count.read();
-            metrics.timestamp = now;
-        }
+                (
+                    cpu,
+                    ram_used,
+                    ram_total,
+                    total_disk.saturating_sub(available_disk),
+                    total_disk,
+                    load_avg,
+                )
+            })
+            .await
+            .unwrap_or((0.0, 0, 0, 0, 0, sysinfo::LoadAvg::default()));
+
+        metrics.cpu_usage = cpu;
+        metrics.ram_used_bytes = ram_used;
+        metrics.ram_total_bytes = ram_total;
+        metrics.disk_used_bytes = disk_used;
+        metrics.disk_total_bytes = disk_total;
+        metrics.load_avg_1 = load_avg.one as f32;
+        metrics.load_avg_5 = load_avg.five as f32;
+        metrics.load_avg_15 = load_avg.fifteen as f32;
+        metrics.apps_count = apps_count;
+        metrics.timestamp = now;
 
         let vms_info = if let Some(mgr) = &self.firecracker {
             mgr.get_all_vms().await
@@ -443,6 +460,7 @@ mod tests {
                     chroot_dir: None,
                     app_started: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
                     app_started_at_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                    vfs_processes: Vec::new(),
                 },
             );
         }

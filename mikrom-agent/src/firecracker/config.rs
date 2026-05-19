@@ -80,6 +80,7 @@ pub struct FirecrackerConfig {
     pub jailer_uid: u32,
     pub jailer_gid: u32,
     pub chroot_base: String,
+    pub virtiofsd_path: String,
 }
 
 impl FirecrackerConfig {
@@ -111,6 +112,8 @@ impl FirecrackerConfig {
                 .unwrap_or(1000),
             chroot_base: std::env::var("JAILER_CHROOT_BASE")
                 .unwrap_or_else(|_| "/srv/jailer".to_string()),
+            virtiofsd_path: std::env::var("VIRTIOFSD_PATH")
+                .unwrap_or_else(|_| "/usr/libexec/virtiofsd".to_string()),
         }
     }
 
@@ -127,6 +130,7 @@ impl FirecrackerConfig {
             jailer_uid: 0,
             jailer_gid: 0,
             chroot_base: String::new(),
+            virtiofsd_path: String::new(),
         }
     }
 }

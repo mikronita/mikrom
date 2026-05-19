@@ -355,7 +355,14 @@ impl BackgroundService for ControlPlane {
                                             .execute(&db)
                                             .await;
 
-                                        let response = if !update.target_urls.is_empty() {
+                                        let response = if update.target_urls.is_empty() {
+                                            // targets are empty, we already deleted them above
+                                            let _ = tx.try_send(());
+                                            RouterConfigAck {
+                                                success: true,
+                                                message: String::new(),
+                                            }
+                                        } else {
                                             let mut success = true;
                                             let mut last_error = String::new();
 
@@ -384,13 +391,6 @@ impl BackgroundService for ControlPlane {
                                                     success: false,
                                                     message: last_error,
                                                 }
-                                            }
-                                        } else {
-                                            // targets are empty, we already deleted them above
-                                            let _ = tx.try_send(());
-                                            RouterConfigAck {
-                                                success: true,
-                                                message: String::new(),
                                             }
                                         };
 

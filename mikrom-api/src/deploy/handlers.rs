@@ -21,7 +21,7 @@ use tracing::info;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, ToSchema, Default, Clone)]
 pub struct CreateAppRequest {
     pub name: String,
     pub git_url: String,
@@ -1163,7 +1163,6 @@ mod tests {
     use crate::repositories::user_repository::{MockUserRepository, User, UserRole};
     use crate::scheduler::MockScheduler;
     use axum::extract::{Path, State};
-    use axum::http::StatusCode;
     use std::sync::Arc;
     use uuid::Uuid;
 

@@ -650,8 +650,8 @@ impl CephRbd {
     pub async fn unmap_volume(device_or_spec: &str) -> Result<()> {
         info!("Unmapping RBD device/spec natively: {}", device_or_spec);
 
-        let id = if device_or_spec.starts_with("/dev/rbd") {
-            device_or_spec[8..].to_string()
+        let id = if let Some(stripped) = device_or_spec.strip_prefix("/dev/rbd") {
+            stripped.to_string()
         } else {
             // It's a spec like pool/name, we need to find the ID
             let mut found_id = None;
@@ -770,41 +770,48 @@ impl CephFs {
         let source_c = CString::new(source)?;
         let target_c = CString::new(mount_point)?;
         let fstype_c = CString::new("ceph")?;
-        let options = format!("name=admin,secretfile=/etc/ceph/admin.secret");
-        let options_c = CString::new(options)?;
+        let options_c = CString::new("name=admin,secretfile=/etc/ceph/admin.secret")?;
 
-        unsafe {
-            let ret = libc::mount(
-                source_c.as_ptr(),
-                target_c.as_ptr(),
-                fstype_c.as_ptr(),
-                0,
-                options_c.as_ptr() as *const libc::c_void,
-            );
+        let volume_id_owned = volume_id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let ret = unsafe {
+                libc::mount(
+                    source_c.as_ptr(),
+                    target_c.as_ptr(),
+                    fstype_c.as_ptr(),
+                    0,
+                    options_c.as_ptr() as *const libc::c_void,
+                )
+            };
 
             if ret != 0 {
                 let err = std::io::Error::last_os_error();
-                return Err(anyhow!(
+                Err(anyhow!(
                     "Failed to mount CephFS volume {}: {}",
-                    volume_id,
+                    volume_id_owned,
                     err
-                ));
+                ))
+            } else {
+                Ok(())
             }
-        }
-
-        Ok(())
+        })
+        .await
+        .map_err(|e| anyhow!("Blocking task failed: {}", e))?
     }
 
     pub async fn unmount_volume(mount_point: &str) -> Result<()> {
         info!("Unmounting CephFS volume natively from {}", mount_point);
         let mount_point_c = CString::new(mount_point)?;
-        unsafe {
-            let ret = libc::umount2(mount_point_c.as_ptr(), libc::MNT_DETACH);
+        let mount_point_owned = mount_point.to_string();
+        tokio::task::spawn_blocking(move || {
+            let ret = unsafe { libc::umount2(mount_point_c.as_ptr(), libc::MNT_DETACH) };
             if ret != 0 {
                 let err = std::io::Error::last_os_error();
-                warn!("Failed to unmount natively {}: {}", mount_point, err);
+                warn!("Failed to unmount natively {}: {}", mount_point_owned, err);
             }
-        }
-        Ok(())
+        })
+        .await
+        .map_err(|e| anyhow!("Blocking task failed: {}", e))
     }
 }
