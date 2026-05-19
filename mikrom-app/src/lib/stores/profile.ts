@@ -2,7 +2,7 @@ import { browser } from "$app/environment";
 import { onMount } from "svelte";
 import { writable } from "svelte/store";
 import { getToken } from "$lib/auth";
-import { getUserProfile, watchWorkspaceEvents, type UserProfile } from "$lib/api";
+import { getUserProfile, type UserProfile } from "$lib/api";
 
 const PROFILE_CACHE_KEY = "mikrom_profile";
 

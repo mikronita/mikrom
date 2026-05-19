@@ -2,7 +2,7 @@
   import { ChevronDown } from "lucide-svelte";
   const { class: className = "", ...rest } = $$restProps;
 
-  export let value: any = undefined;
+  export let value: string | number | readonly string[] | undefined = undefined;
   export let id: string | undefined = undefined;
   export let required = false;
   export let disabled = false;

@@ -21,11 +21,6 @@
     createSecurityRule,
     deleteSecurityRule,
     getMeshStatus,
-    getUserProfile,
-    listActiveDeployments,
-    listApps,
-    listSecurityRules,
-    type AppInfo,
     type CreateSecurityRuleRequest,
     type MeshStatus,
     type SecurityRule,
@@ -99,7 +94,7 @@
           selectedApp = $appsStore[0].name;
           await loadRules(token, selectedApp);
         }
-      } catch (err) {
+      } catch (_err) {
         toast.error("Failed to load networking data");
       } finally {
         loading = false;

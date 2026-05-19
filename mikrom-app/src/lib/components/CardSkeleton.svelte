@@ -12,11 +12,9 @@
   export let compact = false;
 
   const { class: classAttr = "", ...rest } = $$restProps;
-
-  $: mergedClassName = cn("overflow-hidden rounded-lg border bg-card shadow-sm", classAttr);
 </script>
 
-<div class={mergedClassName} {...rest}>
+<div class={cn("overflow-hidden rounded-lg border bg-card shadow-sm", classAttr)} {...rest}>
   <div class={compact ? "p-4" : "p-5"}>
     <div class="flex items-start gap-4">
       {#if showIcon}
