@@ -153,11 +153,20 @@ async fn sync_deployment_state(
                 kind: WorkspaceEventKind::DeploymentChanged,
                 user_id: Some(app.user_id),
                 app_id: Some(app.id),
-                app_name: Some(app.name),
+                app_name: Some(app.name.clone()),
                 deployment_id: Some(dep.id),
                 volume_id: None,
                 resource_id: Some(dep.id.to_string()),
             });
+
+            if let Err(e) = state.notify_router(&app).await {
+                tracing::error!(
+                    app_id = %app.id,
+                    hostname = ?app.hostname,
+                    error = %e,
+                    "Failed to refresh router targets after deployment change"
+                );
+            }
         }
     }
 }

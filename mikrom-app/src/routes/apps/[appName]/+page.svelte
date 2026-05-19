@@ -58,6 +58,7 @@
   } from "$lib/api";
   import { toast } from "$lib/toast";
   import { appsStore, refreshApps } from "$lib/stores/apps";
+  import { vmsStore, vmsLoading } from "$lib/stores/vms";
 
   type MetricsSnapshot = {
     time: string;
@@ -117,6 +118,14 @@
       lastUpdate: number;
     }
   >();
+  $: runningReplicaCount =
+    app
+      ? $vmsStore.filter(
+          (vm) =>
+            vm.status.toLowerCase() === "running" &&
+            (vm.app_id === app.id || vm.app_name === app.name)
+        ).length
+      : 0;
 
   function normalizeCpuUsage(cpuUsage?: number) {
     const value = cpuUsage ?? 0;
@@ -147,6 +156,16 @@
     const value = new Date(dateStr);
     if (Number.isNaN(value.getTime())) return "--";
     return value.toLocaleString();
+  }
+
+  function formatReplicaSummary(appInfo: AppInfo) {
+    if (appInfo.autoscaling_enabled) {
+      if ($vmsLoading && runningReplicaCount === 0) return `--/${appInfo.max_replicas}`;
+      return `${runningReplicaCount}/${appInfo.max_replicas}`;
+    }
+
+    if ($vmsLoading && runningReplicaCount === 0) return "--";
+    return `${runningReplicaCount}`;
   }
 
   function nowIso() {
@@ -332,11 +351,8 @@
 
         const depId = "deployment_id" in deployment ? deployment.deployment_id : null;
         const jobId = deployment.job_id;
+        const vmId = deployment.vm_id;
         const index = deployments.findIndex((dep) => (depId && dep.id === depId) || (jobId && dep.job_id === jobId));
-
-        if (deployment.status !== "RUNNING" && jobId && replicaSamples.has(jobId)) {
-          replicaSamples.delete(jobId);
-        }
 
         if (index === -1) {
           deployments = sortDeployments([normalizeDeployment(deployment), ...deployments]);
@@ -580,7 +596,7 @@
                     <td class="px-4 py-4"><Badge variant={deploymentBadge.variant} className={`font-semibold capitalize ${deploymentBadge.className}`}>{dep.status}</Badge></td>
                     <td class="px-4 py-4 text-xs font-medium text-muted-foreground">
                       {#if currentApp && isCurrentTarget}
-                        {currentApp.autoscaling_enabled ? `${currentApp.min_replicas}–${currentApp.max_replicas}` : currentApp.desired_replicas}
+                        {formatReplicaSummary(currentApp)}
                       {:else}
                         0
                       {/if}
