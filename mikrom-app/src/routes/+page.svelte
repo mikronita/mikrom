@@ -257,8 +257,6 @@
             {#each healthServices as service, index}
               {@const ServiceIcon = service.icon}
               {@const status = $healthStore?.services?.[service.key] || (hasHealthError() ? "OFFLINE" : "CHECKING")}
-              {@const isOnline = status === "ONLINE"}
-              {@const isChecking = status === "CHECKING"}
               <div class="flex flex-col gap-4">
                 <div class="flex items-center justify-between gap-4">
                   <div class="flex items-center gap-2">

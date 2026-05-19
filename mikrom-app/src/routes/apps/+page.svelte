@@ -13,8 +13,6 @@
   import CardSkeleton from "$lib/components/CardSkeleton.svelte";
   import CreateAppModal from "$lib/components/CreateAppModal.svelte";
   import { formatDate } from "$lib/utils";
-  import { getToken } from "$lib/auth";
-  import { type AppInfo } from "$lib/api";
   import { vmsStore } from "$lib/stores/vms";
   import { appsStore, appsLoading, appsError, refreshApps } from "$lib/stores/apps";
   import { toast } from "$lib/toast";

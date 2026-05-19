@@ -1,7 +1,7 @@
 import { get } from "svelte/store";
 import { watchWorkspaceEvents, type WorkspaceEvent } from "$lib/api";
 import { getToken } from "$lib/auth";
-import { refreshApps, appsStore } from "./apps";
+import { refreshApps } from "./apps";
 import { refreshVolumes, refreshSnapshots, volumesStore } from "./volumes";
 import { refreshVms } from "./vms";
 import { refreshProfile } from "./profile";
@@ -57,7 +57,6 @@ export function initWorkspaceSSE() {
         // If we have a specific app_id, we could be more targeted,
         // but for now, if the volumesStore is not empty, we refresh.
         // In a real app, we might want to know which app is currently selected in the UI.
-        const apps = get(appsStore);
         if (event.app_id) {
            void refreshVolumes(event.app_id);
         } else {

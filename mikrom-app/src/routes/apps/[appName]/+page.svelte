@@ -23,9 +23,9 @@
     Cog,
     CheckCircle2,
     Info,
-    Network,
     Scale,
   } from "lucide-svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import Card from "$lib/components/Card.svelte";
   import CardHeader from "$lib/components/CardHeader.svelte";
@@ -49,6 +49,7 @@
     deployAppVersion,
     getAppSecret,
     listDeployments,
+    type AppInfo,
     type DeploymentInfo,
     type LiveDeploymentInfo,
     type VmMetricsResponse,
@@ -57,28 +58,6 @@
   } from "$lib/api";
   import { toast } from "$lib/toast";
   import { appsStore, refreshApps } from "$lib/stores/apps";
-
-  const webhookBaseUrl = browser
-    ? `${window.location.protocol}//${window.location.hostname}:5001/v1`
-    : "http://localhost:5001/v1";
-
-  let deployments: DeploymentInfo[] = [];
-  let loading = true;
-  let error = "";
-  let liveMetrics: VmMetricsResponse | null = null;
-  let metricsHistory: Array<{ time: string; cpu: number; ram: number; rx: number; tx: number; total_rx: number; total_tx: number }> = [];
-  let secret: string | null = null;
-  let showSecret = false;
-  let showWebhookModal = false;
-  let showScaleModal = false;
-  let showDeleteAppDialog = false;
-  let deployingApp = false;
-  let deletingApp = false;
-  let showHistory = false;
-  let activatingDeploymentId: string | null = null;
-
-  $: appName = decodeURIComponent($page.params.appName ?? "");
-  $: app = $appsStore.find((item) => item.name === appName);
 
   type MetricsSnapshot = {
     time: string;
@@ -90,8 +69,57 @@
     total_tx: number;
   };
 
+  const webhookBaseUrl = browser
+    ? `${window.location.protocol}//${window.location.hostname}:5001/v1`
+    : "http://localhost:5001/v1";
+
+  let deployments: DeploymentInfo[] = [];
+  let loading = true;
+  let liveMetrics: VmMetricsResponse | null = null;
+  let metricsHistory: MetricsSnapshot[] = [];
+  let secret: string | null = null;
+  let showSecret = false;
+  let showWebhookModal = false;
+  let showScaleModal = false;
+  let showDeleteAppDialog = false;
+  let deployingApp = false;
+  let deletingApp = false;
+  let activatingDeploymentId: string | null = null;
+  let app: AppInfo | null = null;
+  let active: DeploymentInfo | null;
+  let inFlight: DeploymentInfo | undefined;
+  let latestMetrics: MetricsSnapshot;
+  let totalTrafficBytes: number;
+  let recentDeploymentsList: DeploymentInfo[];
+  let metricCards: Array<{
+    key: string;
+    label: string;
+    detail: string;
+    value: string;
+    icon: typeof Cpu;
+    color: string;
+  }>;
+  let showLivePerformance: boolean;
+
+  $: appName = decodeURIComponent($page.params.appName ?? "");
+  $: app = $appsStore.find((item) => item.name === appName) ?? null;
+
+  const lastNetwork = new SvelteMap<string, { tx: number; rx: number; time: number; txRate: number; rxRate: number }>();
+  const replicaSamples = new SvelteMap<
+    string,
+    {
+      cpu: number;
+      ram: number;
+      rx: number;
+      tx: number;
+      total_rx: number;
+      total_tx: number;
+      lastUpdate: number;
+    }
+  >();
+
   function normalizeCpuUsage(cpuUsage?: number) {
-    const value = cpuUsage || 0;
+    const value = cpuUsage ?? 0;
     return value <= 1 ? value * 100 : value;
   }
 
@@ -111,40 +139,85 @@
     return `${(bytes / Math.pow(unit, index)).toFixed(1)} ${sizes[index]}`;
   }
 
-  let lastNetwork = new Map<string, { tx: number; rx: number; time: number; txRate: number; rxRate: number }>();
-
-  function activeDeployment() {
-    if (!deployments.length) return null;
-    
-    // 1. Try to find the one explicitly marked as active by the app
-    const activeById = app?.active_deployment_id ? deployments.find((dep) => dep.id === app.active_deployment_id) : null;
-    if (activeById) return activeById;
-    
-    // 2. Fallback to any running/draining deployment
-    const running = [...deployments]
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      .find((dep) => ["RUNNING", "DRAINING", "HEALTHY", "STARTING"].includes((dep.status || "").toUpperCase()));
-    if (running) return running;
-    
-    // 3. Fallback to the most recent deployment
-    return [...deployments].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+  function sortDeployments(list: DeploymentInfo[]) {
+    return [...list].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
-  function productionDepId() {
-    return (
-      app?.active_deployment_id ||
-      [...deployments]
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-        .find((d) => (d.status || "").toUpperCase() === "RUNNING")?.id
-    );
+  function formatDeploymentDate(dateStr: string) {
+    const value = new Date(dateStr);
+    if (Number.isNaN(value.getTime())) return "--";
+    return value.toLocaleString();
   }
 
-  function getStatusClass(status: string) {
-    const s = (status || "").toLowerCase();
-    if (s === "running") return "default";
-    if (["building", "scheduled", "pending", "paused", "draining"].includes(s)) return "secondary";
-    if (["failed", "cancelled"].includes(s)) return "destructive";
-    return "outline";
+  function nowIso() {
+    return new Date().toISOString();
+  }
+
+  function normalizeDeployment(deployment: DeploymentInfo | LiveDeploymentInfo, previous?: DeploymentInfo): DeploymentInfo {
+    const full = deployment as Partial<DeploymentInfo>;
+    const live = deployment as LiveDeploymentInfo;
+    const fallbackTime = previous?.created_at ?? previous?.updated_at ?? nowIso();
+    const canonicalId =
+      ("deployment_id" in deployment ? live.deployment_id : null)
+      ?? ("id" in deployment ? full.id : null)
+      ?? deployment.job_id
+      ?? previous?.id
+      ?? "";
+
+    return {
+      id: canonicalId,
+      app_id: full.app_id ?? live.app_id,
+      build_id: full.build_id ?? previous?.build_id ?? null,
+      image_tag: full.image_tag ?? previous?.image_tag ?? null,
+      job_id: deployment.job_id ?? previous?.job_id ?? null,
+      ipv6_address: deployment.ipv6_address ?? previous?.ipv6_address ?? null,
+      status: deployment.status ?? previous?.status ?? "UNKNOWN",
+      vcpus: full.vcpus ?? previous?.vcpus ?? 0,
+      memory_mib: full.memory_mib ?? previous?.memory_mib ?? 0,
+      disk_mib: full.disk_mib ?? previous?.disk_mib ?? 0,
+      port: full.port ?? previous?.port ?? 0,
+      env_vars: full.env_vars ?? previous?.env_vars ?? {},
+      git_commit_hash: full.git_commit_hash ?? previous?.git_commit_hash ?? null,
+      git_commit_message: full.git_commit_message ?? previous?.git_commit_message ?? null,
+      git_branch: full.git_branch ?? previous?.git_branch ?? null,
+      trigger_source: full.trigger_source ?? previous?.trigger_source ?? "manual",
+      created_at: previous?.created_at ?? full.created_at ?? fallbackTime,
+      updated_at: previous?.updated_at ?? full.updated_at ?? fallbackTime,
+    };
+  }
+
+  function getDeploymentBadgeProps(status: string) {
+    const s = status.toLowerCase();
+    if (s === "running") {
+      return {
+        variant: "outline" as const,
+        className: "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]",
+      };
+    }
+    if (s === "draining" || s === "building" || s === "scheduled" || s === "pending" || s === "paused") {
+      return {
+        variant: "outline" as const,
+        className: "border-transparent bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] text-[var(--status-warning)]",
+      };
+    }
+    if (s === "failed" || s === "cancelled") {
+      return {
+        variant: "destructive" as const,
+        className: "",
+      };
+    }
+    return {
+      variant: "outline" as const,
+      className: "",
+    };
+  }
+
+  function getDeploymentButtonText(dep: DeploymentInfo, isCurrentlyInProd: boolean) {
+    if (isCurrentlyInProd) return "Currently in Prod";
+    if (dep.status === "DRAINING") return "Draining...";
+    if (dep.status === "BUILDING") return "Building...";
+    if (dep.status === "STARTING" || dep.status === "SCHEDULED") return "Starting...";
+    return "Promote to Prod";
   }
 
   function copy(text: string) {
@@ -155,23 +228,9 @@
       .catch(() => toast.error("Failed to copy to clipboard"));
   }
 
-  let replicaSamples = new Map<
-    string,
-    {
-      cpu: number;
-      ram: number;
-      rx: number;
-      tx: number;
-      total_rx: number;
-      total_tx: number;
-      lastUpdate: number;
-    }
-  >();
-
   function handleMetrics(sample: VmMetricsResponse) {
     if (!sample) return;
 
-    // 1. Calculate rates for this specific replica
     const txBytes = sample.tx_bytes || 0;
     const rxBytes = sample.rx_bytes || 0;
     const now = Date.now();
@@ -188,7 +247,6 @@
         rxRate = Math.max(0, rxBytes - prev.rx) / deltaTime / 1024;
         lastNetwork.set(key, { tx: txBytes, rx: rxBytes, time: now, txRate, rxRate });
       } else {
-        // Reuse previous rates to avoid jitter, but we'll still update CPU/RAM below
         txRate = prev.txRate || 0;
         rxRate = prev.rxRate || 0;
       }
@@ -196,7 +254,6 @@
       lastNetwork.set(key, { tx: txBytes, rx: rxBytes, time: now, txRate: 0, rxRate: 0 });
     }
 
-    // 2. Update this replica's state in our map
     replicaSamples.set(key, {
       cpu: normalizeCpuUsage(sample.cpu_usage),
       ram: (sample.ram_used_bytes || 0) / (1024 * 1024),
@@ -207,34 +264,31 @@
       lastUpdate: now,
     });
 
-    // 3. Clean up stale replicas (no data for > 15s)
     for (const [replicaKey, data] of replicaSamples.entries()) {
       if (now - data.lastUpdate > 15000) {
         replicaSamples.delete(replicaKey);
       }
     }
 
-    // 4. Calculate aggregated metrics across all active replicas
     const activeReplicas = Array.from(replicaSamples.values());
     if (activeReplicas.length === 0) return;
 
     const count = activeReplicas.length;
-    const aggregated = {
+    const aggregated: MetricsSnapshot = {
       time: new Date().toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
       }),
-      cpu: activeReplicas.reduce((sum, r) => sum + r.cpu, 0) / count, // Average CPU
-      ram: activeReplicas.reduce((sum, r) => sum + r.ram, 0), // Total RAM
-      rx: activeReplicas.reduce((sum, r) => sum + r.rx, 0), // Total RX Rate
-      tx: activeReplicas.reduce((sum, r) => sum + r.tx, 0), // Total TX Rate
-      total_rx: activeReplicas.reduce((sum, r) => sum + r.total_rx, 0),
-      total_tx: activeReplicas.reduce((sum, r) => sum + r.total_tx, 0),
+      cpu: activeReplicas.reduce((sum, replica) => sum + replica.cpu, 0) / count,
+      ram: activeReplicas.reduce((sum, replica) => sum + replica.ram, 0),
+      rx: activeReplicas.reduce((sum, replica) => sum + replica.rx, 0),
+      tx: activeReplicas.reduce((sum, replica) => sum + replica.tx, 0),
+      total_rx: activeReplicas.reduce((sum, replica) => sum + replica.total_rx, 0),
+      total_tx: activeReplicas.reduce((sum, replica) => sum + replica.total_tx, 0),
     };
 
-    // 5. Update history and live view
-    liveMetrics = sample; // Keep the last sample for miscellaneous info
+    liveMetrics = sample;
     metricsHistory = [...metricsHistory.slice(-29), aggregated];
   }
 
@@ -261,7 +315,9 @@
         getAppSecret(token, currentAppName),
       ]);
 
-      if (deploymentsResult.data) deployments = sortDeployments(deploymentsResult.data.map((dep) => normalizeDeployment(dep)));
+      if (deploymentsResult.data) {
+        deployments = sortDeployments(deploymentsResult.data.map((dep) => normalizeDeployment(dep)));
+      }
       if (secretResult.data) secret = secretResult.data.github_webhook_secret;
       if (deploymentsResult.error) {
         toast.error(deploymentsResult.error || "Failed to load deployments");
@@ -273,36 +329,20 @@
 
       cleanupDeployments = watchDeploymentsSSE(token, (deployment) => {
         if (deployment.app_name !== currentAppName) return;
-        
-        // Find if we already have this deployment (by ID or Job ID)
+
         const depId = "deployment_id" in deployment ? deployment.deployment_id : null;
         const jobId = deployment.job_id;
-        
-        const index = deployments.findIndex((dep) => 
-          (depId && dep.id === depId) || 
-          (jobId && dep.job_id === jobId)
-        );
+        const index = deployments.findIndex((dep) => (depId && dep.id === depId) || (jobId && dep.job_id === jobId));
 
-        // NEW: If deployment is no longer running, remove it from active metrics aggregation
-        if (deployment.status !== "RUNNING" && jobId) {
-          if (replicaSamples.has(jobId)) {
-            replicaSamples.delete(jobId);
-            // Trigger a re-calculation of aggregated metrics if possible
-            // By deleting it here, the next metric sample from any OTHER replica will produce the correct total
-          }
+        if (deployment.status !== "RUNNING" && jobId && replicaSamples.has(jobId)) {
+          replicaSamples.delete(jobId);
         }
 
         if (index === -1) {
-          // Only add if it's a new one we don't know about
           deployments = sortDeployments([normalizeDeployment(deployment), ...deployments]);
         } else {
-          // Update existing one
           deployments = sortDeployments(
-            deployments.map((dep, depIndex) =>
-              depIndex === index
-                ? normalizeDeployment(deployment, dep)
-                : dep,
-            ),
+            deployments.map((dep, depIndex) => (depIndex === index ? normalizeDeployment(deployment, dep) : dep)),
           );
         }
       });
@@ -310,7 +350,6 @@
       cleanupMetrics = watchAppMetrics(token, currentAppName, handleMetrics);
     };
 
-    // Use a reactive block for appName changes
     const unsub = page.subscribe(($page) => {
       const name = decodeURIComponent($page.params.appName ?? "");
       if (name) init(name);
@@ -372,32 +411,30 @@
     }
   }
 
-  $: active = ((_deps, _app) => {
-    if (!deployments || deployments.length === 0) return null;
-    const activeById = app?.active_deployment_id ? deployments.find((dep) => dep.id === app.active_deployment_id) : null;
-    if (activeById) return activeById;
-    return [...deployments]
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      .find((dep) => ["RUNNING", "DRAINING", "HEALTHY", "STARTING"].includes((dep.status || "").toUpperCase())) 
-      || deployments[0];
-  })(deployments, app);
-
-  $: latestMetrics = (metricsHistory.length > 0 ? metricsHistory[metricsHistory.length - 1] : null) || (liveMetrics ? {
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-      cpu: normalizeCpuUsage(liveMetrics.cpu_usage),
-      ram: (liveMetrics.ram_used_bytes || 0) / (1024 * 1024),
-      rx: 0,
-      tx: 0,
-      total_rx: liveMetrics.rx_bytes || 0,
-      total_tx: liveMetrics.tx_bytes || 0,
-    } : { time: "", cpu: 0, ram: 0, rx: 0, tx: 0, total_rx: 0, total_tx: 0 });
-
-  $: inFlight = deployments.find(d => ["HEALTH_CHECKING", "STARTING", "BUILDING", "SCHEDULED"].includes(d.status));
-
+  $: active =
+    deployments.length === 0
+      ? null
+      : (app?.active_deployment_id ? deployments.find((dep) => dep.id === app.active_deployment_id) : null) ||
+        [...deployments]
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .find((dep) => ["RUNNING", "DRAINING", "HEALTHY", "STARTING"].includes((dep.status || "").toUpperCase())) ||
+        deployments[0];
+  $: inFlight = deployments.find((d) => ["HEALTH_CHECKING", "STARTING", "BUILDING", "SCHEDULED"].includes(d.status));
+  $: latestMetrics =
+    (metricsHistory.length > 0 ? metricsHistory[metricsHistory.length - 1] : null) ||
+    (liveMetrics
+      ? {
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+          cpu: normalizeCpuUsage(liveMetrics.cpu_usage),
+          ram: (liveMetrics.ram_used_bytes || 0) / (1024 * 1024),
+          rx: 0,
+          tx: 0,
+          total_rx: liveMetrics.rx_bytes || 0,
+          total_tx: liveMetrics.tx_bytes || 0,
+        }
+      : { time: "", cpu: 0, ram: 0, rx: 0, tx: 0, total_rx: 0, total_tx: 0 });
   $: recentDeploymentsList = sortDeployments(deployments).slice(0, 5);
-
   $: totalTrafficBytes = (latestMetrics.total_rx || 0) + (latestMetrics.total_tx || 0);
-
   $: metricCards = [
     {
       key: "cpu",
@@ -432,125 +469,8 @@
       color: "bg-[var(--chart-4)]",
     },
   ];
-
-  function getDeploymentBadgeProps(status: string) {
-    const s = status.toLowerCase();
-    if (s === "running") {
-      return {
-        variant: "outline" as const,
-        className: "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]",
-      };
-    }
-    if (s === "draining" || s === "building" || s === "scheduled" || s === "pending" || s === "paused") {
-      return {
-        variant: "outline" as const,
-        className: "border-transparent bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] text-[var(--status-warning)]",
-      };
-    }
-    if (s === "failed" || s === "cancelled") {
-      return {
-        variant: "destructive" as const,
-        className: "",
-      };
-    }
-    return {
-      variant: "outline" as const,
-      className: "",
-    };
-  }
-
-  function formatMetricValue(name: string | number, value: unknown): string {
-    const numericValue = typeof value === "number" ? value : Number(value);
-    if (!Number.isFinite(numericValue)) return "--";
-    if (name === "cpu") return `${numericValue.toFixed(1)}%`;
-    if (name === "ram") return `${numericValue.toFixed(0)} MiB`;
-    if (name === "rx" || name === "tx") return formatNetworkRate(numericValue);
-    return numericValue.toLocaleString();
-  }
-
-  function getDeploymentButtonText(dep: DeploymentInfo, isCurrentlyInProd: boolean) {
-    if (isCurrentlyInProd) return "Currently in Prod";
-    if (dep.status === "DRAINING") return "Draining...";
-    if (dep.status === "BUILDING") return "Building...";
-    if (dep.status === "STARTING" || dep.status === "SCHEDULED") return "Starting...";
-    return "Promote to Prod";
-  }
-
-  function formatDuration(start: string, end: string) {
-    const startTime = new Date(start).getTime();
-    const endTime = new Date(end).getTime();
-    if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return "--";
-    const diff = endTime - startTime;
-    if (diff < 0) return "--";
-    if (diff < 1000) return `${diff}ms`;
-    const seconds = Math.floor(diff / 1000);
-    if (seconds < 60) {
-      const ms = diff % 1000;
-      return ms > 0 ? `${seconds}s ${ms}ms` : `${seconds}s`;
-    }
-    const minutes = Math.floor(seconds / 60);
-    return `${minutes}m ${seconds % 60}s`;
-  }
-
-  function sortDeployments(list: DeploymentInfo[]) {
-    return [...list].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }
-
-  function recentDeployments(list: DeploymentInfo[]) {
-    return sortDeployments(list).slice(0, 5);
-  }
-
-  function formatDeploymentDate(dateStr: string) {
-    const value = new Date(dateStr);
-    if (Number.isNaN(value.getTime())) return "--";
-    return value.toLocaleString();
-  }
-
-  function nowIso() {
-    return new Date().toISOString();
-  }
-
-  function normalizeDeployment(
-    deployment: DeploymentInfo | LiveDeploymentInfo,
-    previous?: DeploymentInfo,
-  ): DeploymentInfo {
-    const full = deployment as Partial<DeploymentInfo>;
-    const live = deployment as LiveDeploymentInfo;
-    const fallbackTime = previous?.created_at ?? previous?.updated_at ?? nowIso();
-    
-    // Canonical ID is the deployment_id if present, otherwise deployment.id, otherwise job_id
-    const canonicalId = ("deployment_id" in deployment ? live.deployment_id : null) 
-      ?? ("id" in deployment ? full.id : null)
-      ?? deployment.job_id 
-      ?? previous?.id 
-      ?? "";
-
-    return {
-      id: canonicalId,
-      app_id: full.app_id ?? live.app_id,
-      build_id: full.build_id ?? previous?.build_id ?? null,
-      image_tag: full.image_tag ?? previous?.image_tag ?? null,
-      job_id: deployment.job_id ?? previous?.job_id ?? null,
-      ipv6_address: deployment.ipv6_address ?? previous?.ipv6_address ?? null,
-      status: deployment.status ?? previous?.status ?? "UNKNOWN",
-      vcpus: full.vcpus ?? previous?.vcpus ?? 0,
-      memory_mib: full.memory_mib ?? previous?.memory_mib ?? 0,
-      disk_mib: full.disk_mib ?? previous?.disk_mib ?? 0,
-      port: full.port ?? previous?.port ?? 0,
-      env_vars: full.env_vars ?? previous?.env_vars ?? {},
-      git_commit_hash: full.git_commit_hash ?? previous?.git_commit_hash ?? null,
-      git_commit_message: full.git_commit_message ?? previous?.git_commit_message ?? null,
-      git_branch: full.git_branch ?? previous?.git_branch ?? null,
-      trigger_source: full.trigger_source ?? previous?.trigger_source ?? "manual",
-      created_at: previous?.created_at ?? full.created_at ?? fallbackTime,
-      updated_at: previous?.updated_at ?? full.updated_at ?? fallbackTime,
-    };
-  }
+  $: showLivePerformance = Boolean(active && (["RUNNING", "DRAINING", "STARTING", "HEALTHY"].includes(active.status.toUpperCase()) || liveMetrics));
 </script>
-
-<svelte:head>
-  <title>Mikrom - {appName}</title>
-</svelte:head>
 
 <DashboardLayout>
     <div class="flex flex-col justify-between gap-4 md:flex-row md:items-center">
@@ -572,11 +492,6 @@
       </div>
       <div class="flex items-center gap-2">
         <Button size="sm" onclick={handleDeployApp} disabled={deployingApp}>
-          {#if deployingApp}
-            <Loader2 class="size-4 animate-spin" />
-          {:else}
-            <Rocket class="size-4" />
-          {/if}
           Deploy Now
         </Button>
         <Button size="sm" variant="outline" onclick={() => (showScaleModal = true)}>
@@ -634,6 +549,7 @@
                 </tr>
               {:else}
                 {#each recentDeploymentsList as dep}
+                  {@const currentApp = app}
                   {@const isProduction = active?.id === dep.id}
                   {@const isCurrentTarget = inFlight ? inFlight.id === dep.id : isProduction}
                   {@const canActivate = ["RUNNING", "PAUSED", "STOPPED", "FAILED"].includes(dep.status) && !isProduction}
@@ -663,8 +579,8 @@
                     </td>
                     <td class="px-4 py-4"><Badge variant={deploymentBadge.variant} className={`font-semibold capitalize ${deploymentBadge.className}`}>{dep.status}</Badge></td>
                     <td class="px-4 py-4 text-xs font-medium text-muted-foreground">
-                      {#if app && isCurrentTarget}
-                        {app.autoscaling_enabled ? `${app.min_replicas}–${app.max_replicas}` : app.desired_replicas}
+                      {#if currentApp && isCurrentTarget}
+                        {currentApp.autoscaling_enabled ? `${currentApp.min_replicas}–${currentApp.max_replicas}` : currentApp.desired_replicas}
                       {:else}
                         0
                       {/if}
@@ -714,7 +630,7 @@
       </Card>
     </section>
 
-    {#if active && (["RUNNING", "DRAINING", "STARTING", "HEALTHY"].includes(active.status.toUpperCase()) || liveMetrics)}
+    {#if showLivePerformance}
       <div class="space-y-6 animate-in fade-in duration-500 border-t border-border pt-6">
         <h2 class="text-lg font-bold tracking-tight">Live Performance</h2>
 
@@ -824,7 +740,7 @@
   {/if}
 
   {#if app && showScaleModal}
-    <ScaleAppModal bind:open={showScaleModal} {app} />
+    <ScaleAppModal bind:open={showScaleModal} app={app!} />
   {/if}
 
   <AlertDialog
