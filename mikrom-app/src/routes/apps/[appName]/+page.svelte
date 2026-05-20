@@ -24,7 +24,6 @@
     CheckCircle2,
     Info,
     Scale,
-    Radio,
   } from "lucide-svelte";
   import { SvelteMap } from "svelte/reactivity";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
@@ -172,18 +171,6 @@
 
   function nowIso() {
     return new Date().toISOString();
-  }
-
-  function getScaleStateLabel(scaleState: string) {
-    if (scaleState === "scaled_to_zero") return "Paused";
-    return "Running";
-  }
-
-  function getScaleStateBadgeClass(scaleState: string) {
-    if (scaleState === "scaled_to_zero") {
-      return "border-transparent bg-muted/70 text-muted-foreground";
-    }
-    return "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]";
   }
 
   function normalizeDeployment(deployment: DeploymentInfo | LiveDeploymentInfo, previous?: DeploymentInfo): DeploymentInfo {
@@ -366,7 +353,6 @@
 
         const depId = "deployment_id" in deployment ? deployment.deployment_id : null;
         const jobId = deployment.job_id;
-        const vmId = deployment.vm_id;
         const index = deployments.findIndex((dep) => (depId && dep.id === depId) || (jobId && dep.job_id === jobId));
 
         if (index === -1) {
