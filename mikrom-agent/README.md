@@ -44,7 +44,7 @@ When a deployment is triggered:
 | Variable | Default | Description |
 |---|---|---|
 | `NATS_URL` | `nats://127.0.0.1:4222` | URL of the NATS server |
-| `HOST_ID` | random UUID | Stable identifier for this node |
+| `AGENT_HOST_ID` | random UUID | Stable identifier for this node; persisted under `data_path/host_id.txt` |
 | `AGENT_HOSTNAME` | — | IP/Hostname advertised to the scheduler |
 | `USE_TLS` | `false` | Enable mutual TLS for NATS |
 

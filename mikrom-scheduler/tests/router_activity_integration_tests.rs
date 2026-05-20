@@ -173,15 +173,22 @@ impl JobRepository for InMemoryJobRepo {
 }
 
 #[derive(Clone, Default)]
-struct InMemoryWorkerRepo;
+struct InMemoryWorkerRepo {
+    workers: Arc<Mutex<Vec<Worker>>>,
+}
 
 #[async_trait]
 impl WorkerRepository for InMemoryWorkerRepo {
-    async fn register(&self, _w: Worker) -> DomainResult<()> {
+    async fn register(&self, worker: Worker) -> DomainResult<()> {
+        self.workers.lock().await.push(worker);
         Ok(())
     }
 
-    async fn unregister(&self, _h: &str) -> DomainResult<()> {
+    async fn unregister(&self, host_id: &str) -> DomainResult<()> {
+        self.workers
+            .lock()
+            .await
+            .retain(|worker| worker.host_id != host_id);
         Ok(())
     }
 
@@ -193,16 +200,22 @@ impl WorkerRepository for InMemoryWorkerRepo {
         Ok(())
     }
 
-    async fn get_worker(&self, _h: &str) -> DomainResult<Option<Worker>> {
-        Ok(None)
+    async fn get_worker(&self, host_id: &str) -> DomainResult<Option<Worker>> {
+        Ok(self
+            .workers
+            .lock()
+            .await
+            .iter()
+            .find(|worker| worker.host_id == host_id)
+            .cloned())
     }
 
     async fn list_workers(&self) -> DomainResult<Vec<Worker>> {
-        Ok(vec![])
+        Ok(self.workers.lock().await.clone())
     }
 
     async fn get_available_workers(&self, _t: i64) -> DomainResult<Vec<Worker>> {
-        Ok(vec![])
+        Ok(self.workers.lock().await.clone())
     }
 }
 
@@ -343,7 +356,21 @@ async fn test_router_traffic_restores_paused_deployment() {
         jobs: Arc::new(Mutex::new(vec![paused_job])),
     };
 
-    let worker_repo = InMemoryWorkerRepo;
+    let worker_repo = InMemoryWorkerRepo::default();
+    worker_repo
+        .register(Worker {
+            host_id: "host-1".to_string(),
+            hostname: "worker-1".to_string(),
+            advertise_address: "worker-1".to_string(),
+            wireguard_pubkey: None,
+            wireguard_ip: None,
+            wireguard_port: None,
+            metrics: None,
+            registered_at: chrono::Utc::now().timestamp(),
+            last_heartbeat: chrono::Utc::now().timestamp(),
+        })
+        .await
+        .unwrap();
     let agent_client = RecordingAgentClient::default();
     let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
 
@@ -610,7 +637,21 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
     let job_repo = InMemoryJobRepo {
         jobs: Arc::new(Mutex::new(vec![job])),
     };
-    let worker_repo = InMemoryWorkerRepo;
+    let worker_repo = InMemoryWorkerRepo::default();
+    worker_repo
+        .register(Worker {
+            host_id: "host-race".to_string(),
+            hostname: "worker-race".to_string(),
+            advertise_address: "worker-race".to_string(),
+            wireguard_pubkey: None,
+            wireguard_ip: None,
+            wireguard_port: None,
+            metrics: None,
+            registered_at: chrono::Utc::now().timestamp(),
+            last_heartbeat: chrono::Utc::now().timestamp(),
+        })
+        .await
+        .unwrap();
     let agent_client = RecordingAgentClient::default();
     let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
 
