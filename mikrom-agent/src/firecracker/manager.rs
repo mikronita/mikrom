@@ -411,7 +411,6 @@ impl FirecrackerManager {
         processes: &mut HashMap<VmId, VmProcess>,
     ) -> Option<(VmId, AppId, String, VmConfig)> {
         let proc = processes.remove(vm_id)?;
-        self.cleanup_exited_process_artifacts(vm_id, &proc).await;
 
         let mut vms = self.vms.write().await;
         let vm = vms.get_mut(vm_id)?;
@@ -421,7 +420,7 @@ impl FirecrackerManager {
             "Checking if VM needs auto-restart"
         );
 
-        let restart_data = if vm.status == VmStatus::Running {
+        if vm.status == VmStatus::Running {
             tracing::error!(
                 vm_id = %vm_id,
                 exit_code = ?exit_status.code(),
@@ -431,18 +430,33 @@ impl FirecrackerManager {
             if let Some(ip) = &vm.config.ip_address {
                 self.release_vm_ip(ip).await;
             }
+
+            // ONLY cleanup if it was running and crashed
+            self.cleanup_exited_process_artifacts(vm_id, &proc).await;
+
             Some((*vm_id, vm.app_id, vm.image.clone(), vm.config.clone()))
+        } else if vm.status == VmStatus::Paused {
+            tracing::info!(
+                vm_id = %vm_id,
+                "VM is hibernated (Paused), preserving artifacts for resume"
+            );
+            // DO NOT cleanup rootfs or snapshots here!
+            // We only remove the Firecracker-specific runtime artifacts (socket, chroot)
+            // but we keep the EXT4 and snapshot files.
+            self.cleanup_process_chroot(vm_id, &proc).await;
+            self.remove_stale_socket(&proc.socket_path).await;
+            None
         } else {
             tracing::info!(
                 vm_id = %vm_id,
                 status = ?vm.status,
                 "VM was not in Running state, skipping auto-restart"
             );
+            // Cleanup everything for Stopped/Failed VMs
+            self.cleanup_exited_process_artifacts(vm_id, &proc).await;
+            vm.status = VmStatus::Stopped;
             None
-        };
-
-        vm.status = VmStatus::Stopped;
-        restart_data
+        }
     }
 
     async fn cleanup_exited_process_artifacts(&self, vm_id: &VmId, proc: &VmProcess) {
@@ -941,7 +955,7 @@ impl FirecrackerManager {
         let body = serde_json::json!({
             "snapshot_path": load_snap,
             "mem_file_path": load_mem,
-            "resume": true
+            "resume_vm": true
         })
         .to_string();
 
@@ -998,7 +1012,7 @@ impl FirecrackerManager {
 
     fn build_boot_args(&self, config: &VmConfig) -> String {
         let mut boot_args =
-            "console=ttyS0 reboot=k panic=1 pci=off nomodules rw root=/dev/vda init=/mikrom-init"
+            "console=ttyS0 reboot=k panic=1 pci=off nomodules rw root=/dev/vda init=/mikrom-init i8042.nokbd i8042.noaux quiet"
                 .to_string();
         if let (Some(ip), Some(gw)) = (&config.ip_address, &config.gateway) {
             let mask = config.netmask.as_deref().unwrap_or("255.255.255.0");
@@ -2207,6 +2221,14 @@ impl FirecrackerManager {
         rootfs_host_path: &str,
     ) -> Result<(String, Vec<String>, String, Option<String>), FirecrackerError> {
         let chroot_dir = self.get_chroot_dir(vm_id);
+
+        // Ensure clean slate to avoid "File exists" errors from jailer
+        // (especially for /dev/net/tun or other static nodes)
+        if chroot_dir.exists() {
+            tracing::info!(vm_id = %vm_id, ?chroot_dir, "Cleaning up existing jailer chroot before setup");
+            let _ = tokio::fs::remove_dir_all(&chroot_dir).await;
+        }
+
         let root_dir = chroot_dir.join("root");
         let run_dir = root_dir.join("run");
 
@@ -2461,6 +2483,9 @@ impl FirecrackerManager {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixListener;
+    use tokio::task::JoinHandle;
 
     #[test]
     fn test_ipv6_route_prefix_uses_guest_prefix() {
@@ -2498,6 +2523,43 @@ mod tests {
             std::process::id(),
             uuid::Uuid::new_v4()
         ))
+    }
+
+    fn temp_data_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "mikrom-agent-{name}-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ))
+    }
+
+    fn temp_socket_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "mikrom-agent-{name}-{}-{}.sock",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ))
+    }
+
+    async fn spawn_fc_socket_stub(path: PathBuf, expected_requests: usize) -> JoinHandle<()> {
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).expect("bind unix socket");
+
+        tokio::spawn(async move {
+            for _ in 0..expected_requests {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buf = [0u8; 4096];
+                let _ =
+                    tokio::time::timeout(std::time::Duration::from_secs(2), stream.read(&mut buf))
+                        .await;
+                let response =
+                    b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                let _ = stream.write_all(response).await;
+                let _ = stream.shutdown().await;
+            }
+        })
     }
 
     #[tokio::test]
@@ -2721,6 +2783,104 @@ mod tests {
 
         assert!(!mgr.has_process(&vm_id).await);
         assert_ne!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn test_pause_vm_terminates_process_and_resume_restarts_from_snapshot() {
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let vm_id = VmId::new();
+        let app_id = AppId::new();
+        let socket_path = temp_socket_path("pause-resume");
+        let _server = spawn_fc_socket_stub(socket_path.clone(), 3).await;
+
+        let child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("sleep 10")
+            .spawn()
+            .expect("failed to spawn test child");
+
+        mgr.insert_process_for_test(&vm_id, child, socket_path.to_string_lossy().to_string())
+            .await;
+        mgr.set_vm_for_test(
+            &vm_id,
+            VmInfo {
+                vm_id,
+                app_id,
+                image: "test-image".to_string(),
+                config: config(),
+                status: VmStatus::Running,
+                started_at: None,
+                error_message: None,
+            },
+        )
+        .await;
+
+        mgr.pause_vm(&vm_id).await.expect("pause_vm should succeed");
+        assert!(!mgr.has_process(&vm_id).await);
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Paused);
+
+        mgr.resume_vm(&vm_id)
+            .await
+            .expect("resume_vm should restart from snapshot");
+
+        // Wait for it to become Running (since start_vm is async)
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while mgr.get_vm_status(&vm_id).await.unwrap() != VmStatus::Running {
+            if std::time::Instant::now() > deadline {
+                panic!("Timeout waiting for VM to become Running after resume");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        // In stub mode, start_vm does not re-insert the process into the map
+        if mgr.fc_config.kernel_path.is_some() {
+            assert!(mgr.has_process(&vm_id).await);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_all_stale_resources_keeps_paused_vm_artifacts() {
+        let mut mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let data_dir = temp_data_dir("gc-paused");
+        tokio::fs::create_dir_all(&data_dir).await.unwrap();
+        mgr.fc_config.data_dir = data_dir.to_string_lossy().to_string();
+
+        let paused_vm_id = VmId::new();
+        let stale_vm_id = VmId::new();
+        let prefix = format!("fc-{}-", mgr.agent_id);
+
+        mgr.set_vm_for_test(
+            &paused_vm_id,
+            VmInfo {
+                vm_id: paused_vm_id,
+                app_id: AppId::new(),
+                image: "paused-image".to_string(),
+                config: config(),
+                status: VmStatus::Paused,
+                started_at: None,
+                error_message: None,
+            },
+        )
+        .await;
+
+        let paused_rootfs = data_dir.join(format!("{prefix}{paused_vm_id}-rootfs.ext4"));
+        let paused_socket = data_dir.join(format!("{prefix}{paused_vm_id}.sock"));
+        let stale_rootfs = data_dir.join(format!("{prefix}{stale_vm_id}-rootfs.ext4"));
+        let stale_socket = data_dir.join(format!("{prefix}{stale_vm_id}.sock"));
+
+        tokio::fs::write(&paused_rootfs, b"paused").await.unwrap();
+        tokio::fs::write(&paused_socket, b"paused").await.unwrap();
+        tokio::fs::write(&stale_rootfs, b"stale").await.unwrap();
+        tokio::fs::write(&stale_socket, b"stale").await.unwrap();
+
+        mgr.cleanup_all_stale_resources().await;
+
+        assert!(tokio::fs::metadata(&paused_rootfs).await.is_ok());
+        assert!(tokio::fs::metadata(&paused_socket).await.is_ok());
+        assert!(tokio::fs::metadata(&stale_rootfs).await.is_err());
+        assert!(tokio::fs::metadata(&stale_socket).await.is_err());
+
+        let _ = tokio::fs::remove_dir_all(&data_dir).await;
     }
 
     #[tokio::test]

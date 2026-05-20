@@ -120,10 +120,12 @@ impl SchedulerServer {
     }
 
     pub async fn list_apps(&self, req: ListAppsRequest) -> anyhow::Result<ListAppsResponse> {
+        let status_filter = req.status.and_then(crate::domain::JobStatus::from_i32);
+
         let jobs = self
             .app_service
             .job_repo
-            .list_jobs(Some(&req.user_id), None, None)
+            .list_jobs(Some(&req.user_id), None, status_filter)
             .await
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
@@ -262,12 +264,15 @@ impl SchedulerServer {
                 id: req.app_id,
                 user_id: req.user_id,
                 vpc_ipv6_prefix: req.vpc_ipv6_prefix,
+                hostname: req.hostname,
                 desired_replicas: req.desired_replicas,
                 min_replicas: req.min_replicas,
                 max_replicas: req.max_replicas,
                 autoscaling_enabled: req.autoscaling_enabled,
                 cpu_threshold: req.cpu_threshold,
                 mem_threshold: req.mem_threshold,
+                last_router_traffic_at: req.last_router_traffic_at,
+                last_scaled_to_zero_at: req.last_scaled_to_zero_at,
             })
             .await
         {
@@ -497,5 +502,63 @@ impl Clone for SchedulerServer {
             app_service: self.app_service.clone(),
             certs: self.certs.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::AppService;
+    use crate::domain::AppConfig;
+    use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository};
+    use mockall::predicate::function;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_update_app_scaling_config_maps_router_activity_fields() {
+        let mut app_repo = crate::domain::app::MockAppRepository::new();
+        app_repo
+            .expect_update_app_config()
+            .with(function(|cfg: &AppConfig| {
+                cfg.id == "app-1"
+                    && cfg.user_id == "user-1"
+                    && cfg.hostname == "app.example.com"
+                    && cfg.last_router_traffic_at == 123
+                    && cfg.last_scaled_to_zero_at == 456
+                    && cfg.desired_replicas == 2
+            }))
+            .times(1)
+            .returning(|_| Box::pin(async { Ok(()) }));
+
+        let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
+        let service = AppService::new(
+            Arc::new(MockJobRepository::new()),
+            Arc::new(app_repo),
+            Arc::new(MockWorkerRepository::new()),
+            Arc::new(MockAgentClient::new()),
+            nats_client,
+            sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+        );
+        let server = SchedulerServer::new(Arc::new(service), None);
+
+        let response = server
+            .update_app_scaling_config(UpdateAppScalingConfigRequest {
+                app_id: "app-1".to_string(),
+                user_id: "user-1".to_string(),
+                vpc_ipv6_prefix: "fd00::".to_string(),
+                hostname: "app.example.com".to_string(),
+                desired_replicas: 2,
+                min_replicas: 1,
+                max_replicas: 3,
+                autoscaling_enabled: true,
+                cpu_threshold: 80.0,
+                mem_threshold: 70.0,
+                last_router_traffic_at: 123,
+                last_scaled_to_zero_at: 456,
+            })
+            .await
+            .unwrap();
+
+        assert!(response.success);
     }
 }

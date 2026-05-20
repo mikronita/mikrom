@@ -87,7 +87,7 @@ impl AppRepository for PostgresAppRepository {
         let health_check_path = params.health_check_path.unwrap_or_else(|| "/".to_string());
         let drain_timeout = params.drain_timeout.unwrap_or(10);
         let desired_replicas = params.desired_replicas.unwrap_or(1);
-        let min_replicas = params.min_replicas.unwrap_or(1);
+        let min_replicas = params.min_replicas.unwrap_or(0);
         let max_replicas = params.max_replicas.unwrap_or(1);
         let autoscaling_enabled = params.autoscaling_enabled.unwrap_or(false);
         let cpu_threshold = params.cpu_threshold.unwrap_or(80.0);

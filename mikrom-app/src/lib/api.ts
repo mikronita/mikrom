@@ -90,6 +90,8 @@ export interface WorkspaceEvent {
   resource_id?: string | null;
 }
 
+export type AppScaleState = "active" | "scaled_to_zero";
+
 export interface LiveDeploymentInfo {
   job_id: string;
   deployment_id: string;
@@ -107,6 +109,7 @@ export interface LiveDeploymentInfo {
   git_commit_hash?: string | null;
   git_commit_message?: string | null;
   git_branch?: string | null;
+  scale_state?: AppScaleState;
 }
 
 export interface LiveDeploymentStatus extends LiveDeploymentInfo {
@@ -119,6 +122,7 @@ export interface LiveDeploymentStatus extends LiveDeploymentInfo {
 export interface LogLine {
   line: string;
   timestamp: number;
+  scale_state?: AppScaleState;
 }
 
 export interface VmMetrics {
@@ -133,6 +137,7 @@ export interface VmMetrics {
   status: string;
   error_message?: string | null;
   ipv6_address?: string | null;
+  scale_state?: AppScaleState;
 }
 
 export type VmMetricsResponse = VmMetrics;
@@ -169,6 +174,7 @@ export interface AppInfo {
   autoscaling_enabled: boolean;
   cpu_threshold: number;
   mem_threshold: number;
+  scale_state: AppScaleState;
   created_at: string;
 }
 
@@ -216,6 +222,7 @@ export interface DeploymentInfo {
   git_commit_message: string | null;
   git_branch: string | null;
   trigger_source: string;
+  scale_state?: AppScaleState;
   created_at: string;
   updated_at: string;
 }

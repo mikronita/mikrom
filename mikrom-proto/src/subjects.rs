@@ -11,6 +11,9 @@ pub const ROUTER_TLS_CERT_UPDATED: &str = "mikrom.router.tls_cert_updated";
 /// Router ACME challenge update subject.
 pub const ROUTER_ACME_CHALLENGE_UPDATED: &str = "mikrom.router.acme_challenge_updated";
 
+/// Router traffic event subject.
+pub const ROUTER_TRAFFIC_EVENT: &str = "mikrom.router.traffic";
+
 // ── Scheduler Subjects ───────────────────────────────────────────────────────
 
 /// Scheduler job updates subject.

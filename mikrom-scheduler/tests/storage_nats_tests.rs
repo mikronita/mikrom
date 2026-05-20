@@ -27,6 +27,7 @@ async fn test_scheduler_storage_nats_dispatch() {
         Arc::new(mikrom_scheduler::domain::app::MockAppRepository::new()),
         Arc::new(MockWorkerRepository::new()), // Will re-mock below
         Arc::new(mikrom_scheduler::infrastructure::nats::NatsAgentClient::new(client.clone())),
+        client.clone(),
         sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
     );
 

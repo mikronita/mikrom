@@ -7,21 +7,36 @@ use mikrom_proto::scheduler::{
     WorkerHeartbeat,
 };
 use prost::Message;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 const MESH_PRUNING_THRESHOLD_SECS: i64 = 30;
 
 pub struct NatsEventLoop {
     server: SchedulerServer,
     client: async_nats::Client,
+    queue_group: String,
+    router_restore_in_progress: Arc<Mutex<HashSet<String>>>,
 }
 
 impl NatsEventLoop {
     pub fn new(server: SchedulerServer, client: async_nats::Client) -> Self {
-        Self { server, client }
+        Self {
+            server,
+            client,
+            queue_group: "schedulers".to_string(),
+            router_restore_in_progress: Arc::new(Mutex::new(HashSet::new())),
+        }
+    }
+
+    pub fn with_queue_group(mut self, group: String) -> Self {
+        self.queue_group = group;
+        self
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
         let client = self.client.clone();
+        let queue_group = self.queue_group.clone();
 
         // 1. Heartbeats
         let mut heartbeat_sub = client
@@ -31,84 +46,84 @@ impl NatsEventLoop {
         let mut router_heartbeat_sub = client
             .subscribe("mikrom.scheduler.router.heartbeat")
             .await?;
+        let mut router_traffic_sub = client
+            .queue_subscribe(
+                mikrom_proto::subjects::ROUTER_TRAFFIC_EVENT,
+                queue_group.clone(),
+            )
+            .await?;
 
         // 2. Queue Group Subscriptions for Load Balancing
         let mut deploy_sub = client
-            .queue_subscribe("mikrom.scheduler.deploy", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.deploy", queue_group.clone())
             .await?;
         let mut status_sub = client
-            .queue_subscribe("mikrom.scheduler.get_job", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.get_job", queue_group.clone())
             .await?;
         let mut list_sub = client
-            .queue_subscribe("mikrom.scheduler.list_apps", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.list_apps", queue_group.clone())
             .await?;
         let mut list_workers_sub = client
-            .queue_subscribe("mikrom.scheduler.list_workers", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.list_workers", queue_group.clone())
             .await?;
         let mut pause_sub = client
-            .queue_subscribe("mikrom.scheduler.pause_app", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.pause_app", queue_group.clone())
             .await?;
         let mut resume_sub = client
-            .queue_subscribe("mikrom.scheduler.resume_app", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.resume_app", queue_group.clone())
             .await?;
         let mut cancel_sub = client
-            .queue_subscribe("mikrom.scheduler.cancel_app", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.cancel_app", queue_group.clone())
             .await?;
         let mut delete_sub = client
-            .queue_subscribe("mikrom.scheduler.delete_app", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.delete_app", queue_group.clone())
             .await?;
         let mut delete_all_sub = client
-            .queue_subscribe(
-                "mikrom.scheduler.delete_all_by_app",
-                "schedulers".to_string(),
-            )
+            .queue_subscribe("mikrom.scheduler.delete_all_by_app", queue_group.clone())
             .await?;
         let mut scale_sub = client
             .queue_subscribe(
                 mikrom_proto::subjects::SCHEDULER_SCALE_APP,
-                "schedulers".to_string(),
+                queue_group.clone(),
             )
             .await?;
         let mut health_sub = client
-            .queue_subscribe("mikrom.scheduler.check_health", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.check_health", queue_group.clone())
             .await?;
         let mut security_sub = client
             .queue_subscribe(
                 "mikrom.scheduler.update_security_groups",
-                "schedulers".to_string(),
+                queue_group.clone(),
             )
             .await?;
         let mut update_scaling_sub = client
             .queue_subscribe(
                 mikrom_proto::subjects::SCHEDULER_UPDATE_APP_SCALING_CONFIG,
-                "schedulers".to_string(),
+                queue_group.clone(),
             )
             .await?;
         let mut create_volume_sub = client
-            .queue_subscribe("mikrom.scheduler.create_volume", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.create_volume", queue_group.clone())
             .await?;
         let mut snapshot_sub = client
-            .queue_subscribe("mikrom.scheduler.create_snapshot", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.create_snapshot", queue_group.clone())
             .await?;
         let mut delete_volume_sub = client
-            .queue_subscribe("mikrom.scheduler.delete_volume", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.delete_volume", queue_group.clone())
             .await?;
         let mut delete_snapshot_sub = client
-            .queue_subscribe("mikrom.scheduler.delete_snapshot", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.delete_snapshot", queue_group.clone())
             .await?;
         let mut restore_snapshot_sub = client
-            .queue_subscribe(
-                "mikrom.scheduler.restore_snapshot",
-                "schedulers".to_string(),
-            )
+            .queue_subscribe("mikrom.scheduler.restore_snapshot", queue_group.clone())
             .await?;
         let mut clone_volume_sub = client
-            .queue_subscribe("mikrom.scheduler.clone_volume", "schedulers".to_string())
+            .queue_subscribe("mikrom.scheduler.clone_volume", queue_group.clone())
             .await?;
 
         tracing::info!("NATS Event Loop started, listening for messages...");
 
-        let mut mesh_interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+        let mut mesh_interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
 
         loop {
             tokio::select! {
@@ -117,6 +132,7 @@ impl NatsEventLoop {
                 }
                 Some(msg) = heartbeat_sub.next() => self.handle_heartbeat(msg).await,
                 Some(msg) = router_heartbeat_sub.next() => self.handle_router_heartbeat(msg).await,
+                Some(msg) = router_traffic_sub.next() => self.handle_router_traffic(msg).await,
                 Some(msg) = deploy_sub.next() => self.handle_deploy(msg).await,
                 Some(msg) = status_sub.next() => self.handle_status(msg).await,
                 Some(msg) = list_sub.next() => self.handle_list_apps(msg).await,
@@ -139,6 +155,25 @@ impl NatsEventLoop {
                 Some(msg) = clone_volume_sub.next() => self.handle_clone_volume(msg).await,
             }
         }
+    }
+
+    fn acquire_router_restore_guard(
+        router_restore_in_progress: &Arc<Mutex<HashSet<String>>>,
+        app_id: &str,
+    ) -> Option<RouterRestoreGuard> {
+        let mut in_progress = router_restore_in_progress
+            .lock()
+            .expect("router restore guard mutex poisoned");
+
+        if !in_progress.insert(app_id.to_string()) {
+            tracing::debug!(event = "router_restore_deduplicated", app_id = %app_id, "Router restore already in progress");
+            return None;
+        }
+
+        Some(RouterRestoreGuard {
+            router_restore_in_progress: router_restore_in_progress.clone(),
+            app_id: app_id.to_string(),
+        })
     }
 
     async fn broadcast_mesh_updates(server: SchedulerServer, client: async_nats::Client) {
@@ -169,15 +204,25 @@ impl NatsEventLoop {
             .filter(|w| now - w.last_heartbeat < MESH_PRUNING_THRESHOLD_SECS)
             .collect();
 
-        // 1. Fetch all running jobs once and group by host_id
+        // 1. Fetch all active jobs grouped by host_id
         let mut jobs_by_host = std::collections::HashMap::new();
         if let Ok(jobs) = server
             .app_service
             .job_repo
-            .list_jobs(None, None, Some(crate::domain::JobStatus::Running))
+            .list_jobs(None, None, None)
             .await
         {
             for job in jobs {
+                if !matches!(
+                    job.status,
+                    crate::domain::JobStatus::Pending
+                        | crate::domain::JobStatus::Scheduled
+                        | crate::domain::JobStatus::Running
+                        | crate::domain::JobStatus::Paused
+                ) {
+                    continue;
+                }
+
                 if let Some(host_id) = &job.host_id {
                     jobs_by_host
                         .entry(host_id.clone())
@@ -360,6 +405,115 @@ impl NatsEventLoop {
                 },
                 Err(e) => {
                     tracing::error!("Failed to decode router heartbeat: {}", e);
+                },
+            }
+        });
+    }
+
+    async fn handle_router_traffic(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let router_restore_in_progress = self.router_restore_in_progress.clone();
+        tokio::spawn(async move {
+            match mikrom_proto::router::RouterTrafficEvent::decode(&message.payload[..]) {
+                Ok(event) => {
+                    tracing::info!(
+                        hostname = %event.hostname,
+                        router_id = %event.router_id,
+                        timestamp = %event.timestamp,
+                        "Received router traffic event"
+                    );
+
+                    let Some(mut app) = server
+                        .app_service
+                        .app_repo
+                        .get_app_config_by_hostname(&event.hostname)
+                        .await
+                        .ok()
+                        .flatten()
+                    else {
+                        return;
+                    };
+
+                    let timestamp = if event.timestamp > 0 {
+                        event.timestamp
+                    } else {
+                        chrono::Utc::now().timestamp()
+                    };
+
+                    app.last_router_traffic_at = timestamp;
+                    if let Err(e) = server
+                        .app_service
+                        .app_repo
+                        .update_app_config(app.clone())
+                        .await
+                    {
+                        tracing::error!(
+                            hostname = %event.hostname,
+                            error = %e,
+                            "Failed to persist router traffic timestamp"
+                        );
+                        return;
+                    }
+
+                    let current_count = server
+                        .app_service
+                        .job_repo
+                        .list_jobs(Some(&app.user_id), Some(&app.id), None)
+                        .await
+                        .map(|jobs| {
+                            jobs.into_iter()
+                                .filter(|job| {
+                                    matches!(
+                                        job.status,
+                                        crate::domain::JobStatus::Pending
+                                            | crate::domain::JobStatus::Scheduled
+                                            | crate::domain::JobStatus::Running
+                                    )
+                                })
+                                .count() as u32
+                        })
+                        .unwrap_or_default();
+
+                    if current_count == 0 && app.desired_replicas > 0 {
+                        let Some(_restore_guard) = Self::acquire_router_restore_guard(
+                            &router_restore_in_progress,
+                            &app.id,
+                        ) else {
+                            return;
+                        };
+
+                        tracing::info!(
+                            event = "restore_from_router_traffic",
+                            app_id = %app.id,
+                            hostname = %event.hostname,
+                            desired = %app.desired_replicas,
+                            "Router traffic arrived for a scaled-to-zero app; restoring replicas"
+                        );
+
+                        if let Err(e) = server
+                            .app_service
+                            .scale_app(&app.id, app.desired_replicas, &app.user_id)
+                            .await
+                        {
+                            tracing::error!(
+                                app_id = %app.id,
+                                hostname = %event.hostname,
+                                error = %e,
+                                "Failed to restore app after router traffic"
+                            );
+                        } else {
+                            tracing::info!(
+                                event = "restore_from_router_traffic_completed",
+                                app_id = %app.id,
+                                hostname = %event.hostname,
+                                desired = %app.desired_replicas,
+                                "App restored after router traffic"
+                            );
+                        }
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Failed to decode router traffic event: {}", e);
                 },
             }
         });
@@ -973,6 +1127,19 @@ impl NatsEventLoop {
     }
 }
 
+struct RouterRestoreGuard {
+    router_restore_in_progress: Arc<Mutex<HashSet<String>>>,
+    app_id: String,
+}
+
+impl Drop for RouterRestoreGuard {
+    fn drop(&mut self) {
+        if let Ok(mut in_progress) = self.router_restore_in_progress.lock() {
+            in_progress.remove(&self.app_id);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1030,8 +1197,13 @@ mod tests {
         let job_repo = Arc::new(job_repo);
         let agent_client = Arc::new(MockAgentClient::new());
 
-        let deployment =
-            DeploymentService::new(job_repo.clone(), worker_repo.clone(), agent_client.clone());
+        let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
+        let deployment = DeploymentService::new(
+            job_repo.clone(),
+            worker_repo.clone(),
+            agent_client.clone(),
+            nats_client.clone(),
+        );
 
         // Dummy AppRepo for tests
         #[derive(Debug)]
@@ -1047,11 +1219,20 @@ mod tests {
             ) -> anyhow::Result<Option<crate::domain::AppConfig>> {
                 Ok(None)
             }
+            async fn get_app_config_by_hostname(
+                &self,
+                _: &str,
+            ) -> anyhow::Result<Option<crate::domain::AppConfig>> {
+                Ok(None)
+            }
             async fn list_all_apps(&self) -> anyhow::Result<Vec<crate::domain::AppConfig>> {
                 Ok(vec![])
             }
             async fn list_autoscaling_apps(&self) -> anyhow::Result<Vec<crate::domain::AppConfig>> {
                 Ok(vec![])
+            }
+            async fn remove_app_config(&self, _: &str) -> anyhow::Result<()> {
+                Ok(())
             }
         }
 
@@ -1061,6 +1242,7 @@ mod tests {
             job_repo,
             app_repo: Arc::new(DummyAppRepo),
             agent_client,
+            nats_client,
             pool,
         });
 

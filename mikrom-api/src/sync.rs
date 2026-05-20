@@ -7,7 +7,7 @@ use tokio::time::{Duration, interval};
 use tracing::{error, info};
 
 pub async fn start_ip_sync_task(state: AppState) {
-    let mut interval = interval(Duration::from_millis(5000)); // Poll every 5 seconds
+    let mut interval = interval(Duration::from_millis(1000)); // Poll every 1 second
     info!("Starting IP/Status sync background task (Optimized)");
 
     loop {

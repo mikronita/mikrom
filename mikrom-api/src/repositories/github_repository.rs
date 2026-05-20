@@ -17,11 +17,9 @@ pub trait GithubRepository: Send + Sync {
     async fn delete_account(&self, id: Uuid) -> anyhow::Result<()>;
 }
 
-#[cfg(any(test, feature = "test-utils"))]
 #[derive(Default)]
 pub struct MockGithubRepository {}
 
-#[cfg(any(test, feature = "test-utils"))]
 #[async_trait]
 impl GithubRepository for MockGithubRepository {
     async fn create_account(

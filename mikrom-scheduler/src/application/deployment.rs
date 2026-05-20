@@ -11,6 +11,7 @@ pub struct DeploymentService {
     job_repo: Arc<dyn JobRepository>,
     worker_repo: Arc<dyn WorkerRepository>,
     agent_client: Arc<dyn AgentClient>,
+    nats_client: async_nats::Client,
 }
 
 impl DeploymentService {
@@ -18,11 +19,13 @@ impl DeploymentService {
         job_repo: Arc<dyn JobRepository>,
         worker_repo: Arc<dyn WorkerRepository>,
         agent_client: Arc<dyn AgentClient>,
+        nats_client: async_nats::Client,
     ) -> Self {
         Self {
             job_repo,
             worker_repo,
             agent_client,
+            nats_client,
         }
     }
 
@@ -76,7 +79,39 @@ impl DeploymentService {
         job.status = JobStatus::Running;
         job.started_at = Some(chrono::Utc::now().timestamp());
 
+        // Notify cluster of new job
+        let _ = self.publish_job_update(&job).await;
+
         Ok(job)
+    }
+
+    async fn publish_job_update(&self, job: &Job) -> DomainResult<()> {
+        use mikrom_proto::scheduler::AppInfo;
+        use prost::Message;
+
+        let info = AppInfo {
+            job_id: job.job_id.clone(),
+            app_id: job.app_id.clone(),
+            app_name: job.app_name.clone(),
+            image: job.image.clone(),
+            status: job.status as i32,
+            host_id: job.host_id.clone().unwrap_or_default(),
+            vm_id: job.vm_id.clone().unwrap_or_default(),
+            user_id: job.user_id.clone(),
+            deployment_id: job.deployment_id.clone().unwrap_or_default(),
+            ipv6_address: job.config.ipv6_address.clone().unwrap_or_default(),
+            ..Default::default()
+        };
+
+        let mut buf = Vec::new();
+        if info.encode(&mut buf).is_ok() {
+            let _ = self
+                .nats_client
+                .publish(mikrom_proto::subjects::SCHEDULER_JOB_UPDATES, buf.into())
+                .await;
+        }
+
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]

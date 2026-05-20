@@ -41,3 +41,9 @@ message RouterMetrics {
   double latency_avg_ms = 6;
   int64 timestamp = 7;
 }
+
+message RouterTrafficEvent {
+  string hostname = 1;
+  string router_id = 2;
+  int64 timestamp = 3;
+}

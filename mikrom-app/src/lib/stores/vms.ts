@@ -51,6 +51,10 @@ export function initVmsSSE() {
       const index = current.findIndex((vm) => vm.job_id === updatedVm.job_id || vm.deployment_id === updatedVm.deployment_id);
       const isRunning = updatedVm.status.toLowerCase() === "running";
 
+      // If a VM status changes, the app scale state might have changed too.
+      // Refresh the apps store to ensure reactivity.
+      import("./apps").then(({ refreshApps }) => refreshApps()).catch(console.error);
+
       if (!isRunning) {
         return index === -1 ? current : current.filter((_, itemIndex) => itemIndex !== index);
       }

@@ -24,6 +24,7 @@
     CheckCircle2,
     Info,
     Scale,
+    Radio,
   } from "lucide-svelte";
   import { SvelteMap } from "svelte/reactivity";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
@@ -104,6 +105,7 @@
 
   $: appName = decodeURIComponent($page.params.appName ?? "");
   $: app = $appsStore.find((item) => item.name === appName) ?? null;
+  $: appScaleState = app?.scale_state ?? "scaled_to_zero";
 
   const lastNetwork = new SvelteMap<string, { tx: number; rx: number; time: number; txRate: number; rxRate: number }>();
   const replicaSamples = new SvelteMap<
@@ -172,6 +174,18 @@
     return new Date().toISOString();
   }
 
+  function getScaleStateLabel(scaleState: string) {
+    if (scaleState === "scaled_to_zero") return "Paused";
+    return "Running";
+  }
+
+  function getScaleStateBadgeClass(scaleState: string) {
+    if (scaleState === "scaled_to_zero") {
+      return "border-transparent bg-muted/70 text-muted-foreground";
+    }
+    return "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]";
+  }
+
   function normalizeDeployment(deployment: DeploymentInfo | LiveDeploymentInfo, previous?: DeploymentInfo): DeploymentInfo {
     const full = deployment as Partial<DeploymentInfo>;
     const live = deployment as LiveDeploymentInfo;
@@ -200,6 +214,7 @@
       git_commit_message: full.git_commit_message ?? previous?.git_commit_message ?? null,
       git_branch: full.git_branch ?? previous?.git_branch ?? null,
       trigger_source: full.trigger_source ?? previous?.trigger_source ?? "manual",
+      scale_state: full.scale_state ?? live.scale_state ?? previous?.scale_state,
       created_at: previous?.created_at ?? full.created_at ?? fallbackTime,
       updated_at: previous?.updated_at ?? full.updated_at ?? fallbackTime,
     };
@@ -430,11 +445,13 @@
   $: active =
     deployments.length === 0
       ? null
-      : (app?.active_deployment_id ? deployments.find((dep) => dep.id === app.active_deployment_id) : null) ||
-        [...deployments]
-          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-          .find((dep) => ["RUNNING", "DRAINING", "HEALTHY", "STARTING"].includes((dep.status || "").toUpperCase())) ||
-        deployments[0];
+      : appScaleState === "scaled_to_zero"
+        ? null
+        : (app?.active_deployment_id ? deployments.find((dep) => dep.id === app.active_deployment_id) : null) ||
+          [...deployments]
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .find((dep) => ["RUNNING", "DRAINING", "HEALTHY", "STARTING"].includes((dep.status || "").toUpperCase())) ||
+          deployments[0];
   $: inFlight = deployments.find((d) => ["HEALTH_CHECKING", "STARTING", "BUILDING", "SCHEDULED"].includes(d.status));
   $: latestMetrics =
     (metricsHistory.length > 0 ? metricsHistory[metricsHistory.length - 1] : null) ||
@@ -485,7 +502,13 @@
       color: "bg-[var(--chart-4)]",
     },
   ];
-  $: showLivePerformance = Boolean(active && (["RUNNING", "DRAINING", "STARTING", "HEALTHY"].includes(active.status.toUpperCase()) || liveMetrics));
+  $: showLivePerformance = appScaleState !== "scaled_to_zero" && runningReplicaCount > 0;
+
+  $: if (appScaleState === "scaled_to_zero" || runningReplicaCount === 0) {
+    liveMetrics = null;
+    metricsHistory = [];
+    replicaSamples.clear();
+  }
 </script>
 
 <DashboardLayout>
@@ -495,7 +518,7 @@
           <Boxes />
         </div>
         <div>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-3">
             <h1 class="text-2xl font-semibold tracking-tight">{app?.name || appName}.apps.mikrom.spluca.org</h1>
             <Button variant="outline" size="sm" href={`https://${app?.name || appName}.apps.mikrom.spluca.org`} target="_blank" rel="noreferrer" className="shrink-0">
               <Globe2 class="size-4" />

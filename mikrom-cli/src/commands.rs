@@ -144,7 +144,8 @@ pub enum AppCommands {
         #[arg(long, short, help = "Name of the application")]
         name: String,
     },
-    /// Configure scaling and autoscaling for an application
+    /// Configure scaling and autoscaling for an application.
+    /// Note: All apps scale to zero automatically after inactivity.
     Scale {
         #[arg(long, short, help = "Name of the application")]
         name: String,
@@ -156,8 +157,6 @@ pub enum AppCommands {
         replicas: Option<i32>,
         #[arg(long, help = "Enable/disable autoscaling (--auto true/false)")]
         auto: Option<bool>,
-        #[arg(long, short = 'm', help = "Minimum replicas for autoscaling (1-3)")]
-        min: Option<i32>,
         #[arg(long, short = 'M', help = "Maximum replicas for autoscaling (1-3)")]
         max: Option<i32>,
         #[arg(long, short = 'c', help = "CPU threshold percentage for autoscaling")]

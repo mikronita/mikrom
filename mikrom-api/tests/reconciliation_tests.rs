@@ -136,6 +136,10 @@ async fn test_route_reconciliation_on_startup() {
             }],
         })
     });
+    mock_scheduler
+        .expect_update_app_scaling_config()
+        .times(0..)
+        .returning(|_| Ok(true));
 
     let mut state_mut = state;
     state_mut.scheduler = Arc::new(mock_scheduler);

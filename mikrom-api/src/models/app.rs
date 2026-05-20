@@ -25,6 +25,8 @@ pub struct App {
     pub autoscaling_enabled: bool,
     pub cpu_threshold: f64,
     pub mem_threshold: f64,
+    pub last_router_traffic_at: i64,
+    pub last_scaled_to_zero_at: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -46,11 +48,13 @@ impl Default for App {
             health_check_path: "/".to_string(),
             drain_timeout: 10,
             desired_replicas: 1,
-            min_replicas: 1,
+            min_replicas: 0,
             max_replicas: 1,
             autoscaling_enabled: false,
             cpu_threshold: 80.0,
             mem_threshold: 80.0,
+            last_router_traffic_at: 0,
+            last_scaled_to_zero_at: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

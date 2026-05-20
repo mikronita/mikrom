@@ -427,6 +427,9 @@ message UpdateAppScalingConfigRequest {
   double mem_threshold = 7;
   string vpc_ipv6_prefix = 8;
   uint32 desired_replicas = 9;
+  string hostname = 10;
+  int64 last_router_traffic_at = 11;
+  int64 last_scaled_to_zero_at = 12;
 }
 
 message UpdateAppScalingConfigResponse {

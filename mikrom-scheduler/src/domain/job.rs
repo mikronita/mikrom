@@ -26,6 +26,19 @@ impl JobStatus {
             Self::Cancelled => "cancelled",
         }
     }
+
+    pub fn from_i32(v: i32) -> Option<Self> {
+        match v {
+            1 => Some(Self::Pending),
+            2 => Some(Self::Scheduled),
+            3 => Some(Self::Running),
+            4 => Some(Self::Failed),
+            5 => Some(Self::Cancelled),
+            6 => Some(Self::Paused),
+            7 => Some(Self::Stopped),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Copy, Default)]

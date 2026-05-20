@@ -561,6 +561,12 @@ pub struct UpdateAppScalingConfigRequest {
     pub vpc_ipv6_prefix: ::prost::alloc::string::String,
     #[prost(uint32, tag = "9")]
     pub desired_replicas: u32,
+    #[prost(string, tag = "10")]
+    pub hostname: ::prost::alloc::string::String,
+    #[prost(int64, tag = "11")]
+    pub last_router_traffic_at: i64,
+    #[prost(int64, tag = "12")]
+    pub last_scaled_to_zero_at: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UpdateAppScalingConfigResponse {
