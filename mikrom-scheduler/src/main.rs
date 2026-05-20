@@ -46,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
         app_repo,
         worker_repo,
         agent_client,
+        nats_client.clone(),
         pool.clone(),
     ));
 

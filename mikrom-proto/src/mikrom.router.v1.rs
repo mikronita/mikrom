@@ -60,3 +60,12 @@ pub struct RouterMetrics {
     #[prost(int64, tag = "7")]
     pub timestamp: i64,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RouterTrafficEvent {
+    #[prost(string, tag = "1")]
+    pub hostname: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub router_id: ::prost::alloc::string::String,
+    #[prost(int64, tag = "3")]
+    pub timestamp: i64,
+}

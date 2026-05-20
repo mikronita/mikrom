@@ -68,7 +68,7 @@ impl Drop for TestDb {
         let db_name = self.db_name.clone();
 
         // We use a background thread to perform the cleanup to not block the test executor
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -83,10 +83,13 @@ impl Drop for TestDb {
                         db_name
                     ).as_str()).await;
 
-                    let _ = conn.execute(format!("DROP DATABASE IF EXISTS {}", db_name).as_str()).await;
+                    let _ = conn.execute(format!("DROP DATABASE IF EXISTS \"{}\"", db_name).as_str()).await;
                 }
             });
         });
+
+        // Wait for the cleanup thread to finish to ensure the database is dropped
+        let _ = handle.join();
     }
 }
 

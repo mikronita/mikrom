@@ -30,7 +30,6 @@ pub mod sync;
 pub mod vms;
 pub mod workspace;
 
-#[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
 pub use deploy::deploy_app;
@@ -143,6 +142,7 @@ impl AppState {
             }
         }
 
+        let has_targets = !target_urls.is_empty();
         let config = RouterConfigUpdate {
             hostname: hostname.clone(),
             target_urls,
@@ -152,6 +152,26 @@ impl AppState {
         self.nats
             .publish(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
             .await?;
+
+        if has_targets && let Ok(Some(user)) = self.user_repo.find_by_id(app.user_id).await {
+            let _ = self
+                .scheduler
+                .update_app_scaling_config(mikrom_proto::scheduler::UpdateAppScalingConfigRequest {
+                    app_id: app.id.to_string(),
+                    user_id: app.user_id.to_string(),
+                    min_replicas: app.min_replicas as u32,
+                    max_replicas: app.max_replicas as u32,
+                    autoscaling_enabled: app.autoscaling_enabled,
+                    cpu_threshold: app.cpu_threshold,
+                    mem_threshold: app.mem_threshold,
+                    vpc_ipv6_prefix: user.vpc_ipv6_prefix.unwrap_or_default(),
+                    desired_replicas: app.desired_replicas as u32,
+                    hostname: app.hostname.clone().unwrap_or_default(),
+                    last_router_traffic_at: chrono::Utc::now().timestamp(),
+                    last_scaled_to_zero_at: 0,
+                })
+                .await;
+        }
 
         Ok(())
     }

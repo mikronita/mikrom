@@ -25,11 +25,20 @@
     [...$apps]
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .slice(0, 5)
-      .map((app) => ({
-        ...app,
-        liveVm: $vms.find((vm) => vm.app_id === app.id || vm.app_name === app.name),
-        status: $vms.find((vm) => vm.app_id === app.id || vm.app_name === app.name)?.status || "Stopped",
-      }))
+      .map((app) => {
+        const liveVm = $vms.find((vm) => vm.app_id === app.id || vm.app_name === app.name);
+        let status = liveVm?.status || (app.active_deployment_id ? "Paused" : "Stopped");
+        
+        if (app.scale_state === "scaled_to_zero" && status !== "Stopped") {
+          status = "Paused";
+        }
+
+        return {
+          ...app,
+          liveVm,
+          status,
+        };
+      })
   );
   const hasUndeployedAppsStore = derived([appsStore, vmsStore], ([$apps, $vms]) => 
     $apps.length > 0 && $apps.every((app) => !$vms.some((vm) => vm.app_id === app.id || vm.app_name === app.name))
@@ -86,6 +95,7 @@
   function getAppStatusVariant(status: string) {
     const normalized = status.toLowerCase();
     if (normalized === "running") return "outline";
+    if (normalized === "paused") return "outline";
     if (["building", "pending", "scheduled", "starting", "draining"].includes(normalized)) return "secondary";
     if (["failed", "cancelled", "offline", "error"].includes(normalized)) return "destructive";
     return "outline";
@@ -98,9 +108,17 @@
   }
 
   function getAppStatusClass(status: string) {
-    return status.toLowerCase() === "running"
-      ? "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]"
-      : "";
+    const normalized = status.toLowerCase();
+    if (normalized === "running") {
+      return "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]";
+    }
+    if (normalized === "paused") {
+      return "border-transparent bg-muted/70 text-muted-foreground";
+    }
+    if (normalized === "stopped") {
+      return "border-transparent bg-muted/40 text-muted-foreground/60";
+    }
+    return "";
   }
 
   function getHealthClass(status: string) {

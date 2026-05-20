@@ -28,6 +28,10 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
     mock_scheduler
         .expect_update_app_scaling_config()
         .returning(|_| Ok(true));
+    mock_scheduler
+        .expect_list_apps()
+        .times(0..)
+        .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
 
     // Simulate Router responding to NATS requests
     let nats_clone = nats_client.clone();

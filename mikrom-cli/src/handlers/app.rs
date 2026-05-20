@@ -19,11 +19,10 @@ pub async fn handle(client: &MikromClient, cmd: AppCommands, output: OutputForma
             name,
             replicas,
             auto,
-            min,
             max,
             cpu,
             mem,
-        } => scale(client, &name, replicas, auto, min, max, cpu, mem, output).await,
+        } => scale(client, &name, replicas, auto, max, cpu, mem, output).await,
     }
 }
 
@@ -244,7 +243,6 @@ async fn scale(
     name: &str,
     replicas: Option<i32>,
     auto: Option<bool>,
-    min: Option<i32>,
     max: Option<i32>,
     cpu: Option<f64>,
     mem: Option<f64>,
@@ -264,7 +262,7 @@ async fn scale(
     let req = crate::client::ScaleRequest {
         desired_replicas: replicas,
         autoscaling_enabled: auto,
-        min_replicas: min,
+        min_replicas: Some(0), // Mandatory scale-to-zero
         max_replicas: max,
         cpu_threshold: cpu,
         mem_threshold: mem,

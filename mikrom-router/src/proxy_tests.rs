@@ -32,7 +32,7 @@ mod tests {
         }));
 
         let metrics = Arc::new(RouterMetricsCounters::new());
-        let proxy = MikromProxy::new(state, false, None, metrics, 100);
+        let proxy = MikromProxy::new(state, false, None, metrics, None, 100);
 
         let lb = proxy.get_lb("app.mikrom.local").await.unwrap();
         let t1 = lb.select(b"", 256).unwrap();
@@ -70,7 +70,7 @@ mod tests {
         }));
 
         let metrics = Arc::new(RouterMetricsCounters::new());
-        let proxy = MikromProxy::new(state, false, None, metrics, 100);
+        let proxy = MikromProxy::new(state, false, None, metrics, None, 100);
 
         let lb = proxy.get_lb("app.mikrom.local").await.unwrap();
         let t1 = lb.select(b"", 256).unwrap().to_string();
@@ -105,7 +105,7 @@ mod tests {
         }));
 
         let metrics = Arc::new(RouterMetricsCounters::new());
-        let proxy = MikromProxy::new(state, false, None, metrics, 100);
+        let proxy = MikromProxy::new(state, false, None, metrics, None, 100);
 
         let (lb, use_tls, alternative_cn) = proxy
             .get_lb_and_tls("registry.mikrom.spluca.org:443")

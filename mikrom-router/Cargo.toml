@@ -53,3 +53,8 @@ axum = "0.7"
 tokio = { version = "1.37", features = ["full"] }
 
 tokio-test = "0.4.5"
+mikrom-api = { path = "../mikrom-api", features = ["test-utils"] }
+mikrom-scheduler = { path = "../mikrom-scheduler", features = ["test-utils"] }
+tower = { version = "0.5", features = ["util"] }
+uuid = { version = "1", features = ["v4"] }
+rustls = { version = "0.23", features = ["ring"] }

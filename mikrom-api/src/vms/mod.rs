@@ -1,6 +1,7 @@
 pub mod volumes;
 pub use volumes::*;
 
+use crate::deploy::handlers::{AppScaleState, resolve_app_scale_state};
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::SecurityRule;
 use crate::repositories::app_repository::UpdateDeploymentParams;
@@ -34,6 +35,7 @@ pub struct LiveDeploymentInfo {
     pub ipv6_address: Option<String>,
     pub vcpus: i32,
     pub memory_mib: i64,
+    pub scale_state: AppScaleState,
 }
 
 use futures::Stream;
@@ -71,6 +73,8 @@ pub async fn app_logs_stream_handler(
         return Err(ApiError::Forbidden);
     }
 
+    let scale_state = resolve_app_scale_state(&state, &app).await;
+
     // 2. Subscribe to NATS for all logs of this app
     // Subject pattern: mikrom.logs.<app_id>.>
     let nats_sub = state
@@ -82,9 +86,20 @@ pub async fn app_logs_stream_handler(
     let stream = async_stream::stream! {
         let mut nats_stream = nats_sub;
         while let Some(msg) = nats_stream.next().await {
-             if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&msg.payload) {
-                 yield Ok(Event::default().data(json.to_string()));
-             }
+            let enriched = match serde_json::from_slice::<serde_json::Value>(&msg.payload) {
+                Ok(serde_json::Value::Object(mut obj)) => {
+                    obj.insert("scale_state".to_string(), serde_json::json!(scale_state));
+                    serde_json::Value::Object(obj)
+                },
+                Ok(other) => other,
+                Err(_) => serde_json::json!({
+                    "line": String::from_utf8_lossy(&msg.payload).to_string(),
+                    "timestamp": chrono::Utc::now().timestamp_millis(),
+                    "scale_state": scale_state,
+                }),
+            };
+
+            yield Ok(Event::default().data(enriched.to_string()));
         }
     };
 
@@ -125,6 +140,7 @@ pub async fn app_metrics_stream_handler(
 
     let app_id = app.id.to_string();
     let active_deployment_id = app.active_deployment_id.map(|id| id.to_string());
+    let scale_state = resolve_app_scale_state(&state, &app).await;
     let mut nats_sub = state
         .nats
         .subscribe(format!("mikrom.metrics.{}.>", app_id))
@@ -150,7 +166,15 @@ pub async fn app_metrics_stream_handler(
                 continue;
             }
 
-            yield Ok(Event::default().data(data.to_string()));
+            let enriched = match data {
+                serde_json::Value::Object(mut obj) => {
+                    obj.insert("scale_state".to_string(), serde_json::json!(scale_state));
+                    serde_json::Value::Object(obj)
+                },
+                other => other,
+            };
+
+            yield Ok(Event::default().data(enriched.to_string()));
         }
     };
 
@@ -178,6 +202,18 @@ pub struct LiveDeploymentStatus {
     pub ipv6_address: Option<String>,
     pub vcpus: i32,
     pub memory_mib: i64,
+    pub scale_state: AppScaleState,
+}
+
+async fn resolve_app_scale_state_by_id(state: &crate::AppState, app_id: &str) -> AppScaleState {
+    let Ok(app_uuid) = uuid::Uuid::parse_str(app_id) else {
+        return AppScaleState::Active;
+    };
+
+    match state.app_repo.get_app(app_uuid).await {
+        Ok(Some(app)) => resolve_app_scale_state(state, &app).await,
+        _ => AppScaleState::Active,
+    }
 }
 
 #[utoipa::path(
@@ -248,6 +284,7 @@ pub async fn list_active_deployments(
         let dep = user_deployments.get(&sch_app.deployment_id);
         let vcpus = dep.map(|d| d.vcpus).unwrap_or(1);
         let memory_mib = dep.map(|d| d.memory_mib).unwrap_or(128);
+        let scale_state = resolve_app_scale_state_by_id(&state, &sch_app.app_id).await;
 
         active_deployments.push(LiveDeploymentInfo {
             job_id: sch_app.job_id,
@@ -269,6 +306,7 @@ pub async fn list_active_deployments(
             },
             vcpus,
             memory_mib,
+            scale_state,
         });
     }
 
@@ -347,6 +385,7 @@ pub async fn watch_deployments(
             let vcpus = dep.map(|d| d.vcpus).unwrap_or(1);
             let memory_mib = dep.map(|d| d.memory_mib).unwrap_or(128);
 
+            let scale_state = resolve_app_scale_state_by_id(&state_clone, &job.app_id).await;
             let data = serde_json::json!({
                 "job_id": job.job_id,
                 "deployment_id": job.deployment_id,
@@ -366,6 +405,7 @@ pub async fn watch_deployments(
                 "ram_used_bytes": job.ram_used_bytes,
                 "tx_bytes": job.tx_bytes,
                 "rx_bytes": job.rx_bytes,
+                "scale_state": scale_state,
                 "scheduled_at": 0,
                 "started_at": 0,
                 "stopped_at": 0,
@@ -410,6 +450,7 @@ pub async fn watch_deployments(
                                 "ram_used_bytes": job.ram_used_bytes,
                                 "tx_bytes": job.tx_bytes,
                                 "rx_bytes": job.rx_bytes,
+                                "scale_state": resolve_app_scale_state_by_id(&state_clone, &job.app_id).await,
                                 "scheduled_at": 0,
                                 "started_at": 0,
                                 "stopped_at": 0,
@@ -448,6 +489,7 @@ pub async fn watch_deployments(
                                         "ram_used_bytes": 0,
                                         "tx_bytes": 0,
                                         "rx_bytes": 0,
+                                        "scale_state": resolve_app_scale_state(&state_clone, &app).await,
                                         "scheduled_at": 0,
                                         "started_at": 0,
                                         "stopped_at": 0,
@@ -508,6 +550,7 @@ pub async fn watch_deployments(
                                 "ram_used_bytes": job.ram_used_bytes,
                                 "tx_bytes": job.tx_bytes,
                                 "rx_bytes": job.rx_bytes,
+                                "scale_state": resolve_app_scale_state_by_id(&state_clone, &job.app_id).await,
                                 "scheduled_at": 0,
                                 "started_at": 0,
                                 "stopped_at": 0,
@@ -538,6 +581,7 @@ pub async fn watch_deployments(
                                                 "memory_mib": dep.memory_mib,
                                                 "cpu_usage": 0.0,
                                                 "ram_used_bytes": 0,
+                                                "scale_state": resolve_app_scale_state(&state_clone, &app).await,
                                                 "scheduled_at": 0,
                                                 "started_at": 0,
                                                 "stopped_at": 0,
@@ -638,6 +682,7 @@ pub async fn get_deployment_status(
 
     // If it's a temporary ID from BUILDING/SCHEDULED phase
     if job_id.starts_with("temp-") {
+        let scale_state = resolve_app_scale_state(&state, &app).await;
         return Ok(Json(LiveDeploymentStatus {
             job_id: job_id.clone(),
             deployment_id: dep.id.to_string(),
@@ -658,6 +703,7 @@ pub async fn get_deployment_status(
             vcpus: dep.vcpus,
             memory_mib: dep.memory_mib,
             ipv6_address: dep.ipv6_address,
+            scale_state,
         }));
     }
 
@@ -671,6 +717,8 @@ pub async fn get_deployment_status(
         .request("mikrom.scheduler.get_job", nats_req)
         .await
         .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
+
+    let scale_state = resolve_app_scale_state(&state, &app).await;
 
     let deployment_status = LiveDeploymentStatus {
         job_id: inner.job_id,
@@ -696,6 +744,7 @@ pub async fn get_deployment_status(
         },
         vcpus: dep.vcpus,
         memory_mib: dep.memory_mib,
+        scale_state,
     };
 
     Ok(Json(deployment_status))
@@ -1086,8 +1135,17 @@ async fn fetch_mesh_status(state: &crate::AppState) -> ApiResult<MeshStatus> {
 }
 
 pub async fn prime_mesh_status_cache(state: &crate::AppState) -> ApiResult<()> {
-    let snapshot = fetch_mesh_status(state).await?;
-    let _ = state.mesh_status.send(snapshot);
+    match fetch_mesh_status(state).await {
+        Ok(snapshot) => {
+            let _ = state.mesh_status.send(snapshot);
+        },
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "Failed to prime mesh status cache during startup; will be updated in background"
+            );
+        },
+    }
     Ok(())
 }
 

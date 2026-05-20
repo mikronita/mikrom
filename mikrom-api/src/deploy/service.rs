@@ -237,6 +237,9 @@ impl DeploymentService {
         let inner = match nats_result {
             Ok(inner) => inner,
             Err(e) => {
+                let error_text = e.to_string();
+                let scheduler_unavailable = error_text.contains("no responders");
+
                 let _ = state
                     .app_repo
                     .update_deployment(
@@ -259,6 +262,12 @@ impl DeploymentService {
                     volume_id: None,
                     resource_id: Some(deployment.id.to_string()),
                 });
+                if scheduler_unavailable {
+                    return Err(ApiError::Scheduler(
+                        "Scheduler is not available right now".to_string(),
+                    ));
+                }
+
                 return Err(e);
             },
         };
@@ -316,6 +325,37 @@ impl DeploymentService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::app::{App, Deployment};
+    use crate::nats::{NatsClient, TypedNatsClient};
+    use crate::repositories::app_repository::MockAppRepository;
+    use crate::repositories::user_repository::{MockUserRepository, User, UserRole};
+    use crate::repositories::volume_repository::MockVolumeRepository;
+    use async_trait::async_trait;
+    use sqlx::types::Uuid;
+    use std::sync::Arc;
+
+    struct NoRespondersNatsClient;
+
+    #[async_trait]
+    impl NatsClient for NoRespondersNatsClient {
+        async fn request_raw(
+            &self,
+            _subject: String,
+            _payload: Vec<u8>,
+        ) -> anyhow::Result<Vec<u8>> {
+            Err(anyhow::anyhow!(
+                "NATS request failed: no responders: no responders"
+            ))
+        }
+
+        async fn publish_raw(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn subscribe_raw(&self, _subject: String) -> anyhow::Result<async_nats::Subscriber> {
+            Err(anyhow::anyhow!("not used"))
+        }
+    }
 
     #[test]
     #[allow(clippy::assertions_on_constants)]
@@ -348,5 +388,98 @@ mod tests {
             DeploymentService::parse_u64_env(Some("bad".to_string()), 11),
             11
         );
+    }
+
+    #[tokio::test]
+    async fn deploy_to_scheduler_maps_no_responders_to_scheduler_unavailable() {
+        let app_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let deployment_id = Uuid::new_v4();
+
+        let mut app_repo = MockAppRepository::new();
+        app_repo
+            .expect_update_deployment()
+            .times(2)
+            .returning(|_, _| Ok(()));
+
+        let mut user_repo = MockUserRepository::new();
+        user_repo.expect_find_by_id().returning(move |_| {
+            Ok(Some(User {
+                id: user_id,
+                email: "test@example.com".to_string(),
+                password_hash: "hash".to_string(),
+                role: UserRole::User,
+                first_name: None,
+                last_name: None,
+                vpc_ipv6_prefix: Some("fd00::".to_string()),
+            }))
+        });
+
+        let mut volume_repo = MockVolumeRepository::new();
+        volume_repo
+            .expect_list_volumes_by_app()
+            .times(1)
+            .returning(|_| Ok(vec![]));
+
+        let state = crate::AppState {
+            user_repo: Arc::new(user_repo),
+            app_repo: Arc::new(app_repo),
+            github_repo: Arc::new(crate::repositories::MockGithubRepository::default()),
+            volume_repo: Arc::new(volume_repo),
+            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
+            nats: TypedNatsClient::new_custom(Arc::new(NoRespondersNatsClient)),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+            jwt_secret: "secret".into(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            acme_email: "admin@example.com".into(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: Arc::new(dashmap::DashSet::new()),
+        };
+
+        let app = App {
+            id: app_id,
+            user_id,
+            name: "demo".into(),
+            git_url: "https://example.com/demo".into(),
+            port: 8080,
+            hostname: Some("demo.example.com".into()),
+            ..Default::default()
+        };
+
+        let deployment = Deployment {
+            id: deployment_id,
+            app_id,
+            user_id,
+            status: "PENDING".into(),
+            ..Default::default()
+        };
+
+        let err = DeploymentService::deploy_to_scheduler(
+            &state,
+            &app,
+            &deployment,
+            DeployParams {
+                image_tag: "image:tag".into(),
+                vcpus: 1,
+                memory_mib: 256,
+                disk_mib: 512,
+                port: 8080,
+                env: std::collections::HashMap::new(),
+            },
+        )
+        .await
+        .expect_err("no responders should map to scheduler unavailable");
+
+        assert!(matches!(err, ApiError::Scheduler(_)));
     }
 }

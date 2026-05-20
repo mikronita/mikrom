@@ -355,7 +355,6 @@ mod tests {
                 name,
                 replicas,
                 auto,
-                min,
                 max,
                 cpu,
                 mem,
@@ -363,7 +362,6 @@ mod tests {
                 assert_eq!(name, "my-app");
                 assert_eq!(replicas, Some(3));
                 assert_eq!(auto, Some(true));
-                assert_eq!(min, Some(2));
                 assert_eq!(max, Some(5));
                 assert_eq!(cpu, Some(75.5));
                 assert_eq!(mem, None);

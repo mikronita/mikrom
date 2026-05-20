@@ -34,14 +34,20 @@
     return {
       vcpus: appVms.reduce((total, vm) => total + (vm.vcpus || 1), 0),
       memory_mib: appVms.reduce((total, vm) => total + (vm.memory_mib || 128), 0),
-      count: appVms.length
+      count: appVms.length,
     };
   }
 
-  function getLiveBadgeClass(isLive: boolean) {
-    return isLive
-      ? "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]"
-      : "";
+  function getScaleStateLabel(scaleState: string) {
+    if (scaleState === "scaled_to_zero") return "Paused";
+    return "Running";
+  }
+
+  function getScaleStateBadgeClass(scaleState: string) {
+    if (scaleState === "scaled_to_zero") {
+      return "border-transparent bg-muted/70 text-muted-foreground";
+    }
+    return "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]";
   }
 </script>
 
@@ -92,9 +98,8 @@
       {:else}
         {#each [...$appsStore].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) as app}
           {@const resources = getAppResources(app.id, app.name)}
-          {@const hasActiveDeployment = !!app.active_deployment_id}
-          {@const isRunning = resources.count > 0}
-          {@const isActive = hasActiveDeployment || isRunning}
+          {@const effectiveScaleState = app.scale_state || (resources.count > 0 ? "active" : "scaled_to_zero")}
+          {@const hasRunningReplicas = resources.count > 0}
           <a class="block" href={`/apps/${encodeURIComponent(app.name)}`}>
             <Card class="h-full overflow-hidden transition-colors hover:bg-muted/30">
               <CardHeader>
@@ -108,9 +113,9 @@
                     </div>
                     <CardDescription>Application workspace</CardDescription>
                   </div>
-                  <Badge variant={isActive ? "outline" : "outline"} className={`shrink-0 gap-1.5 uppercase ${getLiveBadgeClass(isActive)}`}>
+                  <Badge variant="outline" className={`shrink-0 gap-1.5 uppercase ${getScaleStateBadgeClass(effectiveScaleState)}`}>
                     <Radio class="size-3" />
-                    {isActive ? "Live" : "Idle"}
+                    {getScaleStateLabel(effectiveScaleState)}
                   </Badge>
                 </div>
               </CardHeader>
@@ -121,7 +126,7 @@
                     Created {formatDate(app.created_at)}
                   </span>
                   <div class="flex flex-wrap items-center gap-2">
-                    {#if isRunning}
+                    {#if hasRunningReplicas}
                       <Badge variant="outline" className="gap-1.5">
                         <Cpu class="size-3" />
                         <span>{resources.vcpus} vCPU</span>
@@ -135,8 +140,10 @@
                           <span>{resources.count} replicas</span>
                         </Badge>
                       {/if}
-                    {:else if hasActiveDeployment}
-                      <Badge variant="outline">Active deployment</Badge>
+                    {:else if effectiveScaleState === "scaled_to_zero"}
+                      <Badge variant="outline" className="border-transparent bg-muted/70 text-muted-foreground">
+                        0 replicas
+                      </Badge>
                     {:else}
                       <Badge variant="outline">No active deployment</Badge>
                     {/if}

@@ -65,7 +65,7 @@ impl Drop for TestDb {
         let server_url = self.server_url.clone();
         let db_name = self.db_name.clone();
 
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -79,10 +79,12 @@ impl Drop for TestDb {
                         db_name
                     ).as_str()).await;
 
-                    let _ = conn.execute(format!("DROP DATABASE IF EXISTS {}", db_name).as_str()).await;
+                    let _ = conn.execute(format!("DROP DATABASE IF EXISTS \"{}\"", db_name).as_str()).await;
                 }
             });
         });
+
+        let _ = handle.join();
     }
 }
 

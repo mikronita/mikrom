@@ -84,7 +84,11 @@ async fn test_hierarchical_deployment_status_success() {
             }))
         });
 
-    let mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    mock_scheduler
+        .expect_list_apps()
+        .times(0..)
+        .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
 
     // We still need a NATS client to satisfy AppState, but it won't be used
     // because we are using a temp- ID.
@@ -190,13 +194,19 @@ async fn test_hierarchical_security_cross_app_prevention() {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    mock_scheduler
+        .expect_list_apps()
+        .times(0..)
+        .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
+
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
         volume_repo: Arc::new(
             mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
         ),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),

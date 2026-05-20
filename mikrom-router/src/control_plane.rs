@@ -136,7 +136,7 @@ impl ControlPlane {
             hc.consecutive_failure = 2;
 
             lb.set_health_check(Box::new(hc));
-            lb.health_check_frequency = Some(std::time::Duration::from_secs(5));
+            lb.health_check_frequency = Some(std::time::Duration::from_millis(250));
             let tls_alternative_cn = tls_alternative_cn_for_host(&host);
 
             routes.insert(
@@ -348,6 +348,16 @@ impl BackgroundService for ControlPlane {
                                 match RouterConfigUpdate::decode(&msg.payload[..]) {
                                     Ok(update) => {
                                         info!("Control Plane: Received route update for {}", update.hostname);
+
+                                        // FAST-PATH: Update in-memory state immediately
+                                        if let Err(e) = state_manager.update_route_targets(
+                                            update.hostname.clone(),
+                                            update.target_urls.clone()
+                                        ).await {
+                                            error!("Control Plane: Fast-path route update failed for {}: {}", update.hostname, e);
+                                        } else {
+                                            info!("Control Plane: Successfully applied fast-path route update for {}", update.hostname);
+                                        }
 
                                         // First, delete existing targets for this host to maintain eventual consistency with the desired state
                                         let _ = sqlx::query("DELETE FROM routes WHERE hostname = $1")

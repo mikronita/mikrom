@@ -61,6 +61,7 @@ pub struct WireGuardManager {
     interface: String,
     config_dir: String,
     listen_port: u16,
+    last_peers: parking_lot::Mutex<Option<Vec<mikrom_proto::scheduler::Peer>>>,
 }
 
 impl WireGuardManager {
@@ -69,6 +70,7 @@ impl WireGuardManager {
             interface: interface.to_string(),
             config_dir: "/etc/wireguard".to_string(),
             listen_port: 51820,
+            last_peers: parking_lot::Mutex::new(None),
         }
     }
 
@@ -584,6 +586,19 @@ impl WireGuardManager {
         private_key: &str,
         host_id: &str,
     ) -> anyhow::Result<()> {
+        // 1. Check if update is actually needed
+        {
+            let mut last_peers = self.last_peers.lock();
+            if let Some(last) = last_peers.as_ref()
+                && last == peers
+            {
+                debug!("Skipping redundant WireGuard peer update (list matches)");
+                return Ok(());
+            }
+
+            *last_peers = Some(peers.to_vec());
+        }
+
         let mut conf = format!(
             "[Interface]\nPrivateKey = {}\nListenPort = {}\n\n",
             private_key, self.listen_port

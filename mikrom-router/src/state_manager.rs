@@ -156,6 +156,53 @@ impl StateManager {
         Ok(())
     }
 
+    pub async fn update_route_targets(&self, host: String, targets: Vec<String>) -> Result<()> {
+        use pingora::lb::health_check::TcpHealthCheck;
+
+        if targets.is_empty() {
+            let mut state = self.state.write().await;
+            state.routes.remove(&host);
+            let state_clone = state.clone();
+            drop(state);
+            self.persist_state(&state_clone).await;
+            return Ok(());
+        }
+
+        let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice())?;
+
+        let mut hc = TcpHealthCheck::default();
+        hc.consecutive_success = 1;
+        hc.consecutive_failure = 2;
+
+        lb.set_health_check(Box::new(hc));
+        lb.health_check_frequency = Some(std::time::Duration::from_millis(250));
+
+        let mut state = self.state.write().await;
+        // Reuse use_tls and alternative_cn if they exist
+        let (use_tls, alternative_cn) = state
+            .routes
+            .get(&host)
+            .map(|r| (r.use_tls, r.tls_alternative_cn.clone()))
+            .unwrap_or((false, None));
+
+        state.routes.insert(
+            host.clone(),
+            Route {
+                host,
+                targets,
+                lb: Arc::new(lb),
+                use_tls,
+                tls_alternative_cn: alternative_cn,
+            },
+        );
+
+        let state_clone = state.clone();
+        drop(state);
+
+        self.persist_state(&state_clone).await;
+        Ok(())
+    }
+
     async fn persist_state(&self, state: &State) {
         let s_state = SerializableState {
             routes: state

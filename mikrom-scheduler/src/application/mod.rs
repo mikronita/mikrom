@@ -8,6 +8,8 @@ use crate::domain::{
 };
 use std::sync::Arc;
 
+const ROUTER_IDLE_TIMEOUT_SECS: i64 = 30;
+
 fn autoscale_next_replicas(app: &AppConfig, current_count: u32, avg_cpu: f32, avg_mem: f32) -> u32 {
     let mut desired = current_count;
 
@@ -29,6 +31,7 @@ pub struct AppService {
     pub app_repo: Arc<dyn AppRepository>,
     pub worker_repo: Arc<dyn WorkerRepository>,
     pub agent_client: Arc<dyn AgentClient>,
+    pub nats_client: async_nats::Client,
     pub pool: sqlx::PgPool,
 }
 
@@ -38,6 +41,7 @@ impl AppService {
         app_repo: Arc<dyn AppRepository>,
         worker_repo: Arc<dyn WorkerRepository>,
         agent_client: Arc<dyn AgentClient>,
+        nats_client: async_nats::Client,
         pool: sqlx::PgPool,
     ) -> Self {
         Self {
@@ -45,11 +49,13 @@ impl AppService {
                 job_repo.clone(),
                 worker_repo.clone(),
                 agent_client.clone(),
+                nats_client.clone(),
             ),
             job_repo,
             app_repo,
             worker_repo,
             agent_client,
+            nats_client,
             pool,
         }
     }
@@ -82,6 +88,21 @@ impl AppService {
             return Ok(());
         }
 
+        // Re-check traffic before hibernating to avoid race condition
+        if let Ok(Some(app)) = self.app_repo.get_app_config(&job.app_id).await {
+            let now = chrono::Utc::now().timestamp();
+            if app.last_router_traffic_at > app.last_scaled_to_zero_at
+                && now - app.last_router_traffic_at < ROUTER_IDLE_TIMEOUT_SECS
+            {
+                tracing::info!(
+                    job_id = %job_id,
+                    app_id = %job.app_id,
+                    "Aborting hibernation: traffic detected just before pause"
+                );
+                return Ok(());
+            }
+        }
+
         tracing::info!(
             job_id = %job_id,
             app_id = %job.app_id,
@@ -101,6 +122,10 @@ impl AppService {
             self.job_repo
                 .update_job_status(job_id, JobStatus::Paused)
                 .await?;
+
+            let mut updated_job = job;
+            updated_job.status = JobStatus::Paused;
+            let _ = self.publish_job_update(&updated_job).await;
         }
 
         tracing::info!(job_id = %job_id, "Job paused successfully");
@@ -122,6 +147,11 @@ impl AppService {
             self.job_repo
                 .update_job_status(job_id, JobStatus::Running)
                 .await?;
+
+            let mut updated_job = job;
+            updated_job.status = JobStatus::Running;
+            updated_job.started_at = Some(chrono::Utc::now().timestamp());
+            let _ = self.publish_job_update(&updated_job).await;
         }
 
         tracing::info!(job_id = %job_id, "Job resumed successfully");
@@ -136,6 +166,40 @@ impl AppService {
         }
 
         self.job_repo.remove_job(job_id).await?;
+
+        let mut deleted_job = job;
+        deleted_job.status = JobStatus::Stopped;
+        let _ = self.publish_job_update(&deleted_job).await;
+
+        Ok(())
+    }
+
+    async fn publish_job_update(&self, job: &Job) -> DomainResult<()> {
+        use mikrom_proto::scheduler::AppInfo;
+        use prost::Message;
+
+        let info = AppInfo {
+            job_id: job.job_id.clone(),
+            app_id: job.app_id.clone(),
+            app_name: job.app_name.clone(),
+            image: job.image.clone(),
+            status: job.status as i32,
+            host_id: job.host_id.clone().unwrap_or_default(),
+            vm_id: job.vm_id.clone().unwrap_or_default(),
+            user_id: job.user_id.clone(),
+            deployment_id: job.deployment_id.clone().unwrap_or_default(),
+            ipv6_address: job.config.ipv6_address.clone().unwrap_or_default(),
+            ..Default::default()
+        };
+
+        let mut buf = Vec::new();
+        if info.encode(&mut buf).is_ok() {
+            let _ = self
+                .nats_client
+                .publish(mikrom_proto::subjects::SCHEDULER_JOB_UPDATES, buf.into())
+                .await;
+        }
+
         Ok(())
     }
 
@@ -172,6 +236,10 @@ impl AppService {
         }
 
         self.job_repo.remove_jobs_by_app(app_id).await?;
+        self.app_repo
+            .remove_app_config(app_id)
+            .await
+            .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
         Ok(())
     }
 
@@ -192,6 +260,13 @@ impl AppService {
                     )
             })
             .collect();
+        let paused_jobs: Vec<_> = self
+            .job_repo
+            .list_jobs(Some(user_id), Some(app_id), None)
+            .await?
+            .into_iter()
+            .filter(|j| j.status == JobStatus::Paused)
+            .collect();
 
         let current_count = active_jobs.len() as u32;
 
@@ -200,30 +275,53 @@ impl AppService {
         }
 
         if current_count < desired_replicas {
-            let to_add = desired_replicas - current_count;
+            let mut to_add = desired_replicas - current_count;
             tracing::info!(app_id = %app_id, to_add = %to_add, "Scaling up app");
+
+            let mut resumed = 0u32;
+            if current_count == 0 && !paused_jobs.is_empty() {
+                let mut resume_candidates = paused_jobs.clone();
+                resume_candidates.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+
+                for job in resume_candidates.iter().take(to_add as usize) {
+                    if job.host_id.is_some() && job.vm_id.is_some() {
+                        self.resume_app(&job.job_id, user_id).await?;
+                        resumed += 1;
+                    }
+                }
+
+                to_add -= resumed;
+            }
+
+            if to_add == 0 {
+                return Ok(());
+            }
 
             // Fetch app config to get the VPC prefix
             let app_config = self.app_repo.get_app_config(app_id).await?;
             let vpc_prefix = app_config.map(|c| c.vpc_ipv6_prefix).unwrap_or_default();
 
-            // Find a template job to clone
-            let template_job = active_jobs.first().cloned();
+            // Find a template job to clone. Prefer an active job, then a paused job.
+            let mut template_job = active_jobs
+                .first()
+                .cloned()
+                .or_else(|| paused_jobs.first().cloned());
 
-            let template_job = match template_job {
-                Some(t) => t,
-                None => {
-                    // Try to list ALL jobs for this app to find a template
-                    let all_jobs = self
-                        .job_repo
-                        .list_jobs(Some(user_id), Some(app_id), None)
-                        .await?;
-                    all_jobs.first().cloned().ok_or_else(|| {
-                        DomainError::Infrastructure(format!(
-                            "No template job found for app {app_id} to scale up"
-                        ))
-                    })?
-                },
+            if template_job.is_none() {
+                let mut all_jobs = self
+                    .job_repo
+                    .list_jobs(Some(user_id), Some(app_id), None)
+                    .await?;
+                all_jobs.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+                template_job = all_jobs.into_iter().next();
+            }
+
+            let Some(template_job) = template_job else {
+                tracing::debug!(
+                    app_id = %app_id,
+                    "Scaling up from zero but no preserved deployment was found; leaving app unchanged"
+                );
+                return Ok(());
             };
 
             let mut deployment_futures = Vec::new();
@@ -285,7 +383,15 @@ impl AppService {
             });
 
             for job in jobs_to_kill.iter().take(to_remove as usize) {
-                self.delete_app(&job.job_id, user_id).await?;
+                if desired_replicas == 0 {
+                    if job.host_id.is_some() && job.vm_id.is_some() {
+                        self.pause_app(&job.job_id, user_id).await?;
+                    } else {
+                        self.delete_app(&job.job_id, user_id).await?;
+                    }
+                } else {
+                    self.delete_app(&job.job_id, user_id).await?;
+                }
             }
         }
 
@@ -294,7 +400,7 @@ impl AppService {
 
     pub async fn start_autoscaler(self: Arc<Self>) {
         tracing::info!("Starting background autoscaler loop");
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
 
         loop {
             interval.tick().await;
@@ -304,7 +410,7 @@ impl AppService {
         }
     }
 
-    async fn reconcile_apps(&self) -> DomainResult<()> {
+    pub async fn reconcile_apps(&self) -> DomainResult<()> {
         // 1. Get all app configurations
         let apps = self
             .app_repo
@@ -316,11 +422,19 @@ impl AppService {
             return Ok(());
         }
 
-        // 2. Get all running jobs grouped by app_id
+        // 2. Get all active jobs grouped by app_id (including Pending/Scheduled)
         let all_jobs = self
             .job_repo
-            .list_jobs(None, None, Some(JobStatus::Running))
-            .await?;
+            .list_jobs(None, None, None)
+            .await?
+            .into_iter()
+            .filter(|j| {
+                matches!(
+                    j.status,
+                    JobStatus::Pending | JobStatus::Scheduled | JobStatus::Running
+                )
+            })
+            .collect::<Vec<_>>();
 
         // Optimization: Fetch all workers once to avoid N+1 queries in the loop
         let workers = self
@@ -361,15 +475,129 @@ impl AppService {
             }
         }
 
+        let now = chrono::Utc::now().timestamp();
+
         // 3. Evaluate each app
         for app in apps {
             let current_count = *app_running_counts.get(&app.id).unwrap_or(&0);
+            let router_idle = app.min_replicas == 0
+                && app.last_router_traffic_at > 0
+                && now - app.last_router_traffic_at >= ROUTER_IDLE_TIMEOUT_SECS;
+            let should_restore_from_zero = app.min_replicas == 0
+                && app.desired_replicas > 0
+                && app.last_router_traffic_at > app.last_scaled_to_zero_at;
+
+            if current_count > 0 && router_idle {
+                tracing::info!(
+                    event = "scale_to_zero",
+                    app_id = %app.id,
+                    last_router_traffic_at = %app.last_router_traffic_at,
+                    "No router traffic for 30 seconds; scaling app to zero"
+                );
+
+                // Update timestamp FIRST to prevent immediate wake-up if scale_app takes time or fails
+                if let Err(e) = self
+                    .app_repo
+                    .update_app_config(AppConfig {
+                        last_scaled_to_zero_at: now,
+                        ..app.clone()
+                    })
+                    .await
+                {
+                    tracing::error!(
+                        app_id = %app.id,
+                        error = %e,
+                        "Failed to persist scale-to-zero timestamp"
+                    );
+                    // If we can't persist the timestamp, we shouldn't scale down yet
+                    // because we won't be able to detect NEW traffic correctly.
+                    continue;
+                }
+
+                if let Err(e) = self.scale_app(&app.id, 0, &app.user_id).await {
+                    tracing::error!(
+                        app_id = %app.id,
+                        error = %e,
+                        "Failed to scale app to zero after router inactivity"
+                    );
+                }
+
+                continue;
+            }
+
+            if current_count == 0 {
+                // If it's a new app or has never reached zero correctly, initialize the timestamp
+                if app.last_scaled_to_zero_at == 0 && app.last_router_traffic_at == 0 {
+                    let _ = self
+                        .app_repo
+                        .update_app_config(AppConfig {
+                            last_scaled_to_zero_at: now,
+                            ..app.clone()
+                        })
+                        .await;
+                    continue;
+                }
+
+                if should_restore_from_zero {
+                    tracing::info!(
+                        event = "restore_from_router_traffic",
+                        app_id = %app.id,
+                        desired = %app.desired_replicas,
+                        "Restoring app after router traffic returned"
+                    );
+
+                    if let Err(e) = self
+                        .scale_app(&app.id, app.desired_replicas, &app.user_id)
+                        .await
+                    {
+                        tracing::error!(
+                            app_id = %app.id,
+                            desired = %app.desired_replicas,
+                            error = %e,
+                            "Failed to restore app after router traffic"
+                        );
+                    }
+                } else if app.min_replicas > 0 {
+                    // App has no running instances but min_replicas > 0, scale up to min
+                    tracing::info!(app_id = %app.id, "Scaling up to min_replicas");
+                    if let Err(e) = self
+                        .scale_app(&app.id, app.min_replicas, &app.user_id)
+                        .await
+                    {
+                        tracing::error!("Failed to scale app {} to min: {}", app.id, e);
+                    } else if let Err(e) = self
+                        .app_repo
+                        .update_app_config(AppConfig {
+                            desired_replicas: app.min_replicas,
+                            ..app.clone()
+                        })
+                        .await
+                    {
+                        tracing::error!(
+                            app_id = %app.id,
+                            desired = %app.min_replicas,
+                            error = %e,
+                            "Failed to persist min_replicas target"
+                        );
+                    }
+                } else if app.min_replicas == 0 {
+                    // If min_replicas is 0, we stay at 0 until traffic returns.
+                    // Do nothing.
+                } else if !app.autoscaling_enabled && app.desired_replicas > 0 {
+                    // This is handled by the first deployment usually, but if all instances died, we might want to recover.
+                    // However, we need a template job. scale_app handles that.
+                    tracing::debug!(app_id = %app.id, "App has 0 instances but desired > 0. Waiting for first deploy or historical template.");
+                    // We try scale_app anyway, it will fail if no template exists.
+                    let _ = self
+                        .scale_app(&app.id, app.desired_replicas, &app.user_id)
+                        .await;
+                }
+
+                continue;
+            }
 
             if app.autoscaling_enabled {
                 if let Some((total_cpu, total_mem)) = app_metrics.get(&app.id) {
-                    if current_count == 0 {
-                        continue;
-                    }
                     let avg_cpu = total_cpu / (current_count as f32);
                     let avg_mem = total_mem / (current_count as f32);
 
@@ -423,33 +651,10 @@ impl AppService {
                             );
                         }
                     }
-                } else if app.min_replicas > 0 {
-                    // App has no running instances but min_replicas > 0, scale up to min
-                    tracing::info!(app_id = %app.id, "Scaling up to min_replicas");
-                    if let Err(e) = self
-                        .scale_app(&app.id, app.min_replicas, &app.user_id)
-                        .await
-                    {
-                        tracing::error!("Failed to scale app {} to min: {}", app.id, e);
-                    } else if let Err(e) = self
-                        .app_repo
-                        .update_app_config(AppConfig {
-                            desired_replicas: app.min_replicas,
-                            ..app.clone()
-                        })
-                        .await
-                    {
-                        tracing::error!(
-                            app_id = %app.id,
-                            desired = %app.min_replicas,
-                            error = %e,
-                            "Failed to persist min_replicas target"
-                        );
-                    }
                 }
             } else {
                 // Manual scaling reconciliation
-                if current_count != app.desired_replicas && current_count > 0 {
+                if current_count != app.desired_replicas {
                     tracing::info!(
                         app_id = %app.id,
                         current = %current_count,
@@ -462,14 +667,6 @@ impl AppService {
                     {
                         tracing::error!("Failed to reconcile app {}: {}", app.id, e);
                     }
-                } else if current_count == 0 && app.desired_replicas > 0 {
-                    // This is handled by the first deployment usually, but if all instances died, we might want to recover.
-                    // However, we need a template job. scale_app handles that.
-                    tracing::debug!(app_id = %app.id, "App has 0 instances but desired > 0. Waiting for first deploy or historical template.");
-                    // We try scale_app anyway, it will fail if no template exists.
-                    let _ = self
-                        .scale_app(&app.id, app.desired_replicas, &app.user_id)
-                        .await;
                 }
             }
         }
@@ -675,7 +872,7 @@ mod tests {
         async fn fail_job(&self, _job_id: &str, _msg: String, _ts: i64) -> DomainResult<()> {
             Ok(())
         }
-        async fn cancel_job(&self, _j: &str, _ts: i64) -> DomainResult<()> {
+        async fn cancel_job(&self, _job_id: &str, _ts: i64) -> DomainResult<()> {
             Ok(())
         }
         async fn remove_job(&self, _j: &str) -> DomainResult<()> {
@@ -730,7 +927,10 @@ mod tests {
         async fn update_app_config(&self, _config: AppConfig) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn get_app_config(&self, _app_id: &str) -> anyhow::Result<Option<AppConfig>> {
+        async fn get_app_config(&self, _: &str) -> anyhow::Result<Option<AppConfig>> {
+            Ok(None)
+        }
+        async fn get_app_config_by_hostname(&self, _: &str) -> anyhow::Result<Option<AppConfig>> {
             Ok(None)
         }
         async fn list_all_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
@@ -738,6 +938,9 @@ mod tests {
         }
         async fn list_autoscaling_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
             Ok(vec![])
+        }
+        async fn remove_app_config(&self, _: &str) -> anyhow::Result<()> {
+            Ok(())
         }
     }
 
@@ -864,16 +1067,19 @@ mod tests {
         // Use a lazy pool that doesn't connect for testing
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
 
+        let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
         let service = AppService {
             deployment: DeploymentService::new(
                 job_repo.clone(),
                 worker_repo.clone(),
                 agent_client.clone(),
+                nats_client.clone(),
             ),
             job_repo,
             app_repo,
             worker_repo,
             agent_client,
+            nats_client,
             pool,
         };
 
@@ -924,16 +1130,19 @@ mod tests {
         let agent_client = Arc::new(agent_client);
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
 
+        let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
         let service = AppService {
             deployment: DeploymentService::new(
                 job_repo.clone(),
                 worker_repo.clone(),
                 agent_client.clone(),
+                nats_client.clone(),
             ),
             job_repo,
             app_repo,
             worker_repo,
             agent_client,
+            nats_client,
             pool,
         };
 
@@ -972,16 +1181,19 @@ mod tests {
         let agent_client = Arc::new(agent_client);
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
 
+        let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
         let service = AppService {
             deployment: DeploymentService::new(
                 job_repo.clone(),
                 worker_repo.clone(),
                 agent_client.clone(),
+                nats_client.clone(),
             ),
             job_repo,
             app_repo,
             worker_repo,
             agent_client,
+            nats_client,
             pool,
         };
 
@@ -1018,16 +1230,19 @@ mod tests {
         let agent_client = Arc::new(agent_client);
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
 
+        let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
         let service = AppService {
             deployment: DeploymentService::new(
                 job_repo.clone(),
                 worker_repo.clone(),
                 agent_client.clone(),
+                nats_client.clone(),
             ),
             job_repo,
             app_repo,
             worker_repo,
             agent_client,
+            nats_client,
             pool,
         };
 
@@ -1060,16 +1275,19 @@ mod tests {
         let agent_client = Arc::new(agent_client);
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
 
+        let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
         let service = AppService {
             deployment: DeploymentService::new(
                 job_repo.clone(),
                 worker_repo.clone(),
                 agent_client.clone(),
+                nats_client.clone(),
             ),
             job_repo,
             app_repo,
             worker_repo,
             agent_client,
+            nats_client,
             pool,
         };
 
@@ -1093,6 +1311,9 @@ mod tests {
             autoscaling_enabled: true,
             cpu_threshold: 80.0,
             mem_threshold: 80.0,
+            hostname: "app.example.com".to_string(),
+            last_router_traffic_at: 0,
+            last_scaled_to_zero_at: 0,
         };
 
         let target = autoscale_next_replicas(&app, 3, 30.0, 25.0);
@@ -1112,6 +1333,9 @@ mod tests {
             autoscaling_enabled: true,
             cpu_threshold: 80.0,
             mem_threshold: 80.0,
+            hostname: "app.example.com".to_string(),
+            last_router_traffic_at: 0,
+            last_scaled_to_zero_at: 0,
         };
 
         let target = autoscale_next_replicas(&app, 2, 80.0, 80.0);

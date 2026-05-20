@@ -19,7 +19,7 @@
   let loading = false;
   let config = {
     desired_replicas: app.desired_replicas,
-    min_replicas: app.min_replicas,
+    min_replicas: 0, // Mandatory scale-to-zero
     max_replicas: app.max_replicas,
     autoscaling_enabled: app.autoscaling_enabled,
     cpu_threshold: app.cpu_threshold,
@@ -29,9 +29,18 @@
   async function handleSave() {
     const token = getToken();
     if (!token) return;
+
+    if (!config.autoscaling_enabled) {
+      config.min_replicas = 0;
+      config.max_replicas = config.desired_replicas;
+    }
+
     loading = true;
     try {
-      const result = await scaleApp(token, app.name, config);
+      const result = await scaleApp(token, app.name, {
+        ...config,
+        min_replicas: 0, // Ensure it's 0
+      });
       if (result.error) {
         toast.error(result.error);
         return;
@@ -47,6 +56,20 @@
 
 <Modal bind:open title={`Scaling & Reliability: ${app.name}`} description="Configure how many replicas of your application should run.">
   <FieldGroup className="pt-4">
+    <div class="rounded-lg border border-blue-500/20 p-4 bg-blue-500/5 mb-4">
+      <div class="flex items-start gap-3">
+        <div class="mt-0.5">
+          <Scale class="size-4 text-blue-500" />
+        </div>
+        <div class="space-y-1">
+          <div class="text-sm font-medium text-blue-500">Global Scale-to-Zero Policy</div>
+          <div class="text-xs text-muted-foreground leading-relaxed">
+            All Mikrom applications scale to zero after 5 minutes of inactivity to save resources. Your app will automatically wake up when it receives traffic.
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="flex items-center justify-between rounded-lg border border-border p-4 bg-muted/30">
       <div class="space-y-0.5">
         <div class="text-sm font-medium">Autoscaling</div>
@@ -59,12 +82,9 @@
     <Input type="number" bind:value={config.desired_replicas} min={0} max={3} />
   </Field>
 {:else}
-  <FieldSet className="grid grid-cols-2 gap-4 space-y-0">
-    <Field label="Min Replicas">
-      <Input type="number" bind:value={config.min_replicas} min={1} max={config.max_replicas} />
-    </Field>
-    <Field label="Max Replicas">
-      <Input type="number" bind:value={config.max_replicas} min={config.min_replicas} max={3} />
+  <FieldSet className="grid grid-cols-1 gap-4 space-y-0">
+    <Field label="Max Replicas" description="Maximum number of instances to scale up to (max 3).">
+      <Input type="number" bind:value={config.max_replicas} min={1} max={3} />
     </Field>
   </FieldSet>
 

@@ -1,5 +1,7 @@
 use crate::state::State;
+use crate::traffic::RouterTrafficPublisher;
 use async_trait::async_trait;
+use dashmap::DashMap;
 use openssl::x509::X509;
 use opentelemetry::propagation::{Extractor, Injector};
 use pingora::lb::LoadBalancer;
@@ -67,8 +69,10 @@ pub struct MikromProxy {
     acme_staging: bool,
     upstream_ca: Option<Arc<Box<[X509]>>>,
     pub metrics: Arc<RouterMetricsCounters>,
+    traffic_publisher: Option<Arc<RouterTrafficPublisher>>,
     rate_limiter: Rate,
     rps_limit: isize,
+    wake_up_failures: DashMap<String, (u32, std::time::Instant)>,
 }
 
 pub struct MikromCtx {
@@ -83,6 +87,7 @@ impl MikromProxy {
         acme_staging: bool,
         upstream_ca: Option<Arc<Box<[X509]>>>,
         metrics: Arc<RouterMetricsCounters>,
+        traffic_publisher: Option<Arc<RouterTrafficPublisher>>,
         rps_limit: isize,
     ) -> Self {
         Self {
@@ -90,8 +95,10 @@ impl MikromProxy {
             acme_staging,
             upstream_ca,
             metrics,
+            traffic_publisher,
             rate_limiter: Rate::new(Duration::from_secs(1)),
             rps_limit,
+            wake_up_failures: DashMap::new(),
         }
     }
 
@@ -128,6 +135,41 @@ impl MikromProxy {
 
     pub async fn get_lb(&self, host: &str) -> Result<Arc<LoadBalancer<RoundRobin>>> {
         self.get_lb_and_tls(host).await.map(|(lb, _, _)| lb)
+    }
+
+    pub async fn has_route(&self, host: &str) -> bool {
+        let raw_host = host;
+        let host = canonical_host(raw_host);
+        let state = self.state.read().await;
+        state.routes.contains_key(host.as_str()) || state.routes.contains_key(raw_host)
+    }
+
+    async fn wait_for_route(
+        &self,
+        host: &str,
+        normalized_host: &str,
+    ) -> Result<(Arc<LoadBalancer<RoundRobin>>, bool, Option<String>)> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+
+        loop {
+            match self.get_lb_and_tls(host).await {
+                Ok(route) => return Ok(route),
+                Err(e) => {
+                    if self.has_route(host).await {
+                        return Err(e);
+                    }
+
+                    if std::time::Instant::now() >= deadline {
+                        return Err(Error::explain(
+                            ErrorType::HTTPStatus(503),
+                            format!("Route for host {normalized_host} is starting up"),
+                        ));
+                    }
+
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                },
+            }
+        }
     }
 
     async fn write_text_response(
@@ -312,6 +354,12 @@ impl ProxyHttp for MikromProxy {
 
         let path = session.req_header().uri.path().to_string();
 
+        if !normalized_host.is_empty()
+            && let Some(publisher) = &self.traffic_publisher
+        {
+            publisher.record(normalized_host.clone());
+        }
+
         if self
             .maybe_handle_acme_challenge(session, &host, &path)
             .await?
@@ -343,31 +391,108 @@ impl ProxyHttp for MikromProxy {
             .unwrap_or("");
         let normalized_host = canonical_host(host);
 
-        let (lb, use_tls, alternative_cn) = self.get_lb_and_tls(host).await?;
-
-        // Use client address as a hash seed for better distribution/stickiness if LB supports it
-        let hash = session
-            .client_addr()
-            .map_or_else(|| b"".to_vec(), |addr| addr.to_string().into_bytes());
-
-        let upstream = lb.select(&hash, 256).ok_or_else(|| {
-            Error::explain(
-                ErrorType::InternalError,
-                format!("No healthy upstreams for host: {normalized_host}"),
-            )
-        })?;
-
-        info!("Selected upstream: {upstream:?}, use_tls: {use_tls}");
-        let mut peer = HttpPeer::new(upstream.to_string(), use_tls, normalized_host);
-        if use_tls {
-            if let Some(ca) = &self.upstream_ca {
-                peer.options.ca = Some(ca.clone());
-            }
-            if let Some(alternative_cn) = alternative_cn {
-                peer.options.alternative_cn = Some(alternative_cn);
+        // 1. Circuit Breaker Check
+        if let Some(entry) = self.wake_up_failures.get(&normalized_host) {
+            let (count, last_failure) = *entry;
+            if count >= 3 && last_failure.elapsed() < Duration::from_mins(1) {
+                return Err(Error::explain(
+                    ErrorType::HTTPStatus(503),
+                    format!(
+                        "Application {normalized_host} is currently unavailable (circuit breaker open)"
+                    ),
+                ));
             }
         }
-        Ok(Box::new(peer))
+
+        let start_time = std::time::Instant::now();
+        let deadline = start_time + std::time::Duration::from_secs(30);
+        let mut last_log_time = start_time;
+
+        loop {
+            // Deduplicate and publish traffic event to wake up app if needed
+            if let Some(publisher) = &self.traffic_publisher {
+                publisher.record(normalized_host.clone());
+            }
+
+            let (lb, use_tls, alternative_cn) = if self.has_route(host).await {
+                self.get_lb_and_tls(host).await?
+            } else {
+                self.wait_for_route(host, normalized_host.as_str()).await?
+            };
+
+            // Use client address as a hash seed for better distribution/stickiness if LB supports it
+            let hash = session
+                .client_addr()
+                .map_or_else(|| b"".to_vec(), |addr| addr.to_string().into_bytes());
+
+            if let Some(upstream) = lb.select(&hash, 256) {
+                // Pre-flight check: ensure the target is actually reachable via TCP.
+                // This handles the "No route to host" race during 6PN/WireGuard synchronization.
+                let addr_str = upstream.addr.to_string();
+                if let Ok(Ok(_stream)) = tokio::time::timeout(
+                    std::time::Duration::from_millis(500),
+                    tokio::net::TcpStream::connect(&addr_str),
+                )
+                .await
+                {
+                    info!("Selected upstream: {upstream:?}, use_tls: {use_tls} (verified)");
+
+                    // Success: Reset circuit breaker
+                    self.wake_up_failures.remove(&normalized_host);
+
+                    let mut peer = HttpPeer::new(addr_str, use_tls, normalized_host);
+                    if use_tls {
+                        if let Some(ca) = &self.upstream_ca {
+                            peer.options.ca = Some(ca.clone());
+                        }
+                        if let Some(alternative_cn) = &alternative_cn {
+                            peer.options.alternative_cn = Some(alternative_cn.clone());
+                        }
+                    }
+                    return Ok(Box::new(peer));
+                }
+
+                // Upstream not ready yet, continue loop
+                let now = std::time::Instant::now();
+                if now >= deadline {
+                    warn!(host = %normalized_host, addr = %addr_str, "Wake-up timeout reached, incrementing circuit breaker");
+
+                    // Increment circuit breaker
+                    let mut entry = self
+                        .wake_up_failures
+                        .entry(normalized_host.clone())
+                        .or_insert((0, std::time::Instant::now()));
+                    entry.0 += 1;
+                    entry.1 = std::time::Instant::now();
+                    drop(entry);
+
+                    return Err(Error::explain(
+                        ErrorType::HTTPStatus(503),
+                        format!("Upstream {addr_str} selected but unreachable after 30s"),
+                    ));
+                }
+            } else {
+                let now = std::time::Instant::now();
+                if now >= deadline {
+                    return Err(Error::explain(
+                        ErrorType::HTTPStatus(503),
+                        format!(
+                            "No healthy upstreams for host: {normalized_host} after waiting 30s"
+                        ),
+                    ));
+                }
+
+                // Log selection failure every 2 seconds to avoid spamming but keep visibility
+                if now.duration_since(last_log_time).as_secs() >= 2 {
+                    info!(
+                        "No healthy upstreams for {normalized_host} yet (app might be waking up), waiting..."
+                    );
+                    last_log_time = now;
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
     }
 
     async fn upstream_request_filter(
@@ -474,5 +599,91 @@ impl ProxyHttp for MikromProxy {
         } else {
             self.metrics.responses_5xx.fetch_add(1, Ordering::Relaxed);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{Route, State};
+    use pingora::lb::LoadBalancer;
+    use pingora::lb::selection::RoundRobin;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    #[tokio::test]
+    async fn test_has_route_detects_inserted_host() {
+        let mut routes = HashMap::new();
+        let targets = vec!["127.0.0.1:8080".to_string()];
+        let lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice()).unwrap();
+        routes.insert(
+            "app.example.com".to_string(),
+            Route {
+                host: "app.example.com".to_string(),
+                targets,
+                lb: Arc::new(lb),
+                use_tls: false,
+                tls_alternative_cn: None,
+            },
+        );
+
+        let state = Arc::new(RwLock::new(State {
+            routes,
+            acme_tokens: HashMap::new(),
+            certificates: HashMap::new(),
+        }));
+
+        let proxy = MikromProxy::new(
+            state,
+            false,
+            None,
+            Arc::new(RouterMetricsCounters::new()),
+            None,
+            100,
+        );
+
+        assert!(proxy.has_route("app.example.com").await);
+        assert!(proxy.has_route("app.example.com:443").await);
+        assert!(!proxy.has_route("missing.example.com").await);
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_route_detects_late_route() {
+        let state = Arc::new(RwLock::new(State::default()));
+        let proxy = MikromProxy::new(
+            state.clone(),
+            false,
+            None,
+            Arc::new(RouterMetricsCounters::new()),
+            None,
+            100,
+        );
+
+        let host = "late.example.com".to_string();
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            let targets = vec!["127.0.0.1:8080".to_string()];
+            let lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice()).unwrap();
+            let mut guard = state_clone.write().await;
+            guard.routes.insert(
+                host.clone(),
+                Route {
+                    host,
+                    targets,
+                    lb: Arc::new(lb),
+                    use_tls: false,
+                    tls_alternative_cn: None,
+                },
+            );
+        });
+
+        let result = proxy
+            .wait_for_route("late.example.com", "late.example.com")
+            .await
+            .unwrap();
+        assert!(!result.1);
+        assert!(result.2.is_none());
     }
 }
