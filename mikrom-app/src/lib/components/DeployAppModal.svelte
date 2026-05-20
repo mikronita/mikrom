@@ -22,17 +22,15 @@
   let loading = false;
   let selectedCpu = DEFAULT_CPU;
   let selectedMemory = DEFAULT_MEMORY;
-  let previousOpen = false;
 
   function resetForm() {
     selectedCpu = DEFAULT_CPU;
     selectedMemory = DEFAULT_MEMORY;
   }
 
-  $: if (open && !previousOpen) {
+  $: if (open) {
     resetForm();
   }
-  $: previousOpen = open;
 
   function close() {
     resetForm();
