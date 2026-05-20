@@ -196,14 +196,8 @@ impl WorkerRepository for PgWorkerRepository {
     async fn register(&self, worker: Worker) -> DomainResult<()> {
         let now = chrono::Utc::now().timestamp();
 
-        // Remove any stale worker with the same hostname but different host_id
-        sqlx::query("DELETE FROM workers WHERE hostname = $1 AND id != $2")
-            .bind(&worker.hostname)
-            .bind(&worker.host_id)
-            .execute(&self.pool)
-            .await?;
-
-        // Upsert the worker
+        // Keep the worker record hot with a single upsert. We avoid a pre-delete because it
+        // amplifies write contention on the workers table under heartbeat bursts.
         sqlx::query(
             r#"
             INSERT INTO workers (id, hostname, advertise_address, wireguard_pubkey, wireguard_ip, wireguard_port, last_heartbeat, registered_at, status)

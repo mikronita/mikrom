@@ -14,8 +14,9 @@ async fn main() -> anyhow::Result<()> {
     mikrom_proto::telemetry::init_telemetry("mikrom-scheduler", env!("CARGO_PKG_VERSION"), None)?;
 
     tracing::info!("Connecting to database...");
+    let database_max_connections = config.database_max_connections.max(1);
     let pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(database_max_connections)
         .acquire_timeout(Duration::from_secs(3))
         .connect(&config.database_url)
         .await?;
@@ -51,6 +52,22 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     let server = SchedulerServer::new(app_service.clone(), certs);
+
+    // Periodic pool telemetry for diagnosing contention and starvation.
+    let pool_for_metrics = pool.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            tracing::info!(
+                db_pool_size = pool_for_metrics.size(),
+                db_pool_idle = pool_for_metrics.num_idle(),
+                db_pool_max_connections = database_max_connections,
+                db_pool_closed = pool_for_metrics.is_closed(),
+                "Scheduler database pool snapshot"
+            );
+        }
+    });
 
     // Start background cleanup task
     let pool_clone = pool.clone();

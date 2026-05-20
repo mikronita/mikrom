@@ -5,6 +5,9 @@ pub struct SchedulerConfig {
     pub database_url: String,
     pub nats_url: String,
 
+    #[serde(default = "default_database_max_connections")]
+    pub database_max_connections: u32,
+
     #[serde(default = "default_use_tls")]
     pub use_tls: bool,
 
@@ -14,6 +17,10 @@ pub struct SchedulerConfig {
 
 fn default_use_tls() -> bool {
     false
+}
+
+fn default_database_max_connections() -> u32 {
+    10
 }
 
 fn default_certs_dir() -> String {
