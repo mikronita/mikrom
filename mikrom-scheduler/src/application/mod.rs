@@ -137,8 +137,37 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn resume_app(&self, job_id: &str, user_id: &str) -> DomainResult<()> {
+    pub async fn resume_app(&self, job_id: &str, user_id: &str) -> DomainResult<bool> {
         let job = self.get_app_status(job_id, user_id).await?;
+
+        let Some(host_id) = job.host_id.as_ref() else {
+            return Ok(false);
+        };
+        let Some(vm_id) = job.vm_id.as_ref() else {
+            return Ok(false);
+        };
+
+        if self.worker_repo.get_worker(host_id).await?.is_none() {
+            let message = format!("Host {host_id} no longer exists");
+            tracing::warn!(
+                job_id = %job_id,
+                app_id = %job.app_id,
+                host_id = %host_id,
+                "Invalidating paused job linked to a missing host"
+            );
+
+            self.job_repo
+                .fail_job(job_id, message.clone(), chrono::Utc::now().timestamp())
+                .await?;
+
+            let mut updated_job = job;
+            updated_job.status = JobStatus::Failed;
+            updated_job.stopped_at = Some(chrono::Utc::now().timestamp());
+            updated_job.error_message = Some(message);
+            let _ = self.publish_job_update(&updated_job).await;
+
+            return Ok(false);
+        }
 
         tracing::info!(
             job_id = %job_id,
@@ -147,20 +176,18 @@ impl AppService {
             "Resuming job"
         );
 
-        if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
-            self.agent_client.resume_vm(host_id, vm_id).await?;
-            self.job_repo
-                .update_job_status(job_id, JobStatus::Running)
-                .await?;
+        self.agent_client.resume_vm(host_id, vm_id).await?;
+        self.job_repo
+            .update_job_status(job_id, JobStatus::Running)
+            .await?;
 
-            let mut updated_job = job;
-            updated_job.status = JobStatus::Running;
-            updated_job.started_at = Some(chrono::Utc::now().timestamp());
-            let _ = self.publish_job_update(&updated_job).await;
-        }
+        let mut updated_job = job;
+        updated_job.status = JobStatus::Running;
+        updated_job.started_at = Some(chrono::Utc::now().timestamp());
+        let _ = self.publish_job_update(&updated_job).await;
 
         tracing::info!(job_id = %job_id, "Job resumed successfully");
-        Ok(())
+        Ok(true)
     }
 
     pub async fn delete_app(&self, job_id: &str, user_id: &str) -> DomainResult<()> {
@@ -290,8 +317,13 @@ impl AppService {
 
                 for job in resume_candidates.iter().take(to_add as usize) {
                     if job.host_id.is_some() && job.vm_id.is_some() {
-                        self.resume_app(&job.job_id, user_id).await?;
-                        resumed += 1;
+                        match self.resume_app(&job.job_id, user_id).await {
+                            Ok(true) => {
+                                resumed += 1;
+                            },
+                            Ok(false) => {},
+                            Err(e) => return Err(e),
+                        }
                     }
                 }
 
@@ -1331,6 +1363,64 @@ mod tests {
             .expect_err("cleanup should fail");
 
         assert!(matches!(err, DomainError::Infrastructure(_)));
+    }
+
+    #[tokio::test]
+    async fn test_resume_app_invalidates_missing_host_instead_of_calling_agent() {
+        let mut job = paused_job();
+        job.status = JobStatus::Paused;
+
+        let mut job_repo = MockJobRepository::new();
+        job_repo.expect_get_job().with(eq("job-1")).returning({
+            let job = job.clone();
+            move |_| Ok(Some(job.clone()))
+        });
+        job_repo
+            .expect_fail_job()
+            .with(
+                eq("job-1"),
+                mockall::predicate::function(|msg: &String| msg == "Host host-1 no longer exists"),
+                mockall::predicate::function(|ts: &i64| *ts > 0),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let mut worker_repo = MockWorkerRepository::new();
+        worker_repo
+            .expect_get_worker()
+            .with(eq("host-1"))
+            .times(1)
+            .returning(|_| Ok(None));
+
+        let mut agent_client = MockAgentClient::new();
+        agent_client.expect_resume_vm().times(0);
+
+        let app_repo = Arc::new(DummyAppRepo);
+        let job_repo = Arc::new(job_repo);
+        let worker_repo = Arc::new(worker_repo);
+        let agent_client = Arc::new(agent_client);
+        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
+
+        let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
+        let service = AppService {
+            deployment: DeploymentService::new(
+                job_repo.clone(),
+                worker_repo.clone(),
+                agent_client.clone(),
+                nats_client.clone(),
+            ),
+            job_repo,
+            app_repo,
+            worker_repo,
+            agent_client,
+            nats_client,
+            pool,
+            router_idle_timeout_secs: 900,
+        };
+
+        let resumed = service.resume_app("job-1", "user-1").await.unwrap();
+
+        assert!(!resumed);
     }
 
     #[test]

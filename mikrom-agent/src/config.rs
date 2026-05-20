@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::path::Path;
 use std::path::PathBuf;
 use uuid::Uuid;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -54,12 +55,24 @@ fn default_data_path() -> PathBuf {
 impl AgentConfig {
     pub fn load() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
+        let env_host_id = std::env::var("AGENT_HOST_ID")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
         let mut config: AgentConfig = envy::from_env()?;
 
         // Ensure data path exists
         if !config.data_path.exists() {
             let _ = std::fs::create_dir_all(&config.data_path);
         }
+
+        config.host_id = match env_host_id {
+            Some(host_id) => {
+                persist_host_id(&config.data_path, &host_id)?;
+                host_id
+            },
+            None => load_or_persist_host_id(&config.data_path, config.host_id.clone())?,
+        };
 
         // Ensure WireGuard key pair exists
         let key_path = config.data_path.join("wireguard.key");
@@ -122,5 +135,47 @@ impl AgentConfig {
         } else {
             Some(key_str)
         }
+    }
+}
+
+fn host_id_path(data_path: &Path) -> PathBuf {
+    data_path.join("host_id.txt")
+}
+
+fn load_or_persist_host_id(data_path: &Path, generated_host_id: String) -> anyhow::Result<String> {
+    let path = host_id_path(data_path);
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let existing = existing.trim().to_string();
+        if !existing.is_empty() {
+            return Ok(existing);
+        }
+    }
+
+    persist_host_id(data_path, &generated_host_id)?;
+    Ok(generated_host_id)
+}
+
+fn persist_host_id(data_path: &Path, host_id: &str) -> anyhow::Result<()> {
+    std::fs::write(host_id_path(data_path), host_id)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_id_is_persisted_between_loads() {
+        let data_path =
+            std::env::temp_dir().join(format!("mikrom-agent-config-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&data_path).unwrap();
+
+        let first = load_or_persist_host_id(&data_path, "host-a".to_string()).unwrap();
+        let second = load_or_persist_host_id(&data_path, "host-b".to_string()).unwrap();
+
+        assert_eq!(first, "host-a");
+        assert_eq!(second, "host-a");
+
+        let _ = std::fs::remove_dir_all(&data_path);
     }
 }
