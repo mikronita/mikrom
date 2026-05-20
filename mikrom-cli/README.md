@@ -43,7 +43,7 @@ mikrom -o json system health
 |---|---|
 | `mikrom app list` | List all your registered applications. |
 | `mikrom app create` | Register a new app with a name and Git URL. |
-| `mikrom app deploy` | Trigger a new build and deployment for an app. |
+| `mikrom app deploy` | Trigger a new build and deployment for an app. Supports `--cpu` (`1`-`4`) and `--memory` (`512M`, `1G`, `2G`, `4G`). |
 | `mikrom app activate` | Rollback or activate a specific historical deployment. |
 | `mikrom app deployments` | List deployment history for an application. |
 | `mikrom app watch` | Stream build and deployment events for an app. |
@@ -81,3 +81,18 @@ mikrom config set api-url https://mikrom.production.es
 
 ### Scripting & Automation
 Use `--output json` for machine-readable output in CI/CD pipelines and administrative scripts.
+
+### Deployment presets
+`mikrom app deploy` accepts the same deployment presets in interactive and scripted use:
+
+- CPU: `1`, `2`, `3`, `4`
+- RAM: `512M`, `1G`, `2G`, `4G`
+
+Examples:
+
+```bash
+mikrom app deploy --name my-app --cpu 2 --memory 1G
+mikrom app deploy --name my-app
+```
+
+If you omit the flags, the CLI prompts for a preset and defaults to `1` CPU and `512M` RAM when you just press Enter.

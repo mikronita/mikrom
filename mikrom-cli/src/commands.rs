@@ -1,5 +1,15 @@
 use clap::{Subcommand, ValueEnum};
 
+pub fn parse_memory_choice(value: &str) -> Result<u32, String> {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "512M" => Ok(512),
+        "1G" => Ok(1024),
+        "2G" => Ok(2048),
+        "4G" => Ok(4096),
+        _ => Err("memory must be one of 512M, 1G, 2G, or 4G".to_string()),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum OutputFormat {
     Table,
@@ -121,6 +131,19 @@ pub enum AppCommands {
     Deploy {
         #[arg(long, short, help = "Name of the application to deploy")]
         name: String,
+        #[arg(
+            long,
+            help = "CPU cores to allocate (1, 2, 3, or 4; default: 1)",
+            value_parser = clap::value_parser!(u32).range(1..=4)
+        )]
+        cpu: Option<u32>,
+        #[arg(
+            long,
+            short = 'm',
+            help = "Memory to allocate (512M, 1G, 2G, or 4G; default: 512M)",
+            value_parser = parse_memory_choice
+        )]
+        memory: Option<u32>,
     },
     /// Activate/Rollback to a specific deployment
     Activate {

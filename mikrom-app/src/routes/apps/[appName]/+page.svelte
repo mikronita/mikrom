@@ -42,11 +42,11 @@
   import MetricChart from "$lib/components/MetricChart.svelte";
   import Skeleton from "$lib/components/Skeleton.svelte";
   import ScaleAppModal from "$lib/components/ScaleAppModal.svelte";
+  import DeployAppModal from "$lib/components/DeployAppModal.svelte";
   import { getToken } from "$lib/auth";
   import {
     activateDeployment,
     deleteApp,
-    deployAppVersion,
     getAppSecret,
     listDeployments,
     type AppInfo,
@@ -82,8 +82,8 @@
   let showSecret = false;
   let showWebhookModal = false;
   let showScaleModal = false;
+  let showDeployModal = false;
   let showDeleteAppDialog = false;
-  let deployingApp = false;
   let deletingApp = false;
   let activatingDeploymentId: string | null = null;
   let app: AppInfo | null = null;
@@ -379,22 +379,6 @@
     };
   });
 
-  async function handleDeployApp() {
-    const token = getToken();
-    if (!token || !app) return;
-    deployingApp = true;
-    try {
-      const result = await deployAppVersion(token, appName);
-      if (result.error) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success(`Deployment for ${app.name} initiated`);
-    } finally {
-      deployingApp = false;
-    }
-  }
-
   async function handleDeleteApp() {
     const token = getToken();
     if (!token || !app) return;
@@ -516,7 +500,7 @@
         </div>
       </div>
       <div class="flex items-center gap-2">
-        <Button size="sm" onclick={handleDeployApp} disabled={deployingApp}>
+        <Button size="sm" onclick={() => (showDeployModal = true)} disabled={!app}>
           Deploy Now
         </Button>
         <Button size="sm" variant="outline" onclick={() => (showScaleModal = true)}>
@@ -766,6 +750,10 @@
 
   {#if app && showScaleModal}
     <ScaleAppModal bind:open={showScaleModal} app={app!} />
+  {/if}
+
+  {#if app && showDeployModal}
+    <DeployAppModal bind:open={showDeployModal} app={app!} />
   {/if}
 
   <AlertDialog
