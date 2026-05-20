@@ -36,7 +36,7 @@ pub(crate) fn resolve_deployment_memory_mib(memory_mib: Option<u32>) -> ApiResul
         Ok(value)
     } else {
         Err(ApiError::BadRequest(format!(
-            "Unsupported memory value {value}. Allowed values are 512M, 1G, 2G, and 4G."
+            "Unsupported memory value {value}. Allowed values are 512, 1024, 2048, and 4096 MiB."
         )))
     }
 }
