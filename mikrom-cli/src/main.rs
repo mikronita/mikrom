@@ -163,7 +163,27 @@ mod tests {
     fn test_cli_app_deploy_parses_name() {
         let cli = Cli::try_parse_from(["mikrom", "app", "deploy", "--name", "svc"]).unwrap();
         match cli.command {
-            Commands::App(AppCommands::Deploy { name }) => assert_eq!(name, "svc"),
+            Commands::App(AppCommands::Deploy { name, cpu, memory }) => {
+                assert_eq!(name, "svc");
+                assert!(cpu.is_none());
+                assert!(memory.is_none());
+            },
+            _ => panic!("expected app deploy"),
+        }
+    }
+
+    #[test]
+    fn test_cli_app_deploy_parses_resources() {
+        let cli = Cli::try_parse_from([
+            "mikrom", "app", "deploy", "--name", "svc", "--cpu", "3", "--memory", "2G",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::App(AppCommands::Deploy { name, cpu, memory }) => {
+                assert_eq!(name, "svc");
+                assert_eq!(cpu, Some(3));
+                assert_eq!(memory, Some(2048));
+            },
             _ => panic!("expected app deploy"),
         }
     }
@@ -342,8 +362,6 @@ mod tests {
             "3",
             "--auto",
             "true",
-            "--min",
-            "2",
             "--max",
             "5",
             "--cpu",

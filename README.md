@@ -81,12 +81,21 @@ make install-cli
 mikrom auth login --email user@example.com --password secret
 
 # Create and deploy an app
-mikrom apps create --name my-app --git-url https://github.com/user/my-app.git
-mikrom apps deploy --app-id <app-id>
+mikrom app create --name my-app --git-url https://github.com/user/my-app.git
+mikrom app deploy --name my-app --cpu 2 --memory 1G
 
 # Check status
-mikrom deployments
+mikrom deployment list
 ```
+
+### Deployment presets
+
+When you deploy an app from the UI or CLI, Mikrom currently offers the same resource presets:
+
+- CPU: `1`, `2`, `3`, `4`
+- RAM: `512M`, `1G`, `2G`, `4G`
+
+The default selection is `1` CPU and `512M` RAM.
 
 ## Testing
 

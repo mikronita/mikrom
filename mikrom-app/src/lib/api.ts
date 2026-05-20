@@ -195,6 +195,14 @@ export interface CreateAppRequest {
   github_repo_full_name?: string;
 }
 
+export const DEPLOYMENT_CPU_OPTIONS = [1, 2, 3, 4] as const;
+export const DEPLOYMENT_MEMORY_OPTIONS = [
+  { label: "512M", value: 512 },
+  { label: "1G", value: 1024 },
+  { label: "2G", value: 2048 },
+  { label: "4G", value: 4096 },
+] as const;
+
 export interface GithubRepo {
   id: number;
   name: string;

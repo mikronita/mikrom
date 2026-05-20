@@ -486,11 +486,19 @@ impl MikromClient {
             .to_string())
     }
 
-    pub async fn deploy_app_version(&self, app_id: &str) -> anyhow::Result<DeployResponse> {
+    pub async fn deploy_app_version(
+        &self,
+        app_id: &str,
+        vcpus: u32,
+        memory_mib: u32,
+    ) -> anyhow::Result<DeployResponse> {
         self.request(
             reqwest::Method::POST,
             &format!("/apps/{}/deploy", app_id),
-            Some(serde_json::json!({})),
+            Some(serde_json::json!({
+                "vcpus": vcpus,
+                "memory_mib": memory_mib,
+            })),
         )
         .await
     }

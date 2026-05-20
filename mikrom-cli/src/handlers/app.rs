@@ -2,13 +2,19 @@ use crate::client::MikromClient;
 use crate::commands::{AppCommands, OutputFormat};
 use crate::ui;
 use anyhow::Result;
+use std::io::{self, IsTerminal, Write};
+
+const CPU_OPTIONS: [u32; 4] = [1, 2, 3, 4];
+const MEMORY_OPTIONS: [(&str, u32); 4] = [("512M", 512), ("1G", 1024), ("2G", 2048), ("4G", 4096)];
 
 pub async fn handle(client: &MikromClient, cmd: AppCommands, output: OutputFormat) -> Result<()> {
     match cmd {
         AppCommands::List => list(client, output).await,
         AppCommands::Create { name, git_url } => create(client, &name, &git_url, output).await,
         AppCommands::Delete { name } => delete(client, &name, output).await,
-        AppCommands::Deploy { name } => deploy(client, &name, output).await,
+        AppCommands::Deploy { name, cpu, memory } => {
+            deploy(client, &name, cpu, memory, output).await
+        },
         AppCommands::Activate { app, deployment_id } => {
             activate(client, &app, &deployment_id, output).await
         },
@@ -126,7 +132,22 @@ async fn delete(client: &MikromClient, name: &str, output: OutputFormat) -> Resu
     Ok(())
 }
 
-async fn deploy(client: &MikromClient, name: &str, output: OutputFormat) -> Result<()> {
+async fn deploy(
+    client: &MikromClient,
+    name: &str,
+    cpu: Option<u32>,
+    memory: Option<u32>,
+    output: OutputFormat,
+) -> Result<()> {
+    let vcpus = match cpu {
+        Some(value) => value,
+        None => prompt_cpu()?,
+    };
+    let memory_mib = match memory {
+        Some(value) => value,
+        None => prompt_memory()?,
+    };
+
     if output == OutputFormat::Table {
         ui::step(
             ui::WAIT,
@@ -136,8 +157,13 @@ async fn deploy(client: &MikromClient, name: &str, output: OutputFormat) -> Resu
                 ui::bold_cyan(name)
             ),
         );
+        ui::label_value(
+            ui::INFO,
+            "Resources:",
+            &format!("{} vCPU, {} MiB RAM", vcpus, memory_mib),
+        );
     }
-    let resp = client.deploy_app_version(name).await?;
+    let resp = client.deploy_app_version(name, vcpus, memory_mib).await?;
     if output == OutputFormat::Json {
         return ui::print_json(&resp);
     }
@@ -162,6 +188,62 @@ async fn deploy(client: &MikromClient, name: &str, output: OutputFormat) -> Resu
     }
     ui::label_value(ui::INFO, "Status:", &ui::cyan_label(&resp.status));
     Ok(())
+}
+
+fn prompt_cpu() -> Result<u32> {
+    prompt_choice(
+        "Select CPU preset:",
+        &[
+            ("1 vCPU", CPU_OPTIONS[0]),
+            ("2 vCPU", CPU_OPTIONS[1]),
+            ("3 vCPU", CPU_OPTIONS[2]),
+            ("4 vCPU", CPU_OPTIONS[3]),
+        ],
+        0,
+    )
+}
+
+fn prompt_memory() -> Result<u32> {
+    prompt_choice("Select RAM preset:", &MEMORY_OPTIONS, 0)
+}
+
+fn prompt_choice(prompt: &str, options: &[(&str, u32)], default_index: usize) -> Result<u32> {
+    let default_value = options
+        .get(default_index)
+        .map(|(_, value)| *value)
+        .unwrap_or_else(|| options[0].1);
+
+    if !io::stdin().is_terminal() {
+        return Ok(default_value);
+    }
+
+    loop {
+        ui::info(prompt);
+        for (index, (label, _)) in options.iter().enumerate() {
+            println!("  {}. {}", index + 1, label);
+        }
+        print!(
+            "Choose [1-{}] (default {}): ",
+            options.len(),
+            default_index + 1
+        );
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return Ok(default_value);
+        }
+
+        if let Ok(choice) = trimmed.parse::<usize>()
+            && let Some((_, value)) = options.get(choice.saturating_sub(1))
+        {
+            return Ok(*value);
+        }
+
+        ui::error("Please choose one of the listed options.");
+    }
 }
 
 async fn activate(

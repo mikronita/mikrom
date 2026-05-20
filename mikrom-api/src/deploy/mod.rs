@@ -14,12 +14,43 @@ pub use handlers::*;
 pub use orchestrator::DeploymentOrchestrator;
 pub use workflow::DeploymentPromotionWorkflow;
 
+pub const DEFAULT_DEPLOYMENT_VCPUS: u32 = 1;
+pub const DEFAULT_DEPLOYMENT_MEMORY_MIB: u32 = 512;
+pub const DEPLOYMENT_VCPU_OPTIONS: [u32; 4] = [1, 2, 3, 4];
+pub const DEPLOYMENT_MEMORY_OPTIONS_MIB: [u32; 4] = [512, 1024, 2048, 4096];
+
+pub(crate) fn resolve_deployment_vcpus(vcpus: Option<u32>) -> ApiResult<u32> {
+    let value = vcpus.unwrap_or(DEFAULT_DEPLOYMENT_VCPUS);
+    if DEPLOYMENT_VCPU_OPTIONS.contains(&value) {
+        Ok(value)
+    } else {
+        Err(ApiError::BadRequest(format!(
+            "Unsupported CPU value {value}. Allowed values are 1, 2, 3, and 4."
+        )))
+    }
+}
+
+pub(crate) fn resolve_deployment_memory_mib(memory_mib: Option<u32>) -> ApiResult<u32> {
+    let value = memory_mib.unwrap_or(DEFAULT_DEPLOYMENT_MEMORY_MIB);
+    if DEPLOYMENT_MEMORY_OPTIONS_MIB.contains(&value) {
+        Ok(value)
+    } else {
+        Err(ApiError::BadRequest(format!(
+            "Unsupported memory value {value}. Allowed values are 512M, 1G, 2G, and 4G."
+        )))
+    }
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct DeployRequestPayload {
     pub app_name: String,
     pub image: String,
     pub git_url: Option<String>,
+    /// CPU cores to allocate. Allowed values: 1, 2, 3, or 4.
+    #[schema(example = 1, minimum = 1, maximum = 4)]
     pub vcpus: Option<u32>,
+    /// Memory to allocate in MiB. Allowed values: 512, 1024, 2048, or 4096.
+    #[schema(example = 512, minimum = 512, maximum = 4096, multiple_of = 512)]
     pub memory_mib: Option<u32>,
     pub disk_mib: Option<u32>,
     pub port: Option<u32>,
@@ -58,8 +89,8 @@ pub async fn deploy_app(
 ) -> ApiResult<Json<DeployResponseBody>> {
     let final_image = payload.image.clone();
 
-    let vcpus = payload.vcpus.unwrap_or(1);
-    let memory_mib = payload.memory_mib.unwrap_or(256);
+    let vcpus = resolve_deployment_vcpus(payload.vcpus)?;
+    let memory_mib = resolve_deployment_memory_mib(payload.memory_mib)?;
     let disk_mib = payload.disk_mib.unwrap_or(1024);
     let port = payload.port.unwrap_or(8080);
 
@@ -166,4 +197,39 @@ pub async fn deploy_app(
     tracing::info!(job_id = ?result.job_id, status = %result.status, "Deployment processed");
 
     Ok(Json(result))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_default_resources() {
+        assert_eq!(
+            resolve_deployment_vcpus(None).expect("default CPU"),
+            DEFAULT_DEPLOYMENT_VCPUS
+        );
+        assert_eq!(
+            resolve_deployment_memory_mib(None).expect("default memory"),
+            DEFAULT_DEPLOYMENT_MEMORY_MIB
+        );
+    }
+
+    #[test]
+    fn accepts_supported_resources() {
+        for cpu in DEPLOYMENT_VCPU_OPTIONS {
+            assert_eq!(resolve_deployment_vcpus(Some(cpu)).unwrap(), cpu);
+        }
+        for memory in DEPLOYMENT_MEMORY_OPTIONS_MIB {
+            assert_eq!(resolve_deployment_memory_mib(Some(memory)).unwrap(), memory);
+        }
+    }
+
+    #[test]
+    fn rejects_unsupported_resources() {
+        assert!(resolve_deployment_vcpus(Some(0)).is_err());
+        assert!(resolve_deployment_vcpus(Some(5)).is_err());
+        assert!(resolve_deployment_memory_mib(Some(256)).is_err());
+        assert!(resolve_deployment_memory_mib(Some(1536)).is_err());
+    }
 }

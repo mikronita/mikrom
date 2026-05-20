@@ -2,6 +2,10 @@ use crate::AppState;
 use crate::auth::AuthUser;
 use crate::deploy::orchestrator::DeploymentOrchestrator;
 use crate::deploy::service::{DeployParams, DeploymentService};
+use crate::deploy::{
+    DEFAULT_DEPLOYMENT_MEMORY_MIB, DEFAULT_DEPLOYMENT_VCPUS, resolve_deployment_memory_mib,
+    resolve_deployment_vcpus,
+};
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::App;
 use crate::models::app::Deployment;
@@ -196,7 +200,11 @@ pub struct ScaleAppRequest {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ManualDeployRequest {
+    /// CPU cores to allocate. Allowed values: 1, 2, 3, or 4.
+    #[schema(example = 1, minimum = 1, maximum = 4)]
     pub vcpus: Option<u32>,
+    /// Memory to allocate in MiB. Allowed values: 512, 1024, 2048, or 4096.
+    #[schema(example = 512, minimum = 512, maximum = 4096, multiple_of = 512)]
     pub memory_mib: Option<u32>,
     pub disk_mib: Option<u32>,
     pub env: Option<std::collections::HashMap<String, String>>,
@@ -1054,13 +1062,13 @@ pub async fn deploy_app_version_handler(
     Path(app_name): Path<String>,
     Json(payload): Json<ManualDeployRequest>,
 ) -> ApiResult<Json<crate::deploy::DeployResponseBody>> {
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
-
-    let vcpus = payload.vcpus.unwrap_or(1);
-    let memory_mib = payload.memory_mib.unwrap_or(256);
+    let vcpus = resolve_deployment_vcpus(payload.vcpus)?;
+    let memory_mib = resolve_deployment_memory_mib(payload.memory_mib)?;
     let disk_mib = payload.disk_mib.unwrap_or(1024);
     let env_vars = payload.env.clone().unwrap_or_default();
     let image = payload.image.clone();
+
+    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
     // Try to fetch latest git metadata if linked to GitHub
     let mut git_metadata = None;
@@ -1212,8 +1220,8 @@ pub async fn trigger_app_build(
     app: crate::models::app::App,
     git_metadata: Option<crate::repositories::app_repository::GitMetadata>,
 ) -> ApiResult<Uuid> {
-    let vcpus = 1;
-    let memory_mib = 256;
+    let vcpus = DEFAULT_DEPLOYMENT_VCPUS;
+    let memory_mib = DEFAULT_DEPLOYMENT_MEMORY_MIB;
     let disk_mib = 1024;
     let env_vars = std::collections::HashMap::new();
 
@@ -1222,7 +1230,7 @@ pub async fn trigger_app_build(
         .create_deployment(crate::repositories::app_repository::NewDeployment {
             app_id: app.id,
             user_id: app.user_id.to_string(),
-            vcpus,
+            vcpus: vcpus as i32,
             memory_mib: memory_mib as i64,
             disk_mib: disk_mib as i64,
             port: app.port,
@@ -1248,7 +1256,7 @@ pub async fn trigger_app_build(
         &state,
         &app,
         &deployment,
-        vcpus as u32,
+        vcpus,
         memory_mib as u64,
         disk_mib as u64,
         env_vars,
@@ -1384,7 +1392,7 @@ mod tests {
                     ipv6_address: Some("fd00::1".to_string()),
                     status: "RUNNING".to_string(),
                     vcpus: 1,
-                    memory_mib: 256,
+                    memory_mib: 512,
                     disk_mib: 1024,
                     port: 8080,
                     env_vars: serde_json::json!({}),
