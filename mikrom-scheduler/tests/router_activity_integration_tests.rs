@@ -354,6 +354,7 @@ async fn test_router_traffic_restores_paused_deployment() {
         Arc::new(agent_client.clone()),
         client.clone(),
         pool,
+        900,
     ));
 
     let server = SchedulerServer::new(app_service.clone(), None);
@@ -495,6 +496,7 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
         agent_client.clone(),
         client.clone(),
         pool,
+        900,
     ));
 
     let server = SchedulerServer::new(app_service.clone(), None);
@@ -619,6 +621,7 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
         Arc::new(agent_client.clone()),
         client.clone(),
         pool,
+        900,
     );
 
     let server = SchedulerServer {

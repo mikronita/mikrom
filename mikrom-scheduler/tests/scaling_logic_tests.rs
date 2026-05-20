@@ -278,6 +278,7 @@ async fn test_reconcile_scale_up_from_zero_manual() {
         agent_client,
         nats_client,
         pool,
+        900,
     );
 
     service.reconcile_apps().await.unwrap();
@@ -349,6 +350,7 @@ async fn test_reconcile_scale_up_from_zero_with_traffic() {
         agent_client,
         nats_client,
         pool,
+        900,
     );
 
     service.reconcile_apps().await.unwrap();

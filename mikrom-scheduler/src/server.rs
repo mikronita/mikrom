@@ -538,6 +538,7 @@ mod tests {
             Arc::new(MockAgentClient::new()),
             nats_client,
             sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+            900,
         );
         let server = SchedulerServer::new(Arc::new(service), None);
 

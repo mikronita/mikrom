@@ -43,6 +43,7 @@ Messages are defined in `mikrom-proto/proto/*.proto`.
 |---|---|---|
 | `NATS_URL` | `nats://127.0.0.1:4222` | URL of the NATS server |
 | `METRICS_TTL_SECS` | `30` | Heartbeat timeout |
+| `ROUTER_IDLE_TIMEOUT_SECS` | `900` | Idle time before scaling an app to zero after router traffic stops |
 | `MAX_APPS_PER_HOST` | `10` | Resource isolation limit |
 | `USE_TLS` | `false` | Enable mutual TLS for NATS |
 
