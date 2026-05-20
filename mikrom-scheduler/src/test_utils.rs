@@ -65,7 +65,7 @@ impl Drop for TestDb {
         let server_url = self.server_url.clone();
         let db_name = self.db_name.clone();
 
-        let handle = std::thread::spawn(move || {
+        std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -83,8 +83,6 @@ impl Drop for TestDb {
                 }
             });
         });
-
-        let _ = handle.join();
     }
 }
 

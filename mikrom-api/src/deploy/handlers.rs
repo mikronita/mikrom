@@ -15,6 +15,7 @@ use axum::{
 use futures::stream::Stream;
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
@@ -122,30 +123,37 @@ pub(crate) async fn resolve_app_scale_state(state: &AppState, app: &App) -> AppS
                 .filter(|j| j.app_id == app.id.to_string())
                 .count();
 
-            if running_count > 0 {
-                let now = chrono::Utc::now().timestamp();
-                // If traffic in the last 10 seconds, mark as active, otherwise idle
-                if app.last_router_traffic_at > 0 && now - app.last_router_traffic_at < 10 {
-                    AppScaleState::Active
-                } else {
-                    AppScaleState::Idle
-                }
-            } else {
-                // If we have a deployment and desired replicas > 0, we're warming up
-                if app.desired_replicas > 0 && app.active_deployment_id.is_some() {
-                    AppScaleState::WarmingUp
-                } else {
-                    AppScaleState::ScaledToZero
-                }
-            }
+            resolve_app_scale_state_from_running_count(
+                app,
+                running_count,
+                chrono::Utc::now().timestamp(),
+            )
         },
         Err(_) => AppScaleState::ScaledToZero,
     }
 }
 
-async fn build_app_response(state: &AppState, app: &App) -> AppResponse {
-    let scale_state = resolve_app_scale_state(state, app).await;
+fn resolve_app_scale_state_from_running_count(
+    app: &App,
+    running_count: usize,
+    now: i64,
+) -> AppScaleState {
+    if running_count > 0 {
+        // If traffic in the last 10 seconds, mark as active, otherwise idle
+        if app.last_router_traffic_at > 0 && now - app.last_router_traffic_at < 10 {
+            AppScaleState::Active
+        } else {
+            AppScaleState::Idle
+        }
+    } else if app.desired_replicas > 0 && app.active_deployment_id.is_some() {
+        // If we have a deployment and desired replicas > 0, we're warming up
+        AppScaleState::WarmingUp
+    } else {
+        AppScaleState::ScaledToZero
+    }
+}
 
+fn build_app_response_with_scale_state(app: &App, scale_state: AppScaleState) -> AppResponse {
     AppResponse {
         id: app.id,
         name: app.name.clone(),
@@ -168,6 +176,12 @@ async fn build_app_response(state: &AppState, app: &App) -> AppResponse {
         scale_state,
         created_at: app.created_at,
     }
+}
+
+async fn build_app_response(state: &AppState, app: &App) -> AppResponse {
+    let scale_state = resolve_app_scale_state(state, app).await;
+
+    build_app_response_with_scale_state(app, scale_state)
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -410,10 +424,45 @@ pub async fn list_apps_handler(
         .list_apps_by_user(Some(user_id))
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let now = chrono::Utc::now().timestamp();
+
+    let running_counts = match state
+        .scheduler
+        .list_apps(mikrom_proto::scheduler::ListAppsRequest {
+            user_id: user_id.to_string(),
+            status: Some(mikrom_proto::scheduler::DeployStatus::Running as i32),
+        })
+        .await
+    {
+        Ok(resp) => {
+            let mut counts = HashMap::new();
+            for job in resp.apps {
+                if let Ok(app_id) = Uuid::parse_str(&job.app_id) {
+                    *counts.entry(app_id).or_insert(0) += 1;
+                }
+            }
+            Some(counts)
+        },
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "Failed to list running jobs from scheduler while listing apps"
+            );
+            None
+        },
+    };
 
     let mut responses = Vec::with_capacity(apps.len());
     for app in apps {
-        let mut response = build_app_response(&state, &app).await;
+        let mut response = if let Some(running_counts) = &running_counts {
+            let running_count = *running_counts.get(&app.id).unwrap_or(&0);
+            build_app_response_with_scale_state(
+                &app,
+                resolve_app_scale_state_from_running_count(&app, running_count, now),
+            )
+        } else {
+            build_app_response(&state, &app).await
+        };
         if response.github_webhook_secret.is_some() {
             response.github_webhook_secret = Some("********".to_string());
         }

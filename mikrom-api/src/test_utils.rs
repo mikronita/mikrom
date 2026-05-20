@@ -62,13 +62,11 @@ impl Deref for TestDb {
 
 impl Drop for TestDb {
     fn drop(&mut self) {
-        // Since we can't do async in Drop easily without a runtime handle,
-        // and we want to be sure it happens, we use a separate thread or blocking call.
+        // Best-effort cleanup runs in the background so dropping the test helper stays non-blocking.
         let server_url = self.server_url.clone();
         let db_name = self.db_name.clone();
 
-        // We use a background thread to perform the cleanup to not block the test executor
-        let handle = std::thread::spawn(move || {
+        std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -87,9 +85,6 @@ impl Drop for TestDb {
                 }
             });
         });
-
-        // Wait for the cleanup thread to finish to ensure the database is dropped
-        let _ = handle.join();
     }
 }
 
