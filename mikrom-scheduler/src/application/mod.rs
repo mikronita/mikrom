@@ -9,14 +9,17 @@ use crate::domain::{
 use std::sync::Arc;
 
 const ROUTER_IDLE_TIMEOUT_SECS: i64 = 30;
+const AUTOSCALING_SCALE_DOWN_HYSTERESIS_RATIO: f64 = 0.5;
 
 fn autoscale_next_replicas(app: &AppConfig, current_count: u32, avg_cpu: f32, avg_mem: f32) -> u32 {
     let mut desired = current_count;
+    let cpu = avg_cpu as f64;
+    let mem = avg_mem as f64;
 
-    if (avg_cpu as f64) > app.cpu_threshold || (avg_mem as f64) > app.mem_threshold {
+    if cpu > app.cpu_threshold || mem > app.mem_threshold {
         desired = desired.saturating_add(1).min(app.max_replicas);
-    } else if (avg_cpu as f64) < app.cpu_threshold
-        && (avg_mem as f64) < app.mem_threshold
+    } else if cpu < app.cpu_threshold * AUTOSCALING_SCALE_DOWN_HYSTERESIS_RATIO
+        && mem < app.mem_threshold * AUTOSCALING_SCALE_DOWN_HYSTERESIS_RATIO
         && desired > app.min_replicas
     {
         desired -= 1;
@@ -478,8 +481,31 @@ impl AppService {
         let now = chrono::Utc::now().timestamp();
 
         // 3. Evaluate each app
-        for app in apps {
+        for mut app in apps {
             let current_count = *app_running_counts.get(&app.id).unwrap_or(&0);
+
+            if current_count > 0
+                && app.min_replicas == 0
+                && app.desired_replicas > 0
+                && app.last_router_traffic_at == 0
+            {
+                let updated_app = AppConfig {
+                    last_router_traffic_at: now,
+                    ..app.clone()
+                };
+
+                if let Err(e) = self.app_repo.update_app_config(updated_app).await {
+                    tracing::error!(
+                        app_id = %app.id,
+                        error = %e,
+                        "Failed to initialize router traffic timestamp for active app"
+                    );
+                    continue;
+                }
+
+                app.last_router_traffic_at = now;
+            }
+
             let router_idle = app.min_replicas == 0
                 && app.last_router_traffic_at > 0
                 && now - app.last_router_traffic_at >= ROUTER_IDLE_TIMEOUT_SECS;
@@ -1319,6 +1345,28 @@ mod tests {
         let target = autoscale_next_replicas(&app, 3, 30.0, 25.0);
 
         assert_eq!(target, 2);
+    }
+
+    #[test]
+    fn autoscaling_target_holds_size_inside_hysteresis_band() {
+        let app = AppConfig {
+            id: "app-1".to_string(),
+            user_id: "user-1".to_string(),
+            vpc_ipv6_prefix: "fd00::".to_string(),
+            desired_replicas: 3,
+            min_replicas: 1,
+            max_replicas: 3,
+            autoscaling_enabled: true,
+            cpu_threshold: 80.0,
+            mem_threshold: 80.0,
+            hostname: "app.example.com".to_string(),
+            last_router_traffic_at: 0,
+            last_scaled_to_zero_at: 0,
+        };
+
+        let target = autoscale_next_replicas(&app, 3, 70.0, 70.0);
+
+        assert_eq!(target, 3);
     }
 
     #[test]

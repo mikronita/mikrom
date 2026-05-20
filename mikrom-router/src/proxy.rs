@@ -426,69 +426,38 @@ impl ProxyHttp for MikromProxy {
                 .map_or_else(|| b"".to_vec(), |addr| addr.to_string().into_bytes());
 
             if let Some(upstream) = lb.select(&hash, 256) {
-                // Pre-flight check: ensure the target is actually reachable via TCP.
-                // This handles the "No route to host" race during 6PN/WireGuard synchronization.
                 let addr_str = upstream.addr.to_string();
-                if let Ok(Ok(_stream)) = tokio::time::timeout(
-                    std::time::Duration::from_millis(500),
-                    tokio::net::TcpStream::connect(&addr_str),
-                )
-                .await
-                {
-                    info!("Selected upstream: {upstream:?}, use_tls: {use_tls} (verified)");
+                info!("Selected upstream: {upstream:?}, use_tls: {use_tls}");
 
-                    // Success: Reset circuit breaker
-                    self.wake_up_failures.remove(&normalized_host);
+                // Success: Reset circuit breaker
+                self.wake_up_failures.remove(&normalized_host);
 
-                    let mut peer = HttpPeer::new(addr_str, use_tls, normalized_host);
-                    if use_tls {
-                        if let Some(ca) = &self.upstream_ca {
-                            peer.options.ca = Some(ca.clone());
-                        }
-                        if let Some(alternative_cn) = &alternative_cn {
-                            peer.options.alternative_cn = Some(alternative_cn.clone());
-                        }
+                let mut peer = HttpPeer::new(addr_str, use_tls, normalized_host);
+                if use_tls {
+                    if let Some(ca) = &self.upstream_ca {
+                        peer.options.ca = Some(ca.clone());
                     }
-                    return Ok(Box::new(peer));
+                    if let Some(alternative_cn) = &alternative_cn {
+                        peer.options.alternative_cn = Some(alternative_cn.clone());
+                    }
                 }
+                return Ok(Box::new(peer));
+            }
 
-                // Upstream not ready yet, continue loop
-                let now = std::time::Instant::now();
-                if now >= deadline {
-                    warn!(host = %normalized_host, addr = %addr_str, "Wake-up timeout reached, incrementing circuit breaker");
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return Err(Error::explain(
+                    ErrorType::HTTPStatus(503),
+                    format!("No healthy upstreams for host: {normalized_host} after waiting 30s"),
+                ));
+            }
 
-                    // Increment circuit breaker
-                    let mut entry = self
-                        .wake_up_failures
-                        .entry(normalized_host.clone())
-                        .or_insert((0, std::time::Instant::now()));
-                    entry.0 += 1;
-                    entry.1 = std::time::Instant::now();
-                    drop(entry);
-
-                    return Err(Error::explain(
-                        ErrorType::HTTPStatus(503),
-                        format!("Upstream {addr_str} selected but unreachable after 30s"),
-                    ));
-                }
-            } else {
-                let now = std::time::Instant::now();
-                if now >= deadline {
-                    return Err(Error::explain(
-                        ErrorType::HTTPStatus(503),
-                        format!(
-                            "No healthy upstreams for host: {normalized_host} after waiting 30s"
-                        ),
-                    ));
-                }
-
-                // Log selection failure every 2 seconds to avoid spamming but keep visibility
-                if now.duration_since(last_log_time).as_secs() >= 2 {
-                    info!(
-                        "No healthy upstreams for {normalized_host} yet (app might be waking up), waiting..."
-                    );
-                    last_log_time = now;
-                }
+            // Log selection failure every 2 seconds to avoid spamming but keep visibility
+            if now.duration_since(last_log_time).as_secs() >= 2 {
+                info!(
+                    "No healthy upstreams for {normalized_host} yet (app might be waking up), waiting..."
+                );
+                last_log_time = now;
             }
 
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;

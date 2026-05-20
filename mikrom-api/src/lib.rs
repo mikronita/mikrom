@@ -153,7 +153,11 @@ impl AppState {
             .publish(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
             .await?;
 
-        if has_targets && let Ok(Some(user)) = self.user_repo.find_by_id(app.user_id).await {
+        if has_targets {
+            let Some(user) = self.user_repo.find_by_id(app.user_id).await.ok().flatten() else {
+                return Ok(());
+            };
+
             let _ = self
                 .scheduler
                 .update_app_scaling_config(mikrom_proto::scheduler::UpdateAppScalingConfigRequest {
