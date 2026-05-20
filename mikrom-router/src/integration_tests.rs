@@ -766,6 +766,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         agent_client.clone(),
         nats_client.clone(),
         pool.clone(),
+        900,
     ));
     let scheduler_server = SchedulerServer::new(app_service.clone(), None);
     let scheduler_event_loop = NatsEventLoop::new(scheduler_server, nats_client.clone());
@@ -1003,7 +1004,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
             autoscaling_enabled: false,
             cpu_threshold: 80.0,
             mem_threshold: 80.0,
-            last_router_traffic_at: now - 600,
+            last_router_traffic_at: now - 1000,
             last_scaled_to_zero_at: 0,
         })
         .await

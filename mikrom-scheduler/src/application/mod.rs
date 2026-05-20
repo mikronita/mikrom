@@ -8,7 +8,6 @@ use crate::domain::{
 };
 use std::sync::Arc;
 
-const ROUTER_IDLE_TIMEOUT_SECS: i64 = 30;
 const AUTOSCALING_SCALE_DOWN_HYSTERESIS_RATIO: f64 = 0.5;
 
 fn autoscale_next_replicas(app: &AppConfig, current_count: u32, avg_cpu: f32, avg_mem: f32) -> u32 {
@@ -36,6 +35,7 @@ pub struct AppService {
     pub agent_client: Arc<dyn AgentClient>,
     pub nats_client: async_nats::Client,
     pub pool: sqlx::PgPool,
+    pub router_idle_timeout_secs: i64,
 }
 
 impl AppService {
@@ -46,6 +46,7 @@ impl AppService {
         agent_client: Arc<dyn AgentClient>,
         nats_client: async_nats::Client,
         pool: sqlx::PgPool,
+        router_idle_timeout_secs: i64,
     ) -> Self {
         Self {
             deployment: DeploymentService::new(
@@ -60,6 +61,7 @@ impl AppService {
             agent_client,
             nats_client,
             pool,
+            router_idle_timeout_secs,
         }
     }
 
@@ -95,7 +97,7 @@ impl AppService {
         if let Ok(Some(app)) = self.app_repo.get_app_config(&job.app_id).await {
             let now = chrono::Utc::now().timestamp();
             if app.last_router_traffic_at > app.last_scaled_to_zero_at
-                && now - app.last_router_traffic_at < ROUTER_IDLE_TIMEOUT_SECS
+                && now - app.last_router_traffic_at < self.router_idle_timeout_secs
             {
                 tracing::info!(
                     job_id = %job_id,
@@ -508,7 +510,7 @@ impl AppService {
 
             let router_idle = app.min_replicas == 0
                 && app.last_router_traffic_at > 0
-                && now - app.last_router_traffic_at >= ROUTER_IDLE_TIMEOUT_SECS;
+                && now - app.last_router_traffic_at >= self.router_idle_timeout_secs;
             let should_restore_from_zero = app.min_replicas == 0
                 && app.desired_replicas > 0
                 && app.last_router_traffic_at > app.last_scaled_to_zero_at;
@@ -518,7 +520,8 @@ impl AppService {
                     event = "scale_to_zero",
                     app_id = %app.id,
                     last_router_traffic_at = %app.last_router_traffic_at,
-                    "No router traffic for 30 seconds; scaling app to zero"
+                    timeout_secs = self.router_idle_timeout_secs,
+                    "No router traffic for configured idle timeout; scaling app to zero"
                 );
 
                 // Update timestamp FIRST to prevent immediate wake-up if scale_app takes time or fails
@@ -1107,6 +1110,7 @@ mod tests {
             agent_client,
             nats_client,
             pool,
+            router_idle_timeout_secs: 900,
         };
 
         let res = service.check_health("job-1", "user-1").await.unwrap();
@@ -1170,6 +1174,7 @@ mod tests {
             agent_client,
             nats_client,
             pool,
+            router_idle_timeout_secs: 900,
         };
 
         service.pause_app("job-1", "user-1").await.unwrap();
@@ -1221,6 +1226,7 @@ mod tests {
             agent_client,
             nats_client,
             pool,
+            router_idle_timeout_secs: 900,
         };
 
         service.pause_app("job-1", "user-1").await.unwrap();
@@ -1270,6 +1276,7 @@ mod tests {
             agent_client,
             nats_client,
             pool,
+            router_idle_timeout_secs: 900,
         };
 
         service.delete_all_by_app("app-1", "user-1").await.unwrap();
@@ -1315,6 +1322,7 @@ mod tests {
             agent_client,
             nats_client,
             pool,
+            router_idle_timeout_secs: 900,
         };
 
         let err = service

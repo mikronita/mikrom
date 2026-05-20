@@ -64,7 +64,7 @@
         <div class="space-y-1">
           <div class="text-sm font-medium text-blue-500">Global Scale-to-Zero Policy</div>
           <div class="text-xs text-muted-foreground leading-relaxed">
-            All Mikrom applications scale to zero after 5 minutes of inactivity to save resources. Your app will automatically wake up when it receives traffic.
+            All Mikrom applications scale to zero after 15 minutes of inactivity to save resources. Your app will automatically wake up when it receives traffic.
           </div>
         </div>
       </div>

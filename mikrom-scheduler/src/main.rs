@@ -49,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
         agent_client,
         nats_client.clone(),
         pool.clone(),
+        config.router_idle_timeout_secs,
     ));
 
     let server = SchedulerServer::new(app_service.clone(), certs);

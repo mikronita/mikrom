@@ -1244,6 +1244,7 @@ mod tests {
             agent_client,
             nats_client,
             pool,
+            router_idle_timeout_secs: 900,
         });
 
         let server = SchedulerServer {
