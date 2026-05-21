@@ -34,8 +34,7 @@ mod tests {
             .collect();
 
         assert!(!table_names.contains(&"jobs".to_string()));
-        assert!(table_names.contains(&"workers".to_string()));
-        assert!(table_names.contains(&"users".to_string()));
+        assert!(table_names.contains(&"deployments".to_string()));
         assert!(table_names.contains(&"apps".to_string()));
     }
 
