@@ -1,6 +1,6 @@
 use crate::error::{ApiError, ApiResult};
 use crate::models::volume::{
-    AppVolume, AttachedVolume, Volume, VolumeSnapshot, VolumeWithAttachments,
+    AppVolume, AttachedVolume, Volume, VolumeAccessMode, VolumeSnapshot, VolumeWithAttachments,
 };
 use crate::repositories::volume_repository::{CreateSnapshotParams, CreateVolumeParams};
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
@@ -55,10 +55,25 @@ fn validate_mount_point(mount_point: &str) -> ApiResult<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn has_duplicate_mount_point(volumes: &[AttachedVolume], mount_point: &str) -> bool {
     volumes
         .iter()
         .any(|volume| volume.mount_point == mount_point)
+}
+
+fn has_duplicate_mount_point_for_volume(
+    volumes: &[AttachedVolume],
+    volume_id: Uuid,
+    mount_point: &str,
+) -> bool {
+    volumes
+        .iter()
+        .any(|volume| volume.volume.id != volume_id && volume.mount_point == mount_point)
+}
+
+fn storage_nats_timeout() -> Duration {
+    Duration::from_secs(30)
 }
 
 #[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
@@ -108,7 +123,7 @@ pub async fn create_volume_handler(
 
     let resp: mikrom_proto::scheduler::CreateVolumeResponse = state
         .nats
-        .with_timeout(Duration::from_secs(5))
+        .with_timeout(storage_nats_timeout())
         .request("mikrom.scheduler.create_volume", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;
@@ -193,17 +208,54 @@ pub async fn attach_volume_handler(
 
     validate_mount_point(&req.mount_point)?;
 
-    let existing_volumes = state.volume_repo.list_volumes_by_app(app_id).await?;
-    if has_duplicate_mount_point(&existing_volumes, &req.mount_point) {
+    let requested_access_mode = VolumeAccessMode::from_i32(req.access_mode)
+        .ok_or_else(|| ApiError::BadRequest(format!("Invalid access mode {}", req.access_mode)))?;
+
+    let app_volumes = state.volume_repo.list_volumes_by_app(app_id).await?;
+    if has_duplicate_mount_point_for_volume(&app_volumes, req.volume_id, &req.mount_point) {
         return Err(ApiError::BadRequest(format!(
             "Mount point {} is already in use for this application",
             req.mount_point
         )));
     }
 
+    let user_volumes = state.volume_repo.list_volumes_by_user(app.user_id).await?;
+    let target_volume = user_volumes
+        .into_iter()
+        .find(|entry| entry.volume.id == req.volume_id)
+        .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
+
+    let other_app_attachments = target_volume
+        .attachments
+        .iter()
+        .filter(|attachment| attachment.app_id != app_id)
+        .collect::<Vec<_>>();
+
+    let has_other_app_rwo_attachment = other_app_attachments.iter().any(|attachment| {
+        VolumeAccessMode::from_i32(attachment.access_mode) == Some(VolumeAccessMode::ReadWriteOnce)
+    });
+
+    if requested_access_mode == VolumeAccessMode::ReadWriteOnce && !other_app_attachments.is_empty()
+    {
+        return Err(ApiError::BadRequest(
+            "Volume is already attached to another application and cannot be shared in ReadWriteOnce mode".to_string(),
+        ));
+    }
+
+    if has_other_app_rwo_attachment {
+        return Err(ApiError::BadRequest(
+            "Volume already has a ReadWriteOnce attachment on another application".to_string(),
+        ));
+    }
+
     let app_volume = state
         .volume_repo
-        .attach_volume_to_app(app_id, req.volume_id, req.mount_point, req.access_mode)
+        .attach_volume_to_app(
+            app_id,
+            req.volume_id,
+            req.mount_point,
+            requested_access_mode.as_i32(),
+        )
         .await?;
 
     // Emit workspace event
@@ -322,13 +374,25 @@ pub async fn create_snapshot_handler(
 
     let resp: mikrom_proto::scheduler::CreateSnapshotResponse = state
         .nats
-        .with_timeout(Duration::from_secs(5))
+        .with_timeout(storage_nats_timeout())
         .request("mikrom.scheduler.create_snapshot", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;
 
     if !resp.success {
         return Err(ApiError::Scheduler(resp.message));
+    }
+
+    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+        kind: WorkspaceEventKind::SnapshotChanged,
+        user_id: Some(volume.user_id),
+        app_id: None,
+        app_name: None,
+        deployment_id: None,
+        volume_id: Some(volume.id),
+        resource_id: Some(snapshot.id.to_string()),
+    }) {
+        tracing::warn!(error = %e, "Failed to broadcast SnapshotChanged event");
     }
 
     Ok((StatusCode::CREATED, Json(snapshot)))
@@ -382,7 +446,7 @@ pub async fn delete_volume_handler(
 
     let resp: mikrom_proto::scheduler::DeleteVolumeResponse = state
         .nats
-        .with_timeout(Duration::from_secs(5))
+        .with_timeout(storage_nats_timeout())
         .request("mikrom.scheduler.delete_volume", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;
@@ -441,7 +505,7 @@ pub async fn delete_snapshot_handler(
 
     let resp: mikrom_proto::scheduler::DeleteSnapshotResponse = state
         .nats
-        .with_timeout(Duration::from_secs(5))
+        .with_timeout(storage_nats_timeout())
         .request("mikrom.scheduler.delete_snapshot", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;
@@ -451,6 +515,18 @@ pub async fn delete_snapshot_handler(
     }
 
     state.volume_repo.delete_snapshot(snapshot_id).await?;
+
+    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+        kind: WorkspaceEventKind::SnapshotChanged,
+        user_id: Some(snapshot.user_id),
+        app_id: None,
+        app_name: None,
+        deployment_id: None,
+        volume_id: Some(snapshot.volume_id),
+        resource_id: Some(snapshot.id.to_string()),
+    }) {
+        tracing::warn!(error = %e, "Failed to broadcast SnapshotChanged event");
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -482,7 +558,7 @@ pub async fn restore_snapshot_handler(
 
     let resp: mikrom_proto::scheduler::RestoreSnapshotResponse = state
         .nats
-        .with_timeout(Duration::from_secs(5))
+        .with_timeout(storage_nats_timeout())
         .request("mikrom.scheduler.restore_snapshot", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;
@@ -538,7 +614,7 @@ pub async fn clone_volume_handler(
 
     let resp: mikrom_proto::scheduler::CloneVolumeResponse = state
         .nats
-        .with_timeout(Duration::from_secs(5))
+        .with_timeout(storage_nats_timeout())
         .request("mikrom.scheduler.clone_volume", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;

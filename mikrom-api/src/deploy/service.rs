@@ -3,6 +3,7 @@ use crate::deploy::worker::{BuildTask, start_build_polling};
 use crate::deploy::workflow::DeploymentPromotionWorkflow;
 use crate::error::{ApiError, ApiResult};
 use crate::models::app::{App, Deployment};
+use crate::models::volume::VolumeAccessMode;
 use crate::repositories::app_repository::UpdateDeploymentParams;
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use mikrom_proto::scheduler::{AppConfig, DeployRequest, DeployResponse};
@@ -215,7 +216,8 @@ impl DeploymentService {
                     .map(|v| mikrom_proto::scheduler::Volume {
                         volume_id: v.volume.id.to_string(),
                         size_mib: v.volume.size_mib as u64,
-                        read_only: v.access_mode == 2, // ROX is read-only
+                        read_only: VolumeAccessMode::from_i32(v.access_mode)
+                            .is_some_and(|mode| mode.is_read_only()),
                         pool_name: v.volume.pool_name,
                         mount_point: v.mount_point,
                         access_mode: v.access_mode,
