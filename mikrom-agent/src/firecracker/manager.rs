@@ -1882,6 +1882,15 @@ impl FirecrackerManager {
             Err(_) => return,
         };
 
+        // Pre-calculate 8-character prefixes of active VM IDs for O(1) lookup
+        let active_prefixes: std::collections::HashSet<String> = active_vm_ids
+            .iter()
+            .map(|vm_id| {
+                let s = vm_id.to_string();
+                if s.len() >= 8 { s[..8].to_string() } else { s }
+            })
+            .collect();
+
         let mut links = handle.link().get().execute();
         while let Ok(Some(link)) = links.try_next().await {
             let name = link.attributes.iter().find_map(|attr| match attr {
@@ -1898,12 +1907,8 @@ impl FirecrackerManager {
                     continue;
                 }
 
-                // Check if any active VM ID starts with this prefix
-                let is_active = active_vm_ids
-                    .iter()
-                    .any(|vm_id| vm_id.to_string().starts_with(vm_id_prefix));
-
-                if !is_active {
+                // Check if this TAP belongs to any active VM using the pre-calculated prefixes
+                if !active_prefixes.contains(vm_id_prefix) {
                     tracing::info!(tap = %tap_name, "Cleaning up stale TAP interface");
                     self.cleanup_tap(&tap_name).await;
                 }
