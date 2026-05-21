@@ -389,38 +389,89 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_volume_create_parses_new_fields() {
+    fn test_cli_volume_create_parses_name_and_size() {
         let cli = Cli::try_parse_from([
-            "mikrom",
-            "volume",
-            "create",
-            "--app",
-            "my-app",
-            "--name",
-            "data",
-            "--size",
-            "1024",
-            "--mount",
-            "/mnt/data",
-            "--mode",
-            "1",
+            "mikrom", "volume", "create", "--name", "data", "--size", "1024",
         ])
         .unwrap();
         match cli.command {
-            Commands::Volume(mikrom_cli::commands::VolumeCommands::Create {
+            Commands::Volume(mikrom_cli::commands::VolumeCommands::Create { name, size }) => {
+                assert_eq!(name, "data");
+                assert_eq!(size, 1024);
+            },
+            _ => panic!("expected volume create"),
+        }
+    }
+
+    #[test]
+    fn test_cli_volume_list_parses_optional_app() {
+        let cli = Cli::try_parse_from(["mikrom", "volume", "list"]).unwrap();
+        match cli.command {
+            Commands::Volume(mikrom_cli::commands::VolumeCommands::List { app }) => {
+                assert!(app.is_none());
+            },
+            _ => panic!("expected volume list"),
+        }
+
+        let cli = Cli::try_parse_from(["mikrom", "volume", "list", "--app", "svc"]).unwrap();
+        match cli.command {
+            Commands::Volume(mikrom_cli::commands::VolumeCommands::List { app }) => {
+                assert_eq!(app.as_deref(), Some("svc"));
+            },
+            _ => panic!("expected volume list with app"),
+        }
+    }
+
+    #[test]
+    fn test_cli_volume_attach_parses_fields() {
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "volume",
+            "attach",
+            "--app",
+            "svc",
+            "--volume-id",
+            "vol-123",
+            "--mount",
+            "/data",
+            "--mode",
+            "2",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Volume(mikrom_cli::commands::VolumeCommands::Attach {
                 app,
-                name,
-                size,
+                volume_id,
                 mount,
                 mode,
             }) => {
-                assert_eq!(app, "my-app");
-                assert_eq!(name, "data");
-                assert_eq!(size, 1024);
-                assert_eq!(mount, "/mnt/data");
-                assert_eq!(mode, 1);
+                assert_eq!(app, "svc");
+                assert_eq!(volume_id, "vol-123");
+                assert_eq!(mount, "/data");
+                assert_eq!(mode, 2);
             },
-            _ => panic!("expected volume create"),
+            _ => panic!("expected volume attach"),
+        }
+    }
+
+    #[test]
+    fn test_cli_volume_detach_parses_fields() {
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "volume",
+            "detach",
+            "--app",
+            "svc",
+            "--volume-id",
+            "vol-123",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Volume(mikrom_cli::commands::VolumeCommands::Detach { app, volume_id }) => {
+                assert_eq!(app, "svc");
+                assert_eq!(volume_id, "vol-123");
+            },
+            _ => panic!("expected volume detach"),
         }
     }
 }

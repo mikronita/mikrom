@@ -55,13 +55,10 @@ async fn test_list_volume_snapshots_endpoint() {
         .returning(move |id| {
             Ok(Some(Volume {
                 id,
-                app_id: Uuid::new_v4(),
                 user_id,
                 name: "test-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
-                mount_point: "/data".to_string(),
-                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -143,13 +140,10 @@ async fn test_create_volume_snapshot_endpoint() {
         .returning(move |id| {
             Ok(Some(Volume {
                 id,
-                app_id,
                 user_id,
                 name: "test-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
-                mount_point: "/data".to_string(),
-                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -269,13 +263,10 @@ async fn test_restore_volume_snapshot_endpoint() {
         .returning(move |id| {
             Ok(Some(Volume {
                 id,
-                app_id: Uuid::new_v4(),
                 user_id,
                 name: "test-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
-                mount_point: "/data".to_string(),
-                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -386,13 +377,10 @@ async fn test_delete_snapshot_endpoint() {
         .returning(move |id| {
             Ok(Some(Volume {
                 id,
-                app_id: Uuid::new_v4(),
                 user_id,
                 name: "test-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
-                mount_point: "/data".to_string(),
-                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -494,13 +482,10 @@ async fn test_clone_volume_endpoint() {
         .returning(move |id| {
             Ok(Some(Volume {
                 id,
-                app_id: Uuid::new_v4(),
                 user_id,
                 name: "source-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
-                mount_point: "/data".to_string(),
-                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -511,13 +496,10 @@ async fn test_clone_volume_endpoint() {
         .returning(move |params| {
             Ok(Volume {
                 id: target_volume_id,
-                app_id: params.app_id,
                 user_id: params.user_id,
                 name: params.name,
                 size_mib: params.size_mib,
                 pool_name: params.pool_name,
-                mount_point: params.mount_point,
-                access_mode: params.access_mode,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             })
@@ -594,9 +576,9 @@ async fn test_clone_volume_endpoint() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let volume: Volume = serde_json::from_slice(&body).unwrap();
-    assert_eq!(volume.id, target_volume_id);
-    assert_eq!(volume.name, "cloned-vol");
+    let volume: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(volume["id"], target_volume_id.to_string());
+    assert_eq!(volume["name"], "cloned-vol");
 }
 
 #[tokio::test]
@@ -623,13 +605,10 @@ async fn test_restore_volume_snapshot_endpoint_failure() {
         .returning(move |id| {
             Ok(Some(Volume {
                 id,
-                app_id: Uuid::new_v4(),
                 user_id,
                 name: "test-vol".to_string(),
                 size_mib: 1024,
                 pool_name: "test-pool".to_string(),
-                mount_point: "/data".to_string(),
-                access_mode: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             }))
@@ -705,5 +684,5 @@ async fn test_restore_volume_snapshot_endpoint_failure() {
         .await
         .unwrap();
     let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(error["error"], "Error communicating with scheduler");
+    assert_eq!(error["error"], "Scheduler error: Image is busy");
 }

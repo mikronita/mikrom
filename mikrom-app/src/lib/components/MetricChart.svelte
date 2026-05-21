@@ -268,7 +268,7 @@
     <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
       {#each series as config}
         {@const latest = visiblePoints.at(-1)}
-        <div class="flex items-center gap-2 text-sm text-muted-foreground">
+        <div class="flex items-center gap-2 text-xs text-muted-foreground">
           <span class="size-2 rounded-full" style={`background-color: ${config.color}`}></span>
           <span>{config.label}</span>
           {#if latest}

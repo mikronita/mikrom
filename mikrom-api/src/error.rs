@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::convert::Infallible;
 use thiserror::Error;
 
-#[derive(Serialize, rovo::schemars::JsonSchema)]
+#[derive(Serialize, serde::Deserialize, rovo::schemars::JsonSchema)]
 pub struct ErrorResponse {
     pub error: String,
     pub status: u16,
@@ -113,7 +113,7 @@ impl IntoResponse for ApiError {
                 tracing::error!("Scheduler error: {}", msg);
                 (
                     StatusCode::SERVICE_UNAVAILABLE,
-                    "Error communicating with scheduler".to_string(),
+                    format!("Scheduler error: {}", msg),
                 )
             },
             Self::Anyhow(err) => {
@@ -215,5 +215,24 @@ where
         } else {
             vec![]
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+
+    #[tokio::test]
+    async fn scheduler_error_is_exposed_in_response_body() {
+        let response = ApiError::Scheduler("scheduler unavailable".to_string()).into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let error: ErrorResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error.error, "Scheduler error: scheduler unavailable");
+        assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE.as_u16());
     }
 }

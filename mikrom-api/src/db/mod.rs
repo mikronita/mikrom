@@ -19,6 +19,7 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateE
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::TestDb;
 
     #[tokio::test]
     async fn test_connect_with_invalid_url() {
@@ -28,11 +29,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_migrations() {
-        let pool =
-            connect_to_url("postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test")
-                .await
-                .unwrap();
-        let result = run_migrations(&pool).await;
+        let env_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".env");
+        dotenvy::from_path(env_path).ok();
+        let db = TestDb::new().await;
+        let pool = db.pool();
+        let result = run_migrations(pool).await;
         assert!(result.is_ok());
     }
 }

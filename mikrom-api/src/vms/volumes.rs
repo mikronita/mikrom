@@ -1,5 +1,7 @@
 use crate::error::{ApiError, ApiResult};
-use crate::models::volume::{Volume, VolumeSnapshot};
+use crate::models::volume::{
+    AppVolume, AttachedVolume, Volume, VolumeSnapshot, VolumeWithAttachments,
+};
 use crate::repositories::volume_repository::{CreateSnapshotParams, CreateVolumeParams};
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::{
@@ -8,12 +10,18 @@ use axum::{
     http::StatusCode,
 };
 use serde::Deserialize;
+use std::time::Duration;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct CreateVolumeRequest {
     pub name: String,
     pub size_mib: i32,
+}
+
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
+pub struct AttachVolumeRequest {
+    pub volume_id: Uuid,
     #[serde(default = "default_mount_point")]
     pub mount_point: String,
     #[serde(default)]
@@ -22,6 +30,35 @@ pub struct CreateVolumeRequest {
 
 fn default_mount_point() -> String {
     "/data".to_string()
+}
+
+fn validate_mount_point(mount_point: &str) -> ApiResult<()> {
+    if !mount_point.starts_with('/') || mount_point.contains("..") {
+        return Err(ApiError::BadRequest(
+            "Mount point must be an absolute path and cannot contain ..".to_string(),
+        ));
+    }
+
+    let forbidden_paths = [
+        "/", "/etc", "/proc", "/sys", "/dev", "/bin", "/sbin", "/lib", "/usr", "/root", "/boot",
+        "/var", "/tmp", "/home", "/run",
+    ];
+    for path in forbidden_paths {
+        if mount_point == path || (path != "/" && mount_point.starts_with(&format!("{}/", path))) {
+            return Err(ApiError::BadRequest(format!(
+                "Mount point {} is reserved by the system",
+                mount_point
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn has_duplicate_mount_point(volumes: &[AttachedVolume], mount_point: &str) -> bool {
+    volumes
+        .iter()
+        .any(|volume| volume.mount_point == mount_point)
 }
 
 #[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
@@ -44,53 +81,20 @@ pub struct CloneVolumeRequest {
 pub async fn create_volume_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
-    Path(app_id): Path<Uuid>,
     Json(req): Json<CreateVolumeRequest>,
 ) -> ApiResult<(StatusCode, Json<Volume>)> {
-    let app = state
-        .app_repo
-        .get_app(app_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?;
 
-    if app.user_id.to_string() != auth.user_id {
-        return Err(ApiError::Forbidden);
-    }
-
-    let pool_name = format!("user_{}_volumes", app.user_id.to_string().replace('-', "_"));
-
-    // Validate mount point
-    if !req.mount_point.starts_with('/') || req.mount_point.contains("..") {
-        return Err(ApiError::BadRequest(
-            "Mount point must be an absolute path and cannot contain ..".to_string(),
-        ));
-    }
-
-    let forbidden_paths = [
-        "/", "/etc", "/proc", "/sys", "/dev", "/bin", "/sbin", "/lib", "/usr", "/root", "/boot",
-        "/var", "/tmp", "/home", "/run",
-    ];
-    for path in forbidden_paths {
-        if req.mount_point == path
-            || (path != "/" && req.mount_point.starts_with(&format!("{}/", path)))
-        {
-            return Err(ApiError::BadRequest(format!(
-                "Mount point {} is reserved by the system",
-                req.mount_point
-            )));
-        }
-    }
+    let pool_name = format!("user_{}_volumes", user_id.to_string().replace('-', "_"));
 
     let volume = state
         .volume_repo
         .create_volume(CreateVolumeParams {
-            app_id,
-            user_id: app.user_id,
+            user_id,
             name: req.name,
             size_mib: req.size_mib,
             pool_name: pool_name.clone(),
-            mount_point: req.mount_point,
-            access_mode: req.access_mode,
         })
         .await?;
 
@@ -104,6 +108,7 @@ pub async fn create_volume_handler(
 
     let resp: mikrom_proto::scheduler::CreateVolumeResponse = state
         .nats
+        .with_timeout(Duration::from_secs(5))
         .request("mikrom.scheduler.create_volume", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;
@@ -115,9 +120,9 @@ pub async fn create_volume_handler(
     // Emit workspace event
     if let Err(e) = state.workspace_events.send(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
-        user_id: Some(app.user_id),
-        app_id: Some(app.id),
-        app_name: Some(app.name),
+        user_id: Some(user_id),
+        app_id: None,
+        app_name: None,
         deployment_id: None,
         volume_id: Some(volume.id),
         resource_id: Some(volume.id.to_string()),
@@ -133,7 +138,7 @@ pub async fn list_volumes_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(app_id): Path<Uuid>,
-) -> ApiResult<Json<Vec<Volume>>> {
+) -> ApiResult<Json<Vec<AttachedVolume>>> {
     let app = state
         .app_repo
         .get_app(app_id)
@@ -146,6 +151,116 @@ pub async fn list_volumes_handler(
 
     let volumes = state.volume_repo.list_volumes_by_app(app_id).await?;
     Ok(Json(volumes))
+}
+
+#[rovo::rovo]
+pub async fn list_all_volumes_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+) -> ApiResult<Json<Vec<VolumeWithAttachments>>> {
+    let user_id = uuid::Uuid::parse_str(&auth.user_id)
+        .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?;
+    let volumes = state.volume_repo.list_volumes_by_user(user_id).await?;
+    Ok(Json(volumes))
+}
+
+#[rovo::rovo]
+pub async fn attach_volume_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path(app_id): Path<Uuid>,
+    Json(req): Json<AttachVolumeRequest>,
+) -> ApiResult<(StatusCode, Json<AppVolume>)> {
+    let app = state
+        .app_repo
+        .get_app(app_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    let volume = state
+        .volume_repo
+        .get_volume(req.volume_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
+
+    if volume.user_id != app.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    validate_mount_point(&req.mount_point)?;
+
+    let existing_volumes = state.volume_repo.list_volumes_by_app(app_id).await?;
+    if has_duplicate_mount_point(&existing_volumes, &req.mount_point) {
+        return Err(ApiError::BadRequest(format!(
+            "Mount point {} is already in use for this application",
+            req.mount_point
+        )));
+    }
+
+    let app_volume = state
+        .volume_repo
+        .attach_volume_to_app(app_id, req.volume_id, req.mount_point, req.access_mode)
+        .await?;
+
+    // Emit workspace event
+    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+        kind: WorkspaceEventKind::VolumeChanged,
+        user_id: Some(app.user_id),
+        app_id: Some(app.id),
+        app_name: Some(app.name),
+        deployment_id: None,
+        volume_id: Some(req.volume_id),
+        resource_id: Some(req.volume_id.to_string()),
+    }) {
+        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
+    }
+
+    Ok((StatusCode::OK, Json(app_volume)))
+}
+
+#[rovo::rovo]
+pub async fn detach_volume_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_id, volume_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<StatusCode> {
+    let app = state
+        .app_repo
+        .get_app(app_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
+
+    if app.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
+    }
+
+    let detached = state
+        .volume_repo
+        .detach_volume_from_app(app_id, volume_id)
+        .await?;
+
+    if !detached {
+        return Err(ApiError::NotFound("Attachment not found".to_string()));
+    }
+
+    // Emit workspace event
+    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+        kind: WorkspaceEventKind::VolumeChanged,
+        user_id: Some(app.user_id),
+        app_id: Some(app.id),
+        app_name: Some(app.name),
+        deployment_id: None,
+        volume_id: Some(volume_id),
+        resource_id: Some(volume_id.to_string()),
+    }) {
+        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[rovo::rovo]
@@ -197,83 +312,23 @@ pub async fn create_snapshot_handler(
         })
         .await?;
 
-    // 1. Find where the app is currently running to route the snapshot command
-    let app = state
-        .app_repo
-        .get_app(volume.app_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
-
-    let host_id = if let Some(dep_id) = app.active_deployment_id {
-        if let Some(deployment) = state.app_repo.get_deployment(dep_id).await? {
-            if let Some(job_id) = deployment.job_id {
-                if job_id.starts_with("temp-") {
-                    None
-                } else {
-                    use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse};
-                    let inner: AppStatusResponse = state
-                        .nats
-                        .request(
-                            "mikrom.scheduler.get_job",
-                            AppStatusRequest {
-                                job_id,
-                                user_id: auth.user_id.clone(),
-                            },
-                        )
-                        .await
-                        .map_err(|e| {
-                            ApiError::Scheduler(format!("Scheduler request failed: {e}"))
-                        })?;
-
-                    if inner.host_id.is_empty() {
-                        None
-                    } else {
-                        Some(inner.host_id)
-                    }
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    } else {
-        None
+    // Physically create the snapshot via Scheduler
+    let nats_req = mikrom_proto::scheduler::CreateSnapshotRequest {
+        volume_id: volume.id.to_string(),
+        snapshot_name: snapshot.name.clone(),
+        pool_name: volume.pool_name.clone(),
+        host_id: String::new(),
     };
 
-    use mikrom_proto::scheduler::{
-        CreateSnapshotRequest as SchedSnapReq, CreateSnapshotResponse as SchedSnapRes,
-    };
-
-    let nats_req = SchedSnapReq {
-        volume_id: volume_id.to_string(),
-        snapshot_name: req.name,
-        pool_name: volume.pool_name,
-        host_id: host_id.unwrap_or_default(),
-    };
-
-    let scheduler_res: SchedSnapRes = state
+    let resp: mikrom_proto::scheduler::CreateSnapshotResponse = state
         .nats
-        .with_timeout(std::time::Duration::from_secs(30))
+        .with_timeout(Duration::from_secs(5))
         .request("mikrom.scheduler.create_snapshot", nats_req)
         .await
-        .map_err(|e| ApiError::Scheduler(format!("Scheduler request failed: {e}")))?;
+        .map_err(|e| ApiError::Scheduler(e.to_string()))?;
 
-    if !scheduler_res.success {
-        return Err(ApiError::Scheduler(scheduler_res.message));
-    }
-
-    // Emit workspace event
-    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
-        kind: WorkspaceEventKind::SnapshotChanged,
-        user_id: Some(volume.user_id),
-        app_id: Some(volume.app_id),
-        app_name: None,
-        deployment_id: None,
-        volume_id: Some(volume.id),
-        resource_id: Some(snapshot.id.to_string()),
-    }) {
-        tracing::warn!(error = %e, "Failed to broadcast SnapshotChanged event");
+    if !resp.success {
+        return Err(ApiError::Scheduler(resp.message));
     }
 
     Ok((StatusCode::CREATED, Json(snapshot)))
@@ -295,34 +350,54 @@ pub async fn delete_volume_handler(
         return Err(ApiError::Forbidden);
     }
 
-    // 1. Tell Scheduler to delete physical volume in Ceph
-    use mikrom_proto::scheduler::{DeleteVolumeRequest, DeleteVolumeResponse};
+    // Check for snapshots before deletion
+    let snapshots = state
+        .volume_repo
+        .list_snapshots_by_volume(volume_id)
+        .await?;
 
-    let nats_req = DeleteVolumeRequest {
-        volume_id: volume_id.to_string(),
-        pool_name: volume.pool_name,
-        host_id: String::new(), // Scheduler picks any worker
-    };
-
-    let scheduler_res: DeleteVolumeResponse = state
-        .nats
-        .with_timeout(std::time::Duration::from_secs(30))
-        .request("mikrom.scheduler.delete_volume", nats_req)
-        .await
-        .map_err(|e| ApiError::Scheduler(format!("Scheduler request failed: {e}")))?;
-
-    if !scheduler_res.success {
-        return Err(ApiError::Scheduler(scheduler_res.message));
+    if !snapshots.is_empty() {
+        return Err(ApiError::BadRequest(
+            "Cannot delete volume because it has snapshots. Please delete all snapshots first."
+                .to_string(),
+        ));
     }
 
-    // 2. Delete from DB
+    // Check if volume is attached to any app
+    let is_attached = state.volume_repo.is_volume_attached(volume_id).await?;
+
+    if is_attached {
+        return Err(ApiError::BadRequest(
+            "Cannot delete volume because it is attached to one or more applications. Please detach it first."
+                .to_string(),
+        ));
+    }
+
+    // Physically delete the volume via Scheduler
+    let nats_req = mikrom_proto::scheduler::DeleteVolumeRequest {
+        volume_id: volume_id.to_string(),
+        pool_name: volume.pool_name.clone(),
+        host_id: String::new(),
+    };
+
+    let resp: mikrom_proto::scheduler::DeleteVolumeResponse = state
+        .nats
+        .with_timeout(Duration::from_secs(5))
+        .request("mikrom.scheduler.delete_volume", nats_req)
+        .await
+        .map_err(|e| ApiError::Scheduler(e.to_string()))?;
+
+    if !resp.success {
+        return Err(ApiError::Scheduler(resp.message));
+    }
+
     state.volume_repo.delete_volume(volume_id).await?;
 
     // Emit workspace event
     if let Err(e) = state.workspace_events.send(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
         user_id: Some(volume.user_id),
-        app_id: Some(volume.app_id),
+        app_id: None,
         app_name: None,
         deployment_id: None,
         volume_id: Some(volume_id),
@@ -332,62 +407,6 @@ pub async fn delete_volume_handler(
     }
 
     Ok(StatusCode::NO_CONTENT)
-}
-
-#[rovo::rovo]
-pub async fn restore_snapshot_handler(
-    auth: crate::auth::AuthUser,
-    State(state): State<crate::AppState>,
-    Path(volume_id): Path<Uuid>,
-    Json(req): Json<RestoreSnapshotRequest>,
-) -> ApiResult<StatusCode> {
-    let volume = state
-        .volume_repo
-        .get_volume(volume_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
-
-    if volume.user_id.to_string() != auth.user_id {
-        return Err(ApiError::Forbidden);
-    }
-
-    // 1. Tell Scheduler to restore the snapshot in Ceph
-    use mikrom_proto::scheduler::{
-        RestoreSnapshotRequest as SchedRestoreReq, RestoreSnapshotResponse as SchedRestoreRes,
-    };
-
-    let nats_req = SchedRestoreReq {
-        volume_id: volume_id.to_string(),
-        snapshot_name: req.snapshot_name,
-        pool_name: volume.pool_name,
-        host_id: String::new(), // Scheduler picks any worker
-    };
-
-    let scheduler_res: SchedRestoreRes = state
-        .nats
-        .with_timeout(std::time::Duration::from_secs(30))
-        .request("mikrom.scheduler.restore_snapshot", nats_req)
-        .await
-        .map_err(|e| ApiError::Scheduler(format!("Scheduler request failed: {e}")))?;
-
-    if !scheduler_res.success {
-        return Err(ApiError::Scheduler(scheduler_res.message));
-    }
-
-    // Emit workspace event
-    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
-        kind: WorkspaceEventKind::VolumeChanged,
-        user_id: Some(volume.user_id),
-        app_id: Some(volume.app_id),
-        app_name: None,
-        deployment_id: None,
-        volume_id: Some(volume_id),
-        resource_id: Some(volume_id.to_string()),
-    }) {
-        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
-    }
-
-    Ok(StatusCode::OK)
 }
 
 #[rovo::rovo]
@@ -412,44 +431,67 @@ pub async fn delete_snapshot_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    // 1. Tell Scheduler to delete physical snapshot in Ceph
-    use mikrom_proto::scheduler::{DeleteSnapshotRequest, DeleteSnapshotResponse};
-
-    let nats_req = DeleteSnapshotRequest {
-        volume_id: volume.id.to_string(),
-        snapshot_name: snapshot.name,
-        pool_name: volume.pool_name,
-        host_id: String::new(), // Scheduler picks any worker
+    // Physically delete the snapshot via Scheduler
+    let nats_req = mikrom_proto::scheduler::DeleteSnapshotRequest {
+        volume_id: snapshot.volume_id.to_string(),
+        snapshot_name: snapshot.name.clone(),
+        pool_name: volume.pool_name.clone(),
+        host_id: String::new(),
     };
 
-    let scheduler_res: DeleteSnapshotResponse = state
+    let resp: mikrom_proto::scheduler::DeleteSnapshotResponse = state
         .nats
-        .with_timeout(std::time::Duration::from_secs(30))
+        .with_timeout(Duration::from_secs(5))
         .request("mikrom.scheduler.delete_snapshot", nats_req)
         .await
-        .map_err(|e| ApiError::Scheduler(format!("Scheduler request failed: {e}")))?;
+        .map_err(|e| ApiError::Scheduler(e.to_string()))?;
 
-    if !scheduler_res.success {
-        return Err(ApiError::Scheduler(scheduler_res.message));
+    if !resp.success {
+        return Err(ApiError::Scheduler(resp.message));
     }
 
-    // 2. Delete from DB
     state.volume_repo.delete_snapshot(snapshot_id).await?;
 
-    // Emit workspace event
-    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
-        kind: WorkspaceEventKind::SnapshotChanged,
-        user_id: Some(snapshot.user_id),
-        app_id: Some(volume.app_id),
-        app_name: None,
-        deployment_id: None,
-        volume_id: Some(volume.id),
-        resource_id: Some(snapshot_id.to_string()),
-    }) {
-        tracing::warn!(error = %e, "Failed to broadcast SnapshotChanged event");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[rovo::rovo]
+pub async fn restore_snapshot_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path(volume_id): Path<Uuid>,
+    Json(req): Json<RestoreSnapshotRequest>,
+) -> ApiResult<StatusCode> {
+    let volume = state
+        .volume_repo
+        .get_volume(volume_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
+
+    if volume.user_id.to_string() != auth.user_id {
+        return Err(ApiError::Forbidden);
     }
 
-    Ok(StatusCode::NO_CONTENT)
+    // Physically restore the snapshot via Scheduler
+    let nats_req = mikrom_proto::scheduler::RestoreSnapshotRequest {
+        volume_id: volume_id.to_string(),
+        snapshot_name: req.snapshot_name,
+        pool_name: volume.pool_name.clone(),
+        host_id: String::new(),
+    };
+
+    let resp: mikrom_proto::scheduler::RestoreSnapshotResponse = state
+        .nats
+        .with_timeout(Duration::from_secs(5))
+        .request("mikrom.scheduler.restore_snapshot", nats_req)
+        .await
+        .map_err(|e| ApiError::Scheduler(e.to_string()))?;
+
+    if !resp.success {
+        return Err(ApiError::Scheduler(resp.message));
+    }
+
+    Ok(StatusCode::OK)
 }
 
 #[rovo::rovo]
@@ -459,70 +501,98 @@ pub async fn clone_volume_handler(
     Path(volume_id): Path<Uuid>,
     Json(req): Json<CloneVolumeRequest>,
 ) -> ApiResult<(StatusCode, Json<Volume>)> {
-    let source_volume = state
+    let volume = state
         .volume_repo
         .get_volume(volume_id)
         .await?
-        .ok_or_else(|| ApiError::NotFound("Source volume not found".to_string()))?;
+        .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if source_volume.user_id.to_string() != auth.user_id {
+    if volume.user_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
-    // 1. Create target volume in DB
-    let target_volume = state
+    let user_id = Uuid::parse_str(&auth.user_id)
+        .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?;
+
+    let pool_name = format!("user_{}_volumes", user_id.to_string().replace('-', "_"));
+
+    // Create the record for the new cloned volume
+    let new_volume = state
         .volume_repo
         .create_volume(CreateVolumeParams {
-            app_id: source_volume.app_id,
-            user_id: source_volume.user_id,
-            name: req.name,
-            size_mib: source_volume.size_mib, // Clones usually keep the same size initially
-            pool_name: source_volume.pool_name.clone(),
-            mount_point: source_volume.mount_point.clone(),
-            access_mode: source_volume.access_mode,
+            user_id,
+            name: req.name.clone(),
+            size_mib: volume.size_mib,
+            pool_name: pool_name.clone(),
         })
         .await?;
 
-    // 2. Tell Scheduler to clone physical volume in Ceph
-    use mikrom_proto::scheduler::{
-        CloneVolumeRequest as SchedCloneReq, CloneVolumeResponse as SchedCloneRes,
-    };
-
-    let nats_req = SchedCloneReq {
-        source_volume_id: source_volume.id.to_string(),
+    // Physically clone the volume via Scheduler
+    let nats_req = mikrom_proto::scheduler::CloneVolumeRequest {
+        source_volume_id: volume_id.to_string(),
         snapshot_name: req.snapshot_name,
-        target_volume_id: target_volume.id.to_string(),
-        pool_name: source_volume.pool_name,
-        host_id: String::new(), // Scheduler picks any worker
+        target_volume_id: new_volume.id.to_string(),
+        pool_name: pool_name.clone(),
+        host_id: String::new(),
     };
 
-    let scheduler_res: SchedCloneRes = state
+    let resp: mikrom_proto::scheduler::CloneVolumeResponse = state
         .nats
-        .with_timeout(std::time::Duration::from_secs(30))
+        .with_timeout(Duration::from_secs(5))
         .request("mikrom.scheduler.clone_volume", nats_req)
         .await
-        .map_err(|e| ApiError::Scheduler(format!("Scheduler request failed: {e}")))?;
+        .map_err(|e| ApiError::Scheduler(e.to_string()))?;
 
-    if !scheduler_res.success {
-        // Rollback DB entry if physical clone fails
-        if let Err(e) = state.volume_repo.delete_volume(target_volume.id).await {
-            tracing::error!(volume_id = %target_volume.id, error = %e, "Failed to rollback volume DB entry after physical clone failure");
-        }
-        return Err(ApiError::Scheduler(scheduler_res.message));
+    if !resp.success {
+        // Rollback DB record if physical clone fails
+        state.volume_repo.delete_volume(new_volume.id).await?;
+        return Err(ApiError::Scheduler(resp.message));
     }
 
     // Emit workspace event
     if let Err(e) = state.workspace_events.send(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
-        user_id: Some(target_volume.user_id),
-        app_id: Some(target_volume.app_id),
+        user_id: Some(user_id),
+        app_id: None,
         app_name: None,
         deployment_id: None,
-        volume_id: Some(target_volume.id),
-        resource_id: Some(target_volume.id.to_string()),
+        volume_id: Some(new_volume.id),
+        resource_id: Some(new_volume.id.to_string()),
     }) {
         tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
     }
 
-    Ok((StatusCode::CREATED, Json(target_volume)))
+    Ok((StatusCode::CREATED, Json(new_volume)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_mount_point_rejects_duplicate_paths() {
+        let volumes = vec![AttachedVolume {
+            volume: Volume {
+                id: Uuid::new_v4(),
+                user_id: Uuid::new_v4(),
+                name: "vol-a".to_string(),
+                size_mib: 1024,
+                pool_name: "pool-a".to_string(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            },
+            mount_point: "/data".to_string(),
+            access_mode: 0,
+        }];
+
+        assert!(has_duplicate_mount_point(&volumes, "/data"));
+        assert!(!has_duplicate_mount_point(&volumes, "/cache"));
+    }
+
+    #[test]
+    fn validate_mount_point_rejects_reserved_and_relative_paths() {
+        assert!(validate_mount_point("data").is_err());
+        assert!(validate_mount_point("/etc/app").is_err());
+        assert!(validate_mount_point("/data").is_ok());
+    }
 }
