@@ -21,14 +21,12 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let state = crate::AppState::from_ref(state);
         let claims = parts.extensions.get::<crate::auth::jwt::Claims>().cloned();
-        let headers = parts.headers.clone();
-        let uri = parts.uri.clone();
 
         let claims = if let Some(claims) = claims {
             claims
         } else {
             // 1. Get token from Authorization header OR query parameter (for SSE)
-            let token = extract_token_from_headers_and_uri(&headers, &uri)?;
+            let token = extract_token_from_headers_and_uri(&parts.headers, &parts.uri)?;
 
             // 2. Decode and validate JWT
             crate::auth::jwt::verify_token(&token, &state.jwt_secret)
@@ -39,8 +37,16 @@ where
     }
 }
 
-impl rovo::aide::OperationInput for AuthUser {}
-
+impl rovo::aide::OperationInput for AuthUser {
+    fn operation_input(
+        _ctx: &mut rovo::aide::generate::GenContext,
+        operation: &mut rovo::aide::openapi::Operation,
+    ) {
+        operation.security.push(indexmap::indexmap! {
+            "jwt".to_string() => vec![]
+        });
+    }
+}
 fn auth_user_from_claims(claims: crate::auth::jwt::Claims) -> AuthUser {
     AuthUser {
         user_id: claims.sub,
