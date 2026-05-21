@@ -5,9 +5,8 @@ use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::{Json, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use utoipa::ToSchema;
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct RegisterRequest {
     pub email: String,
     pub password: String,
@@ -15,13 +14,13 @@ pub struct RegisterRequest {
     pub last_name: Option<String>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
 pub struct AuthResponse {
     pub user: UserResponse,
     pub token: String,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
 pub struct UserResponse {
     pub id: String,
     pub email: String,
@@ -31,29 +30,19 @@ pub struct UserResponse {
     pub vpc_ipv6_prefix: Option<String>,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct UpdateProfileRequest {
     pub first_name: Option<String>,
     pub last_name: Option<String>,
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/auth/register",
-    request_body = RegisterRequest,
-    responses(
-        (status = 201, description = "User registered successfully", body = AuthResponse),
-        (status = 400, description = "Bad request", body = crate::error::ErrorResponse),
-        (status = 409, description = "User already exists", body = crate::error::ErrorResponse)
-    ),
-    tag = "auth"
-)]
+#[rovo::rovo]
 pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
@@ -120,16 +109,7 @@ pub async fn register(
     ))
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/auth/login",
-    request_body = LoginRequest,
-    responses(
-        (status = 200, description = "User logged in successfully", body = AuthResponse),
-        (status = 401, description = "Invalid credentials", body = crate::error::ErrorResponse)
-    ),
-    tag = "auth"
-)]
+#[rovo::rovo]
 pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginRequest>,
@@ -172,18 +152,7 @@ pub async fn login(
     }))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/auth/me",
-    responses(
-        (status = 200, description = "Get current user profile", body = UserResponse),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "auth",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn get_profile(
     auth: crate::auth::AuthUser,
     State(state): State<AppState>,
@@ -208,19 +177,7 @@ pub async fn get_profile(
     }))
 }
 
-#[utoipa::path(
-    put,
-    path = "/v1/auth/me",
-    request_body = UpdateProfileRequest,
-    responses(
-        (status = 200, description = "Profile updated successfully", body = UserResponse),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "auth",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn update_profile(
     auth: crate::auth::AuthUser,
     State(state): State<AppState>,
@@ -327,7 +284,7 @@ mod tests {
             last_name: None,
         };
 
-        let response = register(State(state), Json(payload)).await;
+        let response = __register_impl(State(state), Json(payload)).await;
         assert!(response.is_ok());
     }
 
@@ -387,7 +344,7 @@ mod tests {
             password: password.into(),
         };
 
-        let response = login(State(state), Json(payload)).await;
+        let response = __login_impl(State(state), Json(payload)).await;
         assert!(response.is_ok());
     }
 }

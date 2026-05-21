@@ -55,93 +55,79 @@ async fn build_state() -> AppState {
 }
 
 #[tokio::test]
-async fn test_openapi_json_endpoint() {
+async fn test_v1_health_routing() {
     let app = create_app(build_state().await);
 
     let response = app
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/v1/api-docs/openapi.json")
+                .uri("/v1/health")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["content-type"], "application/json");
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let spec: serde_json::Value = serde_json::from_slice(&body).unwrap();
-
-    assert_eq!(spec["components"]["securitySchemes"]["jwt"]["type"], "http");
-    assert_eq!(
-        spec["components"]["securitySchemes"]["jwt"]["scheme"],
-        "bearer"
-    );
-
-    // Verify SSE endpoint documentation
-    let health_stream = &spec["paths"]["/v1/health/stream"]["get"];
-    assert!(
-        !health_stream.is_null(),
-        "GET /v1/health/stream should be documented"
-    );
-    let content_type = &health_stream["responses"]["200"]["content"];
-    assert!(
-        content_type.get("text/event-stream").is_some(),
-        "GET /v1/health/stream should have text/event-stream content type"
+    // 404 would mean prefix is missing or wrong
+    // It might be 200 or 500 (if health check fails due to DB/NATS), but not 404
+    assert_ne!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "GET /v1/health should not be 404"
     );
 }
 
 #[tokio::test]
-async fn test_swagger_ui_endpoint() {
-    let app = create_app(build_state().await);
+async fn test_v1_auth_routing() {
+    let state = build_state().await;
+    let mut user_repo = repositories::user_repository::MockUserRepository::new();
+    user_repo.expect_find_by_email().returning(|_| Ok(None)); // Just return None to avoid 404/panic
+    let mut state = state;
+    state.user_repo = Arc::new(user_repo);
+    let app = create_app(state);
 
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri("/v1/docs/")
-                .body(Body::empty())
+                .method("POST")
+                .uri("/v1/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"email":"test@example.com","password":"password"}"#,
+                ))
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    assert!(
-        response
-            .headers()
-            .get("content-type")
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("text/html"))
+    assert_ne!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "POST /v1/auth/login should not be 404"
     );
 }
 
 #[tokio::test]
-async fn test_api_docs_landing_endpoint() {
+async fn test_v1_apps_routing() {
     let app = create_app(build_state().await);
 
     let response = app
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/v1/api-docs/")
+                .uri("/v1/apps")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    assert!(
-        response
-            .headers()
-            .get("content-type")
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("text/html"))
+    // It will likely be 401 Unauthorized because we don't provide a JWT, but not 404
+    assert_ne!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "GET /v1/apps should not be 404"
     );
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }

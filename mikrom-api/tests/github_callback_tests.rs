@@ -2,7 +2,9 @@ use axum::extract::Query;
 use axum::extract::State;
 use axum::http::StatusCode;
 use mikrom_api::AppState;
-use mikrom_api::github::handlers::{InstallCallbackQuery, github_callback};
+use mikrom_api::github::handlers::{
+    __github_callback_impl as github_callback, InstallCallbackQuery,
+};
 use mikrom_api::nats::TypedNatsClient;
 use mikrom_api::repositories::MockGithubRepository;
 use mikrom_api::repositories::app_repository::MockAppRepository;

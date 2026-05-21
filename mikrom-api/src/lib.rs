@@ -1,8 +1,11 @@
-use axum::extract::ConnectInfo;
+use axum::Json;
+use axum::extract::{ConnectInfo, State};
 use axum::middleware;
 use axum::response::sse::{Event, Sse};
-use axum::{Router, extract::State, routing::get};
 use futures::Stream;
+use rovo::Router;
+use rovo::aide::swagger::Swagger;
+use rovo::routing::{delete, get, patch, post};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -51,8 +54,6 @@ use mikrom_proto::router::RouterConfigUpdate;
 
 use auth::{get_profile, login, register, update_profile};
 use github::handlers::{github_callback, github_install, list_repos};
-use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
 pub use workspace::{WorkspaceEvent, WorkspaceEventKind};
 
 #[derive(Clone)]
@@ -221,7 +222,11 @@ impl AppState {
     }
 }
 
-pub fn create_app(state: AppState) -> Router {
+pub const API_V1: &str = "/v1";
+pub const OPENAPI_PATH: &str = "/v1/api-docs/openapi";
+pub const SWAGGER_PATH: &str = "/v1/docs";
+
+pub fn create_app(state: AppState) -> axum::Router {
     let rate_limiter = Arc::new(
         crate::rate_limit::RateLimiter::new(
             crate::rate_limit::RateLimitConfig::default(),
@@ -235,7 +240,7 @@ pub fn create_app(state: AppState) -> Router {
 pub fn create_app_with_rate_limits(
     state: AppState,
     rate_limiter: Arc<crate::rate_limit::RateLimiter>,
-) -> Router {
+) -> axum::Router {
     rate_limiter.start_cleanup_task();
 
     let cors = CorsLayer::new()
@@ -243,146 +248,165 @@ pub fn create_app_with_rate_limits(
         .allow_methods(Any)
         .allow_headers(Any);
 
+    let mut api = crate::openapi::build_openapi();
+
     let public_routes = Router::new()
-        .route("/health", get(health))
-        .route("/health/stream", get(health_stream));
+        .route("/v1/health", get(health))
+        .route("/v1/health/stream", get(health_stream))
+        .finish_api(&mut api);
 
     let protected_routes = Router::new()
-        .route("/auth/register", axum::routing::post(register))
-        .route("/auth/login", axum::routing::post(login))
+        .route("/v1/auth/register", post(register))
+        .route("/v1/auth/login", post(login))
         .route(
-            "/webhooks/github/:app_name",
-            axum::routing::post(github_webhook_handler),
+            "/v1/webhooks/github/{app_name}",
+            post(github_webhook_handler),
         )
+        .route("/v1/webhooks/github", post(github_webhook_handler_generic))
+        .route("/v1/auth/me", get(get_profile).put(update_profile))
+        .route("/v1/github/install", get(github_install))
+        .route("/v1/github/callback", get(github_callback))
+        .route("/v1/github/repos", get(list_repos))
         .route(
-            "/webhooks/github",
-            axum::routing::post(github_webhook_handler_generic),
-        )
-        .route("/auth/me", get(get_profile).put(update_profile))
-        .route("/github/install", get(github_install))
-        .route("/github/callback", get(github_callback))
-        .route("/github/repos", get(list_repos))
-        .route(
-            "/github/accounts",
+            "/v1/github/accounts",
             get(crate::github::handlers::list_accounts),
         )
         .route(
-            "/apps",
-            axum::routing::post(crate::deploy::create_app_handler)
-                .get(crate::deploy::list_apps_handler),
+            "/v1/apps",
+            post(crate::deploy::create_app_handler).get(crate::deploy::list_apps_handler),
         )
-        .route("/deploy", axum::routing::post(crate::deploy::deploy_app))
+        .route("/v1/deploy", post(crate::deploy::deploy_app))
         .route(
-            "/apps/:app_name",
-            axum::routing::delete(crate::deploy::delete_app_handler),
+            "/v1/apps/{app_name}",
+            delete(crate::deploy::delete_app_handler),
         )
         .route(
-            "/apps/:app_name/secret",
+            "/v1/apps/{app_name}/secret",
             get(crate::deploy::get_app_secret_handler),
         )
         .route(
-            "/apps/:app_name/scale",
-            axum::routing::patch(crate::deploy::scale_app_handler),
+            "/v1/apps/{app_name}/scale",
+            patch(crate::deploy::scale_app_handler),
         )
         .route(
-            "/apps/:app_name/deploy",
-            axum::routing::post(crate::deploy::deploy_app_version_handler),
+            "/v1/apps/{app_name}/deploy",
+            post(crate::deploy::deploy_app_version_handler),
         )
         .route(
-            "/apps/:app_name/deployments",
+            "/v1/apps/{app_name}/deployments",
             get(crate::deploy::list_deployments_handler),
         )
         .route(
-            "/apps/:app_name/deployments/stream",
+            "/v1/apps/{app_name}/deployments/stream",
             get(crate::deploy::deployments_stream_handler),
         )
         .route(
-            "/apps/:app_name/logs/stream",
+            "/v1/apps/{app_name}/logs/stream",
             get(crate::vms::app_logs_stream_handler),
         )
         .route(
-            "/apps/:app_name/metrics/stream",
+            "/v1/apps/{app_name}/metrics/stream",
             get(crate::vms::app_metrics_stream_handler),
         )
         .route(
-            "/workspace/events",
+            "/v1/workspace/events",
             get(crate::workspace::workspace_events_stream),
         )
         .route(
-            "/apps/:app_name/deployments/:deployment_id/activate",
-            axum::routing::post(crate::deploy::activate_deployment_handler),
+            "/v1/apps/{app_name}/deployments/{deployment_id}/activate",
+            post(crate::deploy::activate_deployment_handler),
         )
         .route(
-            "/apps/:app_name/deployments/:job_id",
+            "/v1/apps/{app_name}/deployments/{job_id}",
             get(get_deployment_status).delete(stop_deployment),
         )
         .route(
-            "/apps/:app_name/deployments/:job_id/logs",
+            "/v1/apps/{app_name}/deployments/{job_id}/logs",
             get(get_deployment_logs),
         )
         .route(
-            "/apps/:app_name/deployments/:job_id/pause",
-            axum::routing::post(pause_deployment),
+            "/v1/apps/{app_name}/deployments/{job_id}/pause",
+            post(pause_deployment),
         )
         .route(
-            "/apps/:app_name/deployments/:job_id/resume",
-            axum::routing::post(resume_deployment),
+            "/v1/apps/{app_name}/deployments/{job_id}/resume",
+            post(resume_deployment),
         )
         .route(
-            "/apps/:app_name/deployments/:job_id/delete",
-            axum::routing::delete(delete_deployment_record),
+            "/v1/apps/{app_name}/deployments/{job_id}/delete",
+            delete(delete_deployment_record),
         )
         .route(
-            "/apps/:app_name/security-groups",
+            "/v1/apps/{app_name}/security-groups",
             get(list_security_rules_handler).post(create_security_rule_handler),
         )
         .route(
-            "/apps/:app_name/security-groups/:rule_id",
-            axum::routing::delete(delete_security_rule_handler),
+            "/v1/apps/{app_name}/security-groups/{rule_id}",
+            delete(delete_security_rule_handler),
         )
-        .route("/networking/mesh", get(get_mesh_status_handler))
-        .route("/networking/mesh/stream", get(mesh_status_stream_handler))
-        .route("/deployments/active", get(list_active_deployments))
-        .route("/deployments/events", get(watch_deployments))
+        .route("/v1/networking/mesh", get(get_mesh_status_handler))
         .route(
-            "/apps/:app_id/volumes",
-            axum::routing::post(crate::vms::volumes::create_volume_handler)
+            "/v1/networking/mesh/stream",
+            get(mesh_status_stream_handler),
+        )
+        .route("/v1/deployments/active", get(list_active_deployments))
+        .route("/v1/deployments/events", get(watch_deployments))
+        .route(
+            "/v1/apps/{app_id}/volumes",
+            post(crate::vms::volumes::create_volume_handler)
                 .get(crate::vms::volumes::list_volumes_handler),
         )
         .route(
-            "/volumes/:volume_id/snapshots",
-            axum::routing::post(crate::vms::volumes::create_snapshot_handler)
+            "/v1/volumes/{volume_id}/snapshots",
+            post(crate::vms::volumes::create_snapshot_handler)
                 .get(crate::vms::volumes::list_snapshots_handler),
         )
         .route(
-            "/volumes/:volume_id/restore",
-            axum::routing::post(crate::vms::volumes::restore_snapshot_handler),
+            "/v1/volumes/{volume_id}/restore",
+            post(crate::vms::volumes::restore_snapshot_handler),
         )
         .route(
-            "/volumes/:volume_id/clone",
-            axum::routing::post(crate::vms::volumes::clone_volume_handler),
+            "/v1/volumes/{volume_id}/clone",
+            post(crate::vms::volumes::clone_volume_handler),
         )
         .route(
-            "/volumes/:volume_id",
-            axum::routing::delete(crate::vms::volumes::delete_volume_handler),
+            "/v1/volumes/{volume_id}",
+            delete(crate::vms::volumes::delete_volume_handler),
         )
         .route(
-            "/snapshots/:snapshot_id",
-            axum::routing::delete(crate::vms::volumes::delete_snapshot_handler),
-        );
+            "/v1/snapshots/{snapshot_id}",
+            delete(crate::vms::volumes::delete_snapshot_handler),
+        )
+        .finish_api(&mut api);
 
-    let protected_routes = protected_routes.route_layer(middleware::from_fn_with_state(
+    let protected_routes_layered = protected_routes.route_layer(middleware::from_fn_with_state(
         rate_limiter,
         crate::rate_limit::rate_limit_middleware,
     ));
 
-    Router::new()
-        .merge(SwaggerUi::new("/v1/docs").url(
-            "/v1/api-docs/openapi.json",
-            crate::openapi::ApiDoc::openapi(),
-        ))
-        .nest("/v1", public_routes)
-        .nest("/v1", protected_routes)
+    let swagger_spec = "/v1/api-docs/openapi.json";
+    let swagger_alias = axum::Router::new()
+        .route(
+            "/v1/api-docs/",
+            axum::routing::get(Swagger::new(swagger_spec).axum_handler()),
+        )
+        .route(
+            &format!("{}/", SWAGGER_PATH),
+            axum::routing::get(Swagger::new(swagger_spec).axum_handler()),
+        )
+        .with_state(state.clone());
+
+    let oas_router = Router::new()
+        .with_oas_route(api, OPENAPI_PATH)
+        .with_swagger(SWAGGER_PATH)
+        .with_state(state.clone())
+        .finish();
+
+    public_routes
+        .merge(protected_routes_layered)
+        .with_state(state)
+        .merge(oas_router)
+        .merge(swagger_alias)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &axum::http::Request<_>| {
@@ -404,7 +428,6 @@ pub fn create_app_with_rate_limits(
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .layer(cors)
-        .with_state(state)
 }
 
 pub fn start_background_tasks(state: AppState) {
@@ -447,7 +470,7 @@ pub fn start_background_tasks(state: AppState) {
     });
 }
 
-#[derive(serde::Serialize, utoipa::ToSchema)]
+#[derive(serde::Serialize, rovo::schemars::JsonSchema)]
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
@@ -548,14 +571,16 @@ async fn get_system_health(state: &AppState) -> HashMap<String, String> {
     services
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/health",
-    responses(
-        (status = 200, description = "API Health Status", body = HealthResponse)
-    ),
-    tag = "system"
-)]
+/// Get system health status
+///
+/// # Responses
+///
+/// 200: Json<HealthResponse> - System health details
+///
+/// # Metadata
+///
+/// @tag Health
+#[rovo::rovo]
 async fn health(State(state): State<AppState>) -> axum::Json<HealthResponse> {
     let services = get_system_health(&state).await;
 
@@ -566,17 +591,10 @@ async fn health(State(state): State<AppState>) -> axum::Json<HealthResponse> {
     })
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/health/stream",
-    responses(
-        (status = 200, description = "SSE stream of System Health Updates"),
-    ),
-    tag = "system"
-)]
-async fn health_stream(
+#[rovo::rovo]
+pub async fn health_stream(
     State(state): State<AppState>,
-) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+) -> ApiResult<crate::error::SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     let stream = async_stream::stream! {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         loop {
@@ -595,10 +613,8 @@ async fn health_stream(
         }
     };
 
-    Ok(Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(Duration::from_secs(15))
-            .text("keep-alive"),
+    Ok(crate::error::SseResponse(
+        Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new()),
     ))
 }
 
