@@ -104,32 +104,7 @@ async fn test_swagger_ui_endpoint() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/v1/docs/")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert!(
-        response
-            .headers()
-            .get("content-type")
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("text/html"))
-    );
-}
-
-#[tokio::test]
-async fn test_api_docs_landing_endpoint() {
-    let app = create_app(build_state().await);
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/v1/api-docs/")
+                .uri("/v1/docs")
                 .body(Body::empty())
                 .unwrap(),
         )
