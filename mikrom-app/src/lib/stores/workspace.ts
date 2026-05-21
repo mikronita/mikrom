@@ -54,17 +54,11 @@ export function initWorkspaceSSE() {
         break;
 
       case "volume_changed": {
-        // If we have a specific app_id, we could be more targeted,
-        // but for now, if the volumesStore is not empty, we refresh.
-        // In a real app, we might want to know which app is currently selected in the UI.
-        if (event.app_id) {
-           void refreshVolumes(event.app_id);
+        const currentVolumes = get(volumesStore);
+        if (event.app_id && currentVolumes.length > 0 && "mount_point" in currentVolumes[0]) {
+          void refreshVolumes(event.app_id);
         } else {
-           // Fallback if app_id is missing: refresh if we have volumes loaded
-           const currentVolumes = get(volumesStore);
-           if (currentVolumes.length > 0 && currentVolumes[0].app_id) {
-             void refreshVolumes(currentVolumes[0].app_id);
-           }
+          void refreshVolumes();
         }
         break;
       }

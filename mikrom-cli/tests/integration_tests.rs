@@ -277,6 +277,136 @@ async fn test_client_resume_deployment() {
 }
 
 #[tokio::test]
+async fn test_client_list_app_volumes() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/apps/app-123/volumes"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": "vol-1",
+                "name": "data",
+                "size_mib": 1024,
+                "created_at": "2024-01-01T00:00:00Z",
+                "mount_point": "/data",
+                "access_mode": 0
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let res = client.list_volumes("app-123").await.unwrap();
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0].volume.id, "vol-1");
+    assert_eq!(res[0].mount_point, "/data");
+    assert_eq!(res[0].access_mode, 0);
+}
+
+#[tokio::test]
+async fn test_client_list_all_volumes_includes_attachments() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/volumes"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": "vol-1",
+                "name": "data",
+                "size_mib": 1024,
+                "created_at": "2024-01-01T00:00:00Z",
+                "attachments": [
+                    {
+                        "app_id": "app-1",
+                        "app_name": "svc",
+                        "mount_point": "/data",
+                        "access_mode": 1
+                    }
+                ]
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let res = client.list_all_volumes().await.unwrap();
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0].volume.name, "data");
+    assert_eq!(res[0].attachments[0].app_name, "svc");
+}
+
+#[tokio::test]
+async fn test_client_create_volume_uses_global_endpoint() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/volumes"))
+        .and(body_json(json!({
+            "name": "data",
+            "size_mib": 2048
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": "vol-1",
+            "name": "data",
+            "size_mib": 2048,
+            "created_at": "2024-01-01T00:00:00Z"
+        })))
+        .mount(&server)
+        .await;
+
+    let res = client.create_volume("data", 2048).await.unwrap();
+    assert_eq!(res.id, "vol-1");
+    assert_eq!(res.name, "data");
+    assert_eq!(res.size_mib, 2048);
+}
+
+#[tokio::test]
+async fn test_client_attach_volume_uses_attach_endpoint() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/apps/app-123/volumes/attach"))
+        .and(body_json(json!({
+            "volume_id": "vol-1",
+            "mount_point": "/data",
+            "access_mode": 2
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "app_id": "app-123",
+            "volume_id": "vol-1",
+            "mount_point": "/data",
+            "access_mode": 2,
+            "created_at": "2024-01-01T00:00:00Z"
+        })))
+        .mount(&server)
+        .await;
+
+    let res = client
+        .attach_volume("app-123", "vol-1", "/data", 2)
+        .await
+        .unwrap();
+    assert_eq!(res.app_id, "app-123");
+    assert_eq!(res.volume_id, "vol-1");
+    assert_eq!(res.access_mode, 2);
+}
+
+#[tokio::test]
+async fn test_client_detach_volume_uses_detach_endpoint() {
+    let server = MockServer::start().await;
+    let client = MikromClient::new(server.uri(), Some("token".into()));
+
+    Mock::given(method("DELETE"))
+        .and(path("/v1/apps/app-123/volumes/vol-1/detach"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    client.detach_volume("app-123", "vol-1").await.unwrap();
+}
+
+#[tokio::test]
 async fn test_client_delete_deployment_record() {
     let server = MockServer::start().await;
     let client = MikromClient::new(server.uri(), Some("token".into()));

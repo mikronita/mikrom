@@ -284,13 +284,39 @@ export interface GithubAccount {
 
 export interface Volume {
   id: string;
-  app_id: string;
+  user_id: string;
   name: string;
   size_mib: number;
-  pool_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppVolume {
+  app_id: string;
+  volume_id: string;
   mount_point: string;
   access_mode: number;
   created_at: string;
+}
+
+export interface AttachedVolume extends AppVolume {
+  id: string;
+  user_id: string;
+  name: string;
+  size_mib: number;
+  pool_name: string;
+  updated_at: string;
+}
+
+export interface VolumeAttachmentInfo {
+  app_id: string;
+  app_name: string;
+  mount_point: string;
+  access_mode: number;
+}
+
+export interface VolumeWithAttachments extends Volume {
+  attachments: VolumeAttachmentInfo[];
 }
 
 export interface VolumeSnapshot {
@@ -303,6 +329,10 @@ export interface VolumeSnapshot {
 export interface CreateVolumeRequest {
   name: string;
   size_mib: number;
+}
+
+export interface AttachVolumeRequest {
+  volume_id: string;
   mount_point: string;
   access_mode: number;
 }
@@ -680,17 +710,28 @@ export async function getGithubInstallUrl(token: string) {
 export async function listVolumes(token: string, appId: string) {
   try {
     const response = await fetch(`${API_PROXY_BASE}/apps/${appId}/volumes`, { headers: authHeaders(token) });
-    const result = await parseJson<Volume[]>(response);
+    const result = await parseJson<AttachedVolume[]>(response);
     if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch volumes") };
-    return { data: result as Volume[] };
+    return { data: result as AttachedVolume[] };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Network error" };
   }
 }
 
-export async function createVolume(token: string, appId: string, data: CreateVolumeRequest) {
+export async function listAllVolumes(token: string) {
   try {
-    const response = await fetch(`${API_PROXY_BASE}/apps/${appId}/volumes`, {
+    const response = await fetch(`${API_PROXY_BASE}/volumes`, { headers: authHeaders(token) });
+    const result = await parseJson<VolumeWithAttachments[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch all volumes") };
+    return { data: result as VolumeWithAttachments[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function createVolume(token: string, data: CreateVolumeRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/volumes`, {
       method: "POST",
       headers: authHeaders(token),
       body: JSON.stringify(data),
@@ -698,6 +739,37 @@ export async function createVolume(token: string, appId: string, data: CreateVol
     const result = await parseJson<Volume>(response);
     if (!response.ok) return { error: getErrorMessage(result, "Failed to create volume") };
     return { data: result as Volume };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function attachVolume(token: string, appId: string, data: AttachVolumeRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appId}/volumes/attach`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<AppVolume>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to attach volume") };
+    return { data: result as AppVolume };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function detachVolume(token: string, appId: string, volumeId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${appId}/volumes/${volumeId}/detach`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (!response.ok) {
+      const result = await parseJson(response);
+      return { error: getErrorMessage(result, "Failed to detach volume") };
+    }
+    return { data: true };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Network error" };
   }

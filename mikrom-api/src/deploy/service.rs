@@ -213,10 +213,10 @@ impl DeploymentService {
                 volumes: volumes
                     .into_iter()
                     .map(|v| mikrom_proto::scheduler::Volume {
-                        volume_id: v.id.to_string(),
-                        size_mib: v.size_mib as u64,
-                        read_only: false, // Default to RW
-                        pool_name: v.pool_name,
+                        volume_id: v.volume.id.to_string(),
+                        size_mib: v.volume.size_mib as u64,
+                        read_only: v.access_mode == 2, // ROX is read-only
+                        pool_name: v.volume.pool_name,
                         mount_point: v.mount_point,
                         access_mode: v.access_mode,
                     })

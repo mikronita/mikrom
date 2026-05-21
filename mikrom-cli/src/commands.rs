@@ -40,19 +40,24 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum VolumeCommands {
-    /// List all volumes for an application
+    /// List all volumes (optional filter by application)
     List {
         #[arg(long, short, help = "Name of the application")]
-        app: String,
+        app: Option<String>,
     },
-    /// Create a new persistent volume for an application
+    /// Create a new persistent volume
     Create {
-        #[arg(long, short, help = "Name of the application")]
-        app: String,
         #[arg(long, short, help = "Display name for the volume")]
         name: String,
         #[arg(long, short, help = "Size in MiB")]
         size: i32,
+    },
+    /// Attach a volume to an application
+    Attach {
+        #[arg(long, short, help = "Name of the application")]
+        app: String,
+        #[arg(long, short, help = "Volume ID")]
+        volume_id: String,
         #[arg(long, short, help = "Mount point inside the VM (e.g. /data)")]
         mount: String,
         #[arg(
@@ -62,6 +67,13 @@ pub enum VolumeCommands {
             default_value = "0"
         )]
         mode: i32,
+    },
+    /// Detach a volume from an application
+    Detach {
+        #[arg(long, short, help = "Name of the application")]
+        app: String,
+        #[arg(long, short, help = "Volume ID")]
+        volume_id: String,
     },
     /// Create a snapshot of a volume
     Snapshot {

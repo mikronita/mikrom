@@ -98,16 +98,44 @@ pub struct WhoamiResponse {
     pub created_at: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Volume {
     pub id: String,
-    pub app_id: String,
     pub name: String,
     pub size_mib: i32,
-    pub pool_name: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VolumeAttachmentInfo {
+    pub app_id: String,
+    pub app_name: String,
+    pub mount_point: String,
+    pub access_mode: i32,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VolumeWithAttachments {
+    #[serde(flatten)]
+    pub volume: Volume,
+    pub attachments: Vec<VolumeAttachmentInfo>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AppVolume {
+    pub app_id: String,
+    pub volume_id: String,
     pub mount_point: String,
     pub access_mode: i32,
     pub created_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AttachedVolume {
+    #[serde(flatten)]
+    pub volume: Volume,
+    pub mount_point: String,
+    pub access_mode: i32,
 }
 
 #[derive(Debug, Serialize)]
@@ -226,7 +254,17 @@ impl MikromClient {
         bail!("{} (HTTP {})", err_body.error, status);
     }
 
-    pub async fn list_volumes(&self, app_id: &str) -> anyhow::Result<Vec<Volume>> {
+    async fn request_no_body(&self, method: reqwest::Method, endpoint: &str) -> anyhow::Result<()> {
+        self.request_no_content_with_timeout(
+            method,
+            endpoint,
+            None::<()>,
+            std::time::Duration::from_secs(30),
+        )
+        .await
+    }
+
+    pub async fn list_volumes(&self, app_id: &str) -> anyhow::Result<Vec<AttachedVolume>> {
         self.request(
             reqwest::Method::GET,
             &format!("apps/{}/volumes", app_id),
@@ -235,24 +273,45 @@ impl MikromClient {
         .await
     }
 
-    pub async fn create_volume(
-        &self,
-        app_id: &str,
-        name: &str,
-        size_mib: i32,
-        mount_point: &str,
-        access_mode: i32,
-    ) -> anyhow::Result<Volume> {
+    pub async fn list_all_volumes(&self) -> anyhow::Result<Vec<VolumeWithAttachments>> {
+        self.request(reqwest::Method::GET, "volumes", None::<()>)
+            .await
+    }
+
+    pub async fn create_volume(&self, name: &str, size_mib: i32) -> anyhow::Result<Volume> {
         let body = serde_json::json!({
             "name": name,
             "size_mib": size_mib,
+        });
+        self.request(reqwest::Method::POST, "volumes", Some(body))
+            .await
+    }
+
+    pub async fn attach_volume(
+        &self,
+        app_id: &str,
+        volume_id: &str,
+        mount_point: &str,
+        access_mode: i32,
+    ) -> anyhow::Result<AppVolume> {
+        let body = serde_json::json!({
+            "volume_id": volume_id,
             "mount_point": mount_point,
             "access_mode": access_mode,
         });
+
         self.request(
             reqwest::Method::POST,
-            &format!("apps/{}/volumes", app_id),
+            &format!("apps/{}/volumes/attach", app_id),
             Some(body),
+        )
+        .await
+    }
+
+    pub async fn detach_volume(&self, app_id: &str, volume_id: &str) -> anyhow::Result<()> {
+        self.request_no_body(
+            reqwest::Method::DELETE,
+            &format!("apps/{}/volumes/{}/detach", app_id, volume_id),
         )
         .await
     }

@@ -373,8 +373,20 @@ pub fn create_app_with_rate_limits(
         )
         .route(
             &format!("{}/apps/{{app_id}}/volumes", API_V1),
+            get(crate::vms::volumes::list_volumes_handler),
+        )
+        .route(
+            &format!("{}/apps/{{app_id}}/volumes/attach", API_V1),
+            post(crate::vms::volumes::attach_volume_handler),
+        )
+        .route(
+            &format!("{}/apps/{{app_id}}/volumes/{{volume_id}}/detach", API_V1),
+            delete(crate::vms::volumes::detach_volume_handler),
+        )
+        .route(
+            &format!("{}/volumes", API_V1),
             post(crate::vms::volumes::create_volume_handler)
-                .get(crate::vms::volumes::list_volumes_handler),
+                .get(crate::vms::volumes::list_all_volumes_handler),
         )
         .route(
             &format!("{}/volumes/{{volume_id}}/snapshots", API_V1),
