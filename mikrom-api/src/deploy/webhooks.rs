@@ -30,22 +30,7 @@ pub struct GitHubCommit {
     pub message: String,
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/webhooks/github/{app_name}",
-    request_body(content = String, description = "GitHub Webhook Payload", content_type = "application/json"),
-    params(
-        ("app_name" = String, Path, description = "Application Name")
-    ),
-    responses(
-        (status = 200, description = "Webhook ignored or processed successfully without deployment"),
-        (status = 202, description = "Webhook accepted and deployment initiated"),
-        (status = 400, description = "Bad Request"),
-        (status = 401, description = "Unauthorized (Invalid Signature)"),
-        (status = 404, description = "Application not found")
-    ),
-    tag = "system"
-)]
+#[rovo::rovo]
 pub async fn github_webhook_handler(
     state: State<AppState>,
     Path(app_name): Path<String>,
@@ -56,19 +41,7 @@ pub async fn github_webhook_handler(
     github_webhook_handler_core(state, Some(app_name), headers, body_bytes).await
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/webhooks/github",
-    request_body(content = String, description = "GitHub Webhook Payload", content_type = "application/json"),
-    responses(
-        (status = 200, description = "Webhook ignored or processed successfully without deployment"),
-        (status = 202, description = "Webhook accepted and deployment initiated"),
-        (status = 400, description = "Bad Request"),
-        (status = 401, description = "Unauthorized (Invalid Signature)"),
-        (status = 404, description = "Application not found")
-    ),
-    tag = "system"
-)]
+#[rovo::rovo]
 pub async fn github_webhook_handler_generic(
     state: State<AppState>,
     headers: HeaderMap,
@@ -290,7 +263,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let result = github_webhook_handler(
+        let result = __github_webhook_handler_impl(
             State(state),
             Path("test-app".to_string()),
             headers,
@@ -312,7 +285,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-github-event", "ping".parse().unwrap());
 
-        let result = github_webhook_handler(
+        let result = __github_webhook_handler_impl(
             State(state),
             Path("any-app".to_string()),
             headers,
@@ -350,7 +323,7 @@ mod tests {
         headers.insert("x-github-event", "push".parse().unwrap());
         headers.insert("x-hub-signature-256", signature.parse().unwrap());
 
-        let result = github_webhook_handler(
+        let result = __github_webhook_handler_impl(
             State(state),
             Path("test-app".to_string()),
             headers,
@@ -390,7 +363,7 @@ mod tests {
         headers.insert("x-github-event", "push".parse().unwrap());
         headers.insert("x-hub-signature-256", signature.parse().unwrap());
 
-        let result = github_webhook_handler(
+        let result = __github_webhook_handler_impl(
             State(state),
             Path("test-repo".to_string()),
             headers,
@@ -436,7 +409,7 @@ mod tests {
         headers.insert("x-github-event", "push".parse().unwrap());
         headers.insert("x-hub-signature-256", signature.parse().unwrap());
 
-        let result = github_webhook_handler_generic(State(state), headers, body.into())
+        let result = __github_webhook_handler_generic_impl(State(state), headers, body.into())
             .await
             .unwrap();
         assert_eq!(result, StatusCode::ACCEPTED);
@@ -477,7 +450,7 @@ mod tests {
         headers.insert("x-github-event", "push".parse().unwrap());
         headers.insert("x-hub-signature-256", signature.parse().unwrap());
 
-        let result = github_webhook_handler_generic(State(state), headers, body.into())
+        let result = __github_webhook_handler_generic_impl(State(state), headers, body.into())
             .await
             .unwrap();
 

@@ -4,7 +4,9 @@ use axum::extract::State;
 use chrono::Utc;
 use mikrom_api::AppState;
 use mikrom_api::auth::AuthUser;
-use mikrom_api::deploy::handlers::{ManualDeployRequest, deploy_app_version_handler};
+use mikrom_api::deploy::handlers::{
+    __deploy_app_version_handler_impl as deploy_app_version_handler, ManualDeployRequest,
+};
 use mikrom_api::models::app::{App, Deployment};
 use mikrom_api::nats::TypedNatsClient;
 use mikrom_api::repositories::MockGithubRepository;

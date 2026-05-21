@@ -1,10 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, FromRow, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone, rovo::schemars::JsonSchema)]
 pub struct App {
     pub id: Uuid,
     pub name: String,
@@ -61,7 +60,7 @@ impl Default for App {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, FromRow, Clone, ToSchema, Default)]
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone, rovo::schemars::JsonSchema, Default)]
 pub struct Deployment {
     pub id: Uuid,
     pub app_id: Uuid,
@@ -75,7 +74,6 @@ pub struct Deployment {
     pub memory_mib: i64,
     pub disk_mib: i64,
     pub port: i32,
-    #[schema(value_type = Object)]
     pub env_vars: serde_json::Value,
     pub git_commit_hash: Option<String>,
     pub git_commit_message: Option<String>,
@@ -85,7 +83,7 @@ pub struct Deployment {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize, Deserialize, FromRow, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone, rovo::schemars::JsonSchema)]
 pub struct SecurityRule {
     pub id: Uuid,
     pub app_id: Uuid,

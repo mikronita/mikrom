@@ -10,8 +10,7 @@ default = []
 test-utils = []
 
 [dependencies]
-# Axum 0.7 is required for compatibility with utoipa-swagger-ui v8
-axum = "0.7"
+axum = "0.8"
 tokio = { workspace = true }
 tokio-stream = { version = "0.1", features = ["sync"] }
 serde = { version = "1", features = ["derive"] }
@@ -24,7 +23,7 @@ bcrypt = "0.16"
 jsonwebtoken = "9"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "migrate"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "migrate", "macros"] }
 dotenvy = "0.15"
 thiserror = "2"
 anyhow.workspace = true
@@ -44,8 +43,9 @@ base64 = "0.22.1"
 sha2 = "0.10.9"
 hmac = "0.12.1"
 hex = "0.4.3"
-utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
-utoipa-swagger-ui = { version = "8", features = ["axum"] }
+indexmap = "2"
+rovo = { version = "0.4.8", features = ["swagger"] }
+schemars = { version = "0.9.0", features = ["chrono04", "uuid1"] }
 rand = "0.10.1"
 rustls = { version = "0.23", features = ["ring"] }
 reqwest = { version = "0.13.3", features = ["json"] }

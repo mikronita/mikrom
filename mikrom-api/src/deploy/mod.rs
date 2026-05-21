@@ -1,7 +1,6 @@
 use crate::error::{ApiError, ApiResult};
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub mod handlers;
@@ -41,23 +40,21 @@ pub(crate) fn resolve_deployment_memory_mib(memory_mib: Option<u32>) -> ApiResul
     }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct DeployRequestPayload {
     pub app_name: String,
     pub image: String,
     pub git_url: Option<String>,
     /// CPU cores to allocate. Allowed values: 1, 2, 3, or 4.
-    #[schema(example = 1, minimum = 1, maximum = 4)]
     pub vcpus: Option<u32>,
     /// Memory to allocate in MiB. Allowed values: 512, 1024, 2048, or 4096.
-    #[schema(example = 512, minimum = 512, maximum = 4096, multiple_of = 512)]
     pub memory_mib: Option<u32>,
     pub disk_mib: Option<u32>,
     pub port: Option<u32>,
     pub env: Option<std::collections::HashMap<String, String>>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
 pub struct DeployResponseBody {
     pub job_id: Option<String>,
     pub deployment_id: Option<String>,
@@ -68,20 +65,7 @@ pub struct DeployResponseBody {
     pub message: String,
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/deploy",
-    request_body = DeployRequestPayload,
-    responses(
-        (status = 200, description = "Deployment initiated", body = DeployResponseBody),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 500, description = "Internal error", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn deploy_app(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,

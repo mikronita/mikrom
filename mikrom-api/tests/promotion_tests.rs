@@ -225,7 +225,7 @@ async fn test_promote_paused_deployment_resumes_it() {
     };
 
     // Call the handler!
-    mikrom_api::deploy::handlers::activate_deployment_handler(
+    mikrom_api::deploy::handlers::__activate_deployment_handler_impl(
         auth,
         axum::extract::State(state),
         axum::extract::Path((app.name.clone(), new_dep_id)),
@@ -242,7 +242,7 @@ async fn test_promote_running_deployment_while_flow_active_is_immediate() {
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
     use mikrom_api::auth::AuthUser;
-    use mikrom_api::deploy::handlers::activate_deployment_handler;
+    use mikrom_api::deploy::handlers::__activate_deployment_handler_impl as activate_deployment_handler;
 
     let mut mock_app_repo = MockAppRepository::new();
     let mut mock_scheduler = MockScheduler::new();
@@ -385,7 +385,7 @@ async fn test_promote_running_deployment_with_stale_db_status_uses_runtime_statu
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
     use mikrom_api::auth::AuthUser;
-    use mikrom_api::deploy::handlers::activate_deployment_handler;
+    use mikrom_api::deploy::handlers::__activate_deployment_handler_impl as activate_deployment_handler;
 
     eprintln!(
         "skipping test_promote_running_deployment_with_stale_db_status_uses_runtime_status: flaky under parallel nextest due shared NATS subjects"

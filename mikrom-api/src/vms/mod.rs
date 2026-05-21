@@ -2,23 +2,18 @@ pub mod volumes;
 pub use volumes::*;
 
 use crate::deploy::handlers::{AppScaleState, resolve_app_scale_state};
-use crate::error::{ApiError, ApiResult};
-use crate::models::app::SecurityRule;
+use crate::error::{ApiError, ApiResult, SseResponse};
 use crate::repositories::app_repository::UpdateDeploymentParams;
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::{
     Json,
     extract::{Path, State},
-    response::{
-        IntoResponse,
-        sse::{Event, Sse},
-    },
+    response::sse::{Event, Sse},
 };
 use serde::Serialize;
 use tokio_stream::StreamExt;
-use utoipa::ToSchema;
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
 pub struct LiveDeploymentInfo {
     pub job_id: String,
     pub deployment_id: String,
@@ -41,27 +36,12 @@ pub struct LiveDeploymentInfo {
 use futures::Stream;
 use std::convert::Infallible;
 
-#[utoipa::path(
-    get,
-    path = "/v1/apps/{app_name}/logs/stream",
-    params(
-        ("app_name" = String, Path, description = "Application name")
-    ),
-    responses(
-        (status = 200, description = "SSE stream of application logs", content_type = "text/event-stream"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn app_logs_stream_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(app_name): Path<String>,
-) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+) -> ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     // 1. Verify app exists and user has access
     let app = state
         .app_repo
@@ -103,30 +83,17 @@ pub async fn app_logs_stream_handler(
         }
     };
 
-    Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new()))
+    Ok(SseResponse(
+        Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new()),
+    ))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/apps/{app_name}/metrics/stream",
-    params(
-        ("app_name" = String, Path, description = "Application name")
-    ),
-    responses(
-        (status = 200, description = "SSE stream of application metrics", content_type = "text/event-stream"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn app_metrics_stream_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(app_name): Path<String>,
-) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+) -> ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     // 1. Verify app exists and user has access
     let app = state
         .app_repo
@@ -178,10 +145,12 @@ pub async fn app_metrics_stream_handler(
         }
     };
 
-    Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new()))
+    Ok(SseResponse(
+        Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new()),
+    ))
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
 pub struct LiveDeploymentStatus {
     pub job_id: String,
     pub deployment_id: String,
@@ -216,18 +185,7 @@ async fn resolve_app_scale_state_by_id(state: &crate::AppState, app_id: &str) ->
     }
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/deployments/active",
-    responses(
-        (status = 200, description = "List of active deployments", body = [LiveDeploymentInfo]),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 #[tracing::instrument(skip(state, auth))]
 pub async fn list_active_deployments(
     auth: crate::auth::AuthUser,
@@ -313,23 +271,12 @@ pub async fn list_active_deployments(
     Ok(Json(active_deployments))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/deployments/events",
-    responses(
-        (status = 200, description = "SSE stream of active deployment events"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 #[tracing::instrument(skip(state, auth))]
 pub async fn watch_deployments(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
-) -> ApiResult<impl IntoResponse> {
+) -> ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     let nats_sub = state
         .nats
         .subscribe("mikrom.scheduler.job_updates")
@@ -602,10 +549,12 @@ pub async fn watch_deployments(
         }
     };
 
-    Ok(Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(std::time::Duration::from_secs(5))
-            .text("keep-alive"),
+    Ok(SseResponse(
+        Sse::new(stream).keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(std::time::Duration::from_secs(5))
+                .text("keep-alive"),
+        ),
     ))
 }
 
@@ -653,23 +602,7 @@ pub async fn validate_app_deployment(
     Ok((app, deployment))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/apps/{app_name}/deployments/{job_id}",
-    params(
-        ("app_name" = String, Path, description = "Application name"),
-        ("job_id" = String, Path, description = "Deployment Job ID")
-    ),
-    responses(
-        (status = 200, description = "Get live deployment details", body = LiveDeploymentStatus),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Deployment not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 #[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn get_deployment_status(
     auth: crate::auth::AuthUser,
@@ -750,28 +683,12 @@ pub async fn get_deployment_status(
     Ok(Json(deployment_status))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/apps/{app_name}/deployments/{job_id}/logs",
-    params(
-        ("app_name" = String, Path, description = "Application name"),
-        ("job_id" = String, Path, description = "Deployment Job ID")
-    ),
-    responses(
-        (status = 200, description = "SSE stream for VM logs", content_type = "text/event-stream"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Deployment not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn get_deployment_logs(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
-) -> ApiResult<impl IntoResponse> {
+) -> ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     // 1. Validate app ownership and deployment connection
     let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
 
@@ -808,30 +725,16 @@ pub async fn get_deployment_logs(
         Ok::<Event, std::convert::Infallible>(Event::default().data(text))
     });
 
-    Ok(Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(std::time::Duration::from_secs(1))
-            .text("keep-alive"),
+    Ok(SseResponse(
+        Sse::new(stream).keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(std::time::Duration::from_secs(1))
+                .text("keep-alive"),
+        ),
     ))
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/apps/{app_name}/deployments/{job_id}/pause",
-    params(
-        ("app_name" = String, Path, description = "Application name"),
-        ("job_id" = String, Path, description = "Deployment Job ID")
-    ),
-    responses(
-        (status = 200, description = "Deployment paused"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application/Deployment not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 #[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn pause_deployment(
     auth: crate::auth::AuthUser,
@@ -900,23 +803,7 @@ pub async fn pause_deployment(
     }
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/apps/{app_name}/deployments/{job_id}/resume",
-    params(
-        ("app_name" = String, Path, description = "Application name"),
-        ("job_id" = String, Path, description = "Deployment Job ID")
-    ),
-    responses(
-        (status = 200, description = "Deployment resumed"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application/Deployment not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 #[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn resume_deployment(
     auth: crate::auth::AuthUser,
@@ -970,23 +857,7 @@ pub async fn resume_deployment(
     }
 }
 
-#[utoipa::path(
-    delete,
-    path = "/v1/apps/{app_name}/deployments/{job_id}",
-    params(
-        ("app_name" = String, Path, description = "Application name"),
-        ("job_id" = String, Path, description = "Deployment Job ID")
-    ),
-    responses(
-        (status = 200, description = "Deployment stopped"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application/Deployment not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 #[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn stop_deployment(
     auth: crate::auth::AuthUser,
@@ -1047,23 +918,7 @@ pub async fn stop_deployment(
     }
 }
 
-#[utoipa::path(
-    delete,
-    path = "/v1/apps/{app_name}/deployments/{job_id}/delete",
-    params(
-        ("app_name" = String, Path, description = "Application name"),
-        ("job_id" = String, Path, description = "Deployment Job ID")
-    ),
-    responses(
-        (status = 200, description = "Deployment record deleted"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application/Deployment not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 #[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn delete_deployment_record(
     auth: crate::auth::AuthUser,
@@ -1093,24 +948,13 @@ pub async fn delete_deployment_record(
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
-#[derive(Debug, Clone, Default, Serialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, rovo::schemars::JsonSchema)]
 pub struct MeshStatus {
     pub workers: Vec<crate::models::worker::Worker>,
     pub total_workers: usize,
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/networking/mesh",
-    responses(
-        (status = 200, description = "Mesh network status", body = MeshStatus),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "networking",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn get_mesh_status_handler(
     _auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
@@ -1202,22 +1046,11 @@ pub async fn start_mesh_status_tracker(state: crate::AppState) {
     }
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/networking/mesh/stream",
-    responses(
-        (status = 200, description = "SSE stream of mesh status updates", content_type = "text/event-stream"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "networking",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn mesh_status_stream_handler(
     _auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
-) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+) -> ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     let mut rx = state.mesh_status.subscribe();
 
     let stream = async_stream::stream! {
@@ -1238,14 +1071,16 @@ pub async fn mesh_status_stream_handler(
         }
     };
 
-    Ok(Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(std::time::Duration::from_secs(10))
-            .text("keep-alive"),
+    Ok(SseResponse(
+        Sse::new(stream).keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(std::time::Duration::from_secs(10))
+                .text("keep-alive"),
+        ),
     ))
 }
 
-#[derive(Debug, serde::Deserialize, ToSchema)]
+#[derive(Debug, serde::Deserialize, rovo::schemars::JsonSchema)]
 pub struct CreateSecurityRuleRequest {
     pub protocol: String,
     pub port_start: i32,
@@ -1253,22 +1088,7 @@ pub struct CreateSecurityRuleRequest {
     pub action: String,
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/apps/{app_name}/security-groups",
-    params(
-        ("app_name" = String, Path, description = "Application name")
-    ),
-    responses(
-        (status = 200, description = "List of security rules", body = [SecurityRule]),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "networking",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn list_security_rules_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
@@ -1288,23 +1108,7 @@ pub async fn list_security_rules_handler(
     Ok(Json(rules))
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/apps/{app_name}/security-groups",
-    request_body = CreateSecurityRuleRequest,
-    params(
-        ("app_name" = String, Path, description = "Application name")
-    ),
-    responses(
-        (status = 201, description = "Security rule created", body = SecurityRule),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "networking",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn create_security_rule_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
@@ -1360,23 +1164,7 @@ pub async fn create_security_rule_handler(
     Ok((axum::http::StatusCode::CREATED, Json(rule)))
 }
 
-#[utoipa::path(
-    delete,
-    path = "/v1/apps/{app_name}/security-groups/{rule_id}",
-    params(
-        ("app_name" = String, Path, description = "Application name"),
-        ("rule_id" = String, Path, description = "Rule UUID")
-    ),
-    responses(
-        (status = 200, description = "Security rule deleted"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application/Rule not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "networking",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn delete_security_rule_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,

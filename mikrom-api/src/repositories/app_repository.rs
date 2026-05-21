@@ -29,6 +29,7 @@ pub struct UpdateDeploymentParams {
     pub git_branch: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, rovo::schemars::JsonSchema)]
 pub struct GitMetadata {
     pub git_commit_hash: Option<String>,
     pub git_commit_message: Option<String>,

@@ -24,10 +24,9 @@ use std::convert::Infallible;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
-use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize, Serialize, ToSchema, Default, Clone)]
+#[derive(Debug, Deserialize, Serialize, rovo::schemars::JsonSchema, Default, Clone)]
 pub struct CreateAppRequest {
     pub name: String,
     pub git_url: String,
@@ -43,27 +42,12 @@ pub struct CreateAppRequest {
     pub autoscaling_enabled: Option<bool>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
 pub struct AppSecretResponse {
     pub github_webhook_secret: Option<String>,
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/apps/{app_name}/secret",
-    params(
-        ("app_name" = String, Path, description = "Application name")
-    ),
-    responses(
-        (status = 200, description = "Get application secret", body = AppSecretResponse),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "apps",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn get_app_secret_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -76,7 +60,7 @@ pub async fn get_app_secret_handler(
     }))
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AppScaleState {
     Active,
@@ -85,7 +69,7 @@ pub enum AppScaleState {
     WarmingUp,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
 pub struct AppResponse {
     pub id: Uuid,
     pub name: String,
@@ -188,7 +172,7 @@ async fn build_app_response(state: &AppState, app: &App) -> AppResponse {
     build_app_response_with_scale_state(app, scale_state)
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct ScaleAppRequest {
     pub desired_replicas: Option<i32>,
     pub min_replicas: Option<i32>,
@@ -198,33 +182,18 @@ pub struct ScaleAppRequest {
     pub mem_threshold: Option<f64>,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct ManualDeployRequest {
     /// CPU cores to allocate. Allowed values: 1, 2, 3, or 4.
-    #[schema(example = 1, minimum = 1, maximum = 4)]
     pub vcpus: Option<u32>,
     /// Memory to allocate in MiB. Allowed values: 512, 1024, 2048, or 4096.
-    #[schema(example = 512, minimum = 512, maximum = 4096, multiple_of = 512)]
     pub memory_mib: Option<u32>,
     pub disk_mib: Option<u32>,
     pub env: Option<std::collections::HashMap<String, String>>,
     pub image: Option<String>,
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/apps",
-    request_body = CreateAppRequest,
-    responses(
-        (status = 201, description = "Application created", body = AppResponse),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 500, description = "Internal error", body = crate::error::ErrorResponse)
-    ),
-    tag = "apps",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn create_app_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -409,18 +378,7 @@ pub async fn create_app_handler(
     ))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/apps",
-    responses(
-        (status = 200, description = "List applications", body = [AppResponse]),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "apps",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn list_apps_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -480,22 +438,7 @@ pub async fn list_apps_handler(
     Ok(Json(responses))
 }
 
-#[utoipa::path(
-    delete,
-    path = "/v1/apps/{app_name}",
-    params(
-        ("app_name" = String, Path, description = "Application name")
-    ),
-    responses(
-        (status = 204, description = "Application deleted"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "apps",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn delete_app_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -604,23 +547,7 @@ pub async fn delete_app_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(
-    patch,
-    path = "/v1/apps/{app_name}/scale",
-    request_body = ScaleAppRequest,
-    params(
-        ("app_name" = String, Path, description = "Application name")
-    ),
-    responses(
-        (status = 200, description = "Scaling configuration updated"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "apps",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn scale_app_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -735,21 +662,7 @@ pub async fn scale_app_handler(
     Ok(StatusCode::OK)
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/apps/{app_name}/deployments",
-    params(
-        ("app_name" = String, Path, description = "Application name")
-    ),
-    responses(
-        (status = 200, description = "List deployments", body = [Deployment]),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn list_deployments_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -764,26 +677,12 @@ pub async fn list_deployments_handler(
     Ok(Json(deployments))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/apps/{app_name}/deployments/stream",
-    params(
-        ("app_name" = String, Path, description = "Application name")
-    ),
-    responses(
-        (status = 200, description = "SSE stream for deployment updates", content_type = "text/event-stream"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn deployments_stream_handler(
     auth: AuthUser,
     State(state): State<AppState>,
     Path(app_name): Path<String>,
-) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+) -> ApiResult<crate::error::SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
     let app_id = app.id;
     let rx = state.deployment_events.subscribe();
@@ -853,30 +752,16 @@ pub async fn deployments_stream_handler(
         }
     };
 
-    Ok(Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(std::time::Duration::from_secs(5))
-            .text("keep-alive"),
+    Ok(crate::error::SseResponse(
+        Sse::new(stream).keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(std::time::Duration::from_secs(5))
+                .text("keep-alive"),
+        ),
     ))
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/apps/{app_name}/deployments/{deployment_id}/activate",
-    params(
-        ("app_name" = String, Path, description = "Application name"),
-        ("deployment_id" = Uuid, Path, description = "Deployment ID")
-    ),
-    responses(
-        (status = 200, description = "Deployment activated"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Deployment not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn activate_deployment_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -1039,23 +924,7 @@ pub async fn activate_deployment_handler(
     }
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/apps/{app_name}/deploy",
-    params(
-        ("app_name" = String, Path, description = "Application name")
-    ),
-    request_body = ManualDeployRequest,
-    responses(
-        (status = 200, description = "Deployment triggered", body = crate::deploy::DeployResponseBody),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse),
-        (status = 404, description = "Application not found", body = crate::error::ErrorResponse)
-    ),
-    tag = "deployment",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn deploy_app_version_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -1487,7 +1356,7 @@ mod tests {
             mem_threshold: None,
         };
 
-        let result = scale_app_handler(
+        let result = __scale_app_handler_impl(
             auth,
             State(state),
             Path("test-app".to_string()),
@@ -1578,7 +1447,7 @@ mod tests {
         mock_scheduler.expect_update_app_scaling_config().times(0);
         state.scheduler = Arc::new(mock_scheduler);
 
-        let result = scale_app_handler(
+        let result = __scale_app_handler_impl(
             auth,
             State(state),
             Path("test-app".to_string()),

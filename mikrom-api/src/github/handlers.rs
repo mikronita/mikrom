@@ -8,25 +8,14 @@ use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::Redirect;
 use serde::Deserialize;
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct InstallCallbackQuery {
     pub installation_id: i64,
     pub setup_action: String,
     pub state: Option<String>,
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/github/install",
-    responses(
-        (status = 200, description = "Get GitHub App installation URL", body = serde_json::Value),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "auth",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn github_install(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -49,20 +38,7 @@ pub async fn github_install(
     })))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/github/callback",
-    params(
-        ("installation_id" = i64, Query, description = "GitHub installation ID"),
-        ("setup_action" = String, Query, description = "Setup action"),
-        ("state" = String, Query, description = "State token for CSRF protection")
-    ),
-    responses(
-        (status = 302, description = "Redirect back to frontend after successful installation"),
-        (status = 400, description = "Invalid callback parameters", body = crate::error::ErrorResponse)
-    ),
-    tag = "auth"
-)]
+#[rovo::rovo(skip)]
 pub async fn github_callback(
     State(state): State<AppState>,
     Query(query): Query<InstallCallbackQuery>,
@@ -163,18 +139,7 @@ pub async fn github_callback(
     Ok(Redirect::to(&format!("{}/settings", state.frontend_url)))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/github/repos",
-    responses(
-        (status = 200, description = "List available GitHub repositories", body = [GithubRepo]),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "auth",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn list_repos(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -212,18 +177,7 @@ pub async fn list_repos(
     Ok(Json(all_repos))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/github/accounts",
-    responses(
-        (status = 200, description = "List connected GitHub accounts", body = [UserGithubAccount]),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "auth",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn list_accounts(
     State(state): State<AppState>,
     auth: AuthUser,

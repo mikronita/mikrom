@@ -375,6 +375,20 @@ async fn test_watch_deployments_stream_includes_scale_state() {
         }])
     });
 
+    mock_active
+        .expect_list_deployments_by_app()
+        .returning(move |_| {
+            Ok(vec![mikrom_api::models::app::Deployment {
+                id: dep_id,
+                app_id,
+                user_id,
+                status: "RUNNING".to_string(),
+                job_id: Some("job-1".to_string()),
+                image_tag: Some("nginx:latest".into()),
+                ..Default::default()
+            }])
+        });
+
     let mut mock_scheduler = MockScheduler::new();
     let job_id_for_sch = job_id.clone();
     let user_id_str = user_id.to_string();

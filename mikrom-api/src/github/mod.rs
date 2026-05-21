@@ -18,7 +18,7 @@ pub struct InstallationTokenResponse {
     pub expires_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Serialize, Deserialize, rovo::schemars::JsonSchema)]
 pub struct GithubRepo {
     pub id: i64,
     pub name: String,

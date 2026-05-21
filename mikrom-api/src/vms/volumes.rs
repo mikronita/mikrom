@@ -6,13 +6,11 @@ use axum::{
     Json,
     extract::{Path, State},
     http::StatusCode,
-    response::IntoResponse,
 };
 use serde::Deserialize;
-use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct CreateVolumeRequest {
     pub name: String,
     pub size_mib: i32,
@@ -26,37 +24,23 @@ fn default_mount_point() -> String {
     "/data".to_string()
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct CreateSnapshotRequest {
     pub name: String,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct RestoreSnapshotRequest {
     pub snapshot_name: String,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct CloneVolumeRequest {
     pub name: String,
     pub snapshot_name: String,
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/apps/{app_id}/volumes",
-    params(
-        ("app_id" = Uuid, Path, description = "Application ID")
-    ),
-    request_body = CreateVolumeRequest,
-    responses(
-        (status = 201, description = "Volume created", body = Volume),
-        (status = 401, description = "Unauthorized"),
-        (status = 404, description = "App not found")
-    ),
-    tag = "volume",
-    security(("jwt" = []))
-)]
+#[rovo::rovo]
 pub async fn create_volume_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
@@ -144,20 +128,7 @@ pub async fn create_volume_handler(
     Ok((StatusCode::CREATED, Json(volume)))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/apps/{app_id}/volumes",
-    params(
-        ("app_id" = Uuid, Path, description = "Application ID")
-    ),
-    responses(
-        (status = 200, description = "List of volumes", body = [Volume]),
-        (status = 401, description = "Unauthorized"),
-        (status = 404, description = "App not found")
-    ),
-    tag = "volume",
-    security(("jwt" = []))
-)]
+#[rovo::rovo]
 pub async fn list_volumes_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
@@ -177,20 +148,7 @@ pub async fn list_volumes_handler(
     Ok(Json(volumes))
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/volumes/{volume_id}/snapshots",
-    params(
-        ("volume_id" = Uuid, Path, description = "Volume ID")
-    ),
-    responses(
-        (status = 200, description = "List of snapshots", body = [VolumeSnapshot]),
-        (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Volume not found")
-    ),
-    tag = "volume",
-    security(("jwt" = []))
-)]
+#[rovo::rovo]
 pub async fn list_snapshots_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
@@ -213,21 +171,7 @@ pub async fn list_snapshots_handler(
     Ok(Json(snapshots))
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/volumes/{volume_id}/snapshots",
-    params(
-        ("volume_id" = Uuid, Path, description = "Volume ID")
-    ),
-    request_body = CreateSnapshotRequest,
-    responses(
-        (status = 201, description = "Snapshot created", body = VolumeSnapshot),
-        (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Volume not found")
-    ),
-    tag = "volume",
-    security(("jwt" = []))
-)]
+#[rovo::rovo]
 pub async fn create_snapshot_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
@@ -335,25 +279,12 @@ pub async fn create_snapshot_handler(
     Ok((StatusCode::CREATED, Json(snapshot)))
 }
 
-#[utoipa::path(
-    delete,
-    path = "/v1/volumes/{volume_id}",
-    params(
-        ("volume_id" = Uuid, Path, description = "Volume ID")
-    ),
-    responses(
-        (status = 204, description = "Volume deleted"),
-        (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Volume not found")
-    ),
-    tag = "volume",
-    security(("jwt" = []))
-)]
+#[rovo::rovo]
 pub async fn delete_volume_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(volume_id): Path<Uuid>,
-) -> ApiResult<axum::response::Response> {
+) -> ApiResult<StatusCode> {
     let volume = state
         .volume_repo
         .get_volume(volume_id)
@@ -400,30 +331,16 @@ pub async fn delete_volume_handler(
         tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
     }
 
-    Ok(StatusCode::NO_CONTENT.into_response())
+    Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/volumes/{volume_id}/restore",
-    params(
-        ("volume_id" = Uuid, Path, description = "Volume ID")
-    ),
-    request_body = RestoreSnapshotRequest,
-    responses(
-        (status = 200, description = "Snapshot restored successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Volume not found")
-    ),
-    tag = "volume",
-    security(("jwt" = []))
-)]
+#[rovo::rovo]
 pub async fn restore_snapshot_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(volume_id): Path<Uuid>,
     Json(req): Json<RestoreSnapshotRequest>,
-) -> ApiResult<axum::response::Response> {
+) -> ApiResult<StatusCode> {
     let volume = state
         .volume_repo
         .get_volume(volume_id)
@@ -470,28 +387,15 @@ pub async fn restore_snapshot_handler(
         tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
     }
 
-    Ok(StatusCode::OK.into_response())
+    Ok(StatusCode::OK)
 }
 
-#[utoipa::path(
-    delete,
-    path = "/v1/snapshots/{snapshot_id}",
-    params(
-        ("snapshot_id" = Uuid, Path, description = "Snapshot ID")
-    ),
-    responses(
-        (status = 204, description = "Snapshot deleted"),
-        (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Snapshot not found")
-    ),
-    tag = "volume",
-    security(("jwt" = []))
-)]
+#[rovo::rovo]
 pub async fn delete_snapshot_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
     Path(snapshot_id): Path<Uuid>,
-) -> ApiResult<axum::response::Response> {
+) -> ApiResult<StatusCode> {
     let snapshot = state
         .volume_repo
         .get_snapshot(snapshot_id)
@@ -545,24 +449,10 @@ pub async fn delete_snapshot_handler(
         tracing::warn!(error = %e, "Failed to broadcast SnapshotChanged event");
     }
 
-    Ok(StatusCode::NO_CONTENT.into_response())
+    Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(
-    post,
-    path = "/v1/volumes/{volume_id}/clone",
-    params(
-        ("volume_id" = Uuid, Path, description = "Source volume ID")
-    ),
-    request_body = CloneVolumeRequest,
-    responses(
-        (status = 201, description = "Volume cloned successfully", body = Volume),
-        (status = 401, description = "Unauthorized"),
-        (status = 404, description = "Volume not found")
-    ),
-    tag = "volume",
-    security(("jwt" = []))
-)]
+#[rovo::rovo]
 pub async fn clone_volume_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,

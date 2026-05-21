@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::auth::AuthUser;
+use crate::error::SseResponse;
 use axum::extract::State;
 use axum::response::sse::{Event, Sse};
 use futures::Stream;
@@ -7,7 +8,7 @@ use serde::Serialize;
 use std::convert::Infallible;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, rovo::schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceEventKind {
     AppCreated,
@@ -22,7 +23,7 @@ pub enum WorkspaceEventKind {
     Refresh,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, rovo::schemars::JsonSchema)]
 pub struct WorkspaceEvent {
     pub kind: WorkspaceEventKind,
     pub user_id: Option<Uuid>,
@@ -33,22 +34,11 @@ pub struct WorkspaceEvent {
     pub resource_id: Option<String>,
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/workspace/events",
-    responses(
-        (status = 200, description = "SSE stream of workspace events", content_type = "text/event-stream"),
-        (status = 401, description = "Unauthorized", body = crate::error::ErrorResponse)
-    ),
-    tag = "system",
-    security(
-        ("jwt" = [])
-    )
-)]
+#[rovo::rovo]
 pub async fn workspace_events_stream(
     auth: AuthUser,
     State(state): State<AppState>,
-) -> crate::error::ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+) -> crate::error::ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     let mut rx = state.workspace_events.subscribe();
     let auth_user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|e| crate::error::ApiError::Internal(e.to_string()))?;
@@ -83,9 +73,11 @@ pub async fn workspace_events_stream(
         }
     };
 
-    Ok(Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(std::time::Duration::from_secs(10))
-            .text("keep-alive"),
+    Ok(SseResponse(
+        Sse::new(stream).keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(std::time::Duration::from_secs(10))
+                .text("keep-alive"),
+        ),
     ))
 }

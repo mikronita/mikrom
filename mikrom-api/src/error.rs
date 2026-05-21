@@ -1,16 +1,38 @@
 use axum::{
     Json,
     http::StatusCode,
-    response::{IntoResponse, Response},
+    response::{
+        IntoResponse, Response,
+        sse::{Event, Sse},
+    },
 };
+use futures::Stream;
 use serde::Serialize;
+use std::convert::Infallible;
 use thiserror::Error;
-use utoipa::ToSchema;
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, rovo::schemars::JsonSchema)]
 pub struct ErrorResponse {
     pub error: String,
     pub status: u16,
+}
+
+impl rovo::aide::OperationOutput for ErrorResponse {
+    type Inner = Self;
+
+    fn operation_response(
+        ctx: &mut rovo::aide::generate::GenContext,
+        operation: &mut rovo::aide::openapi::Operation,
+    ) -> Option<rovo::aide::openapi::Response> {
+        <axum::Json<Self> as rovo::aide::OperationOutput>::operation_response(ctx, operation)
+    }
+
+    fn inferred_responses(
+        ctx: &mut rovo::aide::generate::GenContext,
+        operation: &mut rovo::aide::openapi::Operation,
+    ) -> Vec<(Option<u16>, rovo::aide::openapi::Response)> {
+        <axum::Json<Self> as rovo::aide::OperationOutput>::inferred_responses(ctx, operation)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -122,3 +144,76 @@ impl IntoResponse for ApiError {
 }
 
 pub type ApiResult<T> = Result<T, ApiError>;
+
+impl rovo::aide::OperationOutput for ApiError {
+    type Inner = ErrorResponse;
+
+    fn operation_response(
+        ctx: &mut rovo::aide::generate::GenContext,
+        operation: &mut rovo::aide::openapi::Operation,
+    ) -> Option<rovo::aide::openapi::Response> {
+        <axum::Json<ErrorResponse> as rovo::aide::OperationOutput>::operation_response(
+            ctx, operation,
+        )
+    }
+
+    fn inferred_responses(
+        ctx: &mut rovo::aide::generate::GenContext,
+        operation: &mut rovo::aide::openapi::Operation,
+    ) -> Vec<(Option<u16>, rovo::aide::openapi::Response)> {
+        if let Some(res) = Self::operation_response(ctx, operation) {
+            vec![(None, res)]
+        } else {
+            vec![]
+        }
+    }
+}
+
+pub struct SseResponse<S>(pub Sse<S>);
+
+impl<S> IntoResponse for SseResponse<S>
+where
+    S: Stream<Item = Result<Event, Infallible>> + Send + 'static,
+{
+    fn into_response(self) -> Response {
+        self.0.into_response()
+    }
+}
+
+impl<S> rovo::aide::OperationOutput for SseResponse<S>
+where
+    S: Stream<Item = Result<Event, Infallible>> + Send + 'static,
+{
+    type Inner = Self;
+
+    fn operation_response(
+        _ctx: &mut rovo::aide::generate::GenContext,
+        _operation: &mut rovo::aide::openapi::Operation,
+    ) -> Option<rovo::aide::openapi::Response> {
+        let mut content = indexmap::IndexMap::new();
+        content.insert(
+            "text/event-stream".to_string(),
+            rovo::aide::openapi::MediaType {
+                schema: None,
+                ..Default::default()
+            },
+        );
+
+        Some(rovo::aide::openapi::Response {
+            description: "Server-Sent Events stream".to_string(),
+            content,
+            ..Default::default()
+        })
+    }
+
+    fn inferred_responses(
+        ctx: &mut rovo::aide::generate::GenContext,
+        operation: &mut rovo::aide::openapi::Operation,
+    ) -> Vec<(Option<u16>, rovo::aide::openapi::Response)> {
+        if let Some(res) = Self::operation_response(ctx, operation) {
+            vec![(Some(200), res)]
+        } else {
+            vec![]
+        }
+    }
+}

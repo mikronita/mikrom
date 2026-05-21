@@ -199,7 +199,7 @@ async fn test_activate_deployment_no_job_id() {
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
     use mikrom_api::auth::AuthUser;
-    use mikrom_api::deploy::handlers::activate_deployment_handler;
+    use mikrom_api::deploy::handlers::__activate_deployment_handler_impl as activate_deployment_handler;
 
     let mut mock_app_repo = MockAppRepository::new();
     let mock_scheduler = MockScheduler::new();

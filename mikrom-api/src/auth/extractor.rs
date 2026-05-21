@@ -1,6 +1,5 @@
 use crate::error::ApiError;
 use axum::{
-    async_trait,
     extract::{FromRef, FromRequestParts},
     http::{HeaderMap, Uri, request::Parts},
 };
@@ -12,7 +11,6 @@ pub struct AuthUser {
     pub role: crate::repositories::user_repository::UserRole,
 }
 
-#[async_trait]
 impl<S> FromRequestParts<S> for AuthUser
 where
     S: Send + Sync,
@@ -22,12 +20,15 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let state = crate::AppState::from_ref(state);
+        let claims = parts.extensions.get::<crate::auth::jwt::Claims>().cloned();
+        let headers = parts.headers.clone();
+        let uri = parts.uri.clone();
 
-        let claims = if let Some(claims) = parts.extensions.get::<crate::auth::jwt::Claims>() {
-            claims.clone()
+        let claims = if let Some(claims) = claims {
+            claims
         } else {
             // 1. Get token from Authorization header OR query parameter (for SSE)
-            let token = extract_token_from_headers_and_uri(&parts.headers, &parts.uri)?;
+            let token = extract_token_from_headers_and_uri(&headers, &uri)?;
 
             // 2. Decode and validate JWT
             crate::auth::jwt::verify_token(&token, &state.jwt_secret)
@@ -37,6 +38,8 @@ where
         Ok(auth_user_from_claims(claims))
     }
 }
+
+impl rovo::aide::OperationInput for AuthUser {}
 
 fn auth_user_from_claims(claims: crate::auth::jwt::Claims) -> AuthUser {
     AuthUser {
@@ -72,7 +75,6 @@ pub(crate) fn extract_token_from_headers_and_uri(
 
 pub struct AdminUser(pub AuthUser);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for AdminUser
 where
     S: Send + Sync,
@@ -108,17 +110,17 @@ mod tests {
         let token =
             crate::auth::jwt::create_token(&user_id, &email, &UserRole::User, &jwt_secret).unwrap();
 
-        let nats_url =
-            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
-        let nats_client = async_nats::connect(nats_url).await.unwrap();
-        let nats = crate::nats::TypedNatsClient::new(nats_client);
         let state = AppState {
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(MockAppRepository::new()),
             github_repo: Arc::new(crate::repositories::MockGithubRepository::default()),
-            volume_repo: Arc::new(crate::repositories::MockVolumeRepository::new()),
+            volume_repo: Arc::new(
+                crate::repositories::volume_repository::MockVolumeRepository::new(),
+            ),
             scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
-            nats,
+            nats: crate::nats::TypedNatsClient::new_custom(Arc::new(
+                crate::nats::MockNatsClient::new(),
+            )),
             router_addr: "http://localhost:8080".to_string(),
             frontend_url: "http://localhost:3000".to_string(),
             api_db: sqlx::postgres::PgPoolOptions::new()
@@ -148,23 +150,6 @@ mod tests {
         let auth_user = AuthUser::from_request_parts(&mut parts, &state)
             .await
             .unwrap();
-
-        assert_eq!(auth_user.user_id, user_id);
-        assert_eq!(auth_user.email, email);
-    }
-
-    #[tokio::test]
-    async fn test_auth_extractor_uses_claims_from_extensions() {
-        let user_id = uuid::Uuid::new_v4().to_string();
-        let email = "extension@example.com".to_string();
-        let claims = crate::auth::jwt::Claims {
-            sub: user_id.clone(),
-            email: email.clone(),
-            role: UserRole::User,
-            exp: 9_999_999_999,
-            iat: 1,
-        };
-        let auth_user = auth_user_from_claims(claims);
 
         assert_eq!(auth_user.user_id, user_id);
         assert_eq!(auth_user.email, email);

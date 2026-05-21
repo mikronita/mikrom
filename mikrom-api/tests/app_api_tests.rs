@@ -669,7 +669,9 @@ async fn test_create_app_with_custom_config() {
     use axum::Json;
     use axum::extract::State;
     use mikrom_api::auth::AuthUser;
-    use mikrom_api::deploy::handlers::{CreateAppRequest, create_app_handler};
+    use mikrom_api::deploy::handlers::{
+        __create_app_handler_impl as create_app_handler, CreateAppRequest,
+    };
     use mikrom_api::repositories::{MockGithubRepository, MockUserRepository};
     use mikrom_api::scheduler::MockScheduler;
     use mockall::predicate;

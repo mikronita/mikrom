@@ -3,6 +3,7 @@ use prost::Message;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[mockall::automock]
 #[async_trait::async_trait]
 pub trait NatsClient: Send + Sync {
     async fn request_raw(&self, subject: String, payload: Vec<u8>) -> anyhow::Result<Vec<u8>>;
