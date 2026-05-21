@@ -4,7 +4,6 @@ use axum::middleware;
 use axum::response::sse::{Event, Sse};
 use futures::Stream;
 use rovo::Router;
-use rovo::aide::swagger::Swagger;
 use rovo::routing::{delete, get, patch, post};
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -251,130 +250,151 @@ pub fn create_app_with_rate_limits(
     let mut api = crate::openapi::build_openapi();
 
     let public_routes = Router::new()
-        .route("/v1/health", get(health))
-        .route("/v1/health/stream", get(health_stream))
+        .route(&format!("{}/health", API_V1), get(health))
+        .route(&format!("{}/health/stream", API_V1), get(health_stream))
         .finish_api(&mut api);
 
     let protected_routes = Router::new()
-        .route("/v1/auth/register", post(register))
-        .route("/v1/auth/login", post(login))
+        .route(&format!("{}/auth/register", API_V1), post(register))
+        .route(&format!("{}/auth/login", API_V1), post(login))
         .route(
-            "/v1/webhooks/github/{app_name}",
+            &format!("{}/webhooks/github/{{app_name}}", API_V1),
             post(github_webhook_handler),
         )
-        .route("/v1/webhooks/github", post(github_webhook_handler_generic))
-        .route("/v1/auth/me", get(get_profile).put(update_profile))
-        .route("/v1/github/install", get(github_install))
-        .route("/v1/github/callback", get(github_callback))
-        .route("/v1/github/repos", get(list_repos))
         .route(
-            "/v1/github/accounts",
+            &format!("{}/webhooks/github", API_V1),
+            post(github_webhook_handler_generic),
+        )
+        .route(
+            &format!("{}/auth/me", API_V1),
+            get(get_profile).put(update_profile),
+        )
+        .route(&format!("{}/github/install", API_V1), get(github_install))
+        .route(&format!("{}/github/callback", API_V1), get(github_callback))
+        .route(&format!("{}/github/repos", API_V1), get(list_repos))
+        .route(
+            &format!("{}/github/accounts", API_V1),
             get(crate::github::handlers::list_accounts),
         )
         .route(
-            "/v1/apps",
+            &format!("{}/apps", API_V1),
             post(crate::deploy::create_app_handler).get(crate::deploy::list_apps_handler),
         )
-        .route("/v1/deploy", post(crate::deploy::deploy_app))
         .route(
-            "/v1/apps/{app_name}",
+            &format!("{}/deploy", API_V1),
+            post(crate::deploy::deploy_app),
+        )
+        .route(
+            &format!("{}/apps/{{app_name}}", API_V1),
             delete(crate::deploy::delete_app_handler),
         )
         .route(
-            "/v1/apps/{app_name}/secret",
+            &format!("{}/apps/{{app_name}}/secret", API_V1),
             get(crate::deploy::get_app_secret_handler),
         )
         .route(
-            "/v1/apps/{app_name}/scale",
+            &format!("{}/apps/{{app_name}}/scale", API_V1),
             patch(crate::deploy::scale_app_handler),
         )
         .route(
-            "/v1/apps/{app_name}/deploy",
+            &format!("{}/apps/{{app_name}}/deploy", API_V1),
             post(crate::deploy::deploy_app_version_handler),
         )
         .route(
-            "/v1/apps/{app_name}/deployments",
+            &format!("{}/apps/{{app_name}}/deployments", API_V1),
             get(crate::deploy::list_deployments_handler),
         )
         .route(
-            "/v1/apps/{app_name}/deployments/stream",
+            &format!("{}/apps/{{app_name}}/deployments/stream", API_V1),
             get(crate::deploy::deployments_stream_handler),
         )
         .route(
-            "/v1/apps/{app_name}/logs/stream",
+            &format!("{}/apps/{{app_name}}/logs/stream", API_V1),
             get(crate::vms::app_logs_stream_handler),
         )
         .route(
-            "/v1/apps/{app_name}/metrics/stream",
+            &format!("{}/apps/{{app_name}}/metrics/stream", API_V1),
             get(crate::vms::app_metrics_stream_handler),
         )
         .route(
-            "/v1/workspace/events",
+            &format!("{}/workspace/events", API_V1),
             get(crate::workspace::workspace_events_stream),
         )
         .route(
-            "/v1/apps/{app_name}/deployments/{deployment_id}/activate",
+            &format!(
+                "{}/apps/{{app_name}}/deployments/{{deployment_id}}/activate",
+                API_V1
+            ),
             post(crate::deploy::activate_deployment_handler),
         )
         .route(
-            "/v1/apps/{app_name}/deployments/{job_id}",
+            &format!("{}/apps/{{app_name}}/deployments/{{job_id}}", API_V1),
             get(get_deployment_status).delete(stop_deployment),
         )
         .route(
-            "/v1/apps/{app_name}/deployments/{job_id}/logs",
+            &format!("{}/apps/{{app_name}}/deployments/{{job_id}}/logs", API_V1),
             get(get_deployment_logs),
         )
         .route(
-            "/v1/apps/{app_name}/deployments/{job_id}/pause",
+            &format!("{}/apps/{{app_name}}/deployments/{{job_id}}/pause", API_V1),
             post(pause_deployment),
         )
         .route(
-            "/v1/apps/{app_name}/deployments/{job_id}/resume",
+            &format!("{}/apps/{{app_name}}/deployments/{{job_id}}/resume", API_V1),
             post(resume_deployment),
         )
         .route(
-            "/v1/apps/{app_name}/deployments/{job_id}/delete",
+            &format!("{}/apps/{{app_name}}/deployments/{{job_id}}/delete", API_V1),
             delete(delete_deployment_record),
         )
         .route(
-            "/v1/apps/{app_name}/security-groups",
+            &format!("{}/apps/{{app_name}}/security-groups", API_V1),
             get(list_security_rules_handler).post(create_security_rule_handler),
         )
         .route(
-            "/v1/apps/{app_name}/security-groups/{rule_id}",
+            &format!("{}/apps/{{app_name}}/security-groups/{{rule_id}}", API_V1),
             delete(delete_security_rule_handler),
         )
-        .route("/v1/networking/mesh", get(get_mesh_status_handler))
         .route(
-            "/v1/networking/mesh/stream",
+            &format!("{}/networking/mesh", API_V1),
+            get(get_mesh_status_handler),
+        )
+        .route(
+            &format!("{}/networking/mesh/stream", API_V1),
             get(mesh_status_stream_handler),
         )
-        .route("/v1/deployments/active", get(list_active_deployments))
-        .route("/v1/deployments/events", get(watch_deployments))
         .route(
-            "/v1/apps/{app_id}/volumes",
+            &format!("{}/deployments/active", API_V1),
+            get(list_active_deployments),
+        )
+        .route(
+            &format!("{}/deployments/events", API_V1),
+            get(watch_deployments),
+        )
+        .route(
+            &format!("{}/apps/{{app_id}}/volumes", API_V1),
             post(crate::vms::volumes::create_volume_handler)
                 .get(crate::vms::volumes::list_volumes_handler),
         )
         .route(
-            "/v1/volumes/{volume_id}/snapshots",
+            &format!("{}/volumes/{{volume_id}}/snapshots", API_V1),
             post(crate::vms::volumes::create_snapshot_handler)
                 .get(crate::vms::volumes::list_snapshots_handler),
         )
         .route(
-            "/v1/volumes/{volume_id}/restore",
+            &format!("{}/volumes/{{volume_id}}/restore", API_V1),
             post(crate::vms::volumes::restore_snapshot_handler),
         )
         .route(
-            "/v1/volumes/{volume_id}/clone",
+            &format!("{}/volumes/{{volume_id}}/clone", API_V1),
             post(crate::vms::volumes::clone_volume_handler),
         )
         .route(
-            "/v1/volumes/{volume_id}",
+            &format!("{}/volumes/{{volume_id}}", API_V1),
             delete(crate::vms::volumes::delete_volume_handler),
         )
         .route(
-            "/v1/snapshots/{snapshot_id}",
+            &format!("{}/snapshots/{{snapshot_id}}", API_V1),
             delete(crate::vms::volumes::delete_snapshot_handler),
         )
         .finish_api(&mut api);
@@ -384,29 +404,15 @@ pub fn create_app_with_rate_limits(
         crate::rate_limit::rate_limit_middleware,
     ));
 
-    let swagger_spec = "/v1/api-docs/openapi.json";
-    let swagger_alias = axum::Router::new()
-        .route(
-            "/v1/api-docs/",
-            axum::routing::get(Swagger::new(swagger_spec).axum_handler()),
-        )
-        .route(
-            &format!("{}/", SWAGGER_PATH),
-            axum::routing::get(Swagger::new(swagger_spec).axum_handler()),
-        )
-        .with_state(state.clone());
-
     let oas_router = Router::new()
         .with_oas_route(api, OPENAPI_PATH)
         .with_swagger(SWAGGER_PATH)
-        .with_state(state.clone())
         .finish();
 
     public_routes
         .merge(protected_routes_layered)
-        .with_state(state)
         .merge(oas_router)
-        .merge(swagger_alias)
+        .with_state(state)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &axum::http::Request<_>| {
