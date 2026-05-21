@@ -1,13 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Camera, Copy, Database, HardDrive, History, Link, Link2Off, Plus, RotateCcw, Trash2 } from "lucide-svelte";
+  import { Camera, Copy, Database, HardDrive, History, Link, Plus, RotateCcw, Trash2 } from "lucide-svelte";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import Card from "$lib/components/Card.svelte";
   import CardHeader from "$lib/components/CardHeader.svelte";
   import CardTitle from "$lib/components/CardTitle.svelte";
   import CardDescription from "$lib/components/CardDescription.svelte";
   import CardContent from "$lib/components/CardContent.svelte";
-  import Badge from "$lib/components/Badge.svelte";
   import Button from "$lib/components/Button.svelte";
   import AlertDialog from "$lib/components/AlertDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
@@ -18,7 +17,6 @@
   import FieldGroup from "$lib/components/FieldGroup.svelte";
   import Input from "$lib/components/Input.svelte";
   import Select from "$lib/components/Select.svelte";
-  import * as CardUI from "$lib/components/ui/card";
   import { Badge as BadgeUI } from "$lib/components/ui/badge";
   import { Button as ButtonUI } from "$lib/components/ui/button";
   import * as TableUI from "$lib/components/ui/table";
@@ -202,12 +200,12 @@
     return size >= 1024 ? `${(size / 1024).toFixed(1)} GiB` : `${size} MiB`;
   }
 
-  function isAttachedVolume(v: any): v is AttachedVolume {
-    return v && typeof v.mount_point === "string";
+  function isAttachedVolume(v: Volume | AttachedVolume | VolumeWithAttachments): v is AttachedVolume {
+    return "mount_point" in v;
   }
 
-  function isVolumeWithAttachments(v: any): v is VolumeWithAttachments {
-    return v && Array.isArray(v.attachments);
+  function isVolumeWithAttachments(v: Volume | AttachedVolume | VolumeWithAttachments): v is VolumeWithAttachments {
+    return "attachments" in v;
   }
 </script>
 

@@ -3,6 +3,42 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rovo::schemars::JsonSchema)]
+#[repr(i32)]
+pub enum VolumeAccessMode {
+    ReadWriteOnce = 0,
+    ReadWriteMany = 1,
+    ReadOnlyMany = 2,
+}
+
+impl VolumeAccessMode {
+    pub fn as_i32(self) -> i32 {
+        self as i32
+    }
+
+    pub fn is_read_only(self) -> bool {
+        matches!(self, Self::ReadOnlyMany)
+    }
+
+    pub fn from_i32(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::ReadWriteOnce),
+            1 => Some(Self::ReadWriteMany),
+            2 => Some(Self::ReadOnlyMany),
+            _ => None,
+        }
+    }
+}
+
+impl TryFrom<i32> for VolumeAccessMode {
+    type Error = ();
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        Self::from_i32(value).ok_or(())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone, rovo::schemars::JsonSchema)]
 pub struct Volume {
     pub id: Uuid,
@@ -128,5 +164,29 @@ mod tests {
         assert_eq!(json["app_id"], Uuid::from_u128(4).to_string());
         assert_eq!(json["volume_id"], Uuid::from_u128(5).to_string());
         assert_eq!(json["mount_point"], "/mnt/data");
+    }
+
+    #[test]
+    fn volume_access_mode_converts_from_i32() {
+        assert_eq!(
+            VolumeAccessMode::from_i32(0).unwrap(),
+            VolumeAccessMode::ReadWriteOnce
+        );
+        assert_eq!(
+            VolumeAccessMode::from_i32(1).unwrap(),
+            VolumeAccessMode::ReadWriteMany
+        );
+        assert_eq!(
+            VolumeAccessMode::from_i32(2).unwrap(),
+            VolumeAccessMode::ReadOnlyMany
+        );
+        assert!(VolumeAccessMode::from_i32(99).is_none());
+    }
+
+    #[test]
+    fn volume_access_mode_flags_read_only() {
+        assert!(VolumeAccessMode::ReadOnlyMany.is_read_only());
+        assert!(!VolumeAccessMode::ReadWriteOnce.is_read_only());
+        assert_eq!(VolumeAccessMode::ReadWriteMany.as_i32(), 1);
     }
 }
