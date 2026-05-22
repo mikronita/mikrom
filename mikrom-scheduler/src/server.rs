@@ -49,6 +49,8 @@ impl SchedulerServer {
                     })
                     .collect(),
                 health_check_path: c.health_check_path,
+                hypervisor: crate::domain::job::HypervisorType::from_i32(c.hypervisor)
+                    .unwrap_or_default(),
             })
             .unwrap_or_default();
 
@@ -57,16 +59,16 @@ impl SchedulerServer {
         match self
             .app_service
             .deployment
-            .deploy_app(
-                req.app_id.clone(),
-                req.app_name,
-                req.image,
-                req.user_id,
-                req.deployment_id,
-                req.vpc_ipv6_prefix,
+            .deploy_app(crate::application::deployment::DeployAppParams {
+                app_id: req.app_id.clone(),
+                app_name: req.app_name,
+                image: req.image,
+                user_id: req.user_id,
+                deployment_id: req.deployment_id,
+                vpc_ipv6_prefix: req.vpc_ipv6_prefix,
                 config,
                 strategy,
-            )
+            })
             .await
         {
             Ok(job) => Ok(DeployResponse {

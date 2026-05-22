@@ -21,6 +21,16 @@ pub struct DeployParams {
     pub disk_mib: u32,
     pub port: u32,
     pub env: std::collections::HashMap<String, String>,
+    pub hypervisor: i32,
+}
+
+pub struct TriggerBuildParams {
+    pub vcpus: u32,
+    pub memory_mib: u64,
+    pub disk_mib: u64,
+    pub env: std::collections::HashMap<String, String>,
+    pub hypervisor: i32,
+    pub guard: crate::DeploymentFlowGuard,
 }
 
 impl DeploymentService {
@@ -52,16 +62,11 @@ impl DeploymentService {
         std::time::Duration::from_secs(secs)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn trigger_build(
         state: &AppState,
         app: &App,
         deployment: &Deployment,
-        vcpus: u32,
-        memory_mib: u64,
-        disk_mib: u64,
-        env: std::collections::HashMap<String, String>,
-        guard: crate::DeploymentFlowGuard,
+        params: TriggerBuildParams,
     ) -> ApiResult<String> {
         state
             .app_repo
@@ -153,14 +158,15 @@ impl DeploymentService {
             app_name: app.name.clone(),
             user_id: app.user_id.to_string(),
             build_id: build_id.clone(),
-            vcpus,
-            memory_mib,
-            disk_mib,
+            vcpus: params.vcpus,
+            memory_mib: params.memory_mib,
+            disk_mib: params.disk_mib,
             port: app.port as u32,
-            env,
+            env: params.env,
+            hypervisor: params.hypervisor,
         };
 
-        start_build_polling(state.clone(), task, Some(guard)).await;
+        start_build_polling(state.clone(), task, Some(params.guard)).await;
 
         Ok(build_id)
     }
@@ -211,6 +217,7 @@ impl DeploymentService {
                 port: params.port,
                 env: params.env,
                 health_check_path: app.health_check_path.clone(),
+                hypervisor: params.hypervisor,
                 volumes: volumes
                     .into_iter()
                     .map(|v| mikrom_proto::scheduler::Volume {
@@ -477,6 +484,7 @@ mod tests {
                 disk_mib: 512,
                 port: 8080,
                 env: std::collections::HashMap::new(),
+                hypervisor: deployment.hypervisor,
             },
         )
         .await

@@ -9,7 +9,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use tokio::fs::File;
-use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader, SeekFrom};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader, SeekFrom};
 use tokio::time::{Duration, interval};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,45 +46,56 @@ impl TailedFile {
         }
     }
 
-    async fn next_line(&self) -> anyhow::Result<String> {
-        loop {
-            let metadata = match tokio::fs::metadata(&self.path).await {
-                Ok(metadata) => metadata,
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    continue;
-                },
-                Err(err) => return Err(err.into()),
-            };
+    /// Read any new lines that have appeared since the last offset.
+    /// Returns a non-empty Vec only when there is new data.
+    async fn read_new_lines(&self) -> anyhow::Result<Vec<String>> {
+        let metadata = match tokio::fs::metadata(&self.path).await {
+            Ok(m) => m,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Vec::new());
+            },
+            Err(err) => return Err(err.into()),
+        };
 
-            let mut offset = self.offset.load(Ordering::SeqCst);
-            if metadata.len() < offset {
-                offset = 0;
-                self.offset.store(0, Ordering::SeqCst);
-            }
-
-            let file = File::open(&self.path).await?;
-            let mut reader = BufReader::new(file);
-            reader.seek(SeekFrom::Start(offset)).await?;
-
-            let mut line = String::new();
-            let bytes = reader.read_line(&mut line).await?;
-            if bytes == 0 {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                continue;
-            }
-
-            let next_offset = offset + bytes as u64;
-            self.offset.store(next_offset, Ordering::SeqCst);
-            if line.ends_with('\n') {
-                line.pop();
-                if line.ends_with('\r') {
-                    line.pop();
-                }
-            }
-
-            return Ok(line);
+        let mut offset = self.offset.load(Ordering::SeqCst);
+        let len = metadata.len();
+        if len < offset {
+            offset = 0;
+            self.offset.store(0, Ordering::SeqCst);
         }
+        if len == offset {
+            return Ok(Vec::new());
+        }
+
+        let file = File::open(&self.path).await?;
+        let mut reader = BufReader::new(file);
+        reader.seek(SeekFrom::Start(offset)).await?;
+
+        let mut buf = Vec::new();
+        let bytes_read = reader.read_to_end(&mut buf).await?;
+        if bytes_read == 0 {
+            return Ok(Vec::new());
+        }
+
+        let text = String::from_utf8_lossy(&buf);
+        let mut lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
+
+        // If the buffer doesn't end with a newline, the last "line" is incomplete;
+        // stash it back for the next read.
+        if !text.ends_with('\n') && !lines.is_empty() {
+            let incomplete = lines.pop().unwrap();
+            let new_offset = offset + text.len() as u64 - incomplete.len() as u64;
+            self.offset.store(new_offset, Ordering::SeqCst);
+            // If there are no complete lines, return empty and keep the incomplete chunk.
+            if lines.is_empty() {
+                return Ok(Vec::new());
+            }
+        } else {
+            self.offset
+                .store(offset + text.len() as u64, Ordering::SeqCst);
+        }
+
+        Ok(lines)
     }
 }
 
@@ -182,45 +193,47 @@ impl LogShipper {
             let stderr_tail = TailedFile::new(stderr_path, stderr_offset);
             let mut batch = Vec::new();
             let mut timer = interval(self.flush_interval);
+            let mut poll = interval(Duration::from_millis(500));
             let mut app_started = self.app_started.load(Ordering::SeqCst);
 
             loop {
                 tokio::select! {
-                    result = stdout_tail.next_line() => {
-                        match result {
-                            Ok(line) => {
-                                if !app_started && line == "__MIKROM_APP_START__" {
-                                    app_started = true;
-                                    self.app_started.store(true, Ordering::SeqCst);
-                                    self.app_started_at_ms.store(
-                                        chrono::Utc::now().timestamp_millis() as u64,
-                                        Ordering::SeqCst,
-                                    );
-                                    tracing::info!(app_id = %self.app_id, vm_id = %self.vm_id, "Application started marker received");
-                                    continue;
+                    _ = poll.tick() => {
+                        match stdout_tail.read_new_lines().await {
+                            Ok(lines) => {
+                                for line in lines {
+                                    if !app_started && line == "__MIKROM_APP_START__" {
+                                        app_started = true;
+                                        self.app_started.store(true, Ordering::SeqCst);
+                                        self.app_started_at_ms.store(
+                                            chrono::Utc::now().timestamp_millis() as u64,
+                                            Ordering::SeqCst,
+                                        );
+                                        tracing::info!(app_id = %self.app_id, vm_id = %self.vm_id, "Application started marker received");
+                                        continue;
+                                    }
+                                    self.process_line("stdout", line, &mut batch, app_started).await;
                                 }
-                                self.process_line("stdout", line, &mut batch, app_started).await;
                                 if batch.len() >= self.batch_size {
                                     self.flush(&mut batch).await;
                                 }
                             }
                             Err(err) => {
                                 tracing::error!(vm_id = %self.vm_id, error = %err, "Failed to tail Firecracker stdout log");
-                                tokio::time::sleep(Duration::from_millis(200)).await;
                             }
                         }
-                    }
-                    result = stderr_tail.next_line() => {
-                        match result {
-                            Ok(line) => {
-                                self.process_line("stderr", line, &mut batch, app_started).await;
+
+                        match stderr_tail.read_new_lines().await {
+                            Ok(lines) => {
+                                for line in lines {
+                                    self.process_line("stderr", line, &mut batch, app_started).await;
+                                }
                                 if batch.len() >= self.batch_size {
                                     self.flush(&mut batch).await;
                                 }
                             }
                             Err(err) => {
                                 tracing::error!(vm_id = %self.vm_id, error = %err, "Failed to tail Firecracker stderr log");
-                                tokio::time::sleep(Duration::from_millis(200)).await;
                             }
                         }
                     }

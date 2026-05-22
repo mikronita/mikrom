@@ -1,4 +1,4 @@
-use crate::firecracker::config::FirecrackerError;
+use crate::hypervisor::HypervisorError;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
@@ -11,15 +11,15 @@ pub async fn fc_request(
     socket_path: &str,
     api_path: &str,
     body: &str,
-) -> Result<(), FirecrackerError> {
+) -> Result<(), HypervisorError> {
     let stream_fut = tokio::net::UnixStream::connect(socket_path);
     let stream = tokio::time::timeout(Duration::from_secs(2), stream_fut)
         .await
-        .map_err(|_| FirecrackerError::ApiError {
+        .map_err(|_| HypervisorError::ApiError {
             path: api_path.to_string(),
             msg: "connect timeout".to_string(),
         })?
-        .map_err(|e| FirecrackerError::ApiError {
+        .map_err(|e| HypervisorError::ApiError {
             path: api_path.to_string(),
             msg: format!("connect: {e}"),
         })?;
@@ -34,7 +34,7 @@ pub async fn fc_request(
     writer
         .write_all(request.as_bytes())
         .await
-        .map_err(|e| FirecrackerError::ApiError {
+        .map_err(|e| HypervisorError::ApiError {
             path: api_path.to_string(),
             msg: format!("write: {e}"),
         })?;
@@ -46,7 +46,7 @@ pub async fn fc_request(
 async fn read_firecracker_response<R>(
     reader: &mut BufReader<R>,
     api_path: &str,
-) -> Result<(), FirecrackerError>
+) -> Result<(), HypervisorError>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
@@ -54,11 +54,11 @@ where
 
     tokio::time::timeout(Duration::from_secs(2), reader.read_line(&mut status_line))
         .await
-        .map_err(|_| FirecrackerError::ApiError {
+        .map_err(|_| HypervisorError::ApiError {
             path: api_path.to_string(),
             msg: "read timeout".to_string(),
         })?
-        .map_err(|e| FirecrackerError::ApiError {
+        .map_err(|e| HypervisorError::ApiError {
             path: api_path.to_string(),
             msg: format!("read: {e}"),
         })?;
@@ -69,11 +69,11 @@ where
         let mut header_line = String::new();
         tokio::time::timeout(Duration::from_secs(2), reader.read_line(&mut header_line))
             .await
-            .map_err(|_| FirecrackerError::ApiError {
+            .map_err(|_| HypervisorError::ApiError {
                 path: api_path.to_string(),
                 msg: "header read timeout".to_string(),
             })?
-            .map_err(|e| FirecrackerError::ApiError {
+            .map_err(|e| HypervisorError::ApiError {
                 path: api_path.to_string(),
                 msg: format!("header read: {e}"),
             })?;
@@ -103,7 +103,7 @@ where
     match content_length {
         Some(len) => {
             if len > MAX_RESPONSE_BODY_BYTES {
-                return Err(FirecrackerError::ApiError {
+                return Err(HypervisorError::ApiError {
                     path: api_path.to_string(),
                     msg: format!("response body too large: {len} bytes"),
                 });
@@ -114,11 +114,11 @@ where
                 reader.read_exact(&mut response_body),
             )
             .await
-            .map_err(|_| FirecrackerError::ApiError {
+            .map_err(|_| HypervisorError::ApiError {
                 path: api_path.to_string(),
                 msg: "body read timeout".to_string(),
             })?
-            .map_err(|e| FirecrackerError::ApiError {
+            .map_err(|e| HypervisorError::ApiError {
                 path: api_path.to_string(),
                 msg: format!("body read: {e}"),
             })?;
@@ -130,17 +130,17 @@ where
                 limited_reader.read_to_end(&mut response_body),
             )
             .await
-            .map_err(|_| FirecrackerError::ApiError {
+            .map_err(|_| HypervisorError::ApiError {
                 path: api_path.to_string(),
                 msg: "body read timeout".to_string(),
             })?
-            .map_err(|e| FirecrackerError::ApiError {
+            .map_err(|e| HypervisorError::ApiError {
                 path: api_path.to_string(),
                 msg: format!("body read: {e}"),
             })?;
 
             if response_body.len() > MAX_RESPONSE_BODY_BYTES {
-                return Err(FirecrackerError::ApiError {
+                return Err(HypervisorError::ApiError {
                     path: api_path.to_string(),
                     msg: format!("response body too large: {} bytes", response_body.len()),
                 });
@@ -157,7 +157,7 @@ where
         } else {
             format!("{}; body: {}", status_line.trim(), body_text)
         };
-        Err(FirecrackerError::ApiError {
+        Err(HypervisorError::ApiError {
             path: api_path.to_string(),
             msg,
         })
@@ -166,7 +166,7 @@ where
 
 /// Send a PUT request to the Firecracker API socket and return Ok on 2xx.
 #[tracing::instrument(skip_all, fields(api_path = %api_path))]
-pub async fn fc_put(socket_path: &str, api_path: &str, body: &str) -> Result<(), FirecrackerError> {
+pub async fn fc_put(socket_path: &str, api_path: &str, body: &str) -> Result<(), HypervisorError> {
     fc_request("PUT", socket_path, api_path, body).await
 }
 
@@ -176,19 +176,19 @@ pub async fn fc_patch(
     socket_path: &str,
     api_path: &str,
     body: &str,
-) -> Result<(), FirecrackerError> {
+) -> Result<(), HypervisorError> {
     fc_request("PATCH", socket_path, api_path, body).await
 }
 
 /// Poll until the Unix socket file appears (Firecracker is ready to accept API calls).
-pub async fn wait_for_socket(path: &str, timeout: Duration) -> Result<(), FirecrackerError> {
+pub async fn wait_for_socket(path: &str, timeout: Duration) -> Result<(), HypervisorError> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         if tokio::fs::metadata(path).await.is_ok() {
             return Ok(());
         }
         if tokio::time::Instant::now() >= deadline {
-            return Err(FirecrackerError::SocketTimeout(path.to_string()));
+            return Err(HypervisorError::SocketTimeout(path.to_string()));
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }

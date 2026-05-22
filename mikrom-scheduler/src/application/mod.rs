@@ -379,16 +379,16 @@ impl AppService {
 
                 deployment_futures.push(async move {
                     deployment
-                        .deploy_app(
+                        .deploy_app(crate::application::deployment::DeployAppParams {
                             app_id,
                             app_name,
                             image,
                             user_id,
                             deployment_id,
-                            vpc_prefix,
+                            vpc_ipv6_prefix: vpc_prefix,
                             config,
-                            crate::domain::worker::SchedulingStrategy::LeastLoaded,
-                        )
+                            strategy: crate::domain::worker::SchedulingStrategy::LeastLoaded,
+                        })
                         .await
                 });
             }

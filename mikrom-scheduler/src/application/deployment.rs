@@ -14,6 +14,17 @@ pub struct DeploymentService {
     nats_client: async_nats::Client,
 }
 
+pub struct DeployAppParams {
+    pub app_id: String,
+    pub app_name: String,
+    pub image: String,
+    pub user_id: String,
+    pub deployment_id: String,
+    pub vpc_ipv6_prefix: String,
+    pub config: VmConfig,
+    pub strategy: SchedulingStrategy,
+}
+
 impl DeploymentService {
     pub fn new(
         job_repo: Arc<dyn JobRepository>,
@@ -29,33 +40,25 @@ impl DeploymentService {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn deploy_app(
-        &self,
-        app_id: String,
-        app_name: String,
-        image: String,
-        user_id: String,
-        deployment_id: String,
-        vpc_ipv6_prefix: String,
-        mut config: VmConfig,
-        strategy: SchedulingStrategy,
-    ) -> DomainResult<Job> {
+    pub async fn deploy_app(&self, params: DeployAppParams) -> DomainResult<Job> {
         let job_id = Uuid::new_v4().to_string();
         let vm_id = Uuid::new_v4().to_string();
 
-        config = self.apply_ipv6_assignment(config, &job_id, &vpc_ipv6_prefix);
-        let worker = self.select_best_worker(&config, &app_id, strategy).await?;
+        let mut config = params.config;
+        config = self.apply_ipv6_assignment(config, &job_id, &params.vpc_ipv6_prefix);
+        let worker = self
+            .select_best_worker(&config, &params.app_id, params.strategy)
+            .await?;
         let host_id = worker.host_id.clone();
 
-        let mut job = self.build_job(
+        let mut job = Job::new(
             job_id.clone(),
-            app_id.clone(),
-            app_name,
-            image.clone(),
+            params.app_id.clone(),
+            params.app_name,
+            params.image.clone(),
             config,
-            user_id.clone(),
-            deployment_id,
+            params.user_id.clone(),
+            Some(params.deployment_id),
         );
         job.schedule(host_id.clone(), vm_id.clone());
 
@@ -65,7 +68,7 @@ impl DeploymentService {
 
         if let Err(e) = self
             .agent_client
-            .start_vm(&host_id, &app_id, &image, &vm_id, &job.config)
+            .start_vm(&host_id, &params.app_id, &params.image, &vm_id, &job.config)
             .await
         {
             tracing::error!(job_id = %job_id, error = %e, "Failed to deploy to agent");
@@ -114,28 +117,6 @@ impl DeploymentService {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn build_job(
-        &self,
-        job_id: String,
-        app_id: String,
-        app_name: String,
-        image: String,
-        config: VmConfig,
-        user_id: String,
-        deployment_id: String,
-    ) -> Job {
-        Job::new(
-            job_id,
-            app_id,
-            app_name,
-            image,
-            config,
-            user_id,
-            Some(deployment_id),
-        )
-    }
-
     fn apply_ipv6_assignment(
         &self,
         mut config: VmConfig,
@@ -180,6 +161,15 @@ impl DeploymentService {
         let mut viable_workers: Vec<Worker> = workers
             .into_iter()
             .filter(|w| {
+                // When hypervisor is unspecified, accept any worker.
+                // Otherwise, reject workers that advertise a non-empty list
+                // that does not contain the requested hypervisor.
+                if config.hypervisor != crate::domain::job::HypervisorType::Unspecified
+                    && !w.supported_hypervisors.is_empty()
+                    && !w.supported_hypervisors.contains(&config.hypervisor)
+                {
+                    return false;
+                }
                 if let Some(ref metrics) = w.metrics {
                     metrics.can_fit_vm(config.memory_mib, config.disk_mib)
                 } else {

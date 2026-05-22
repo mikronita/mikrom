@@ -40,6 +40,16 @@ pub(crate) fn resolve_deployment_memory_mib(memory_mib: Option<u32>) -> ApiResul
     }
 }
 
+/// Map a user-provided hypervisor name to its proto discriminant.
+/// Returns `0` (Unspecified) when `None` is passed.
+fn resolve_deployment_hypervisor(hypervisor: Option<&str>) -> i32 {
+    match hypervisor {
+        Some("firecracker") => 1,
+        Some("qemu") | Some("qemu-microvm") => 2,
+        _ => 0,
+    }
+}
+
 #[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct DeployRequestPayload {
     pub app_name: String,
@@ -52,6 +62,8 @@ pub struct DeployRequestPayload {
     pub disk_mib: Option<u32>,
     pub port: Option<u32>,
     pub env: Option<std::collections::HashMap<String, String>>,
+    /// Hypervisor to use: "firecracker" or "qemu". Defaults to scheduler-selected.
+    pub hypervisor: Option<String>,
 }
 
 #[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
@@ -112,6 +124,7 @@ pub async fn deploy_app(
             disk_mib: disk_mib as u64,
             port,
             env: payload.env.clone().unwrap_or_default(),
+            hypervisor: resolve_deployment_hypervisor(payload.hypervisor.as_deref()),
         };
 
         let guard = state.try_start_flow(app_id.into());
@@ -155,6 +168,7 @@ pub async fn deploy_app(
             health_check_path: "/".to_string(),
             ipv6_address: String::new(),
             ipv6_gateway: String::new(),
+            hypervisor: resolve_deployment_hypervisor(payload.hypervisor.as_deref()),
         }),
         deployment_id: String::new(), // Not applicable for one-off deploy
         vpc_ipv6_prefix,

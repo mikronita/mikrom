@@ -191,6 +191,8 @@ pub struct ManualDeployRequest {
     pub disk_mib: Option<u32>,
     pub env: Option<std::collections::HashMap<String, String>>,
     pub image: Option<String>,
+    /// Hypervisor to use: "firecracker" or "qemu". Defaults to scheduler-selected.
+    pub hypervisor: Option<String>,
 }
 
 #[rovo::rovo]
@@ -878,140 +880,64 @@ pub async fn deploy_app_version_handler(
     let disk_mib = payload.disk_mib.unwrap_or(1024);
     let env_vars = payload.env.clone().unwrap_or_default();
     let image = payload.image.clone();
+    let hypervisor = crate::deploy::resolve_deployment_hypervisor(payload.hypervisor.as_deref());
 
     let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
 
-    // Try to fetch latest git metadata if linked to GitHub
-    let mut git_metadata = None;
-    #[allow(clippy::collapsible_if)]
-    if let Some(installation_id) = app.github_installation_id {
-        if let Some(repo_full_name) = &app.github_repo_full_name {
-            match (&state.github_app_id, &state.github_private_key) {
-                (Some(github_app_id), Some(github_private_key)) => {
-                    // TODO: Fetch the repository's default branch or use a configured branch
-                    // instead of hardcoding main/master.
-                    // For now, we try main then master as a sensible default.
-                    match crate::github::get_repo_latest_commit(
-                        github_app_id,
-                        github_private_key,
-                        installation_id,
-                        repo_full_name,
-                        "main",
-                    )
-                    .await
-                    {
-                        Ok(meta) => git_metadata = Some(meta),
-                        Err(_) => {
-                            // Try master if main fails
-                            if let Ok(meta) = crate::github::get_repo_latest_commit(
-                                github_app_id,
-                                github_private_key,
-                                installation_id,
-                                repo_full_name,
-                                "master",
-                            )
-                            .await
-                            {
-                                git_metadata = Some(meta);
-                            }
-                        },
-                    }
-                },
-                _ => {
-                    tracing::warn!(
-                        app_id = %app.id,
-                        "GitHub linked but API credentials missing in state"
-                    )
-                },
-            }
-        }
-    }
+    let git_metadata = fetch_app_git_metadata(&state, &app).await;
 
     let deployment = state
         .app_repo
-        .create_deployment(crate::repositories::app_repository::NewDeployment {
-            app_id: app.id,
-            user_id: auth.user_id.clone(),
-            vcpus: vcpus as i32,
-            memory_mib: memory_mib as i64,
-            disk_mib: disk_mib as i64,
-            port: app.port,
-            env_vars: env_vars.clone(),
-            trigger_source: "manual".to_string(),
-            git_commit_hash: git_metadata
-                .as_ref()
-                .and_then(|m| m.git_commit_hash.clone()),
-            git_commit_message: git_metadata
-                .as_ref()
-                .and_then(|m| m.git_commit_message.clone()),
-            git_branch: git_metadata.as_ref().and_then(|m| m.git_branch.clone()),
-        })
+        .create_deployment(
+            crate::repositories::app_repository::NewDeployment::from_handler(
+                app.id,
+                auth.user_id.clone(),
+                vcpus as i32,
+                memory_mib as i64,
+                disk_mib as i64,
+                app.port,
+                env_vars.clone(),
+                "manual".to_string(),
+                git_metadata.as_ref(),
+                hypervisor,
+            ),
+        )
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    // Protect against concurrent flows
     let guard = state.try_start_flow(app.id.into()).ok_or_else(|| {
         ApiError::BadRequest("A deployment flow is already in progress for this application".into())
     })?;
 
-    // If an image is provided directly, skip the build phase and deploy immediately
     if let Some(image_tag) = image {
-        info!(app = %app.name, image = %image_tag, "Direct image deployment requested, skipping build");
-
-        // 1. Trigger deployment
-        let inner = match DeploymentService::deploy_to_scheduler(
+        return direct_image_deploy(
             &state,
-            &app,
-            &deployment,
-            DeployParams {
-                image_tag: image_tag.clone(),
-                vcpus,
-                memory_mib,
-                disk_mib,
-                port: app.port as u32,
-                env: env_vars.clone(),
-            },
-        )
-        .await
-        {
-            Ok(inner) => inner,
-            Err(e) => {
-                return Err(e);
-            },
-        };
-
-        // 2. Start Zero-Downtime orchestration in background
-        DeploymentService::run_zero_downtime_flow(
-            state.clone(),
             app,
-            deployment.clone(),
-            inner.clone(),
-            auth.user_id.clone(),
-            true,
+            deployment,
+            image_tag,
+            vcpus,
+            memory_mib,
+            disk_mib,
+            env_vars,
+            hypervisor,
             guard,
-        );
-
-        return Ok(Json(crate::deploy::DeployResponseBody {
-            job_id: Some(inner.job_id),
-            deployment_id: Some(deployment.id.to_string()),
-            status: "HEALTH_CHECKING".to_string(),
-            host_id: Some(inner.host_id),
-            vm_id: Some(inner.vm_id),
-            image_tag: Some(image_tag),
-            message: "Deployment triggered, health check in progress".to_string(),
-        }));
+            auth.user_id,
+        )
+        .await;
     }
 
-    // Default: Trigger build
     DeploymentService::trigger_build(
         &state,
         &app,
         &deployment,
-        vcpus,
-        memory_mib as u64,
-        disk_mib as u64,
-        env_vars,
-        guard,
+        crate::deploy::service::TriggerBuildParams {
+            vcpus,
+            memory_mib: memory_mib as u64,
+            disk_mib: disk_mib as u64,
+            env: env_vars,
+            hypervisor,
+            guard,
+        },
     )
     .await?;
 
@@ -1023,6 +949,99 @@ pub async fn deploy_app_version_handler(
         vm_id: None,
         image_tag: None,
         message: "Build initiated via NATS".to_string(),
+    }))
+}
+
+async fn fetch_app_git_metadata(
+    state: &AppState,
+    app: &crate::models::app::App,
+) -> Option<crate::repositories::app_repository::GitMetadata> {
+    let installation_id = app.github_installation_id?;
+    let repo_full_name = app.github_repo_full_name.as_ref()?;
+    let (github_app_id, github_private_key) = match (
+        &state.github_app_id,
+        &state.github_private_key,
+    ) {
+        (Some(id), Some(key)) => (id, key),
+        _ => {
+            tracing::warn!(app_id = %app.id, "GitHub linked but API credentials missing in state");
+            return None;
+        },
+    };
+
+    match crate::github::get_repo_latest_commit(
+        github_app_id,
+        github_private_key,
+        installation_id,
+        repo_full_name,
+        "main",
+    )
+    .await
+    {
+        Ok(meta) => Some(meta),
+        Err(_) => crate::github::get_repo_latest_commit(
+            github_app_id,
+            github_private_key,
+            installation_id,
+            repo_full_name,
+            "master",
+        )
+        .await
+        .ok(),
+    }
+}
+
+async fn direct_image_deploy(
+    state: &AppState,
+    app: crate::models::app::App,
+    deployment: crate::models::app::Deployment,
+    image_tag: String,
+    vcpus: u32,
+    memory_mib: u32,
+    disk_mib: u32,
+    env_vars: std::collections::HashMap<String, String>,
+    hypervisor: i32,
+    guard: crate::DeploymentFlowGuard,
+    user_id: String,
+) -> ApiResult<Json<crate::deploy::DeployResponseBody>> {
+    info!(app = %app.name, image = %image_tag, "Direct image deployment requested, skipping build");
+
+    let deployment_id = deployment.id;
+
+    let inner = DeploymentService::deploy_to_scheduler(
+        state,
+        &app,
+        &deployment,
+        DeployParams {
+            image_tag: image_tag.clone(),
+            vcpus,
+            memory_mib,
+            disk_mib,
+            port: app.port as u32,
+            env: env_vars,
+            hypervisor,
+        },
+    )
+    .await?;
+
+    DeploymentService::run_zero_downtime_flow(
+        state.clone(),
+        app,
+        deployment,
+        inner.clone(),
+        user_id,
+        true,
+        guard,
+    );
+
+    Ok(Json(crate::deploy::DeployResponseBody {
+        job_id: Some(inner.job_id),
+        deployment_id: Some(deployment_id.to_string()),
+        status: "HEALTH_CHECKING".to_string(),
+        host_id: Some(inner.host_id),
+        vm_id: Some(inner.vm_id),
+        image_tag: Some(image_tag),
+        message: "Deployment triggered, health check in progress".to_string(),
     }))
 }
 
@@ -1038,23 +1057,20 @@ pub async fn trigger_app_build(
 
     let deployment = state
         .app_repo
-        .create_deployment(crate::repositories::app_repository::NewDeployment {
-            app_id: app.id,
-            user_id: app.user_id.to_string(),
-            vcpus: vcpus as i32,
-            memory_mib: memory_mib as i64,
-            disk_mib: disk_mib as i64,
-            port: app.port,
-            env_vars: env_vars.clone(),
-            trigger_source: "github_webhook".to_string(),
-            git_commit_hash: git_metadata
-                .as_ref()
-                .and_then(|m| m.git_commit_hash.clone()),
-            git_commit_message: git_metadata
-                .as_ref()
-                .and_then(|m| m.git_commit_message.clone()),
-            git_branch: git_metadata.as_ref().and_then(|m| m.git_branch.clone()),
-        })
+        .create_deployment(
+            crate::repositories::app_repository::NewDeployment::from_handler(
+                app.id,
+                app.user_id.to_string(),
+                vcpus as i32,
+                memory_mib as i64,
+                disk_mib as i64,
+                app.port,
+                env_vars.clone(),
+                "github_webhook".to_string(),
+                git_metadata.as_ref(),
+                0,
+            ),
+        )
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -1067,11 +1083,14 @@ pub async fn trigger_app_build(
         &state,
         &app,
         &deployment,
-        vcpus,
-        memory_mib as u64,
-        disk_mib as u64,
-        env_vars,
-        guard,
+        crate::deploy::service::TriggerBuildParams {
+            vcpus,
+            memory_mib: memory_mib as u64,
+            disk_mib: disk_mib as u64,
+            env: env_vars,
+            hypervisor: 0,
+            guard,
+        },
     )
     .await?;
 
@@ -1213,6 +1232,7 @@ mod tests {
                     trigger_source: "test".to_string(),
                     created_at: chrono::Utc::now(),
                     updated_at: chrono::Utc::now(),
+                    hypervisor: 0,
                 }))
             });
 

@@ -195,6 +195,7 @@ pub struct BuildTask {
     pub disk_mib: u64,
     pub port: u32,
     pub env: HashMap<String, String>,
+    pub hypervisor: i32,
 }
 
 pub async fn start_build_polling(
@@ -247,6 +248,7 @@ pub async fn resume_pending_builds(state: AppState) {
             disk_mib: dep.disk_mib as u64,
             port: dep.port as u32,
             env: serde_json::from_value(dep.env_vars).unwrap_or_default(),
+            hypervisor: dep.hypervisor,
         };
 
         let guard = state.try_start_flow(app.id.into());
@@ -355,6 +357,7 @@ pub async fn poll_and_deploy(
                         disk_mib: task.disk_mib as u32,
                         port: final_port,
                         env: task.env.clone(),
+                        hypervisor: task.hypervisor,
                     },
                 )
                 .await

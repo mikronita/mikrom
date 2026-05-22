@@ -2,7 +2,6 @@
   import { page } from "$app/stores";
   import { 
     HardDrive, 
-    ArrowLeft, 
     Database, 
     History, 
     Camera,
@@ -42,7 +41,6 @@
         <h2 class="text-xl font-semibold">Volume not found</h2>
         <p class="text-sm text-muted-foreground">The volume you are looking for does not exist or has been deleted.</p>
         <Button href="/storage" variant="outline" class="mt-4">
-          <ArrowLeft class="mr-2 size-4" />
           Back to Storage
         </Button>
       </EmptyState>
@@ -50,11 +48,6 @@
   {:else}
     <div class="flex flex-col gap-6">
       <div class="flex flex-col gap-4">
-        <a href="/storage" class="flex w-fit items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft class="size-4" />
-          Back to Storage
-        </a>
-        
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div class="flex items-center gap-4">
             <div class="flex size-12 items-center justify-center rounded-lg border border-border bg-background text-foreground">

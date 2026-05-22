@@ -2,18 +2,19 @@
 
 [![CI](https://github.com/antpard/mikrom/actions/workflows/ci.yml/badge.svg)](https://github.com/antpard/mikrom/actions/workflows/ci.yml)
 
-Mikrom is a modern **Platform-as-a-Service (PaaS)** that deploys containerized workloads into [Firecracker](https://firecracker-microvm.github.io/) microVMs. Inspired by platforms like Fly.io and Railway, Mikrom provides a **Zero-Config** experience: point it at a Git repository, and it will build, deploy, and route traffic to your application automatically.
+Mikrom is a modern **Platform-as-a-Service (PaaS)** that deploys containerized workloads into lightweight microVMs ([Firecracker](https://firecracker-microvm.github.io/) or [QEMU microvm](https://www.qemu.org/docs/master/system/i386/microvm.html)). Inspired by platforms like Fly.io and Railway, Mikrom provides a **Zero-Config** experience: point it at a Git repository, and it will build, deploy, and route traffic to your application automatically.
 
 ## Key Features
 
 - **🚀 Zero-Config**: Automatic language detection and building via [Railpack](https://railpack.com/).
-- **⚡ MicroVM Isolation**: Every application runs in its own dedicated Firecracker microVM for maximum security and performance.
+- **⚡ MicroVM Isolation**: Every application runs in its own dedicated microVM (Firecracker or QEMU microvm) for maximum security and performance.
 - **🌐 Dynamic Routing**: Built-in ingress router based on Caddy with automatic hostname assignment and TLS.
 - **🔒 Automatic TLS**: Seamless ACME integration (Let's Encrypt) for all your applications.
 - **🐙 GitHub Integration**: Connect your repositories for automated deployments on every push.
 - **🦀 Built with Rust**: High-performance, memory-safe backend services.
 - **📊 Real-time Observability**: Metrics and logs collection via NATS, Prometheus, and Loki.
 - **🛠️ Power CLI**: Full control over your apps and deployments from your terminal.
+- **🖥️ Dual Hypervisor**: Choose between Firecracker and QEMU microvm per deployment — or let the scheduler decide automatically.
 
 ## Architecture
 
@@ -24,7 +25,7 @@ User (CLI/Web)
   → mikrom-api      (REST Management & Auth)
     → mikrom-builder   (Git cloning & Railpack building)
     → mikrom-scheduler (Resource allocation & IPAM)
-      → mikrom-agent   (Worker node, Firecracker lifecycle)
+      → mikrom-agent   (Worker node, Firecracker/QEMU VM lifecycle)
 User (Traffic)
   → mikrom-router   (Caddy-based Dynamic Ingress Proxy)
     → App MicroVM      (Target instance)
@@ -41,7 +42,7 @@ Observability
 | `mikrom-router/` | High-performance Caddy-based dynamic reverse proxy. |
 | `mikrom-telemetry/` | Observability service for metrics (Prometheus) and logs (Loki). |
 | `mikrom-scheduler/` | Intelligent resource manager. Places workloads on the best workers. |
-| `mikrom-agent/` | The worker daemon. Manages microVMs and network isolation. |
+| `mikrom-agent/` | The worker daemon. Manages microVMs (Firecracker or QEMU microvm via a pluggable `VmHypervisor` trait), network isolation, and host metrics. |
 | `mikrom-app/` | Dashboard (Next.js 16, React 19, Tailwind CSS 4). |
 | `mikrom-cli/` | Command-line interface (`mikrom`). |
 | `mikrom-proto/` | Shared NATS/Protobuf definitions. |

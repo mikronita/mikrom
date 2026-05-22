@@ -15,6 +15,37 @@ pub struct NewDeployment {
     pub git_commit_hash: Option<String>,
     pub git_commit_message: Option<String>,
     pub git_branch: Option<String>,
+    pub hypervisor: i32,
+}
+
+impl NewDeployment {
+    pub fn from_handler(
+        app_id: Uuid,
+        user_id: String,
+        vcpus: i32,
+        memory_mib: i64,
+        disk_mib: i64,
+        port: i32,
+        env_vars: std::collections::HashMap<String, String>,
+        trigger_source: String,
+        git_metadata: Option<&GitMetadata>,
+        hypervisor: i32,
+    ) -> Self {
+        Self {
+            app_id,
+            user_id,
+            vcpus,
+            memory_mib,
+            disk_mib,
+            port,
+            env_vars,
+            trigger_source,
+            git_commit_hash: git_metadata.and_then(|m| m.git_commit_hash.clone()),
+            git_commit_message: git_metadata.and_then(|m| m.git_commit_message.clone()),
+            git_branch: git_metadata.and_then(|m| m.git_branch.clone()),
+            hypervisor,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]

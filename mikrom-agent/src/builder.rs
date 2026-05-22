@@ -14,36 +14,37 @@ use std::path::{Path, PathBuf};
 use tokio::process::Command;
 use tracing::info;
 
+#[derive(Debug)]
 pub struct ImageBuilder;
+
+pub struct DockerToExt4Params<'a> {
+    pub image: &'a str,
+    pub output_path: &'a Path,
+    pub base_rootfs_path: &'a str,
+    pub port: u32,
+    pub ipv6_addr: Option<String>,
+    pub ipv6_gw: Option<String>,
+    pub volumes: &'a [crate::hypervisor::Volume],
+}
 
 impl ImageBuilder {
     pub fn new() -> anyhow::Result<Self> {
         Ok(Self)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn docker_to_ext4(
-        &self,
-        image: &str,
-        output_path: &Path,
-        base_rootfs_path: &str,
-        port: u32,
-        ipv6_addr: Option<String>,
-        ipv6_gw: Option<String>,
-        volumes: &[crate::firecracker::config::Volume],
-    ) -> anyhow::Result<()> {
+    pub async fn docker_to_ext4(&self, params: DockerToExt4Params<'_>) -> anyhow::Result<()> {
         info!(
             "Converting Docker image {} to ext4 at {:?} (port={}, base={}, volumes={})",
-            image,
-            output_path,
-            port,
-            base_rootfs_path,
-            volumes.len()
+            params.image,
+            params.output_path,
+            params.port,
+            params.base_rootfs_path,
+            params.volumes.len()
         );
 
         let docker = Docker::connect_with_local_defaults()
             .context("Failed to connect to the local Docker daemon")?;
-        let parent_dir = output_path.parent().unwrap_or(Path::new("/tmp"));
+        let parent_dir = params.output_path.parent().unwrap_or(Path::new("/tmp"));
         let container_name = format!("mikrom-build-{}", uuid::Uuid::new_v4());
         let mount_dir = parent_dir.join(format!("mnt-{container_name}"));
 
@@ -52,7 +53,7 @@ impl ImageBuilder {
             let mut pull_stream = docker.create_image(
                 Some(
                     CreateImageOptionsBuilder::default()
-                        .from_image(image)
+                        .from_image(params.image)
                         .build(),
                 ),
                 None,
@@ -64,13 +65,13 @@ impl ImageBuilder {
                     info!("[DOCKER-PULL] {}", status.trim_end());
                 }
                 if let Some(error) = message.error_detail.and_then(|detail| detail.message) {
-                    anyhow::bail!("Failed to pull docker image {image}: {}", error);
+                    anyhow::bail!("Failed to pull docker image {}: {}", params.image, error);
                 }
             }
 
             // 1. Inspect metadata (Extract Entrypoint and Cmd as structured data)
             let image_info = docker
-                .inspect_image(image)
+                .inspect_image(params.image)
                 .await
                 .context("Failed to inspect docker image")?;
             let image_config = image_info.config.unwrap_or_default();
@@ -86,7 +87,7 @@ impl ImageBuilder {
 
             // 2. Create temporary container to export filesystem
             let container_config = bollard::models::ContainerCreateBody {
-                image: Some(image.to_string()),
+                image: Some(params.image.to_string()),
                 env: Some(env_vars.clone()),
                 entrypoint: Some(entrypoint_list.clone()),
                 cmd: Some(cmd_list.clone()),
@@ -108,11 +109,16 @@ impl ImageBuilder {
             // 4. Prepare rootfs using Agent Overlay (Copy base-rootfs.ext4)
             info!(
                 "Copying base rootfs from {} to {:?}...",
-                base_rootfs_path, output_path
+                params.base_rootfs_path, params.output_path
             );
-            tokio::fs::copy(base_rootfs_path, &output_path)
+            tokio::fs::copy(params.base_rootfs_path, params.output_path)
                 .await
-                .with_context(|| format!("Failed to copy base rootfs from {}", base_rootfs_path))?;
+                .with_context(|| {
+                    format!(
+                        "Failed to copy base rootfs from {}",
+                        params.base_rootfs_path
+                    )
+                })?;
 
             // 5. Mount and copy only the application payload
             tokio::fs::create_dir_all(&mount_dir).await?;
@@ -122,7 +128,7 @@ impl ImageBuilder {
             let status = Command::new("mount")
                 .arg("-o")
                 .arg("loop")
-                .arg(output_path)
+                .arg(params.output_path)
                 .arg(&mount_dir)
                 .status()
                 .await?;
@@ -170,7 +176,7 @@ impl ImageBuilder {
             Self::maybe_grant_net_bind_service(
                 &mount_dir,
                 app_entrypoint.first().map(String::as_str),
-                port,
+                params.port,
             )
             .await?;
 
@@ -237,16 +243,16 @@ impl ImageBuilder {
                 }
             }
             env_map.insert("PATH".to_string(), path_parts.join(":"));
-            env_map.insert("PORT".to_string(), port.to_string());
-            if let Some(addr) = ipv6_addr {
-                env_map.insert("IPV6_ADDR".to_string(), addr);
+            env_map.insert("PORT".to_string(), params.port.to_string());
+            if let Some(addr) = &params.ipv6_addr {
+                env_map.insert("IPV6_ADDR".to_string(), addr.clone());
             }
-            if let Some(gw) = ipv6_gw {
-                env_map.insert("IPV6_GW".to_string(), gw);
+            if let Some(gw) = &params.ipv6_gw {
+                env_map.insert("IPV6_GW".to_string(), gw.clone());
             }
 
             let mut volumes_json = Vec::new();
-            for (idx, vol) in volumes.iter().enumerate() {
+            for (idx, vol) in params.volumes.iter().enumerate() {
                 volumes_json.push(serde_json::json!({
                     "drive_id": vol.volume_id.replace('-', "_"),
                     "mount_point": vol.mount_point,
@@ -269,17 +275,16 @@ impl ImageBuilder {
             .await
             .context("Failed to write init.json")?;
 
-            info!("Successfully created ext4 rootfs for {}", image);
+            info!("Successfully created ext4 rootfs for {}", params.image);
             Ok::<(), anyhow::Error>(())
         }
         .await;
 
         info!("Flushing and cleaning up...");
         // Flush filesystem buffers before teardown.
-        // SAFETY: libc::sync has no arguments and only requests a global sync.
-        unsafe {
-            libc::sync();
-        }
+        // sync(2) is a synchronous syscall that can block for seconds,
+        // so run it in a blocking task.
+        let _ = tokio::task::spawn_blocking(|| unsafe { libc::sync() }).await;
 
         if let Err(e) = unmount_path(&mount_dir, 0) {
             tracing::error!(
@@ -301,7 +306,7 @@ impl ImageBuilder {
             .await;
         let _ = docker
             .remove_image(
-                image,
+                params.image,
                 Some(RemoveImageOptionsBuilder::default().force(true).build()),
                 None,
             )
@@ -318,16 +323,20 @@ impl ImageBuilder {
     ) -> anyhow::Result<()> {
         let destination_root = mount_dir.join(destination_name);
 
-        if destination_root.exists() {
-            if destination_root.is_dir() {
-                fs::remove_dir_all(&destination_root)
+        if tokio::fs::metadata(&destination_root).await.is_ok() {
+            let meta = tokio::fs::metadata(&destination_root).await?;
+            if meta.is_dir() {
+                tokio::fs::remove_dir_all(&destination_root)
+                    .await
                     .with_context(|| format!("Failed to clear {}", destination_root.display()))?;
             } else {
-                fs::remove_file(&destination_root)
+                tokio::fs::remove_file(&destination_root)
+                    .await
                     .with_context(|| format!("Failed to clear {}", destination_root.display()))?;
             }
         }
-        fs::create_dir_all(&destination_root)
+        tokio::fs::create_dir_all(&destination_root)
+            .await
             .with_context(|| format!("Failed to create {}", destination_root.display()))?;
 
         let source = format!(
@@ -359,14 +368,14 @@ impl ImageBuilder {
             );
         }
 
-        fs::set_permissions(&destination_root, fs::Permissions::from_mode(0o755)).with_context(
-            || {
+        tokio::fs::set_permissions(&destination_root, std::fs::Permissions::from_mode(0o755))
+            .await
+            .with_context(|| {
                 format!(
                     "Failed to set permissions on {}",
                     destination_root.display()
                 )
-            },
-        )?;
+            })?;
 
         Ok(())
     }
@@ -398,15 +407,19 @@ impl ImageBuilder {
         let destination = mount_dir.join(source_path.strip_prefix("/").unwrap_or(source_path));
 
         if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)
+            tokio::fs::create_dir_all(parent)
+                .await
                 .with_context(|| format!("Failed to create {}", parent.display()))?;
         }
-        if destination.exists() {
-            if destination.is_dir() {
-                fs::remove_dir_all(&destination)
+        if tokio::fs::metadata(&destination).await.is_ok() {
+            let meta = tokio::fs::metadata(&destination).await?;
+            if meta.is_dir() {
+                tokio::fs::remove_dir_all(&destination)
+                    .await
                     .with_context(|| format!("Failed to clear {}", destination.display()))?;
             } else {
-                fs::remove_file(&destination)
+                tokio::fs::remove_file(&destination)
+                    .await
                     .with_context(|| format!("Failed to clear {}", destination.display()))?;
             }
         }
@@ -435,7 +448,8 @@ impl ImageBuilder {
             );
         }
 
-        fs::set_permissions(&destination, fs::Permissions::from_mode(0o755))
+        tokio::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o755))
+            .await
             .with_context(|| format!("Failed to set permissions on {}", destination.display()))?;
 
         Ok(())
@@ -810,15 +824,15 @@ mod tests {
         let builder = ImageBuilder::new().unwrap();
         let temp_path = PathBuf::from("/tmp/test-invalid-image.ext4");
         let result = builder
-            .docker_to_ext4(
-                "nonexistent-image-12345",
-                &temp_path,
-                "/tmp/nonexistent-base.ext4",
-                8080,
-                None,
-                None,
-                &[],
-            )
+            .docker_to_ext4(crate::builder::DockerToExt4Params {
+                image: "nonexistent-image-12345",
+                output_path: &temp_path,
+                base_rootfs_path: "/tmp/nonexistent-base.ext4",
+                port: 8080,
+                ipv6_addr: None,
+                ipv6_gw: None,
+                volumes: &[],
+            })
             .await;
         assert!(result.is_err());
     }

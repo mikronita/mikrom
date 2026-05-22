@@ -81,6 +81,7 @@ pub struct Deployment {
     pub trigger_source: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub hypervisor: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone, rovo::schemars::JsonSchema)]

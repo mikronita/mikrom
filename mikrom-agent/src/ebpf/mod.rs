@@ -16,6 +16,12 @@ pub struct EbpfManager {
     ebpf: Ebpf,
 }
 
+impl std::fmt::Debug for EbpfManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EbpfManager").finish_non_exhaustive()
+    }
+}
+
 impl EbpfManager {
     pub async fn load() -> Result<Self, EbpfError> {
         let _permit = LOADING_SEMAPHORE
