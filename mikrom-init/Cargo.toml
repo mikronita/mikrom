@@ -12,3 +12,6 @@ anyhow = "1.0"
 rtnetlink = "0.14"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "macros", "net", "process", "time"] }
 futures = "0.3"
+
+[dev-dependencies]
+tempfile = "3.27"

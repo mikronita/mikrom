@@ -7,7 +7,8 @@ use std::sync::{
 
 pub struct VmProcess {
     pub vm_id: VmId,
-    pub child: tokio::process::Child,
+    pub child: Option<tokio::process::Child>,
+    pub pid: Option<u32>,
     pub socket_path: String,
     pub metrics_path: Option<String>,
     pub tap_name: Option<String>,

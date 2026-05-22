@@ -45,12 +45,15 @@ impl VmStartupGuard {
     /// Mark the startup as successful, preventing automatic cleanup on Drop.
     pub fn commit(mut self) -> VmProcess {
         self.committed = true;
+        let pid = self.child.as_ref().and_then(|child| child.id());
         VmProcess {
             vm_id: self.vm_id,
-            child: self
-                .child
-                .take()
-                .expect("Child process must exist at commit"),
+            child: Some(
+                self.child
+                    .take()
+                    .expect("Child process must exist at commit"),
+            ),
+            pid,
             socket_path: self.socket_path.to_string_lossy().to_string(),
             metrics_path: self.metrics_path.take(),
             tap_name: self.tap_name.take(),
@@ -105,6 +108,48 @@ impl Drop for VmStartupGuard {
                     tracing::warn!(vm_id = %vm_id, tap = %tap, "Tap cleanup skipped in guard drop (needs manual cleanup or manager reference)");
                 }
             });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn test_commit_preserves_child_pid_and_state() {
+        let vm_id = VmId::new();
+        let mut guard = VmStartupGuard::new(vm_id, PathBuf::from("/run/firecracker.socket"));
+        guard.log_task = Some(tokio::spawn(async {}));
+
+        let child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("sleep 1")
+            .spawn()
+            .expect("failed to spawn child");
+        let child_pid = child.id();
+        guard.child = Some(child);
+        guard.tap_name = Some("m-tap-test".to_string());
+        guard.tap_ifindex = Some(42);
+        guard.chroot_dir = Some(PathBuf::from("/tmp/test-chroot"));
+        guard.metrics_path = Some("/metrics.json".to_string());
+        guard.app_started.store(true, Ordering::SeqCst);
+        guard.app_started_at_ms.store(1234, Ordering::SeqCst);
+
+        let mut process = guard.commit();
+        assert_eq!(process.pid, child_pid);
+        assert!(process.child.is_some());
+        assert_eq!(process.socket_path, "/run/firecracker.socket");
+        assert_eq!(process.tap_name.as_deref(), Some("m-tap-test"));
+        assert_eq!(process.tap_ifindex, Some(42));
+        assert_eq!(process.metrics_path.as_deref(), Some("/metrics.json"));
+        assert_eq!(process.chroot_dir.as_deref(), Some("/tmp/test-chroot"));
+        assert!(process.app_started.load(Ordering::SeqCst));
+        assert_eq!(process.app_started_at_ms.load(Ordering::SeqCst), 1234);
+
+        if let Some(child) = process.child.as_mut() {
+            let _ = child.kill().await;
         }
     }
 }

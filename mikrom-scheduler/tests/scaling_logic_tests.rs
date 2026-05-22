@@ -258,6 +258,7 @@ async fn test_reconcile_scale_up_from_zero_manual() {
         mem_threshold: 80.0,
         last_router_traffic_at: 0,
         last_scaled_to_zero_at: 0,
+        restore_retry_after_at: 0,
     };
 
     let job_repo = MockScalingJobRepo {
@@ -312,6 +313,7 @@ async fn test_reconcile_scale_up_from_zero_with_traffic() {
         mem_threshold: 80.0,
         last_router_traffic_at: now,
         last_scaled_to_zero_at: now - 10, // Traffic is newer
+        restore_retry_after_at: 0,
     };
 
     let paused_job = Job {
@@ -369,4 +371,74 @@ async fn test_reconcile_scale_up_from_zero_with_traffic() {
         1,
         "Should have resumed the job due to traffic"
     );
+}
+
+#[tokio::test]
+async fn test_reconcile_skips_restore_during_backoff() {
+    let app_id = "app-1";
+    let now = chrono::Utc::now().timestamp();
+    let app_config = AppConfig {
+        id: app_id.to_string(),
+        user_id: "user-1".to_string(),
+        vpc_ipv6_prefix: "fd00::".to_string(),
+        hostname: "app1.example.com".to_string(),
+        desired_replicas: 1,
+        min_replicas: 0,
+        max_replicas: 3,
+        autoscaling_enabled: false,
+        cpu_threshold: 80.0,
+        mem_threshold: 80.0,
+        last_router_traffic_at: now,
+        last_scaled_to_zero_at: now - 10,
+        restore_retry_after_at: now + 300,
+    };
+
+    let paused_job = Job {
+        job_id: "job-1".to_string(),
+        app_id: app_id.to_string(),
+        app_name: "app1".to_string(),
+        image: "img".to_string(),
+        user_id: "user-1".to_string(),
+        status: JobStatus::Paused,
+        host_id: Some("host-1".to_string()),
+        vm_id: Some("vm-1".to_string()),
+        created_at: now - 100,
+        started_at: None,
+        stopped_at: None,
+        scheduled_at: None,
+        deployment_id: Some("dep-1".to_string()),
+        config: VmConfig::default(),
+        error_message: None,
+    };
+
+    let job_repo = MockScalingJobRepo {
+        jobs: Arc::new(Mutex::new(vec![paused_job.clone()])),
+    };
+    let app_repo = MockScalingAppRepo {
+        apps: vec![app_config],
+    };
+    let worker_repo = Arc::new(MockScalingWorkerRepo);
+    let agent_client = Arc::new(MockScalingAgentClient);
+    let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
+    let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
+
+    let service = AppService::new(
+        Arc::new(job_repo),
+        Arc::new(app_repo),
+        worker_repo,
+        agent_client,
+        nats_client,
+        pool,
+        900,
+    );
+
+    service.reconcile_apps().await.unwrap();
+
+    let jobs = service
+        .job_repo
+        .list_jobs(None, Some(app_id), None)
+        .await
+        .unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].status, JobStatus::Paused);
 }

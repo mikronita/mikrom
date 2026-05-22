@@ -451,7 +451,8 @@ mod tests {
                 vm_id,
                 crate::firecracker::process::VmProcess {
                     vm_id,
-                    child,
+                    pid: child.id(),
+                    child: Some(child),
                     socket_path: format!("{}/fake.sock", mgr.fc_config.data_dir),
                     metrics_path: Some(metrics_file.clone()),
                     tap_name: None,

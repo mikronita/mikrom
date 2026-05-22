@@ -11,6 +11,9 @@ RestartSec=5
 User=root
 # El agente necesita acceso a /dev/kvm para Firecracker
 Group=root
+# Deja que los hijos sobrevivan al reinicio del servicio; el agente gestiona
+# Firecracker como procesos aparte.
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target

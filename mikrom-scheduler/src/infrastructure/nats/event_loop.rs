@@ -96,6 +96,12 @@ impl NatsEventLoop {
                 queue_group.clone(),
             )
             .await?;
+        let mut vm_failed_sub = client
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_VM_FAILED,
+                queue_group.clone(),
+            )
+            .await?;
         let mut update_scaling_sub = client
             .queue_subscribe(
                 mikrom_proto::subjects::SCHEDULER_UPDATE_APP_SCALING_CONFIG,
@@ -145,6 +151,7 @@ impl NatsEventLoop {
                 Some(msg) = scale_sub.next() => self.handle_scale(msg).await,
                 Some(msg) = health_sub.next() => self.handle_check_health(msg).await,
                 Some(msg) = security_sub.next() => self.handle_update_security_groups(msg).await,
+                Some(msg) = vm_failed_sub.next() => self.handle_vm_failed(msg).await,
                 Some(msg) = update_scaling_sub.next() => self.handle_update_app_scaling_config(msg).await,
                 Some(msg) = create_volume_sub.next() => self.handle_create_volume(msg).await,
                 Some(msg) = snapshot_sub.next() => self.handle_create_snapshot(msg).await,
@@ -455,6 +462,9 @@ impl NatsEventLoop {
                         return;
                     }
 
+                    let restore_retry_blocked =
+                        app.restore_retry_after_at > 0 && timestamp < app.restore_retry_after_at;
+
                     let current_count = server
                         .app_service
                         .job_repo
@@ -475,6 +485,16 @@ impl NatsEventLoop {
                         .unwrap_or_default();
 
                     if current_count == 0 && app.desired_replicas > 0 {
+                        if restore_retry_blocked {
+                            tracing::warn!(
+                                app_id = %app.id,
+                                hostname = %event.hostname,
+                                retry_after = %app.restore_retry_after_at,
+                                "Skipping router-triggered restore while backoff is active"
+                            );
+                            return;
+                        }
+
                         let Some(_restore_guard) = Self::acquire_router_restore_guard(
                             &router_restore_in_progress,
                             &app.id,
@@ -502,6 +522,15 @@ impl NatsEventLoop {
                                 "Failed to restore app after router traffic"
                             );
                         } else {
+                            let _ = server
+                                .app_service
+                                .app_repo
+                                .update_app_config(crate::domain::AppConfig {
+                                    last_scaled_to_zero_at: timestamp,
+                                    restore_retry_after_at: 0,
+                                    ..app.clone()
+                                })
+                                .await;
                             tracing::info!(
                                 event = "restore_from_router_traffic_completed",
                                 app_id = %app.id,
@@ -525,6 +554,8 @@ impl NatsEventLoop {
         tokio::spawn(async move {
             match WorkerHeartbeat::decode(&message.payload[..]) {
                 Ok(heartbeat) => {
+                    use mikrom_proto::scheduler::VmStatus as ProtoVmStatus;
+
                     tracing::debug!(
                         "Received heartbeat from worker {} with WG IP {}",
                         heartbeat.host_id,
@@ -570,6 +601,112 @@ impl NatsEventLoop {
                             .unwrap_or_default();
 
                         for (vm_id, vm_metrics) in &metrics.vms {
+                            if vm_metrics.status != ProtoVmStatus::Failed as i32 {
+                                continue;
+                            }
+
+                            let Some(job) = running_jobs_by_vm.get(vm_id) else {
+                                continue;
+                            };
+
+                            let message = if vm_metrics.error_message.is_empty() {
+                                "VM startup failed".to_string()
+                            } else {
+                                vm_metrics.error_message.clone()
+                            };
+
+                            tracing::error!(
+                                job_id = %job.job_id,
+                                vm_id = %vm_id,
+                                host_id = %heartbeat.host_id,
+                                error = %message,
+                                "Detected failed VM in worker heartbeat"
+                            );
+
+                            if let Err(e) = server
+                                .app_service
+                                .job_repo
+                                .fail_job(
+                                    &job.job_id,
+                                    message.clone(),
+                                    chrono::Utc::now().timestamp(),
+                                )
+                                .await
+                            {
+                                tracing::error!(
+                                    job_id = %job.job_id,
+                                    vm_id = %vm_id,
+                                    error = %e,
+                                    "Failed to persist failed VM state"
+                                );
+                                continue;
+                            }
+
+                            let mut updated_job = job.clone();
+                            updated_job.status = crate::domain::JobStatus::Failed;
+                            updated_job.stopped_at = Some(chrono::Utc::now().timestamp());
+                            updated_job.error_message = Some(message);
+
+                            if let Ok(Some(mut app)) = server
+                                .app_service
+                                .app_repo
+                                .get_app_config(&updated_job.app_id)
+                                .await
+                            {
+                                let retry_after = i64::MAX / 4;
+                                app.restore_retry_after_at = retry_after;
+                                if let Err(e) =
+                                    server.app_service.app_repo.update_app_config(app).await
+                                {
+                                    tracing::error!(
+                                        app_id = %updated_job.app_id,
+                                        retry_after = %retry_after,
+                                        error = %e,
+                                        "Failed to persist restore backoff after failed VM heartbeat"
+                                    );
+                                }
+                            }
+
+                            use mikrom_proto::scheduler::AppInfo;
+                            use prost::Message;
+
+                            let info = AppInfo {
+                                job_id: updated_job.job_id.clone(),
+                                app_id: updated_job.app_id.clone(),
+                                app_name: updated_job.app_name.clone(),
+                                image: updated_job.image.clone(),
+                                status: updated_job.status as i32,
+                                host_id: updated_job.host_id.clone().unwrap_or_default(),
+                                vm_id: updated_job.vm_id.clone().unwrap_or_default(),
+                                user_id: updated_job.user_id.clone(),
+                                deployment_id: updated_job
+                                    .deployment_id
+                                    .clone()
+                                    .unwrap_or_default(),
+                                ipv6_address: updated_job
+                                    .config
+                                    .ipv6_address
+                                    .clone()
+                                    .unwrap_or_default(),
+                                ..Default::default()
+                            };
+
+                            let mut buf = Vec::new();
+                            if info.encode(&mut buf).is_ok() {
+                                let _ = client
+                                    .publish(
+                                        mikrom_proto::subjects::SCHEDULER_JOB_UPDATES,
+                                        buf.into(),
+                                    )
+                                    .await;
+                            }
+                        }
+
+                        for (vm_id, vm_metrics) in &metrics.vms {
+                            if vm_metrics.status == ProtoVmStatus::Failed as i32 {
+                                continue;
+                            }
+
                             let Some(job) = running_jobs_by_vm.get(vm_id) else {
                                 continue;
                             };
@@ -664,6 +801,123 @@ impl NatsEventLoop {
                         let _ = client.publish(reply, buf.into()).await;
                     }
                 }
+            }
+        });
+    }
+
+    async fn handle_vm_failed(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let Ok(event) = mikrom_proto::agent::VmFailureEvent::decode(&message.payload[..])
+            else {
+                tracing::warn!("Failed to decode VM failure event");
+                return;
+            };
+
+            let Some(job) = server
+                .app_service
+                .job_repo
+                .find_job_by_vm_id(&event.vm_id)
+                .await
+                .ok()
+                .flatten()
+            else {
+                tracing::warn!(vm_id = %event.vm_id, "VM failure event received for unknown job");
+                return;
+            };
+
+            if matches!(
+                job.status,
+                crate::domain::JobStatus::Failed
+                    | crate::domain::JobStatus::Cancelled
+                    | crate::domain::JobStatus::Stopped
+            ) {
+                tracing::debug!(
+                    job_id = %job.job_id,
+                    vm_id = %event.vm_id,
+                    "Ignoring VM failure event for terminal job"
+                );
+                return;
+            }
+
+            let message_text = if event.error_message.is_empty() {
+                "VM startup failed".to_string()
+            } else {
+                event.error_message
+            };
+
+            tracing::error!(
+                job_id = %job.job_id,
+                vm_id = %event.vm_id,
+                error = %message_text,
+                "Received immediate VM failure event"
+            );
+
+            if let Err(e) = server
+                .app_service
+                .job_repo
+                .fail_job(
+                    &job.job_id,
+                    message_text.clone(),
+                    chrono::Utc::now().timestamp(),
+                )
+                .await
+            {
+                tracing::error!(
+                    job_id = %job.job_id,
+                    vm_id = %event.vm_id,
+                    error = %e,
+                    "Failed to persist VM failure event"
+                );
+                return;
+            }
+
+            let mut updated_job = job;
+            updated_job.status = crate::domain::JobStatus::Failed;
+            updated_job.stopped_at = Some(chrono::Utc::now().timestamp());
+            updated_job.error_message = Some(message_text);
+
+            if let Ok(Some(mut app)) = server
+                .app_service
+                .app_repo
+                .get_app_config(&updated_job.app_id)
+                .await
+            {
+                let retry_after = i64::MAX / 4;
+                app.restore_retry_after_at = retry_after;
+                if let Err(e) = server.app_service.app_repo.update_app_config(app).await {
+                    tracing::error!(
+                        app_id = %updated_job.app_id,
+                        retry_after = %retry_after,
+                        error = %e,
+                        "Failed to persist restore backoff after VM failure"
+                    );
+                }
+            }
+
+            use mikrom_proto::scheduler::AppInfo;
+            use prost::Message;
+
+            let info = AppInfo {
+                job_id: updated_job.job_id.clone(),
+                app_id: updated_job.app_id.clone(),
+                app_name: updated_job.app_name.clone(),
+                image: updated_job.image.clone(),
+                status: updated_job.status as i32,
+                host_id: updated_job.host_id.clone().unwrap_or_default(),
+                vm_id: updated_job.vm_id.clone().unwrap_or_default(),
+                user_id: updated_job.user_id.clone(),
+                deployment_id: updated_job.deployment_id.clone().unwrap_or_default(),
+                ipv6_address: updated_job.config.ipv6_address.clone().unwrap_or_default(),
+                ..Default::default()
+            };
+
+            let mut buf = Vec::new();
+            if info.encode(&mut buf).is_ok() {
+                let _ = client
+                    .publish(mikrom_proto::subjects::SCHEDULER_JOB_UPDATES, buf.into())
+                    .await;
             }
         });
     }
@@ -1148,7 +1402,8 @@ mod tests {
     use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository, Worker};
     use chrono::Utc;
     use sqlx::PgPool;
-    use std::sync::Arc;
+    use std::collections::HashSet;
+    use std::sync::{Arc, Mutex};
 
     #[tokio::test]
     async fn test_calculate_mesh_updates_prunes_dead_workers() {
@@ -1273,5 +1528,19 @@ mod tests {
             2,
             "Both workers should still be updated (though they might be alone)"
         );
+    }
+
+    #[test]
+    fn test_router_restore_guard_deduplicates_app_restores() {
+        let in_progress = Arc::new(Mutex::new(HashSet::new()));
+
+        let guard = NatsEventLoop::acquire_router_restore_guard(&in_progress, "app-1");
+        assert!(guard.is_some());
+        assert!(NatsEventLoop::acquire_router_restore_guard(&in_progress, "app-1").is_none());
+
+        drop(guard);
+
+        let guard = NatsEventLoop::acquire_router_restore_guard(&in_progress, "app-1");
+        assert!(guard.is_some());
     }
 }

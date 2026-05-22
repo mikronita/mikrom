@@ -2885,6 +2885,8 @@ dependencies = [
  "serde_json",
  "shlex",
  "sysinfo",
+ "tar",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3017,6 +3019,7 @@ dependencies = [
  "rtnetlink",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

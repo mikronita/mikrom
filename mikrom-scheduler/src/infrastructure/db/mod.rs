@@ -370,8 +370,8 @@ impl AppRepository for PgAppRepository {
             INSERT INTO apps (
                 id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas,
                 autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at,
-                last_scaled_to_zero_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+                last_scaled_to_zero_at, restore_retry_after_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
             ON CONFLICT (id) DO UPDATE SET
                 vpc_ipv6_prefix = EXCLUDED.vpc_ipv6_prefix,
                 hostname = EXCLUDED.hostname,
@@ -383,6 +383,7 @@ impl AppRepository for PgAppRepository {
                 mem_threshold = EXCLUDED.mem_threshold,
                 last_router_traffic_at = EXCLUDED.last_router_traffic_at,
                 last_scaled_to_zero_at = EXCLUDED.last_scaled_to_zero_at,
+                restore_retry_after_at = EXCLUDED.restore_retry_after_at,
                 updated_at = NOW()
             "#,
         )
@@ -398,6 +399,7 @@ impl AppRepository for PgAppRepository {
         .bind(config.mem_threshold)
         .bind(config.last_router_traffic_at)
         .bind(config.last_scaled_to_zero_at)
+        .bind(config.restore_retry_after_at)
         .execute(&self.pool)
         .await?;
 
@@ -406,7 +408,7 @@ impl AppRepository for PgAppRepository {
 
     async fn get_app_config(&self, app_id: &str) -> anyhow::Result<Option<AppConfig>> {
         let row = sqlx::query(
-            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at FROM apps WHERE id = $1"
+            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps WHERE id = $1"
         )
         .bind(app_id)
         .fetch_optional(&self.pool)
@@ -420,7 +422,7 @@ impl AppRepository for PgAppRepository {
         hostname: &str,
     ) -> anyhow::Result<Option<AppConfig>> {
         let row = sqlx::query(
-            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at FROM apps WHERE hostname = $1"
+            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps WHERE hostname = $1"
         )
         .bind(hostname)
         .fetch_optional(&self.pool)
@@ -431,7 +433,7 @@ impl AppRepository for PgAppRepository {
 
     async fn list_all_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
         let rows = sqlx::query(
-            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at FROM apps"
+            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps"
         )
         .fetch_all(&self.pool)
         .await?;
@@ -441,7 +443,7 @@ impl AppRepository for PgAppRepository {
 
     async fn list_autoscaling_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
         let rows = sqlx::query(
-            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at FROM apps WHERE autoscaling_enabled = TRUE"
+            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps WHERE autoscaling_enabled = TRUE"
         )
         .fetch_all(&self.pool)
         .await?;
@@ -472,5 +474,6 @@ fn map_row_to_app_config(r: &sqlx::postgres::PgRow) -> AppConfig {
         mem_threshold: r.get("mem_threshold"),
         last_router_traffic_at: r.get("last_router_traffic_at"),
         last_scaled_to_zero_at: r.get("last_scaled_to_zero_at"),
+        restore_retry_after_at: r.get("restore_retry_after_at"),
     }
 }

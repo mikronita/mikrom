@@ -7,7 +7,13 @@ use crate::firecracker::process::{
     CommandExecutor, RealCommandExecutor, VmDetailedInfo, VmProcess,
 };
 use crate::logger::LogShipper;
-use mikrom_proto::id::{AppId, VmId};
+use anyhow::Context;
+use mikrom_proto::{
+    id::{AppId, VmId},
+    subjects,
+};
+use prost::Message;
+use serde::{Deserialize, Serialize};
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::CString;
@@ -66,7 +72,112 @@ struct StartupContext {
     chroot_dir: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedVmRuntime {
+    vm: VmInfo,
+    pid: Option<u32>,
+    socket_path: String,
+    metrics_path: Option<String>,
+    tap_name: Option<String>,
+    tap_ifindex: Option<u32>,
+    chroot_dir: Option<String>,
+    app_started: bool,
+    app_started_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum PersistedVmRecord {
+    Legacy(VmInfo),
+    Current(PersistedVmRuntime),
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct PersistedAgentState {
+    vms: Vec<PersistedVmRecord>,
+}
+
+impl PersistedVmRuntime {
+    fn from_runtime(vm: &VmInfo, proc: Option<&VmProcess>) -> Self {
+        let pid = proc.and_then(FirecrackerManager::process_pid);
+        let socket_path = proc.map(|p| p.socket_path.clone()).unwrap_or_default();
+        let metrics_path = proc.and_then(|p| p.metrics_path.clone());
+        let tap_name = proc.and_then(|p| p.tap_name.clone());
+        let tap_ifindex = proc.and_then(|p| p.tap_ifindex);
+        let chroot_dir = proc.and_then(|p| p.chroot_dir.clone());
+        let app_started = proc
+            .map(|p| p.app_started.load(Ordering::SeqCst))
+            .unwrap_or(false);
+        let app_started_at_ms = proc
+            .map(|p| p.app_started_at_ms.load(Ordering::SeqCst))
+            .unwrap_or(0);
+
+        Self {
+            vm: vm.clone(),
+            pid,
+            socket_path,
+            metrics_path,
+            tap_name,
+            tap_ifindex,
+            chroot_dir,
+            app_started,
+            app_started_at_ms,
+        }
+    }
+}
+
 impl FirecrackerManager {
+    fn process_pid(proc: &VmProcess) -> Option<u32> {
+        proc.pid
+            .or_else(|| proc.child.as_ref().and_then(|child| child.id()))
+    }
+
+    fn is_pid_alive(pid: u32) -> bool {
+        let rc = unsafe { libc::kill(pid as i32, 0) };
+        rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+
+    async fn wait_for_pid_exit(pid: u32, timeout: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if !Self::is_pid_alive(pid) {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    async fn kill_process(
+        &self,
+        vm_id: &VmId,
+        proc: &mut VmProcess,
+    ) -> Result<(), FirecrackerError> {
+        if let Some(child) = proc.child.as_mut() {
+            if let Err(e) = child.kill().await {
+                tracing::error!(vm_id = %vm_id, "Failed to send kill signal to Firecracker: {}", e);
+            }
+            let _ = child.wait().await;
+            return Ok(());
+        }
+
+        if let Some(pid) = proc.pid {
+            let rc = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+            if rc != 0 {
+                let err = std::io::Error::last_os_error();
+                tracing::warn!(vm_id = %vm_id, pid = pid, error = %err, "Failed to signal recovered Firecracker process");
+            }
+            let _ = Self::wait_for_pid_exit(pid, Duration::from_secs(10)).await;
+            return Ok(());
+        }
+
+        Err(FirecrackerError::StopFailed(format!(
+            "No process handle or pid available for VM {vm_id}"
+        )))
+    }
+
     fn ipv6_route_prefix(ipv6: &str) -> Option<String> {
         let addr: std::net::Ipv6Addr = ipv6.parse().ok()?;
         let seg = addr.segments();
@@ -223,7 +334,7 @@ impl FirecrackerManager {
         vms.values()
             .map(|vm| {
                 let proc = processes.get(&vm.vm_id);
-                let pid = proc.map(|p| p.child.id().unwrap_or(0));
+                let pid = proc.and_then(FirecrackerManager::process_pid);
                 let metrics_path = proc.and_then(|p| p.metrics_path.clone());
                 let socket_path = proc.map(|p| p.socket_path.clone());
                 let tap_name = proc.and_then(|p| p.tap_name.clone());
@@ -367,17 +478,28 @@ impl FirecrackerManager {
         let mut to_remove = Vec::new();
 
         for (vm_id, proc) in processes.iter_mut() {
-            match proc.child.try_wait() {
-                Ok(Some(status)) => {
-                    tracing::info!(vm_id = %vm_id, status = ?status, "Detected Firecracker process exit via GC");
-                    to_remove.push((*vm_id, status));
-                },
-                Ok(None) => {
-                    // Still running
-                },
-                Err(e) => {
-                    tracing::error!(vm_id = %vm_id, error = %e, "Error checking Firecracker process status");
-                },
+            let status = if let Some(child) = proc.child.as_mut() {
+                match child.try_wait() {
+                    Ok(Some(status)) => Some(status),
+                    Ok(None) => None,
+                    Err(e) => {
+                        tracing::error!(vm_id = %vm_id, error = %e, "Error checking Firecracker process status");
+                        None
+                    },
+                }
+            } else if let Some(pid) = proc.pid {
+                if Self::is_pid_alive(pid) {
+                    None
+                } else {
+                    Some(std::process::ExitStatus::from_raw(0))
+                }
+            } else {
+                Some(std::process::ExitStatus::from_raw(0))
+            };
+
+            if let Some(status) = status {
+                tracing::info!(vm_id = %vm_id, status = ?status, "Detected Firecracker process exit via GC");
+                to_remove.push((*vm_id, status));
             }
         }
 
@@ -421,7 +543,7 @@ impl FirecrackerManager {
             "Checking if VM needs auto-restart"
         );
 
-        if vm.status == VmStatus::Running {
+        if vm.status == VmStatus::Running || vm.status == VmStatus::Starting {
             tracing::error!(
                 vm_id = %vm_id,
                 exit_code = ?exit_status.code(),
@@ -572,6 +694,7 @@ impl FirecrackerManager {
                 );
             }
         }
+        let _ = self.persist_runtime_state().await;
 
         // 2. Add initial log entry
         {
@@ -1285,6 +1408,7 @@ impl FirecrackerManager {
         }
 
         self.processes.lock().await.insert(vm_id, vm_process);
+        let _ = self.persist_runtime_state().await;
         tracing::info!(vm_id = %vm_id, "Firecracker VM successfully started");
         Ok(())
     }
@@ -1333,7 +1457,8 @@ impl FirecrackerManager {
             vm_id,
             VmProcess {
                 vm_id,
-                child,
+                pid: child.id(),
+                child: Some(child),
                 socket_path: "/tmp/test.sock".to_string(),
                 metrics_path: None,
                 tap_name: None,
@@ -1442,6 +1567,8 @@ impl FirecrackerManager {
             }
             vm.status = VmStatus::Stopped;
         }
+        drop(vms);
+        let _ = self.persist_runtime_state().await;
 
         Ok(())
     }
@@ -1461,10 +1588,7 @@ impl FirecrackerManager {
             vm_id = %vm_id,
             "Sending kill signal to Firecracker process for stopping"
         );
-        if let Err(e) = proc.child.kill().await {
-            tracing::error!(vm_id = %vm_id, "Failed to send kill signal to Firecracker: {}", e);
-        }
-        let _ = proc.child.wait().await;
+        let _ = self.kill_process(vm_id, proc).await;
         tracing::info!(vm_id = %vm_id, "Firecracker process terminated");
     }
 
@@ -1493,6 +1617,7 @@ impl FirecrackerManager {
             let mut vms = self.vms.write().await;
             vms.remove(vm_id);
         }
+        let _ = self.persist_runtime_state().await;
 
         // 3. Forced cleanup of file artifacts (in case they weren't in processes map)
 
@@ -1567,11 +1692,7 @@ impl FirecrackerManager {
         proc.log_task.abort();
 
         tracing::info!(vm_id = %vm_id, "Sending kill signal to Firecracker process for hibernation");
-        if let Err(e) = proc.child.kill().await {
-            tracing::error!(vm_id = %vm_id, "Failed to send kill signal to Firecracker: {}", e);
-        }
-
-        let _ = proc.child.wait().await;
+        let _ = self.kill_process(vm_id, proc).await;
         tracing::info!(vm_id = %vm_id, "Firecracker process terminated for hibernation");
 
         let socket_path = proc.socket_path.clone();
@@ -1591,6 +1712,8 @@ impl FirecrackerManager {
         if let Some(vm) = vms.get_mut(vm_id) {
             vm.status = VmStatus::Paused;
         }
+        drop(vms);
+        let _ = self.persist_runtime_state().await;
 
         tracing::info!(vm_id = %vm_id, "VM paused and process terminated successfully");
         Ok(())
@@ -1599,49 +1722,68 @@ impl FirecrackerManager {
     #[tracing::instrument(skip(self), fields(vm_id = %vm_id))]
     pub async fn resume_vm(&self, vm_id: &VmId) -> Result<(), FirecrackerError> {
         let mut processes = self.processes.lock().await;
+        let mut live_process_resumed = false;
         let restart_from_snapshot = if let Some(proc) = processes.get_mut(vm_id) {
-            match proc.child.try_wait() {
-                Ok(Some(status)) => {
-                    tracing::warn!(
-                        vm_id = %vm_id,
-                        status = ?status,
-                        "Found stale Firecracker process during resume, restarting from snapshot"
-                    );
-                    true
-                },
-                Ok(None) => {
-                    let resume_body = serde_json::json!({ "state": "Resumed" }).to_string();
-                    match fc_patch(&proc.socket_path, "/vm", &resume_body).await {
-                        Ok(_) => {
-                            let mut vms = self.vms.write().await;
-                            if let Some(vm) = vms.get_mut(vm_id) {
-                                vm.status = VmStatus::Running;
-                            }
-                            return Ok(());
-                        },
-                        Err(e) => {
-                            tracing::warn!(
-                                vm_id = %vm_id,
-                                error = %e,
-                                "Failed to resume Firecracker process in place, restarting from snapshot"
-                            );
-                            true
-                        },
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!(
-                        vm_id = %vm_id,
-                        error = %e,
-                        "Could not inspect Firecracker process during resume, restarting from snapshot"
-                    );
-                    true
-                },
+            let process_alive = if let Some(child) = proc.child.as_mut() {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        tracing::warn!(
+                            vm_id = %vm_id,
+                            status = ?status,
+                            "Found stale Firecracker process during resume, restarting from snapshot"
+                        );
+                        false
+                    },
+                    Ok(None) => true,
+                    Err(e) => {
+                        tracing::warn!(
+                            vm_id = %vm_id,
+                            error = %e,
+                            "Could not inspect Firecracker process during resume, restarting from snapshot"
+                        );
+                        false
+                    },
+                }
+            } else if let Some(pid) = proc.pid {
+                Self::is_pid_alive(pid)
+            } else {
+                false
+            };
+
+            if process_alive {
+                let resume_body = serde_json::json!({ "state": "Resumed" }).to_string();
+                match fc_patch(&proc.socket_path, "/vm", &resume_body).await {
+                    Ok(_) => {
+                        let mut vms = self.vms.write().await;
+                        if let Some(vm) = vms.get_mut(vm_id) {
+                            vm.status = VmStatus::Running;
+                        }
+                        drop(vms);
+                        live_process_resumed = true;
+                        false
+                    },
+                    Err(e) => {
+                        tracing::warn!(
+                            vm_id = %vm_id,
+                            error = %e,
+                            "Failed to resume Firecracker process in place, restarting from snapshot"
+                        );
+                        true
+                    },
+                }
+            } else {
+                true
             }
         } else {
             tracing::info!(vm_id = %vm_id, "Process missing for resume, attempting restart from snapshot...");
             true
         };
+
+        if live_process_resumed {
+            drop(processes);
+            let _ = self.persist_runtime_state().await;
+            return Ok(());
+        }
 
         if restart_from_snapshot {
             {
@@ -1651,8 +1793,11 @@ impl FirecrackerManager {
                 }
             }
             processes.remove(vm_id);
+            drop(processes);
+            let _ = self.persist_runtime_state().await;
+        } else {
+            drop(processes);
         }
-        drop(processes);
 
         let vm_info = self
             .get_vm(vm_id)
@@ -1693,7 +1838,7 @@ impl FirecrackerManager {
         let mut pids = HashMap::new();
         let processes = self.processes.lock().await;
         for (vm_id, proc) in processes.iter() {
-            if let Some(pid) = proc.child.id() {
+            if let Some(pid) = Self::process_pid(proc) {
                 pids.insert(*vm_id, pid);
             }
         }
@@ -1825,7 +1970,30 @@ impl FirecrackerManager {
         let mut vms = self.vms.write().await;
         if let Some(vm) = vms.get_mut(vm_id) {
             vm.status = VmStatus::Failed;
-            vm.error_message = Some(msg);
+            vm.error_message = Some(msg.clone());
+        }
+        drop(vms);
+        let _ = self.persist_runtime_state().await;
+
+        self.publish_vm_failure_event(vm_id, msg).await;
+    }
+
+    async fn publish_vm_failure_event(&self, vm_id: &VmId, msg: String) {
+        let Some(client) = self.nats_client.read().await.clone() else {
+            return;
+        };
+
+        let event = mikrom_proto::agent::VmFailureEvent {
+            vm_id: vm_id.to_string(),
+            error_message: msg,
+        };
+        let mut buf = Vec::new();
+        if event.encode(&mut buf).is_ok()
+            && let Err(e) = client
+                .publish(subjects::SCHEDULER_VM_FAILED, buf.into())
+                .await
+        {
+            tracing::warn!(vm_id = %vm_id, error = %e, "Failed to publish VM failure event");
         }
     }
 
@@ -1841,9 +2009,11 @@ impl FirecrackerManager {
             let processes = self.processes.lock().await;
             let vms = self.vms.read().await;
             let mut ids: std::collections::HashSet<VmId> = processes.keys().cloned().collect();
-            // Also protect VMs that are currently starting
-            for id in vms.keys() {
-                ids.insert(*id);
+            // Also protect VMs that are still expected to be alive after a restart.
+            for (id, vm) in vms.iter() {
+                if !matches!(vm.status, VmStatus::Stopped | VmStatus::Failed) {
+                    ids.insert(*id);
+                }
             }
             ids
         };
@@ -1874,6 +2044,204 @@ impl FirecrackerManager {
 
         // 3. Clean up stale TAP interfaces (network-specific)
         self.cleanup_stale_taps(&active_vm_ids).await;
+    }
+
+    fn runtime_state_path(&self) -> PathBuf {
+        std::path::Path::new(&self.fc_config.data_dir).join("agent-state.json")
+    }
+
+    fn recovered_socket_path(&self, vm_id: &VmId, runtime: Option<&PersistedVmRuntime>) -> String {
+        if let Some(runtime) = runtime
+            && !runtime.socket_path.is_empty()
+        {
+            return runtime.socket_path.clone();
+        }
+
+        if self.fc_config.use_jailer {
+            self.get_chroot_dir(vm_id)
+                .join("root/run/firecracker.socket")
+                .to_string_lossy()
+                .to_string()
+        } else {
+            VmPaths::new(&self.fc_config.data_dir, &self.agent_id, *vm_id)
+                .socket_path()
+                .to_string_lossy()
+                .to_string()
+        }
+    }
+
+    fn recovered_metrics_path(
+        &self,
+        vm_id: &VmId,
+        runtime: Option<&PersistedVmRuntime>,
+    ) -> Option<String> {
+        if let Some(runtime) = runtime
+            && let Some(path) = runtime.metrics_path.as_ref()
+        {
+            return Some(path.clone());
+        }
+
+        if self.fc_config.use_jailer {
+            Some(
+                self.get_chroot_dir(vm_id)
+                    .join("root/metrics.json")
+                    .to_string_lossy()
+                    .to_string(),
+            )
+        } else {
+            Some(
+                VmPaths::new(&self.fc_config.data_dir, &self.agent_id, *vm_id)
+                    .metrics_path()
+                    .to_string_lossy()
+                    .to_string(),
+            )
+        }
+    }
+
+    pub async fn load_runtime_state(&self) -> anyhow::Result<()> {
+        let state_path = self.runtime_state_path();
+        let Ok(raw) = tokio::fs::read_to_string(&state_path).await else {
+            return Ok(());
+        };
+
+        let state: PersistedAgentState = serde_json::from_str(&raw).with_context(|| {
+            format!(
+                "Failed to parse runtime state from {}",
+                state_path.display()
+            )
+        })?;
+
+        let mut loaded_vms = HashMap::new();
+        let mut loaded_processes = HashMap::new();
+        let mut updated_state = false;
+
+        for record in state.vms {
+            let (mut vm, runtime) = match record {
+                PersistedVmRecord::Legacy(vm) => (vm, None),
+                PersistedVmRecord::Current(runtime) => {
+                    let vm = runtime.vm.clone();
+                    (vm, Some(runtime))
+                },
+            };
+
+            let runtime_ref = runtime.as_ref();
+            let should_track_process = matches!(
+                vm.status,
+                VmStatus::Starting | VmStatus::Running | VmStatus::Stopping
+            );
+
+            if should_track_process {
+                let pid = runtime_ref
+                    .and_then(|r| r.pid)
+                    .filter(|pid| Self::is_pid_alive(*pid));
+                if let Some(pid) = pid {
+                    let socket_path = self.recovered_socket_path(&vm.vm_id, runtime_ref);
+                    let metrics_path = self.recovered_metrics_path(&vm.vm_id, runtime_ref);
+                    let tap_name = runtime_ref.and_then(|r| r.tap_name.clone());
+                    let tap_ifindex = runtime_ref.and_then(|r| r.tap_ifindex);
+                    let chroot_dir = runtime_ref.and_then(|r| r.chroot_dir.clone()).or_else(|| {
+                        if self.fc_config.use_jailer {
+                            Some(self.get_chroot_dir(&vm.vm_id).to_string_lossy().to_string())
+                        } else {
+                            None
+                        }
+                    });
+                    let app_started = runtime_ref.map(|r| r.app_started).unwrap_or(false);
+                    let app_started_at_ms = runtime_ref.map(|r| r.app_started_at_ms).unwrap_or(0);
+
+                    loaded_processes.insert(
+                        vm.vm_id,
+                        VmProcess {
+                            vm_id: vm.vm_id,
+                            child: None,
+                            pid: Some(pid),
+                            socket_path,
+                            metrics_path,
+                            tap_name,
+                            tap_ifindex,
+                            log_task: tokio::spawn(async {}),
+                            chroot_dir,
+                            app_started: Arc::new(AtomicBool::new(app_started)),
+                            app_started_at_ms: Arc::new(AtomicU64::new(app_started_at_ms)),
+                            vfs_processes: Vec::new(),
+                        },
+                    );
+                } else {
+                    vm.status = match vm.status {
+                        VmStatus::Stopping => VmStatus::Stopped,
+                        _ => VmStatus::Failed,
+                    };
+                    vm.error_message = Some(
+                        "Recovered Firecracker process was not alive after agent restart"
+                            .to_string(),
+                    );
+                    updated_state = true;
+                }
+            }
+
+            loaded_vms.insert(vm.vm_id, vm);
+        }
+
+        {
+            let mut vms = self.vms.write().await;
+            *vms = loaded_vms;
+        }
+
+        {
+            let mut processes = self.processes.lock().await;
+            *processes = loaded_processes;
+        }
+
+        if updated_state {
+            let _ = self.persist_runtime_state().await;
+        }
+
+        tracing::info!(
+            state_path = %state_path.display(),
+            loaded_vms = self.vms.read().await.len(),
+            loaded_processes = self.processes.lock().await.len(),
+            "Loaded persisted Firecracker state"
+        );
+
+        Ok(())
+    }
+
+    pub async fn persist_runtime_state(&self) -> anyhow::Result<()> {
+        let state_path = self.runtime_state_path();
+        let tmp_path = state_path.with_extension("json.tmp");
+        let vms = self.vms.read().await;
+        let processes = self.processes.lock().await;
+        let mut records = Vec::with_capacity(vms.len());
+        for vm in vms.values() {
+            let proc = processes.get(&vm.vm_id);
+            records.push(PersistedVmRecord::Current(
+                PersistedVmRuntime::from_runtime(vm, proc),
+            ));
+        }
+        drop(processes);
+        drop(vms);
+
+        let state = PersistedAgentState { vms: records };
+        let payload = serde_json::to_vec_pretty(&state)?;
+
+        tokio::fs::write(&tmp_path, payload)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to write temporary runtime state {}",
+                    tmp_path.display()
+                )
+            })?;
+        tokio::fs::rename(&tmp_path, &state_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to persist runtime state to {}",
+                    state_path.display()
+                )
+            })?;
+
+        Ok(())
     }
 
     async fn cleanup_stale_taps(&self, active_vm_ids: &std::collections::HashSet<VmId>) {
@@ -2489,7 +2857,8 @@ impl FirecrackerManager {
             *vm_id,
             VmProcess {
                 vm_id: *vm_id,
-                child,
+                pid: child.id(),
+                child: Some(child),
                 socket_path,
                 metrics_path: None,
                 tap_name: None,
@@ -2585,6 +2954,18 @@ mod tests {
         ))
     }
 
+    fn test_vm_info(vm_id: VmId, status: VmStatus) -> VmInfo {
+        VmInfo {
+            vm_id,
+            app_id: AppId::new(),
+            image: "test-image".to_string(),
+            config: config(),
+            status,
+            started_at: None,
+            error_message: None,
+        }
+    }
+
     async fn spawn_fc_socket_stub(path: PathBuf, expected_requests: usize) -> JoinHandle<()> {
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).expect("bind unix socket");
@@ -2640,7 +3021,20 @@ mod tests {
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         let vm_id = VmId::new();
         start(&mgr, &vm_id).await;
+        for _ in 0..100 {
+            if mgr.get_vm_status(&vm_id).await.unwrap() == VmStatus::Running {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Running);
         assert!(mgr.stop_vm(&vm_id).await.is_ok());
+        for _ in 0..100 {
+            if mgr.get_vm_status(&vm_id).await.unwrap() == VmStatus::Stopped {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         assert_eq!(mgr.get_vm_status(&vm_id).await.unwrap(), VmStatus::Stopped);
     }
 
@@ -2923,6 +3317,202 @@ mod tests {
         assert!(tokio::fs::metadata(&paused_socket).await.is_ok());
         assert!(tokio::fs::metadata(&stale_rootfs).await.is_err());
         assert!(tokio::fs::metadata(&stale_socket).await.is_err());
+
+        let _ = tokio::fs::remove_dir_all(&data_dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_all_stale_resources_removes_failed_vm_artifacts() {
+        let mut mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let data_dir = temp_data_dir("gc-failed");
+        tokio::fs::create_dir_all(&data_dir).await.unwrap();
+        mgr.fc_config.data_dir = data_dir.to_string_lossy().to_string();
+
+        let failed_vm_id = VmId::new();
+        let prefix = format!("fc-{}-", mgr.agent_id);
+
+        mgr.set_vm_for_test(
+            &failed_vm_id,
+            VmInfo {
+                vm_id: failed_vm_id,
+                app_id: AppId::new(),
+                image: "failed-image".to_string(),
+                config: config(),
+                status: VmStatus::Failed,
+                started_at: None,
+                error_message: Some("boom".to_string()),
+            },
+        )
+        .await;
+
+        let failed_rootfs = data_dir.join(format!("{prefix}{failed_vm_id}-rootfs.ext4"));
+        let failed_socket = data_dir.join(format!("{prefix}{failed_vm_id}.sock"));
+        let failed_metrics = data_dir.join(format!("{prefix}{failed_vm_id}-metrics.json"));
+
+        tokio::fs::write(&failed_rootfs, b"failed").await.unwrap();
+        tokio::fs::write(&failed_socket, b"failed").await.unwrap();
+        tokio::fs::write(&failed_metrics, b"failed").await.unwrap();
+
+        mgr.cleanup_all_stale_resources().await;
+
+        assert!(tokio::fs::metadata(&failed_rootfs).await.is_err());
+        assert!(tokio::fs::metadata(&failed_socket).await.is_err());
+        assert!(tokio::fs::metadata(&failed_metrics).await.is_err());
+
+        let _ = tokio::fs::remove_dir_all(&data_dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_persist_runtime_state_writes_pid_and_runtime_metadata() {
+        let mut mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let data_dir = temp_data_dir("persist-runtime-state");
+        tokio::fs::create_dir_all(&data_dir).await.unwrap();
+        mgr.fc_config.data_dir = data_dir.to_string_lossy().to_string();
+
+        let vm_id = VmId::new();
+        let vm = test_vm_info(vm_id, VmStatus::Running);
+        mgr.set_vm_for_test(&vm_id, vm.clone()).await;
+
+        let child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("sleep 5")
+            .spawn()
+            .expect("failed to spawn child");
+        let child_pid = child.id();
+        mgr.insert_process_for_test(&vm_id, child, "/run/firecracker.socket".to_string())
+            .await;
+
+        mgr.persist_runtime_state().await.unwrap();
+
+        let raw = tokio::fs::read_to_string(mgr.runtime_state_path())
+            .await
+            .unwrap();
+        let state: PersistedAgentState = serde_json::from_str(&raw).unwrap();
+        assert_eq!(state.vms.len(), 1);
+        match &state.vms[0] {
+            PersistedVmRecord::Current(runtime) => {
+                assert_eq!(runtime.vm.vm_id, vm_id);
+                assert_eq!(runtime.vm.status, VmStatus::Running);
+                assert_eq!(runtime.pid, child_pid);
+                assert_eq!(runtime.socket_path, "/run/firecracker.socket");
+                assert!(runtime.app_started);
+                assert!(runtime.app_started_at_ms > 0);
+            },
+            PersistedVmRecord::Legacy(_) => panic!("expected current runtime record"),
+        }
+
+        let mut processes = mgr.processes.lock().await;
+        if let Some(mut proc) = processes.remove(&vm_id)
+            && let Some(mut child) = proc.child.take()
+        {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+        drop(processes);
+        let _ = tokio::fs::remove_dir_all(&data_dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_load_runtime_state_recovers_alive_process_and_marks_dead_process_failed() {
+        let mut mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let data_dir = temp_data_dir("load-runtime-state");
+        tokio::fs::create_dir_all(&data_dir).await.unwrap();
+        mgr.fc_config.data_dir = data_dir.to_string_lossy().to_string();
+
+        let alive_vm_id = VmId::new();
+        let dead_vm_id = VmId::new();
+        let alive_vm = test_vm_info(alive_vm_id, VmStatus::Running);
+        let dead_vm = test_vm_info(dead_vm_id, VmStatus::Running);
+        let current_pid = std::process::id();
+        let dead_pid = u32::MAX.saturating_sub(1);
+
+        let state = PersistedAgentState {
+            vms: vec![
+                PersistedVmRecord::Current(PersistedVmRuntime {
+                    vm: alive_vm,
+                    pid: Some(current_pid),
+                    socket_path: "/run/firecracker.socket".to_string(),
+                    metrics_path: Some("/run/metrics.json".to_string()),
+                    tap_name: Some("m-tap-alive".to_string()),
+                    tap_ifindex: Some(12),
+                    chroot_dir: Some("/srv/jailer/firecracker/alive".to_string()),
+                    app_started: true,
+                    app_started_at_ms: 1234,
+                }),
+                PersistedVmRecord::Current(PersistedVmRuntime {
+                    vm: dead_vm,
+                    pid: Some(dead_pid),
+                    socket_path: "/run/firecracker.socket".to_string(),
+                    metrics_path: Some("/run/metrics.json".to_string()),
+                    tap_name: Some("m-tap-dead".to_string()),
+                    tap_ifindex: Some(13),
+                    chroot_dir: Some("/srv/jailer/firecracker/dead".to_string()),
+                    app_started: true,
+                    app_started_at_ms: 5678,
+                }),
+            ],
+        };
+
+        tokio::fs::write(
+            mgr.runtime_state_path(),
+            serde_json::to_vec_pretty(&state).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        mgr.load_runtime_state().await.unwrap();
+
+        assert!(mgr.has_process(&alive_vm_id).await);
+        assert_eq!(
+            mgr.get_vm_status(&alive_vm_id).await.unwrap(),
+            VmStatus::Running
+        );
+
+        let dead_vm_info = mgr.get_vm(&dead_vm_id).await.unwrap();
+        assert_eq!(dead_vm_info.status, VmStatus::Failed);
+        assert!(
+            dead_vm_info
+                .error_message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Recovered Firecracker process was not alive")
+        );
+        assert!(!mgr.has_process(&dead_vm_id).await);
+
+        let _ = tokio::fs::remove_dir_all(&data_dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_load_runtime_state_handles_legacy_records() {
+        let mut mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let data_dir = temp_data_dir("load-legacy-runtime-state");
+        tokio::fs::create_dir_all(&data_dir).await.unwrap();
+        mgr.fc_config.data_dir = data_dir.to_string_lossy().to_string();
+
+        let legacy_vm_id = VmId::new();
+        let legacy_vm = test_vm_info(legacy_vm_id, VmStatus::Running);
+        let state = PersistedAgentState {
+            vms: vec![PersistedVmRecord::Legacy(legacy_vm)],
+        };
+
+        tokio::fs::write(
+            mgr.runtime_state_path(),
+            serde_json::to_vec_pretty(&state).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        mgr.load_runtime_state().await.unwrap();
+
+        let vm = mgr.get_vm(&legacy_vm_id).await.unwrap();
+        assert_eq!(vm.status, VmStatus::Failed);
+        assert!(
+            vm.error_message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Recovered Firecracker process was not alive")
+        );
+        assert!(!mgr.has_process(&legacy_vm_id).await);
 
         let _ = tokio::fs::remove_dir_all(&data_dir).await;
     }
