@@ -49,17 +49,13 @@
     </AlertDialog.Header>
     <AlertDialog.Footer>
       <AlertDialog.Cancel onclick={handleClose}>{cancelText}</AlertDialog.Cancel>
-      <AlertDialog.Action>
-        {#snippet child({ props })}
-          <Button 
-            {...props}
-            variant={finalVariant === "destructive" ? "destructive" : "default"} 
-            onclick={handleAction} 
-            disabled={loading}
-          >
-            {finalActionText}
-          </Button>
-        {/snippet}
+      <AlertDialog.Action
+        variant={finalVariant === "destructive" ? "destructive" : "default"}
+        onclick={handleAction}
+        disabled={loading}
+        class={finalVariant === "destructive" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}
+      >
+        {finalActionText}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>

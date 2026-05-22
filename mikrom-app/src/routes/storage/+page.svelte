@@ -362,7 +362,7 @@
                       <Button variant="ghost" size="icon" class="size-8" title="Take Snapshot" onclick={() => createSnapshot(volume.id)}>
                         <Camera class="size-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" class="size-8 text-destructive hover:text-destructive hover:bg-destructive/10" title="Delete Volume" onclick={() => (volumeToDelete = volume)}>
+                      <Button variant="destructive-soft" size="icon" class="size-8" title="Delete Volume" onclick={() => (volumeToDelete = volume)}>
                         <Trash2 class="size-4" />
                       </Button>
                     </div>
@@ -453,7 +453,7 @@
                     <Button variant="outline" size="icon" class="size-7" title="Clone" onclick={() => { snapshotToClone = snap.volume_id; restoreSnapshotName = snap.name; cloneName = `${$volumesStore.find((v) => v.id === snap.volume_id)?.name || "volume"}-clone`; showCloneModal = true; }}>
                       <Copy class="size-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" class="size-7 text-destructive hover:bg-destructive/10" title="Delete" onclick={() => (snapshotToDelete = snap)}>
+                    <Button variant="destructive-soft" size="icon" class="size-7" title="Delete" onclick={() => (snapshotToDelete = snap)}>
                       <Trash2 class="size-3.5" />
                     </Button>
                   </div>
