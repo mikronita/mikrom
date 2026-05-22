@@ -51,7 +51,7 @@
 <div class="flex min-h-screen flex-col bg-background px-4 py-10">
   <div class="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-6">
     <div class="flex flex-col items-center gap-3 text-center">
-      <div class="flex size-10 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm">
+      <div class="flex size-10 items-center justify-center rounded-md border border-border bg-card text-foreground shadow-xs">
         <Box class="size-5" />
       </div>
       <div class="flex flex-col gap-1">

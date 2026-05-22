@@ -119,7 +119,7 @@
       </div>
     </div>
 
-    <div class="grid h-auto w-full grid-cols-2 gap-1 overflow-hidden rounded-lg border border-border bg-muted p-1 sm:grid-cols-3 xl:grid-cols-6">
+    <div class="grid h-auto w-full grid-cols-2 gap-1 overflow-hidden rounded-md border border-border bg-muted p-1 sm:grid-cols-3 xl:grid-cols-6">
       {#each settingsTabs as tab}
         <button
           class={`flex min-h-10 items-center justify-start gap-2 rounded-md px-3 text-sm transition-colors sm:justify-center ${
@@ -278,7 +278,7 @@
         </CardHeader>
         <CardContent>
           <div class="flex flex-col gap-4">
-            <div class="flex flex-col gap-4 rounded-lg border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex flex-col gap-4 rounded-md border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div class="flex items-center gap-4">
                 <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
                   <CheckCircle2 class="size-4" />
@@ -303,20 +303,20 @@
                 <CardTitle class="text-2xl">Pro developer</CardTitle>
                 <p class="text-sm text-muted-foreground">$29 / month</p>
               </div>
-              <Badge variant="outline" class="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">Active</Badge>
+              <Badge variant="outline" class="border-transparent bg-status-info/10 text-status-info">Active</Badge>
             </div>
           </CardHeader>
           <CardContent class="pt-6">
             <div class="grid gap-3 sm:grid-cols-3">
-              <div class="rounded-lg border bg-background p-4">
+              <div class="rounded-md border bg-background p-4">
                 <p class="text-2xl font-semibold">4</p>
                 <p class="text-sm text-muted-foreground">Active apps</p>
               </div>
-              <div class="rounded-lg border bg-background p-4">
+              <div class="rounded-md border bg-background p-4">
                 <p class="text-2xl font-semibold">120 GB</p>
                 <p class="text-sm text-muted-foreground">Bandwidth</p>
               </div>
-              <div class="rounded-lg border bg-background p-4">
+              <div class="rounded-md border bg-background p-4">
                 <p class="text-2xl font-semibold">24/7</p>
                 <p class="text-sm text-muted-foreground">Support</p>
               </div>
@@ -334,7 +334,7 @@
             <CardDescription>Manage the card used for renewals and invoices.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div class="flex items-center gap-4 rounded-lg border bg-muted/30 p-4">
+            <div class="flex items-center gap-4 rounded-md border bg-muted/30 p-4">
               <div class="flex h-8 w-12 shrink-0 items-center justify-center rounded-md border bg-background text-xs font-semibold italic text-muted-foreground">
                 VISA
               </div>
@@ -364,7 +364,7 @@
                   <CardSkeleton
                     compact
                     showBadge={false}
-                    iconClassName="size-10 rounded-lg"
+                    iconClassName="size-10 rounded-md"
                     titleClassName="w-32"
                     descriptionClassName="w-44"
                     footerLineClassName=""
@@ -372,7 +372,7 @@
                   <CardSkeleton
                     compact
                     showBadge={false}
-                    iconClassName="size-10 rounded-lg"
+                    iconClassName="size-10 rounded-md"
                     titleClassName="w-32"
                     descriptionClassName="w-44"
                     footerLineClassName=""
@@ -380,7 +380,7 @@
                 </div>
               {:else if githubAccounts.length > 0}
                 {#each githubAccounts as account}
-                  <div class="flex flex-col gap-4 rounded-lg border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div class="flex flex-col gap-4 rounded-md border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div class="flex items-center gap-4">
                       <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
                         <Github class="size-4" />
@@ -402,7 +402,7 @@
                   </Button>
                 </div>
               {:else}
-                <div class="flex flex-col gap-4 rounded-lg border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div class="flex flex-col gap-4 rounded-md border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div class="flex items-center gap-4">
                     <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
                       <Github class="size-4" />
@@ -427,14 +427,14 @@
         </CardHeader>
         <CardContent>
           <div class="space-y-4">
-            <div class="flex items-start justify-between gap-4 rounded-lg border bg-muted/30 p-4">
+            <div class="flex items-start justify-between gap-4 rounded-md border bg-muted/30 p-4">
               <div class="space-y-1">
                 <div class="text-base font-medium">Deployment status</div>
                 <p class="text-sm text-muted-foreground">Receive an email when your deployments finish or fail.</p>
               </div>
               <Switch bind:checked={emailNotifications} aria-label="Toggle deployment status notifications" />
             </div>
-            <div class="flex items-start justify-between gap-4 rounded-lg border bg-muted/30 p-4">
+            <div class="flex items-start justify-between gap-4 rounded-md border bg-muted/30 p-4">
               <div class="space-y-1">
                 <div class="text-base font-medium">Marketing emails</div>
                 <p class="text-sm text-muted-foreground">New features, tips and weekly summaries.</p>

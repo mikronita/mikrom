@@ -21,11 +21,11 @@
   function getStatusBadgeClass(status: string) {
     switch (status) {
       case "Running":
-        return "border-transparent bg-[color-mix(in_srgb,var(--status-online)_12%,transparent)] text-[var(--status-online)]";
+        return "border-transparent bg-status-online/10 text-status-online";
       case "Provisioning":
-        return "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]";
+        return "border-transparent bg-status-info/10 text-status-info";
       case "Deleting":
-        return "border-transparent bg-[color-mix(in_srgb,var(--status-error)_12%,transparent)] text-[var(--status-error)]";
+        return "border-transparent bg-status-offline/10 text-status-offline";
       default:
         return "border-transparent bg-muted/70 text-muted-foreground";
     }
@@ -82,7 +82,7 @@
             <Card class="h-full overflow-hidden transition-colors hover:bg-muted/30">
               <CardHeader>
                 <div class="flex items-start gap-4">
-                  <div class="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-foreground">
+                  <div class="flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
                     <DatabaseIcon class="size-5" />
                   </div>
                   <div class="flex min-w-0 flex-1 flex-col gap-2">

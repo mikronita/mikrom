@@ -5,7 +5,7 @@
   let {
     showIcon = true,
     showBadge = true,
-    iconClassName = "size-10 rounded-lg",
+    iconClassName = "size-10 rounded-md",
     titleClassName = "w-32",
     descriptionClassName = "w-full",
     footerPills = [],
@@ -16,8 +16,8 @@
   } = $props();
 </script>
 
-<div class={cn("overflow-hidden rounded-lg border bg-card shadow-sm", classAttr)} {...rest}>
-  <div class={compact ? "p-4" : "p-5"}>
+<div class={cn("overflow-hidden rounded-lg border bg-card shadow-xs", classAttr)} {...rest}>
+  <div class={compact ? "p-3" : "p-5"}>
     <div class="flex items-start gap-4">
       {#if showIcon}
         <Skeleton class={cn("shrink-0", iconClassName)} />

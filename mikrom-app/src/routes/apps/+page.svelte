@@ -49,7 +49,7 @@
     if (scaleState === "scaled_to_zero") {
       return "border-transparent bg-muted/70 text-muted-foreground";
     }
-    return "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]";
+    return "border-transparent bg-status-info/10 text-status-info";
   }
 </script>
 
@@ -106,7 +106,7 @@
             <Card class="h-full overflow-hidden transition-colors hover:bg-muted/30">
               <CardHeader>
                 <div class="flex items-start gap-4">
-                  <div class="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-foreground">
+                  <div class="flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
                     <Boxes class="size-5" />
                   </div>
                   <div class="flex min-w-0 flex-1 flex-col gap-2">
@@ -138,7 +138,7 @@
                         <span>{resources.memory_mib} MB</span>
                       </Badge>
                       {#if resources.count > 1}
-                        <Badge variant="outline" class="bg-status-online/10 text-status-online border-status-online/20 gap-1.5">
+                        <Badge variant="outline" class="bg-status-online/10 text-status-online border-transparent gap-1.5">
                           <span>{resources.count} replicas</span>
                         </Badge>
                       {/if}

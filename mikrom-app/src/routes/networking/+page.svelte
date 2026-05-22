@@ -20,6 +20,12 @@
     SelectItem,
     SelectTrigger,
     SelectValue,
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
   } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import { getToken } from "$lib/auth";
@@ -61,13 +67,13 @@
     if (s === "running") {
       return {
         variant: "outline" as const,
-        className: "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]",
+        className: "border-transparent bg-status-info/10 text-status-info",
       };
     }
     if (s === "draining" || s === "building" || s === "scheduled" || s === "pending" || s === "paused") {
       return {
         variant: "outline" as const,
-        className: "border-transparent bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] text-[var(--status-warning)]",
+        className: "border-transparent bg-status-warning/10 text-status-warning",
       };
     }
     if (s === "failed" || s === "cancelled") {
@@ -168,7 +174,7 @@
         </div>
         <p class="max-w-2xl text-sm text-muted-foreground">Monitor the private 6PN mesh, workload addresses and application security rules.</p>
       </div>
-      <Badge variant="outline" class="w-fit gap-2 px-3 py-1.5 border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">
+      <Badge variant="outline" class="w-fit gap-2 px-3 py-1.5 border-transparent bg-status-info/10 text-status-info">
         <LockKeyhole class="size-4" />
         WireGuard mesh
       </Badge>
@@ -202,66 +208,81 @@
     </div>
 
     <div class="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(24rem,0.85fr)]">
-      <Card>
+      <Card class="h-fit">
         <CardHeader class="border-b border-border bg-muted/20">
           <div class="flex items-center justify-between gap-4">
-            <div class="flex flex-col gap-1.5">
+            <div class="grid gap-1">
               <CardTitle>Workload connectivity</CardTitle>
               <CardDescription>Running microVMs reachable inside your private 6PN mesh.</CardDescription>
             </div>
-            <Badge variant="outline" class="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]"><Network class="size-4" />{runningDeployments.length} active</Badge>
+            <Badge variant="outline" class="border-transparent bg-status-info/10 text-status-info">
+              <Network class="size-4" />
+              {runningDeployments.length} active
+            </Badge>
           </div>
         </CardHeader>
-        <div class="overflow-x-auto">
-          <table class="w-full">
-            <thead>
-              <tr class="border-b border-border text-left text-sm">
-                <th class="px-4 py-3">Workload</th>
-                <th class="px-4 py-3">6PN address</th>
-                <th class="px-4 py-3 text-right">Health</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#if loading}
-                {#each Array.from({ length: 3 }) as _}
-                  <tr class="border-b border-border">
-                    <td class="p-4" colspan="3"><Skeleton class="h-10 w-full" /></td>
-                  </tr>
-                {/each}
-              {:else if runningDeployments.length === 0}
-                <tr><td colspan="3"><EmptyState><Network class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">No active workloads</h3><p class="text-sm text-muted-foreground">Running deployments will appear here with their private network address.</p></EmptyState></td></tr>
-              {:else}
-                {#each runningDeployments as deployment}
-                  {@const deploymentBadge = getDeploymentBadgeProps(deployment.status)}
-                  <tr class="border-b border-border">
-                    <td class="px-4 py-4">
-                      <a href={`/apps/${encodeURIComponent(deployment.app_name)}`} class="flex items-center gap-3 hover:opacity-80">
-                        <div class="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground"><Boxes class="size-4" /></div>
-                        <div>
-                          <div class="truncate font-medium">{deployment.app_name}</div>
-                          <div class="font-mono text-xs text-muted-foreground">vm-{formatVmId(deployment.vm_id)}</div>
-                        </div>
-                      </a>
-                    </td>
-                    <td class="px-4 py-4">
-                      <div class="flex flex-col gap-1">
-                        <span class="w-fit rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs">{deployment.ipv6_address || "Assigning address..."}</span>
-                        <span class="text-xs text-muted-foreground">Private mesh endpoint</span>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Workload</TableHead>
+              <TableHead>6PN address</TableHead>
+              <TableHead class="text-right">Health</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {#if loading}
+              {#each Array.from({ length: 3 }) as _}
+                <TableRow>
+                  <TableCell colspan={3}><Skeleton class="h-10 w-full" /></TableCell>
+                </TableRow>
+              {/each}
+            {:else if runningDeployments.length === 0}
+              <TableRow>
+                <TableCell colspan={3}>
+                  <EmptyState>
+                    <Network class="size-10 text-muted-foreground" />
+                    <h3 class="text-xl font-semibold">No active workloads</h3>
+                    <p class="text-sm text-muted-foreground">Running deployments will appear here with their private network address.</p>
+                  </EmptyState>
+                </TableCell>
+              </TableRow>
+            {:else}
+              {#each runningDeployments as deployment}
+                {@const deploymentBadge = getDeploymentBadgeProps(deployment.status)}
+                <TableRow>
+                  <TableCell>
+                    <a href={`/apps/${encodeURIComponent(deployment.app_name)}`} class="flex items-center gap-3 hover:opacity-80">
+                      <div class="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
+                        <Boxes class="size-4" />
                       </div>
-                    </td>
-                    <td class="px-4 py-4 text-right"><Badge variant={deploymentBadge.variant} class={`capitalize ${deploymentBadge.className}`}>{deployment.status.toLowerCase()}</Badge></td>
-                  </tr>
-                {/each}
-              {/if}
-            </tbody>
-          </table>
-        </div>
+                      <div>
+                        <div class="truncate font-medium">{deployment.app_name}</div>
+                        <div class="font-mono text-xs text-muted-foreground">vm-{formatVmId(deployment.vm_id)}</div>
+                      </div>
+                    </a>
+                  </TableCell>
+                  <TableCell>
+                    <div class="flex flex-col gap-1">
+                      <span class="w-fit rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs">{deployment.ipv6_address || "Assigning address..."}</span>
+                      <span class="text-xs text-muted-foreground">Private mesh endpoint</span>
+                    </div>
+                  </TableCell>
+                  <TableCell class="text-right">
+                    <Badge variant={deploymentBadge.variant} class={`capitalize ${deploymentBadge.className}`}>
+                      {deployment.status.toLowerCase()}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              {/each}
+            {/if}
+          </TableBody>
+        </Table>
       </Card>
 
       <Card>
         <CardHeader class="border-b border-border bg-muted/20">
           <div class="flex flex-col gap-4">
-            <div class="flex flex-col gap-1.5">
+            <div class="grid gap-1">
               <CardTitle>Security groups</CardTitle>
               <CardDescription>L3/L4 rules applied to every active microVM for an application.</CardDescription>
             </div>
@@ -292,9 +313,13 @@
           </div>
         </CardHeader>
 
-          <CardContent class="p-4">
+        <CardContent class="pt-5">
           {#if !selectedApp}
-            <EmptyState><ShieldCheck class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">Select an application</h3><p class="text-sm text-muted-foreground">Choose an app to inspect and manage its security group rules.</p></EmptyState>
+            <EmptyState>
+              <ShieldCheck class="size-10 text-muted-foreground" />
+              <h3 class="text-xl font-semibold">Select an application</h3>
+              <p class="text-sm text-muted-foreground">Choose an app to inspect and manage its security group rules.</p>
+            </EmptyState>
           {:else if $securityRulesLoading}
             <div class="flex flex-col gap-3">
               <Skeleton class="h-10 w-full" />
@@ -302,7 +327,11 @@
               <Skeleton class="h-10 w-full" />
             </div>
           {:else if $securityRulesStore.length === 0}
-            <EmptyState><ShieldCheck class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">No security rules</h3><p class="text-sm text-muted-foreground">Create the first firewall rule for this application.</p></EmptyState>
+            <EmptyState>
+              <ShieldCheck class="size-10 text-muted-foreground" />
+              <h3 class="text-xl font-semibold">No security rules</h3>
+              <p class="text-sm text-muted-foreground">Create the first firewall rule for this application.</p>
+            </EmptyState>
           {:else}
             <div class="space-y-2">
               {#each $securityRulesStore as item}
@@ -312,7 +341,7 @@
                     <div class="text-xs text-muted-foreground">Priority {item.priority}</div>
                   </div>
                   <div class="flex items-center gap-2">
-                    <Badge variant={item.action === "allow" ? "outline" : "destructive"} class={item.action === "allow" ? "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]" : ""}>{item.action}</Badge>
+                    <Badge variant={item.action === "allow" ? "outline" : "destructive"} class={item.action === "allow" ? "border-transparent bg-status-info/10 text-status-info" : ""}>{item.action}</Badge>
                     <Button variant="ghost" size="icon" onclick={() => (ruleToDelete = item)}>
                       <Trash2 class="size-4" />
                     </Button>
