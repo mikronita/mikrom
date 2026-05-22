@@ -332,6 +332,7 @@ fn map_row_to_job(r: &sqlx::postgres::PgRow) -> Job {
             ipv6_gateway: r.get("ipv6_gateway"),
             volumes: vec![], // TODO: Volumes
             health_check_path: r.get("health_check_path"),
+            hypervisor: Default::default(),
         },
     }
 }
@@ -349,6 +350,7 @@ fn map_row_to_worker(r: &sqlx::postgres::PgRow) -> Worker {
         metrics,
         registered_at: r.get("registered_at"),
         last_heartbeat: r.get("last_heartbeat"),
+        supported_hypervisors: vec![],
     }
 }
 

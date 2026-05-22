@@ -599,10 +599,12 @@ impl WireGuardManager {
             *last_peers = Some(peers.to_vec());
         }
 
-        let mut conf = format!(
-            "[Interface]\nPrivateKey = {}\nListenPort = {}\n\n",
-            private_key, self.listen_port
-        );
+        // Pre-allocate ~1 KB per peer to avoid repeated reallocations.
+        let estimated_capacity = peers.len().saturating_mul(1024).saturating_add(256);
+        let mut conf = String::with_capacity(estimated_capacity);
+        conf.push_str("[Interface]\n");
+        conf.push_str(&format!("PrivateKey = {}\n", private_key));
+        conf.push_str(&format!("ListenPort = {}\n\n", self.listen_port));
 
         let mut route_targets = Vec::new();
 

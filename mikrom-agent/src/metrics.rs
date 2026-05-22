@@ -1,10 +1,9 @@
-use crate::firecracker::{FirecrackerManager, VmStatus};
+use crate::hypervisor::{HypervisorType, VmHypervisor, VmStatus};
 use mikrom_proto::id::{AppId, VmId};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use sysinfo::{Disks, Pid, System};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VmMetrics {
@@ -54,9 +53,9 @@ impl Default for SystemMetrics {
 }
 
 pub struct MetricsCollector {
-    sys: Arc<RwLock<System>>,
-    disks: Arc<RwLock<Disks>>,
-    firecracker: Option<FirecrackerManager>,
+    sys: Arc<RwLock<sysinfo::System>>,
+    disks: Arc<RwLock<sysinfo::Disks>>,
+    hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>,
     apps_count: Arc<RwLock<u32>>,
 }
 
@@ -68,25 +67,27 @@ impl Default for MetricsCollector {
 
 impl MetricsCollector {
     pub fn new() -> Self {
-        let mut sys = System::new_all();
+        let mut sys = sysinfo::System::new_all();
         sys.refresh_all();
-        let disks = Disks::new_with_refreshed_list();
+        let disks = sysinfo::Disks::new_with_refreshed_list();
         Self {
             sys: Arc::new(RwLock::new(sys)),
             disks: Arc::new(RwLock::new(disks)),
-            firecracker: None,
+            hypervisors: Arc::new(HashMap::new()),
             apps_count: Arc::new(RwLock::new(0)),
         }
     }
 
-    pub fn with_firecracker(firecracker: FirecrackerManager) -> Self {
-        let mut sys = System::new_all();
+    pub fn with_hypervisors(
+        hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>,
+    ) -> Self {
+        let mut sys = sysinfo::System::new_all();
         sys.refresh_all();
-        let disks = Disks::new_with_refreshed_list();
+        let disks = sysinfo::Disks::new_with_refreshed_list();
         Self {
             sys: Arc::new(RwLock::new(sys)),
             disks: Arc::new(RwLock::new(disks)),
-            firecracker: Some(firecracker),
+            hypervisors,
             apps_count: Arc::new(RwLock::new(0)),
         }
     }
@@ -111,132 +112,101 @@ impl MetricsCollector {
         let disks = self.disks.clone();
         let apps_count = *self.apps_count.read();
 
-        let (cpu, ram_used, ram_total, disk_used, disk_total, load_avg) =
-            tokio::task::spawn_blocking(move || {
-                let mut sys = sys.write();
-                sys.refresh_all();
+        let sys_result = tokio::task::spawn_blocking(move || {
+            let mut sys = sys.write();
+            sys.refresh_all();
 
-                let cpu = sys.global_cpu_usage();
-                let ram_used = sys.used_memory();
-                let ram_total = sys.total_memory();
+            let cpu = sys.global_cpu_usage();
+            let ram_used = sys.used_memory();
+            let ram_total = sys.total_memory();
 
-                let mut disks = disks.write();
-                disks.refresh_list();
-                let mut total_disk = 0;
-                let mut available_disk = 0;
-                for disk in disks.iter_mut() {
-                    disk.refresh();
-                    total_disk += disk.total_space();
-                    available_disk += disk.available_space();
-                }
+            let mut disks = disks.write();
+            disks.refresh_list();
+            let mut total_disk = 0;
+            let mut available_disk = 0;
+            for disk in disks.iter_mut() {
+                disk.refresh();
+                total_disk += disk.total_space();
+                available_disk += disk.available_space();
+            }
 
-                let load_avg = sysinfo::System::load_average();
+            let load_avg = sysinfo::System::load_average();
 
-                (
-                    cpu,
-                    ram_used,
-                    ram_total,
-                    total_disk.saturating_sub(available_disk),
-                    total_disk,
-                    load_avg,
-                )
-            })
-            .await
-            .unwrap_or((0.0, 0, 0, 0, 0, sysinfo::LoadAvg::default()));
+            (
+                cpu,
+                ram_used,
+                ram_total,
+                total_disk.saturating_sub(available_disk),
+                total_disk,
+                load_avg,
+            )
+        })
+        .await;
 
-        metrics.cpu_usage = cpu;
-        metrics.ram_used_bytes = ram_used;
-        metrics.ram_total_bytes = ram_total;
-        metrics.disk_used_bytes = disk_used;
-        metrics.disk_total_bytes = disk_total;
-        metrics.load_avg_1 = load_avg.one as f32;
-        metrics.load_avg_5 = load_avg.five as f32;
-        metrics.load_avg_15 = load_avg.fifteen as f32;
+        match sys_result {
+            Ok((cpu, ram_used, ram_total, disk_used, disk_total, load_avg)) => {
+                metrics.cpu_usage = cpu;
+                metrics.ram_used_bytes = ram_used;
+                metrics.ram_total_bytes = ram_total;
+                metrics.disk_used_bytes = disk_used;
+                metrics.disk_total_bytes = disk_total;
+                metrics.load_avg_1 = load_avg.one as f32;
+                metrics.load_avg_5 = load_avg.five as f32;
+                metrics.load_avg_15 = load_avg.fifteen as f32;
+            },
+            Err(e) => {
+                tracing::error!(error = %e, "System metrics blocking task failed; metrics will be zeroed");
+            },
+        }
         metrics.apps_count = apps_count;
         metrics.timestamp = now;
 
-        let vms_info = if let Some(mgr) = &self.firecracker {
-            mgr.get_all_vms().await
-        } else {
-            Vec::new()
-        };
+        // Collect VM metrics from all hypervisors
+        for (_htype, hv) in self.hypervisors.iter() {
+            let vms_info = hv.get_all_vms().await;
 
-        for vm in vms_info {
-            let mut vm_metrics = VmMetrics {
-                app_id: vm.app_id,
-                vm_id: vm.vm_id,
-                cpu_usage: 0.0,
-                ram_used_bytes: 0,
-                status: vm.status,
-                error_message: vm.error_message,
-                firecracker_metrics: None,
-                tx_bytes: 0,
-                rx_bytes: 0,
-            };
+            for vm in vms_info {
+                let mut vm_metrics = VmMetrics {
+                    app_id: vm.app_id,
+                    vm_id: vm.vm_id,
+                    cpu_usage: 0.0,
+                    ram_used_bytes: 0,
+                    status: vm.status,
+                    error_message: vm.error_message,
+                    firecracker_metrics: None,
+                    tx_bytes: 0,
+                    rx_bytes: 0,
+                };
 
-            if let Some(pid) = vm.pid.filter(|pid| *pid > 0) {
-                let pid = Pid::from_u32(pid);
-                let sys = self.sys.read();
-                if let Some(process) = sys.process(pid) {
-                    vm_metrics.cpu_usage = process.cpu_usage();
-                    vm_metrics.ram_used_bytes = process.memory();
-                }
-            }
-
-            // Attempt to read Firecracker metrics if path is available
-            #[allow(clippy::collapsible_if)]
-            if let Some(metrics_path) = vm.metrics_path {
-                if let Ok(content) = tokio::fs::read_to_string(&metrics_path).await {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                        vm_metrics.firecracker_metrics = Some(json);
+                if let Some(pid) = vm.pid.filter(|pid| *pid > 0) {
+                    let pid = sysinfo::Pid::from_u32(pid);
+                    let sys = self.sys.read();
+                    if let Some(process) = sys.process(pid) {
+                        vm_metrics.cpu_usage = process.cpu_usage();
+                        vm_metrics.ram_used_bytes = process.memory();
                     }
                 }
-            }
 
-            // Attempt to read eBPF stats if ifindex is available
-            #[allow(clippy::collapsible_if)]
-            if let Some(ifindex) = vm.tap_ifindex {
-                if let Some(mgr) = &self.firecracker {
-                    let ebpf = mgr.ebpf_manager.lock().await;
-                    if let Some(ebpf) = ebpf.as_ref() {
-                        if let Some(stats) = ebpf.get_stats(ifindex) {
-                            vm_metrics.tx_bytes = stats.tx_bytes;
-                            vm_metrics.rx_bytes = stats.rx_bytes;
+                // Attempt to read hypervisor metrics if path is available
+                if let Some(metrics_path) = vm.metrics_path {
+                    if let Ok(content) = tokio::fs::read_to_string(&metrics_path).await {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                            vm_metrics.firecracker_metrics = Some(json);
                         }
                     }
                 }
-            }
 
-            #[allow(clippy::collapsible_if)]
-            if vm_metrics.tx_bytes == 0 && vm_metrics.rx_bytes == 0 {
-                if let Some(tap_name) = vm.tap_name.as_deref() {
-                    let (tap_tx, tap_rx) = read_tap_network_stats(tap_name).await;
-                    vm_metrics.tx_bytes = tap_rx; // Host RX = VM TX (Out)
-                    vm_metrics.rx_bytes = tap_tx; // Host TX = VM RX (In)
-                    tracing::debug!(vm_id = %vm.vm_id, tap = %tap_name, tx = %vm_metrics.tx_bytes, rx = %vm_metrics.rx_bytes, "Retrieved sysfs network stats");
+                // Attempt to read eBPF stats if ifindex is available
+                if let Some(_ifindex) = vm.tap_ifindex {
+                    // TODO: read eBPF stats when available via the hypervisor
                 }
-            }
 
-            metrics.vms.insert(vm_metrics.vm_id, vm_metrics);
+                metrics.vms.insert(vm_metrics.vm_id, vm_metrics);
+            }
         }
 
         metrics
     }
-}
-
-async fn read_tap_network_stats(tap_name: &str) -> (u64, u64) {
-    let base = format!("/sys/class/net/{tap_name}/statistics");
-    let tx_bytes = read_u64_file(&format!("{base}/tx_bytes")).await;
-    let rx_bytes = read_u64_file(&format!("{base}/rx_bytes")).await;
-    (tx_bytes, rx_bytes)
-}
-
-async fn read_u64_file(path: &str) -> u64 {
-    tokio::fs::read_to_string(path)
-        .await
-        .ok()
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .unwrap_or(0)
 }
 
 impl Clone for MetricsCollector {
@@ -244,28 +214,28 @@ impl Clone for MetricsCollector {
         Self {
             sys: self.sys.clone(),
             disks: self.disks.clone(),
-            firecracker: self.firecracker.clone(),
+            hypervisors: self.hypervisors.clone(),
             apps_count: self.apps_count.clone(),
         }
     }
 }
 
-pub struct FirecrackerExporter {
+pub struct MetricsExporter {
     client: async_nats::Client,
     collector: MetricsCollector,
-    firecracker: FirecrackerManager,
+    hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>,
 }
 
-impl FirecrackerExporter {
+impl MetricsExporter {
     pub fn new(
         client: async_nats::Client,
         collector: MetricsCollector,
-        firecracker: FirecrackerManager,
+        hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>,
     ) -> Self {
         Self {
             client,
             collector,
-            firecracker,
+            hypervisors,
         }
     }
 
@@ -275,11 +245,16 @@ impl FirecrackerExporter {
             interval.tick().await;
             let metrics = self.collector.collect().await;
 
-            // Publish host metrics
-            let host_id = self.firecracker.agent_id.clone();
+            // Use the first available hypervisor's agent_id (all should share the same)
+            let host_id = self
+                .hypervisors
+                .values()
+                .next()
+                .map(|hv| hv.agent_id().to_string())
+                .unwrap_or_default();
+
             let subject = format!("mikrom.telemetry.host.{}", host_id);
 
-            #[allow(clippy::collapsible_if)]
             if let Ok(payload) = serde_json::to_vec(&metrics) {
                 if let Err(e) = self.client.publish(subject, payload.into()).await {
                     tracing::error!("Failed to publish metrics to NATS: {}", e);
@@ -412,12 +387,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_with_vms_and_metrics_file() {
+        use crate::firecracker::FirecrackerManager;
         use crate::firecracker::config::FirecrackerConfig;
-        use crate::firecracker::config::VmConfig;
-        use crate::firecracker::manager::FirecrackerManager;
+        use crate::hypervisor::VmConfig;
 
         let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
-        let collector = MetricsCollector::with_firecracker(mgr.clone());
+        let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
+        hvs.insert(HypervisorType::Firecracker, Arc::new(mgr.clone()));
+        let collector = MetricsCollector::with_hypervisors(Arc::new(hvs));
 
         let vm_id = VmId::new();
         let app_id = AppId::new();
@@ -461,7 +438,7 @@ mod tests {
                     stderr_log_offset: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
                     tap_name: None,
                     tap_ifindex: None,
-                    log_task,
+                    log_task: Some(log_task),
                     chroot_dir: None,
                     app_started: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
                     app_started_at_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),

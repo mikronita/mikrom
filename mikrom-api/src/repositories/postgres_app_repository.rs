@@ -264,8 +264,8 @@ impl AppRepository for PostgresAppRepository {
 
         let deployment = sqlx::query_as::<_, Deployment>(
             r#"
-            INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, port, env_vars, trigger_source, git_commit_hash, git_commit_message, git_branch)
-            VALUES ($1, $2, 'BUILDING', $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, port, env_vars, trigger_source, git_commit_hash, git_commit_message, git_branch, hypervisor)
+            VALUES ($1, $2, 'BUILDING', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING *
             "#,
         )
@@ -280,6 +280,7 @@ impl AppRepository for PostgresAppRepository {
         .bind(data.git_commit_hash)
         .bind(data.git_commit_message)
         .bind(data.git_branch)
+        .bind(data.hypervisor)
         .fetch_one(&self.pool)
         .await?;
 
@@ -515,19 +516,20 @@ mod tests {
 
         // 4. Create a deployment
         let deployment = app_repo
-            .create_deployment(crate::repositories::app_repository::NewDeployment {
-                app_id: app.id,
-                user_id: user_id.to_string(),
-                vcpus: 1,
-                memory_mib: 256,
-                disk_mib: 1024,
-                port: 8080,
-                env_vars: std::collections::HashMap::new(),
-                trigger_source: "manual".to_string(),
-                git_commit_hash: None,
-                git_commit_message: None,
-                git_branch: None,
-            })
+            .create_deployment(
+                crate::repositories::app_repository::NewDeployment::from_handler(
+                    app.id,
+                    user_id.to_string(),
+                    1,
+                    256,
+                    1024,
+                    8080,
+                    std::collections::HashMap::new(),
+                    "manual".to_string(),
+                    None,
+                    0,
+                ),
+            )
             .await
             .expect("failed to create deployment");
         assert_eq!(deployment.status, "BUILDING");

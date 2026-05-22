@@ -60,6 +60,26 @@ pub struct Volume {
     pub access_mode: AccessMode,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Copy, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HypervisorType {
+    #[default]
+    Unspecified = 0,
+    Firecracker = 1,
+    QemuMicrovm = 2,
+}
+
+impl HypervisorType {
+    pub fn from_i32(v: i32) -> Option<Self> {
+        match v {
+            0 => Some(Self::Unspecified),
+            1 => Some(Self::Firecracker),
+            2 => Some(Self::QemuMicrovm),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmConfig {
     pub vcpus: u32,
@@ -71,6 +91,7 @@ pub struct VmConfig {
     pub ipv6_gateway: Option<String>,
     pub volumes: Vec<Volume>,
     pub health_check_path: String,
+    pub hypervisor: HypervisorType,
 }
 
 impl Default for VmConfig {
@@ -85,6 +106,7 @@ impl Default for VmConfig {
             ipv6_gateway: None,
             volumes: vec![],
             health_check_path: "/".to_string(),
+            hypervisor: HypervisorType::default(),
         }
     }
 }

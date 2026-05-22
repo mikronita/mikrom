@@ -410,6 +410,7 @@ impl NatsEventLoop {
                         metrics: None,
                         registered_at: chrono::Utc::now().timestamp(),
                         last_heartbeat: chrono::Utc::now().timestamp(),
+                        supported_hypervisors: vec![],
                     };
 
                     if let Err(e) = server.app_service.worker_repo.register(worker).await {
@@ -584,6 +585,11 @@ impl NatsEventLoop {
                         metrics: None, // Will update below
                         registered_at: chrono::Utc::now().timestamp(),
                         last_heartbeat: chrono::Utc::now().timestamp(),
+                        supported_hypervisors: heartbeat
+                            .supported_hypervisors
+                            .iter()
+                            .filter_map(|&v| crate::domain::job::HypervisorType::from_i32(v))
+                            .collect(),
                     };
 
                     if let Err(e) = server.app_service.worker_repo.register(worker).await {
@@ -1448,6 +1454,7 @@ mod tests {
             metrics: None,
             registered_at: now,
             last_heartbeat: now - 10,
+            supported_hypervisors: vec![],
         };
 
         // Dead worker (60 seconds ago)
@@ -1461,6 +1468,7 @@ mod tests {
             metrics: None,
             registered_at: now,
             last_heartbeat: now - 60,
+            supported_hypervisors: vec![],
         };
 
         // Mock list_workers to return both

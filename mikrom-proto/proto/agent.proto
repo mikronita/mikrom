@@ -216,6 +216,12 @@ message StartVmRequest {
   VmConfig config = 4;
 }
 
+enum HypervisorType {
+  HYPERTYPE_UNSPECIFIED = 0;
+  HYPERTYPE_FIRECRACKER = 1;
+  HYPERTYPE_QEMU_MICROVM = 2;
+}
+
 message Volume {
   string volume_id = 1;
   uint64 size_mib = 2;
@@ -242,6 +248,7 @@ message VmConfig {
   string health_check_path = 11;
   string ipv6_address = 12;
   string ipv6_gateway = 13;
+  HypervisorType hypervisor = 14;
 }
 
 

@@ -67,6 +67,7 @@ pub struct Worker {
     pub metrics: Option<HostMetrics>,
     pub registered_at: i64,
     pub last_heartbeat: i64,
+    pub supported_hypervisors: Vec<crate::domain::job::HypervisorType>,
 }
 
 #[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]

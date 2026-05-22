@@ -1,12 +1,16 @@
 pub mod api;
+pub mod api_config;
+pub mod cleanup;
 pub mod config;
 pub mod guard;
+pub mod jailer;
 pub mod manager;
+pub mod network;
 pub mod paths;
 pub mod process;
+pub mod snapshots;
+pub mod state;
+pub mod volumes;
 
-pub use config::{FirecrackerConfig, FirecrackerError, VmConfig, VmInfo, VmStatus, Volume};
-pub use guard::VmStartupGuard;
+pub use config::FirecrackerConfig;
 pub use manager::FirecrackerManager;
-pub use paths::VmPaths;
-pub use process::{VmDetailedInfo, VmProcess};

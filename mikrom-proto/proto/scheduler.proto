@@ -161,6 +161,7 @@ message WorkerHeartbeat {
   string wireguard_ip = 8;
   int32 wireguard_port = 9;
   string advertise_address = 10;
+  repeated HypervisorType supported_hypervisors = 11;
 }
 
 message RouterHeartbeat {
@@ -255,6 +256,7 @@ message RegisterWorkerRequest {
   string host_id = 1;
   string hostname = 2;
   string wireguard_pubkey = 6;
+  repeated HypervisorType supported_hypervisors = 7;
 }
 
 message RegisterWorkerResponse {
@@ -311,6 +313,12 @@ message DeployRequest {
   string vpc_ipv6_prefix = 7;
 }
 
+enum HypervisorType {
+  HYPERTYPE_UNSPECIFIED = 0;
+  HYPERTYPE_FIRECRACKER = 1;
+  HYPERTYPE_QEMU_MICROVM = 2;
+}
+
 message Volume {
   string volume_id = 1;
   uint64 size_mib = 2;
@@ -337,6 +345,7 @@ message AppConfig {
   string health_check_path = 10;
   string ipv6_address = 11;
   string ipv6_gateway = 12;
+  HypervisorType hypervisor = 13;
 }
 
 

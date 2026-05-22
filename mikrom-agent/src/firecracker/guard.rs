@@ -53,22 +53,22 @@ impl VmStartupGuard {
     }
 
     /// Mark the startup as successful, preventing automatic cleanup on Drop.
-    pub fn commit(mut self) -> VmProcess {
+    /// Returns `None` if the child process or log task are missing (startup
+    /// was never fully initialised).
+    pub fn commit(mut self) -> Option<VmProcess> {
         self.committed = true;
-        let pid = self.child.as_ref().and_then(|child| child.id());
-        VmProcess {
+        let child = self.child.take()?;
+        let pid = child.id();
+        let log_task = self.log_task.take()?;
+        Some(VmProcess {
             vm_id: self.vm_id,
-            child: Some(
-                self.child
-                    .take()
-                    .expect("Child process must exist at commit"),
-            ),
+            child: Some(child),
             pid,
             socket_path: self.socket_path.to_string_lossy().to_string(),
             metrics_path: self.metrics_path.take(),
             tap_name: self.tap_name.take(),
             tap_ifindex: self.tap_ifindex,
-            log_task: self.log_task.take().expect("Log task must exist at commit"),
+            log_task: Some(log_task),
             stdout_log_path: self.stdout_log_path.clone(),
             stderr_log_path: self.stderr_log_path.clone(),
             stdout_log_offset: self.stdout_log_offset.clone(),
@@ -81,7 +81,7 @@ impl VmStartupGuard {
             app_started_at_ms: self.app_started_at_ms.clone(),
             vfs_pids: self.vfs_pids.clone(),
             vfs_processes: std::mem::take(&mut self.vfs_processes),
-        }
+        })
     }
 }
 
@@ -155,7 +155,9 @@ mod tests {
         guard.app_started.store(true, Ordering::SeqCst);
         guard.app_started_at_ms.store(1234, Ordering::SeqCst);
 
-        let mut process = guard.commit();
+        let mut process = guard
+            .commit()
+            .expect("commit should succeed when child and log_task are set");
         assert_eq!(process.pid, child_pid);
         assert!(process.child.is_some());
         assert_eq!(process.socket_path, "/run/firecracker.socket");

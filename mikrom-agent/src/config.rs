@@ -30,6 +30,27 @@ pub struct AgentConfig {
     pub wireguard_port: Option<u16>,
 
     pub wireguard_pubkey: Option<String>,
+
+    #[serde(default = "default_qemu_enabled")]
+    pub qemu_enabled: bool,
+
+    #[serde(default = "default_http_port")]
+    pub http_port: u16,
+
+    #[serde(default = "default_max_vms_per_host")]
+    pub max_vms_per_host: u32,
+}
+
+const fn default_qemu_enabled() -> bool {
+    true
+}
+
+const fn default_http_port() -> u16 {
+    5002
+}
+
+const fn default_max_vms_per_host() -> u32 {
+    0 // 0 = unlimited
 }
 
 fn default_certs_dir() -> String {
@@ -108,7 +129,81 @@ impl AgentConfig {
         use base64::{Engine as _, engine::general_purpose};
         config.wireguard_pubkey = Some(general_purpose::STANDARD.encode(public.as_bytes()));
 
+        config.validate()?;
+
         Ok(config)
+    }
+
+    /// Validate that the loaded configuration is usable.
+    ///
+    /// Checks:
+    /// - NATS URL is parseable
+    /// - Data path exists and is writable
+    /// - Host ID is non-empty
+    /// - Required capabilities are present (warns only)
+    pub fn validate(&self) -> anyhow::Result<()> {
+        // 1. NATS URL must be parseable
+        if self.nats_url.is_empty() {
+            return Err(anyhow::anyhow!("NATS URL is empty"));
+        }
+        if let Err(e) = self.nats_url.parse::<std::net::SocketAddr>() {
+            // Not a bare SocketAddr — try as URL (async_nats accepts both)
+            if !self.nats_url.starts_with("nats://") && !self.nats_url.starts_with("tls://") {
+                return Err(anyhow::anyhow!(
+                    "NATS URL '{}' does not look like a valid NATS endpoint: {e}",
+                    self.nats_url
+                ));
+            }
+        }
+
+        // 2. Data path must exist and be writable
+        if !self.data_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Data path '{}' does not exist",
+                self.data_path.display()
+            ));
+        }
+        let test_file = self.data_path.join(".write_test");
+        match std::fs::File::create(&test_file) {
+            Ok(_) => {
+                let _ = std::fs::remove_file(&test_file);
+            },
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Data path '{}' is not writable: {e}",
+                    self.data_path.display()
+                ));
+            },
+        }
+
+        // 3. Host ID must be non-empty
+        if self.host_id.is_empty() {
+            return Err(anyhow::anyhow!("Host ID is empty"));
+        }
+
+        // 4. Warn if we don't seem to have CAP_NET_ADMIN (needed for bridges/TAPs)
+        #[cfg(target_os = "linux")]
+        {
+            let cap_file = std::path::Path::new("/proc/self/status");
+            if cap_file.exists() {
+                if let Ok(content) = std::fs::read_to_string(cap_file) {
+                    if let Some(line) = content.lines().find(|l| l.starts_with("CapEff:")) {
+                        let caps_hex = line.trim_start_matches("CapEff:").trim();
+                        if let Ok(caps) = u64::from_str_radix(caps_hex, 16) {
+                            const CAP_NET_ADMIN: u64 = 1 << 12;
+                            if caps & CAP_NET_ADMIN == 0 {
+                                tracing::warn!(
+                                    "Process lacks CAP_NET_ADMIN — bridge and TAP creation may fail"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        tracing::info!("Agent configuration validated successfully");
+        Ok(())
     }
 
     #[must_use]

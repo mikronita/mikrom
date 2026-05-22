@@ -192,6 +192,8 @@ pub struct WorkerHeartbeat {
     pub wireguard_port: i32,
     #[prost(string, tag = "10")]
     pub advertise_address: ::prost::alloc::string::String,
+    #[prost(enumeration = "HypervisorType", repeated, tag = "11")]
+    pub supported_hypervisors: ::prost::alloc::vec::Vec<i32>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RouterHeartbeat {
@@ -324,6 +326,8 @@ pub struct RegisterWorkerRequest {
     pub hostname: ::prost::alloc::string::String,
     #[prost(string, tag = "6")]
     pub wireguard_pubkey: ::prost::alloc::string::String,
+    #[prost(enumeration = "HypervisorType", repeated, tag = "7")]
+    pub supported_hypervisors: ::prost::alloc::vec::Vec<i32>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterWorkerResponse {
@@ -434,6 +438,8 @@ pub struct AppConfig {
     pub ipv6_address: ::prost::alloc::string::String,
     #[prost(string, tag = "12")]
     pub ipv6_gateway: ::prost::alloc::string::String,
+    #[prost(enumeration = "HypervisorType", tag = "13")]
+    pub hypervisor: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeployResponse {
@@ -612,6 +618,35 @@ impl VmStatus {
             "VM_STATUS_STOPPED" => Some(Self::Stopped),
             "VM_STATUS_FAILED" => Some(Self::Failed),
             "VM_STATUS_PAUSED" => Some(Self::Paused),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum HypervisorType {
+    HypertypeUnspecified = 0,
+    HypertypeFirecracker = 1,
+    HypertypeQemuMicrovm = 2,
+}
+impl HypervisorType {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::HypertypeUnspecified => "HYPERTYPE_UNSPECIFIED",
+            Self::HypertypeFirecracker => "HYPERTYPE_FIRECRACKER",
+            Self::HypertypeQemuMicrovm => "HYPERTYPE_QEMU_MICROVM",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "HYPERTYPE_UNSPECIFIED" => Some(Self::HypertypeUnspecified),
+            "HYPERTYPE_FIRECRACKER" => Some(Self::HypertypeFirecracker),
+            "HYPERTYPE_QEMU_MICROVM" => Some(Self::HypertypeQemuMicrovm),
             _ => None,
         }
     }

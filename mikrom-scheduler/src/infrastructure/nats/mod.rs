@@ -87,6 +87,7 @@ impl AgentClient for NatsAgentClient {
             health_check_path: config.health_check_path.clone(),
             ipv6_address: config.ipv6_address.clone().unwrap_or_default(),
             ipv6_gateway: config.ipv6_gateway.clone().unwrap_or_default(),
+            hypervisor: config.hypervisor as i32, // HypervisorType enum discriminant matches proto
         };
 
         self.send_command(

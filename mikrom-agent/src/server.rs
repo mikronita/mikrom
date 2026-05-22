@@ -1,5 +1,7 @@
 use crate::ceph::StorageProvider;
-use crate::firecracker::FirecrackerManager;
+use crate::hypervisor::{
+    HypervisorError, HypervisorType, VmConfig, VmHypervisor, VmInfo, VmStatus, Volume,
+};
 use crate::metrics::MetricsCollector;
 use parking_lot::RwLock;
 use prost::Message;
@@ -12,7 +14,7 @@ pub struct AgentServer {
     config: crate::config::AgentConfig,
     ip_address: String,
     metrics_collector: MetricsCollector,
-    firecracker: FirecrackerManager,
+    hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>,
     shutdown_flag: Arc<RwLock<bool>>,
     http_client: reqwest::Client,
     wg_manager: Arc<crate::wireguard::WireGuardManager>,
@@ -20,15 +22,15 @@ pub struct AgentServer {
 
 impl AgentServer {
     pub async fn new(config: crate::config::AgentConfig, ip_address: String) -> Self {
-        let firecracker = FirecrackerManager::new().await;
-        Self::with_manager(config, ip_address, firecracker)
+        let hypervisors = Arc::new(crate::hypervisor::factory::create_hypervisors(&config).await);
+        Self::with_hypervisors(config, ip_address, hypervisors)
     }
 
     #[must_use]
-    pub fn with_manager(
+    pub fn with_hypervisors(
         config: crate::config::AgentConfig,
         ip_address: String,
-        firecracker: FirecrackerManager,
+        hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>,
     ) -> Self {
         let http_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(2))
@@ -41,31 +43,35 @@ impl AgentServer {
         }
 
         Self {
+            metrics_collector: MetricsCollector::with_hypervisors(hypervisors.clone()),
+            hypervisors,
             config: config.clone(),
             ip_address,
-            metrics_collector: MetricsCollector::with_firecracker(firecracker.clone()),
-            firecracker,
             shutdown_flag: Arc::new(RwLock::new(false)),
             http_client,
             wg_manager: Arc::new(wg_manager),
         }
     }
 
+    /// Returns the data directory used by hypervisors for persistence.
+    fn data_dir(&self) -> String {
+        self.config.data_path.to_string_lossy().to_string()
+    }
+
     pub async fn serve(&self) -> anyhow::Result<()> {
-        // Initialize global networking (bridge, forwarding, NAT)
-        if let Err(e) = self.firecracker.init_network().await {
-            tracing::error!("Failed to initialize host networking: {e}");
+        // Initialize all hypervisors (networking, state loading, GC, background tasks)
+        for (_htype, hv) in &*self.hypervisors {
+            if let Err(e) = hv.init_network().await {
+                tracing::error!("Failed to initialize host networking: {e}");
+            }
+
+            if let Err(e) = hv.load_runtime_state().await {
+                tracing::warn!("Failed to loaded hypervisor state: {e}");
+            }
+
+            hv.cleanup_all_stale_resources().await;
+            hv.start_background_tasks();
         }
-
-        if let Err(e) = self.firecracker.load_runtime_state().await {
-            tracing::warn!("Failed to load persisted Firecracker state: {e}");
-        }
-
-        // Cleanup any stale resources from previous runs
-        self.firecracker.cleanup_all_stale_resources().await;
-
-        // Start background tasks (GC)
-        self.firecracker.start_background_tasks();
 
         // 3. Initialize WireGuard
         let priv_key = match self.config.get_wg_private_key() {
@@ -73,7 +79,7 @@ impl AgentServer {
             None => {
                 info!("WireGuard private key not provided, attempting to load or generate...");
                 self.wg_manager
-                    .load_or_generate_key(&self.firecracker.fc_config.data_dir)
+                    .load_or_generate_key(&self.data_dir())
                     .await?
             },
         };
@@ -84,25 +90,67 @@ impl AgentServer {
 
         let pub_key = self.wg_manager.get_public_key(&priv_key)?;
 
+        // 4. Spawn HTTP health/metrics server
+        let http_server = crate::http::AgentHttpServer::new(
+            self.config.http_port,
+            self.metrics_collector.clone(),
+            self.hypervisors.clone(),
+        );
+        let _http_handle = http_server.spawn();
+
         let nats_url = self.config.nats_url.clone();
-        let firecracker = self.firecracker.clone();
         let self_clone = self.clone();
 
         tokio::spawn(async move {
             let mut nats_client = None;
+            let mut consecutive_failures: u32 = 0;
+            let max_backoff_secs: u64 = 60;
+            let circuit_breaker_threshold: u32 = 10;
+            let circuit_breaker_cooldown_secs: u64 = 300;
 
             loop {
                 if nats_client.is_none() {
+                    // Circuit breaker: if too many failures, wait longer before retrying
+                    if consecutive_failures >= circuit_breaker_threshold {
+                        tracing::warn!(
+                            failures = consecutive_failures,
+                            cooldown_secs = circuit_breaker_cooldown_secs,
+                            "NATS circuit breaker open, cooling down before reconnect"
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_secs(
+                            circuit_breaker_cooldown_secs,
+                        ))
+                        .await;
+                        consecutive_failures = 0;
+                    }
+
                     tracing::info!("Connecting to NATS at {nats_url}");
                     match async_nats::connect(&nats_url).await {
                         Ok(client) => {
                             tracing::info!("Connected to NATS");
                             nats_client = Some(client.clone());
-                            firecracker.set_nats_client(client).await;
+                            consecutive_failures = 0;
+                            // Set NATS client on all hypervisors
+                            for (_htype, hv) in &*self_clone.hypervisors {
+                                hv.set_nats_client(client.clone()).await;
+                            }
                         },
                         Err(e) => {
-                            tracing::error!("Failed to connect to NATS: {e}. Retrying in 5s...");
-                            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                            consecutive_failures += 1;
+                            let delay = std::cmp::min(
+                                2u64.saturating_pow(consecutive_failures),
+                                max_backoff_secs,
+                            );
+                            // Add jitter (0-25%) to avoid thundering herd
+                            let jitter = rand::random::<u64>() % (delay / 4 + 1);
+                            let total_delay = delay + jitter;
+
+                            tracing::error!(
+                                failures = consecutive_failures,
+                                delay_secs = total_delay,
+                                "Failed to connect to NATS: {e}. Retrying..."
+                            );
+                            tokio::time::sleep(tokio::time::Duration::from_secs(total_delay)).await;
                             continue;
                         },
                     }
@@ -112,11 +160,11 @@ impl AgentServer {
                     continue;
                 };
 
-                // 1. Initialize FirecrackerExporter
-                let exporter = crate::metrics::FirecrackerExporter::new(
+                // 1. Initialize MetricsExporter
+                let exporter = crate::metrics::MetricsExporter::new(
                     client.clone(),
                     self_clone.metrics_collector.clone(),
-                    self_clone.firecracker.clone(),
+                    self_clone.hypervisors.clone(),
                 );
 
                 // 2. Spawn listeners
@@ -152,7 +200,54 @@ impl AgentServer {
         }
 
         tracing::info!("Agent shutdown requested");
+        self.shutdown().await;
         Ok(())
+    }
+
+    /// Trigger graceful shutdown from an external signal handler.
+    pub async fn trigger_shutdown(&self) {
+        tracing::info!("Shutdown signal received, initiating graceful shutdown");
+        *self.shutdown_flag.write() = true;
+    }
+
+    /// Graceful shutdown sequence:
+    /// 1. Persist runtime state for all hypervisors
+    /// 2. Stop all running VMs
+    /// 3. Log completion
+    async fn shutdown(&self) {
+        tracing::info!("Persisting runtime state...");
+        for (htype, hv) in &*self.hypervisors {
+            if let Err(e) = hv.persist_runtime_state().await {
+                tracing::error!(hypervisor = ?htype, error = %e, "Failed to persist runtime state");
+            }
+        }
+
+        tracing::info!("Stopping all VMs...");
+        for (htype, hv) in &*self.hypervisors {
+            let vms = hv.get_all_vms().await;
+            for vm in vms {
+                if matches!(
+                    vm.status,
+                    VmStatus::Running | VmStatus::Starting | VmStatus::Paused
+                ) {
+                    tracing::info!(
+                        vm_id = %vm.vm_id,
+                        hypervisor = ?htype,
+                        status = ?vm.status,
+                        "Stopping VM during shutdown"
+                    );
+                    if let Err(e) = hv.stop_vm(&vm.vm_id).await {
+                        tracing::error!(
+                            vm_id = %vm.vm_id,
+                            error = %e,
+                            "Failed to stop VM during shutdown"
+                        );
+                    }
+                }
+            }
+        }
+
+        tracing::info!("Agent shutdown complete");
     }
 
     fn start_mesh_listener(
@@ -192,11 +287,9 @@ impl AgentServer {
     }
 
     fn start_command_listener(&self, client: async_nats::Client) -> tokio::task::JoinHandle<()> {
-        let fc = self.firecracker.clone();
+        let self_clone = self.clone();
         let host_id = self.config.host_id.clone();
-        // Fixed subject to match scheduler: mikrom.agent.{host_id}.cmd
         let subject = format!("mikrom.agent.{}.cmd", host_id);
-        let nats = client.clone();
 
         tokio::spawn(async move {
             let mut cmd_sub = match client.subscribe(subject.clone()).await {
@@ -210,7 +303,7 @@ impl AgentServer {
             tracing::info!("Listening for agent commands on {}", subject);
             use futures::StreamExt;
             while let Some(msg) = cmd_sub.next().await {
-                Self::handle_nats_command(msg, &fc, &nats).await;
+                self_clone.handle_nats_command(msg, &client).await;
             }
         })
     }
@@ -219,10 +312,9 @@ impl AgentServer {
         &self,
         client: async_nats::Client,
     ) -> tokio::task::JoinHandle<()> {
-        let fc = self.firecracker.clone();
         let host_id = self.config.host_id.clone();
-        // Fixed subject to match scheduler: mikrom.agent.{host_id}.check_health
         let subject = format!("mikrom.agent.{}.check_health", host_id);
+        let hypervisors = self.hypervisors.clone();
         let nats = client.clone();
         let http_client = self.http_client.clone();
 
@@ -238,144 +330,305 @@ impl AgentServer {
             tracing::info!("Listening for health checks on {}", subject);
             use futures::StreamExt;
             while let Some(msg) = health_sub.next().await {
-                Self::handle_health_check(msg, &fc, &nats, &http_client).await;
+                Self::handle_health_check(msg, &*hypervisors, &nats, &http_client).await;
             }
         })
     }
 
-    async fn handle_nats_command(
-        message: async_nats::Message,
-        fc: &FirecrackerManager,
-        nats: &async_nats::Client,
-    ) {
+    async fn handle_nats_command(&self, message: async_nats::Message, nats: &async_nats::Client) {
         use mikrom_proto::agent::AgentCommand;
         let Ok(command) = AgentCommand::decode(&message.payload[..]) else {
             tracing::error!("Failed to decode AgentCommand");
             return;
         };
 
-        let result = Self::dispatch_agent_command(command.command, fc).await;
+        let result = self.dispatch_agent_command(command.command).await;
         Self::reply_agent_command(message, nats, result).await;
     }
 
-    async fn dispatch_agent_command(
-        command: Option<mikrom_proto::agent::agent_command::Command>,
-        fc: &FirecrackerManager,
-    ) -> Result<String, crate::firecracker::config::FirecrackerError> {
+    /// Extract the VM ID from a command that targets a specific VM.
+    fn extract_vm_id_from_command(
+        command: &mikrom_proto::agent::agent_command::Command,
+    ) -> Option<&str> {
         match command {
-            Some(mikrom_proto::agent::agent_command::Command::StartVm(req)) => {
-                let config = Self::proto_vm_config(req.config);
-                let vm_id = Self::parse_vm_id(&req.vm_id)?;
-                let app_id = Self::parse_app_id(&req.app_id)?;
-
-                fc.start_vm(vm_id, app_id, req.image, config)
-                    .await
-                    .map(|_| "VM started".to_string())
-            },
-            Some(mikrom_proto::agent::agent_command::Command::StopVm(req)) => {
-                let vm_id = Self::parse_vm_id(&req.vm_id)?;
-                fc.stop_vm(&vm_id).await.map(|_| "VM stopped".to_string())
-            },
-            Some(mikrom_proto::agent::agent_command::Command::PauseVm(req)) => {
-                let vm_id = Self::parse_vm_id(&req.vm_id)?;
-                fc.pause_vm(&vm_id).await.map(|_| "VM paused".to_string())
-            },
-            Some(mikrom_proto::agent::agent_command::Command::ResumeVm(req)) => {
-                let vm_id = Self::parse_vm_id(&req.vm_id)?;
-                fc.resume_vm(&vm_id).await.map(|_| "VM resumed".to_string())
-            },
-            Some(mikrom_proto::agent::agent_command::Command::DeleteVm(req)) => {
-                let vm_id = Self::parse_vm_id(&req.vm_id)?;
-                fc.delete_vm(&vm_id)
-                    .await
-                    .map(|_| "VM resources purged".to_string())
-            },
-            Some(mikrom_proto::agent::agent_command::Command::UpdateFirewall(req)) => {
-                let vm_id = Self::parse_vm_id(&req.vm_id)?;
-                let rules = Self::map_firewall_rules(req.rules);
-
-                fc.update_vm_firewall(&vm_id, rules)
-                    .await
-                    .map(|_| "Firewall rules updated".to_string())
-                    .map_err(|e| {
-                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                    })
-            },
-            Some(mikrom_proto::agent::agent_command::Command::CreateSnapshot(req)) => {
-                let storage = crate::ceph::CephRbd;
-                storage
-                    .create_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
-                    .await
-                    .map(|_| "Snapshot created".to_string())
-                    .map_err(|e| {
-                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                    })
-            },
-            Some(mikrom_proto::agent::agent_command::Command::DeleteVolume(req)) => {
-                let storage = crate::ceph::CephRbd;
-                storage
-                    .delete_volume(&req.pool_name, &req.volume_id)
-                    .await
-                    .map(|_| "Volume deleted".to_string())
-                    .map_err(|e| {
-                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                    })
-            },
-            Some(mikrom_proto::agent::agent_command::Command::DeleteSnapshot(req)) => {
-                let storage = crate::ceph::CephRbd;
-                storage
-                    .delete_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
-                    .await
-                    .map(|_| "Snapshot deleted".to_string())
-                    .map_err(|e| {
-                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                    })
-            },
-            Some(mikrom_proto::agent::agent_command::Command::CreateVolume(req)) => {
-                let storage = crate::ceph::CephRbd;
-                storage
-                    .create_volume(&req.pool_name, &req.volume_id, req.size_mib as i32)
-                    .await
-                    .map(|_| "Volume created".to_string())
-                    .map_err(|e| {
-                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                    })
-            },
-            Some(mikrom_proto::agent::agent_command::Command::RestoreSnapshot(req)) => {
-                let storage = crate::ceph::CephRbd;
-                storage
-                    .restore_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
-                    .await
-                    .map(|_| "Snapshot restored".to_string())
-                    .map_err(|e| {
-                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                    })
-            },
-            Some(mikrom_proto::agent::agent_command::Command::CloneVolume(req)) => {
-                let storage = crate::ceph::CephRbd;
-                storage
-                    .clone_volume(
-                        &req.pool_name,
-                        &req.source_volume_id,
-                        &req.snapshot_name,
-                        &req.target_volume_id,
-                    )
-                    .await
-                    .map(|_| "Volume cloned".to_string())
-                    .map_err(|e| {
-                        crate::firecracker::config::FirecrackerError::ProcessError(e.to_string())
-                    })
-            },
-            None => Err(crate::firecracker::config::FirecrackerError::ProcessError(
-                "Empty command".to_string(),
-            )),
+            mikrom_proto::agent::agent_command::Command::StartVm(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::StopVm(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::PauseVm(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::ResumeVm(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::DeleteVm(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::UpdateFirewall(req) => Some(&req.vm_id),
+            _ => None,
         }
     }
 
-    fn proto_vm_config(
-        config: Option<mikrom_proto::agent::VmConfig>,
-    ) -> crate::firecracker::config::VmConfig {
-        let mut vm_config = crate::firecracker::config::VmConfig::default();
+    /// Pick the right hypervisor for a StartVm command based on config.
+    fn resolve_hypervisor_for_start<'a>(
+        req: &mikrom_proto::agent::StartVmRequest,
+        hypervisors: &'a HashMap<HypervisorType, Arc<dyn VmHypervisor>>,
+    ) -> Option<&'a Arc<dyn VmHypervisor>> {
+        let htype = match req.config.as_ref()?.hypervisor {
+            1 => HypervisorType::Firecracker,
+            2 => HypervisorType::QemuMicrovm,
+            _ => HypervisorType::Firecracker,
+        };
+        hypervisors.get(&htype)
+    }
+
+    /// Search every hypervisor for a VM by ID.
+    async fn find_hypervisor_for_vm<'a>(
+        vm_id: &mikrom_proto::id::VmId,
+        hypervisors: &'a HashMap<HypervisorType, Arc<dyn VmHypervisor>>,
+    ) -> Option<&'a Arc<dyn VmHypervisor>> {
+        for (_htype, hv) in hypervisors {
+            if hv.get_vm_info(vm_id).await.is_some() {
+                return Some(hv);
+            }
+        }
+        None
+    }
+
+    /// Count active VMs across all hypervisors.
+    async fn count_active_vms(
+        hypervisors: &HashMap<HypervisorType, Arc<dyn VmHypervisor>>,
+    ) -> usize {
+        let mut total = 0;
+        for hv in hypervisors.values() {
+            total += hv
+                .get_all_vms()
+                .await
+                .into_iter()
+                .filter(|v| {
+                    matches!(
+                        v.status,
+                        VmStatus::Running | VmStatus::Starting | VmStatus::Paused
+                    )
+                })
+                .count();
+        }
+        total
+    }
+
+    async fn dispatch_agent_command(
+        &self,
+        command: Option<mikrom_proto::agent::agent_command::Command>,
+    ) -> Result<String, HypervisorError> {
+        let Some(cmd) = command else {
+            return Err(HypervisorError::ProcessError("Empty command".to_string()));
+        };
+
+        let hypervisors = &*self.hypervisors;
+        let hv = if let mikrom_proto::agent::agent_command::Command::StartVm(ref req) = cmd {
+            Self::resolve_hypervisor_for_start(req, hypervisors)
+        } else if let Some(vid) = Self::extract_vm_id_from_command(&cmd) {
+            let vm_id = Self::parse_vm_id(vid)?;
+            Self::find_hypervisor_for_vm(&vm_id, hypervisors).await
+        } else {
+            None
+        };
+        let hv =
+            hv.ok_or_else(|| HypervisorError::ProcessError("No hypervisor available".to_string()))?;
+
+        match cmd {
+            mikrom_proto::agent::agent_command::Command::StartVm(req) => {
+                self.handle_start_vm(hv, req, self.config.max_vms_per_host)
+                    .await
+            },
+            mikrom_proto::agent::agent_command::Command::StopVm(req) => {
+                self.handle_stop_vm(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::PauseVm(req) => {
+                self.handle_pause_vm(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::ResumeVm(req) => {
+                self.handle_resume_vm(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::DeleteVm(req) => {
+                self.handle_delete_vm(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::UpdateFirewall(req) => {
+                self.handle_update_firewall(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::CreateSnapshot(req) => {
+                self.handle_create_snapshot(req).await
+            },
+            mikrom_proto::agent::agent_command::Command::DeleteVolume(req) => {
+                self.handle_delete_volume(req).await
+            },
+            mikrom_proto::agent::agent_command::Command::DeleteSnapshot(req) => {
+                self.handle_delete_snapshot(req).await
+            },
+            mikrom_proto::agent::agent_command::Command::CreateVolume(req) => {
+                self.handle_create_volume(req).await
+            },
+            mikrom_proto::agent::agent_command::Command::RestoreSnapshot(req) => {
+                self.handle_restore_snapshot(req).await
+            },
+            mikrom_proto::agent::agent_command::Command::CloneVolume(req) => {
+                self.handle_clone_volume(req).await
+            },
+        }
+    }
+
+    async fn handle_start_vm(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::StartVmRequest,
+        max_vms: u32,
+    ) -> Result<String, HypervisorError> {
+        if max_vms > 0 {
+            let active = Self::count_active_vms(self.hypervisors.as_ref()).await;
+            if active >= max_vms as usize {
+                return Err(HypervisorError::ProcessError(format!(
+                    "Host at VM capacity ({active}/{max_vms}) — cannot start new VM"
+                )));
+            }
+        }
+
+        let config = Self::proto_vm_config(req.config);
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        let app_id = Self::parse_app_id(&req.app_id)?;
+
+        hv.start_vm(vm_id, app_id, req.image, config)
+            .await
+            .map(|_| "VM started".to_string())
+    }
+
+    async fn handle_stop_vm(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::StopVmRequest,
+    ) -> Result<String, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.stop_vm(&vm_id).await.map(|_| "VM stopped".to_string())
+    }
+
+    async fn handle_pause_vm(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::PauseVmRequest,
+    ) -> Result<String, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.pause_vm(&vm_id).await.map(|_| "VM paused".to_string())
+    }
+
+    async fn handle_resume_vm(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::ResumeVmRequest,
+    ) -> Result<String, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.resume_vm(&vm_id).await.map(|_| "VM resumed".to_string())
+    }
+
+    async fn handle_delete_vm(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::DeleteVmRequest,
+    ) -> Result<String, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.delete_vm(&vm_id)
+            .await
+            .map(|_| "VM resources purged".to_string())
+    }
+
+    async fn handle_update_firewall(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::UpdateFirewallRequest,
+    ) -> Result<String, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        let rules = Self::map_firewall_rules(req.rules);
+
+        hv.update_vm_firewall(&vm_id, rules)
+            .await
+            .map(|_| "Firewall rules updated".to_string())
+    }
+
+    async fn handle_create_snapshot(
+        &self,
+        req: mikrom_proto::agent::CreateSnapshotRequest,
+    ) -> Result<String, HypervisorError> {
+        let _ = self;
+        let storage = crate::ceph::CephRbd;
+        storage
+            .create_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
+            .await
+            .map(|_| "Snapshot created".to_string())
+            .map_err(|e| HypervisorError::ProcessError(e.to_string()))
+    }
+
+    async fn handle_delete_volume(
+        &self,
+        req: mikrom_proto::agent::DeleteVolumeRequest,
+    ) -> Result<String, HypervisorError> {
+        let _ = self;
+        let storage = crate::ceph::CephRbd;
+        storage
+            .delete_volume(&req.pool_name, &req.volume_id)
+            .await
+            .map(|_| "Volume deleted".to_string())
+            .map_err(|e| HypervisorError::ProcessError(e.to_string()))
+    }
+
+    async fn handle_delete_snapshot(
+        &self,
+        req: mikrom_proto::agent::DeleteSnapshotRequest,
+    ) -> Result<String, HypervisorError> {
+        let _ = self;
+        let storage = crate::ceph::CephRbd;
+        storage
+            .delete_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
+            .await
+            .map(|_| "Snapshot deleted".to_string())
+            .map_err(|e| HypervisorError::ProcessError(e.to_string()))
+    }
+
+    async fn handle_create_volume(
+        &self,
+        req: mikrom_proto::agent::CreateVolumeRequest,
+    ) -> Result<String, HypervisorError> {
+        let _ = self;
+        let storage = crate::ceph::CephRbd;
+        storage
+            .create_volume(&req.pool_name, &req.volume_id, req.size_mib as i32)
+            .await
+            .map(|_| "Volume created".to_string())
+            .map_err(|e| HypervisorError::ProcessError(e.to_string()))
+    }
+
+    async fn handle_restore_snapshot(
+        &self,
+        req: mikrom_proto::agent::RestoreSnapshotRequest,
+    ) -> Result<String, HypervisorError> {
+        let _ = self;
+        let storage = crate::ceph::CephRbd;
+        storage
+            .restore_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
+            .await
+            .map(|_| "Snapshot restored".to_string())
+            .map_err(|e| HypervisorError::ProcessError(e.to_string()))
+    }
+
+    async fn handle_clone_volume(
+        &self,
+        req: mikrom_proto::agent::CloneVolumeRequest,
+    ) -> Result<String, HypervisorError> {
+        let _ = self;
+        let storage = crate::ceph::CephRbd;
+        storage
+            .clone_volume(
+                &req.pool_name,
+                &req.source_volume_id,
+                &req.snapshot_name,
+                &req.target_volume_id,
+            )
+            .await
+            .map(|_| "Volume cloned".to_string())
+            .map_err(|e| HypervisorError::ProcessError(e.to_string()))
+    }
+
+    fn proto_vm_config(config: Option<mikrom_proto::agent::VmConfig>) -> VmConfig {
+        let mut vm_config = VmConfig::default();
         if let Some(c) = config {
             vm_config.vcpus = c.vcpus;
             vm_config.memory_mib = u64::from(c.memory_mib);
@@ -387,7 +640,7 @@ impl AgentServer {
             vm_config.volumes = c
                 .volumes
                 .into_iter()
-                .map(|v| crate::firecracker::config::Volume {
+                .map(|v| Volume {
                     volume_id: v.volume_id,
                     size_mib: v.size_mib,
                     read_only: v.read_only,
@@ -426,30 +679,22 @@ impl AgentServer {
             .collect()
     }
 
-    fn parse_vm_id(
-        vm_id: &str,
-    ) -> Result<mikrom_proto::id::VmId, crate::firecracker::config::FirecrackerError> {
-        vm_id.parse::<mikrom_proto::id::VmId>().map_err(|e| {
-            crate::firecracker::config::FirecrackerError::ProcessError(format!(
-                "Invalid vm_id '{vm_id}': {e}"
-            ))
-        })
+    fn parse_vm_id(vm_id: &str) -> Result<mikrom_proto::id::VmId, HypervisorError> {
+        vm_id
+            .parse::<mikrom_proto::id::VmId>()
+            .map_err(|e| HypervisorError::ProcessError(format!("Invalid vm_id '{vm_id}': {e}")))
     }
 
-    fn parse_app_id(
-        app_id: &str,
-    ) -> Result<mikrom_proto::id::AppId, crate::firecracker::config::FirecrackerError> {
-        app_id.parse::<mikrom_proto::id::AppId>().map_err(|e| {
-            crate::firecracker::config::FirecrackerError::ProcessError(format!(
-                "Invalid app_id '{app_id}': {e}"
-            ))
-        })
+    fn parse_app_id(app_id: &str) -> Result<mikrom_proto::id::AppId, HypervisorError> {
+        app_id
+            .parse::<mikrom_proto::id::AppId>()
+            .map_err(|e| HypervisorError::ProcessError(format!("Invalid app_id '{app_id}': {e}")))
     }
 
     async fn reply_agent_command(
         message: async_nats::Message,
         nats: &async_nats::Client,
-        result: Result<String, crate::firecracker::config::FirecrackerError>,
+        result: Result<String, HypervisorError>,
     ) {
         if let Some(reply) = message.reply {
             let response = match result {
@@ -469,9 +714,10 @@ impl AgentServer {
         }
     }
 
+    /// Search all hypervisors for the VM and run health check.
     async fn handle_health_check(
         message: async_nats::Message,
-        fc: &FirecrackerManager,
+        hypervisors: &HashMap<HypervisorType, Arc<dyn VmHypervisor>>,
         nats: &async_nats::Client,
         http_client: &reqwest::Client,
     ) {
@@ -481,108 +727,136 @@ impl AgentServer {
             return;
         };
 
-        let vm_id = req.vm_id.parse().unwrap_or_default();
-        let vm_info = fc.get_vm_info(&vm_id).await;
-        let result = if let Some(vm) = vm_info {
-            if matches!(vm.status, crate::firecracker::VmStatus::Failed) {
-                tracing::warn!(
-                    vm_id = %vm_id,
-                    error = vm.error_message.as_deref().unwrap_or("unknown error"),
-                    "Skipping health check for failed VM"
-                );
-                return Self::reply_health_check(
-                    message,
-                    nats,
-                    Err(vm
-                        .error_message
-                        .unwrap_or_else(|| "VM startup failed".to_string())),
-                )
-                .await;
-            }
+        let vm_id: mikrom_proto::id::VmId = match req.vm_id.parse() {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!(vm_id = %req.vm_id, error = %e, "Invalid VM ID in health check request");
+                return Self::reply_health_check(message, nats, Err(format!("Invalid VM ID: {e}")))
+                    .await;
+            },
+        };
 
-            let port = vm.config.port;
-            let path = if vm.config.health_check_path.is_empty() {
-                "/".to_string()
-            } else {
-                vm.config.health_check_path.clone()
-            };
-            let ip = vm.config.ipv6_address.clone();
-
-            if let Some(ip_addr) = ip {
-                let started_at_ms = fc.get_vm_started_at_ms(&vm_id).await.unwrap_or_default();
-                let now_ms = chrono::Utc::now().timestamp_millis() as u64;
-                if started_at_ms > 0 && fc.is_app_started(&vm_id).await {
-                    let boot_grace_ms = Duration::from_millis(250).as_millis() as u64;
-                    if now_ms.saturating_sub(started_at_ms) < boot_grace_ms {
-                        tracing::info!(
-                            vm_id = %vm_id,
-                            ready_since_ms = started_at_ms,
-                            boot_grace_ms = boot_grace_ms,
-                            "Waiting briefly after application marker before health checking"
-                        );
-                        return Self::reply_health_check(
-                            message,
-                            nats,
-                            Err("VM application is still booting".to_string()),
-                        )
-                        .await;
-                    }
+        let result = match Self::find_vm_hypervisor(hypervisors, &vm_id).await {
+            Some((vm, hv)) => {
+                if matches!(vm.status, VmStatus::Failed) {
+                    tracing::warn!(
+                        vm_id = %vm_id,
+                        error = vm.error_message.as_deref().unwrap_or("unknown error"),
+                        "Skipping health check for failed VM"
+                    );
+                    return Self::reply_health_check(
+                        message,
+                        nats,
+                        Err(vm
+                            .error_message
+                            .unwrap_or_else(|| "VM startup failed".to_string())),
+                    )
+                    .await;
                 }
 
-                let url = if ip_addr.contains(':') {
-                    format!("http://[{ip_addr}]:{port}{path}")
+                let port = vm.config.port;
+                let path = if vm.config.health_check_path.is_empty() {
+                    "/".to_string()
                 } else {
-                    format!("http://{ip_addr}:{port}{path}")
+                    vm.config.health_check_path.clone()
                 };
-                tracing::info!(
-                    vm_id = %vm_id,
-                    ip = %ip_addr,
-                    port = port,
-                    path = %path,
-                    url = %url,
-                    "Performing health check..."
-                );
+                let ip = vm.config.ipv6_address.clone();
 
-                match tokio::time::timeout(Duration::from_secs(2), http_client.get(&url).send())
-                    .await
-                {
-                    Ok(Ok(resp)) if resp.status().is_success() => Ok("Healthy".to_string()),
-                    Ok(Ok(resp)) => {
-                        let status = resp.status();
-                        tracing::warn!(
-                            vm_id = %vm_id,
-                            url = %url,
-                            status = %status,
-                            "Health check returned non-success status"
-                        );
-                        Err(format!("Unhealthy: HTTP {}", status))
-                    },
-                    Ok(Err(e)) => {
-                        tracing::warn!(
-                            vm_id = %vm_id,
-                            url = %url,
-                            error = %e,
-                            "Health check request failed"
-                        );
-                        Err(format!("Unhealthy: {e}"))
-                    },
-                    Err(_) => {
-                        tracing::warn!(
-                            vm_id = %vm_id,
-                            url = %url,
-                            "Health check request timed out"
-                        );
-                        Err("Unhealthy: request timed out".to_string())
-                    },
+                if let Some(ip_addr) = ip {
+                    let started_at_ms = hv.get_vm_started_at_ms(&vm_id).await.unwrap_or_default();
+                    let now_ms = chrono::Utc::now().timestamp_millis() as u64;
+                    if started_at_ms > 0 && hv.is_app_started(&vm_id).await {
+                        let boot_grace_ms = Duration::from_millis(250).as_millis() as u64;
+                        if now_ms.saturating_sub(started_at_ms) < boot_grace_ms {
+                            tracing::info!(
+                                vm_id = %vm_id,
+                                ready_since_ms = started_at_ms,
+                                boot_grace_ms = boot_grace_ms,
+                                "Waiting briefly after application marker before health checking"
+                            );
+                            return Self::reply_health_check(
+                                message,
+                                nats,
+                                Err("VM application is still booting".to_string()),
+                            )
+                            .await;
+                        }
+                    }
+
+                    tracing::info!(
+                        vm_id = %vm_id,
+                        ip = %ip_addr,
+                        port = port,
+                        path = %path,
+                        url = %Self::build_health_url(&ip_addr, port, &path),
+                        "Performing health check..."
+                    );
+
+                    Self::perform_http_health_check(&ip_addr, port, &path, http_client).await
+                } else {
+                    Err("VM has no IPv6 address assigned (6PN required)".to_string())
                 }
-            } else {
-                Err("VM has no IPv6 address assigned (6PN required)".to_string())
-            }
-        } else {
-            Err("VM not found".to_string())
+            },
+            None => Err("VM not found".to_string()),
         };
 
         Self::reply_health_check(message, nats, result).await;
+    }
+
+    async fn find_vm_hypervisor(
+        hypervisors: &HashMap<HypervisorType, Arc<dyn VmHypervisor>>,
+        vm_id: &mikrom_proto::id::VmId,
+    ) -> Option<(VmInfo, Arc<dyn VmHypervisor>)> {
+        for (_, hv) in hypervisors {
+            if let Some(info) = hv.get_vm_info(vm_id).await {
+                return Some((info, hv.clone()));
+            }
+        }
+        None
+    }
+
+    fn build_health_url(ip: &str, port: u32, path: &str) -> String {
+        if ip.contains(':') {
+            format!("http://[{ip}]:{port}{path}")
+        } else {
+            format!("http://{ip}:{port}{path}")
+        }
+    }
+
+    async fn perform_http_health_check(
+        ip: &str,
+        port: u32,
+        path: &str,
+        client: &reqwest::Client,
+    ) -> Result<String, String> {
+        let url = Self::build_health_url(ip, port, path);
+        match tokio::time::timeout(Duration::from_secs(2), client.get(&url).send()).await {
+            Ok(Ok(resp)) if resp.status().is_success() => Ok("Healthy".to_string()),
+            Ok(Ok(resp)) => {
+                let status = resp.status();
+                tracing::warn!(
+                    url = %url,
+                    status = %status,
+                    "Health check returned non-success status"
+                );
+                Err(format!("Unhealthy: HTTP {}", status))
+            },
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    url = %url,
+                    error = %e,
+                    "Health check request failed"
+                );
+                Err(format!("Unhealthy: {e}"))
+            },
+            Err(_) => {
+                tracing::warn!(
+                    url = %url,
+                    "Health check request timed out"
+                );
+                Err("Unhealthy: request timed out".to_string())
+            },
+        }
     }
 
     async fn reply_health_check(
@@ -622,6 +896,7 @@ impl AgentServer {
         let wireguard_port = i32::from(self.wg_manager.listen_port());
         let metrics_collector = self.metrics_collector.clone();
         let advertise_address = self.ip_address.clone();
+        let supported_hypervisors: Vec<i32> = self.hypervisors.keys().map(|k| *k as i32).collect();
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
@@ -643,16 +918,12 @@ impl AgentServer {
                                 cpu_usage: vm.cpu_usage,
                                 ram_used_bytes: vm.ram_used_bytes,
                                 status: match vm.status {
-                                    crate::firecracker::VmStatus::Starting => {
-                                        ProtoVmStatus::Starting
-                                    },
-                                    crate::firecracker::VmStatus::Running => ProtoVmStatus::Running,
-                                    crate::firecracker::VmStatus::Paused => ProtoVmStatus::Paused,
-                                    crate::firecracker::VmStatus::Stopping => {
-                                        ProtoVmStatus::Stopping
-                                    },
-                                    crate::firecracker::VmStatus::Stopped => ProtoVmStatus::Stopped,
-                                    crate::firecracker::VmStatus::Failed => ProtoVmStatus::Failed,
+                                    VmStatus::Starting => ProtoVmStatus::Starting,
+                                    VmStatus::Running => ProtoVmStatus::Running,
+                                    VmStatus::Paused => ProtoVmStatus::Paused,
+                                    VmStatus::Stopping => ProtoVmStatus::Stopping,
+                                    VmStatus::Stopped => ProtoVmStatus::Stopped,
+                                    VmStatus::Failed => ProtoVmStatus::Failed,
                                 } as i32,
                                 error_message: vm.error_message.clone().unwrap_or_default(),
                                 tx_bytes: vm.tx_bytes,
@@ -683,6 +954,7 @@ impl AgentServer {
                     wireguard_ip: wireguard_ip.clone(),
                     wireguard_port,
                     advertise_address: advertise_address.clone(),
+                    supported_hypervisors: supported_hypervisors.clone(),
                 };
 
                 let mut buf = Vec::new();
@@ -702,7 +974,7 @@ impl Clone for AgentServer {
             config: self.config.clone(),
             ip_address: self.ip_address.clone(),
             metrics_collector: self.metrics_collector.clone(),
-            firecracker: self.firecracker.clone(),
+            hypervisors: self.hypervisors.clone(),
             shutdown_flag: self.shutdown_flag.clone(),
             http_client: self.http_client.clone(),
             wg_manager: self.wg_manager.clone(),
@@ -714,18 +986,30 @@ impl Clone for AgentServer {
 mod tests {
     use super::*;
     use crate::firecracker::FirecrackerManager;
+    use crate::hypervisor::{HypervisorType, VmHypervisor, VmInfo};
+    use crate::qemu::{QemuConfig, QemuManager};
     use async_nats::Message as NatsMessage;
     use futures::StreamExt;
     use mikrom_proto::agent::{CheckHealthRequest, CheckHealthResponse};
     use mikrom_proto::id::{AppId, VmId};
     use prost::Message;
+    use std::sync::Arc;
+
+    async fn make_hypervisors() -> HashMap<HypervisorType, Arc<dyn VmHypervisor>> {
+        let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
+        hvs.insert(
+            HypervisorType::Firecracker,
+            Arc::new(FirecrackerManager::new().await),
+        );
+        hvs
+    }
 
     #[tokio::test]
     async fn test_handle_health_check_vm_not_found() {
         let nats_url =
             std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
         let nats_client = async_nats::connect(nats_url).await.unwrap();
-        let fc = FirecrackerManager::new().await;
+        let hypervisors = make_hypervisors().await;
         let reply = "test.reply.notfound".to_string();
         let mut sub = nats_client.subscribe(reply.clone()).await.unwrap();
 
@@ -746,7 +1030,13 @@ mod tests {
             length: payload_len,
         };
 
-        AgentServer::handle_health_check(message, &fc, &nats_client, &reqwest::Client::new()).await;
+        AgentServer::handle_health_check(
+            message,
+            &hypervisors,
+            &nats_client,
+            &reqwest::Client::new(),
+        )
+        .await;
 
         let resp_msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
             .await
@@ -754,7 +1044,7 @@ mod tests {
             .unwrap();
         let resp = CheckHealthResponse::decode(&resp_msg.payload[..]).unwrap();
         assert!(!resp.is_healthy);
-        assert!(resp.message.contains("VM not found"));
+        assert!(resp.message.contains("Invalid VM ID"));
     }
 
     #[tokio::test]
@@ -763,12 +1053,14 @@ mod tests {
             std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
         let nats_client = async_nats::connect(nats_url).await.unwrap();
         let fc = FirecrackerManager::new().await;
+        let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
+        hvs.insert(HypervisorType::Firecracker, Arc::new(fc.clone()));
         let reply = "test.reply.failed".to_string();
         let mut sub = nats_client.subscribe(reply.clone()).await.unwrap();
 
         let vm_id = VmId::new();
         {
-            use crate::firecracker::config::{VmConfig, VmInfo, VmStatus};
+            use crate::hypervisor::{VmConfig, VmInfo, VmStatus};
             let mut vms = fc.vms.write().await;
             vms.insert(
                 vm_id,
@@ -805,7 +1097,8 @@ mod tests {
             length: payload_len,
         };
 
-        AgentServer::handle_health_check(message, &fc, &nats_client, &reqwest::Client::new()).await;
+        AgentServer::handle_health_check(message, &hvs, &nats_client, &reqwest::Client::new())
+            .await;
 
         let resp_msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
             .await
@@ -822,12 +1115,14 @@ mod tests {
             std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
         let nats_client = async_nats::connect(nats_url).await.unwrap();
         let fc = FirecrackerManager::new().await;
+        let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
+        hvs.insert(HypervisorType::Firecracker, Arc::new(fc.clone()));
         let reply = "test.reply.booting".to_string();
         let mut sub = nats_client.subscribe(reply.clone()).await.unwrap();
 
         let vm_id = VmId::new();
         {
-            use crate::firecracker::config::{VmConfig, VmInfo, VmStatus};
+            use crate::hypervisor::{VmConfig, VmInfo, VmStatus};
             let mut vms = fc.vms.write().await;
             vms.insert(
                 vm_id,
@@ -866,7 +1161,8 @@ mod tests {
             length: payload_len,
         };
 
-        AgentServer::handle_health_check(message, &fc, &nats_client, &reqwest::Client::new()).await;
+        AgentServer::handle_health_check(message, &hvs, &nats_client, &reqwest::Client::new())
+            .await;
 
         let resp_msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
             .await
@@ -892,13 +1188,15 @@ mod tests {
             std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
         let nats_client = async_nats::connect(nats_url).await.unwrap();
         let fc = FirecrackerManager::new().await;
+        let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
+        hvs.insert(HypervisorType::Firecracker, Arc::new(fc.clone()));
         let reply = "test.reply.http".to_string();
         let mut sub = nats_client.subscribe(reply.clone()).await.unwrap();
 
         // 3. Register a fake VM in the manager so get_vm_info returns it
         let vm_id = VmId::new();
         {
-            use crate::firecracker::config::{VmConfig, VmInfo, VmStatus};
+            use crate::hypervisor::{VmConfig, VmInfo, VmStatus};
             let mut vms = fc.vms.write().await;
             vms.insert(
                 vm_id,
@@ -939,7 +1237,8 @@ mod tests {
             length: payload_len,
         };
 
-        AgentServer::handle_health_check(message, &fc, &nats_client, &reqwest::Client::new()).await;
+        AgentServer::handle_health_check(message, &hvs, &nats_client, &reqwest::Client::new())
+            .await;
 
         let resp_msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
             .await
@@ -977,7 +1276,7 @@ mod tests {
             length: payload_len2,
         };
 
-        AgentServer::handle_health_check(message2, &fc, &nats_client, &reqwest::Client::new())
+        AgentServer::handle_health_check(message2, &hvs, &nats_client, &reqwest::Client::new())
             .await;
         let resp_msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
             .await
@@ -986,5 +1285,219 @@ mod tests {
         let resp = CheckHealthResponse::decode(&resp_msg.payload[..]).unwrap();
         assert!(!resp.is_healthy, "Should be unhealthy for 302 Redirect");
         assert!(resp.message.contains("HTTP 302 Found"));
+    }
+
+    // ── Hypervisor routing tests ─────────────────────────────────
+
+    #[tokio::test]
+    async fn test_resolve_hypervisor_for_start_selects_firecracker() {
+        let hvs = make_hypervisors().await;
+        let req = mikrom_proto::agent::StartVmRequest {
+            vm_id: "vm-1".into(),
+            app_id: "app-1".into(),
+            image: "img".into(),
+            config: Some(mikrom_proto::agent::VmConfig {
+                hypervisor: 1,
+                ..Default::default()
+            }),
+        };
+        let hv = AgentServer::resolve_hypervisor_for_start(&req, &hvs);
+        assert!(hv.is_some());
+        assert_eq!(hv.unwrap().hypervisor_type(), HypervisorType::Firecracker);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_hypervisor_for_start_selects_qemu() {
+        let fc = FirecrackerManager::new().await;
+        let qemu = QemuManager::new("test-agent".into()).await;
+        let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
+        hvs.insert(HypervisorType::Firecracker, Arc::new(fc));
+        hvs.insert(HypervisorType::QemuMicrovm, Arc::new(qemu));
+        let req = mikrom_proto::agent::StartVmRequest {
+            vm_id: "vm-1".into(),
+            app_id: "app-1".into(),
+            image: "img".into(),
+            config: Some(mikrom_proto::agent::VmConfig {
+                hypervisor: 2,
+                ..Default::default()
+            }),
+        };
+        let hv = AgentServer::resolve_hypervisor_for_start(&req, &hvs);
+        assert!(hv.is_some());
+        assert_eq!(hv.unwrap().hypervisor_type(), HypervisorType::QemuMicrovm);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_hypervisor_for_start_defaults_to_firecracker() {
+        let hvs = make_hypervisors().await;
+        let req = mikrom_proto::agent::StartVmRequest {
+            vm_id: "vm-1".into(),
+            app_id: "app-1".into(),
+            image: "img".into(),
+            config: Some(mikrom_proto::agent::VmConfig {
+                hypervisor: 0,
+                ..Default::default()
+            }),
+        };
+        let hv = AgentServer::resolve_hypervisor_for_start(&req, &hvs);
+        assert!(hv.is_some());
+        assert_eq!(hv.unwrap().hypervisor_type(), HypervisorType::Firecracker);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_hypervisor_for_start_no_config() {
+        let hvs = make_hypervisors().await;
+        let req = mikrom_proto::agent::StartVmRequest {
+            vm_id: "vm-1".into(),
+            app_id: "app-1".into(),
+            image: "img".into(),
+            config: None,
+        };
+        let hv = AgentServer::resolve_hypervisor_for_start(&req, &hvs);
+        assert!(hv.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_find_hypervisor_for_vm_finds_on_firecracker() {
+        let fc = FirecrackerManager::new().await;
+        let qemu = QemuManager::new("test-agent".into()).await;
+        let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
+        hvs.insert(HypervisorType::Firecracker, Arc::new(fc.clone()));
+        hvs.insert(HypervisorType::QemuMicrovm, Arc::new(qemu));
+
+        let vm_id = VmId::new();
+        let vm_id_copy = vm_id;
+        // Insert directly into internal state to avoid Firecracker binary check
+        fc.vms.write().await.insert(
+            vm_id_copy,
+            VmInfo {
+                vm_id,
+                app_id: AppId::new(),
+                image: "img".into(),
+                config: VmConfig::default(),
+                status: VmStatus::Running,
+                started_at: None,
+                error_message: None,
+            },
+        );
+
+        let found = AgentServer::find_hypervisor_for_vm(&vm_id, &hvs).await;
+        assert!(found.is_some());
+        assert_eq!(
+            found.unwrap().hypervisor_type(),
+            HypervisorType::Firecracker
+        );
+    }
+
+    #[tokio::test]
+    async fn test_find_hypervisor_for_vm_finds_on_qemu() {
+        let fc = FirecrackerManager::new().await;
+        let qemu = QemuManager::with_config(
+            "test-agent".into(),
+            QemuConfig {
+                binary: "/bin/sleep".into(),
+                kernel_path: "/dev/null".into(),
+                rootfs_path: "/dev/null".into(),
+                base_rootfs_path: "/dev/null".into(),
+                data_dir: std::env::temp_dir().join("qemu-test"),
+                qmp_timeout_secs: 1,
+                extra_args: vec!["3600".into()],
+                kernel_url: None,
+                rootfs_url: None,
+                image_cache_dir: std::env::temp_dir().join("qemu-image-cache-test"),
+                virtiofsd_binary: String::new(),
+                virtiofsd_socket_dir: std::env::temp_dir().join("qemu-virtiofsd-test"),
+                virtiofsd_shares: Vec::new(),
+            },
+        )
+        .await;
+        let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
+        hvs.insert(HypervisorType::Firecracker, Arc::new(fc));
+        hvs.insert(HypervisorType::QemuMicrovm, Arc::new(qemu.clone()));
+
+        let vm_id = VmId::new();
+        let app_id = AppId::new();
+        qemu.start_vm(vm_id, app_id, "img".into(), VmConfig::default())
+            .await
+            .unwrap();
+
+        let found = AgentServer::find_hypervisor_for_vm(&vm_id, &hvs).await;
+        assert!(found.is_some());
+        assert_eq!(
+            found.unwrap().hypervisor_type(),
+            HypervisorType::QemuMicrovm
+        );
+
+        // Cleanup
+        let _ = qemu.stop_vm(&vm_id).await;
+    }
+
+    #[tokio::test]
+    async fn test_find_hypervisor_for_vm_not_found() {
+        let fc = FirecrackerManager::new().await;
+        let qemu = QemuManager::with_config(
+            "test-agent".into(),
+            QemuConfig {
+                binary: "/bin/sleep".into(),
+                kernel_path: "/dev/null".into(),
+                rootfs_path: "/dev/null".into(),
+                base_rootfs_path: "/dev/null".into(),
+                data_dir: std::env::temp_dir().join("qemu-test"),
+                qmp_timeout_secs: 1,
+                extra_args: vec!["3600".into()],
+                kernel_url: None,
+                rootfs_url: None,
+                image_cache_dir: std::env::temp_dir().join("qemu-image-cache-test"),
+                virtiofsd_binary: String::new(),
+                virtiofsd_socket_dir: std::env::temp_dir().join("qemu-virtiofsd-test"),
+                virtiofsd_shares: Vec::new(),
+            },
+        )
+        .await;
+        let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
+        hvs.insert(HypervisorType::Firecracker, Arc::new(fc));
+        hvs.insert(HypervisorType::QemuMicrovm, Arc::new(qemu));
+
+        let ghost = VmId::new();
+        let found = AgentServer::find_hypervisor_for_vm(&ghost, &hvs).await;
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_extract_vm_id_from_start_vm() {
+        use mikrom_proto::agent::agent_command::Command;
+        let cmd = Command::StartVm(mikrom_proto::agent::StartVmRequest {
+            vm_id: "test-vm".into(),
+            app_id: "app-1".into(),
+            image: "img".into(),
+            config: None,
+        });
+        assert_eq!(
+            AgentServer::extract_vm_id_from_command(&cmd),
+            Some("test-vm")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_extract_vm_id_from_stop_vm() {
+        use mikrom_proto::agent::agent_command::Command;
+        let cmd = Command::StopVm(mikrom_proto::agent::StopVmRequest {
+            vm_id: "stop-vm".into(),
+        });
+        assert_eq!(
+            AgentServer::extract_vm_id_from_command(&cmd),
+            Some("stop-vm")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_extract_vm_id_from_snapshot_returns_none() {
+        use mikrom_proto::agent::agent_command::Command;
+        let cmd = Command::CreateSnapshot(mikrom_proto::agent::CreateSnapshotRequest {
+            volume_id: "vol-1".into(),
+            snapshot_name: "snap-1".into(),
+            pool_name: "rbd".into(),
+        });
+        assert!(AgentServer::extract_vm_id_from_command(&cmd).is_none());
     }
 }

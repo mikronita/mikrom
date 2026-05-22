@@ -606,6 +606,18 @@ impl CephRbd {
             },
         };
 
+        // Validate identifiers before passing them to the kernel.
+        if pool.contains(|c: char| c.is_whitespace() || c == '\0' || c == ',') {
+            return Err(anyhow!(
+                "Invalid RBD pool name: contains forbidden characters"
+            ));
+        }
+        if name.contains(|c: char| c.is_whitespace() || c == '\0' || c == ',') {
+            return Err(anyhow!(
+                "Invalid RBD image name: contains forbidden characters"
+            ));
+        }
+
         let map_cmd = format!(
             "{} name=admin,secret={} {} {}",
             mon_host, secret, pool, name
@@ -766,6 +778,11 @@ impl CephFs {
         };
 
         // 2. Perform mount
+        if volume_id.contains(|c: char| c.is_whitespace() || c == '\0' || c == '/') {
+            return Err(anyhow!(
+                "Invalid CephFS volume_id: contains forbidden characters"
+            ));
+        }
         let source = format!("{}:/volumes/{}", mon_host, volume_id);
         let source_c = CString::new(source)?;
         let target_c = CString::new(mount_point)?;
