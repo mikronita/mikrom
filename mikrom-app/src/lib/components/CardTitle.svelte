@@ -1,7 +1,10 @@
 <script lang="ts">
-  const { class: className = "", ...rest } = $$restProps;
+  import { CardTitle as Title } from "./ui/card/index.js";
+  import { cn } from "$lib/utils";
+
+  let { class: className = "", children, ...rest } = $props();
 </script>
 
-<h3 class={`font-semibold leading-none tracking-tight ${className}`} {...rest}>
-  <slot />
-</h3>
+<Title class={cn(className)} {...rest}>
+  {@render children?.()}
+</Title>

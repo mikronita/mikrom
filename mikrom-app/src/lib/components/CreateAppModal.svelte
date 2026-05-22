@@ -2,12 +2,18 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { GitPullRequest, Globe } from "lucide-svelte";
-  import Modal from "$lib/components/Modal.svelte";
-  import Button from "$lib/components/Button.svelte";
-  import Input from "$lib/components/Input.svelte";
-  import Select from "$lib/components/Select.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import Skeleton from "$lib/components/Skeleton.svelte";
+  import { 
+    Modal, 
+    Button, 
+    Input, 
+    Select, 
+    SelectContent, 
+    SelectItem, 
+    SelectTrigger, 
+    SelectValue, 
+    Field, 
+    Skeleton 
+  } from "$lib/components";
   import { createApp, getGithubInstallUrl, listGithubRepos, type GithubRepo, type CreateAppRequest } from "$lib/api";
   import { getToken } from "$lib/auth";
   import { toast } from "$lib/toast";
@@ -92,7 +98,7 @@
   }
 </script>
 
-<Modal bind:open title="Create New Application" description="Add a Git-backed project to your workspace." width="max-w-[425px]" on:close={close}>
+<Modal bind:open title="Create New Application" description="Add a Git-backed project to your workspace." width="max-w-[425px]" onclose={close}>
   <form class="flex flex-col gap-6 pt-2" on:submit|preventDefault={handleSubmit}>
     <Field label="App Name" forId="app_name">
       <Input id="app_name" bind:value={name} placeholder="my-cool-project" required />
@@ -129,15 +135,21 @@
       <Field label="Select Repository" forId="github_repo">
         {#if loadingRepos}
           <div class="flex flex-col gap-2 rounded-md border border-border p-4">
-            <Skeleton className="h-4 w-40" />
-            <Skeleton className="h-10 w-full" />
+            <Skeleton class="h-4 w-40" />
+            <Skeleton class="h-10 w-full" />
           </div>
         {:else if githubRepos.length > 0}
-          <Select id="github_repo" bind:value={selectedRepoId}>
-            <option value="">Select a repository</option>
-            {#each githubRepos as repo}
-              <option value={repo.id.toString()}>{repo.full_name}{repo.private ? " (private)" : ""}</option>
-            {/each}
+          <Select bind:value={selectedRepoId}>
+            <SelectTrigger id="github_repo">
+              <SelectValue placeholder="Select a repository" />
+            </SelectTrigger>
+            <SelectContent>
+              {#each githubRepos as repo}
+                <SelectItem value={repo.id.toString()}>
+                  {repo.full_name}{repo.private ? " (private)" : ""}
+                </SelectItem>
+              {/each}
+            </SelectContent>
           </Select>
         {:else}
           <div class="flex flex-col items-center gap-4 rounded-md border border-border p-6 text-center">

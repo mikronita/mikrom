@@ -1,7 +1,10 @@
 <script lang="ts">
-  const { class: className = "", ...rest } = $$restProps;
+  import { Avatar as AvatarRoot } from "./ui/avatar/index.js";
+  import { cn } from "$lib/utils";
+
+  let { class: className = "", children, ...rest } = $props();
 </script>
 
-<div class={`relative flex shrink-0 overflow-hidden ${className}`} {...rest}>
-  <slot />
-</div>
+<AvatarRoot class={cn(className)} {...rest}>
+  {@render children?.()}
+</AvatarRoot>

@@ -1,10 +1,10 @@
 <script lang="ts">
+  import { Table as TableRoot } from "./ui/table/index.js";
   import { cn } from "$lib/utils";
-  const { class: className = "", ...rest } = $$restProps;
+
+  let { class: className = "", children, ...rest } = $props();
 </script>
 
-<div class="relative w-full overflow-auto">
-  <table class={cn("w-full caption-bottom text-sm", className)} {...rest}>
-    <slot />
-  </table>
-</div>
+<TableRoot class={cn(className)} {...rest}>
+  {@render children?.()}
+</TableRoot>

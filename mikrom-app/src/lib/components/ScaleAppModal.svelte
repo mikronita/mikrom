@@ -1,14 +1,16 @@
 <script lang="ts">
   import { scaleApp, type AppInfo } from "$lib/api";
   import { getToken } from "$lib/auth";
-  import Button from "$lib/components/Button.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import FieldGroup from "$lib/components/FieldGroup.svelte";
-  import FieldSet from "$lib/components/FieldSet.svelte";
-  import FieldLegend from "$lib/components/FieldLegend.svelte";
-  import Input from "$lib/components/Input.svelte";
-  import Modal from "$lib/components/Modal.svelte";
-  import Switch from "$lib/components/Switch.svelte";
+  import {
+    Button,
+    Field,
+    FieldGroup,
+    FieldSet,
+    FieldLegend,
+    Input,
+    Modal,
+    Switch,
+  } from "$lib/components";
   import { toast } from "$lib/toast";
   import { refreshApps } from "$lib/stores/apps";
   import { Loader2, Scale } from "lucide-svelte";
@@ -55,7 +57,7 @@
 </script>
 
 <Modal bind:open title={`Scaling & Reliability: ${app.name}`} description="Configure how many replicas of your application should run.">
-  <FieldGroup className="pt-4">
+  <FieldGroup class="pt-4">
     <div class="rounded-lg border border-blue-500/20 p-4 bg-blue-500/5 mb-4">
       <div class="flex items-start gap-3">
         <div class="mt-0.5">
@@ -82,13 +84,13 @@
     <Input type="number" bind:value={config.desired_replicas} min={0} max={3} />
   </Field>
 {:else}
-  <FieldSet className="grid grid-cols-1 gap-4 space-y-0">
+  <FieldSet class="grid grid-cols-1 gap-4 space-y-0">
     <Field label="Max Replicas" description="Maximum number of instances to scale up to (max 3).">
       <Input type="number" bind:value={config.max_replicas} min={1} max={3} />
     </Field>
   </FieldSet>
 
-  <FieldSet className="rounded-lg border border-border p-4 bg-muted/10">
+  <FieldSet class="rounded-lg border border-border p-4 bg-muted/10">
         <FieldLegend>Thresholds</FieldLegend>
         <div class="grid grid-cols-2 gap-4">
           <Field label="CPU Threshold (%)" description="Scale up when above this.">

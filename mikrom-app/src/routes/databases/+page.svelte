@@ -1,15 +1,17 @@
 <script lang="ts">
   import { Database as DatabaseIcon, Plus, Calendar, Cpu, HardDrive, Radio, Search } from "lucide-svelte";
+  import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+    CardContent,
+    Badge,
+    Button,
+    CardSkeleton,
+    EmptyState,
+  } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
-  import Card from "$lib/components/Card.svelte";
-  import CardHeader from "$lib/components/CardHeader.svelte";
-  import CardTitle from "$lib/components/CardTitle.svelte";
-  import CardDescription from "$lib/components/CardDescription.svelte";
-  import CardContent from "$lib/components/CardContent.svelte";
-  import Badge from "$lib/components/Badge.svelte";
-  import Button from "$lib/components/Button.svelte";
-  import CardSkeleton from "$lib/components/CardSkeleton.svelte";
-  import EmptyState from "$lib/components/EmptyState.svelte";
   import CreateDatabaseModal from "$lib/components/CreateDatabaseModal.svelte";
   import { formatDate } from "$lib/utils";
   import { databasesStore, databasesLoading } from "$lib/stores/databases";
@@ -89,7 +91,7 @@
                     </div>
                     <CardDescription>PostgreSQL {db.version}</CardDescription>
                   </div>
-                  <Badge variant="outline" className={`shrink-0 gap-1.5 uppercase ${getStatusBadgeClass(db.status)}`}>
+                  <Badge variant="outline" class={`shrink-0 gap-1.5 uppercase ${getStatusBadgeClass(db.status)}`}>
                     <Radio class="size-3" />
                     {db.status}
                   </Badge>
@@ -102,15 +104,15 @@
                     Created {formatDate(db.created_at)}
                   </span>
                   <div class="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline" className="gap-1.5">
+                    <Badge variant="outline" class="gap-1.5">
                       <Cpu class="size-3" />
                       <span>{db.vcpus} vCPU</span>
                     </Badge>
-                    <Badge variant="outline" className="gap-1.5">
+                    <Badge variant="outline" class="gap-1.5">
                       <HardDrive class="size-3" />
                       <span>{db.memory_mib / 1024} GB</span>
                     </Badge>
-                    <Badge variant="outline" className="gap-1.5">
+                    <Badge variant="outline" class="gap-1.5">
                       <DatabaseIcon class="size-3" />
                       <span>{db.storage_gb} GB</span>
                     </Badge>

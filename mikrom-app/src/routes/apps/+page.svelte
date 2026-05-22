@@ -2,15 +2,17 @@
   import { onMount } from "svelte";
   import { Boxes, Calendar, Cpu, FolderPlus, HardDrive, Plus, Radio } from "lucide-svelte";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
-  import Card from "$lib/components/Card.svelte";
-  import CardHeader from "$lib/components/CardHeader.svelte";
-  import CardTitle from "$lib/components/CardTitle.svelte";
-  import CardDescription from "$lib/components/CardDescription.svelte";
-  import CardContent from "$lib/components/CardContent.svelte";
-  import Badge from "$lib/components/Badge.svelte";
-  import Button from "$lib/components/Button.svelte";
-  import EmptyState from "$lib/components/EmptyState.svelte";
-  import CardSkeleton from "$lib/components/CardSkeleton.svelte";
+  import { 
+    Card, 
+    CardHeader, 
+    CardTitle, 
+    CardDescription, 
+    CardContent, 
+    Badge, 
+    Button, 
+    EmptyState, 
+    CardSkeleton 
+  } from "$lib/components";
   import CreateAppModal from "$lib/components/CreateAppModal.svelte";
   import { formatDate } from "$lib/utils";
   import { vmsStore } from "$lib/stores/vms";
@@ -113,7 +115,7 @@
                     </div>
                     <CardDescription>Application workspace</CardDescription>
                   </div>
-                  <Badge variant="outline" className={`shrink-0 gap-1.5 uppercase ${getScaleStateBadgeClass(effectiveScaleState)}`}>
+                  <Badge variant="outline" class={`shrink-0 gap-1.5 uppercase ${getScaleStateBadgeClass(effectiveScaleState)}`}>
                     <Radio class="size-3" />
                     {getScaleStateLabel(effectiveScaleState)}
                   </Badge>
@@ -127,21 +129,21 @@
                   </span>
                   <div class="flex flex-wrap items-center gap-2">
                     {#if hasRunningReplicas}
-                      <Badge variant="outline" className="gap-1.5">
+                      <Badge variant="outline" class="gap-1.5">
                         <Cpu class="size-3" />
                         <span>{resources.vcpus} vCPU</span>
                       </Badge>
-                      <Badge variant="outline" className="gap-1.5">
+                      <Badge variant="outline" class="gap-1.5">
                         <HardDrive class="size-3" />
                         <span>{resources.memory_mib} MB</span>
                       </Badge>
                       {#if resources.count > 1}
-                        <Badge variant="outline" className="bg-status-online/10 text-status-online border-status-online/20 gap-1.5">
+                        <Badge variant="outline" class="bg-status-online/10 text-status-online border-status-online/20 gap-1.5">
                           <span>{resources.count} replicas</span>
                         </Badge>
                       {/if}
                     {:else if effectiveScaleState === "scaled_to_zero"}
-                      <Badge variant="outline" className="border-transparent bg-muted/70 text-muted-foreground">
+                      <Badge variant="outline" class="border-transparent bg-muted/70 text-muted-foreground">
                         0 replicas
                       </Badge>
                     {:else}

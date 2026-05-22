@@ -1,14 +1,10 @@
 <script lang="ts">
+  import { TableRow as Row } from "./ui/table/index.js";
   import { cn } from "$lib/utils";
-  const { class: className = "", ...rest } = $$restProps;
+
+  let { class: className = "", children, ...rest } = $props();
 </script>
 
-<tr
-  class={cn(
-    "border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted",
-    className
-  )}
-  {...rest}
->
-  <slot />
-</tr>
+<Row class={cn(className)} {...rest}>
+  {@render children?.()}
+</Row>

@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import Progress from "$lib/components/Progress.svelte";
+  import { Progress } from "$lib/components";
   import { isAuthenticated } from "$lib/auth";
 
-  let checking = true;
+  let { children } = $props();
+  let checking = $state(true);
 
   onMount(() => {
     if (!isAuthenticated()) {
@@ -18,8 +19,8 @@
 
 {#if checking}
   <div class="flex min-h-screen items-center justify-center bg-background px-6">
-    <Progress className="w-56 sm:w-72" />
+    <Progress class="w-56 sm:w-72" />
   </div>
 {:else}
-  <slot />
+  {@render children?.()}
 {/if}

@@ -8,10 +8,16 @@
     type AppInfo,
   } from "$lib/api";
   import { getToken } from "$lib/auth";
-  import Button from "$lib/components/Button.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import Modal from "$lib/components/Modal.svelte";
-  import Select from "$lib/components/Select.svelte";
+  import {
+    Button,
+    Field,
+    Modal,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+  } from "$lib/components";
   import { toast } from "$lib/toast";
 
   export let open = false;
@@ -71,7 +77,7 @@
   title={`Deploy ${app.name}`}
   description="Choose a CPU and RAM preset for this deployment."
   width="max-w-[440px]"
-  on:close={close}
+  onclose={close}
 >
   <form class="flex flex-col gap-6 pt-2" on:submit|preventDefault={handleDeploy}>
     <div class="rounded-lg border border-border bg-muted/30 p-4">
@@ -80,18 +86,28 @@
     </div>
 
     <Field label="CPU" forId="deploy_cpu" description="Choose how many vCPUs this deployment gets.">
-      <Select id="deploy_cpu" bind:value={selectedCpu}>
-        {#each DEPLOYMENT_CPU_OPTIONS as cpu}
-          <option value={cpu.toString()}>{cpu} vCPU</option>
-        {/each}
+      <Select bind:value={selectedCpu}>
+        <SelectTrigger id="deploy_cpu">
+          <SelectValue placeholder="Select CPU" />
+        </SelectTrigger>
+        <SelectContent>
+          {#each DEPLOYMENT_CPU_OPTIONS as cpu}
+            <SelectItem value={cpu.toString()}>{cpu} vCPU</SelectItem>
+          {/each}
+        </SelectContent>
       </Select>
     </Field>
 
     <Field label="RAM" forId="deploy_memory" description="Choose the memory preset for this deployment.">
-      <Select id="deploy_memory" bind:value={selectedMemory}>
-        {#each DEPLOYMENT_MEMORY_OPTIONS as memory}
-          <option value={memory.value.toString()}>{memory.label}</option>
-        {/each}
+      <Select bind:value={selectedMemory}>
+        <SelectTrigger id="deploy_memory">
+          <SelectValue placeholder="Select RAM" />
+        </SelectTrigger>
+        <SelectContent>
+          {#each DEPLOYMENT_MEMORY_OPTIONS as memory}
+            <SelectItem value={memory.value.toString()}>{memory.label}</SelectItem>
+          {/each}
+        </SelectContent>
       </Select>
     </Field>
 
@@ -100,10 +116,15 @@
       forId="deploy_hypervisor"
       description="Select the virtual machine monitor for this deployment."
     >
-      <Select id="deploy_hypervisor" bind:value={selectedHypervisor}>
-        {#each DEPLOYMENT_HYPERVISOR_OPTIONS as opt}
-          <option value={opt.value}>{opt.label}</option>
-        {/each}
+      <Select bind:value={selectedHypervisor}>
+        <SelectTrigger id="deploy_hypervisor">
+          <SelectValue placeholder="Select Hypervisor" />
+        </SelectTrigger>
+        <SelectContent>
+          {#each DEPLOYMENT_HYPERVISOR_OPTIONS as opt}
+            <SelectItem value={opt.value}>{opt.label}</SelectItem>
+          {/each}
+        </SelectContent>
       </Select>
     </Field>
 

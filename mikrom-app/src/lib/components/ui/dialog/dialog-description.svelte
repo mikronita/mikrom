@@ -5,6 +5,7 @@
 	let {
 		ref = $bindable(null),
 		class: className,
+		children,
 		...restProps
 	}: DialogPrimitive.DescriptionProps = $props();
 </script>
@@ -14,4 +15,6 @@
 	data-slot="dialog-description"
 	class={cn("text-muted-foreground *:[a]:hover:text-foreground text-sm *:[a]:underline *:[a]:underline-offset-3", className)}
 	{...restProps}
-/>
+>
+	{@render children?.()}
+</DialogPrimitive.Description>

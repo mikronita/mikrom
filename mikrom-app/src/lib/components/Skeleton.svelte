@@ -1,10 +1,8 @@
 <script lang="ts">
+  import { Skeleton as SkeletonRoot } from "./ui/skeleton/index.js";
   import { cn } from "$lib/utils";
 
-  export let className = "";
-  const { class: classAttr = "", ...rest } = $$restProps;
-
-  $: mergedClassName = cn("animate-pulse rounded-md bg-muted/80", className, classAttr);
+  let { class: className = "", ...rest } = $props();
 </script>
 
-<div class={mergedClassName} {...rest}></div>
+<SkeletonRoot class={cn(className)} {...rest} />

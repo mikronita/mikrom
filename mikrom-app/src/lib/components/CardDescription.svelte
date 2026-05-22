@@ -1,7 +1,10 @@
 <script lang="ts">
-  const { class: className = "", ...rest } = $$restProps;
+  import { CardDescription as Description } from "./ui/card/index.js";
+  import { cn } from "$lib/utils";
+
+  let { class: className = "", children, ...rest } = $props();
 </script>
 
-<p class={`text-sm text-muted-foreground ${className}`} {...rest}>
-  <slot />
-</p>
+<Description class={cn(className)} {...rest}>
+  {@render children?.()}
+</Description>

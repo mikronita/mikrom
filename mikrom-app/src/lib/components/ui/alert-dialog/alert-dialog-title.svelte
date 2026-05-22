@@ -5,6 +5,7 @@
 	let {
 		ref = $bindable(null),
 		class: className,
+		children,
 		...restProps
 	}: AlertDialogPrimitive.TitleProps = $props();
 </script>
@@ -14,4 +15,6 @@
 	data-slot="alert-dialog-title"
 	class={cn("text-lg font-medium sm:group-data-[size=default]/alert-dialog-content:group-has-data-[slot=alert-dialog-media]/alert-dialog-content:col-start-2", className)}
 	{...restProps}
-/>
+>
+	{@render children?.()}
+</AlertDialogPrimitive.Title>

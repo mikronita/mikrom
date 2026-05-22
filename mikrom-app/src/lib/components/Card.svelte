@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { Card as CardRoot } from "./ui/card/index.js";
   import { cn } from "$lib/utils";
 
-  const { class: className = "", ...rest } = $$restProps;
+  let { class: className = "", children, ...rest } = $props();
 </script>
 
-<div class={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)} {...rest}>
-  <slot />
-</div>
+<CardRoot class={cn(className)} {...rest}>
+  {@render children?.()}
+</CardRoot>

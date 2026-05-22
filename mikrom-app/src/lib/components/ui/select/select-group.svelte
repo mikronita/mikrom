@@ -5,6 +5,7 @@
 	let {
 		ref = $bindable(null),
 		class: className,
+		children,
 		...restProps
 	}: SelectPrimitive.GroupProps = $props();
 </script>
@@ -14,4 +15,6 @@
 	data-slot="select-group"
 	class={cn("scroll-my-1 p-1", className)}
 	{...restProps}
-/>
+>
+	{@render children?.()}
+</SelectPrimitive.Group>
