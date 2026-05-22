@@ -994,6 +994,7 @@
     title="Delete application?"
     description={`This will permanently delete ${app?.name || appName} and all of its deployments, volumes and security rules.`}
     confirmLabel="Delete App"
+    variant="destructive"
     onclose={() => (showDeleteAppDialog = false)}
     onconfirm={async () => {
       showDeleteAppDialog = false;

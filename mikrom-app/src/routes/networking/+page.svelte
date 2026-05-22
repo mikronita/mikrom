@@ -342,7 +342,7 @@
                   </div>
                   <div class="flex items-center gap-2">
                     <Badge variant={item.action === "allow" ? "outline" : "destructive"} class={item.action === "allow" ? "border-transparent bg-status-info/10 text-status-info" : ""}>{item.action}</Badge>
-                    <Button variant="ghost" size="icon" onclick={() => (ruleToDelete = item)}>
+                    <Button variant="destructive-soft" size="icon" onclick={() => (ruleToDelete = item)}>
                       <Trash2 class="size-4" />
                     </Button>
                   </div>
@@ -398,6 +398,7 @@
     title="Delete security rule?"
     description={`This will remove the ${ruleToDelete?.protocol.toUpperCase() || "selected"} rule for ${selectedApp} and cannot be undone.`}
     actionText="Delete rule"
+    variant="destructive"
     onclose={() => (ruleToDelete = null)}
     onaction={confirmDeleteRule}
   />
