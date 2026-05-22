@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { TableBody as Body } from "./ui/table/index.js";
   import { cn } from "$lib/utils";
-  const { class: className = "", ...rest } = $$restProps;
+
+  let { class: className = "", children, ...rest } = $props();
 </script>
 
-<tbody class={cn("[&_tr:last-child]:border-0", className)} {...rest}>
-  <slot />
-</tbody>
+<Body class={cn(className)} {...rest}>
+  {@render children?.()}
+</Body>

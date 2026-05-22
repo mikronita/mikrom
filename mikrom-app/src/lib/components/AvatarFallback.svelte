@@ -1,7 +1,10 @@
 <script lang="ts">
-  const { class: className = "", ...rest } = $$restProps;
+  import { AvatarFallback as Fallback } from "./ui/avatar/index.js";
+  import { cn } from "$lib/utils";
+
+  let { class: className = "", children, ...rest } = $props();
 </script>
 
-<div class={`flex h-full w-full items-center justify-center bg-muted text-muted-foreground ${className}`} {...rest}>
-  <slot />
-</div>
+<Fallback class={cn(className)} {...rest}>
+  {@render children?.()}
+</Fallback>

@@ -1,14 +1,12 @@
 <script lang="ts">
-  export let label = "";
-  export let description = "";
-  export let forId: string | undefined = undefined;
+  let { label = "", description = "", forId = undefined, children } = $props();
 </script>
 
 <div class="flex flex-col gap-1.5">
   {#if label}
     <label for={forId} class="text-sm font-medium">{label}</label>
   {/if}
-  <slot />
+  {@render children?.()}
   {#if description}
     <p class="text-xs text-muted-foreground">{description}</p>
   {/if}

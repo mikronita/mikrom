@@ -3,9 +3,7 @@
   import { tick } from "svelte";
   import { onMount } from "svelte";
   import { Loader2, Box } from "lucide-svelte";
-  import Card from "$lib/components/Card.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import Input from "$lib/components/Input.svelte";
+  import { Card, Field, Input, Button } from "$lib/components";
   import { login } from "$lib/api";
   import { setToken } from "$lib/auth";
   import { toast } from "$lib/toast";
@@ -87,10 +85,10 @@
           </div>
 
           <div class="flex flex-col gap-4 pt-2">
-            <button
+            <Button
               type="submit"
               disabled={loading}
-              class="inline-flex h-9 w-full items-center justify-center gap-2 whitespace-nowrap rounded-md border border-transparent bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+              class="w-full"
             >
               {#if loading}
                 <Loader2 class="size-4 animate-spin" />
@@ -98,7 +96,7 @@
               {:else}
                 Sign In
               {/if}
-            </button>
+            </Button>
             <div class="text-center text-sm text-muted-foreground">
               Don&apos;t have an account?
               <a href="/auth/register" class="font-semibold text-foreground hover:underline"> Create one for free</a>

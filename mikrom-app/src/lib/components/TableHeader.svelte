@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { TableHeader as Header } from "./ui/table/index.js";
   import { cn } from "$lib/utils";
-  const { class: className = "", ...rest } = $$restProps;
+
+  let { class: className = "", children, ...rest } = $props();
 </script>
 
-<thead class={cn("[&_tr]:border-b", className)} {...rest}>
-  <slot />
-</thead>
+<Header class={cn(className)} {...rest}>
+  {@render children?.()}
+</Header>

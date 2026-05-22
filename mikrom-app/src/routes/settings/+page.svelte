@@ -1,23 +1,25 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Bell, CheckCircle2, CloudDownload, CreditCard, Github, KeyRound, Loader2, Mail, Plus, Puzzle, Settings, ShieldCheck, Trash2, User } from "lucide-svelte";
+  import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+    CardContent,
+    CardFooter,
+    Badge,
+    Avatar,
+    AvatarFallback,
+    Button,
+    CardSkeleton,
+    Field,
+    Input,
+    Separator,
+    Skeleton,
+    Switch,
+  } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
-  import Card from "$lib/components/Card.svelte";
-  import CardHeader from "$lib/components/CardHeader.svelte";
-  import CardTitle from "$lib/components/CardTitle.svelte";
-  import CardDescription from "$lib/components/CardDescription.svelte";
-  import CardContent from "$lib/components/CardContent.svelte";
-  import CardFooter from "$lib/components/CardFooter.svelte";
-  import Badge from "$lib/components/Badge.svelte";
-  import Avatar from "$lib/components/Avatar.svelte";
-  import AvatarFallback from "$lib/components/AvatarFallback.svelte";
-  import Button from "$lib/components/Button.svelte";
-  import CardSkeleton from "$lib/components/CardSkeleton.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import Input from "$lib/components/Input.svelte";
-  import Separator from "$lib/components/Separator.svelte";
-  import Skeleton from "$lib/components/Skeleton.svelte";
-  import Switch from "$lib/components/Switch.svelte";
   import { getToken } from "$lib/auth";
   import { getGithubInstallUrl, getUserProfile, listGithubAccounts, updateUserProfile, type GithubAccount, type UserProfile } from "$lib/api";
   import { toast } from "$lib/toast";
@@ -152,10 +154,10 @@
               <Separator />
 
               <div class="grid gap-6 md:grid-cols-2">
-                <Skeleton className="h-20 w-full" />
-                <Skeleton className="h-20 w-full" />
+                <Skeleton class="h-20 w-full" />
+                <Skeleton class="h-20 w-full" />
                 <div class="md:col-span-2">
-                  <Skeleton className="h-20 w-full" />
+                  <Skeleton class="h-20 w-full" />
                 </div>
               </div>
             </div>
@@ -301,7 +303,7 @@
                 <CardTitle class="text-2xl">Pro developer</CardTitle>
                 <p class="text-sm text-muted-foreground">$29 / month</p>
               </div>
-              <Badge variant="outline" className="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">Active</Badge>
+              <Badge variant="outline" class="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">Active</Badge>
             </div>
           </CardHeader>
           <CardContent class="pt-6">

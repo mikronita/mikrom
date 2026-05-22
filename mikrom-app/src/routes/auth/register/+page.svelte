@@ -2,9 +2,7 @@
   import { goto } from "$app/navigation";
   import { tick } from "svelte";
   import { Loader2, UserPlus } from "lucide-svelte";
-  import Card from "$lib/components/Card.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import Input from "$lib/components/Input.svelte";
+  import { Card, Field, Input, Button } from "$lib/components";
   import { register } from "$lib/api";
   import { toast } from "$lib/toast";
 
@@ -79,10 +77,10 @@
           </Field>
 
           <div class="flex flex-col gap-4 pt-2">
-            <button
+            <Button
               type="submit"
               disabled={loading}
-              class="inline-flex h-9 w-full items-center justify-center gap-2 whitespace-nowrap rounded-md border border-transparent bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+              class="w-full"
             >
               {#if loading}
                 <Loader2 class="size-4 animate-spin" />
@@ -90,7 +88,7 @@
               {:else}
                 Create account
               {/if}
-            </button>
+            </Button>
             <div class="text-center text-sm text-muted-foreground">
               Already have an account?
               <a href="/auth/login" class="font-medium text-foreground hover:underline"> Sign in</a>

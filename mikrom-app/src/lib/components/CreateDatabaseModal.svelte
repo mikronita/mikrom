@@ -1,11 +1,17 @@
 <script lang="ts">
   import { Database as DatabaseIcon, Cpu, HardDrive, Layers } from "lucide-svelte";
-  import Modal from "$lib/components/Modal.svelte";
-  import Button from "$lib/components/Button.svelte";
-  import Input from "$lib/components/Input.svelte";
-  import Select from "$lib/components/Select.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import FieldGroup from "$lib/components/FieldGroup.svelte";
+  import { 
+    Modal, 
+    Button, 
+    Input, 
+    Select, 
+    SelectContent, 
+    SelectItem, 
+    SelectTrigger, 
+    SelectValue, 
+    Field, 
+    FieldGroup 
+  } from "$lib/components";
   import { addDatabase } from "$lib/stores/databases";
   import { toast } from "$lib/toast";
 
@@ -47,7 +53,7 @@
   }
 </script>
 
-<Modal bind:open title="Create New Database" description="Provision a managed PostgreSQL instance." width="max-w-[450px]" on:close={close}>
+<Modal bind:open title="Create New Database" description="Provision a managed PostgreSQL instance." width="max-w-[450px]" onclose={close}>
   <form class="flex flex-col gap-6 pt-2" on:submit|preventDefault={handleSubmit}>
     <Field label="Database Name" forId="db_name">
       <Input id="db_name" bind:value={name} placeholder="my-production-db" required />
@@ -55,10 +61,15 @@
 
     <div class="grid grid-cols-2 gap-4">
       <Field label="PostgreSQL Version" forId="db_version">
-        <Select id="db_version" bind:value={version}>
-          <option value="16">PostgreSQL 16</option>
-          <option value="15">PostgreSQL 15</option>
-          <option value="14">PostgreSQL 14</option>
+        <Select bind:value={version}>
+          <SelectTrigger id="db_version">
+            <SelectValue placeholder="Select version" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="16">PostgreSQL 16</SelectItem>
+            <SelectItem value="15">PostgreSQL 15</SelectItem>
+            <SelectItem value="14">PostgreSQL 14</SelectItem>
+          </SelectContent>
         </Select>
       </Field>
 

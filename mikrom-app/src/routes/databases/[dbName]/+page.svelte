@@ -25,18 +25,24 @@
     Activity,
     Clock
   } from "lucide-svelte";
+  import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+    CardContent,
+    Badge,
+    Button,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+    Field,
+    AlertDialog,
+    EmptyState,
+  } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
-  import Card from "$lib/components/Card.svelte";
-  import CardHeader from "$lib/components/CardHeader.svelte";
-  import CardTitle from "$lib/components/CardTitle.svelte";
-  import CardDescription from "$lib/components/CardDescription.svelte";
-  import CardContent from "$lib/components/CardContent.svelte";
-  import Badge from "$lib/components/Badge.svelte";
-  import Button from "$lib/components/Button.svelte";
-  import Select from "$lib/components/Select.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import AlertDialog from "$lib/components/AlertDialog.svelte";
-  import EmptyState from "$lib/components/EmptyState.svelte";
   import { databasesStore, deleteDatabase } from "$lib/stores/databases";
   import { toast } from "$lib/toast";
   import { formatDate } from "$lib/utils";
@@ -106,7 +112,7 @@
             <div class="flex flex-col">
               <div class="flex items-center gap-3">
                 <h1 class="text-3xl font-semibold tracking-tight">{db.name}</h1>
-                <Badge variant="outline" className={`gap-1.5 uppercase ${getStatusBadgeClass(db.status)}`}>
+                <Badge variant="outline" class={`gap-1.5 uppercase ${getStatusBadgeClass(db.status)}`}>
                   <Radio class="size-3" />
                   {db.status}
                 </Badge>
@@ -115,7 +121,7 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <Badge variant="outline" className="gap-2 px-3 py-1.5 border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">
+            <Badge variant="outline" class="gap-2 px-3 py-1.5 border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">
               <LockKeyhole class="size-4" />
               Private 6PN
             </Badge>
@@ -242,7 +248,7 @@
                     <CardTitle class="text-base">Connectivity Links</CardTitle>
                     <CardDescription>Applications currently communicating with this database instance.</CardDescription>
                   </div>
-                  <Badge variant="outline" className="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">
+                  <Badge variant="outline" class="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">
                     <Zap class="size-4" />
                     Live routes
                   </Badge>
@@ -272,7 +278,7 @@
                           <span class="rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs">{app.ipv6}</span>
                         </td>
                         <td class="px-4 py-4 text-right">
-                          <Badge variant="outline" className="border-transparent bg-[color-mix(in_srgb,var(--status-online)_12%,transparent)] text-[var(--status-online)]">
+                          <Badge variant="outline" class="border-transparent bg-[color-mix(in_srgb,var(--status-online)_12%,transparent)] text-[var(--status-online)]">
                             {app.status}
                           </Badge>
                         </td>
@@ -390,8 +396,13 @@
             <CardContent class="flex flex-col gap-4">
               <Field label="Maintenance Window" description="When automated updates and backups are performed.">
                 <Select bind:value={maintenanceWindow}>
-                  <option value="sunday-02-00">Sunday at 02:00 UTC</option>
-                  <option value="saturday-02-00">Saturday at 02:00 UTC</option>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select window" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sunday-02-00">Sunday at 02:00 UTC</SelectItem>
+                    <SelectItem value="saturday-02-00">Saturday at 02:00 UTC</SelectItem>
+                  </SelectContent>
                 </Select>
               </Field>
             </CardContent>
@@ -424,8 +435,8 @@
     bind:open={showDeleteDialog}
     title="Are you absolutely sure?"
     description="This action cannot be undone. This will permanently delete your database and all associated data."
-    confirmLabel="Delete Database"
-    confirmVariant="destructive"
-    on:confirm={handleDelete}
+    actionText="Delete Database"
+    variant="destructive"
+    onaction={handleDelete}
   />
 </DashboardLayout>

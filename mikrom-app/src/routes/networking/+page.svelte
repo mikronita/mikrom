@@ -1,21 +1,27 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Boxes, Globe2, LockKeyhole, Network, Plus, Server, ShieldCheck, Trash2 } from "lucide-svelte";
+  import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+    CardContent,
+    Badge,
+    Button,
+    AlertDialog,
+    EmptyState,
+    Skeleton,
+    Modal,
+    Field,
+    Input,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+  } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
-  import Card from "$lib/components/Card.svelte";
-  import CardHeader from "$lib/components/CardHeader.svelte";
-  import CardTitle from "$lib/components/CardTitle.svelte";
-  import CardDescription from "$lib/components/CardDescription.svelte";
-  import CardContent from "$lib/components/CardContent.svelte";
-  import Badge from "$lib/components/Badge.svelte";
-  import Button from "$lib/components/Button.svelte";
-  import AlertDialog from "$lib/components/AlertDialog.svelte";
-  import EmptyState from "$lib/components/EmptyState.svelte";
-  import Skeleton from "$lib/components/Skeleton.svelte";
-  import Modal from "$lib/components/Modal.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import Input from "$lib/components/Input.svelte";
-  import Select from "$lib/components/Select.svelte";
   import { getToken } from "$lib/auth";
   import {
     createSecurityRule,
@@ -162,7 +168,7 @@
         </div>
         <p class="max-w-2xl text-sm text-muted-foreground">Monitor the private 6PN mesh, workload addresses and application security rules.</p>
       </div>
-      <Badge variant="outline" className="w-fit gap-2 px-3 py-1.5 border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">
+      <Badge variant="outline" class="w-fit gap-2 px-3 py-1.5 border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">
         <LockKeyhole class="size-4" />
         WireGuard mesh
       </Badge>
@@ -179,7 +185,7 @@
             <div class="flex flex-col gap-1">
               <CardDescription>{card.label}</CardDescription>
               {#if card.loading}
-                <Skeleton className={`mt-1 h-8 ${card.valueClass.includes("break-all") ? "w-32" : "w-24"}`} />
+                <Skeleton class={`mt-1 h-8 ${card.valueClass.includes("break-all") ? "w-32" : "w-24"}`} />
               {:else}
                 <CardTitle class={card.valueClass}>{card.value}</CardTitle>
               {/if}
@@ -203,7 +209,7 @@
               <CardTitle>Workload connectivity</CardTitle>
               <CardDescription>Running microVMs reachable inside your private 6PN mesh.</CardDescription>
             </div>
-            <Badge variant="outline" className="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]"><Network class="size-4" />{runningDeployments.length} active</Badge>
+            <Badge variant="outline" class="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]"><Network class="size-4" />{runningDeployments.length} active</Badge>
           </div>
         </CardHeader>
         <div class="overflow-x-auto">
@@ -219,7 +225,7 @@
               {#if loading}
                 {#each Array.from({ length: 3 }) as _}
                   <tr class="border-b border-border">
-                    <td class="p-4" colspan="3"><Skeleton className="h-10 w-full" /></td>
+                    <td class="p-4" colspan="3"><Skeleton class="h-10 w-full" /></td>
                   </tr>
                 {/each}
               {:else if runningDeployments.length === 0}
@@ -243,7 +249,7 @@
                         <span class="text-xs text-muted-foreground">Private mesh endpoint</span>
                       </div>
                     </td>
-                    <td class="px-4 py-4 text-right"><Badge variant={deploymentBadge.variant} className={`capitalize ${deploymentBadge.className}`}>{deployment.status.toLowerCase()}</Badge></td>
+                    <td class="px-4 py-4 text-right"><Badge variant={deploymentBadge.variant} class={`capitalize ${deploymentBadge.className}`}>{deployment.status.toLowerCase()}</Badge></td>
                   </tr>
                 {/each}
               {/if}
@@ -260,14 +266,21 @@
               <CardDescription>L3/L4 rules applied to every active microVM for an application.</CardDescription>
             </div>
             <div class="flex flex-col gap-2 sm:flex-row">
-              <Select bind:value={selectedApp} on:change={async () => {
-                const token = getToken();
-                if (token && selectedApp) await loadRules(token, selectedApp);
+              <Select bind:value={selectedApp} onValueChange={async (val: string | undefined) => {
+                if (val) {
+                  selectedApp = val;
+                  const token = getToken();
+                  if (token && selectedApp) await loadRules(token, selectedApp);
+                }
               }}>
-                <option value="">Select application</option>
-                {#each $appsStore as app}
-                  <option value={app.name}>{app.name}</option>
-                {/each}
+                <SelectTrigger>
+                  <SelectValue placeholder="Select application" />
+                </SelectTrigger>
+                <SelectContent>
+                  {#each $appsStore as app}
+                    <SelectItem value={app.name}>{app.name}</SelectItem>
+                  {/each}
+                </SelectContent>
               </Select>
               {#if selectedApp}
                 <Button size="sm" onclick={() => (showRuleModal = true)}>
@@ -284,9 +297,9 @@
             <EmptyState><ShieldCheck class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">Select an application</h3><p class="text-sm text-muted-foreground">Choose an app to inspect and manage its security group rules.</p></EmptyState>
           {:else if $securityRulesLoading}
             <div class="flex flex-col gap-3">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
+              <Skeleton class="h-10 w-full" />
+              <Skeleton class="h-10 w-full" />
+              <Skeleton class="h-10 w-full" />
             </div>
           {:else if $securityRulesStore.length === 0}
             <EmptyState><ShieldCheck class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">No security rules</h3><p class="text-sm text-muted-foreground">Create the first firewall rule for this application.</p></EmptyState>
@@ -299,7 +312,7 @@
                     <div class="text-xs text-muted-foreground">Priority {item.priority}</div>
                   </div>
                   <div class="flex items-center gap-2">
-                    <Badge variant={item.action === "allow" ? "outline" : "destructive"} className={item.action === "allow" ? "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]" : ""}>{item.action}</Badge>
+                    <Badge variant={item.action === "allow" ? "outline" : "destructive"} class={item.action === "allow" ? "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]" : ""}>{item.action}</Badge>
                     <Button variant="ghost" size="icon" onclick={() => (ruleToDelete = item)}>
                       <Trash2 class="size-4" />
                     </Button>
@@ -318,9 +331,14 @@
       <div class="space-y-4">
         <Field label="Protocol">
           <Select bind:value={rule.protocol}>
-            <option value="tcp">TCP</option>
-            <option value="udp">UDP</option>
-            <option value="any">Any</option>
+            <SelectTrigger>
+              <SelectValue placeholder="Select protocol" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="tcp">TCP</SelectItem>
+              <SelectItem value="udp">UDP</SelectItem>
+              <SelectItem value="any">Any</SelectItem>
+            </SelectContent>
           </Select>
         </Field>
         <div class="grid gap-4 sm:grid-cols-2">
@@ -329,8 +347,13 @@
         </div>
         <Field label="Action">
           <Select bind:value={rule.action}>
-            <option value="allow">Allow</option>
-            <option value="deny">Deny</option>
+            <SelectTrigger>
+              <SelectValue placeholder="Select action" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="allow">Allow</SelectItem>
+              <SelectItem value="deny">Deny</SelectItem>
+            </SelectContent>
           </Select>
         </Field>
         <div class="flex justify-end gap-2">
@@ -345,8 +368,8 @@
     open={Boolean(ruleToDelete)}
     title="Delete security rule?"
     description={`This will remove the ${ruleToDelete?.protocol.toUpperCase() || "selected"} rule for ${selectedApp} and cannot be undone.`}
-    confirmLabel="Delete rule"
-    on:close={() => (ruleToDelete = null)}
-    on:confirm={confirmDeleteRule}
+    actionText="Delete rule"
+    onclose={() => (ruleToDelete = null)}
+    onaction={confirmDeleteRule}
   />
 </DashboardLayout>

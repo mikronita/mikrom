@@ -1,25 +1,35 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Camera, Copy, Database, HardDrive, History, Link, Plus, RotateCcw, Trash2 } from "lucide-svelte";
+  import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+    CardContent,
+    Button,
+    AlertDialog,
+    EmptyState,
+    Skeleton,
+    TableSkeleton,
+    Modal,
+    Field,
+    FieldGroup,
+    Input,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+    Badge,
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+  } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
-  import Card from "$lib/components/Card.svelte";
-  import CardHeader from "$lib/components/CardHeader.svelte";
-  import CardTitle from "$lib/components/CardTitle.svelte";
-  import CardDescription from "$lib/components/CardDescription.svelte";
-  import CardContent from "$lib/components/CardContent.svelte";
-  import Button from "$lib/components/Button.svelte";
-  import AlertDialog from "$lib/components/AlertDialog.svelte";
-  import EmptyState from "$lib/components/EmptyState.svelte";
-  import Skeleton from "$lib/components/Skeleton.svelte";
-  import TableSkeleton from "$lib/components/TableSkeleton.svelte";
-  import Modal from "$lib/components/Modal.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import FieldGroup from "$lib/components/FieldGroup.svelte";
-  import Input from "$lib/components/Input.svelte";
-  import Select from "$lib/components/Select.svelte";
-  import { Badge as BadgeUI } from "$lib/components/ui/badge";
-  import { Button as ButtonUI } from "$lib/components/ui/button";
-  import * as TableUI from "$lib/components/ui/table";
 
   import { getToken } from "$lib/auth";
   import { 
@@ -238,11 +248,19 @@
             </CardDescription>
           </div>
           <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Select bind:value={selectedApp} class="sm:w-[220px]" on:change={async () => await loadVolumes(selectedApp)}>
-              <option value="">All Applications</option>
-              {#each $appsStore as app}
-                <option value={app.name}>{app.name}</option>
-              {/each}
+            <Select bind:value={selectedApp} onValueChange={async (val: string | undefined) => {
+              selectedApp = val || "";
+              await loadVolumes(selectedApp);
+            }}>
+              <SelectTrigger class="sm:w-[220px]">
+                <SelectValue placeholder="All Applications" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All Applications</SelectItem>
+                {#each $appsStore as app}
+                  <SelectItem value={app.name}>{app.name}</SelectItem>
+                {/each}
+              </SelectContent>
             </Select>
             <Button size="sm" onclick={() => (showCreateVolume = true)}>
               <Plus class="size-4" />
@@ -255,25 +273,25 @@
       <CardContent class="p-0">
         {#if $volumesLoading}
           <div class="flex flex-col gap-3 p-4">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
+            <Skeleton class="h-10 w-full" />
+            <Skeleton class="h-10 w-full" />
           </div>
         {:else if $volumesStore.length === 0}
           <EmptyState><HardDrive class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">No volumes found</h3><p class="text-sm text-muted-foreground">You don't have any persistent volumes yet.</p></EmptyState>
         {:else}
-          <TableUI.Root>
-            <TableUI.Header>
-              <TableUI.Row>
-                <TableUI.Head>Volume</TableUI.Head>
-                <TableUI.Head>Attached To</TableUI.Head>
-                <TableUI.Head class="text-center w-[120px]">Size</TableUI.Head>
-                <TableUI.Head class="text-right w-[180px]">Actions</TableUI.Head>
-              </TableUI.Row>
-            </TableUI.Header>
-            <TableUI.Body>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Volume</TableHead>
+                <TableHead>Attached To</TableHead>
+                <TableHead class="text-center w-[120px]">Size</TableHead>
+                <TableHead class="text-right w-[180px]">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {#each $volumesStore as volume (volume.id)}
-                <TableUI.Row class="group">
-                  <TableUI.Cell class="font-medium">
+                <TableRow class="group">
+                  <TableCell class="font-medium">
                     <div class="flex items-center gap-3">
                       <div class="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30 text-muted-foreground group-hover:bg-background transition-colors">
                         <Database class="size-4" />
@@ -283,16 +301,16 @@
                         <span class="font-mono text-[10px] text-muted-foreground/70 lowercase tracking-wider">{volume.id}</span>
                       </div>
                     </div>
-                  </TableUI.Cell>
+                  </TableCell>
                   
-                  <TableUI.Cell>
+                  <TableCell>
                     <div class="flex flex-wrap gap-2">
                       {#if isAttachedVolume(volume)}
-                        <BadgeUI variant="outline" class="h-7 items-center gap-1.5 px-2 group/badge bg-muted/20 border-border/50">
+                        <Badge variant="outline" class="h-7 items-center gap-1.5 px-2 group/badge bg-muted/20 border-border/50">
                           <span class="font-medium text-foreground">{$appsStore.find((a) => a.id === selectedAppId)?.name || selectedApp || "Current App"}</span>
-                          <BadgeUI variant="secondary" class="h-4 px-1 text-[8px] font-bold uppercase tracking-tighter">
+                          <Badge variant="secondary" class="h-4 px-1 text-[8px] font-bold uppercase tracking-tighter">
                             {volume.access_mode === 1 ? "RWX" : volume.access_mode === 2 ? "ROX" : "RWO"}
-                          </BadgeUI>
+                          </Badge>
                           <code class="text-[9px] text-muted-foreground bg-background/50 px-1 rounded border border-border/30">{volume.mount_point}</code>
                           <button 
                             class="ml-0.5 rounded-full p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors text-muted-foreground" 
@@ -301,17 +319,17 @@
                           >
                             <Plus class="size-3 rotate-45" />
                           </button>
-                        </BadgeUI>
+                        </Badge>
                       {:else if isVolumeWithAttachments(volume)}
                         {#if volume.attachments.length === 0}
                           <span class="text-xs text-muted-foreground italic opacity-50">Not attached</span>
                         {:else}
                           {#each volume.attachments as attachment}
-                            <BadgeUI variant="outline" class="h-7 items-center gap-1.5 px-2 group/badge bg-muted/20 border-border/50">
+                            <Badge variant="outline" class="h-7 items-center gap-1.5 px-2 group/badge bg-muted/20 border-border/50">
                               <span class="font-medium text-foreground">{attachment.app_name}</span>
-                              <BadgeUI variant="secondary" class="h-4 px-1 text-[8px] font-bold uppercase tracking-tighter">
+                              <Badge variant="secondary" class="h-4 px-1 text-[8px] font-bold uppercase tracking-tighter">
                                 {attachment.access_mode === 1 ? "RWX" : attachment.access_mode === 2 ? "ROX" : "RWO"}
-                              </BadgeUI>
+                              </Badge>
                               <code class="text-[9px] text-muted-foreground bg-background/50 px-1 rounded border border-border/30">{attachment.mount_point}</code>
                               <button 
                                 class="ml-0.5 rounded-full p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors text-muted-foreground" 
@@ -320,39 +338,39 @@
                               >
                                 <Plus class="size-3 rotate-45" />
                               </button>
-                            </BadgeUI>
+                            </Badge>
                           {/each}
                         {/if}
                       {/if}
                     </div>
-                  </TableUI.Cell>
+                  </TableCell>
 
-                  <TableUI.Cell class="text-center">
-                    <BadgeUI variant="secondary" class="font-mono h-6">{formatSize(volume.size_mib)}</BadgeUI>
-                  </TableUI.Cell>
+                  <TableCell class="text-center">
+                    <Badge variant="secondary" class="font-mono h-6">{formatSize(volume.size_mib)}</Badge>
+                  </TableCell>
                   
-                  <TableUI.Cell class="text-right">
+                  <TableCell class="text-right">
                     <div class="flex justify-end gap-1">
                       {#if !selectedApp}
-                        <ButtonUI variant="ghost" size="icon" class="size-8" title="Attach to App" onclick={() => { attachParams.volume_id = volume.id; showAttachVolume = true; }}>
+                        <Button variant="ghost" size="icon" class="size-8" title="Attach to App" onclick={() => { attachParams.volume_id = volume.id; showAttachVolume = true; }}>
                           <Link class="size-4" />
-                        </ButtonUI>
+                        </Button>
                       {/if}
-                      <ButtonUI variant="ghost" size="icon" class="size-8" title="Snapshots" onclick={async () => { volumeForSnapshots = volume.id; showSnapshotsModal = true; await loadSnapshots(volume.id); }}>
+                      <Button variant="ghost" size="icon" class="size-8" title="Snapshots" onclick={async () => { volumeForSnapshots = volume.id; showSnapshotsModal = true; await loadSnapshots(volume.id); }}>
                         <History class="size-4" />
-                      </ButtonUI>
-                      <ButtonUI variant="ghost" size="icon" class="size-8" title="Take Snapshot" onclick={() => createSnapshot(volume.id)}>
+                      </Button>
+                      <Button variant="ghost" size="icon" class="size-8" title="Take Snapshot" onclick={() => createSnapshot(volume.id)}>
                         <Camera class="size-4" />
-                      </ButtonUI>
-                      <ButtonUI variant="ghost" size="icon" class="size-8 text-destructive hover:text-destructive hover:bg-destructive/10" title="Delete Volume" onclick={() => (volumeToDelete = volume)}>
+                      </Button>
+                      <Button variant="ghost" size="icon" class="size-8 text-destructive hover:text-destructive hover:bg-destructive/10" title="Delete Volume" onclick={() => (volumeToDelete = volume)}>
                         <Trash2 class="size-4" />
-                      </ButtonUI>
+                      </Button>
                     </div>
-                  </TableUI.Cell>
-                </TableUI.Row>
+                  </TableCell>
+                </TableRow>
               {/each}
-            </TableUI.Body>
-          </TableUI.Root>
+            </TableBody>
+          </Table>
         {/if}
       </CardContent>
     </Card>
@@ -360,7 +378,7 @@
 
   {#if showCreateVolume}
     <Modal bind:open={showCreateVolume} title="Create new volume" description="The volume will be available to be attached to any application.">
-      <FieldGroup className="pt-2">
+      <FieldGroup class="pt-2">
         <Field label="Volume name"><Input bind:value={newVolume.name} placeholder="my-data-volume" /></Field>
         <Field label="Size (MiB)"><Input type="number" bind:value={newVolume.size_mib} min={128} /></Field>
       </FieldGroup>
@@ -373,21 +391,30 @@
 
   {#if showAttachVolume}
     <Modal bind:open={showAttachVolume} title="Attach volume to application" description="Configure how the volume should be mounted in the microVM.">
-      <FieldGroup className="pt-2">
+      <FieldGroup class="pt-2">
         <Field label="Select Application">
           <Select bind:value={attachParams.app_id}>
-            <option value="">Choose an app...</option>
-            {#each $appsStore as app}
-              <option value={app.id}>{app.name}</option>
-            {/each}
+            <SelectTrigger>
+              <SelectValue placeholder="Choose an app..." />
+            </SelectTrigger>
+            <SelectContent>
+              {#each $appsStore as app}
+                <SelectItem value={app.id}>{app.name}</SelectItem>
+              {/each}
+            </SelectContent>
           </Select>
         </Field>
         <Field label="Mount point"><Input bind:value={attachParams.mount_point} placeholder="/data" /></Field>
         <Field label="Access Mode">
           <Select bind:value={attachParams.access_mode}>
-            <option value={0}>RWO - ReadWriteOnce (Single Node)</option>
-            <option value={1}>RWX - ReadWriteMany (Shared Mesh)</option>
-            <option value={2}>ROX - ReadOnlyMany (Shared Read)</option>
+            <SelectTrigger>
+              <SelectValue placeholder="Select access mode" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="0">RWO - ReadWriteOnce (Single Node)</SelectItem>
+              <SelectItem value="1">RWX - ReadWriteMany (Shared Mesh)</SelectItem>
+              <SelectItem value="2">ROX - ReadOnlyMany (Shared Read)</SelectItem>
+            </SelectContent>
           </Select>
         </Field>
       </FieldGroup>
@@ -398,43 +425,43 @@
     </Modal>
   {/if}
 
-  <Modal open={showSnapshotsModal} title="Snapshot history" width="max-w-3xl" description={`Manage snapshots for volume ${$volumesStore.find((v) => v.id === volumeForSnapshots)?.name || ""}.`} on:close={() => { showSnapshotsModal = false; volumeForSnapshots = ""; snapshotsStore.set([]); }}>
+  <Modal open={showSnapshotsModal} title="Snapshot history" width="max-w-3xl" description={`Manage snapshots for volume ${$volumesStore.find((v) => v.id === volumeForSnapshots)?.name || ""}.`} onclose={() => { showSnapshotsModal = false; volumeForSnapshots = ""; snapshotsStore.set([]); }}>
     <div class="mt-4">
       {#if $snapshotsLoading}
         <TableSkeleton rows={3} cols={3} />
       {:else if $snapshotsStore.length === 0}
-        <EmptyState className="py-8"><Camera class="size-8 text-muted-foreground" /><p class="text-sm text-muted-foreground">No snapshots yet.</p></EmptyState>
+        <EmptyState class="py-8"><Camera class="size-8 text-muted-foreground" /><p class="text-sm text-muted-foreground">No snapshots yet.</p></EmptyState>
       {:else}
-        <TableUI.Root>
-          <TableUI.Header>
-            <TableUI.Row>
-              <TableUI.Head>Snapshot Name</TableUI.Head>
-              <TableUI.Head>Created</TableUI.Head>
-              <TableUI.Head class="text-right">Actions</TableUI.Head>
-            </TableUI.Row>
-          </TableUI.Header>
-          <TableUI.Body>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Snapshot Name</TableHead>
+              <TableHead>Created</TableHead>
+              <TableHead class="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {#each $snapshotsStore as snap}
-              <TableUI.Row>
-                <TableUI.Cell class="font-mono text-xs">{snap.name}</TableUI.Cell>
-                <TableUI.Cell class="text-muted-foreground text-xs">{new Date(snap.created_at).toLocaleString()}</TableUI.Cell>
-                <TableUI.Cell class="text-right">
+              <TableRow>
+                <TableCell class="font-mono text-xs">{snap.name}</TableCell>
+                <TableCell class="text-muted-foreground text-xs">{new Date(snap.created_at).toLocaleString()}</TableCell>
+                <TableCell class="text-right">
                   <div class="flex justify-end gap-1">
-                    <ButtonUI variant="outline" size="icon" class="size-7" title="Restore" onclick={() => { restoreSnapshotName = snap.name; restoreSnapshot(); }}>
+                    <Button variant="outline" size="icon" class="size-7" title="Restore" onclick={() => { restoreSnapshotName = snap.name; restoreSnapshot(); }}>
                       <RotateCcw class="size-3.5" />
-                    </ButtonUI>
-                    <ButtonUI variant="outline" size="icon" class="size-7" title="Clone" onclick={() => { snapshotToClone = snap.volume_id; restoreSnapshotName = snap.name; cloneName = `${$volumesStore.find((v) => v.id === snap.volume_id)?.name || "volume"}-clone`; showCloneModal = true; }}>
+                    </Button>
+                    <Button variant="outline" size="icon" class="size-7" title="Clone" onclick={() => { snapshotToClone = snap.volume_id; restoreSnapshotName = snap.name; cloneName = `${$volumesStore.find((v) => v.id === snap.volume_id)?.name || "volume"}-clone`; showCloneModal = true; }}>
                       <Copy class="size-3.5" />
-                    </ButtonUI>
-                    <ButtonUI variant="ghost" size="icon" class="size-7 text-destructive hover:bg-destructive/10" title="Delete" onclick={() => (snapshotToDelete = snap)}>
+                    </Button>
+                    <Button variant="ghost" size="icon" class="size-7 text-destructive hover:bg-destructive/10" title="Delete" onclick={() => (snapshotToDelete = snap)}>
                       <Trash2 class="size-3.5" />
-                    </ButtonUI>
+                    </Button>
                   </div>
-                </TableUI.Cell>
-              </TableUI.Row>
+                </TableCell>
+              </TableRow>
             {/each}
-          </TableUI.Body>
-        </TableUI.Root>
+          </TableBody>
+        </Table>
       {/if}
     </div>
   </Modal>
@@ -443,9 +470,9 @@
     bind:open={showCloneModal}
     title="Clone snapshot"
     description={`Create a new volume from snapshot ${restoreSnapshotName}.`}
-    on:close={closeCloneModal}
+    onclose={closeCloneModal}
   >
-    <FieldGroup className="pt-2">
+    <FieldGroup class="pt-2">
       <Field label="New volume name">
         <Input bind:value={cloneName} placeholder="my-volume-clone" />
       </Field>
@@ -460,19 +487,19 @@
     open={!!volumeToDelete}
     title="Delete volume?"
     description={`Are you sure you want to delete volume ${volumeToDelete?.name}? All data and snapshots will be permanently lost.`}
-    confirmLabel="Delete Volume"
-    confirmVariant="destructive"
-    on:close={() => (volumeToDelete = null)}
-    on:confirm={confirmDeleteVolume}
+    actionText="Delete Volume"
+    variant="destructive"
+    onclose={() => (volumeToDelete = null)}
+    onaction={confirmDeleteVolume}
   />
 
   <AlertDialog
     open={!!snapshotToDelete}
     title="Delete snapshot?"
     description={`Are you sure you want to delete snapshot ${snapshotToDelete?.name}?`}
-    confirmLabel="Delete Snapshot"
-    confirmVariant="destructive"
-    on:close={() => (snapshotToDelete = null)}
-    on:confirm={confirmDeleteSnapshot}
+    actionText="Delete Snapshot"
+    variant="destructive"
+    onclose={() => (snapshotToDelete = null)}
+    onaction={confirmDeleteSnapshot}
   />
 </DashboardLayout>

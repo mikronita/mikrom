@@ -1,14 +1,16 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { Activity, ArrowRight, Bot, CalendarClock, Container, Cpu, Hammer, LayoutDashboard, Plus, Rocket, Router, Server } from "lucide-svelte";
+  import { 
+    Card, 
+    Badge, 
+    Button, 
+    EmptyState, 
+    Skeleton, 
+    Separator 
+  } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
-  import Card from "$lib/components/Card.svelte";
-  import Badge from "$lib/components/Badge.svelte";
-  import Button from "$lib/components/Button.svelte";
-  import EmptyState from "$lib/components/EmptyState.svelte";
-  import Skeleton from "$lib/components/Skeleton.svelte";
   import CreateAppModal from "$lib/components/CreateAppModal.svelte";
-  import Separator from "$lib/components/Separator.svelte";
   import { formatDate } from "$lib/utils";
   import { getToken } from "$lib/auth";
   import { vmsStore, vmsLoading, refreshVms } from "$lib/stores/vms";
@@ -224,10 +226,10 @@
                 {#if $appsLoading && $appsStore.length === 0}
                   {#each Array.from({ length: 3 }) as _}
                     <tr class="border-b border-border">
-                      <td class="px-4 py-4"><Skeleton className="h-9 w-44" /></td>
-                      <td class="px-4 py-4"><Skeleton className="h-5 w-20" /></td>
-                      <td class="hidden px-4 py-4 xl:table-cell"><Skeleton className="h-5 w-24" /></td>
-                      <td class="px-4 py-4 text-right"><Skeleton className="ml-auto h-8 w-20" /></td>
+                      <td class="px-4 py-4"><Skeleton class="h-9 w-44" /></td>
+                      <td class="px-4 py-4"><Skeleton class="h-5 w-20" /></td>
+                      <td class="hidden px-4 py-4 xl:table-cell"><Skeleton class="h-5 w-24" /></td>
+                      <td class="px-4 py-4 text-right"><Skeleton class="ml-auto h-8 w-20" /></td>
                     </tr>
                   {/each}
                 {:else}
@@ -245,7 +247,7 @@
                         </div>
                       </td>
                       <td class="px-4 py-4">
-                        <Badge variant={getAppStatusVariant(app.status)} className={`capitalize ${getAppStatusClass(app.status)}`}>{app.status}</Badge>
+                        <Badge variant={getAppStatusVariant(app.status)} class={`capitalize ${getAppStatusClass(app.status)}`}>{app.status}</Badge>
                       </td>
                       <td class="hidden px-4 py-4 text-sm text-muted-foreground xl:table-cell">{formatDate(app.created_at)}</td>
                       <td class="px-4 py-4 text-right">
@@ -266,7 +268,7 @@
                 <h2 class="text-lg font-semibold">System Status</h2>
                 <p class="text-sm text-muted-foreground">Health of core services.</p>
               </div>
-              <Badge variant={hasHealthError() || offlineServices > 0 ? "destructive" : "outline"} className={hasHealthError() || offlineServices > 0 ? "" : getHealthClass("ONLINE")}>
+              <Badge variant={hasHealthError() || offlineServices > 0 ? "destructive" : "outline"} class={hasHealthError() || offlineServices > 0 ? "" : getHealthClass("ONLINE")}>
                 {hasHealthError() || offlineServices > 0 ? "Degraded" : "Operational"}
               </Badge>
             </div>
@@ -281,7 +283,7 @@
                     <ServiceIcon class="size-4 text-muted-foreground" />
                     <span class="text-sm font-medium">{service.name}</span>
                   </div>
-                  <Badge variant={getHealthVariant(status)} className={`uppercase ${getHealthClass(status)}`}>
+                  <Badge variant={getHealthVariant(status)} class={`uppercase ${getHealthClass(status)}`}>
                     {status}
                   </Badge>
                 </div>

@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { TableCell as Cell } from "./ui/table/index.js";
   import { cn } from "$lib/utils";
-  const { class: className = "", ...rest } = $$restProps;
+
+  let { class: className = "", children, ...rest } = $props();
 </script>
 
-<td class={cn("p-4 align-middle [&:has([role=checkbox])]:pr-0", className)} {...rest}>
-  <slot />
-</td>
+<Cell class={cn(className)} {...rest}>
+  {@render children?.()}
+</Cell>

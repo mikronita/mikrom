@@ -26,21 +26,23 @@
     Scale,
   } from "lucide-svelte";
   import { SvelteMap } from "svelte/reactivity";
+  import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardDescription,
+    CardContent,
+    Badge,
+    Button,
+    ButtonGroup,
+    AlertDialog,
+    EmptyState,
+    Modal,
+    Input,
+    Skeleton,
+  } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
-  import Card from "$lib/components/Card.svelte";
-  import CardHeader from "$lib/components/CardHeader.svelte";
-  import CardTitle from "$lib/components/CardTitle.svelte";
-  import CardDescription from "$lib/components/CardDescription.svelte";
-  import CardContent from "$lib/components/CardContent.svelte";
-  import Badge from "$lib/components/Badge.svelte";
-  import Button from "$lib/components/Button.svelte";
-  import ButtonGroup from "$lib/components/ButtonGroup.svelte";
-  import AlertDialog from "$lib/components/AlertDialog.svelte";
-  import EmptyState from "$lib/components/EmptyState.svelte";
-  import Modal from "$lib/components/Modal.svelte";
-  import Input from "$lib/components/Input.svelte";
   import MetricChart from "$lib/components/MetricChart.svelte";
-  import Skeleton from "$lib/components/Skeleton.svelte";
   import ScaleAppModal from "$lib/components/ScaleAppModal.svelte";
   import DeployAppModal from "$lib/components/DeployAppModal.svelte";
   import { getToken } from "$lib/auth";
@@ -577,7 +579,7 @@
             href={`https://${app?.name || appName}.apps.mikrom.spluca.org`}
             target="_blank"
             rel="noreferrer"
-            className="shrink-0"
+            class="shrink-0"
           >
             <Globe2 class="size-4" />
             <span class="hidden sm:inline">Visit site</span>
@@ -652,7 +654,7 @@
               {#each Array.from({ length: 3 }) as _}
                 <tr class="border-b border-border">
                   <td class="px-4 py-4" colspan="6"
-                    ><Skeleton className="h-8 w-full" /></td
+                    ><Skeleton class="h-8 w-full" /></td
                   >
                 </tr>
               {/each}
@@ -725,7 +727,7 @@
                   <td class="px-4 py-4"
                     ><Badge
                       variant={deploymentBadge.variant}
-                      className={`font-semibold capitalize ${deploymentBadge.className}`}
+                      class={`font-semibold capitalize ${deploymentBadge.className}`}
                       >{dep.status}</Badge
                     ></td
                   >
@@ -757,7 +759,7 @@
                     {/if}
                   </td>
                   <td class="px-4 py-4 text-right">
-                    <ButtonGroup className="ml-auto">
+                    <ButtonGroup class="ml-auto">
                       {#if isProduction}
                         <Button size="sm" variant="outline" disabled>
                           Currently in Prod
@@ -766,7 +768,7 @@
                         <Button
                           size="sm"
                           variant="outline"
-                          className="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)] hover:bg-[color-mix(in_srgb,var(--status-info)_18%,transparent)]"
+                          class="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)] hover:bg-[color-mix(in_srgb,var(--status-info)_18%,transparent)]"
                           disabled={!canActivate ||
                             activatingDeploymentId !== null}
                           onclick={() => handleActivate(dep.id)}
@@ -800,19 +802,19 @@
       {#if !liveMetrics}
         <Card class="p-12">
           <div class="flex flex-col gap-4">
-            <Skeleton className="h-6 w-44" />
+            <Skeleton class="h-6 w-44" />
             <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {#each Array.from({ length: 4 }) as _}
                 <div class="rounded-lg border bg-background/80 p-3 shadow-sm">
-                  <Skeleton className="h-4 w-24" />
+                  <Skeleton class="h-4 w-24" />
                   <div class="mt-3 flex flex-col gap-2">
-                    <Skeleton className="h-6 w-20" />
-                    <Skeleton className="h-3 w-28" />
+                    <Skeleton class="h-6 w-20" />
+                    <Skeleton class="h-3 w-28" />
                   </div>
                 </div>
               {/each}
             </div>
-            <Skeleton className="h-48 w-full" />
+            <Skeleton class="h-48 w-full" />
           </div>
         </Card>
       {:else}
@@ -868,7 +870,7 @@
       open={showWebhookModal}
       title="GitHub Auto-deploy Configuration"
       width="max-w-[600px]"
-      on:close={() => (showWebhookModal = false)}
+      onclose={() => (showWebhookModal = false)}
     >
       <div class="space-y-6 pt-4">
         <div class="flex items-start gap-3">
@@ -894,14 +896,14 @@
             </p>
             <div class="flex items-center gap-2">
               <Input
-                className="flex-1 font-mono text-xs"
-                readOnly
+                class="flex-1 font-mono text-xs"
+                readonly
                 value={`${webhookBaseUrl}/webhooks/github/${appName}`}
               />
               <Button
                 variant="outline"
                 size="sm"
-                className="h-9 px-3"
+                class="h-9 px-3"
                 onclick={() =>
                   copy(`${webhookBaseUrl}/webhooks/github/${appName}`)}
               >
@@ -919,8 +921,8 @@
             <div class="flex items-center gap-2">
               <div class="relative flex-1">
                 <Input
-                  className="w-full pr-10 font-mono text-xs"
-                  readOnly
+                  class="w-full pr-10 font-mono text-xs"
+                  readonly
                   type={showSecret ? "text" : "password"}
                   value={secret || ""}
                 />
@@ -936,7 +938,7 @@
               <Button
                 variant="outline"
                 size="sm"
-                className="h-9 px-3"
+                class="h-9 px-3"
                 onclick={() => copy(secret || "")}
               >
                 <Clipboard class="size-4" />
@@ -992,8 +994,8 @@
     title="Delete application?"
     description={`This will permanently delete ${app?.name || appName} and all of its deployments, volumes and security rules.`}
     confirmLabel="Delete App"
-    on:close={() => (showDeleteAppDialog = false)}
-    on:confirm={async () => {
+    onclose={() => (showDeleteAppDialog = false)}
+    onconfirm={async () => {
       showDeleteAppDialog = false;
       await handleDeleteApp();
     }}

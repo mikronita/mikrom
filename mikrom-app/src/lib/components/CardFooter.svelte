@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { CardFooter as Footer } from "./ui/card/index.js";
   import { cn } from "$lib/utils";
 
-  const { class: className = "", ...rest } = $$restProps;
+  let { class: className = "", children, ...rest } = $props();
 </script>
 
-<div class={cn("flex items-center p-5 pt-0 sm:p-6 sm:pt-0", className)} {...rest}>
-  <slot />
-</div>
+<Footer class={cn(className)} {...rest}>
+  {@render children?.()}
+</Footer>
