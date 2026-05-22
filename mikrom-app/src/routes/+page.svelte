@@ -3,11 +3,22 @@
   import { Activity, ArrowRight, Bot, CalendarClock, Container, Cpu, Hammer, LayoutDashboard, Plus, Rocket, Router, Server } from "lucide-svelte";
   import { 
     Card, 
+    CardHeader,
+    CardTitle,
+    CardDescription,
+    CardContent,
+    CardFooter,
     Badge, 
     Button, 
     EmptyState, 
     Skeleton, 
-    Separator 
+    Separator,
+    Table,
+    TableHeader,
+    TableBody,
+    TableRow,
+    TableHead,
+    TableCell
   } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import CreateAppModal from "$lib/components/CreateAppModal.svelte";
@@ -112,7 +123,7 @@
   function getAppStatusClass(status: string) {
     const normalized = status.toLowerCase();
     if (normalized === "running") {
-      return "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]";
+      return "border-transparent bg-status-info/10 text-status-info";
     }
     if (normalized === "paused") {
       return "border-transparent bg-muted/70 text-muted-foreground";
@@ -124,12 +135,11 @@
   }
 
   function getHealthClass(status: string) {
-    return status === "ONLINE"
-      ? "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]"
-      : "";
+    if (status === "ONLINE") return "!border-transparent !bg-status-online/10 !text-status-online";
+    if (status === "CHECKING") return "!border-transparent !bg-muted/70 !text-muted-foreground";
+    return "!border-transparent !bg-status-offline/10 !text-status-offline";
   }
 </script>
-
 <svelte:head>
   <title>Mikrom - Dashboard</title>
 </svelte:head>
@@ -156,34 +166,60 @@
 
     <div class="grid gap-4 md:grid-cols-3">
       <Card>
-        <div class="flex items-center justify-between gap-4 border-b border-border p-5 pb-2">
-          <div class="text-sm font-medium">Applications</div>
-          <Container class="size-4 text-muted-foreground" />
-        </div>
-        <div class="p-5 pt-0">
-          <div class="text-3xl font-semibold">{$appsStore.length}</div>
-          <p class="text-xs text-muted-foreground">Git projects in the workspace</p>
-        </div>
+        <CardHeader class="flex flex-row items-start justify-between gap-4 pb-3">
+          <div class="flex flex-col gap-1">
+            <CardDescription>Applications</CardDescription>
+            {#if $appsLoading && $appsStore.length === 0}
+              <Skeleton class="mt-1 h-8 w-16" />
+            {:else}
+              <CardTitle class="text-3xl">{$appsStore.length}</CardTitle>
+            {/if}
+          </div>
+          <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+            <Container class="size-5" />
+          </div>
+        </CardHeader>
+        <CardContent class="pt-0">
+          <p class="text-sm text-muted-foreground">Git projects in the workspace</p>
+        </CardContent>
       </Card>
+
       <Card>
-        <div class="flex items-center justify-between gap-4 border-b border-border p-5 pb-2">
-          <div class="text-sm font-medium">Running VMs</div>
-          <Activity class="size-4 text-muted-foreground" />
-        </div>
-        <div class="p-5 pt-0">
-          <div class="text-3xl font-semibold">{$runningCountStore}</div>
-          <p class="text-xs text-muted-foreground">Instances currently serving traffic</p>
-        </div>
+        <CardHeader class="flex flex-row items-start justify-between gap-4 pb-3">
+          <div class="flex flex-col gap-1">
+            <CardDescription>Running VMs</CardDescription>
+            {#if $vmsLoading && $vmsStore.length === 0}
+              <Skeleton class="mt-1 h-8 w-16" />
+            {:else}
+              <CardTitle class="text-3xl">{$runningCountStore}</CardTitle>
+            {/if}
+          </div>
+          <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+            <Activity class="size-5" />
+          </div>
+        </CardHeader>
+        <CardContent class="pt-0">
+          <p class="text-sm text-muted-foreground">Instances currently serving traffic</p>
+        </CardContent>
       </Card>
+
       <Card>
-        <div class="flex items-center justify-between gap-4 border-b border-border p-5 pb-2">
-          <div class="text-sm font-medium">Deploying</div>
-          <Rocket class="size-4 text-muted-foreground" />
-        </div>
-        <div class="p-5 pt-0">
-          <div class="text-3xl font-semibold">{$pendingCountStore}</div>
-          <p class="text-xs text-muted-foreground">Builds or starts in progress</p>
-        </div>
+        <CardHeader class="flex flex-row items-start justify-between gap-4 pb-3">
+          <div class="flex flex-col gap-1">
+            <CardDescription>Deploying</CardDescription>
+            {#if $vmsLoading && $vmsStore.length === 0}
+              <Skeleton class="mt-1 h-8 w-16" />
+            {:else}
+              <CardTitle class="text-3xl">{$pendingCountStore}</CardTitle>
+            {/if}
+          </div>
+          <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+            <Rocket class="size-5" />
+          </div>
+        </CardHeader>
+        <CardContent class="pt-0">
+          <p class="text-sm text-muted-foreground">Builds or starts in progress</p>
+        </CardContent>
       </Card>
     </div>
 
@@ -199,81 +235,79 @@
       </EmptyState>
     {:else}
       <div class="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <Card class="min-w-0">
-          <div class="border-b border-border p-5">
+        <Card class="min-w-0 h-fit">
+          <CardHeader class="border-b">
             <div class="flex items-center justify-between gap-4">
-              <div>
-                <h2 class="text-lg font-semibold">Recent Applications</h2>
-                <p class="text-sm text-muted-foreground">Latest projects and their runtime state.</p>
+              <div class="grid gap-1">
+                <CardTitle>Recent Applications</CardTitle>
+                <CardDescription>Latest projects and their runtime state.</CardDescription>
               </div>
               <Button variant="outline" size="sm" href="/apps">
                 View all
                 <ArrowRight class="size-4" />
               </Button>
             </div>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="w-full table-fixed">
-              <thead>
-                <tr class="border-b border-border text-left text-sm">
-                  <th class="w-[52%] px-4 py-3">Application</th>
-                  <th class="w-[24%] px-4 py-3">Status</th>
-                  <th class="hidden w-[24%] px-4 py-3 xl:table-cell">Created</th>
-                  <th class="w-[96px] px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#if $appsLoading && $appsStore.length === 0}
-                  {#each Array.from({ length: 3 }) as _}
-                    <tr class="border-b border-border">
-                      <td class="px-4 py-4"><Skeleton class="h-9 w-44" /></td>
-                      <td class="px-4 py-4"><Skeleton class="h-5 w-20" /></td>
-                      <td class="hidden px-4 py-4 xl:table-cell"><Skeleton class="h-5 w-24" /></td>
-                      <td class="px-4 py-4 text-right"><Skeleton class="ml-auto h-8 w-20" /></td>
-                    </tr>
-                  {/each}
-                {:else}
-                  {#each $appsWithStatusStore as app}
-                    <tr class="border-b border-border">
-                      <td class="px-4 py-4">
-                        <div class="flex min-w-0 items-center gap-3">
-                          <div class="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background">
-                            <Server class="size-4" />
-                          </div>
-                          <div class="min-w-0">
-                            <div class="truncate font-medium">{app.name}</div>
-                            <div class="truncate text-xs text-muted-foreground">{app.hostname || "No public hostname"}</div>
-                          </div>
+          </CardHeader>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead class="w-[52%]">Application</TableHead>
+                <TableHead class="w-[24%]">Status</TableHead>
+                <TableHead class="hidden w-[24%] xl:table-cell">Created</TableHead>
+                <TableHead class="w-[96px] text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {#if $appsLoading && $appsStore.length === 0}
+                {#each Array.from({ length: 3 }) as _}
+                  <TableRow>
+                    <TableCell><Skeleton class="h-9 w-44" /></TableCell>
+                    <TableCell><Skeleton class="h-5 w-20" /></TableCell>
+                    <TableCell class="hidden xl:table-cell"><Skeleton class="h-5 w-24" /></TableCell>
+                    <TableCell class="text-right"><Skeleton class="ml-auto h-8 w-20" /></TableCell>
+                  </TableRow>
+                {/each}
+              {:else}
+                {#each $appsWithStatusStore as app}
+                  <TableRow>
+                    <TableCell>
+                      <div class="flex min-w-0 items-center gap-3">
+                        <div class="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background">
+                          <Server class="size-4" />
                         </div>
-                      </td>
-                      <td class="px-4 py-4">
-                        <Badge variant={getAppStatusVariant(app.status)} class={`capitalize ${getAppStatusClass(app.status)}`}>{app.status}</Badge>
-                      </td>
-                      <td class="hidden px-4 py-4 text-sm text-muted-foreground xl:table-cell">{formatDate(app.created_at)}</td>
-                      <td class="px-4 py-4 text-right">
-                        <Button size="sm" variant="outline" href={`/apps/${encodeURIComponent(app.name)}`}>Manage</Button>
-                      </td>
-                    </tr>
-                  {/each}
-                {/if}
-              </tbody>
-            </table>
-          </div>
+                        <div class="min-w-0">
+                          <div class="truncate font-medium">{app.name}</div>
+                          <div class="truncate text-xs text-muted-foreground">{app.hostname || "No public hostname"}</div>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={getAppStatusVariant(app.status)} class={`capitalize ${getAppStatusClass(app.status)}`}>{app.status}</Badge>
+                    </TableCell>
+                    <TableCell class="hidden text-muted-foreground xl:table-cell">{formatDate(app.created_at)}</TableCell>
+                    <TableCell class="text-right">
+                      <Button size="sm" variant="outline" href={`/apps/${encodeURIComponent(app.name)}`}>Manage</Button>
+                    </TableCell>
+                  </TableRow>
+                {/each}
+              {/if}
+            </TableBody>
+          </Table>
         </Card>
 
         <Card>
-          <div class="border-b border-border p-5">
-              <div class="flex items-center justify-between gap-4">
-              <div class="flex flex-col gap-1.5">
-                <h2 class="text-lg font-semibold">System Status</h2>
-                <p class="text-sm text-muted-foreground">Health of core services.</p>
+          <CardHeader class="border-b">
+            <div class="flex items-center justify-between gap-4">
+              <div class="grid gap-1">
+                <CardTitle>System Status</CardTitle>
+                <CardDescription>Health of core services.</CardDescription>
               </div>
-              <Badge variant={hasHealthError() || offlineServices > 0 ? "destructive" : "outline"} class={hasHealthError() || offlineServices > 0 ? "" : getHealthClass("ONLINE")}>
+              <Badge variant="outline" class={hasHealthError() || offlineServices > 0 ? getHealthClass("OFFLINE") : getHealthClass("ONLINE")}>
                 {hasHealthError() || offlineServices > 0 ? "Degraded" : "Operational"}
               </Badge>
             </div>
-          </div>
-          <div class="flex flex-col gap-4 p-5">
+          </CardHeader>
+          <CardContent class="flex flex-col gap-4 py-5">
             {#each healthServices as service, index}
               {@const ServiceIcon = service.icon}
               {@const status = $healthStore?.services?.[service.key] || (hasHealthError() ? "OFFLINE" : "CHECKING")}
@@ -283,7 +317,7 @@
                     <ServiceIcon class="size-4 text-muted-foreground" />
                     <span class="text-sm font-medium">{service.name}</span>
                   </div>
-                  <Badge variant={getHealthVariant(status)} class={`uppercase ${getHealthClass(status)}`}>
+                  <Badge variant="outline" class={`uppercase ${getHealthClass(status)}`}>
                     {status}
                   </Badge>
                 </div>
@@ -292,10 +326,10 @@
                 {/if}
               </div>
             {/each}
-          </div>
-          <div class="border-t border-border p-5 pt-4">
+          </CardContent>
+          <CardFooter class="border-t py-3">
             <p class="text-xs text-muted-foreground">Version {$healthStore?.version || "0.0.0"}</p>
-          </div>
+          </CardFooter>
         </Card>
       </div>
     {/if}

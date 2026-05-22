@@ -75,11 +75,11 @@
   function getStatusBadgeClass(status: string) {
     switch (status) {
       case "Running":
-        return "border-transparent bg-[color-mix(in_srgb,var(--status-online)_12%,transparent)] text-[var(--status-online)]";
+        return "border-transparent bg-status-online/10 text-status-online";
       case "Provisioning":
-        return "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]";
+        return "border-transparent bg-status-info/10 text-status-info";
       case "Deleting":
-        return "border-transparent bg-[color-mix(in_srgb,var(--status-error)_12%,transparent)] text-[var(--status-error)]";
+        return "border-transparent bg-status-offline/10 text-status-offline";
       default:
         return "border-transparent bg-muted/70 text-muted-foreground";
     }
@@ -106,7 +106,7 @@
       <div class="flex flex-col gap-4">
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div class="flex items-center gap-4">
-            <div class="flex size-12 items-center justify-center rounded-lg border border-border bg-background text-foreground">
+            <div class="flex size-12 items-center justify-center rounded-md border border-border bg-background text-foreground">
               <DatabaseIcon class="size-6" />
             </div>
             <div class="flex flex-col">
@@ -121,7 +121,7 @@
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <Badge variant="outline" class="gap-2 px-3 py-1.5 border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">
+            <Badge variant="outline" class="gap-2 px-3 py-1.5 border-transparent bg-status-info/10 text-status-info">
               <LockKeyhole class="size-4" />
               Private 6PN
             </Badge>
@@ -248,7 +248,7 @@
                     <CardTitle class="text-base">Connectivity Links</CardTitle>
                     <CardDescription>Applications currently communicating with this database instance.</CardDescription>
                   </div>
-                  <Badge variant="outline" class="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]">
+                  <Badge variant="outline" class="border-transparent bg-status-info/10 text-status-info">
                     <Zap class="size-4" />
                     Live routes
                   </Badge>
@@ -278,7 +278,7 @@
                           <span class="rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs">{app.ipv6}</span>
                         </td>
                         <td class="px-4 py-4 text-right">
-                          <Badge variant="outline" class="border-transparent bg-[color-mix(in_srgb,var(--status-online)_12%,transparent)] text-[var(--status-online)]">
+                          <Badge variant="outline" class="border-transparent bg-status-online/10 text-status-online">
                             {app.status}
                           </Badge>
                         </td>

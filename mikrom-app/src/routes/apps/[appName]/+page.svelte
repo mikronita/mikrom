@@ -230,7 +230,7 @@
       return {
         variant: "outline" as const,
         className:
-          "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]",
+          "border-transparent bg-status-info/10 text-status-info",
       };
     }
     if (
@@ -243,7 +243,7 @@
       return {
         variant: "outline" as const,
         className:
-          "border-transparent bg-[color-mix(in_srgb,var(--status-warning)_12%,transparent)] text-[var(--status-warning)]",
+          "border-transparent bg-status-warning/10 text-status-warning",
       };
     }
     if (s === "failed" || s === "cancelled") {
@@ -768,7 +768,7 @@
                         <Button
                           size="sm"
                           variant="outline"
-                          class="border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)] hover:bg-[color-mix(in_srgb,var(--status-info)_18%,transparent)]"
+                          class="border-transparent bg-status-info/10 text-status-info hover:bg-status-info/20"
                           disabled={!canActivate ||
                             activatingDeploymentId !== null}
                           onclick={() => handleActivate(dep.id)}
@@ -805,7 +805,7 @@
             <Skeleton class="h-6 w-44" />
             <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {#each Array.from({ length: 4 }) as _}
-                <div class="rounded-lg border bg-background/80 p-3 shadow-sm">
+                <div class="rounded-md border bg-background/80 p-3 shadow-xs">
                   <Skeleton class="h-4 w-24" />
                   <div class="mt-3 flex flex-col gap-2">
                     <Skeleton class="h-6 w-20" />
@@ -834,7 +834,7 @@
               <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 {#each metricCards as metric}
                   <div
-                    class="min-w-36 rounded-lg border bg-background/80 p-3 shadow-sm"
+                    class="min-w-36 rounded-md border bg-background/80 p-3 shadow-xs"
                   >
                     <div
                       class="flex items-center gap-2 text-xs font-medium text-muted-foreground"
@@ -947,7 +947,7 @@
           </div>
         </div>
 
-        <div class="rounded-lg border border-border bg-muted/50 p-4">
+        <div class="rounded-md border border-border bg-muted/50 p-4">
           <h4 class="mb-2 text-xs font-bold">Instructions:</h4>
           <ol
             class="list-inside list-decimal space-y-2 text-xs text-muted-foreground"

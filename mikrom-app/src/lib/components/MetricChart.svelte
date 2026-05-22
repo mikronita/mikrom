@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { cn } from "$lib/utils";
+
   type Point = {
     time: string;
     cpu: number;
@@ -16,7 +18,10 @@
     format: (value: number) => string;
   };
 
-  export let points: Point[] = [];
+  let { points = [], class: className = "" } = $props<{
+    points?: Point[];
+    class?: string;
+  }>();
 
   const width = 960;
   const height = 320;
@@ -58,8 +63,8 @@
     },
   ];
 
-  let hoveredIndex: number | null = null;
-  let chartEl: SVGSVGElement | null = null;
+  let hoveredIndex = $state<number | null>(null);
+  let chartEl = $state<SVGSVGElement | null>(null);
 
   function clamp(value: number, min: number, max: number) {
     return Math.min(Math.max(value, min), max);
@@ -118,40 +123,42 @@
     hoveredIndex = clamp(Math.round(relative * (points.length - 1)), 0, points.length - 1);
   }
 
-  $: chartPoints = points.slice(-30);
-  $: visiblePoints = chartPoints;
-  $: xStep = visiblePoints.length > 1 ? plotWidth / (visiblePoints.length - 1) : 0;
-  $: seriesBounds = Object.fromEntries(
+  const chartPoints = $derived(points.slice(-30));
+  const visiblePoints = $derived(chartPoints);
+  const xStep = $derived(visiblePoints.length > 1 ? plotWidth / (visiblePoints.length - 1) : 0);
+  const seriesBounds = $derived(Object.fromEntries(
     series.map((config) => {
-      const values = visiblePoints.map((point) => point[config.key]);
+      const values = visiblePoints.map((point: Point) => point[config.key]);
       const min = values.length ? Math.min(...values) : 0;
       const max = values.length ? Math.max(...values) : 0;
       const paddedMin = min === max ? min - 1 : min;
       const paddedMax = min === max ? max + 1 : max;
       return [config.key, { min: paddedMin, max: paddedMax }];
     })
-  ) as Record<SeriesKey, { min: number; max: number }>;
-  $: paths = Object.fromEntries(
+  ) as Record<SeriesKey, { min: number; max: number }>);
+  
+  const paths = $derived(Object.fromEntries(
     series.map((config) => {
       const bounds = seriesBounds[config.key];
-      return [config.key, buildCurvePath(visiblePoints.map((point) => point[config.key]), bounds.min, bounds.max)];
+      return [config.key, buildCurvePath(visiblePoints.map((point: Point) => point[config.key]), bounds.min, bounds.max)];
     })
-  ) as Record<SeriesKey, string>;
-  $: activeIndex = hoveredIndex;
-  $: activePoint = activeIndex !== null ? visiblePoints[activeIndex] : null;
-  $: activeX = activeIndex !== null ? plotLeft + xStep * activeIndex : null;
+  ) as Record<SeriesKey, string>);
+  
+  const activeIndex = $derived(hoveredIndex);
+  const activePoint = $derived(activeIndex !== null ? visiblePoints[activeIndex] : null);
+  const activeX = $derived(activeIndex !== null ? plotLeft + xStep * activeIndex : null);
   
   // Calculate tooltip alignment and position
-  $: tooltipXOffset = activeIndex !== null && visiblePoints.length > 0
+  const tooltipXOffset = $derived(activeIndex !== null && visiblePoints.length > 0
     ? activeIndex < visiblePoints.length / 4 
       ? "0%" // Align to the left
       : activeIndex > (visiblePoints.length * 3) / 4
         ? "-100%" // Align to the right
         : "-50%"  // Center
-    : "-50%";
+    : "-50%");
 
-  $: tooltipLeft = activeX !== null ? `${(activeX / width) * 100}%` : "0%";
-  $: tooltipTop =
+  const tooltipLeft = $derived(activeX !== null ? `${(activeX / width) * 100}%` : "0%");
+  const tooltipTop = $derived(
     activePoint && activeIndex !== null
       ? `${Math.max(
           12,
@@ -165,14 +172,15 @@
             ) - 24
           )
         )}px`
-      : "24px";
+      : "24px"
+  );
 
   function clearHover() {
     hoveredIndex = null;
   }
 </script>
 
-<div class="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+<div class={cn("overflow-hidden rounded-lg border border-border bg-card shadow-xs", className)}>
   {#if visiblePoints.length > 0}
     <div class="relative pt-3 sm:pt-4">
       <svg
@@ -182,9 +190,9 @@
         role="img"
         aria-label="System performance chart with CPU, RAM, Network In and Network Out"
         class="h-[300px] w-full touch-none overflow-visible sm:h-[320px]"
-        on:pointermove={hoverFromEvent}
-        on:pointerleave={clearHover}
-        on:pointerdown={hoverFromEvent}
+        onpointermove={hoverFromEvent}
+        onpointerleave={clearHover}
+        onpointerdown={hoverFromEvent}
       >
         <defs>
           <linearGradient id="chart-grid-fade" x1="0" x2="0" y1="0" y2="1">
