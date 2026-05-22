@@ -1,0 +1,130 @@
+<script lang="ts">
+  import { Database as DatabaseIcon, Plus, Calendar, Cpu, HardDrive, Radio, Search } from "lucide-svelte";
+  import DashboardLayout from "$lib/components/DashboardLayout.svelte";
+  import Card from "$lib/components/Card.svelte";
+  import CardHeader from "$lib/components/CardHeader.svelte";
+  import CardTitle from "$lib/components/CardTitle.svelte";
+  import CardDescription from "$lib/components/CardDescription.svelte";
+  import CardContent from "$lib/components/CardContent.svelte";
+  import Badge from "$lib/components/Badge.svelte";
+  import Button from "$lib/components/Button.svelte";
+  import CardSkeleton from "$lib/components/CardSkeleton.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import CreateDatabaseModal from "$lib/components/CreateDatabaseModal.svelte";
+  import { formatDate } from "$lib/utils";
+  import { databasesStore, databasesLoading } from "$lib/stores/databases";
+
+  let showCreate = false;
+
+  function getStatusBadgeClass(status: string) {
+    switch (status) {
+      case "Running":
+        return "border-transparent bg-[color-mix(in_srgb,var(--status-online)_12%,transparent)] text-[var(--status-online)]";
+      case "Provisioning":
+        return "border-transparent bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[var(--status-info)]";
+      case "Deleting":
+        return "border-transparent bg-[color-mix(in_srgb,var(--status-error)_12%,transparent)] text-[var(--status-error)]";
+      default:
+        return "border-transparent bg-muted/70 text-muted-foreground";
+    }
+  }
+</script>
+
+<svelte:head>
+  <title>Mikrom - Databases</title>
+</svelte:head>
+
+<DashboardLayout>
+  <div class="flex flex-col gap-6">
+    <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center gap-3">
+          <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+            <DatabaseIcon />
+          </div>
+          <h1 class="text-3xl font-semibold tracking-tight">Databases</h1>
+        </div>
+        <p class="max-w-2xl text-sm text-muted-foreground">Managed PostgreSQL instances for your applications.</p>
+      </div>
+      <Button onclick={() => (showCreate = true)}>
+        <Plus class="size-4" />
+        New Database
+      </Button>
+    </div>
+
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {#if $databasesLoading && $databasesStore.length === 0}
+        {#each Array.from({ length: 6 }) as _}
+          <CardSkeleton
+            titleClassName="w-32"
+            descriptionClassName="w-full"
+            footerLineClassName="w-40"
+            footerPills={["w-20", "w-24"]}
+          />
+        {/each}
+      {:else if $databasesStore.length === 0}
+        <div class="col-span-full">
+          <EmptyState class="py-16">
+            <DatabaseIcon class="size-10 text-muted-foreground" />
+            <h2 class="text-xl font-semibold">No databases found</h2>
+            <p class="max-w-md text-sm text-muted-foreground">Provision your first PostgreSQL instance to get started.</p>
+            <Button size="sm" onclick={() => (showCreate = true)}>
+              <Plus class="size-4" />
+              Create your first database
+            </Button>
+          </EmptyState>
+        </div>
+      {:else}
+        {#each [...$databasesStore].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) as db}
+          <a class="block" href={`/databases/${encodeURIComponent(db.name)}`}>
+            <Card class="h-full overflow-hidden transition-colors hover:bg-muted/30">
+              <CardHeader>
+                <div class="flex items-start gap-4">
+                  <div class="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-foreground">
+                    <DatabaseIcon class="size-5" />
+                  </div>
+                  <div class="flex min-w-0 flex-1 flex-col gap-2">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <CardTitle class="truncate text-base">{db.name}</CardTitle>
+                    </div>
+                    <CardDescription>PostgreSQL {db.version}</CardDescription>
+                  </div>
+                  <Badge variant="outline" className={`shrink-0 gap-1.5 uppercase ${getStatusBadgeClass(db.status)}`}>
+                    <Radio class="size-3" />
+                    {db.status}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent class="flex flex-col gap-4">
+                <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span class="inline-flex items-center gap-1.5">
+                    <Calendar class="size-4" />
+                    Created {formatDate(db.created_at)}
+                  </span>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="gap-1.5">
+                      <Cpu class="size-3" />
+                      <span>{db.vcpus} vCPU</span>
+                    </Badge>
+                    <Badge variant="outline" className="gap-1.5">
+                      <HardDrive class="size-3" />
+                      <span>{db.memory_mib / 1024} GB</span>
+                    </Badge>
+                    <Badge variant="outline" className="gap-1.5">
+                      <DatabaseIcon class="size-3" />
+                      <span>{db.storage_gb} GB</span>
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </a>
+        {/each}
+      {/if}
+    </div>
+  </div>
+
+  {#if showCreate}
+    <CreateDatabaseModal bind:open={showCreate} />
+  {/if}
+</DashboardLayout>

@@ -3,6 +3,7 @@
   import {
     DEPLOYMENT_CPU_OPTIONS,
     DEPLOYMENT_MEMORY_OPTIONS,
+    DEPLOYMENT_HYPERVISOR_OPTIONS,
     deployAppVersion,
     type AppInfo,
   } from "$lib/api";
@@ -18,14 +19,17 @@
 
   const DEFAULT_CPU = String(DEPLOYMENT_CPU_OPTIONS[0]);
   const DEFAULT_MEMORY = String(DEPLOYMENT_MEMORY_OPTIONS[0].value);
+  const DEFAULT_HYPERVISOR = String(DEPLOYMENT_HYPERVISOR_OPTIONS[0].value);
 
   let loading = false;
   let selectedCpu = DEFAULT_CPU;
   let selectedMemory = DEFAULT_MEMORY;
+  let selectedHypervisor = DEFAULT_HYPERVISOR;
 
   function resetForm() {
     selectedCpu = DEFAULT_CPU;
     selectedMemory = DEFAULT_MEMORY;
+    selectedHypervisor = DEFAULT_HYPERVISOR;
   }
 
   $: if (open) {
@@ -46,6 +50,7 @@
       const result = await deployAppVersion(token, app.name, {
         vcpus: Number(selectedCpu),
         memory_mib: Number(selectedMemory),
+        hypervisor: selectedHypervisor || undefined,
       });
 
       if (result.error) {
@@ -86,6 +91,18 @@
       <Select id="deploy_memory" bind:value={selectedMemory}>
         {#each DEPLOYMENT_MEMORY_OPTIONS as memory}
           <option value={memory.value.toString()}>{memory.label}</option>
+        {/each}
+      </Select>
+    </Field>
+
+    <Field
+      label="Hypervisor"
+      forId="deploy_hypervisor"
+      description="Select the virtual machine monitor for this deployment."
+    >
+      <Select id="deploy_hypervisor" bind:value={selectedHypervisor}>
+        {#each DEPLOYMENT_HYPERVISOR_OPTIONS as opt}
+          <option value={opt.value}>{opt.label}</option>
         {/each}
       </Select>
     </Field>
