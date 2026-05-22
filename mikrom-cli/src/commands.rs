@@ -156,6 +156,12 @@ pub enum AppCommands {
             value_parser = parse_memory_choice
         )]
         memory: Option<u32>,
+        #[arg(
+            long,
+            short = 'H',
+            help = "Hypervisor type: firecracker, qemu, or unspecified (default)"
+        )]
+        hypervisor: Option<String>,
     },
     /// Activate/Rollback to a specific deployment
     Activate {

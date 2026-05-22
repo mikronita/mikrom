@@ -40,6 +40,10 @@ async fn list(client: &MikromClient, output: OutputFormat) -> Result<()> {
                     format!("{} {}", ui::ROCKET, ui::bold_cyan(&dep.app_name)),
                     dep.job_id.clone(),
                     ui::status_label(&dep.status),
+                    dep.hypervisor
+                        .as_deref()
+                        .unwrap_or("unspecified")
+                        .to_string(),
                     dep.ipv6_address.as_deref().unwrap_or("—").to_string(),
                     dep.host_id.clone(),
                 ]
@@ -47,7 +51,7 @@ async fn list(client: &MikromClient, output: OutputFormat) -> Result<()> {
             .collect::<Vec<_>>();
         ui::table(
             "🚀 Live Deployments",
-            &["App", "Job", "Status", "IPv6", "Host"],
+            &["App", "Job", "Status", "Hypervisor", "IPv6", "Host"],
             &rows,
         );
     }
@@ -73,6 +77,14 @@ async fn status(
             vec!["App".to_string(), format!("{} {}", ui::APP, app)],
             vec!["Job".to_string(), status.job_id.clone()],
             vec!["Status".to_string(), ui::status_label(&status.status)],
+            vec![
+                "Hypervisor".to_string(),
+                status
+                    .hypervisor
+                    .as_deref()
+                    .unwrap_or("unspecified")
+                    .to_string(),
+            ],
             vec!["Worker".to_string(), status.host_id.clone()],
             vec!["VM".to_string(), status.vm_id.clone()],
             vec![

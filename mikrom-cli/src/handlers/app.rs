@@ -12,9 +12,12 @@ pub async fn handle(client: &MikromClient, cmd: AppCommands, output: OutputForma
         AppCommands::List => list(client, output).await,
         AppCommands::Create { name, git_url } => create(client, &name, &git_url, output).await,
         AppCommands::Delete { name } => delete(client, &name, output).await,
-        AppCommands::Deploy { name, cpu, memory } => {
-            deploy(client, &name, cpu, memory, output).await
-        },
+        AppCommands::Deploy {
+            name,
+            cpu,
+            memory,
+            hypervisor,
+        } => deploy(client, &name, cpu, memory, hypervisor.as_deref(), output).await,
         AppCommands::Activate { app, deployment_id } => {
             activate(client, &app, &deployment_id, output).await
         },
@@ -137,6 +140,7 @@ async fn deploy(
     name: &str,
     cpu: Option<u32>,
     memory: Option<u32>,
+    hypervisor: Option<&str>,
     output: OutputFormat,
 ) -> Result<()> {
     let vcpus = match cpu {
@@ -162,8 +166,13 @@ async fn deploy(
             "Resources:",
             &format!("{} vCPU, {} MiB RAM", vcpus, memory_mib),
         );
+        if let Some(hv) = hypervisor {
+            ui::label_value(ui::INFO, "Hypervisor:", hv);
+        }
     }
-    let resp = client.deploy_app_version(name, vcpus, memory_mib).await?;
+    let resp = client
+        .deploy_app_version(name, vcpus, memory_mib, hypervisor)
+        .await?;
     if output == OutputFormat::Json {
         return ui::print_json(&resp);
     }
