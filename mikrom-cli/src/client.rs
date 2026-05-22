@@ -65,6 +65,7 @@ pub struct LiveDeploymentInfo {
     pub status: String,
     pub host_id: String,
     pub ipv6_address: Option<String>,
+    pub hypervisor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -77,6 +78,7 @@ pub struct LiveDeploymentStatus {
     pub started_at: i64,
     pub error_message: String,
     pub ipv6_address: Option<String>,
+    pub hypervisor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -85,6 +87,7 @@ pub struct DeploymentInfo {
     pub image_tag: Option<String>,
     pub status: String,
     pub created_at: Option<String>,
+    pub hypervisor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -550,14 +553,19 @@ impl MikromClient {
         app_id: &str,
         vcpus: u32,
         memory_mib: u32,
+        hypervisor: Option<&str>,
     ) -> anyhow::Result<DeployResponse> {
+        let mut body = serde_json::json!({
+            "vcpus": vcpus,
+            "memory_mib": memory_mib,
+        });
+        if let Some(hv) = hypervisor {
+            body["hypervisor"] = serde_json::json!(hv);
+        }
         self.request(
             reqwest::Method::POST,
             &format!("/apps/{}/deploy", app_id),
-            Some(serde_json::json!({
-                "vcpus": vcpus,
-                "memory_mib": memory_mib,
-            })),
+            Some(body),
         )
         .await
     }
