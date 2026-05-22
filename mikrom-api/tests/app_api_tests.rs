@@ -463,6 +463,7 @@ async fn test_list_apps_reports_idle_when_active_deployment_is_running() {
                 git_commit_message: None,
                 git_branch: None,
                 trigger_source: "test".to_string(),
+                hypervisor: 0,
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             }))

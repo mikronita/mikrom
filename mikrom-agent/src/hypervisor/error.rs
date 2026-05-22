@@ -14,4 +14,6 @@ pub enum HypervisorError {
     ApiError { path: String, msg: String },
     #[error("Timed out waiting for socket: {0}")]
     SocketTimeout(String),
+    #[error("Unsupported operation: {0}")]
+    UnsupportedOperation(String),
 }

@@ -117,12 +117,11 @@ impl crate::firecracker::FirecrackerManager {
     }
 
     pub(crate) async fn cleanup_process_paths(&self, vm_id: &VmId, socket_path: Option<&str>) {
-        if let Some(socket) = socket_path {
-            if let Err(e) = tokio::fs::remove_file(socket).await
-                && e.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::debug!("Failed to remove socket {}: {}", socket, e);
-            }
+        if let Some(socket) = socket_path
+            && let Err(e) = tokio::fs::remove_file(socket).await
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::debug!("Failed to remove socket {}: {}", socket, e);
         }
 
         let paths = crate::firecracker::paths::VmPaths::new(

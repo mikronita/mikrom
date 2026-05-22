@@ -43,6 +43,17 @@ message AgentCommand {
     CreateVolumeRequest create_volume = 10;
     RestoreSnapshotRequest restore_snapshot = 11;
     CloneVolumeRequest clone_volume = 12;
+    VmSnapshotCreateRequest vm_snapshot_create = 13;
+    VmSnapshotRestoreRequest vm_snapshot_restore = 14;
+    VmSnapshotDeleteRequest vm_snapshot_delete = 15;
+    VmSnapshotListRequest vm_snapshot_list = 16;
+    AttachVolumeRequest attach_volume = 17;
+    DetachVolumeRequest detach_volume = 18;
+    StartMigrationRequest start_migration = 19;
+    CancelMigrationRequest cancel_migration = 20;
+    QueryMigrationRequest query_migration = 21;
+    SetBalloonRequest set_balloon = 22;
+    QueryBalloonRequest query_balloon = 23;
   }
 }
 
@@ -296,4 +307,132 @@ enum VmStatus {
 message VmLogPayload {
   string line = 1;
   int64 timestamp = 2;
+}
+
+// ── VM Snapshot Operations ─────────────────────────────────────────────────
+message VmSnapshotCreateRequest {
+  string vm_id = 1;
+  string snapshot_name = 2;
+}
+
+message VmSnapshotCreateResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message VmSnapshotRestoreRequest {
+  string vm_id = 1;
+  string snapshot_name = 2;
+}
+
+message VmSnapshotRestoreResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message VmSnapshotDeleteRequest {
+  string vm_id = 1;
+  string snapshot_name = 2;
+}
+
+message VmSnapshotDeleteResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message VmSnapshotListRequest {
+  string vm_id = 1;
+}
+
+message VmSnapshotInfo {
+  string id = 1;
+  string name = 2;
+  int64 created_at = 3;
+  int64 size_bytes = 4;
+  string vm_status = 5;
+}
+
+message VmSnapshotListResponse {
+  bool success = 1;
+  string message = 2;
+  repeated VmSnapshotInfo snapshots = 3;
+}
+
+// ── VM Volume Hot-Plug ─────────────────────────────────────────────────────
+message AttachVolumeRequest {
+  string vm_id = 1;
+  string volume_id = 2;
+  string mount_point = 3;
+  bool read_only = 4;
+}
+
+message AttachVolumeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DetachVolumeRequest {
+  string vm_id = 1;
+  string volume_id = 2;
+}
+
+message DetachVolumeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ── VM Live Migration ──────────────────────────────────────────────────────
+message StartMigrationRequest {
+  string vm_id = 1;
+  string target_host = 2;
+  string target_uri = 3;
+}
+
+message StartMigrationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message CancelMigrationRequest {
+  string vm_id = 1;
+}
+
+message CancelMigrationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message QueryMigrationRequest {
+  string vm_id = 1;
+}
+
+message QueryMigrationResponse {
+  bool success = 1;
+  string message = 2;
+  string status = 3;
+  int64 total_bytes = 4;
+  int64 transferred_bytes = 5;
+  int64 remaining_bytes = 6;
+}
+
+// ── VM Balloon ─────────────────────────────────────────────────────────────
+message SetBalloonRequest {
+  string vm_id = 1;
+  uint32 target_memory_mib = 2;
+}
+
+message SetBalloonResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message QueryBalloonRequest {
+  string vm_id = 1;
+}
+
+message QueryBalloonResponse {
+  bool success = 1;
+  string message = 2;
+  uint32 actual_memory_mib = 3;
+  uint32 max_memory_mib = 4;
 }

@@ -1154,6 +1154,82 @@ mod tests {
         ) -> DomainResult<()> {
             Ok(())
         }
+
+        async fn vm_snapshot_create(
+            &self,
+            _host_id: &str,
+            _vm_id: &str,
+            _snapshot_name: &str,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        async fn vm_snapshot_restore(
+            &self,
+            _host_id: &str,
+            _vm_id: &str,
+            _snapshot_name: &str,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        async fn vm_snapshot_delete(
+            &self,
+            _host_id: &str,
+            _vm_id: &str,
+            _snapshot_name: &str,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        async fn vm_snapshot_list(
+            &self,
+            _host_id: &str,
+            _vm_id: &str,
+        ) -> DomainResult<Vec<mikrom_proto::agent::VmSnapshotInfo>> {
+            Ok(vec![])
+        }
+        async fn attach_volume(
+            &self,
+            _host_id: &str,
+            _vm_id: &str,
+            _volume_id: &str,
+            _mount_point: &str,
+            _read_only: bool,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        async fn detach_volume(
+            &self,
+            _host_id: &str,
+            _vm_id: &str,
+            _volume_id: &str,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        async fn start_migration(
+            &self,
+            _host_id: &str,
+            _vm_id: &str,
+            _target_host: &str,
+            _target_uri: &str,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        async fn cancel_migration(&self, _host_id: &str, _vm_id: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        async fn query_migration(&self, _host_id: &str, _vm_id: &str) -> DomainResult<String> {
+            Ok("completed".to_string())
+        }
+        async fn set_balloon(
+            &self,
+            _host_id: &str,
+            _vm_id: &str,
+            _target_memory_mib: u32,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        async fn query_balloon(&self, _host_id: &str, _vm_id: &str) -> DomainResult<(u32, u32)> {
+            Ok((512, 1024))
+        }
     }
 
     async fn connect_nats_or_skip() -> Option<async_nats::Client> {

@@ -93,6 +93,7 @@ async fn test_route_reconciliation_on_startup() {
             git_commit_hash: None,
             git_commit_message: None,
             git_branch: None,
+            hypervisor: 0,
         })
         .await
         .unwrap();

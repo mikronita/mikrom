@@ -106,10 +106,10 @@ impl QmpClient {
                 if line.is_empty() {
                     continue;
                 }
-                if let Ok(val) = serde_json::from_str::<Value>(&line) {
-                    if val.get("return").is_some() || val.get("error").is_some() {
-                        return Ok(val);
-                    }
+                if let Ok(val) = serde_json::from_str::<Value>(&line)
+                    && (val.get("return").is_some() || val.get("error").is_some())
+                {
+                    return Ok(val);
                 }
             }
         })

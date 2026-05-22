@@ -197,7 +197,10 @@ async fn test_client_deploy_app() {
         .mount(&server)
         .await;
 
-    let res = client.deploy_app_version("test-app", 1, 512).await.unwrap();
+    let res = client
+        .deploy_app_version("test-app", 1, 512, None)
+        .await
+        .unwrap();
     assert_eq!(res.job_id.unwrap(), "job-123");
     assert_eq!(res.status, "BUILDING");
 }

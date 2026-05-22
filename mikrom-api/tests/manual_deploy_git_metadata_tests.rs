@@ -91,6 +91,7 @@ async fn test_manual_deploy_without_github_metadata() {
                 git_commit_hash: None,
                 git_commit_message: None,
                 git_branch: None,
+                hypervisor: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             })
@@ -115,6 +116,7 @@ async fn test_manual_deploy_without_github_metadata() {
         disk_mib: None,
         env: None,
         image: None,
+        hypervisor: None,
     };
 
     let result = deploy_app_version_handler(
@@ -187,6 +189,7 @@ async fn test_manual_deploy_with_github_metadata_fetch_failure() {
                 git_commit_hash: None,
                 git_commit_message: None,
                 git_branch: None,
+                hypervisor: 0,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             })
@@ -213,6 +216,7 @@ async fn test_manual_deploy_with_github_metadata_fetch_failure() {
         disk_mib: None,
         env: None,
         image: None,
+        hypervisor: None,
     };
 
     let result = deploy_app_version_handler(

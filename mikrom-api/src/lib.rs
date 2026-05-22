@@ -43,10 +43,14 @@ pub use repositories::user_repository::UserRepository;
 pub use repositories::volume_repository::VolumeRepository;
 pub use scheduler::Scheduler;
 pub use vms::{
-    create_security_rule_handler, delete_deployment_record, delete_security_rule_handler,
+    attach_volume_runtime_handler, cancel_migration_handler, create_security_rule_handler,
+    delete_deployment_record, delete_security_rule_handler, detach_volume_runtime_handler,
     get_deployment_logs, get_deployment_status, get_mesh_status_handler, list_active_deployments,
-    list_security_rules_handler, mesh_status_stream_handler, pause_deployment, resume_deployment,
-    stop_deployment, watch_deployments,
+    list_security_rules_handler, mesh_status_stream_handler, pause_deployment,
+    query_balloon_handler, query_migration_handler, resume_deployment, set_balloon_handler,
+    start_migration_handler, stop_deployment, vm_snapshot_create_handler,
+    vm_snapshot_delete_handler, vm_snapshot_list_handler, vm_snapshot_restore_handler,
+    watch_deployments,
 };
 
 use mikrom_proto::router::RouterConfigUpdate;
@@ -346,6 +350,76 @@ pub fn create_app_with_rate_limits(
         .route(
             &format!("{}/apps/{{app_name}}/deployments/{{job_id}}/delete", API_V1),
             delete(delete_deployment_record),
+        )
+        .route(
+            &format!(
+                "{}/apps/{{app_name}}/deployments/{{job_id}}/snapshot",
+                API_V1
+            ),
+            post(vm_snapshot_create_handler),
+        )
+        .route(
+            &format!(
+                "{}/apps/{{app_name}}/deployments/{{job_id}}/snapshot/{{snapshot_name}}/restore",
+                API_V1
+            ),
+            post(vm_snapshot_restore_handler),
+        )
+        .route(
+            &format!(
+                "{}/apps/{{app_name}}/deployments/{{job_id}}/snapshot/{{snapshot_name}}",
+                API_V1
+            ),
+            delete(vm_snapshot_delete_handler),
+        )
+        .route(
+            &format!(
+                "{}/apps/{{app_name}}/deployments/{{job_id}}/snapshots",
+                API_V1
+            ),
+            get(vm_snapshot_list_handler),
+        )
+        .route(
+            &format!(
+                "{}/apps/{{app_name}}/deployments/{{job_id}}/volumes/attach",
+                API_V1
+            ),
+            post(attach_volume_runtime_handler),
+        )
+        .route(
+            &format!(
+                "{}/apps/{{app_name}}/deployments/{{job_id}}/volumes/detach",
+                API_V1
+            ),
+            post(detach_volume_runtime_handler),
+        )
+        .route(
+            &format!(
+                "{}/apps/{{app_name}}/deployments/{{job_id}}/migration/start",
+                API_V1
+            ),
+            post(start_migration_handler),
+        )
+        .route(
+            &format!(
+                "{}/apps/{{app_name}}/deployments/{{job_id}}/migration/cancel",
+                API_V1
+            ),
+            post(cancel_migration_handler),
+        )
+        .route(
+            &format!(
+                "{}/apps/{{app_name}}/deployments/{{job_id}}/migration/status",
+                API_V1
+            ),
+            get(query_migration_handler),
+        )
+        .route(
+            &format!(
+                "{}/apps/{{app_name}}/deployments/{{job_id}}/balloon",
+                API_V1
+            ),
+            post(set_balloon_handler).get(query_balloon_handler),
         )
         .route(
             &format!("{}/apps/{{app_name}}/security-groups", API_V1),

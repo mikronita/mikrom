@@ -65,25 +65,25 @@ impl crate::firecracker::FirecrackerManager {
         let mut boot_args =
             "console=ttyS0 reboot=k panic=1 pci=off nomodules rw root=/dev/vda init=/mikrom-init i8042.nokbd i8042.noaux quiet"
                 .to_string();
-        if let (Some(ip_str), Some(gw_str)) = (&config.ip_address, &config.gateway) {
-            if let (Ok(_ip), Ok(_gw)) = (
+        if let (Some(ip_str), Some(gw_str)) = (&config.ip_address, &config.gateway)
+            && let (Ok(_ip), Ok(_gw)) = (
                 ip_str.parse::<std::net::Ipv4Addr>(),
                 gw_str.parse::<std::net::Ipv4Addr>(),
-            ) {
-                let mask = config.netmask.as_deref().unwrap_or("255.255.255.0");
-                if mask.parse::<std::net::Ipv4Addr>().is_ok() {
-                    boot_args.push_str(&format!(" ip={ip_str}::{gw_str}:{mask}::eth0:off"));
-                }
+            )
+        {
+            let mask = config.netmask.as_deref().unwrap_or("255.255.255.0");
+            if mask.parse::<std::net::Ipv4Addr>().is_ok() {
+                boot_args.push_str(&format!(" ip={ip_str}::{gw_str}:{mask}::eth0:off"));
             }
         }
 
-        if let (Some(ipv6_str), Some(gw6_str)) = (&config.ipv6_address, &config.ipv6_gateway) {
-            if let (Ok(_ipv6), Ok(_gw6)) = (
+        if let (Some(ipv6_str), Some(gw6_str)) = (&config.ipv6_address, &config.ipv6_gateway)
+            && let (Ok(_ipv6), Ok(_gw6)) = (
                 ipv6_str.parse::<std::net::Ipv6Addr>(),
                 gw6_str.parse::<std::net::Ipv6Addr>(),
-            ) {
-                boot_args.push_str(&format!(" ip=[{ipv6_str}]::[{gw6_str}]:64::eth0:off"));
-            }
+            )
+        {
+            boot_args.push_str(&format!(" ip=[{ipv6_str}]::[{gw6_str}]:64::eth0:off"));
         }
 
         boot_args

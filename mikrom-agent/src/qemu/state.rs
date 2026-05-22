@@ -36,10 +36,10 @@ impl QemuManager {
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "json") {
                 let content = tokio::fs::read_to_string(&path).await.ok();
-                if let Some(json) = content {
-                    if let Ok(vm_info) = serde_json::from_str::<VmInfo>(&json) {
-                        self.vms.write().await.insert(vm_info.vm_id, vm_info);
-                    }
+                if let Some(json) = content
+                    && let Ok(vm_info) = serde_json::from_str::<VmInfo>(&json)
+                {
+                    self.vms.write().await.insert(vm_info.vm_id, vm_info);
                 }
             }
         }

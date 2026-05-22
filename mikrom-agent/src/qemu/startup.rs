@@ -171,7 +171,7 @@ impl QemuManager {
             event_task,
         };
 
-        self.vms.write().await.insert(vm_id_key.clone(), vm_info);
+        self.vms.write().await.insert(vm_id_key, vm_info);
         self.processes.lock().await.insert(vm_id_key, qemu_proc);
 
         tracing::info!(
@@ -188,6 +188,7 @@ impl QemuManager {
         crate::network::ensure_bridge().await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_qemu_cmd(
         &self,
         vm_id: &VmId,

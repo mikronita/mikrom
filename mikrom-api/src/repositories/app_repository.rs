@@ -19,6 +19,7 @@ pub struct NewDeployment {
 }
 
 impl NewDeployment {
+    #[allow(clippy::too_many_arguments)]
     pub fn from_handler(
         app_id: Uuid,
         user_id: String,

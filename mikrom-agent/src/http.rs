@@ -3,6 +3,9 @@ use crate::metrics::MetricsCollector;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+type HypervisorMap = Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>;
+type HttpServerState = (MetricsCollector, HypervisorMap);
+
 /// HTTP server exposing health and metrics endpoints.
 pub struct AgentHttpServer {
     port: u16,
@@ -61,10 +64,7 @@ impl AgentHttpServer {
     }
 
     async fn metrics_handler(
-        axum::extract::State((_collector, hypervisors)): axum::extract::State<(
-            MetricsCollector,
-            Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>,
-        )>,
+        axum::extract::State((_collector, hypervisors)): axum::extract::State<HttpServerState>,
     ) -> String {
         let mut output = String::new();
 

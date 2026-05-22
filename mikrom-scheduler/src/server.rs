@@ -497,6 +497,525 @@ impl SchedulerServer {
             }),
         }
     }
+
+    pub async fn vm_snapshot_create(
+        &self,
+        req: mikrom_proto::scheduler::VmSnapshotCreateRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::VmSnapshotCreateResponse> {
+        let job = match self
+            .app_service
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(j) => j,
+            Err(e) => {
+                return Ok(mikrom_proto::scheduler::VmSnapshotCreateResponse {
+                    success: false,
+                    message: e.to_string(),
+                });
+            },
+        };
+        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
+            (Some(h), Some(v)) => (h.clone(), v.clone()),
+            _ => {
+                return Ok(mikrom_proto::scheduler::VmSnapshotCreateResponse {
+                    success: false,
+                    message: "Job has no host or VM assigned".to_string(),
+                });
+            },
+        };
+        match self
+            .app_service
+            .agent_client
+            .vm_snapshot_create(&host_id, &vm_id, &req.snapshot_name)
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::VmSnapshotCreateResponse {
+                success: true,
+                message: "VM snapshot created".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::VmSnapshotCreateResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn vm_snapshot_restore(
+        &self,
+        req: mikrom_proto::scheduler::VmSnapshotRestoreRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::VmSnapshotRestoreResponse> {
+        let job = match self
+            .app_service
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(j) => j,
+            Err(e) => {
+                return Ok(mikrom_proto::scheduler::VmSnapshotRestoreResponse {
+                    success: false,
+                    message: e.to_string(),
+                });
+            },
+        };
+        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
+            (Some(h), Some(v)) => (h.clone(), v.clone()),
+            _ => {
+                return Ok(mikrom_proto::scheduler::VmSnapshotRestoreResponse {
+                    success: false,
+                    message: "Job has no host or VM assigned".to_string(),
+                });
+            },
+        };
+        match self
+            .app_service
+            .agent_client
+            .vm_snapshot_restore(&host_id, &vm_id, &req.snapshot_name)
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::VmSnapshotRestoreResponse {
+                success: true,
+                message: "VM snapshot restored".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::VmSnapshotRestoreResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn vm_snapshot_delete(
+        &self,
+        req: mikrom_proto::scheduler::VmSnapshotDeleteRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::VmSnapshotDeleteResponse> {
+        let job = match self
+            .app_service
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(j) => j,
+            Err(e) => {
+                return Ok(mikrom_proto::scheduler::VmSnapshotDeleteResponse {
+                    success: false,
+                    message: e.to_string(),
+                });
+            },
+        };
+        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
+            (Some(h), Some(v)) => (h.clone(), v.clone()),
+            _ => {
+                return Ok(mikrom_proto::scheduler::VmSnapshotDeleteResponse {
+                    success: false,
+                    message: "Job has no host or VM assigned".to_string(),
+                });
+            },
+        };
+        match self
+            .app_service
+            .agent_client
+            .vm_snapshot_delete(&host_id, &vm_id, &req.snapshot_name)
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::VmSnapshotDeleteResponse {
+                success: true,
+                message: "VM snapshot deleted".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::VmSnapshotDeleteResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn vm_snapshot_list(
+        &self,
+        req: mikrom_proto::scheduler::VmSnapshotListRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::VmSnapshotListResponse> {
+        let job = match self
+            .app_service
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(j) => j,
+            Err(e) => {
+                return Ok(mikrom_proto::scheduler::VmSnapshotListResponse {
+                    success: false,
+                    message: e.to_string(),
+                    snapshots: vec![],
+                });
+            },
+        };
+        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
+            (Some(h), Some(v)) => (h.clone(), v.clone()),
+            _ => {
+                return Ok(mikrom_proto::scheduler::VmSnapshotListResponse {
+                    success: false,
+                    message: "Job has no host or VM assigned".to_string(),
+                    snapshots: vec![],
+                });
+            },
+        };
+        match self
+            .app_service
+            .agent_client
+            .vm_snapshot_list(&host_id, &vm_id)
+            .await
+        {
+            Ok(snaps) => {
+                let snapshots: Vec<mikrom_proto::scheduler::VmSnapshotInfo> = snaps
+                    .into_iter()
+                    .map(|s| mikrom_proto::scheduler::VmSnapshotInfo {
+                        id: s.id,
+                        name: s.name,
+                        created_at: s.created_at,
+                        size_bytes: s.size_bytes,
+                        vm_status: s.vm_status,
+                    })
+                    .collect();
+                Ok(mikrom_proto::scheduler::VmSnapshotListResponse {
+                    success: true,
+                    message: "OK".to_string(),
+                    snapshots,
+                })
+            },
+            Err(e) => Ok(mikrom_proto::scheduler::VmSnapshotListResponse {
+                success: false,
+                message: e.to_string(),
+                snapshots: vec![],
+            }),
+        }
+    }
+
+    pub async fn attach_volume(
+        &self,
+        req: mikrom_proto::scheduler::AttachVolumeRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::AttachVolumeResponse> {
+        let job = match self
+            .app_service
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(j) => j,
+            Err(e) => {
+                return Ok(mikrom_proto::scheduler::AttachVolumeResponse {
+                    success: false,
+                    message: e.to_string(),
+                });
+            },
+        };
+        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
+            (Some(h), Some(v)) => (h.clone(), v.clone()),
+            _ => {
+                return Ok(mikrom_proto::scheduler::AttachVolumeResponse {
+                    success: false,
+                    message: "Job has no host or VM assigned".to_string(),
+                });
+            },
+        };
+        match self
+            .app_service
+            .agent_client
+            .attach_volume(
+                &host_id,
+                &vm_id,
+                &req.volume_id,
+                &req.mount_point,
+                req.read_only,
+            )
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::AttachVolumeResponse {
+                success: true,
+                message: "Volume attached".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::AttachVolumeResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn detach_volume(
+        &self,
+        req: mikrom_proto::scheduler::DetachVolumeRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::DetachVolumeResponse> {
+        let job = match self
+            .app_service
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(j) => j,
+            Err(e) => {
+                return Ok(mikrom_proto::scheduler::DetachVolumeResponse {
+                    success: false,
+                    message: e.to_string(),
+                });
+            },
+        };
+        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
+            (Some(h), Some(v)) => (h.clone(), v.clone()),
+            _ => {
+                return Ok(mikrom_proto::scheduler::DetachVolumeResponse {
+                    success: false,
+                    message: "Job has no host or VM assigned".to_string(),
+                });
+            },
+        };
+        match self
+            .app_service
+            .agent_client
+            .detach_volume(&host_id, &vm_id, &req.volume_id)
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::DetachVolumeResponse {
+                success: true,
+                message: "Volume detached".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::DetachVolumeResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn start_migration(
+        &self,
+        req: mikrom_proto::scheduler::StartMigrationRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::StartMigrationResponse> {
+        let job = match self
+            .app_service
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(j) => j,
+            Err(e) => {
+                return Ok(mikrom_proto::scheduler::StartMigrationResponse {
+                    success: false,
+                    message: e.to_string(),
+                });
+            },
+        };
+        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
+            (Some(h), Some(v)) => (h.clone(), v.clone()),
+            _ => {
+                return Ok(mikrom_proto::scheduler::StartMigrationResponse {
+                    success: false,
+                    message: "Job has no host or VM assigned".to_string(),
+                });
+            },
+        };
+        match self
+            .app_service
+            .agent_client
+            .start_migration(&host_id, &vm_id, &req.target_host, &req.target_uri)
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::StartMigrationResponse {
+                success: true,
+                message: "Migration started".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::StartMigrationResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn cancel_migration(
+        &self,
+        req: mikrom_proto::scheduler::CancelMigrationRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::CancelMigrationResponse> {
+        let job = match self
+            .app_service
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(j) => j,
+            Err(e) => {
+                return Ok(mikrom_proto::scheduler::CancelMigrationResponse {
+                    success: false,
+                    message: e.to_string(),
+                });
+            },
+        };
+        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
+            (Some(h), Some(v)) => (h.clone(), v.clone()),
+            _ => {
+                return Ok(mikrom_proto::scheduler::CancelMigrationResponse {
+                    success: false,
+                    message: "Job has no host or VM assigned".to_string(),
+                });
+            },
+        };
+        match self
+            .app_service
+            .agent_client
+            .cancel_migration(&host_id, &vm_id)
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::CancelMigrationResponse {
+                success: true,
+                message: "Migration cancelled".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::CancelMigrationResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn query_migration(
+        &self,
+        req: mikrom_proto::scheduler::QueryMigrationRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::QueryMigrationResponse> {
+        let job = match self
+            .app_service
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(j) => j,
+            Err(e) => {
+                return Ok(mikrom_proto::scheduler::QueryMigrationResponse {
+                    success: false,
+                    message: e.to_string(),
+                    status: "".to_string(),
+                    total_bytes: 0,
+                    transferred_bytes: 0,
+                    remaining_bytes: 0,
+                });
+            },
+        };
+        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
+            (Some(h), Some(v)) => (h.clone(), v.clone()),
+            _ => {
+                return Ok(mikrom_proto::scheduler::QueryMigrationResponse {
+                    success: false,
+                    message: "Job has no host or VM assigned".to_string(),
+                    status: "".to_string(),
+                    total_bytes: 0,
+                    transferred_bytes: 0,
+                    remaining_bytes: 0,
+                });
+            },
+        };
+        match self
+            .app_service
+            .agent_client
+            .query_migration(&host_id, &vm_id)
+            .await
+        {
+            Ok(status) => Ok(mikrom_proto::scheduler::QueryMigrationResponse {
+                success: true,
+                message: "OK".to_string(),
+                status,
+                total_bytes: 0,
+                transferred_bytes: 0,
+                remaining_bytes: 0,
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::QueryMigrationResponse {
+                success: false,
+                message: e.to_string(),
+                status: "".to_string(),
+                total_bytes: 0,
+                transferred_bytes: 0,
+                remaining_bytes: 0,
+            }),
+        }
+    }
+
+    pub async fn set_balloon(
+        &self,
+        req: mikrom_proto::scheduler::SetBalloonRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::SetBalloonResponse> {
+        let job = match self
+            .app_service
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(j) => j,
+            Err(e) => {
+                return Ok(mikrom_proto::scheduler::SetBalloonResponse {
+                    success: false,
+                    message: e.to_string(),
+                });
+            },
+        };
+        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
+            (Some(h), Some(v)) => (h.clone(), v.clone()),
+            _ => {
+                return Ok(mikrom_proto::scheduler::SetBalloonResponse {
+                    success: false,
+                    message: "Job has no host or VM assigned".to_string(),
+                });
+            },
+        };
+        match self
+            .app_service
+            .agent_client
+            .set_balloon(&host_id, &vm_id, req.target_memory_mib)
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::SetBalloonResponse {
+                success: true,
+                message: "Balloon size set".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::SetBalloonResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn query_balloon(
+        &self,
+        req: mikrom_proto::scheduler::QueryBalloonRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::QueryBalloonResponse> {
+        let job = match self
+            .app_service
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(j) => j,
+            Err(e) => {
+                return Ok(mikrom_proto::scheduler::QueryBalloonResponse {
+                    success: false,
+                    message: e.to_string(),
+                    actual_memory_mib: 0,
+                    max_memory_mib: 0,
+                });
+            },
+        };
+        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
+            (Some(h), Some(v)) => (h.clone(), v.clone()),
+            _ => {
+                return Ok(mikrom_proto::scheduler::QueryBalloonResponse {
+                    success: false,
+                    message: "Job has no host or VM assigned".to_string(),
+                    actual_memory_mib: 0,
+                    max_memory_mib: 0,
+                });
+            },
+        };
+        match self
+            .app_service
+            .agent_client
+            .query_balloon(&host_id, &vm_id)
+            .await
+        {
+            Ok((actual, max)) => Ok(mikrom_proto::scheduler::QueryBalloonResponse {
+                success: true,
+                message: "OK".to_string(),
+                actual_memory_mib: actual,
+                max_memory_mib: max,
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::QueryBalloonResponse {
+                success: false,
+                message: e.to_string(),
+                actual_memory_mib: 0,
+                max_memory_mib: 0,
+            }),
+        }
+    }
 }
 
 impl Clone for SchedulerServer {

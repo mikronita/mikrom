@@ -126,10 +126,7 @@ impl crate::firecracker::FirecrackerManager {
     where
         F: FnOnce() -> Option<String>,
     {
-        runtime
-            .and_then(extract)
-            .map(|s| s.clone())
-            .or_else(default)
+        runtime.and_then(extract).cloned().or_else(default)
     }
 
     pub(crate) fn recovered_socket_path(

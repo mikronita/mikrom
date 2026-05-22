@@ -991,6 +991,7 @@ async fn fetch_app_git_metadata(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn direct_image_deploy(
     state: &AppState,
     app: crate::models::app::App,

@@ -60,7 +60,7 @@ impl AgentServer {
 
     pub async fn serve(&self) -> anyhow::Result<()> {
         // Initialize all hypervisors (networking, state loading, GC, background tasks)
-        for (_htype, hv) in &*self.hypervisors {
+        for hv in (*self.hypervisors).values() {
             if let Err(e) = hv.init_network().await {
                 tracing::error!("Failed to initialize host networking: {e}");
             }
@@ -131,7 +131,7 @@ impl AgentServer {
                             nats_client = Some(client.clone());
                             consecutive_failures = 0;
                             // Set NATS client on all hypervisors
-                            for (_htype, hv) in &*self_clone.hypervisors {
+                            for hv in (*self_clone.hypervisors).values() {
                                 hv.set_nats_client(client.clone()).await;
                             }
                         },
@@ -330,7 +330,7 @@ impl AgentServer {
             tracing::info!("Listening for health checks on {}", subject);
             use futures::StreamExt;
             while let Some(msg) = health_sub.next().await {
-                Self::handle_health_check(msg, &*hypervisors, &nats, &http_client).await;
+                Self::handle_health_check(msg, &hypervisors, &nats, &http_client).await;
             }
         })
     }
@@ -357,6 +357,17 @@ impl AgentServer {
             mikrom_proto::agent::agent_command::Command::ResumeVm(req) => Some(&req.vm_id),
             mikrom_proto::agent::agent_command::Command::DeleteVm(req) => Some(&req.vm_id),
             mikrom_proto::agent::agent_command::Command::UpdateFirewall(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::VmSnapshotCreate(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::VmSnapshotRestore(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::VmSnapshotDelete(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::VmSnapshotList(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::AttachVolume(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::DetachVolume(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::StartMigration(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::CancelMigration(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::QueryMigration(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::SetBalloon(req) => Some(&req.vm_id),
+            mikrom_proto::agent::agent_command::Command::QueryBalloon(req) => Some(&req.vm_id),
             _ => None,
         }
     }
@@ -379,7 +390,7 @@ impl AgentServer {
         vm_id: &mikrom_proto::id::VmId,
         hypervisors: &'a HashMap<HypervisorType, Arc<dyn VmHypervisor>>,
     ) -> Option<&'a Arc<dyn VmHypervisor>> {
-        for (_htype, hv) in hypervisors {
+        for hv in hypervisors.values() {
             if hv.get_vm_info(vm_id).await.is_some() {
                 return Some(hv);
             }
@@ -411,7 +422,7 @@ impl AgentServer {
     async fn dispatch_agent_command(
         &self,
         command: Option<mikrom_proto::agent::agent_command::Command>,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let Some(cmd) = command else {
             return Err(HypervisorError::ProcessError("Empty command".to_string()));
         };
@@ -466,7 +477,50 @@ impl AgentServer {
             mikrom_proto::agent::agent_command::Command::CloneVolume(req) => {
                 self.handle_clone_volume(req).await
             },
+            mikrom_proto::agent::agent_command::Command::VmSnapshotCreate(req) => {
+                self.handle_vm_snapshot_create(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::VmSnapshotRestore(req) => {
+                self.handle_vm_snapshot_restore(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::VmSnapshotDelete(req) => {
+                self.handle_vm_snapshot_delete(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::VmSnapshotList(req) => {
+                self.handle_vm_snapshot_list(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::AttachVolume(req) => {
+                self.handle_attach_volume(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::DetachVolume(req) => {
+                self.handle_detach_volume(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::StartMigration(req) => {
+                self.handle_start_migration(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::CancelMigration(req) => {
+                self.handle_cancel_migration(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::QueryMigration(req) => {
+                self.handle_query_migration(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::SetBalloon(req) => {
+                self.handle_set_balloon(hv, req).await
+            },
+            mikrom_proto::agent::agent_command::Command::QueryBalloon(req) => {
+                self.handle_query_balloon(hv, req).await
+            },
         }
+    }
+
+    fn ok_response(msg: &str) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let _ = mikrom_proto::agent::AgentCommandResponse {
+            success: true,
+            message: msg.to_string(),
+        }
+        .encode(&mut buf);
+        buf
     }
 
     async fn handle_start_vm(
@@ -474,7 +528,7 @@ impl AgentServer {
         hv: &Arc<dyn VmHypervisor>,
         req: mikrom_proto::agent::StartVmRequest,
         max_vms: u32,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         if max_vms > 0 {
             let active = Self::count_active_vms(self.hypervisors.as_ref()).await;
             if active >= max_vms as usize {
@@ -490,129 +544,135 @@ impl AgentServer {
 
         hv.start_vm(vm_id, app_id, req.image, config)
             .await
-            .map(|_| "VM started".to_string())
+            .map(|_| Self::ok_response("VM started"))
     }
 
     async fn handle_stop_vm(
         &self,
         hv: &Arc<dyn VmHypervisor>,
         req: mikrom_proto::agent::StopVmRequest,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let vm_id = Self::parse_vm_id(&req.vm_id)?;
-        hv.stop_vm(&vm_id).await.map(|_| "VM stopped".to_string())
+        hv.stop_vm(&vm_id)
+            .await
+            .map(|_| Self::ok_response("VM stopped"))
     }
 
     async fn handle_pause_vm(
         &self,
         hv: &Arc<dyn VmHypervisor>,
         req: mikrom_proto::agent::PauseVmRequest,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let vm_id = Self::parse_vm_id(&req.vm_id)?;
-        hv.pause_vm(&vm_id).await.map(|_| "VM paused".to_string())
+        hv.pause_vm(&vm_id)
+            .await
+            .map(|_| Self::ok_response("VM paused"))
     }
 
     async fn handle_resume_vm(
         &self,
         hv: &Arc<dyn VmHypervisor>,
         req: mikrom_proto::agent::ResumeVmRequest,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let vm_id = Self::parse_vm_id(&req.vm_id)?;
-        hv.resume_vm(&vm_id).await.map(|_| "VM resumed".to_string())
+        hv.resume_vm(&vm_id)
+            .await
+            .map(|_| Self::ok_response("VM resumed"))
     }
 
     async fn handle_delete_vm(
         &self,
         hv: &Arc<dyn VmHypervisor>,
         req: mikrom_proto::agent::DeleteVmRequest,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let vm_id = Self::parse_vm_id(&req.vm_id)?;
         hv.delete_vm(&vm_id)
             .await
-            .map(|_| "VM resources purged".to_string())
+            .map(|_| Self::ok_response("VM resources purged"))
     }
 
     async fn handle_update_firewall(
         &self,
         hv: &Arc<dyn VmHypervisor>,
         req: mikrom_proto::agent::UpdateFirewallRequest,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let vm_id = Self::parse_vm_id(&req.vm_id)?;
         let rules = Self::map_firewall_rules(req.rules);
 
         hv.update_vm_firewall(&vm_id, rules)
             .await
-            .map(|_| "Firewall rules updated".to_string())
+            .map(|_| Self::ok_response("Firewall rules updated"))
     }
 
     async fn handle_create_snapshot(
         &self,
         req: mikrom_proto::agent::CreateSnapshotRequest,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let _ = self;
         let storage = crate::ceph::CephRbd;
         storage
             .create_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
             .await
-            .map(|_| "Snapshot created".to_string())
+            .map(|_| Self::ok_response("Snapshot created"))
             .map_err(|e| HypervisorError::ProcessError(e.to_string()))
     }
 
     async fn handle_delete_volume(
         &self,
         req: mikrom_proto::agent::DeleteVolumeRequest,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let _ = self;
         let storage = crate::ceph::CephRbd;
         storage
             .delete_volume(&req.pool_name, &req.volume_id)
             .await
-            .map(|_| "Volume deleted".to_string())
+            .map(|_| Self::ok_response("Volume deleted"))
             .map_err(|e| HypervisorError::ProcessError(e.to_string()))
     }
 
     async fn handle_delete_snapshot(
         &self,
         req: mikrom_proto::agent::DeleteSnapshotRequest,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let _ = self;
         let storage = crate::ceph::CephRbd;
         storage
             .delete_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
             .await
-            .map(|_| "Snapshot deleted".to_string())
+            .map(|_| Self::ok_response("Snapshot deleted"))
             .map_err(|e| HypervisorError::ProcessError(e.to_string()))
     }
 
     async fn handle_create_volume(
         &self,
         req: mikrom_proto::agent::CreateVolumeRequest,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let _ = self;
         let storage = crate::ceph::CephRbd;
         storage
             .create_volume(&req.pool_name, &req.volume_id, req.size_mib as i32)
             .await
-            .map(|_| "Volume created".to_string())
+            .map(|_| Self::ok_response("Volume created"))
             .map_err(|e| HypervisorError::ProcessError(e.to_string()))
     }
 
     async fn handle_restore_snapshot(
         &self,
         req: mikrom_proto::agent::RestoreSnapshotRequest,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let _ = self;
         let storage = crate::ceph::CephRbd;
         storage
             .restore_snapshot(&req.pool_name, &req.volume_id, &req.snapshot_name)
             .await
-            .map(|_| "Snapshot restored".to_string())
+            .map(|_| Self::ok_response("Snapshot restored"))
             .map_err(|e| HypervisorError::ProcessError(e.to_string()))
     }
 
     async fn handle_clone_volume(
         &self,
         req: mikrom_proto::agent::CloneVolumeRequest,
-    ) -> Result<String, HypervisorError> {
+    ) -> Result<Vec<u8>, HypervisorError> {
         let _ = self;
         let storage = crate::ceph::CephRbd;
         storage
@@ -623,8 +683,156 @@ impl AgentServer {
                 &req.target_volume_id,
             )
             .await
-            .map(|_| "Volume cloned".to_string())
+            .map(|_| Self::ok_response("Volume cloned"))
             .map_err(|e| HypervisorError::ProcessError(e.to_string()))
+    }
+
+    // ── New VM runtime handlers ────────────────────────────────────────────
+
+    async fn handle_vm_snapshot_create(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::VmSnapshotCreateRequest,
+    ) -> Result<Vec<u8>, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.create_vm_snapshot(&vm_id, &req.snapshot_name)
+            .await
+            .map(|_| Self::ok_response("VM snapshot created"))
+    }
+
+    async fn handle_vm_snapshot_restore(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::VmSnapshotRestoreRequest,
+    ) -> Result<Vec<u8>, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.restore_vm_snapshot(&vm_id, &req.snapshot_name)
+            .await
+            .map(|_| Self::ok_response("VM snapshot restored"))
+    }
+
+    async fn handle_vm_snapshot_delete(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::VmSnapshotDeleteRequest,
+    ) -> Result<Vec<u8>, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.delete_vm_snapshot(&vm_id, &req.snapshot_name)
+            .await
+            .map(|_| Self::ok_response("VM snapshot deleted"))
+    }
+
+    async fn handle_vm_snapshot_list(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::VmSnapshotListRequest,
+    ) -> Result<Vec<u8>, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        let snapshots = hv.list_vm_snapshots(&vm_id).await?;
+        let resp = mikrom_proto::agent::VmSnapshotListResponse {
+            success: true,
+            message: "OK".to_string(),
+            snapshots,
+        };
+        let mut buf = Vec::new();
+        resp.encode(&mut buf)
+            .map_err(|e| HypervisorError::ProcessError(e.to_string()))?;
+        Ok(buf)
+    }
+
+    async fn handle_attach_volume(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::AttachVolumeRequest,
+    ) -> Result<Vec<u8>, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.attach_volume(&vm_id, &req.volume_id, &req.mount_point, req.read_only)
+            .await
+            .map(|_| Self::ok_response("Volume attached"))
+    }
+
+    async fn handle_detach_volume(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::DetachVolumeRequest,
+    ) -> Result<Vec<u8>, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.detach_volume(&vm_id, &req.volume_id)
+            .await
+            .map(|_| Self::ok_response("Volume detached"))
+    }
+
+    async fn handle_start_migration(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::StartMigrationRequest,
+    ) -> Result<Vec<u8>, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.start_migration(&vm_id, &req.target_host, &req.target_uri)
+            .await
+            .map(|_| Self::ok_response("Migration started"))
+    }
+
+    async fn handle_cancel_migration(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::CancelMigrationRequest,
+    ) -> Result<Vec<u8>, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.cancel_migration(&vm_id)
+            .await
+            .map(|_| Self::ok_response("Migration cancelled"))
+    }
+
+    async fn handle_query_migration(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::QueryMigrationRequest,
+    ) -> Result<Vec<u8>, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        let status = hv.query_migration(&vm_id).await?;
+        let resp = mikrom_proto::agent::QueryMigrationResponse {
+            success: true,
+            message: "OK".to_string(),
+            status,
+            total_bytes: 0,
+            transferred_bytes: 0,
+            remaining_bytes: 0,
+        };
+        let mut buf = Vec::new();
+        resp.encode(&mut buf)
+            .map_err(|e| HypervisorError::ProcessError(e.to_string()))?;
+        Ok(buf)
+    }
+
+    async fn handle_set_balloon(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::SetBalloonRequest,
+    ) -> Result<Vec<u8>, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        hv.set_balloon_size(&vm_id, req.target_memory_mib)
+            .await
+            .map(|_| Self::ok_response("Balloon size set"))
+    }
+
+    async fn handle_query_balloon(
+        &self,
+        hv: &Arc<dyn VmHypervisor>,
+        req: mikrom_proto::agent::QueryBalloonRequest,
+    ) -> Result<Vec<u8>, HypervisorError> {
+        let vm_id = Self::parse_vm_id(&req.vm_id)?;
+        let (actual, max) = hv.query_balloon(&vm_id).await?;
+        let resp = mikrom_proto::agent::QueryBalloonResponse {
+            success: true,
+            message: "OK".to_string(),
+            actual_memory_mib: actual,
+            max_memory_mib: max,
+        };
+        let mut buf = Vec::new();
+        resp.encode(&mut buf)
+            .map_err(|e| HypervisorError::ProcessError(e.to_string()))?;
+        Ok(buf)
     }
 
     fn proto_vm_config(config: Option<mikrom_proto::agent::VmConfig>) -> VmConfig {
@@ -694,23 +902,22 @@ impl AgentServer {
     async fn reply_agent_command(
         message: async_nats::Message,
         nats: &async_nats::Client,
-        result: Result<String, HypervisorError>,
+        result: Result<Vec<u8>, HypervisorError>,
     ) {
         if let Some(reply) = message.reply {
-            let response = match result {
-                Ok(msg) => mikrom_proto::agent::AgentCommandResponse {
-                    success: true,
-                    message: msg,
-                },
-                Err(e) => mikrom_proto::agent::AgentCommandResponse {
-                    success: false,
-                    message: e.to_string(),
+            let payload = match result {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    let mut buf = Vec::new();
+                    let _ = mikrom_proto::agent::AgentCommandResponse {
+                        success: false,
+                        message: e.to_string(),
+                    }
+                    .encode(&mut buf);
+                    buf
                 },
             };
-            let mut buf = Vec::new();
-            if response.encode(&mut buf).is_ok() {
-                let _ = nats.publish(reply, buf.into()).await;
-            }
+            let _ = nats.publish(reply, payload.into()).await;
         }
     }
 
@@ -807,7 +1014,7 @@ impl AgentServer {
         hypervisors: &HashMap<HypervisorType, Arc<dyn VmHypervisor>>,
         vm_id: &mikrom_proto::id::VmId,
     ) -> Option<(VmInfo, Arc<dyn VmHypervisor>)> {
-        for (_, hv) in hypervisors {
+        for hv in hypervisors.values() {
             if let Some(info) = hv.get_vm_info(vm_id).await {
                 return Some((info, hv.clone()));
             }

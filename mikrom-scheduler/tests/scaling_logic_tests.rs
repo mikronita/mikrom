@@ -182,6 +182,7 @@ impl WorkerRepository for MockScalingWorkerRepo {
             metrics: None,
             registered_at: 0,
             last_heartbeat: chrono::Utc::now().timestamp(),
+            supported_hypervisors: vec![],
         }))
     }
     async fn list_workers(&self) -> DomainResult<Vec<Worker>> {
@@ -195,6 +196,7 @@ impl WorkerRepository for MockScalingWorkerRepo {
             metrics: None,
             registered_at: 0,
             last_heartbeat: chrono::Utc::now().timestamp(),
+            supported_hypervisors: vec![],
         }])
     }
     async fn get_available_workers(&self, _: i64) -> DomainResult<Vec<Worker>> {
@@ -249,6 +251,43 @@ impl AgentClient for MockScalingAgentClient {
     }
     async fn clone_volume(&self, _: &str, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
         Ok(())
+    }
+    async fn vm_snapshot_create(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn vm_snapshot_restore(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn vm_snapshot_delete(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn vm_snapshot_list(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> DomainResult<Vec<mikrom_proto::agent::VmSnapshotInfo>> {
+        Ok(vec![])
+    }
+    async fn attach_volume(&self, _: &str, _: &str, _: &str, _: &str, _: bool) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn detach_volume(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn start_migration(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn cancel_migration(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn query_migration(&self, _: &str, _: &str) -> DomainResult<String> {
+        Ok("completed".to_string())
+    }
+    async fn set_balloon(&self, _: &str, _: &str, _: u32) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn query_balloon(&self, _: &str, _: &str) -> DomainResult<(u32, u32)> {
+        Ok((512, 512))
     }
 }
 

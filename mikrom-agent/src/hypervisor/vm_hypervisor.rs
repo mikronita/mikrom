@@ -89,4 +89,96 @@ pub trait VmHypervisor: Send + Sync + fmt::Debug {
     async fn set_nats_client(&self, client: async_nats::Client);
 
     fn start_background_tasks(&self);
+
+    // ── VM Snapshots ──────────────────────────────────────────
+
+    async fn create_vm_snapshot(&self, _vm_id: &VmId, _name: &str) -> Result<(), HypervisorError> {
+        Err(HypervisorError::UnsupportedOperation(
+            "VM snapshots not supported".to_string(),
+        ))
+    }
+
+    async fn restore_vm_snapshot(&self, _vm_id: &VmId, _name: &str) -> Result<(), HypervisorError> {
+        Err(HypervisorError::UnsupportedOperation(
+            "VM snapshot restore not supported".to_string(),
+        ))
+    }
+
+    async fn delete_vm_snapshot(&self, _vm_id: &VmId, _name: &str) -> Result<(), HypervisorError> {
+        Err(HypervisorError::UnsupportedOperation(
+            "VM snapshot delete not supported".to_string(),
+        ))
+    }
+
+    async fn list_vm_snapshots(
+        &self,
+        _vm_id: &VmId,
+    ) -> Result<Vec<mikrom_proto::agent::VmSnapshotInfo>, HypervisorError> {
+        Err(HypervisorError::UnsupportedOperation(
+            "VM snapshot list not supported".to_string(),
+        ))
+    }
+
+    // ── Volume Hot-Plug ───────────────────────────────────────
+
+    async fn attach_volume(
+        &self,
+        _vm_id: &VmId,
+        _volume_id: &str,
+        _mount_point: &str,
+        _read_only: bool,
+    ) -> Result<(), HypervisorError> {
+        Err(HypervisorError::UnsupportedOperation(
+            "Volume attach not supported".to_string(),
+        ))
+    }
+
+    async fn detach_volume(&self, _vm_id: &VmId, _volume_id: &str) -> Result<(), HypervisorError> {
+        Err(HypervisorError::UnsupportedOperation(
+            "Volume detach not supported".to_string(),
+        ))
+    }
+
+    // ── Live Migration ────────────────────────────────────────
+
+    async fn start_migration(
+        &self,
+        _vm_id: &VmId,
+        _target_host: &str,
+        _target_uri: &str,
+    ) -> Result<(), HypervisorError> {
+        Err(HypervisorError::UnsupportedOperation(
+            "Live migration not supported".to_string(),
+        ))
+    }
+
+    async fn cancel_migration(&self, _vm_id: &VmId) -> Result<(), HypervisorError> {
+        Err(HypervisorError::UnsupportedOperation(
+            "Migration cancel not supported".to_string(),
+        ))
+    }
+
+    async fn query_migration(&self, _vm_id: &VmId) -> Result<String, HypervisorError> {
+        Err(HypervisorError::UnsupportedOperation(
+            "Migration query not supported".to_string(),
+        ))
+    }
+
+    // ── Balloon ────────────────────────────────────────────────
+
+    async fn set_balloon_size(
+        &self,
+        _vm_id: &VmId,
+        _target_memory_mib: u32,
+    ) -> Result<(), HypervisorError> {
+        Err(HypervisorError::UnsupportedOperation(
+            "Balloon not supported".to_string(),
+        ))
+    }
+
+    async fn query_balloon(&self, _vm_id: &VmId) -> Result<(u32, u32), HypervisorError> {
+        Err(HypervisorError::UnsupportedOperation(
+            "Balloon query not supported".to_string(),
+        ))
+    }
 }
