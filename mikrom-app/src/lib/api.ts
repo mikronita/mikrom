@@ -202,6 +202,11 @@ export const DEPLOYMENT_MEMORY_OPTIONS = [
   { label: "2G", value: 2048 },
   { label: "4G", value: 4096 },
 ] as const;
+export const DEPLOYMENT_HYPERVISOR_OPTIONS = [
+  { label: "Default", value: "" },
+  { label: "Firecracker", value: "firecracker" },
+  { label: "QEMU", value: "qemu" },
+] as const;
 
 export interface GithubRepo {
   id: number;
@@ -244,6 +249,7 @@ export interface DeployRequest {
   memory_mib?: number;
   disk_mib?: number;
   env?: Record<string, string>;
+  hypervisor?: string;
 }
 
 export interface DeployResponse {
