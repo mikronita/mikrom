@@ -7,6 +7,16 @@ use mikrom_scheduler::domain::{
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+async fn connect_nats_or_skip() -> Option<async_nats::Client> {
+    match async_nats::connect("nats://localhost:4223").await {
+        Ok(client) => Some(client),
+        Err(err) => {
+            eprintln!("Skipping scheduler scaling test: failed to connect to NATS: {err}");
+            None
+        },
+    }
+}
+
 struct MockScalingAppRepo {
     apps: Vec<AppConfig>,
 }
@@ -270,7 +280,9 @@ async fn test_reconcile_scale_up_from_zero_manual() {
     let worker_repo = Arc::new(MockScalingWorkerRepo);
     let agent_client = Arc::new(MockScalingAgentClient);
     let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
-    let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
+    let Some(nats_client) = connect_nats_or_skip().await else {
+        return;
+    };
 
     let service = AppService::new(
         Arc::new(job_repo),
@@ -343,7 +355,9 @@ async fn test_reconcile_scale_up_from_zero_with_traffic() {
     let worker_repo = Arc::new(MockScalingWorkerRepo);
     let agent_client = Arc::new(MockScalingAgentClient);
     let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
-    let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
+    let Some(nats_client) = connect_nats_or_skip().await else {
+        return;
+    };
 
     let service = AppService::new(
         Arc::new(job_repo),
@@ -420,7 +434,9 @@ async fn test_reconcile_skips_restore_during_backoff() {
     let worker_repo = Arc::new(MockScalingWorkerRepo);
     let agent_client = Arc::new(MockScalingAgentClient);
     let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
-    let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
+    let Some(nats_client) = connect_nats_or_skip().await else {
+        return;
+    };
 
     let service = AppService::new(
         Arc::new(job_repo),

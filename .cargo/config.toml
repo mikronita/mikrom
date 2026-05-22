@@ -1,0 +1,5 @@
+[build]
+rustflags = ["-L", "target/ceph-libs"]
+
+[env]
+LIBRARY_PATH = { value = "target/ceph-libs", relative = true }

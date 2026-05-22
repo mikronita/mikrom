@@ -1,3 +1,4 @@
+mod common;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -169,10 +170,9 @@ async fn test_promotion_back_and_forth() {
             }),
         )
         .times(0);
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     // Mock scheduler deployment and health check via NATS
     let nats_clone = nats_client.clone();
@@ -301,9 +301,7 @@ async fn test_promotion_pauses_previous_active() {
         jwt_secret,
     )
     .unwrap();
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
+    let nats_url = "nats://localhost:4223".to_string();
     let nats_client = match async_nats::connect(nats_url).await {
         Ok(client) => client,
         Err(err) => {
@@ -526,10 +524,9 @@ async fn test_activate_stopped_deployment_resumes_it() {
     // The resumed deployment flow now relies on the scheduler response and
     // does not rewrite the deployment row during this activation path.
     mock_app_repo.expect_update_deployment().times(0);
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     // Mock scheduler deployment and health check via NATS
     let nats_clone = nats_client.clone();
@@ -725,10 +722,9 @@ async fn test_delete_app_cleans_up_resources() {
     mock_volume_repo
         .expect_list_volumes_by_app()
         .returning(|_| Ok(vec![]));
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),

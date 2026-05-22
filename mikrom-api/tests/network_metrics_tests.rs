@@ -28,13 +28,7 @@ async fn setup_app(
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = match async_nats::connect(nats_url).await {
-        Ok(client) => client,
-        Err(err) => {
-            eprintln!("Skipping network metrics test: unable to connect to NATS: {err}");
-            return None;
-        },
-    };
+    let nats_client = async_nats::connect(nats_url).await.ok()?;
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),

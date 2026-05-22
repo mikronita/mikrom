@@ -16,11 +16,16 @@ pub struct VmStartupGuard {
     pub tap_ifindex: Option<u32>,
     pub chroot_dir: Option<PathBuf>,
     pub log_task: Option<JoinHandle<()>>,
+    pub stdout_log_path: String,
+    pub stderr_log_path: String,
+    pub stdout_log_offset: Arc<AtomicU64>,
+    pub stderr_log_offset: Arc<AtomicU64>,
     pub app_started: Arc<AtomicBool>,
     pub app_started_at_ms: Arc<AtomicU64>,
     pub socket_path: PathBuf,
     pub metrics_path: Option<String>,
     pub vfs_processes: Vec<Child>,
+    pub vfs_pids: Vec<u32>,
     committed: bool,
 }
 
@@ -33,11 +38,16 @@ impl VmStartupGuard {
             tap_ifindex: None,
             chroot_dir: None,
             log_task: None,
+            stdout_log_path: String::new(),
+            stderr_log_path: String::new(),
+            stdout_log_offset: Arc::new(AtomicU64::new(0)),
+            stderr_log_offset: Arc::new(AtomicU64::new(0)),
             app_started: Arc::new(AtomicBool::new(false)),
             app_started_at_ms: Arc::new(AtomicU64::new(0)),
             socket_path,
             metrics_path: None,
             vfs_processes: Vec::new(),
+            vfs_pids: Vec::new(),
             committed: false,
         }
     }
@@ -59,12 +69,17 @@ impl VmStartupGuard {
             tap_name: self.tap_name.take(),
             tap_ifindex: self.tap_ifindex,
             log_task: self.log_task.take().expect("Log task must exist at commit"),
+            stdout_log_path: self.stdout_log_path.clone(),
+            stderr_log_path: self.stderr_log_path.clone(),
+            stdout_log_offset: self.stdout_log_offset.clone(),
+            stderr_log_offset: self.stderr_log_offset.clone(),
             chroot_dir: self
                 .chroot_dir
                 .take()
                 .map(|p| p.to_string_lossy().to_string()),
             app_started: self.app_started.clone(),
             app_started_at_ms: self.app_started_at_ms.clone(),
+            vfs_pids: self.vfs_pids.clone(),
             vfs_processes: std::mem::take(&mut self.vfs_processes),
         }
     }
@@ -134,6 +149,9 @@ mod tests {
         guard.tap_ifindex = Some(42);
         guard.chroot_dir = Some(PathBuf::from("/tmp/test-chroot"));
         guard.metrics_path = Some("/metrics.json".to_string());
+        guard.stdout_log_path = "/tmp/stdout.log".to_string();
+        guard.stderr_log_path = "/tmp/stderr.log".to_string();
+        guard.vfs_pids = vec![11, 22];
         guard.app_started.store(true, Ordering::SeqCst);
         guard.app_started_at_ms.store(1234, Ordering::SeqCst);
 
@@ -144,6 +162,9 @@ mod tests {
         assert_eq!(process.tap_name.as_deref(), Some("m-tap-test"));
         assert_eq!(process.tap_ifindex, Some(42));
         assert_eq!(process.metrics_path.as_deref(), Some("/metrics.json"));
+        assert_eq!(process.stdout_log_path, "/tmp/stdout.log");
+        assert_eq!(process.stderr_log_path, "/tmp/stderr.log");
+        assert_eq!(process.vfs_pids, vec![11, 22]);
         assert_eq!(process.chroot_dir.as_deref(), Some("/tmp/test-chroot"));
         assert!(process.app_started.load(Ordering::SeqCst));
         assert_eq!(process.app_started_at_ms.load(Ordering::SeqCst), 1234);

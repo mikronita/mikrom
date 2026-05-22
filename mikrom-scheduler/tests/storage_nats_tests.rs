@@ -9,13 +9,23 @@ use prost::Message;
 use std::sync::Arc;
 use tokio::time::{Duration, timeout};
 
-#[tokio::test]
-async fn test_scheduler_storage_nats_dispatch() {
+async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let client = async_nats::connect(&nats_url)
-        .await
-        .expect("Failed to connect to NATS");
+    match async_nats::connect(&nats_url).await {
+        Ok(client) => Some(client),
+        Err(err) => {
+            eprintln!("Skipping scheduler storage test: failed to connect to NATS: {err}");
+            None
+        },
+    }
+}
+
+#[tokio::test]
+async fn test_scheduler_storage_nats_dispatch() {
+    let Some(client) = connect_nats_or_skip().await else {
+        return;
+    };
 
     // 1. Mock dependencies
     let mut job_repo = MockJobRepository::new();

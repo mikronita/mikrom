@@ -1,3 +1,4 @@
+mod common;
 use mikrom_api::AppState;
 use mikrom_api::deploy::worker::{
     BuildTask, MockBuilderClient, MockSchedulerClient, poll_and_deploy,
@@ -17,12 +18,10 @@ async fn create_test_state(
     app_repo: MockAppRepository,
     user_repo: MockUserRepository,
     volume_repo: mikrom_api::repositories::volume_repository::MockVolumeRepository,
-) -> AppState {
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+) -> Option<AppState> {
+    let nats_client = common::get_nats_client_or_skip().await?;
 
-    AppState {
+    Some(AppState {
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
         volume_repo: Arc::new(volume_repo),
@@ -47,7 +46,7 @@ async fn create_test_state(
         workspace_events: tokio::sync::broadcast::channel(100).0,
         mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    }
+    })
 }
 
 #[tokio::test]
@@ -142,7 +141,9 @@ async fn test_port_propagation_from_builder_to_deployment() {
             })
         });
 
-    let state = create_test_state(mock_repo, mock_user_repo, mock_volume_repo).await;
+    let Some(state) = create_test_state(mock_repo, mock_user_repo, mock_volume_repo).await else {
+        return;
+    };
 
     let task = BuildTask {
         deployment_id,

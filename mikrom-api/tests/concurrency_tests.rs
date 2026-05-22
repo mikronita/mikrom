@@ -1,3 +1,4 @@
+mod common;
 use futures::StreamExt;
 use mikrom_api::AppState;
 use mikrom_api::models::app::{App, Deployment};
@@ -42,10 +43,9 @@ async fn test_concurrent_flows_prevented() {
     mock_app_repo
         .expect_get_app()
         .returning(move |_| Ok(Some(app_clone.clone())));
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
     let mut health_sub = nats_client
         .subscribe("mikrom.scheduler.check_health")
         .await

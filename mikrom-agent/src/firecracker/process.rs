@@ -14,10 +14,15 @@ pub struct VmProcess {
     pub tap_name: Option<String>,
     pub tap_ifindex: Option<u32>,
     pub log_task: tokio::task::JoinHandle<()>,
+    pub stdout_log_path: String,
+    pub stderr_log_path: String,
+    pub stdout_log_offset: Arc<AtomicU64>,
+    pub stderr_log_offset: Arc<AtomicU64>,
     pub chroot_dir: Option<String>,
     pub app_started: Arc<AtomicBool>,
     pub app_started_at_ms: Arc<AtomicU64>,
     pub vfs_processes: Vec<tokio::process::Child>,
+    pub vfs_pids: Vec<u32>,
 }
 
 /// Abstraction over shell command execution, allowing tests to inject a mock

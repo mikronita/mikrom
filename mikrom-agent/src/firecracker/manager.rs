@@ -78,15 +78,26 @@ struct PersistedVmRuntime {
     pid: Option<u32>,
     socket_path: String,
     metrics_path: Option<String>,
+    #[serde(default)]
+    stdout_log_path: String,
+    #[serde(default)]
+    stderr_log_path: String,
+    #[serde(default)]
+    stdout_log_offset: u64,
+    #[serde(default)]
+    stderr_log_offset: u64,
     tap_name: Option<String>,
     tap_ifindex: Option<u32>,
     chroot_dir: Option<String>,
     app_started: bool,
     app_started_at_ms: u64,
+    #[serde(default)]
+    vfs_pids: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant)]
 enum PersistedVmRecord {
     Legacy(VmInfo),
     Current(PersistedVmRuntime),
@@ -102,6 +113,14 @@ impl PersistedVmRuntime {
         let pid = proc.and_then(FirecrackerManager::process_pid);
         let socket_path = proc.map(|p| p.socket_path.clone()).unwrap_or_default();
         let metrics_path = proc.and_then(|p| p.metrics_path.clone());
+        let stdout_log_path = proc.map(|p| p.stdout_log_path.clone()).unwrap_or_default();
+        let stderr_log_path = proc.map(|p| p.stderr_log_path.clone()).unwrap_or_default();
+        let stdout_log_offset = proc
+            .map(|p| p.stdout_log_offset.load(Ordering::SeqCst))
+            .unwrap_or_default();
+        let stderr_log_offset = proc
+            .map(|p| p.stderr_log_offset.load(Ordering::SeqCst))
+            .unwrap_or_default();
         let tap_name = proc.and_then(|p| p.tap_name.clone());
         let tap_ifindex = proc.and_then(|p| p.tap_ifindex);
         let chroot_dir = proc.and_then(|p| p.chroot_dir.clone());
@@ -111,17 +130,23 @@ impl PersistedVmRuntime {
         let app_started_at_ms = proc
             .map(|p| p.app_started_at_ms.load(Ordering::SeqCst))
             .unwrap_or(0);
+        let vfs_pids = proc.map(|p| p.vfs_pids.clone()).unwrap_or_default();
 
         Self {
             vm: vm.clone(),
             pid,
             socket_path,
             metrics_path,
+            stdout_log_path,
+            stderr_log_path,
+            stdout_log_offset,
+            stderr_log_offset,
             tap_name,
             tap_ifindex,
             chroot_dir,
             app_started,
             app_started_at_ms,
+            vfs_pids,
         }
     }
 }
@@ -133,8 +158,11 @@ impl FirecrackerManager {
     }
 
     fn is_pid_alive(pid: u32) -> bool {
-        let rc = unsafe { libc::kill(pid as i32, 0) };
-        rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+        let status_path = format!("/proc/{pid}/status");
+        match std::fs::read_to_string(status_path) {
+            Ok(status) => !status.lines().any(|line| line.starts_with("State:\tZ")),
+            Err(_) => false,
+        }
     }
 
     async fn wait_for_pid_exit(pid: u32, timeout: Duration) -> bool {
@@ -169,7 +197,15 @@ impl FirecrackerManager {
                 let err = std::io::Error::last_os_error();
                 tracing::warn!(vm_id = %vm_id, pid = pid, error = %err, "Failed to signal recovered Firecracker process");
             }
-            let _ = Self::wait_for_pid_exit(pid, Duration::from_secs(10)).await;
+            if !Self::wait_for_pid_exit(pid, Duration::from_secs(10)).await {
+                tracing::warn!(vm_id = %vm_id, pid = pid, "SIGTERM timed out, sending SIGKILL");
+                let rc = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+                if rc != 0 {
+                    let err = std::io::Error::last_os_error();
+                    tracing::warn!(vm_id = %vm_id, pid = pid, error = %err, "Failed to send SIGKILL to recovered Firecracker process");
+                }
+                let _ = Self::wait_for_pid_exit(pid, Duration::from_secs(2)).await;
+            }
             return Ok(());
         }
 
@@ -620,6 +656,17 @@ impl FirecrackerManager {
         {
             tracing::debug!("Failed to remove memory file {:?}: {}", mem_path, e);
         }
+
+        for log_path in [
+            VmPaths::new(&self.fc_config.data_dir, &self.agent_id, *vm_id).stdout_log_path(),
+            VmPaths::new(&self.fc_config.data_dir, &self.agent_id, *vm_id).stderr_log_path(),
+        ] {
+            if let Err(e) = tokio::fs::remove_file(&log_path).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::debug!("Failed to remove log file {:?}: {}", log_path, e);
+            }
+        }
     }
 
     async fn cleanup_process_chroot(&self, vm_id: &VmId, proc: &VmProcess) {
@@ -777,13 +824,18 @@ impl FirecrackerManager {
             tap_ifindex,
             startup.chroot_dir.clone(),
         );
+        guard.stdout_log_path = paths.stdout_log_path().to_string_lossy().to_string();
+        guard.stderr_log_path = paths.stderr_log_path().to_string_lossy().to_string();
 
-        let mut child = self.spawn_firecracker_process(&startup).await?;
+        let child = self.spawn_firecracker_process(&startup, &paths).await?;
         guard.log_task = Some(
-            self.spawn_log_task(
+            self.spawn_log_task_from_paths(
                 &vm_id,
                 &app_id,
-                &mut child,
+                guard.stdout_log_path.clone(),
+                guard.stderr_log_path.clone(),
+                guard.stdout_log_offset.clone(),
+                guard.stderr_log_offset.clone(),
                 guard.app_started.clone(),
                 guard.app_started_at_ms.clone(),
             )
@@ -943,11 +995,41 @@ impl FirecrackerManager {
     async fn spawn_firecracker_process(
         &self,
         startup: &StartupContext,
+        paths: &VmPaths,
     ) -> Result<tokio::process::Child, FirecrackerError> {
+        let stdout_path = paths.stdout_log_path();
+        let stderr_path = paths.stderr_log_path();
+        if let Some(parent) = stdout_path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                FirecrackerError::ProcessError(format!("Failed to create log directory: {e}"))
+            })?;
+        }
+
+        let stdout_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&stdout_path)
+            .map_err(|e| {
+                FirecrackerError::ProcessError(format!(
+                    "Failed to open firecracker stdout log {}: {e}",
+                    stdout_path.display()
+                ))
+            })?;
+        let stderr_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&stderr_path)
+            .map_err(|e| {
+                FirecrackerError::ProcessError(format!(
+                    "Failed to open firecracker stderr log {}: {e}",
+                    stderr_path.display()
+                ))
+            })?;
+
         tokio::process::Command::new(&startup.exec_binary)
             .args(&startup.exec_args)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::from(stdout_file))
+            .stderr(std::process::Stdio::from(stderr_file))
             .spawn()
             .map_err(|e| {
                 let msg = format!(
@@ -981,6 +1063,7 @@ impl FirecrackerManager {
         );
     }
 
+    #[allow(dead_code)]
     async fn spawn_log_task(
         &self,
         vm_id: &VmId,
@@ -1002,6 +1085,37 @@ impl FirecrackerManager {
         );
 
         shipper.spawn(stdout, stderr).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn spawn_log_task_from_paths(
+        &self,
+        vm_id: &VmId,
+        app_id: &AppId,
+        stdout_path: String,
+        stderr_path: String,
+        stdout_offset: Arc<AtomicU64>,
+        stderr_offset: Arc<AtomicU64>,
+        app_started: Arc<AtomicBool>,
+        app_started_at_ms: Arc<AtomicU64>,
+    ) -> tokio::task::JoinHandle<()> {
+        let shipper = LogShipper::new(
+            *vm_id,
+            *app_id,
+            self.nats_client.read().await.clone(),
+            self.logs.clone(),
+            app_started,
+            app_started_at_ms,
+        );
+
+        shipper
+            .spawn_from_paths(
+                PathBuf::from(stdout_path),
+                stdout_offset,
+                PathBuf::from(stderr_path),
+                stderr_offset,
+            )
+            .await
     }
 
     async fn setup_metrics(
@@ -1233,6 +1347,9 @@ impl FirecrackerManager {
                 let vfs_child = self
                     .start_virtiofsd(&guard.vm_id, &vol.volume_id, &vol_host_path, &socket_path)
                     .await?;
+                if let Some(pid) = vfs_child.id() {
+                    guard.vfs_pids.push(pid);
+                }
                 guard.vfs_processes.push(vfs_child);
 
                 // Configure VFS in Firecracker
@@ -1461,6 +1578,10 @@ impl FirecrackerManager {
                 child: Some(child),
                 socket_path: "/tmp/test.sock".to_string(),
                 metrics_path: None,
+                stdout_log_path: "/tmp/test.stdout.log".to_string(),
+                stderr_log_path: "/tmp/test.stderr.log".to_string(),
+                stdout_log_offset: Arc::new(AtomicU64::new(0)),
+                stderr_log_offset: Arc::new(AtomicU64::new(0)),
                 tap_name: None,
                 tap_ifindex: None,
                 log_task,
@@ -1468,6 +1589,7 @@ impl FirecrackerManager {
                 app_started: Arc::new(AtomicBool::new(true)),
                 app_started_at_ms: Arc::new(AtomicU64::new(started_at_ms)),
                 vfs_processes: Vec::new(),
+                vfs_pids: Vec::new(),
             },
         );
     }
@@ -1577,11 +1699,26 @@ impl FirecrackerManager {
         proc.log_task.abort();
 
         // 1. Terminate all virtio-fs daemons
+        let had_vfs_children = !proc.vfs_processes.is_empty();
         for mut vfs_child in proc.vfs_processes.drain(..) {
             if let Err(e) = vfs_child.kill().await {
                 tracing::error!(vm_id = %vm_id, error = %e, "Failed to kill virtiofsd process");
             }
             let _ = vfs_child.wait().await;
+        }
+        if !had_vfs_children {
+            for pid in proc.vfs_pids.drain(..) {
+                let rc = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+                if rc != 0 {
+                    let err = std::io::Error::last_os_error();
+                    tracing::warn!(vm_id = %vm_id, pid = pid, error = %err, "Failed to signal recovered virtiofsd process");
+                }
+                if !Self::wait_for_pid_exit(pid, Duration::from_secs(5)).await {
+                    tracing::warn!(vm_id = %vm_id, pid = pid, "SIGTERM timed out for virtiofsd, sending SIGKILL");
+                    let _ = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+                    let _ = Self::wait_for_pid_exit(pid, Duration::from_secs(2)).await;
+                }
+            }
         }
 
         tracing::info!(
@@ -2028,7 +2165,9 @@ impl FirecrackerManager {
                     if !Self::is_active_resource_name(&file_name, &prefix, &active_vm_ids)
                         && (file_name.ends_with(".sock")
                             || file_name.ends_with("-rootfs.ext4")
-                            || file_name.ends_with("-metrics.json"))
+                            || file_name.ends_with("-metrics.json")
+                            || file_name.ends_with(".stdout.log")
+                            || file_name.ends_with(".stderr.log"))
                     {
                         let path = entry.path();
                         tracing::debug!("Removing stale file: {:?}", path);
@@ -2098,6 +2237,40 @@ impl FirecrackerManager {
         }
     }
 
+    fn recovered_stdout_log_path(
+        &self,
+        vm_id: &VmId,
+        runtime: Option<&PersistedVmRuntime>,
+    ) -> String {
+        if let Some(runtime) = runtime
+            && !runtime.stdout_log_path.is_empty()
+        {
+            return runtime.stdout_log_path.clone();
+        }
+
+        VmPaths::new(&self.fc_config.data_dir, &self.agent_id, *vm_id)
+            .stdout_log_path()
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn recovered_stderr_log_path(
+        &self,
+        vm_id: &VmId,
+        runtime: Option<&PersistedVmRuntime>,
+    ) -> String {
+        if let Some(runtime) = runtime
+            && !runtime.stderr_log_path.is_empty()
+        {
+            return runtime.stderr_log_path.clone();
+        }
+
+        VmPaths::new(&self.fc_config.data_dir, &self.agent_id, *vm_id)
+            .stderr_log_path()
+            .to_string_lossy()
+            .to_string()
+    }
+
     pub async fn load_runtime_state(&self) -> anyhow::Result<()> {
         let state_path = self.runtime_state_path();
         let Ok(raw) = tokio::fs::read_to_string(&state_path).await else {
@@ -2137,6 +2310,14 @@ impl FirecrackerManager {
                 if let Some(pid) = pid {
                     let socket_path = self.recovered_socket_path(&vm.vm_id, runtime_ref);
                     let metrics_path = self.recovered_metrics_path(&vm.vm_id, runtime_ref);
+                    let stdout_log_path = self.recovered_stdout_log_path(&vm.vm_id, runtime_ref);
+                    let stderr_log_path = self.recovered_stderr_log_path(&vm.vm_id, runtime_ref);
+                    let stdout_log_offset = Arc::new(AtomicU64::new(
+                        runtime_ref.map(|r| r.stdout_log_offset).unwrap_or(0),
+                    ));
+                    let stderr_log_offset = Arc::new(AtomicU64::new(
+                        runtime_ref.map(|r| r.stderr_log_offset).unwrap_or(0),
+                    ));
                     let tap_name = runtime_ref.and_then(|r| r.tap_name.clone());
                     let tap_ifindex = runtime_ref.and_then(|r| r.tap_ifindex);
                     let chroot_dir = runtime_ref.and_then(|r| r.chroot_dir.clone()).or_else(|| {
@@ -2146,8 +2327,24 @@ impl FirecrackerManager {
                             None
                         }
                     });
-                    let app_started = runtime_ref.map(|r| r.app_started).unwrap_or(false);
-                    let app_started_at_ms = runtime_ref.map(|r| r.app_started_at_ms).unwrap_or(0);
+                    let app_started = Arc::new(AtomicBool::new(
+                        runtime_ref.map(|r| r.app_started).unwrap_or(false),
+                    ));
+                    let app_started_at_ms = Arc::new(AtomicU64::new(
+                        runtime_ref.map(|r| r.app_started_at_ms).unwrap_or(0),
+                    ));
+                    let log_task = self
+                        .spawn_log_task_from_paths(
+                            &vm.vm_id,
+                            &vm.app_id,
+                            stdout_log_path.clone(),
+                            stderr_log_path.clone(),
+                            stdout_log_offset.clone(),
+                            stderr_log_offset.clone(),
+                            app_started.clone(),
+                            app_started_at_ms.clone(),
+                        )
+                        .await;
 
                     loaded_processes.insert(
                         vm.vm_id,
@@ -2157,13 +2354,18 @@ impl FirecrackerManager {
                             pid: Some(pid),
                             socket_path,
                             metrics_path,
+                            stdout_log_path,
+                            stderr_log_path,
+                            stdout_log_offset,
+                            stderr_log_offset,
                             tap_name,
                             tap_ifindex,
-                            log_task: tokio::spawn(async {}),
+                            log_task,
                             chroot_dir,
-                            app_started: Arc::new(AtomicBool::new(app_started)),
-                            app_started_at_ms: Arc::new(AtomicU64::new(app_started_at_ms)),
+                            app_started,
+                            app_started_at_ms,
                             vfs_processes: Vec::new(),
+                            vfs_pids: runtime_ref.map(|r| r.vfs_pids.clone()).unwrap_or_default(),
                         },
                     );
                 } else {
@@ -2861,6 +3063,10 @@ impl FirecrackerManager {
                 child: Some(child),
                 socket_path,
                 metrics_path: None,
+                stdout_log_path: "/tmp/test.stdout.log".to_string(),
+                stderr_log_path: "/tmp/test.stderr.log".to_string(),
+                stdout_log_offset: Arc::new(AtomicU64::new(0)),
+                stderr_log_offset: Arc::new(AtomicU64::new(0)),
                 tap_name: None,
                 tap_ifindex: None,
                 log_task,
@@ -2870,6 +3076,7 @@ impl FirecrackerManager {
                     chrono::Utc::now().timestamp_millis() as u64
                 )),
                 vfs_processes: Vec::new(),
+                vfs_pids: Vec::new(),
             },
         );
         let mut vms = self.vms.write().await;
@@ -3277,6 +3484,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_kill_process_escalates_to_sigkill_for_recovered_pid() {
+        let mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let vm_id = VmId::new();
+
+        let child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("trap '' TERM; sleep 30")
+            .spawn()
+            .expect("failed to spawn test child");
+        let pid = child.id().expect("test child pid missing");
+
+        let mut proc = VmProcess {
+            vm_id,
+            child: None,
+            pid: Some(pid),
+            socket_path: "/tmp/test.sock".to_string(),
+            metrics_path: None,
+            stdout_log_path: "/tmp/test.stdout.log".to_string(),
+            stderr_log_path: "/tmp/test.stderr.log".to_string(),
+            stdout_log_offset: Arc::new(AtomicU64::new(0)),
+            stderr_log_offset: Arc::new(AtomicU64::new(0)),
+            tap_name: None,
+            tap_ifindex: None,
+            log_task: tokio::spawn(async {}),
+            chroot_dir: None,
+            app_started: Arc::new(AtomicBool::new(false)),
+            app_started_at_ms: Arc::new(AtomicU64::new(0)),
+            vfs_processes: Vec::new(),
+            vfs_pids: Vec::new(),
+        };
+
+        mgr.kill_process(&vm_id, &mut proc)
+            .await
+            .expect("kill_process should succeed");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while FirecrackerManager::is_pid_alive(pid) {
+            if std::time::Instant::now() > deadline {
+                panic!("Recovered process was not terminated after SIGKILL escalation");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    #[tokio::test]
     async fn test_cleanup_all_stale_resources_keeps_paused_vm_artifacts() {
         let mut mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         let data_dir = temp_data_dir("gc-paused");
@@ -3381,6 +3633,15 @@ mod tests {
         let child_pid = child.id();
         mgr.insert_process_for_test(&vm_id, child, "/run/firecracker.socket".to_string())
             .await;
+        let mut processes = mgr.processes.lock().await;
+        if let Some(proc) = processes.get_mut(&vm_id) {
+            proc.stdout_log_path = "/tmp/stdout.log".to_string();
+            proc.stderr_log_path = "/tmp/stderr.log".to_string();
+            proc.stdout_log_offset.store(42, Ordering::SeqCst);
+            proc.stderr_log_offset.store(84, Ordering::SeqCst);
+            proc.vfs_pids = vec![1234, 5678];
+        }
+        drop(processes);
 
         mgr.persist_runtime_state().await.unwrap();
 
@@ -3395,8 +3656,13 @@ mod tests {
                 assert_eq!(runtime.vm.status, VmStatus::Running);
                 assert_eq!(runtime.pid, child_pid);
                 assert_eq!(runtime.socket_path, "/run/firecracker.socket");
+                assert_eq!(runtime.stdout_log_path, "/tmp/stdout.log");
+                assert_eq!(runtime.stderr_log_path, "/tmp/stderr.log");
+                assert_eq!(runtime.stdout_log_offset, 42);
+                assert_eq!(runtime.stderr_log_offset, 84);
                 assert!(runtime.app_started);
                 assert!(runtime.app_started_at_ms > 0);
+                assert_eq!(runtime.vfs_pids, vec![1234, 5678]);
             },
             PersistedVmRecord::Legacy(_) => panic!("expected current runtime record"),
         }
@@ -3433,22 +3699,32 @@ mod tests {
                     pid: Some(current_pid),
                     socket_path: "/run/firecracker.socket".to_string(),
                     metrics_path: Some("/run/metrics.json".to_string()),
+                    stdout_log_path: "/run/stdout.log".to_string(),
+                    stderr_log_path: "/run/stderr.log".to_string(),
+                    stdout_log_offset: 0,
+                    stderr_log_offset: 0,
                     tap_name: Some("m-tap-alive".to_string()),
                     tap_ifindex: Some(12),
                     chroot_dir: Some("/srv/jailer/firecracker/alive".to_string()),
                     app_started: true,
                     app_started_at_ms: 1234,
+                    vfs_pids: Vec::new(),
                 }),
                 PersistedVmRecord::Current(PersistedVmRuntime {
                     vm: dead_vm,
                     pid: Some(dead_pid),
                     socket_path: "/run/firecracker.socket".to_string(),
                     metrics_path: Some("/run/metrics.json".to_string()),
+                    stdout_log_path: "/run/stdout.log".to_string(),
+                    stderr_log_path: "/run/stderr.log".to_string(),
+                    stdout_log_offset: 0,
+                    stderr_log_offset: 0,
                     tap_name: Some("m-tap-dead".to_string()),
                     tap_ifindex: Some(13),
                     chroot_dir: Some("/srv/jailer/firecracker/dead".to_string()),
                     app_started: true,
                     app_started_at_ms: 5678,
+                    vfs_pids: Vec::new(),
                 }),
             ],
         };

@@ -1,4 +1,5 @@
 #![cfg(feature = "test-utils")]
+mod common;
 use futures::StreamExt;
 use mikrom_api::AppState;
 use mikrom_api::repositories::app_repository::{

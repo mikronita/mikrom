@@ -1,3 +1,4 @@
+mod common;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -92,9 +93,9 @@ async fn test_hierarchical_deployment_status_success() {
 
     // We still need a NATS client to satisfy AppState, but it won't be used
     // because we are using a temp- ID.
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
@@ -190,10 +191,9 @@ async fn test_hierarchical_security_cross_app_prevention() {
                 updated_at: Utc::now(),
             }))
         });
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
     let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
     mock_scheduler
         .expect_list_apps()
