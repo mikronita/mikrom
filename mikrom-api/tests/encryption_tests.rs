@@ -81,6 +81,7 @@ async fn test_encryption_at_rest() {
             git_commit_hash: None,
             git_commit_message: None,
             git_branch: None,
+            hypervisor: 0,
         })
         .await
         .expect("failed to create deployment");

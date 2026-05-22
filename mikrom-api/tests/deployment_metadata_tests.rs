@@ -57,6 +57,7 @@ async fn test_deployment_metadata_roundtrip() {
             git_commit_hash: None,
             git_commit_message: None,
             git_branch: None,
+            hypervisor: 0,
         })
         .await
         .expect("failed to create deployment");

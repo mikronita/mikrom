@@ -298,6 +298,51 @@ impl AgentClient for RecordingAgentClient {
     ) -> DomainResult<()> {
         Ok(())
     }
+
+    async fn vm_snapshot_create(&self, _h: &str, _v: &str, _s: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn vm_snapshot_restore(&self, _h: &str, _v: &str, _s: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn vm_snapshot_delete(&self, _h: &str, _v: &str, _s: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn vm_snapshot_list(
+        &self,
+        _h: &str,
+        _v: &str,
+    ) -> DomainResult<Vec<mikrom_proto::agent::VmSnapshotInfo>> {
+        Ok(vec![])
+    }
+    async fn attach_volume(
+        &self,
+        _h: &str,
+        _v: &str,
+        _vol: &str,
+        _m: &str,
+        _r: bool,
+    ) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn detach_volume(&self, _h: &str, _v: &str, _vol: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn start_migration(&self, _h: &str, _v: &str, _th: &str, _tu: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn cancel_migration(&self, _h: &str, _v: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn query_migration(&self, _h: &str, _v: &str) -> DomainResult<String> {
+        Ok("completed".to_string())
+    }
+    async fn set_balloon(&self, _h: &str, _v: &str, _s: u32) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn query_balloon(&self, _h: &str, _v: &str) -> DomainResult<(u32, u32)> {
+        Ok((512, 512))
+    }
 }
 
 #[tokio::test]
@@ -368,6 +413,7 @@ async fn test_router_traffic_restores_paused_deployment() {
             metrics: None,
             registered_at: chrono::Utc::now().timestamp(),
             last_heartbeat: chrono::Utc::now().timestamp(),
+            supported_hypervisors: vec![],
         })
         .await
         .unwrap();
@@ -499,6 +545,7 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
             metrics: None,
             registered_at: chrono::Utc::now().timestamp(),
             last_heartbeat: chrono::Utc::now().timestamp(),
+            supported_hypervisors: vec![],
         })
         .await
         .unwrap();
@@ -649,6 +696,7 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
             metrics: None,
             registered_at: chrono::Utc::now().timestamp(),
             last_heartbeat: chrono::Utc::now().timestamp(),
+            supported_hypervisors: vec![],
         })
         .await
         .unwrap();

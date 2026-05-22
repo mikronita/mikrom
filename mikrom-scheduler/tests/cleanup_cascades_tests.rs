@@ -27,6 +27,7 @@ mod tests {
             metrics: None,
             registered_at: 0,
             last_heartbeat: 0,
+            supported_hypervisors: vec![],
         };
         worker_repo.register(worker).await.unwrap();
 

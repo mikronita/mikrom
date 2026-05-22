@@ -139,6 +139,39 @@ impl NatsEventLoop {
         let mut clone_volume_sub = client
             .queue_subscribe("mikrom.scheduler.clone_volume", queue_group.clone())
             .await?;
+        let mut vm_snapshot_create_sub = client
+            .queue_subscribe("mikrom.scheduler.vm_snapshot_create", queue_group.clone())
+            .await?;
+        let mut vm_snapshot_restore_sub = client
+            .queue_subscribe("mikrom.scheduler.vm_snapshot_restore", queue_group.clone())
+            .await?;
+        let mut vm_snapshot_delete_sub = client
+            .queue_subscribe("mikrom.scheduler.vm_snapshot_delete", queue_group.clone())
+            .await?;
+        let mut vm_snapshot_list_sub = client
+            .queue_subscribe("mikrom.scheduler.vm_snapshot_list", queue_group.clone())
+            .await?;
+        let mut attach_volume_sub = client
+            .queue_subscribe("mikrom.scheduler.attach_volume", queue_group.clone())
+            .await?;
+        let mut detach_volume_sub = client
+            .queue_subscribe("mikrom.scheduler.detach_volume", queue_group.clone())
+            .await?;
+        let mut start_migration_sub = client
+            .queue_subscribe("mikrom.scheduler.start_migration", queue_group.clone())
+            .await?;
+        let mut cancel_migration_sub = client
+            .queue_subscribe("mikrom.scheduler.cancel_migration", queue_group.clone())
+            .await?;
+        let mut query_migration_sub = client
+            .queue_subscribe("mikrom.scheduler.query_migration", queue_group.clone())
+            .await?;
+        let mut set_balloon_sub = client
+            .queue_subscribe("mikrom.scheduler.set_balloon", queue_group.clone())
+            .await?;
+        let mut query_balloon_sub = client
+            .queue_subscribe("mikrom.scheduler.query_balloon", queue_group.clone())
+            .await?;
 
         tracing::info!("NATS Event Loop started, listening for messages...");
 
@@ -173,6 +206,17 @@ impl NatsEventLoop {
                 Some(msg) = delete_snapshot_sub.next() => self.handle_delete_snapshot(msg).await,
                 Some(msg) = restore_snapshot_sub.next() => self.handle_restore_snapshot(msg).await,
                 Some(msg) = clone_volume_sub.next() => self.handle_clone_volume(msg).await,
+                Some(msg) = vm_snapshot_create_sub.next() => self.handle_vm_snapshot_create(msg).await,
+                Some(msg) = vm_snapshot_restore_sub.next() => self.handle_vm_snapshot_restore(msg).await,
+                Some(msg) = vm_snapshot_delete_sub.next() => self.handle_vm_snapshot_delete(msg).await,
+                Some(msg) = vm_snapshot_list_sub.next() => self.handle_vm_snapshot_list(msg).await,
+                Some(msg) = attach_volume_sub.next() => self.handle_attach_volume(msg).await,
+                Some(msg) = detach_volume_sub.next() => self.handle_detach_volume(msg).await,
+                Some(msg) = start_migration_sub.next() => self.handle_start_migration(msg).await,
+                Some(msg) = cancel_migration_sub.next() => self.handle_cancel_migration(msg).await,
+                Some(msg) = query_migration_sub.next() => self.handle_query_migration(msg).await,
+                Some(msg) = set_balloon_sub.next() => self.handle_set_balloon(msg).await,
+                Some(msg) = query_balloon_sub.next() => self.handle_query_balloon(msg).await,
             }
         }
     }
@@ -1390,6 +1434,343 @@ impl NatsEventLoop {
                             let resp = mikrom_proto::scheduler::CloneVolumeResponse {
                                 success: false,
                                 message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_vm_snapshot_create(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::VmSnapshotCreateRequest;
+            if let Ok(req) = VmSnapshotCreateRequest::decode(&message.payload[..]) {
+                let result = server.vm_snapshot_create(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::VmSnapshotCreateResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_vm_snapshot_restore(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::VmSnapshotRestoreRequest;
+            if let Ok(req) = VmSnapshotRestoreRequest::decode(&message.payload[..]) {
+                let result = server.vm_snapshot_restore(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::VmSnapshotRestoreResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_vm_snapshot_delete(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::VmSnapshotDeleteRequest;
+            if let Ok(req) = VmSnapshotDeleteRequest::decode(&message.payload[..]) {
+                let result = server.vm_snapshot_delete(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::VmSnapshotDeleteResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_vm_snapshot_list(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::VmSnapshotListRequest;
+            if let Ok(req) = VmSnapshotListRequest::decode(&message.payload[..]) {
+                let result = server.vm_snapshot_list(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::VmSnapshotListResponse {
+                                success: false,
+                                message: e.to_string(),
+                                snapshots: vec![],
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_attach_volume(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::AttachVolumeRequest;
+            if let Ok(req) = AttachVolumeRequest::decode(&message.payload[..]) {
+                let result = server.attach_volume(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::AttachVolumeResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_detach_volume(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::DetachVolumeRequest;
+            if let Ok(req) = DetachVolumeRequest::decode(&message.payload[..]) {
+                let result = server.detach_volume(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::DetachVolumeResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_start_migration(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::StartMigrationRequest;
+            if let Ok(req) = StartMigrationRequest::decode(&message.payload[..]) {
+                let result = server.start_migration(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::StartMigrationResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_cancel_migration(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::CancelMigrationRequest;
+            if let Ok(req) = CancelMigrationRequest::decode(&message.payload[..]) {
+                let result = server.cancel_migration(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::CancelMigrationResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_query_migration(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::QueryMigrationRequest;
+            if let Ok(req) = QueryMigrationRequest::decode(&message.payload[..]) {
+                let result = server.query_migration(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::QueryMigrationResponse {
+                                success: false,
+                                message: e.to_string(),
+                                status: "".to_string(),
+                                total_bytes: 0,
+                                transferred_bytes: 0,
+                                remaining_bytes: 0,
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_set_balloon(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::SetBalloonRequest;
+            if let Ok(req) = SetBalloonRequest::decode(&message.payload[..]) {
+                let result = server.set_balloon(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::SetBalloonResponse {
+                                success: false,
+                                message: e.to_string(),
+                            };
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle_query_balloon(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::scheduler::QueryBalloonRequest;
+            if let Ok(req) = QueryBalloonRequest::decode(&message.payload[..]) {
+                let result = server.query_balloon(req).await;
+                if let Some(reply) = message.reply {
+                    let mut buf = Vec::new();
+                    match result {
+                        Ok(resp) => {
+                            if resp.encode(&mut buf).is_ok() {
+                                let _ = client.publish(reply, buf.into()).await;
+                            }
+                        },
+                        Err(e) => {
+                            let resp = mikrom_proto::scheduler::QueryBalloonResponse {
+                                success: false,
+                                message: e.to_string(),
+                                actual_memory_mib: 0,
+                                max_memory_mib: 0,
                             };
                             if resp.encode(&mut buf).is_ok() {
                                 let _ = client.publish(reply, buf.into()).await;

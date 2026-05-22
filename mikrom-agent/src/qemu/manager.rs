@@ -86,7 +86,7 @@ impl QemuManager {
         qmp_socket: PathBuf,
     ) -> tokio::task::JoinHandle<()> {
         let vms = self.vms.clone();
-        let vm_id_clone = vm_id.clone();
+        let vm_id_clone = vm_id;
         tokio::spawn(async move {
             let deadline = Duration::from_secs(30);
             let stream =
@@ -127,10 +127,10 @@ impl QemuManager {
                 if line.trim().is_empty() {
                     continue;
                 }
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
-                    if val.get("QMP").is_some() {
-                        break;
-                    }
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line)
+                    && val.get("QMP").is_some()
+                {
+                    break;
                 }
             }
 
@@ -152,10 +152,10 @@ impl QemuManager {
                 if line.trim().is_empty() {
                     continue;
                 }
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
-                    if val.get("return").is_some() || val.get("error").is_some() {
-                        break;
-                    }
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line)
+                    && (val.get("return").is_some() || val.get("error").is_some())
+                {
+                    break;
                 }
             }
 
@@ -477,6 +477,93 @@ impl VmHypervisor for QemuManager {
             }
         });
     }
+
+    // ── VM Snapshots ──────────────────────────────────────────────
+
+    async fn create_vm_snapshot(&self, vm_id: &VmId, name: &str) -> Result<(), HypervisorError> {
+        self.create_snapshot(vm_id, name).await
+    }
+
+    async fn restore_vm_snapshot(&self, vm_id: &VmId, name: &str) -> Result<(), HypervisorError> {
+        self.restore_snapshot(vm_id, name).await
+    }
+
+    async fn delete_vm_snapshot(&self, vm_id: &VmId, name: &str) -> Result<(), HypervisorError> {
+        self.delete_snapshot(vm_id, name).await
+    }
+
+    async fn list_vm_snapshots(
+        &self,
+        vm_id: &VmId,
+    ) -> Result<Vec<mikrom_proto::agent::VmSnapshotInfo>, HypervisorError> {
+        let names = self.list_snapshots(vm_id).await?;
+        let now = chrono::Utc::now().timestamp();
+        Ok(names
+            .into_iter()
+            .enumerate()
+            .map(|(i, name)| mikrom_proto::agent::VmSnapshotInfo {
+                id: (i + 1).to_string(),
+                name,
+                created_at: now,
+                size_bytes: 0,
+                vm_status: "unknown".to_string(),
+            })
+            .collect())
+    }
+
+    // ── Volume Hot-Plug ───────────────────────────────────────────
+
+    async fn attach_volume(
+        &self,
+        vm_id: &VmId,
+        volume_id: &str,
+        mount_point: &str,
+        read_only: bool,
+    ) -> Result<(), HypervisorError> {
+        let disk_path = std::path::Path::new(mount_point);
+        self.attach_volume(vm_id, volume_id, disk_path, read_only)
+            .await
+    }
+
+    async fn detach_volume(&self, vm_id: &VmId, volume_id: &str) -> Result<(), HypervisorError> {
+        self.detach_volume(vm_id, volume_id).await
+    }
+
+    // ── Live Migration ────────────────────────────────────────────
+
+    async fn start_migration(
+        &self,
+        vm_id: &VmId,
+        target_host: &str,
+        target_uri: &str,
+    ) -> Result<(), HypervisorError> {
+        let _ = target_host;
+        self.start_migration(vm_id, target_uri).await
+    }
+
+    async fn cancel_migration(&self, vm_id: &VmId) -> Result<(), HypervisorError> {
+        self.cancel_migration(vm_id).await
+    }
+
+    async fn query_migration(&self, vm_id: &VmId) -> Result<String, HypervisorError> {
+        self.query_migration(vm_id).await
+    }
+
+    // ── Balloon ────────────────────────────────────────────────────
+
+    async fn set_balloon_size(
+        &self,
+        vm_id: &VmId,
+        target_memory_mib: u32,
+    ) -> Result<(), HypervisorError> {
+        self.set_balloon_size(vm_id, target_memory_mib.into()).await
+    }
+
+    async fn query_balloon(&self, vm_id: &VmId) -> Result<(u32, u32), HypervisorError> {
+        self.query_balloon(vm_id)
+            .await
+            .map(|(a, m)| (a as u32, m as u32))
+    }
 }
 
 #[cfg(test)]
@@ -724,7 +811,8 @@ mod tests {
         let path = qemu.resolve_kernel().await;
         // Should return the cached file path (download may succeed or fail)
         assert!(
-            path.starts_with(&cache_dir) || path == PathBuf::from("https://example.com/vmlinux"),
+            path.starts_with(&cache_dir)
+                || path == std::path::Path::new("https://example.com/vmlinux"),
             "Expected cached path or fallback URL, got {path:?}"
         );
         let _ = tokio::fs::remove_dir_all(&cache_dir).await;

@@ -60,6 +60,19 @@ service SchedulerService {
   rpc DeleteSnapshot(DeleteSnapshotRequest) returns (DeleteSnapshotResponse);
   rpc RestoreSnapshot(RestoreSnapshotRequest) returns (RestoreSnapshotResponse);
   rpc CloneVolume(CloneVolumeRequest) returns (CloneVolumeResponse);
+
+  // VM runtime operations
+  rpc VmSnapshotCreate(VmSnapshotCreateRequest) returns (VmSnapshotCreateResponse);
+  rpc VmSnapshotRestore(VmSnapshotRestoreRequest) returns (VmSnapshotRestoreResponse);
+  rpc VmSnapshotDelete(VmSnapshotDeleteRequest) returns (VmSnapshotDeleteResponse);
+  rpc VmSnapshotList(VmSnapshotListRequest) returns (VmSnapshotListResponse);
+  rpc AttachVolume(AttachVolumeRequest) returns (AttachVolumeResponse);
+  rpc DetachVolume(DetachVolumeRequest) returns (DetachVolumeResponse);
+  rpc StartMigration(StartMigrationRequest) returns (StartMigrationResponse);
+  rpc CancelMigration(CancelMigrationRequest) returns (CancelMigrationResponse);
+  rpc QueryMigration(QueryMigrationRequest) returns (QueryMigrationResponse);
+  rpc SetBalloon(SetBalloonRequest) returns (SetBalloonResponse);
+  rpc QueryBalloon(QueryBalloonRequest) returns (QueryBalloonResponse);
 }
 
 message CloneVolumeRequest {
@@ -444,4 +457,143 @@ message UpdateAppScalingConfigRequest {
 message UpdateAppScalingConfigResponse {
   bool success = 1;
   string message = 2;
+}
+
+// ── VM Snapshot Operations ─────────────────────────────────────────────────
+message VmSnapshotCreateRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string snapshot_name = 3;
+}
+
+message VmSnapshotCreateResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message VmSnapshotRestoreRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string snapshot_name = 3;
+}
+
+message VmSnapshotRestoreResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message VmSnapshotDeleteRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string snapshot_name = 3;
+}
+
+message VmSnapshotDeleteResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message VmSnapshotListRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message VmSnapshotInfo {
+  string id = 1;
+  string name = 2;
+  int64 created_at = 3;
+  int64 size_bytes = 4;
+  string vm_status = 5;
+}
+
+message VmSnapshotListResponse {
+  bool success = 1;
+  string message = 2;
+  repeated VmSnapshotInfo snapshots = 3;
+}
+
+// ── VM Volume Hot-Plug ─────────────────────────────────────────────────────
+message AttachVolumeRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string volume_id = 3;
+  string mount_point = 4;
+  bool read_only = 5;
+}
+
+message AttachVolumeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DetachVolumeRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string volume_id = 3;
+}
+
+message DetachVolumeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ── VM Live Migration ──────────────────────────────────────────────────────
+message StartMigrationRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string target_host = 3;
+  string target_uri = 4;
+}
+
+message StartMigrationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message CancelMigrationRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message CancelMigrationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message QueryMigrationRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message QueryMigrationResponse {
+  bool success = 1;
+  string message = 2;
+  string status = 3;
+  int64 total_bytes = 4;
+  int64 transferred_bytes = 5;
+  int64 remaining_bytes = 6;
+}
+
+// ── VM Balloon ─────────────────────────────────────────────────────────────
+message SetBalloonRequest {
+  string job_id = 1;
+  string user_id = 2;
+  uint32 target_memory_mib = 3;
+}
+
+message SetBalloonResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message QueryBalloonRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message QueryBalloonResponse {
+  bool success = 1;
+  string message = 2;
+  uint32 actual_memory_mib = 3;
+  uint32 max_memory_mib = 4;
 }

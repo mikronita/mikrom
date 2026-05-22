@@ -53,6 +53,7 @@ async fn test_scheduler_storage_nats_dispatch() {
         metrics: None,
         registered_at: 0,
         last_heartbeat: chrono::Utc::now().timestamp(),
+        supported_hypervisors: vec![],
     };
     let test_worker_clone = test_worker.clone();
     worker_repo

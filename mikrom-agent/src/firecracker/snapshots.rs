@@ -212,22 +212,20 @@ impl crate::firecracker::FirecrackerManager {
         // Phase 2: If alive, try to resume via API (no locks held).
         let mut live_process_resumed = false;
         let mut restart_from_snapshot = restart_from_snapshot;
-        if process_alive {
-            if let Some(ref socket) = socket_path {
-                let resume_body = serde_json::json!({ "state": "Resumed" }).to_string();
-                match fc_patch(socket, "/vm", &resume_body).await {
-                    Ok(_) => {
-                        live_process_resumed = true;
-                    },
-                    Err(e) => {
-                        tracing::warn!(
-                            vm_id = %vm_id,
-                            error = %e,
-                            "Failed to resume Firecracker process in place, restarting from snapshot"
-                        );
-                        restart_from_snapshot = true;
-                    },
-                }
+        if process_alive && let Some(ref socket) = socket_path {
+            let resume_body = serde_json::json!({ "state": "Resumed" }).to_string();
+            match fc_patch(socket, "/vm", &resume_body).await {
+                Ok(_) => {
+                    live_process_resumed = true;
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        vm_id = %vm_id,
+                        error = %e,
+                        "Failed to resume Firecracker process in place, restarting from snapshot"
+                    );
+                    restart_from_snapshot = true;
+                },
             }
         }
         // Phase 3: Update VM status while holding vms lock (no processes lock held).

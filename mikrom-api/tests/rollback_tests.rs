@@ -80,6 +80,7 @@ async fn test_activate_deployment_endpoint() {
         git_commit_message: None,
         git_branch: None,
         trigger_source: "manual".into(),
+        hypervisor: 0,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
@@ -312,6 +313,7 @@ async fn test_activate_deployment_not_running() {
         git_commit_message: None,
         git_branch: None,
         trigger_source: "manual".into(),
+        hypervisor: 0,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };

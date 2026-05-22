@@ -185,18 +185,17 @@ impl AgentConfig {
         #[cfg(target_os = "linux")]
         {
             let cap_file = std::path::Path::new("/proc/self/status");
-            if cap_file.exists() {
-                if let Ok(content) = std::fs::read_to_string(cap_file) {
-                    if let Some(line) = content.lines().find(|l| l.starts_with("CapEff:")) {
-                        let caps_hex = line.trim_start_matches("CapEff:").trim();
-                        if let Ok(caps) = u64::from_str_radix(caps_hex, 16) {
-                            const CAP_NET_ADMIN: u64 = 1 << 12;
-                            if caps & CAP_NET_ADMIN == 0 {
-                                tracing::warn!(
-                                    "Process lacks CAP_NET_ADMIN — bridge and TAP creation may fail"
-                                );
-                            }
-                        }
+            if cap_file.exists()
+                && let Ok(content) = std::fs::read_to_string(cap_file)
+                && let Some(line) = content.lines().find(|l| l.starts_with("CapEff:"))
+            {
+                let caps_hex = line.trim_start_matches("CapEff:").trim();
+                if let Ok(caps) = u64::from_str_radix(caps_hex, 16) {
+                    const CAP_NET_ADMIN: u64 = 1 << 12;
+                    if caps & CAP_NET_ADMIN == 0 {
+                        tracing::warn!(
+                            "Process lacks CAP_NET_ADMIN — bridge and TAP creation may fail"
+                        );
                     }
                 }
             }

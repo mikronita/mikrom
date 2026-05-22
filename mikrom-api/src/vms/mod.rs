@@ -1209,3 +1209,307 @@ pub async fn delete_security_rule_handler(
 
     Ok(Json(serde_json::json!({ "success": true })))
 }
+
+// ── VM Runtime Operations ──────────────────────────────────────────────────
+
+#[derive(Debug, serde::Deserialize, rovo::schemars::JsonSchema)]
+pub struct SnapshotNameRequest {
+    pub snapshot_name: String,
+}
+
+#[derive(Debug, serde::Deserialize, rovo::schemars::JsonSchema)]
+pub struct AttachVolumeRuntimeRequest {
+    pub volume_id: String,
+    pub mount_point: String,
+    #[serde(default)]
+    pub read_only: bool,
+}
+
+#[derive(Debug, serde::Deserialize, rovo::schemars::JsonSchema)]
+pub struct MigrationStartRequest {
+    pub target_host: String,
+    pub target_uri: String,
+}
+
+#[derive(Debug, serde::Deserialize, rovo::schemars::JsonSchema)]
+pub struct BalloonSetRequest {
+    pub target_memory_mib: u32,
+}
+
+#[rovo::rovo]
+pub async fn vm_snapshot_create_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, job_id)): Path<(String, String)>,
+    Json(payload): Json<SnapshotNameRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let nats_req = mikrom_proto::scheduler::VmSnapshotCreateRequest {
+        job_id,
+        user_id: auth.user_id,
+        snapshot_name: payload.snapshot_name,
+    };
+    let resp: mikrom_proto::scheduler::VmSnapshotCreateResponse = state
+        .nats
+        .request("mikrom.scheduler.vm_snapshot_create", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "success": resp.success,
+        "message": resp.message,
+    })))
+}
+
+#[rovo::rovo]
+pub async fn vm_snapshot_restore_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, job_id, snapshot_name)): Path<(String, String, String)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let nats_req = mikrom_proto::scheduler::VmSnapshotRestoreRequest {
+        job_id,
+        user_id: auth.user_id,
+        snapshot_name,
+    };
+    let resp: mikrom_proto::scheduler::VmSnapshotRestoreResponse = state
+        .nats
+        .request("mikrom.scheduler.vm_snapshot_restore", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "success": resp.success,
+        "message": resp.message,
+    })))
+}
+
+#[rovo::rovo]
+pub async fn vm_snapshot_delete_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, job_id, snapshot_name)): Path<(String, String, String)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let nats_req = mikrom_proto::scheduler::VmSnapshotDeleteRequest {
+        job_id,
+        user_id: auth.user_id,
+        snapshot_name,
+    };
+    let resp: mikrom_proto::scheduler::VmSnapshotDeleteResponse = state
+        .nats
+        .request("mikrom.scheduler.vm_snapshot_delete", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "success": resp.success,
+        "message": resp.message,
+    })))
+}
+
+#[rovo::rovo]
+pub async fn vm_snapshot_list_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, job_id)): Path<(String, String)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let nats_req = mikrom_proto::scheduler::VmSnapshotListRequest {
+        job_id,
+        user_id: auth.user_id,
+    };
+    let resp: mikrom_proto::scheduler::VmSnapshotListResponse = state
+        .nats
+        .request("mikrom.scheduler.vm_snapshot_list", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let snapshots: Vec<serde_json::Value> = resp
+        .snapshots
+        .into_iter()
+        .map(|s| {
+            serde_json::json!({
+                "id": s.id,
+                "name": s.name,
+                "created_at": s.created_at,
+                "size_bytes": s.size_bytes,
+                "vm_status": s.vm_status,
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({
+        "success": resp.success,
+        "message": resp.message,
+        "snapshots": snapshots,
+    })))
+}
+
+#[rovo::rovo]
+pub async fn attach_volume_runtime_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, job_id)): Path<(String, String)>,
+    Json(payload): Json<AttachVolumeRuntimeRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let nats_req = mikrom_proto::scheduler::AttachVolumeRequest {
+        job_id,
+        user_id: auth.user_id,
+        volume_id: payload.volume_id,
+        mount_point: payload.mount_point,
+        read_only: payload.read_only,
+    };
+    let resp: mikrom_proto::scheduler::AttachVolumeResponse = state
+        .nats
+        .request("mikrom.scheduler.attach_volume", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "success": resp.success,
+        "message": resp.message,
+    })))
+}
+
+#[rovo::rovo]
+pub async fn detach_volume_runtime_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, job_id)): Path<(String, String)>,
+    Json(payload): Json<serde_json::Value>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let volume_id = payload
+        .get("volume_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ApiError::BadRequest("volume_id is required".to_string()))?;
+    let nats_req = mikrom_proto::scheduler::DetachVolumeRequest {
+        job_id,
+        user_id: auth.user_id,
+        volume_id: volume_id.to_string(),
+    };
+    let resp: mikrom_proto::scheduler::DetachVolumeResponse = state
+        .nats
+        .request("mikrom.scheduler.detach_volume", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "success": resp.success,
+        "message": resp.message,
+    })))
+}
+
+#[rovo::rovo]
+pub async fn start_migration_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, job_id)): Path<(String, String)>,
+    Json(payload): Json<MigrationStartRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let nats_req = mikrom_proto::scheduler::StartMigrationRequest {
+        job_id,
+        user_id: auth.user_id,
+        target_host: payload.target_host,
+        target_uri: payload.target_uri,
+    };
+    let resp: mikrom_proto::scheduler::StartMigrationResponse = state
+        .nats
+        .request("mikrom.scheduler.start_migration", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "success": resp.success,
+        "message": resp.message,
+    })))
+}
+
+#[rovo::rovo]
+pub async fn cancel_migration_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, job_id)): Path<(String, String)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let nats_req = mikrom_proto::scheduler::CancelMigrationRequest {
+        job_id,
+        user_id: auth.user_id,
+    };
+    let resp: mikrom_proto::scheduler::CancelMigrationResponse = state
+        .nats
+        .request("mikrom.scheduler.cancel_migration", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "success": resp.success,
+        "message": resp.message,
+    })))
+}
+
+#[rovo::rovo]
+pub async fn query_migration_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, job_id)): Path<(String, String)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let nats_req = mikrom_proto::scheduler::QueryMigrationRequest {
+        job_id,
+        user_id: auth.user_id,
+    };
+    let resp: mikrom_proto::scheduler::QueryMigrationResponse = state
+        .nats
+        .request("mikrom.scheduler.query_migration", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "success": resp.success,
+        "message": resp.message,
+        "status": resp.status,
+    })))
+}
+
+#[rovo::rovo]
+pub async fn set_balloon_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, job_id)): Path<(String, String)>,
+    Json(payload): Json<BalloonSetRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let nats_req = mikrom_proto::scheduler::SetBalloonRequest {
+        job_id,
+        user_id: auth.user_id,
+        target_memory_mib: payload.target_memory_mib,
+    };
+    let resp: mikrom_proto::scheduler::SetBalloonResponse = state
+        .nats
+        .request("mikrom.scheduler.set_balloon", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "success": resp.success,
+        "message": resp.message,
+    })))
+}
+
+#[rovo::rovo]
+pub async fn query_balloon_handler(
+    auth: crate::auth::AuthUser,
+    State(state): State<crate::AppState>,
+    Path((app_name, job_id)): Path<(String, String)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let _ = validate_app_deployment(&state, &auth, &app_name, &job_id).await?;
+    let nats_req = mikrom_proto::scheduler::QueryBalloonRequest {
+        job_id,
+        user_id: auth.user_id,
+    };
+    let resp: mikrom_proto::scheduler::QueryBalloonResponse = state
+        .nats
+        .request("mikrom.scheduler.query_balloon", nats_req)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "success": resp.success,
+        "message": resp.message,
+        "actual_memory_mib": resp.actual_memory_mib,
+        "max_memory_mib": resp.max_memory_mib,
+    })))
+}

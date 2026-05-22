@@ -31,14 +31,14 @@ impl QemuManager {
             if exited.is_some() {
                 to_remove.push(*vm_id);
                 let vms = self.vms.read().await;
-                if let Some(vm) = vms.get(vm_id) {
-                    if vm.status == VmStatus::Running || vm.status == VmStatus::Starting {
-                        tracing::error!(
-                            vm_id = %vm_id,
-                            "QEMU process exited unexpectedly, scheduling restart"
-                        );
-                        to_restart.push((*vm_id, vm.app_id, vm.image.clone(), vm.config.clone()));
-                    }
+                if let Some(vm) = vms.get(vm_id)
+                    && (vm.status == VmStatus::Running || vm.status == VmStatus::Starting)
+                {
+                    tracing::error!(
+                        vm_id = %vm_id,
+                        "QEMU process exited unexpectedly, scheduling restart"
+                    );
+                    to_restart.push((*vm_id, vm.app_id, vm.image.clone(), vm.config.clone()));
                 }
             }
         }
@@ -145,99 +145,98 @@ impl QemuManager {
 
         // Clean up data_dir (state JSON, pidfiles, QMP sockets, serial logs)
         let data_dir = &self.config.data_dir;
-        if data_dir.exists() {
-            if let Ok(mut entries) = tokio::fs::read_dir(data_dir).await {
-                let mut paths = Vec::new();
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    paths.push(entry.path());
+        if data_dir.exists()
+            && let Ok(mut entries) = tokio::fs::read_dir(data_dir).await
+        {
+            let mut paths = Vec::new();
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                paths.push(entry.path());
+            }
+            for path in paths {
+                let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                // Expected formats: "qemu-{vm_id}" or "qemu-{vm_id}.{ext}"
+                let vm_id_str = if name.starts_with("qemu-") {
+                    name.strip_prefix("qemu-").unwrap_or(name).to_string()
+                } else {
+                    continue;
+                };
+
+                if active_set.contains(&vm_id_str) {
+                    continue;
                 }
-                for path in paths {
-                    let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
-                        continue;
-                    };
-                    // Expected formats: "qemu-{vm_id}" or "qemu-{vm_id}.{ext}"
-                    let vm_id_str = if name.starts_with("qemu-") {
-                        name.strip_prefix("qemu-").unwrap_or(name).to_string()
-                    } else {
-                        continue;
-                    };
 
-                    if active_set.contains(&vm_id_str) {
-                        continue;
+                // Stale resource – remove it
+                if path.extension().is_some_and(|ext| ext == "pid")
+                    && let Ok(pid_str) = std::fs::read_to_string(&path)
+                    && let Ok(pid) = pid_str.trim().parse::<u32>()
+                {
+                    #[cfg(unix)]
+                    // SAFETY: valid PID from our own pidfile
+                    unsafe {
+                        libc::kill(pid as i32, libc::SIGKILL);
                     }
+                }
 
-                    // Stale resource – remove it
-                    if path.extension().is_some_and(|ext| ext == "pid") {
-                        if let Ok(pid_str) = std::fs::read_to_string(&path) {
-                            if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                                #[cfg(unix)]
-                                // SAFETY: valid PID from our own pidfile
-                                unsafe {
-                                    libc::kill(pid as i32, libc::SIGKILL);
-                                }
-                            }
-                        }
-                    }
-
-                    if let Err(e) = tokio::fs::remove_file(&path).await {
-                        tracing::debug!(
-                            path = %path.display(),
-                            error = %e,
-                            "Failed to remove stale resource"
-                        );
-                    } else {
-                        tracing::info!(
-                            path = %path.display(),
-                            vm_id = %vm_id_str,
-                            "Cleaned up stale resource"
-                        );
-                    }
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    tracing::debug!(
+                        path = %path.display(),
+                        error = %e,
+                        "Failed to remove stale resource"
+                    );
+                } else {
+                    tracing::info!(
+                        path = %path.display(),
+                        vm_id = %vm_id_str,
+                        "Cleaned up stale resource"
+                    );
                 }
             }
         }
 
         // Clean up virtiofsd socket directory
         let fsd_dir = &self.config.virtiofsd_socket_dir;
-        if fsd_dir.exists() {
-            if let Ok(mut entries) = tokio::fs::read_dir(fsd_dir).await {
-                let mut paths = Vec::new();
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    paths.push(entry.path());
+        if fsd_dir.exists()
+            && let Ok(mut entries) = tokio::fs::read_dir(fsd_dir).await
+        {
+            let mut paths = Vec::new();
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                paths.push(entry.path());
+            }
+            for path in paths {
+                let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                // Expected format: "qemu-{vm_id}-{tag}"
+                let vm_id_str = if name.starts_with("qemu-") {
+                    let remainder = name.strip_prefix("qemu-").unwrap_or(name);
+                    // Split on first '-' to get vm_id part
+                    if let Some((vm_id, _)) = remainder.split_once('-') {
+                        vm_id.to_string()
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                };
+
+                if active_set.contains(&vm_id_str) {
+                    continue;
                 }
-                for path in paths {
-                    let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
-                        continue;
-                    };
-                    // Expected format: "qemu-{vm_id}-{tag}"
-                    let vm_id_str = if name.starts_with("qemu-") {
-                        let remainder = name.strip_prefix("qemu-").unwrap_or(name);
-                        // Split on first '-' to get vm_id part
-                        if let Some((vm_id, _)) = remainder.split_once('-') {
-                            vm_id.to_string()
-                        } else {
-                            continue;
-                        }
-                    } else {
-                        continue;
-                    };
 
-                    if active_set.contains(&vm_id_str) {
-                        continue;
-                    }
-
-                    if let Err(e) = tokio::fs::remove_file(&path).await {
-                        tracing::debug!(
-                            path = %path.display(),
-                            error = %e,
-                            "Failed to remove stale virtiofsd socket"
-                        );
-                    } else {
-                        tracing::info!(
-                            path = %path.display(),
-                            vm_id = %vm_id_str,
-                            "Cleaned up stale virtiofsd socket"
-                        );
-                    }
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    tracing::debug!(
+                        path = %path.display(),
+                        error = %e,
+                        "Failed to remove stale virtiofsd socket"
+                    );
+                } else {
+                    tracing::info!(
+                        path = %path.display(),
+                        vm_id = %vm_id_str,
+                        "Cleaned up stale virtiofsd socket"
+                    );
                 }
             }
         }

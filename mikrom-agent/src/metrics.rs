@@ -188,12 +188,11 @@ impl MetricsCollector {
                 }
 
                 // Attempt to read hypervisor metrics if path is available
-                if let Some(metrics_path) = vm.metrics_path {
-                    if let Ok(content) = tokio::fs::read_to_string(&metrics_path).await {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                            vm_metrics.firecracker_metrics = Some(json);
-                        }
-                    }
+                if let Some(metrics_path) = vm.metrics_path
+                    && let Ok(content) = tokio::fs::read_to_string(&metrics_path).await
+                    && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
+                {
+                    vm_metrics.firecracker_metrics = Some(json);
                 }
 
                 // Attempt to read eBPF stats if ifindex is available
@@ -255,10 +254,10 @@ impl MetricsExporter {
 
             let subject = format!("mikrom.telemetry.host.{}", host_id);
 
-            if let Ok(payload) = serde_json::to_vec(&metrics) {
-                if let Err(e) = self.client.publish(subject, payload.into()).await {
-                    tracing::error!("Failed to publish metrics to NATS: {}", e);
-                }
+            if let Ok(payload) = serde_json::to_vec(&metrics)
+                && let Err(e) = self.client.publish(subject, payload.into()).await
+            {
+                tracing::error!("Failed to publish metrics to NATS: {}", e);
             }
         }
     }

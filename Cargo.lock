@@ -2852,12 +2852,12 @@ dependencies = [
 
 [[package]]
 name = "mikrom-agent"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "async-nats",
  "async-trait",
- "axum 0.7.9",
+ "axum 0.8.9",
  "aya",
  "aya-log",
  "base64 0.22.1",

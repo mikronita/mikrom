@@ -581,6 +581,211 @@ pub struct UpdateAppScalingConfigResponse {
     #[prost(string, tag = "2")]
     pub message: ::prost::alloc::string::String,
 }
+/// ── VM Snapshot Operations ─────────────────────────────────────────────────
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VmSnapshotCreateRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub snapshot_name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VmSnapshotCreateResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VmSnapshotRestoreRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub snapshot_name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VmSnapshotRestoreResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VmSnapshotDeleteRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub snapshot_name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VmSnapshotDeleteResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VmSnapshotListRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VmSnapshotInfo {
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(int64, tag = "3")]
+    pub created_at: i64,
+    #[prost(int64, tag = "4")]
+    pub size_bytes: i64,
+    #[prost(string, tag = "5")]
+    pub vm_status: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VmSnapshotListResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "3")]
+    pub snapshots: ::prost::alloc::vec::Vec<VmSnapshotInfo>,
+}
+/// ── VM Volume Hot-Plug ─────────────────────────────────────────────────────
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AttachVolumeRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub volume_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub mount_point: ::prost::alloc::string::String,
+    #[prost(bool, tag = "5")]
+    pub read_only: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AttachVolumeResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DetachVolumeRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub volume_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DetachVolumeResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+/// ── VM Live Migration ──────────────────────────────────────────────────────
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StartMigrationRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub target_host: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub target_uri: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StartMigrationResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CancelMigrationRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CancelMigrationResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct QueryMigrationRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct QueryMigrationResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(int64, tag = "4")]
+    pub total_bytes: i64,
+    #[prost(int64, tag = "5")]
+    pub transferred_bytes: i64,
+    #[prost(int64, tag = "6")]
+    pub remaining_bytes: i64,
+}
+/// ── VM Balloon ─────────────────────────────────────────────────────────────
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SetBalloonRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "3")]
+    pub target_memory_mib: u32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SetBalloonResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct QueryBalloonRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct QueryBalloonResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "3")]
+    pub actual_memory_mib: u32,
+    #[prost(uint32, tag = "4")]
+    pub max_memory_mib: u32,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum VmStatus {

@@ -156,6 +156,7 @@ async fn test_port_propagation_from_builder_to_deployment() {
         disk_mib: 1024,
         port: 8080, // Original port
         env: std::collections::HashMap::new(),
+        hypervisor: 0,
     };
 
     let result = poll_and_deploy(

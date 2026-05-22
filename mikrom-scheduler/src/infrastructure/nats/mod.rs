@@ -5,9 +5,13 @@ pub use event_loop::NatsEventLoop;
 use crate::domain::{AgentClient, DomainError, DomainResult, VmConfig};
 use async_trait::async_trait;
 use mikrom_proto::agent::{
-    AgentCommand, AgentCommandResponse, DeleteVmRequest, PauseVmRequest, RestoreSnapshotRequest,
-    ResumeVmRequest, StartVmRequest, StopVmRequest, UpdateFirewallRequest,
-    VmConfig as ProtoVmConfig, Volume as ProtoVolume,
+    AgentCommand, AgentCommandResponse, AttachVolumeRequest, CancelMigrationRequest,
+    DeleteVmRequest, DetachVolumeRequest, PauseVmRequest, QueryBalloonRequest,
+    QueryBalloonResponse, QueryMigrationRequest, QueryMigrationResponse, RestoreSnapshotRequest,
+    ResumeVmRequest, SetBalloonRequest, StartMigrationRequest, StartVmRequest, StopVmRequest,
+    UpdateFirewallRequest, VmConfig as ProtoVmConfig, VmSnapshotCreateRequest,
+    VmSnapshotDeleteRequest, VmSnapshotListRequest, VmSnapshotListResponse,
+    VmSnapshotRestoreRequest, Volume as ProtoVolume,
 };
 use prost::Message;
 use std::time::Duration;
@@ -53,6 +57,32 @@ impl NatsAgentClient {
         } else {
             Err(DomainError::Infrastructure(inner.message))
         }
+    }
+
+    async fn send_command_raw(
+        &self,
+        host_id: &str,
+        command: mikrom_proto::agent::agent_command::Command,
+    ) -> DomainResult<Vec<u8>> {
+        let subject = format!("mikrom.agent.{}.cmd", host_id);
+        tracing::debug!(?command, %subject, "Sending command to agent (raw)");
+        let cmd = AgentCommand {
+            command: Some(command),
+        };
+
+        let mut payload = Vec::new();
+        cmd.encode(&mut payload)
+            .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(15),
+            self.client.request(subject, payload.into()),
+        )
+        .await
+        .map_err(|_| DomainError::Infrastructure("Agent request timed out".to_string()))?
+        .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+
+        Ok(response.payload.to_vec())
     }
 }
 
@@ -316,5 +346,197 @@ impl AgentClient for NatsAgentClient {
             ),
         )
         .await
+    }
+
+    async fn vm_snapshot_create(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        snapshot_name: &str,
+    ) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::VmSnapshotCreate(
+                VmSnapshotCreateRequest {
+                    vm_id: vm_id.to_string(),
+                    snapshot_name: snapshot_name.to_string(),
+                },
+            ),
+        )
+        .await
+    }
+
+    async fn vm_snapshot_restore(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        snapshot_name: &str,
+    ) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::VmSnapshotRestore(
+                VmSnapshotRestoreRequest {
+                    vm_id: vm_id.to_string(),
+                    snapshot_name: snapshot_name.to_string(),
+                },
+            ),
+        )
+        .await
+    }
+
+    async fn vm_snapshot_delete(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        snapshot_name: &str,
+    ) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::VmSnapshotDelete(
+                VmSnapshotDeleteRequest {
+                    vm_id: vm_id.to_string(),
+                    snapshot_name: snapshot_name.to_string(),
+                },
+            ),
+        )
+        .await
+    }
+
+    async fn vm_snapshot_list(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+    ) -> DomainResult<Vec<mikrom_proto::agent::VmSnapshotInfo>> {
+        let bytes = self
+            .send_command_raw(
+                host_id,
+                mikrom_proto::agent::agent_command::Command::VmSnapshotList(
+                    VmSnapshotListRequest {
+                        vm_id: vm_id.to_string(),
+                    },
+                ),
+            )
+            .await?;
+        let resp = VmSnapshotListResponse::decode(&bytes[..])
+            .map_err(|e| DomainError::Infrastructure(format!("Decode failed: {e}")))?;
+        if resp.success {
+            Ok(resp.snapshots)
+        } else {
+            Err(DomainError::Infrastructure(resp.message))
+        }
+    }
+
+    async fn attach_volume(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        volume_id: &str,
+        mount_point: &str,
+        read_only: bool,
+    ) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::AttachVolume(AttachVolumeRequest {
+                vm_id: vm_id.to_string(),
+                volume_id: volume_id.to_string(),
+                mount_point: mount_point.to_string(),
+                read_only,
+            }),
+        )
+        .await
+    }
+
+    async fn detach_volume(&self, host_id: &str, vm_id: &str, volume_id: &str) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::DetachVolume(DetachVolumeRequest {
+                vm_id: vm_id.to_string(),
+                volume_id: volume_id.to_string(),
+            }),
+        )
+        .await
+    }
+
+    async fn start_migration(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        target_host: &str,
+        target_uri: &str,
+    ) -> DomainResult<()> {
+        let _ = target_host;
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::StartMigration(StartMigrationRequest {
+                vm_id: vm_id.to_string(),
+                target_host: target_host.to_string(),
+                target_uri: target_uri.to_string(),
+            }),
+        )
+        .await
+    }
+
+    async fn cancel_migration(&self, host_id: &str, vm_id: &str) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::CancelMigration(CancelMigrationRequest {
+                vm_id: vm_id.to_string(),
+            }),
+        )
+        .await
+    }
+
+    async fn query_migration(&self, host_id: &str, vm_id: &str) -> DomainResult<String> {
+        let bytes = self
+            .send_command_raw(
+                host_id,
+                mikrom_proto::agent::agent_command::Command::QueryMigration(
+                    QueryMigrationRequest {
+                        vm_id: vm_id.to_string(),
+                    },
+                ),
+            )
+            .await?;
+        let resp = QueryMigrationResponse::decode(&bytes[..])
+            .map_err(|e| DomainError::Infrastructure(format!("Decode failed: {e}")))?;
+        if resp.success {
+            Ok(resp.status)
+        } else {
+            Err(DomainError::Infrastructure(resp.message))
+        }
+    }
+
+    async fn set_balloon(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        target_memory_mib: u32,
+    ) -> DomainResult<()> {
+        self.send_command(
+            host_id,
+            mikrom_proto::agent::agent_command::Command::SetBalloon(SetBalloonRequest {
+                vm_id: vm_id.to_string(),
+                target_memory_mib,
+            }),
+        )
+        .await
+    }
+
+    async fn query_balloon(&self, host_id: &str, vm_id: &str) -> DomainResult<(u32, u32)> {
+        let bytes = self
+            .send_command_raw(
+                host_id,
+                mikrom_proto::agent::agent_command::Command::QueryBalloon(QueryBalloonRequest {
+                    vm_id: vm_id.to_string(),
+                }),
+            )
+            .await?;
+        let resp = QueryBalloonResponse::decode(&bytes[..])
+            .map_err(|e| DomainError::Infrastructure(format!("Decode failed: {e}")))?;
+        if resp.success {
+            Ok((resp.actual_memory_mib, resp.max_memory_mib))
+        } else {
+            Err(DomainError::Infrastructure(resp.message))
+        }
     }
 }

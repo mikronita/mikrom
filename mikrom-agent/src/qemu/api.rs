@@ -38,6 +38,6 @@ impl QemuManager {
     pub async fn is_app_started(&self, vm_id: &VmId) -> bool {
         let vms = self.vms.read().await;
         vms.get(vm_id)
-            .map_or(false, |vm| vm.status == VmStatus::Running)
+            .is_some_and(|vm| vm.status == VmStatus::Running)
     }
 }

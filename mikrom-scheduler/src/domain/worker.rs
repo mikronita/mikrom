@@ -152,6 +152,55 @@ pub trait AgentClient: Send + Sync {
         target_volume_id: &str,
         pool_name: &str,
     ) -> DomainResult<()>;
+
+    async fn vm_snapshot_create(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        snapshot_name: &str,
+    ) -> DomainResult<()>;
+    async fn vm_snapshot_restore(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        snapshot_name: &str,
+    ) -> DomainResult<()>;
+    async fn vm_snapshot_delete(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        snapshot_name: &str,
+    ) -> DomainResult<()>;
+    async fn vm_snapshot_list(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+    ) -> DomainResult<Vec<mikrom_proto::agent::VmSnapshotInfo>>;
+    async fn attach_volume(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        volume_id: &str,
+        mount_point: &str,
+        read_only: bool,
+    ) -> DomainResult<()>;
+    async fn detach_volume(&self, host_id: &str, vm_id: &str, volume_id: &str) -> DomainResult<()>;
+    async fn start_migration(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        target_host: &str,
+        target_uri: &str,
+    ) -> DomainResult<()>;
+    async fn cancel_migration(&self, host_id: &str, vm_id: &str) -> DomainResult<()>;
+    async fn query_migration(&self, host_id: &str, vm_id: &str) -> DomainResult<String>;
+    async fn set_balloon(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        target_memory_mib: u32,
+    ) -> DomainResult<()>;
+    async fn query_balloon(&self, host_id: &str, vm_id: &str) -> DomainResult<(u32, u32)>;
 }
 
 #[mockall::automock]

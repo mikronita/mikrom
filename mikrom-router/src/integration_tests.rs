@@ -287,6 +287,51 @@ impl AgentClient for RecordingAgentClient {
     ) -> DomainResult<()> {
         Ok(())
     }
+
+    async fn vm_snapshot_create(&self, _h: &str, _v: &str, _s: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn vm_snapshot_restore(&self, _h: &str, _v: &str, _s: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn vm_snapshot_delete(&self, _h: &str, _v: &str, _s: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn vm_snapshot_list(
+        &self,
+        _h: &str,
+        _v: &str,
+    ) -> DomainResult<Vec<mikrom_proto::agent::VmSnapshotInfo>> {
+        Ok(vec![])
+    }
+    async fn attach_volume(
+        &self,
+        _h: &str,
+        _v: &str,
+        _vol: &str,
+        _m: &str,
+        _r: bool,
+    ) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn detach_volume(&self, _h: &str, _v: &str, _vol: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn start_migration(&self, _h: &str, _v: &str, _th: &str, _tu: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn cancel_migration(&self, _h: &str, _v: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn query_migration(&self, _h: &str, _v: &str) -> DomainResult<String> {
+        Ok("completed".to_string())
+    }
+    async fn set_balloon(&self, _h: &str, _v: &str, _s: u32) -> DomainResult<()> {
+        Ok(())
+    }
+    async fn query_balloon(&self, _h: &str, _v: &str) -> DomainResult<(u32, u32)> {
+        Ok((512, 512))
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -920,6 +965,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
             git_commit_hash: Some("abc1234".to_string()),
             git_commit_message: Some("e2e deployment".to_string()),
             git_branch: Some("main".to_string()),
+            hypervisor: 0,
         })
         .await
         .unwrap();
@@ -940,6 +986,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
             ipv6_gateway: None,
             volumes: vec![],
             health_check_path: "/".to_string(),
+            hypervisor: mikrom_scheduler::domain::job::HypervisorType::Firecracker,
         },
         app_record.user_id.to_string(),
         Some(deployment.id.to_string()),
