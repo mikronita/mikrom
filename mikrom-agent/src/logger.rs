@@ -3,11 +3,13 @@ use chrono::Utc;
 use mikrom_proto::id::{AppId, VmId};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::fs::File;
+use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader, SeekFrom};
 use tokio::time::{Duration, interval};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +31,61 @@ pub struct LogShipper {
     logs_map: std::sync::Arc<dashmap::DashMap<VmId, VecDeque<String>>>,
     app_started: Arc<AtomicBool>,
     app_started_at_ms: Arc<AtomicU64>,
+}
+
+struct TailedFile {
+    path: PathBuf,
+    offset: Arc<AtomicU64>,
+}
+
+impl TailedFile {
+    fn new(path: impl Into<PathBuf>, offset: Arc<AtomicU64>) -> Self {
+        Self {
+            path: path.into(),
+            offset,
+        }
+    }
+
+    async fn next_line(&self) -> anyhow::Result<String> {
+        loop {
+            let metadata = match tokio::fs::metadata(&self.path).await {
+                Ok(metadata) => metadata,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                },
+                Err(err) => return Err(err.into()),
+            };
+
+            let mut offset = self.offset.load(Ordering::SeqCst);
+            if metadata.len() < offset {
+                offset = 0;
+                self.offset.store(0, Ordering::SeqCst);
+            }
+
+            let file = File::open(&self.path).await?;
+            let mut reader = BufReader::new(file);
+            reader.seek(SeekFrom::Start(offset)).await?;
+
+            let mut line = String::new();
+            let bytes = reader.read_line(&mut line).await?;
+            if bytes == 0 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+
+            let next_offset = offset + bytes as u64;
+            self.offset.store(next_offset, Ordering::SeqCst);
+            if line.ends_with('\n') {
+                line.pop();
+                if line.ends_with('\r') {
+                    line.pop();
+                }
+            }
+
+            return Ok(line);
+        }
+    }
 }
 
 impl LogShipper {
@@ -109,6 +166,70 @@ impl LogShipper {
             // Final flush before exiting
             if !batch.is_empty() {
                 self.flush(&mut batch).await;
+            }
+        })
+    }
+
+    pub async fn spawn_from_paths(
+        self,
+        stdout_path: PathBuf,
+        stdout_offset: Arc<AtomicU64>,
+        stderr_path: PathBuf,
+        stderr_offset: Arc<AtomicU64>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let stdout_tail = TailedFile::new(stdout_path, stdout_offset);
+            let stderr_tail = TailedFile::new(stderr_path, stderr_offset);
+            let mut batch = Vec::new();
+            let mut timer = interval(self.flush_interval);
+            let mut app_started = self.app_started.load(Ordering::SeqCst);
+
+            loop {
+                tokio::select! {
+                    result = stdout_tail.next_line() => {
+                        match result {
+                            Ok(line) => {
+                                if !app_started && line == "__MIKROM_APP_START__" {
+                                    app_started = true;
+                                    self.app_started.store(true, Ordering::SeqCst);
+                                    self.app_started_at_ms.store(
+                                        chrono::Utc::now().timestamp_millis() as u64,
+                                        Ordering::SeqCst,
+                                    );
+                                    tracing::info!(app_id = %self.app_id, vm_id = %self.vm_id, "Application started marker received");
+                                    continue;
+                                }
+                                self.process_line("stdout", line, &mut batch, app_started).await;
+                                if batch.len() >= self.batch_size {
+                                    self.flush(&mut batch).await;
+                                }
+                            }
+                            Err(err) => {
+                                tracing::error!(vm_id = %self.vm_id, error = %err, "Failed to tail Firecracker stdout log");
+                                tokio::time::sleep(Duration::from_millis(200)).await;
+                            }
+                        }
+                    }
+                    result = stderr_tail.next_line() => {
+                        match result {
+                            Ok(line) => {
+                                self.process_line("stderr", line, &mut batch, app_started).await;
+                                if batch.len() >= self.batch_size {
+                                    self.flush(&mut batch).await;
+                                }
+                            }
+                            Err(err) => {
+                                tracing::error!(vm_id = %self.vm_id, error = %err, "Failed to tail Firecracker stderr log");
+                                tokio::time::sleep(Duration::from_millis(200)).await;
+                            }
+                        }
+                    }
+                    _ = timer.tick() => {
+                        if !batch.is_empty() {
+                            self.flush(&mut batch).await;
+                        }
+                    }
+                }
             }
         })
     }

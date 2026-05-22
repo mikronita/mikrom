@@ -1,3 +1,4 @@
+mod common;
 use axum::extract::Query;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -13,12 +14,10 @@ use mikrom_api::scheduler::MockScheduler;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-async fn create_test_state() -> AppState {
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+async fn create_test_state() -> Option<AppState> {
+    let nats_client = common::get_nats_client_or_skip().await?;
 
-    AppState {
+    Some(AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(MockAppRepository::new()),
         volume_repo: Arc::new(
@@ -45,12 +44,14 @@ async fn create_test_state() -> AppState {
         workspace_events: tokio::sync::broadcast::channel(100).0,
         mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    }
+    })
 }
 
 #[tokio::test]
 async fn test_github_callback_missing_state_redirects_to_settings() {
-    let state = create_test_state().await;
+    let Some(state) = create_test_state().await else {
+        return;
+    };
     let query = InstallCallbackQuery {
         installation_id: 12345,
         setup_action: "install".to_string(),
@@ -71,7 +72,9 @@ async fn test_github_callback_missing_state_redirects_to_settings() {
 
 #[tokio::test]
 async fn test_github_callback_invalid_state_returns_error() {
-    let state = create_test_state().await;
+    let Some(state) = create_test_state().await else {
+        return;
+    };
     let query = InstallCallbackQuery {
         installation_id: 12345,
         setup_action: "install".to_string(),

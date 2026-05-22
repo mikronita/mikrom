@@ -1,3 +1,4 @@
+mod common;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -63,9 +64,9 @@ async fn test_create_global_volume() {
         });
 
     let db = TestDb::new().await;
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
     let mut subscriber = nats_client
         .subscribe("mikrom.scheduler.create_volume")
         .await
@@ -209,9 +210,9 @@ async fn test_attach_volume_to_app() {
         });
 
     let db = TestDb::new().await;
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -334,9 +335,9 @@ async fn test_attach_volume_rejects_rwo_conflict() {
         });
 
     let db = TestDb::new().await;
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -426,9 +427,9 @@ async fn test_list_volumes_with_attachments() {
         });
 
     let db = TestDb::new().await;
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -514,9 +515,9 @@ async fn test_delete_volume_fails_if_attached() {
         .returning(|_| Ok(vec![]));
 
     let db = TestDb::new().await;
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),

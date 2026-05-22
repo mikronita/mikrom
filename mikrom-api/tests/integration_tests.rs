@@ -14,12 +14,10 @@ use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 #[path = "common/mod.rs"]
 mod common;
 
-async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
+async fn create_app(pool: PgPool, jwt_secret: &str) -> Option<axum::Router> {
     let user_repo = PostgresUserRepository::new(pool.clone());
     let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".to_string());
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = common::get_nats_client_or_skip().await?;
 
     let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
     mock_scheduler
@@ -89,7 +87,7 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> axum::Router {
         mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
-    mikrom_api::create_app(state)
+    Some(mikrom_api::create_app(state))
 }
 
 #[tokio::test]
@@ -103,7 +101,9 @@ async fn test_all_auth_integration_flows() {
 
     // Test 1: Register and Login Workflow
     {
-        let app = create_app(pool.clone(), jwt_secret).await;
+        let Some(app) = create_app(pool.clone(), jwt_secret).await else {
+            return;
+        };
         let email = format!("workflow_{}@example.com", uuid::Uuid::new_v4());
         let password = "securePassword123";
 
@@ -141,7 +141,9 @@ async fn test_all_auth_integration_flows() {
 
     // Test 2: Profile Flow
     {
-        let app = create_app(pool.clone(), jwt_secret).await;
+        let Some(app) = create_app(pool.clone(), jwt_secret).await else {
+            return;
+        };
         let email = format!("profile_{}@example.com", uuid::Uuid::new_v4());
         let password = "password123";
 
@@ -217,7 +219,9 @@ async fn test_all_auth_integration_flows() {
 
     // Test 3: Multiple Registrations (Conflict)
     {
-        let app = create_app(pool.clone(), jwt_secret).await;
+        let Some(app) = create_app(pool.clone(), jwt_secret).await else {
+            return;
+        };
         let email = format!("multi_{}@example.com", uuid::Uuid::new_v4());
 
         for i in 0..2 {
@@ -247,7 +251,9 @@ async fn test_all_auth_integration_flows() {
 
     // Test 4: Password Hashing (Long Password)
     {
-        let app = create_app(pool.clone(), jwt_secret).await;
+        let Some(app) = create_app(pool.clone(), jwt_secret).await else {
+            return;
+        };
         let email = format!("hash_long_{}@example.com", uuid::Uuid::new_v4());
 
         let resp = app
@@ -269,7 +275,9 @@ async fn test_all_auth_integration_flows() {
 
     // Test 5: Login Full Flow
     {
-        let app = create_app(pool.clone(), jwt_secret).await;
+        let Some(app) = create_app(pool.clone(), jwt_secret).await else {
+            return;
+        };
         let email = format!("login_full_{}@example.com", uuid::Uuid::new_v4());
         let password = "password123";
 
@@ -306,7 +314,9 @@ async fn test_all_auth_integration_flows() {
 
     // Test 6: App Lifecycle
     {
-        let app = create_app(pool.clone(), jwt_secret).await;
+        let Some(app) = create_app(pool.clone(), jwt_secret).await else {
+            return;
+        };
         let email = format!("app_life_{}@example.com", uuid::Uuid::new_v4());
         let password = "password123";
 

@@ -1,3 +1,4 @@
+mod common;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -70,9 +71,9 @@ async fn test_list_volume_snapshots_endpoint() {
         .returning(|_| Ok(vec![]));
 
     let db = TestDb::new().await;
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -173,9 +174,9 @@ async fn test_create_volume_snapshot_endpoint() {
         });
 
     let db = TestDb::new().await;
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let mut subscriber = nats_client
         .subscribe("mikrom.scheduler.create_snapshot")
@@ -273,9 +274,9 @@ async fn test_restore_volume_snapshot_endpoint() {
         });
 
     let db = TestDb::new().await;
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let mut subscriber = nats_client
         .subscribe("mikrom.scheduler.restore_snapshot")
@@ -392,9 +393,9 @@ async fn test_delete_snapshot_endpoint() {
         .returning(|_| Ok(true));
 
     let db = TestDb::new().await;
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let mut subscriber = nats_client
         .subscribe("mikrom.scheduler.delete_snapshot")
@@ -506,9 +507,9 @@ async fn test_clone_volume_endpoint() {
         });
 
     let db = TestDb::new().await;
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let mut subscriber = nats_client
         .subscribe("mikrom.scheduler.clone_volume")
@@ -615,9 +616,9 @@ async fn test_restore_volume_snapshot_endpoint_failure() {
         });
 
     let db = TestDb::new().await;
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let mut subscriber = nats_client
         .subscribe("mikrom.scheduler.restore_snapshot")

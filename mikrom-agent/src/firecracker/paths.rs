@@ -42,6 +42,16 @@ impl VmPaths {
         self.data_dir.join(format!("fc-{}.log", self.vm_id))
     }
 
+    /// Path to the Firecracker stdout log.
+    pub fn stdout_log_path(&self) -> PathBuf {
+        self.data_dir.join(format!("fc-{}.stdout.log", self.vm_id))
+    }
+
+    /// Path to the Firecracker stderr log.
+    pub fn stderr_log_path(&self) -> PathBuf {
+        self.data_dir.join(format!("fc-{}.stderr.log", self.vm_id))
+    }
+
     /// Path to the Firecracker metrics pipe/file.
     pub fn metrics_path(&self) -> PathBuf {
         self.data_dir.join(format!("fc-{}.metrics", self.vm_id))

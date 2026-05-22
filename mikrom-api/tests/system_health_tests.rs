@@ -1,3 +1,4 @@
+mod common;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -16,10 +17,9 @@ async fn test_health_endpoint_structure() {
         db_pool.clone(),
         "key".to_string(),
     ));
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
     let state = AppState {
         user_repo: Arc::new(mock_repo),
         app_repo,
@@ -80,10 +80,9 @@ async fn test_health_stream_endpoint() {
         db_pool.clone(),
         "key".to_string(),
     ));
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
     let state = AppState {
         user_repo: Arc::new(mock_repo),
         app_repo,

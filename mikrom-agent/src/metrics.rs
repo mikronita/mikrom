@@ -455,6 +455,10 @@ mod tests {
                     child: Some(child),
                     socket_path: format!("{}/fake.sock", mgr.fc_config.data_dir),
                     metrics_path: Some(metrics_file.clone()),
+                    stdout_log_path: format!("{}/fake.stdout.log", mgr.fc_config.data_dir),
+                    stderr_log_path: format!("{}/fake.stderr.log", mgr.fc_config.data_dir),
+                    stdout_log_offset: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                    stderr_log_offset: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
                     tap_name: None,
                     tap_ifindex: None,
                     log_task,
@@ -462,6 +466,7 @@ mod tests {
                     app_started: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
                     app_started_at_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
                     vfs_processes: Vec::new(),
+                    vfs_pids: Vec::new(),
                 },
             );
         }

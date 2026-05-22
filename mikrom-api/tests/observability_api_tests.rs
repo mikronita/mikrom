@@ -1,3 +1,4 @@
+mod common;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -19,13 +20,7 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> Option<(axum::Router, as
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = match async_nats::connect(nats_url).await {
-        Ok(client) => client,
-        Err(err) => {
-            eprintln!("Skipping observability test: unable to connect to NATS: {err}");
-            return None;
-        },
-    };
+    let nats_client = async_nats::connect(nats_url).await.ok()?;
 
     let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
     mock_scheduler

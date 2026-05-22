@@ -377,28 +377,17 @@ impl ImageBuilder {
         source_path: &Path,
         destination_name: &str,
     ) -> anyhow::Result<()> {
-        match Self::copy_container_directory(
-            container_name,
-            mount_dir,
-            source_path,
-            destination_name,
-        )
-        .await
-        {
-            Ok(()) => Ok(()),
-            Err(err) => {
-                if Self::is_missing_container_payload_error(&err.to_string()) {
-                    info!(
-                        source = %source_path.display(),
-                        destination = %destination_name,
-                        "Skipping optional runtime payload that is not present in the image"
-                    );
-                    Ok(())
-                } else {
-                    Err(err)
-                }
-            },
+        if !Self::container_source_exists(container_name, source_path).await? {
+            info!(
+                source = %source_path.display(),
+                destination = %destination_name,
+                "Skipping optional runtime payload that is not present in the image"
+            );
+            return Ok(());
         }
+
+        Self::copy_container_directory(container_name, mount_dir, source_path, destination_name)
+            .await
     }
 
     async fn copy_container_file(
@@ -457,20 +446,15 @@ impl ImageBuilder {
         mount_dir: &Path,
         source_path: &Path,
     ) -> anyhow::Result<()> {
-        match Self::copy_container_file(container_name, mount_dir, source_path).await {
-            Ok(()) => Ok(()),
-            Err(err) => {
-                if Self::is_missing_container_payload_error(&err.to_string()) {
-                    info!(
-                        source = %source_path.display(),
-                        "Skipping optional runtime binary that is not present in the image"
-                    );
-                    Ok(())
-                } else {
-                    Err(err)
-                }
-            },
+        if !Self::container_source_exists(container_name, source_path).await? {
+            info!(
+                source = %source_path.display(),
+                "Skipping optional runtime binary that is not present in the image"
+            );
+            return Ok(());
         }
+
+        Self::copy_container_file(container_name, mount_dir, source_path).await
     }
 
     async fn copy_entrypoint_binary(
@@ -604,13 +588,6 @@ impl ImageBuilder {
         Ok(PathBuf::from(normalized))
     }
 
-    fn is_missing_container_payload_error(error_text: &str) -> bool {
-        let lowered = error_text.to_lowercase();
-        lowered.contains("could not find the file")
-            || lowered.contains("no such file")
-            || lowered.contains("not found")
-    }
-
     fn rewrite_program_path(args: &[String], original_workdir: &str) -> Vec<String> {
         let Some((program, rest)) = args.split_first() else {
             return Vec::new();
@@ -644,6 +621,47 @@ impl ImageBuilder {
         let normalized = source_path.trim_start_matches('/').trim_end_matches('/');
 
         format!("/{normalized}/.")
+    }
+
+    async fn container_source_exists(
+        container_name: &str,
+        source_path: &Path,
+    ) -> anyhow::Result<bool> {
+        let inspect = Command::new("docker")
+            .arg("inspect")
+            .arg("--format")
+            .arg("{{.GraphDriver.Data.MergedDir}}")
+            .arg(container_name)
+            .output()
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to inspect container {} for payload presence",
+                    container_name
+                )
+            })?;
+
+        if !inspect.status.success() {
+            let stderr = String::from_utf8_lossy(&inspect.stderr);
+            anyhow::bail!(
+                "Failed to inspect container {} for {}: {}",
+                container_name,
+                source_path.display(),
+                stderr.trim()
+            );
+        }
+
+        let merged_dir = String::from_utf8_lossy(&inspect.stdout).trim().to_string();
+        if merged_dir.is_empty() {
+            anyhow::bail!(
+                "Docker did not return a merged directory for container {} while checking {}",
+                container_name,
+                source_path.display()
+            );
+        }
+
+        let relative = source_path.strip_prefix("/").unwrap_or(source_path);
+        Ok(Path::new(&merged_dir).join(relative).exists())
     }
 
     fn registry_credentials(&self) -> Option<DockerCredentials> {
@@ -745,22 +763,6 @@ mod tests {
 
         let destination = mount_dir.join("mise");
         assert_eq!(destination, mount_dir.join("mise"));
-    }
-
-    #[test]
-    fn test_missing_container_payload_error_detection_is_case_insensitive() {
-        assert!(ImageBuilder::is_missing_container_payload_error(
-            "docker cp: Could Not Find The File"
-        ));
-        assert!(ImageBuilder::is_missing_container_payload_error(
-            "docker cp: no such file or directory"
-        ));
-        assert!(ImageBuilder::is_missing_container_payload_error(
-            "source not found in container"
-        ));
-        assert!(!ImageBuilder::is_missing_container_payload_error(
-            "permission denied"
-        ));
     }
 
     #[test]

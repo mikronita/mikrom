@@ -1,3 +1,4 @@
+mod common;
 use axum::Json;
 use axum::extract::Path;
 use axum::extract::State;
@@ -17,12 +18,10 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
-async fn create_test_state(app_repo: MockAppRepository) -> AppState {
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+async fn create_test_state(app_repo: MockAppRepository) -> Option<AppState> {
+    let nats_client = common::get_nats_client_or_skip().await?;
 
-    AppState {
+    Some(AppState {
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(app_repo),
         volume_repo: Arc::new(
@@ -49,7 +48,7 @@ async fn create_test_state(app_repo: MockAppRepository) -> AppState {
         workspace_events: tokio::sync::broadcast::channel(100).0,
         mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    }
+    })
 }
 
 #[tokio::test]
@@ -101,7 +100,9 @@ async fn test_manual_deploy_without_github_metadata() {
         .expect_update_deployment()
         .returning(|_, _| Ok(()));
 
-    let state = create_test_state(mock_repo).await;
+    let Some(state) = create_test_state(mock_repo).await else {
+        return;
+    };
     let auth = AuthUser {
         user_id: user_id.to_string(),
         email: "test@example.com".into(),
@@ -195,7 +196,9 @@ async fn test_manual_deploy_with_github_metadata_fetch_failure() {
         .expect_update_deployment()
         .returning(|_, _| Ok(()));
 
-    let state = create_test_state(mock_repo).await;
+    let Some(state) = create_test_state(mock_repo).await else {
+        return;
+    };
     // We don't provide valid GitHub credentials so the fetch will fail
 
     let auth = AuthUser {

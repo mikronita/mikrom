@@ -235,7 +235,9 @@ mod tests {
     async fn test_notify_router_skips_scaling_update_when_no_targets_exist() {
         let test_db = mikrom_api::test_utils::TestDb::new().await;
         let pool = test_db.pool().clone();
-        let nats_client = common::get_nats_client().await;
+        let Some(nats_client) = common::get_nats_client_or_skip().await else {
+            return;
+        };
 
         let user_id = Uuid::new_v4();
         let hostname = "no-targets.example.com".to_string();

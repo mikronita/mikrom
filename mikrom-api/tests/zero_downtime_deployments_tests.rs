@@ -1,3 +1,4 @@
+mod common;
 use futures::StreamExt;
 use mikrom_api::AppState;
 use mikrom_api::models::app::{App, Deployment};
@@ -111,10 +112,9 @@ async fn test_zero_downtime_flow_success() {
         let app = app.clone();
         move |_| Ok(Some(app.clone()))
     });
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let job_id = format!("job-zero-downtime-{}", Uuid::new_v4());
     let job_id_clone = job_id.clone();
@@ -238,10 +238,9 @@ async fn test_activate_deployment_no_job_id() {
         .with(eq(app_id), eq(deployment_id))
         .times(1)
         .returning(|_, _| Ok(()));
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let state = AppState {
         user_repo: Arc::new(MockUserRepository::new()),

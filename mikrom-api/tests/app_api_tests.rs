@@ -1,3 +1,4 @@
+mod common;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -75,10 +76,9 @@ async fn test_create_app_endpoint() {
 
     let db = TestDb::new().await;
     let db_pool = db.pool().clone();
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
     let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
     mock_scheduler
         .expect_update_app_scaling_config()
@@ -194,10 +194,9 @@ async fn test_create_app_duplicate_name() {
 
     let db = TestDb::new().await;
     let db_pool = db.pool().clone();
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
     let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
     mock_scheduler
         .expect_update_app_scaling_config()
@@ -320,10 +319,9 @@ async fn test_list_apps_includes_secret() {
 
     let db = TestDb::new().await;
     let db_pool = db.pool().clone();
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
     let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
     mock_scheduler
         .expect_update_app_scaling_config()
@@ -472,9 +470,9 @@ async fn test_list_apps_reports_idle_when_active_deployment_is_running() {
 
     let db = TestDb::new().await;
     let db_pool = db.pool().clone();
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let mut mock_scheduler = Arc::new(mikrom_api::scheduler::MockScheduler::new());
     let mock_scheduler_inner = Arc::get_mut(&mut mock_scheduler).unwrap();
@@ -601,10 +599,9 @@ async fn test_get_app_secret_endpoint() {
 
     let db = TestDb::new().await;
     let db_pool = db.pool().clone();
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
     let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
     mock_scheduler
         .expect_update_app_scaling_config()
@@ -744,9 +741,12 @@ async fn test_create_app_with_custom_config() {
         ),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
-        nats: mikrom_api::nats::TypedNatsClient::new(
-            async_nats::connect("nats://localhost:4223").await.unwrap(),
-        ),
+        nats: {
+            let Some(nats_client) = common::get_nats_client_or_skip().await else {
+                return;
+            };
+            mikrom_api::nats::TypedNatsClient::new(nats_client)
+        },
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
         api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),

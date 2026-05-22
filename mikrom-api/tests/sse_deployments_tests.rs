@@ -1,3 +1,4 @@
+mod common;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -15,12 +16,10 @@ use uuid::Uuid;
 
 const JWT_SECRET: &str = "test-secret";
 
-async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
+async fn setup_app(mock_app_repo: MockAppRepository) -> Option<axum::Router> {
     let mock_user_repo = MockUserRepository::new();
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = common::get_nats_client_or_skip().await?;
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
@@ -51,7 +50,7 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> axum::Router {
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
-    create_app(state)
+    Some(create_app(state))
 }
 
 #[tokio::test]
@@ -107,7 +106,9 @@ async fn test_sse_deployments_stream_initial_data() {
             }])
         });
 
-    let mut router = setup_app(mock_app_repo).await;
+    let Some(mut router) = setup_app(mock_app_repo).await else {
+        return;
+    };
     let token = create_token(
         &user_id.to_string(),
         "test@test.com",
@@ -158,7 +159,9 @@ async fn test_sse_deployments_auth_via_query_param() {
         .expect_list_deployments_by_app()
         .returning(|_| Ok(vec![]));
 
-    let mut router = setup_app(mock_app_repo).await;
+    let Some(mut router) = setup_app(mock_app_repo).await else {
+        return;
+    };
     let token = create_token(
         &user_id.to_string(),
         "test@test.com",
@@ -237,9 +240,9 @@ async fn test_sse_deployments_stream_updates() {
     let mock_user_repo = MockUserRepository::new();
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
     let tx = deployment_events.clone();
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let Some(nats_client) = common::get_nats_client_or_skip().await else {
+        return;
+    };
 
     let state = AppState {
         user_repo: Arc::new(mock_user_repo),
