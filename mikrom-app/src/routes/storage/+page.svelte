@@ -1,16 +1,16 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Camera, Copy, Database, HardDrive, History, Link, Plus, RotateCcw, Trash2 } from "lucide-svelte";
+  import { Calendar, Camera, Copy, HardDrive, History, Link, Plus, RotateCcw, Search, Trash2 } from "lucide-svelte";
   import {
     Card,
     CardHeader,
     CardTitle,
     CardDescription,
     CardContent,
+    CardSkeleton,
     Button,
     AlertDialog,
     EmptyState,
-    Skeleton,
     TableSkeleton,
     Modal,
     Field,
@@ -22,14 +22,9 @@
     SelectTrigger,
     SelectValue,
     Badge,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
   } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
+  import { formatDate } from "$lib/utils";
 
   import { getToken } from "$lib/auth";
   import { 
@@ -225,155 +220,79 @@
 
 <DashboardLayout>
   <div class="flex flex-col gap-6">
-    <div class="flex flex-col gap-2">
-      <div class="flex items-center gap-3">
-        <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
-          <HardDrive />
+    <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center gap-3">
+          <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+            <HardDrive />
+          </div>
+          <h1 class="text-3xl font-semibold tracking-tight">Storage</h1>
         </div>
-        <h1 class="text-3xl font-semibold tracking-tight">Storage</h1>
+        <p class="max-w-2xl text-sm text-muted-foreground">Manage persistent block storage (Ceph RBD) for your applications.</p>
       </div>
-      <p class="max-w-2xl text-sm text-muted-foreground">Manage persistent block storage (Ceph RBD) for your applications.</p>
+      <Button onclick={() => (showCreateVolume = true)}>
+        <Plus class="size-4" />
+        New Volume
+      </Button>
     </div>
 
-    <Card class="overflow-hidden">
-      <CardHeader class="border-b bg-muted/20">
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div class="flex flex-col gap-1.5">
-            <CardTitle class="flex items-center gap-2 text-lg">
-              <Database class="size-5" />
-              Volumes
-            </CardTitle>
-            <CardDescription>
-              Persistent volumes can be attached to your microVMs.
-            </CardDescription>
-          </div>
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Select bind:value={selectedApp} onValueChange={async (val: string | undefined) => {
-              selectedApp = val || "";
-              await loadVolumes(selectedApp);
-            }}>
-              <SelectTrigger class="sm:w-[220px]">
-                <SelectValue placeholder="All Applications" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">All Applications</SelectItem>
-                {#each $appsStore as app}
-                  <SelectItem value={app.name}>{app.name}</SelectItem>
-                {/each}
-              </SelectContent>
-            </Select>
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {#if $volumesLoading && $volumesStore.length === 0}
+        {#each Array.from({ length: 6 }) as _}
+          <CardSkeleton
+            titleClassName="w-32"
+            descriptionClassName="w-full"
+            footerLineClassName="w-40"
+            footerPills={["w-20", "w-24"]}
+          />
+        {/each}
+      {:else if $volumesStore.length === 0}
+        <div class="col-span-full">
+          <EmptyState class="py-16">
+            <HardDrive class="size-10 text-muted-foreground" />
+            <h2 class="text-xl font-semibold">No volumes found</h2>
+            <p class="max-w-md text-sm text-muted-foreground">You don't have any persistent volumes yet.</p>
             <Button size="sm" onclick={() => (showCreateVolume = true)}>
               <Plus class="size-4" />
-              Create Volume
+              Create your first volume
             </Button>
-          </div>
+          </EmptyState>
         </div>
-      </CardHeader>
-
-      <CardContent class="p-0">
-        {#if $volumesLoading}
-          <div class="flex flex-col gap-3 p-4">
-            <Skeleton class="h-10 w-full" />
-            <Skeleton class="h-10 w-full" />
-          </div>
-        {:else if $volumesStore.length === 0}
-          <EmptyState><HardDrive class="size-10 text-muted-foreground" /><h3 class="text-xl font-semibold">No volumes found</h3><p class="text-sm text-muted-foreground">You don't have any persistent volumes yet.</p></EmptyState>
-        {:else}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Volume</TableHead>
-                <TableHead>Attached To</TableHead>
-                <TableHead class="text-center w-[120px]">Size</TableHead>
-                <TableHead class="text-right w-[180px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {#each $volumesStore as volume (volume.id)}
-                <TableRow class="group">
-                  <TableCell class="font-medium">
-                    <div class="flex items-center gap-3">
-                      <div class="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30 text-muted-foreground group-hover:bg-background transition-colors">
-                        <Database class="size-4" />
-                      </div>
-                      <div class="flex flex-col min-w-0">
-                        <span class="truncate font-semibold text-sm">{volume.name}</span>
-                        <span class="font-mono text-[10px] text-muted-foreground/70 lowercase tracking-wider">{volume.id}</span>
-                      </div>
+      {:else}
+        {#each [...$volumesStore].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) as volume (volume.id)}
+          <a href={`/storage/${volume.id}`} class="block">
+            <Card class="h-full overflow-hidden transition-colors hover:bg-muted/30">
+              <CardHeader>
+                <div class="flex items-start gap-4">
+                  <div class="flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
+                    <HardDrive class="size-5" />
+                  </div>
+                  <div class="flex min-w-0 flex-1 flex-col gap-2">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <CardTitle class="truncate text-base">{volume.name}</CardTitle>
                     </div>
-                  </TableCell>
-                  
-                  <TableCell>
-                    <div class="flex flex-wrap gap-2">
-                      {#if isAttachedVolume(volume)}
-                        <Badge variant="outline" class="h-7 items-center gap-1.5 px-2 group/badge bg-muted/20 border-border/50">
-                          <span class="font-medium text-foreground">{$appsStore.find((a) => a.id === selectedAppId)?.name || selectedApp || "Current App"}</span>
-                          <Badge variant="secondary" class="h-4 px-1 text-[8px] font-bold uppercase tracking-tighter">
-                            {volume.access_mode === 1 ? "RWX" : volume.access_mode === 2 ? "ROX" : "RWO"}
-                          </Badge>
-                          <code class="text-[9px] text-muted-foreground bg-background/50 px-1 rounded border border-border/30">{volume.mount_point}</code>
-                          <button 
-                            class="ml-0.5 rounded-full p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors text-muted-foreground" 
-                            title="Detach"
-                            onclick={() => detachVolumeNow(selectedAppId, volume.id)}
-                          >
-                            <Plus class="size-3 rotate-45" />
-                          </button>
-                        </Badge>
-                      {:else if isVolumeWithAttachments(volume)}
-                        {#if volume.attachments.length === 0}
-                          <span class="text-xs text-muted-foreground italic opacity-50">Not attached</span>
-                        {:else}
-                          {#each volume.attachments as attachment}
-                            <Badge variant="outline" class="h-7 items-center gap-1.5 px-2 group/badge bg-muted/20 border-border/50">
-                              <span class="font-medium text-foreground">{attachment.app_name}</span>
-                              <Badge variant="secondary" class="h-4 px-1 text-[8px] font-bold uppercase tracking-tighter">
-                                {attachment.access_mode === 1 ? "RWX" : attachment.access_mode === 2 ? "ROX" : "RWO"}
-                              </Badge>
-                              <code class="text-[9px] text-muted-foreground bg-background/50 px-1 rounded border border-border/30">{attachment.mount_point}</code>
-                              <button 
-                                class="ml-0.5 rounded-full p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors text-muted-foreground" 
-                                title={`Detach from ${attachment.app_name}`}
-                                onclick={() => detachVolumeNow(attachment.app_id, volume.id)}
-                              >
-                                <Plus class="size-3 rotate-45" />
-                              </button>
-                            </Badge>
-                          {/each}
-                        {/if}
-                      {/if}
-                    </div>
-                  </TableCell>
-
-                  <TableCell class="text-center">
-                    <Badge variant="secondary" class="font-mono h-6">{formatSize(volume.size_mib)}</Badge>
-                  </TableCell>
-                  
-                  <TableCell class="text-right">
-                    <div class="flex justify-end gap-1">
-                      {#if !selectedApp}
-                        <Button variant="ghost" size="icon" class="size-8" title="Attach to App" onclick={() => { attachParams.volume_id = volume.id; showAttachVolume = true; }}>
-                          <Link class="size-4" />
-                        </Button>
-                      {/if}
-                      <Button variant="ghost" size="icon" class="size-8" title="Snapshots" onclick={async () => { volumeForSnapshots = volume.id; showSnapshotsModal = true; await loadSnapshots(volume.id); }}>
-                        <History class="size-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" class="size-8" title="Take Snapshot" onclick={() => createSnapshot(volume.id)}>
-                        <Camera class="size-4" />
-                      </Button>
-                      <Button variant="destructive-soft" size="icon" class="size-8" title="Delete Volume" onclick={() => (volumeToDelete = volume)}>
-                        <Trash2 class="size-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              {/each}
-            </TableBody>
-          </Table>
-        {/if}
-      </CardContent>
-    </Card>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent class="flex flex-col gap-4">
+                <div class="flex flex-col gap-3 text-xs text-muted-foreground">
+                  <span class="inline-flex items-center gap-1.5">
+                    <Calendar class="size-4" />
+                    Created {formatDate(volume.created_at)}
+                  </span>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" class="gap-1.5">
+                      <HardDrive class="size-3" />
+                      <span>{formatSize(volume.size_mib)}</span>
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </a>
+        {/each}
+      {/if}
+    </div>
   </div>
 
   {#if showCreateVolume}
