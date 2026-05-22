@@ -374,6 +374,13 @@ pub struct GetVmStatusResponse {
     pub error_message: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VmFailureEvent {
+    #[prost(string, tag = "1")]
+    pub vm_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub error_message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct VmLogPayload {
     #[prost(string, tag = "1")]
     pub line: ::prost::alloc::string::String,

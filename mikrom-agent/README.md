@@ -28,15 +28,15 @@ The agent produces several real-time data streams via NATS:
 Mikrom-agent uses a sophisticated dual-script system to ensure applications start reliably:
 
 1.  **`mikrom-init.sh`**: Acts as the `init` process (PID 1). It mounts essential Linux pseudo-filesystems (`/proc`, `/sys`, `/dev`, `/dev/shm`), configures the loopback interface, sets terminal dimensions for clean logs, and exports environment variables.
-2.  **`app-run.sh`**: Encapsulates the application's exact command-line arguments (extracted from Docker metadata). Using strict JSON-based quoting and `exec`, it ensures that commands like `pnpm start` or `/bin/bash -c "..."` run with their original intent preserved.
+2.  **`app-run.sh`**: Encapsulates the application's exact command-line arguments (extracted from Docker metadata). The app payload is copied to `/app`, and execution is dropped to the `mikrom` user before launch so the workload does not run as root.
 
 ## Docker to Firecracker Flow
 
 When a deployment is triggered:
 1.  **Pull**: The agent pulls the OCI image from the registry.
 2.  **Metadata**: Extracts `Entrypoint`, `CMD`, `WorkingDir`, and `Env` using `docker inspect`.
-3.  **Convert**: Mounts an empty `.ext4` loop device and uses `docker export` to populate it.
-4.  **Inject**: Writes the custom boot scripts into the filesystem and performs an explicit `sync`.
+3.  **Convert**: Mounts an empty `.ext4` loop device and copies only the image `WORKDIR` into `/app`.
+4.  **Inject**: Writes the custom boot scripts into the filesystem, runs the app as `mikrom`, and performs an explicit `sync`.
 5.  **Launch**: Spawns the Firecracker process via `jailer` for maximum security.
 
 ## Configuration

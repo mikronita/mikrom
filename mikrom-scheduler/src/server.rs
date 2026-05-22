@@ -273,6 +273,7 @@ impl SchedulerServer {
                 mem_threshold: req.mem_threshold,
                 last_router_traffic_at: req.last_router_traffic_at,
                 last_scaled_to_zero_at: req.last_scaled_to_zero_at,
+                restore_retry_after_at: 0,
             })
             .await
         {

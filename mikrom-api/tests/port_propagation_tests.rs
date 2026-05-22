@@ -166,7 +166,7 @@ async fn test_port_propagation_from_builder_to_deployment() {
     )
     .await;
 
-    // It will probably fail because of deploy_to_scheduler (real NATS request),
-    // but the port update check is done via MockAppRepository expectations.
+    // The flow may still fail later in deploy_to_scheduler, but the port update
+    // check is done via MockAppRepository expectations.
     assert!(result.is_err());
 }

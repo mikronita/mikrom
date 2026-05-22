@@ -49,6 +49,7 @@ mod tests {
             mem_threshold: 65.0,
             last_router_traffic_at: 12345,
             last_scaled_to_zero_at: 67890,
+            restore_retry_after_at: 0,
         };
 
         repo.update_app_config(config.clone()).await.unwrap();
@@ -57,6 +58,7 @@ mod tests {
         assert_eq!(by_id.hostname, "db-test.example.com");
         assert_eq!(by_id.last_router_traffic_at, 12345);
         assert_eq!(by_id.last_scaled_to_zero_at, 67890);
+        assert_eq!(by_id.restore_retry_after_at, 0);
 
         let by_hostname = repo
             .get_app_config_by_hostname("db-test.example.com")

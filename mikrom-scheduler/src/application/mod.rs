@@ -93,8 +93,12 @@ impl AppService {
             return Ok(());
         }
 
-        // Re-check traffic before hibernating to avoid race condition
-        if let Ok(Some(app)) = self.app_repo.get_app_config(&job.app_id).await {
+        // Re-check traffic before hibernating to avoid race condition.
+        // System-driven cleanup should not be blocked by this guard because we
+        // need to force-stop failed deployments even if traffic raced in.
+        if user_id != "system"
+            && let Ok(Some(app)) = self.app_repo.get_app_config(&job.app_id).await
+        {
             let now = chrono::Utc::now().timestamp();
             if app.last_router_traffic_at > app.last_scaled_to_zero_at
                 && now - app.last_router_traffic_at < self.router_idle_timeout_secs
@@ -540,12 +544,33 @@ impl AppService {
                 app.last_router_traffic_at = now;
             }
 
+            if current_count > 0 && app.restore_retry_after_at > 0 {
+                if let Err(e) = self
+                    .app_repo
+                    .update_app_config(AppConfig {
+                        restore_retry_after_at: 0,
+                        ..app.clone()
+                    })
+                    .await
+                {
+                    tracing::error!(
+                        app_id = %app.id,
+                        error = %e,
+                        "Failed to clear router restore backoff for running app"
+                    );
+                } else {
+                    app.restore_retry_after_at = 0;
+                }
+            }
+
             let router_idle = app.min_replicas == 0
                 && app.last_router_traffic_at > 0
                 && now - app.last_router_traffic_at >= self.router_idle_timeout_secs;
             let should_restore_from_zero = app.min_replicas == 0
                 && app.desired_replicas > 0
                 && app.last_router_traffic_at > app.last_scaled_to_zero_at;
+            let restore_retry_blocked =
+                app.restore_retry_after_at > 0 && now < app.restore_retry_after_at;
 
             if current_count > 0 && router_idle {
                 tracing::info!(
@@ -607,7 +632,13 @@ impl AppService {
                         "Restoring app after router traffic returned"
                     );
 
-                    if let Err(e) = self
+                    if restore_retry_blocked {
+                        tracing::warn!(
+                            app_id = %app.id,
+                            retry_after = %app.restore_retry_after_at,
+                            "Skipping router-triggered restore while backoff is active"
+                        );
+                    } else if let Err(e) = self
                         .scale_app(&app.id, app.desired_replicas, &app.user_id)
                         .await
                     {
@@ -617,6 +648,23 @@ impl AppService {
                             error = %e,
                             "Failed to restore app after router traffic"
                         );
+                    } else if let Err(e) = self
+                        .app_repo
+                        .update_app_config(AppConfig {
+                            last_scaled_to_zero_at: now,
+                            restore_retry_after_at: 0,
+                            ..app.clone()
+                        })
+                        .await
+                    {
+                        tracing::error!(
+                            app_id = %app.id,
+                            error = %e,
+                            "Failed to persist restore-from-traffic timestamp"
+                        );
+                    } else {
+                        app.last_scaled_to_zero_at = now;
+                        app.restore_retry_after_at = 0;
                     }
                 } else if app.min_replicas > 0 {
                     // App has no running instances but min_replicas > 0, scale up to min
@@ -902,6 +950,7 @@ impl AppService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::app::MockAppRepository;
     use crate::domain::job::{Job, JobStatus, VmConfig};
     use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository};
     use crate::domain::{
@@ -1265,6 +1314,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_system_pause_bypasses_recent_traffic_guard() {
+        let job = paused_job();
+        let mut job_repo = MockJobRepository::new();
+        job_repo.expect_get_job().with(eq("job-1")).returning({
+            let job = job.clone();
+            move |_| Ok(Some(job.clone()))
+        });
+        job_repo
+            .expect_update_job_status()
+            .with(eq("job-1"), eq(JobStatus::Paused))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut agent_client = MockAgentClient::new();
+        agent_client
+            .expect_pause_vm()
+            .with(eq("host-1"), eq("vm-1"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+        agent_client.expect_stop_vm().times(0);
+
+        let app_repo = MockAppRepository::new();
+
+        let worker_repo = Arc::new(MockWorkerRepository::new());
+        let job_repo = Arc::new(job_repo);
+        let app_repo = Arc::new(app_repo);
+        let agent_client = Arc::new(agent_client);
+        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
+
+        let nats_client = async_nats::connect("nats://localhost:4223").await.unwrap();
+        let service = AppService {
+            deployment: DeploymentService::new(
+                job_repo.clone(),
+                worker_repo.clone(),
+                agent_client.clone(),
+                nats_client.clone(),
+            ),
+            job_repo,
+            app_repo,
+            worker_repo,
+            agent_client,
+            nats_client,
+            pool,
+            router_idle_timeout_secs: 900,
+        };
+
+        service.pause_app("job-1", "system").await.unwrap();
+    }
+
+    #[tokio::test]
     async fn test_delete_all_by_app_treats_missing_vm_as_success() {
         let job = paused_job();
         let mut job_repo = MockJobRepository::new();
@@ -1438,6 +1537,7 @@ mod tests {
             hostname: "app.example.com".to_string(),
             last_router_traffic_at: 0,
             last_scaled_to_zero_at: 0,
+            restore_retry_after_at: 0,
         };
 
         let target = autoscale_next_replicas(&app, 3, 30.0, 25.0);
@@ -1460,6 +1560,7 @@ mod tests {
             hostname: "app.example.com".to_string(),
             last_router_traffic_at: 0,
             last_scaled_to_zero_at: 0,
+            restore_retry_after_at: 0,
         };
 
         let target = autoscale_next_replicas(&app, 3, 70.0, 70.0);
@@ -1482,6 +1583,7 @@ mod tests {
             hostname: "app.example.com".to_string(),
             last_router_traffic_at: 0,
             last_scaled_to_zero_at: 0,
+            restore_retry_after_at: 0,
         };
 
         let target = autoscale_next_replicas(&app, 2, 80.0, 80.0);

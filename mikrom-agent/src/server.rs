@@ -57,6 +57,10 @@ impl AgentServer {
             tracing::error!("Failed to initialize host networking: {e}");
         }
 
+        if let Err(e) = self.firecracker.load_runtime_state().await {
+            tracing::warn!("Failed to load persisted Firecracker state: {e}");
+        }
+
         // Cleanup any stale resources from previous runs
         self.firecracker.cleanup_all_stale_resources().await;
 
@@ -480,6 +484,22 @@ impl AgentServer {
         let vm_id = req.vm_id.parse().unwrap_or_default();
         let vm_info = fc.get_vm_info(&vm_id).await;
         let result = if let Some(vm) = vm_info {
+            if matches!(vm.status, crate::firecracker::VmStatus::Failed) {
+                tracing::warn!(
+                    vm_id = %vm_id,
+                    error = vm.error_message.as_deref().unwrap_or("unknown error"),
+                    "Skipping health check for failed VM"
+                );
+                return Self::reply_health_check(
+                    message,
+                    nats,
+                    Err(vm
+                        .error_message
+                        .unwrap_or_else(|| "VM startup failed".to_string())),
+                )
+                .await;
+            }
+
             let port = vm.config.port;
             let path = if vm.config.health_check_path.is_empty() {
                 "/".to_string()
@@ -735,6 +755,126 @@ mod tests {
         let resp = CheckHealthResponse::decode(&resp_msg.payload[..]).unwrap();
         assert!(!resp.is_healthy);
         assert!(resp.message.contains("VM not found"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_health_check_skips_failed_vm() {
+        let nats_url =
+            std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
+        let nats_client = async_nats::connect(nats_url).await.unwrap();
+        let fc = FirecrackerManager::new().await;
+        let reply = "test.reply.failed".to_string();
+        let mut sub = nats_client.subscribe(reply.clone()).await.unwrap();
+
+        let vm_id = VmId::new();
+        {
+            use crate::firecracker::config::{VmConfig, VmInfo, VmStatus};
+            let mut vms = fc.vms.write().await;
+            vms.insert(
+                vm_id,
+                VmInfo {
+                    vm_id,
+                    app_id: AppId::new(),
+                    image: "nginx".to_string(),
+                    status: VmStatus::Failed,
+                    config: VmConfig {
+                        port: 8080,
+                        health_check_path: "/".to_string(),
+                        ipv6_address: Some("fd40:b90d:fc5f:1ae0::1".to_string()),
+                        ..Default::default()
+                    },
+                    started_at: None,
+                    error_message: Some("build failed".to_string()),
+                },
+            );
+        }
+
+        let req = CheckHealthRequest {
+            vm_id: vm_id.to_string(),
+        };
+        let mut payload = Vec::new();
+        req.encode(&mut payload).unwrap();
+        let payload_len = payload.len();
+        let message = NatsMessage {
+            subject: "test.subject".into(),
+            reply: Some(reply.into()),
+            payload: payload.into(),
+            headers: None,
+            status: None,
+            description: None,
+            length: payload_len,
+        };
+
+        AgentServer::handle_health_check(message, &fc, &nats_client, &reqwest::Client::new()).await;
+
+        let resp_msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
+            .await
+            .unwrap()
+            .unwrap();
+        let resp = CheckHealthResponse::decode(&resp_msg.payload[..]).unwrap();
+        assert!(!resp.is_healthy);
+        assert!(resp.message.contains("build failed"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_health_check_respects_boot_grace_window() {
+        let nats_url =
+            std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
+        let nats_client = async_nats::connect(nats_url).await.unwrap();
+        let fc = FirecrackerManager::new().await;
+        let reply = "test.reply.booting".to_string();
+        let mut sub = nats_client.subscribe(reply.clone()).await.unwrap();
+
+        let vm_id = VmId::new();
+        {
+            use crate::firecracker::config::{VmConfig, VmInfo, VmStatus};
+            let mut vms = fc.vms.write().await;
+            vms.insert(
+                vm_id,
+                VmInfo {
+                    vm_id,
+                    app_id: AppId::new(),
+                    image: "nginx".to_string(),
+                    status: VmStatus::Running,
+                    config: VmConfig {
+                        port: 8080,
+                        health_check_path: "/".to_string(),
+                        ipv6_address: Some("fd40:b90d:fc5f:1ae0::1".to_string()),
+                        ..Default::default()
+                    },
+                    started_at: None,
+                    error_message: None,
+                },
+            );
+            let started_at_ms = chrono::Utc::now().timestamp_millis() as u64;
+            fc.seed_started_process_for_test(vm_id, started_at_ms).await;
+        }
+
+        let req = CheckHealthRequest {
+            vm_id: vm_id.to_string(),
+        };
+        let mut payload = Vec::new();
+        req.encode(&mut payload).unwrap();
+        let payload_len = payload.len();
+        let message = NatsMessage {
+            subject: "test.subject".into(),
+            reply: Some(reply.into()),
+            payload: payload.into(),
+            headers: None,
+            status: None,
+            description: None,
+            length: payload_len,
+        };
+
+        AgentServer::handle_health_check(message, &fc, &nats_client, &reqwest::Client::new()).await;
+
+        let resp_msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
+            .await
+            .unwrap()
+            .unwrap();
+        let resp = CheckHealthResponse::decode(&resp_msg.payload[..]).unwrap();
+        assert!(!resp.is_healthy);
+        assert!(resp.message.contains("booting"));
     }
 
     #[tokio::test]

@@ -10,8 +10,7 @@ use std::ffi::CString;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
-use tokio::io::AsyncWriteExt;
+use std::path::{Path, PathBuf};
 use tokio::process::Command;
 use tracing::info;
 
@@ -47,7 +46,6 @@ impl ImageBuilder {
         let parent_dir = output_path.parent().unwrap_or(Path::new("/tmp"));
         let container_name = format!("mikrom-build-{}", uuid::Uuid::new_v4());
         let mount_dir = parent_dir.join(format!("mnt-{container_name}"));
-        let export_tar_path = parent_dir.join(format!("{container_name}.tar"));
 
         let result = async {
             // 0. Pull the source image
@@ -82,6 +80,9 @@ impl ImageBuilder {
             let workdir = image_config
                 .working_dir
                 .unwrap_or_else(|| "/app".to_string());
+            let app_workdir = Self::normalize_workdir(&workdir)?;
+            let app_entrypoint = Self::rewrite_program_path(&entrypoint_list, &workdir);
+            let app_cmd = Self::rewrite_program_path(&cmd_list, &workdir);
 
             // 2. Create temporary container to export filesystem
             let container_config = bollard::models::ContainerCreateBody {
@@ -113,7 +114,7 @@ impl ImageBuilder {
                 .await
                 .with_context(|| format!("Failed to copy base rootfs from {}", base_rootfs_path))?;
 
-            // 5. Mount and copy files
+            // 5. Mount and copy only the application payload
             tokio::fs::create_dir_all(&mount_dir).await?;
 
             let mount_dir_str = mount_dir.to_string_lossy();
@@ -130,96 +131,48 @@ impl ImageBuilder {
                 anyhow::bail!("Failed to mount ext4 image");
             }
 
-            // Export the container filesystem and unpack it with the tar crate.
-            let mut export_stream = docker.export_container(&container_name);
-            let mut export_tar = tokio::fs::File::create(&export_tar_path)
-                .await
-                .context("Failed to create temporary export archive")?;
-            while let Some(chunk) = export_stream.next().await {
-                let chunk = chunk.context("Failed to stream container export")?;
-                export_tar
-                    .write_all(&chunk)
-                    .await
-                    .context("Failed to write container export archive")?;
-            }
-            export_tar
-                .flush()
-                .await
-                .context("Failed to flush export archive")?;
-
-            let mount_dir_str = mount_dir.to_string_lossy();
-            let export_tar_str = export_tar_path.to_string_lossy();
-
-            info!(
-                "Extracting container archive to {} (surgical system protection)...",
-                mount_dir_str
-            );
-            let status = Command::new("tar")
-                .arg("-xf")
-                .arg(&*export_tar_str)
-                .arg("-C")
-                .arg(&*mount_dir_str)
-                .arg("--overwrite")
-                // Protect critical OS libraries (GLIBC) to prevent breaking sshd/system tools
-                .arg("--exclude=lib/x86_64-linux-gnu")
-                .arg("--exclude=lib64")
-                .arg("--exclude=usr/lib/x86_64-linux-gnu")
-                // Protect core identity and security config
-                .arg("--exclude=etc/passwd")
-                .arg("--exclude=etc/shadow")
-                .arg("--exclude=etc/group")
-                .arg("--exclude=etc/gshadow")
-                .arg("--exclude=etc/ssh")
-                .arg("--exclude=etc/hostname")
-                .arg("--exclude=etc/hosts")
-                .arg("--exclude=etc/resolv.conf")
-                // Standard system mount points and ephemeral data
-                .arg("--exclude=boot")
-                .arg("--exclude=dev")
-                .arg("--exclude=proc")
-                .arg("--exclude=sys")
-                .arg("--exclude=run")
-                .arg("--exclude=var/lib/dpkg")
-                .arg("--exclude=var/lib/apt")
-                .status()
-                .await
-                .context("Failed to execute tar command")?;
-
-            if !status.success() {
-                anyhow::bail!("Tar command failed with status {}", status);
-            }
-
-            // 6. Ensure critical system directories and permissions (Safeguard)
-            info!("Applying system permission safeguards...");
-            let critical_paths = [
-                ("/root", 0o700),
-                ("/root/.ssh", 0o700),
-                ("/home/mikrom", 0o755),
-                ("/home/mikrom/.ssh", 0o700),
-            ];
-
-            for (path, mode) in critical_paths {
-                let full_path = mount_dir.join(path.trim_start_matches('/'));
-                if tokio::fs::metadata(&full_path).await.is_ok() {
-                    tokio::fs::set_permissions(&full_path, fs::Permissions::from_mode(mode))
-                        .await
-                        .context(format!("Failed to set permissions for {}", path))?;
-                }
-            }
-
-            // Fix authorized_keys permissions if they exist
-            let auth_keys_paths = [
-                "root/.ssh/authorized_keys",
-                "home/mikrom/.ssh/authorized_keys",
-            ];
-            for path in auth_keys_paths {
-                let full_path = mount_dir.join(path);
-                if tokio::fs::metadata(&full_path).await.is_ok() {
-                    tokio::fs::set_permissions(&full_path, fs::Permissions::from_mode(0o600))
-                        .await
-                        .context(format!("Failed to set permissions for {}", path))?;
-                }
-            }
+            // Copy the user app payload and the Railpack runtime shim/runtime binary.
+            Self::copy_container_directory(&container_name, &mount_dir, &app_workdir, "app")
+                .await?;
+            Self::copy_container_directory_optional(
+                &container_name,
+                &mount_dir,
+                Path::new("/mise"),
+                "mise",
+            )
+            .await?;
+            Self::copy_container_directory_optional(
+                &container_name,
+                &mount_dir,
+                Path::new("/etc/mise"),
+                "etc/mise",
+            )
+            .await?;
+            Self::copy_container_directory_optional(
+                &container_name,
+                &mount_dir,
+                Path::new("/opt/corepack"),
+                "opt/corepack",
+            )
+            .await?;
+            Self::copy_container_file_optional(
+                &container_name,
+                &mount_dir,
+                Path::new("/usr/local/bin/mise"),
+            )
+            .await?;
+            Self::copy_entrypoint_binary(
+                &container_name,
+                &mount_dir,
+                app_entrypoint.first().map(String::as_str),
+            )
+            .await?;
+            Self::maybe_grant_net_bind_service(
+                &mount_dir,
+                app_entrypoint.first().map(String::as_str),
+                port,
+            )
+            .await?;
 
             // 7. Setup Mikrom Init (Binario estático)
             info!("Setting up mikrom-init...");
@@ -272,6 +225,18 @@ impl ImageBuilder {
                     env_map.insert(key.to_string(), val.to_string());
                 }
             }
+            let existing_path = env_map.get("PATH").cloned().unwrap_or_default();
+            let mut path_parts = vec![
+                "/app/node_modules/.bin".to_string(),
+                "/mise/shims".to_string(),
+                "/usr/local/bin".to_string(),
+            ];
+            for part in existing_path.split(':') {
+                if !part.is_empty() && !path_parts.iter().any(|candidate| candidate == part) {
+                    path_parts.push(part.to_string());
+                }
+            }
+            env_map.insert("PATH".to_string(), path_parts.join(":"));
             env_map.insert("PORT".to_string(), port.to_string());
             if let Some(addr) = ipv6_addr {
                 env_map.insert("IPV6_ADDR".to_string(), addr);
@@ -291,9 +256,9 @@ impl ImageBuilder {
 
             let init_config = serde_json::json!({
                 "env": env_map,
-                "workdir": workdir,
-                "entrypoint": entrypoint_list,
-                "cmd": cmd_list,
+                "workdir": "/app",
+                "entrypoint": app_entrypoint,
+                "cmd": app_cmd,
                 "volumes": volumes_json
             });
 
@@ -341,9 +306,344 @@ impl ImageBuilder {
                 None,
             )
             .await;
-        let _ = tokio::fs::remove_file(&export_tar_path).await;
 
         result
+    }
+
+    async fn copy_container_directory(
+        container_name: &str,
+        mount_dir: &Path,
+        source_path: &Path,
+        destination_name: &str,
+    ) -> anyhow::Result<()> {
+        let destination_root = mount_dir.join(destination_name);
+
+        if destination_root.exists() {
+            if destination_root.is_dir() {
+                fs::remove_dir_all(&destination_root)
+                    .with_context(|| format!("Failed to clear {}", destination_root.display()))?;
+            } else {
+                fs::remove_file(&destination_root)
+                    .with_context(|| format!("Failed to clear {}", destination_root.display()))?;
+            }
+        }
+        fs::create_dir_all(&destination_root)
+            .with_context(|| format!("Failed to create {}", destination_root.display()))?;
+
+        let source = format!(
+            "{}:{}",
+            container_name,
+            Self::container_source_spec(source_path)
+        );
+        let output = Command::new("docker")
+            .arg("cp")
+            .arg(&source)
+            .arg(&destination_root)
+            .output()
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to invoke docker cp for {} payload",
+                    destination_name
+                )
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!(
+                "Failed to copy {} from container {} to {}: {}",
+                source_path.display(),
+                container_name,
+                destination_root.display(),
+                stderr.trim()
+            );
+        }
+
+        fs::set_permissions(&destination_root, fs::Permissions::from_mode(0o755)).with_context(
+            || {
+                format!(
+                    "Failed to set permissions on {}",
+                    destination_root.display()
+                )
+            },
+        )?;
+
+        Ok(())
+    }
+
+    async fn copy_container_directory_optional(
+        container_name: &str,
+        mount_dir: &Path,
+        source_path: &Path,
+        destination_name: &str,
+    ) -> anyhow::Result<()> {
+        match Self::copy_container_directory(
+            container_name,
+            mount_dir,
+            source_path,
+            destination_name,
+        )
+        .await
+        {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                if Self::is_missing_container_payload_error(&err.to_string()) {
+                    info!(
+                        source = %source_path.display(),
+                        destination = %destination_name,
+                        "Skipping optional runtime payload that is not present in the image"
+                    );
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            },
+        }
+    }
+
+    async fn copy_container_file(
+        container_name: &str,
+        mount_dir: &Path,
+        source_path: &Path,
+    ) -> anyhow::Result<()> {
+        let destination = mount_dir.join(source_path.strip_prefix("/").unwrap_or(source_path));
+
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create {}", parent.display()))?;
+        }
+        if destination.exists() {
+            if destination.is_dir() {
+                fs::remove_dir_all(&destination)
+                    .with_context(|| format!("Failed to clear {}", destination.display()))?;
+            } else {
+                fs::remove_file(&destination)
+                    .with_context(|| format!("Failed to clear {}", destination.display()))?;
+            }
+        }
+
+        let source = format!(
+            "{}:{}",
+            container_name,
+            source_path.to_string_lossy().trim_end_matches('/')
+        );
+        let output = Command::new("docker")
+            .arg("cp")
+            .arg(&source)
+            .arg(&destination)
+            .output()
+            .await
+            .context("Failed to invoke docker cp for runtime binary")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!(
+                "Failed to copy {} from container {} to {}: {}",
+                source_path.display(),
+                container_name,
+                destination.display(),
+                stderr.trim()
+            );
+        }
+
+        fs::set_permissions(&destination, fs::Permissions::from_mode(0o755))
+            .with_context(|| format!("Failed to set permissions on {}", destination.display()))?;
+
+        Ok(())
+    }
+
+    async fn copy_container_file_optional(
+        container_name: &str,
+        mount_dir: &Path,
+        source_path: &Path,
+    ) -> anyhow::Result<()> {
+        match Self::copy_container_file(container_name, mount_dir, source_path).await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                if Self::is_missing_container_payload_error(&err.to_string()) {
+                    info!(
+                        source = %source_path.display(),
+                        "Skipping optional runtime binary that is not present in the image"
+                    );
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            },
+        }
+    }
+
+    async fn copy_entrypoint_binary(
+        container_name: &str,
+        mount_dir: &Path,
+        entrypoint: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let Some(entrypoint) = entrypoint else {
+            return Ok(());
+        };
+
+        let source_path = Path::new(entrypoint);
+        if !source_path.is_absolute() {
+            return Ok(());
+        }
+
+        let ignored_prefixes = [
+            "/bin/",
+            "/sbin/",
+            "/usr/bin/",
+            "/usr/sbin/",
+            "/lib/",
+            "/lib64/",
+            "/usr/lib/",
+            "/usr/lib64/",
+            "/app/",
+            "/mise/",
+            "/etc/mise/",
+            "/opt/corepack/",
+        ];
+
+        if ignored_prefixes
+            .iter()
+            .any(|prefix| entrypoint.starts_with(prefix))
+        {
+            return Ok(());
+        }
+
+        Self::copy_container_file(container_name, mount_dir, source_path).await
+    }
+
+    async fn maybe_grant_net_bind_service(
+        mount_dir: &Path,
+        entrypoint: Option<&str>,
+        port: u32,
+    ) -> anyhow::Result<()> {
+        let Some(entrypoint) = entrypoint else {
+            return Ok(());
+        };
+
+        if !Self::needs_net_bind_service(entrypoint, port) {
+            return Ok(());
+        }
+
+        let destination = mount_dir.join(entrypoint.trim_start_matches('/'));
+        let metadata = tokio::fs::metadata(&destination).await.with_context(|| {
+            format!(
+                "Failed to inspect entrypoint binary for CAP_NET_BIND_SERVICE: {}",
+                destination.display()
+            )
+        })?;
+
+        if !metadata.is_file() {
+            anyhow::bail!(
+                "Entrypoint target is not a regular file: {}",
+                destination.display()
+            );
+        }
+
+        let output = Command::new("setcap")
+            .arg("cap_net_bind_service=+ep")
+            .arg(&destination)
+            .output()
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to invoke setcap for entrypoint binary {}",
+                    destination.display()
+                )
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!(
+                "Failed to grant CAP_NET_BIND_SERVICE to {}: {}",
+                destination.display(),
+                stderr.trim()
+            );
+        }
+
+        info!(
+            entrypoint = %entrypoint,
+            destination = %destination.display(),
+            "Granted CAP_NET_BIND_SERVICE to entrypoint binary"
+        );
+
+        Ok(())
+    }
+
+    fn needs_net_bind_service(entrypoint: &str, port: u32) -> bool {
+        if port >= 1024 {
+            return false;
+        }
+
+        let ignored_prefixes = [
+            "/bin/",
+            "/sbin/",
+            "/usr/bin/",
+            "/usr/sbin/",
+            "/lib/",
+            "/lib64/",
+            "/usr/lib/",
+            "/usr/lib64/",
+        ];
+
+        entrypoint.starts_with('/')
+            && !ignored_prefixes
+                .iter()
+                .any(|prefix| entrypoint.starts_with(prefix))
+    }
+
+    fn normalize_workdir(workdir: &str) -> anyhow::Result<PathBuf> {
+        let trimmed = workdir.trim();
+        let without_leading = trimmed.trim_start_matches('/');
+        let normalized = without_leading.trim_end_matches('/');
+
+        if normalized.is_empty() {
+            anyhow::bail!("WORKDIR must point to a non-root directory");
+        }
+
+        Ok(PathBuf::from(normalized))
+    }
+
+    fn is_missing_container_payload_error(error_text: &str) -> bool {
+        let lowered = error_text.to_lowercase();
+        lowered.contains("could not find the file")
+            || lowered.contains("no such file")
+            || lowered.contains("not found")
+    }
+
+    fn rewrite_program_path(args: &[String], original_workdir: &str) -> Vec<String> {
+        let Some((program, rest)) = args.split_first() else {
+            return Vec::new();
+        };
+
+        let source_workdir = format!(
+            "/{}",
+            original_workdir
+                .trim_start_matches('/')
+                .trim_end_matches('/')
+        );
+        let rewritten_program = if program.starts_with(&source_workdir) {
+            let suffix = &program[source_workdir.len()..];
+            if suffix.is_empty() {
+                "/app".to_string()
+            } else {
+                format!("/app{suffix}")
+            }
+        } else {
+            program.clone()
+        };
+
+        let mut rewritten = Vec::with_capacity(args.len());
+        rewritten.push(rewritten_program);
+        rewritten.extend(rest.iter().cloned());
+        rewritten
+    }
+
+    fn container_source_spec(source_path: &Path) -> String {
+        let source_path = source_path.to_string_lossy();
+        let normalized = source_path.trim_start_matches('/').trim_end_matches('/');
+
+        format!("/{normalized}/.")
     }
 
     fn registry_credentials(&self) -> Option<DockerCredentials> {
@@ -376,10 +676,131 @@ fn unmount_path(path: &Path, flags: libc::c_int) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use tempfile::tempdir;
 
     #[test]
     fn test_builder_new() {
         let _ = ImageBuilder::new();
+    }
+
+    #[test]
+    fn test_rewrite_program_path_maps_workdir_executable_to_app() {
+        let args = vec!["/srv/app/bin/server".to_string(), "--flag".to_string()];
+        let rewritten = ImageBuilder::rewrite_program_path(&args, "/srv/app");
+        assert_eq!(rewritten[0], "/app/bin/server");
+        assert_eq!(rewritten[1], "--flag");
+    }
+
+    #[test]
+    fn test_rewrite_program_path_leaves_external_binary_untouched() {
+        let args = vec!["/usr/bin/node".to_string(), "server.js".to_string()];
+        let rewritten = ImageBuilder::rewrite_program_path(&args, "/srv/app");
+        assert_eq!(rewritten, args);
+    }
+
+    #[test]
+    fn test_rewrite_program_path_handles_empty_args() {
+        let rewritten = ImageBuilder::rewrite_program_path(&[], "/srv/app");
+        assert!(rewritten.is_empty());
+    }
+
+    #[test]
+    fn test_normalize_workdir_rejects_root() {
+        assert!(ImageBuilder::normalize_workdir("/").is_err());
+    }
+
+    #[test]
+    fn test_normalize_workdir_trims_slashes() {
+        let normalized = ImageBuilder::normalize_workdir("/srv/app/").unwrap();
+        assert_eq!(normalized, PathBuf::from("srv/app"));
+    }
+
+    #[test]
+    fn test_container_source_spec_normalizes_paths() {
+        assert_eq!(
+            ImageBuilder::container_source_spec(Path::new("/app")),
+            "/app/."
+        );
+        assert_eq!(
+            ImageBuilder::container_source_spec(Path::new("/mise")),
+            "/mise/."
+        );
+    }
+
+    #[test]
+    fn test_copy_container_file_builds_destination_path() {
+        let dir = tempdir().unwrap();
+        let mount_dir = dir.path().join("mount");
+        fs::create_dir_all(&mount_dir).unwrap();
+
+        let destination = mount_dir.join("usr/local/bin/mise");
+        assert_eq!(destination, mount_dir.join("usr/local/bin/mise"));
+    }
+
+    #[test]
+    fn test_copy_container_directory_builds_destination_path() {
+        let dir = tempdir().unwrap();
+        let mount_dir = dir.path().join("mount");
+        fs::create_dir_all(&mount_dir).unwrap();
+
+        let destination = mount_dir.join("mise");
+        assert_eq!(destination, mount_dir.join("mise"));
+    }
+
+    #[test]
+    fn test_missing_container_payload_error_detection_is_case_insensitive() {
+        assert!(ImageBuilder::is_missing_container_payload_error(
+            "docker cp: Could Not Find The File"
+        ));
+        assert!(ImageBuilder::is_missing_container_payload_error(
+            "docker cp: no such file or directory"
+        ));
+        assert!(ImageBuilder::is_missing_container_payload_error(
+            "source not found in container"
+        ));
+        assert!(!ImageBuilder::is_missing_container_payload_error(
+            "permission denied"
+        ));
+    }
+
+    #[test]
+    fn test_needs_net_bind_service() {
+        assert!(ImageBuilder::needs_net_bind_service("/whoami", 80));
+        assert!(ImageBuilder::needs_net_bind_service("/app/bin/server", 80));
+        assert!(!ImageBuilder::needs_net_bind_service("/bin/bash", 80));
+        assert!(!ImageBuilder::needs_net_bind_service("/usr/bin/node", 80));
+        assert!(!ImageBuilder::needs_net_bind_service("/whoami", 8080));
+    }
+
+    #[tokio::test]
+    async fn test_copy_entrypoint_binary_ignores_system_and_runtime_paths() {
+        let dir = tempdir().unwrap();
+        let mount_dir = dir.path().join("mount");
+        fs::create_dir_all(&mount_dir).unwrap();
+
+        assert!(
+            ImageBuilder::copy_entrypoint_binary("container", &mount_dir, Some("/bin/bash"))
+                .await
+                .is_ok()
+        );
+        assert!(
+            ImageBuilder::copy_entrypoint_binary("container", &mount_dir, Some("/usr/bin/node"))
+                .await
+                .is_ok()
+        );
+        assert!(
+            ImageBuilder::copy_entrypoint_binary("container", &mount_dir, Some("/mise/shims/pnpm"))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_rewrite_program_path_exact_workdir_maps_to_app() {
+        let args = vec!["/srv/app".to_string(), "--flag".to_string()];
+        let rewritten = ImageBuilder::rewrite_program_path(&args, "/srv/app");
+        assert_eq!(rewritten[0], "/app");
+        assert_eq!(rewritten[1], "--flag");
     }
 
     #[tokio::test]

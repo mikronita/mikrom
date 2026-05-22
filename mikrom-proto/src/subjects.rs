@@ -19,6 +19,9 @@ pub const ROUTER_TRAFFIC_EVENT: &str = "mikrom.router.traffic";
 /// Scheduler job updates subject.
 pub const SCHEDULER_JOB_UPDATES: &str = "mikrom.scheduler.job_updates";
 
+/// Scheduler VM failure subject.
+pub const SCHEDULER_VM_FAILED: &str = "mikrom.scheduler.vm_failed";
+
 /// Scheduler list apps subject (request/reply).
 pub const SCHEDULER_LIST_APPS: &str = "mikrom.scheduler.list_apps";
 

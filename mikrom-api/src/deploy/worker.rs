@@ -5,7 +5,7 @@ use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use async_trait::async_trait;
 use futures::StreamExt;
 use mikrom_proto::builder::{BuildStatus, GetBuildStatusRequest, GetBuildStatusResponse};
-use mikrom_proto::scheduler::DeployRequest;
+use mikrom_proto::scheduler::{DeployRequest, DeployStatus};
 use prost::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -287,7 +287,7 @@ pub async fn poll_and_deploy(
                 info!(build_id = %task.build_id, "Build successful, triggering deployment...");
 
                 let (image_tag, port, hash, msg, branch) = (
-                    current_status.1,
+                    current_status.1.clone(),
                     current_status.2,
                     current_status.3,
                     current_status.4,
@@ -349,7 +349,7 @@ pub async fn poll_and_deploy(
                     &app,
                     &deployment,
                     DeployParams {
-                        image_tag,
+                        image_tag: image_tag.clone(),
                         vcpus: task.vcpus,
                         memory_mib: task.memory_mib as u32,
                         disk_mib: task.disk_mib as u32,
@@ -359,6 +359,24 @@ pub async fn poll_and_deploy(
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
+
+                if inner.status != DeployStatus::Running as i32 {
+                    warn!(
+                        deployment_id = %task.deployment_id,
+                        build_id = %task.build_id,
+                        status = %inner.status,
+                        message = %inner.message,
+                        "Deployment failed before zero-downtime promotion"
+                    );
+                    mark_deployment_failed(
+                        &state,
+                        task.deployment_id,
+                        task.app_id,
+                        Some(image_tag),
+                    )
+                    .await?;
+                    break;
+                }
 
                 DeploymentService::run_zero_downtime_flow(
                     state.clone(),
@@ -374,28 +392,7 @@ pub async fn poll_and_deploy(
             },
             BuildStatus::Failed => {
                 error!(build_id = %task.build_id, "Build failed, aborting deployment");
-                state
-                    .app_repo
-                    .update_deployment(
-                        task.deployment_id,
-                        UpdateDeploymentParams {
-                            status: Some("FAILED".to_string()),
-                            ..Default::default()
-                        },
-                    )
-                    .await?;
-                state.deployment_events.send(task.app_id).ok();
-                if let Ok(Some(app)) = state.app_repo.get_app(task.app_id).await {
-                    state.publish_workspace_event(WorkspaceEvent {
-                        kind: WorkspaceEventKind::DeploymentChanged,
-                        user_id: Some(app.user_id),
-                        app_id: Some(app.id),
-                        app_name: Some(app.name),
-                        deployment_id: Some(task.deployment_id),
-                        volume_id: None,
-                        resource_id: Some(task.build_id.clone()),
-                    });
-                }
+                mark_deployment_failed(&state, task.deployment_id, task.app_id, None).await?;
                 break;
             },
             _ => {
@@ -431,23 +428,58 @@ pub async fn poll_and_deploy(
     Ok(())
 }
 
+async fn mark_deployment_failed(
+    state: &AppState,
+    deployment_id: Uuid,
+    app_id: Uuid,
+    image_tag: Option<String>,
+) -> anyhow::Result<()> {
+    state
+        .app_repo
+        .update_deployment(
+            deployment_id,
+            UpdateDeploymentParams {
+                status: Some("FAILED".to_string()),
+                image_tag,
+                ..Default::default()
+            },
+        )
+        .await?;
+
+    state.deployment_events.send(app_id).ok();
+    if let Ok(Some(app)) = state.app_repo.get_app(app_id).await {
+        state.publish_workspace_event(WorkspaceEvent {
+            kind: WorkspaceEventKind::DeploymentChanged,
+            user_id: Some(app.user_id),
+            app_id: Some(app.id),
+            app_name: Some(app.name),
+            deployment_id: Some(deployment_id),
+            volume_id: None,
+            resource_id: Some(deployment_id.to_string()),
+        });
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::app::App;
+    use crate::nats::MockNatsClient;
     use crate::repositories::app_repository::MockAppRepository;
     use crate::repositories::user_repository::MockUserRepository;
+    use crate::scheduler::MockScheduler;
+    use mockall::predicate::function;
 
     async fn create_test_state() -> AppState {
-        let nats_url =
-            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
-        let nats_client = async_nats::connect(nats_url).await.unwrap();
-        let nats = crate::nats::TypedNatsClient::new(nats_client);
+        let nats = crate::nats::TypedNatsClient::new_custom(Arc::new(MockNatsClient::new()));
         AppState {
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(MockAppRepository::new()),
             github_repo: Arc::new(crate::repositories::MockGithubRepository::default()),
             volume_repo: Arc::new(crate::repositories::MockVolumeRepository::new()),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
+            scheduler: Arc::new(MockScheduler::new()),
             nats,
             router_addr: "http://localhost:8080".to_string(),
             frontend_url: "http://localhost:3000".to_string(),
@@ -473,5 +505,88 @@ mod tests {
     #[tokio::test]
     async fn test_poll_and_deploy_success() {
         let _state = create_test_state().await;
+    }
+
+    #[tokio::test]
+    async fn test_mark_deployment_failed_updates_deployment_and_emits_events() {
+        let app_id = Uuid::new_v4();
+        let deployment_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+
+        let mut app_repo = MockAppRepository::new();
+        app_repo
+            .expect_update_deployment()
+            .with(
+                function(move |id: &Uuid| *id == deployment_id),
+                function(
+                    |params: &crate::repositories::app_repository::UpdateDeploymentParams| {
+                        params.status.as_deref() == Some("FAILED")
+                            && params.image_tag.as_deref() == Some("image:tag")
+                    },
+                ),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        app_repo
+            .expect_get_app()
+            .with(function(move |id: &Uuid| *id == app_id))
+            .times(1)
+            .returning(move |_| {
+                Ok(Some(App {
+                    id: app_id,
+                    user_id,
+                    name: "demo".to_string(),
+                    hostname: Some("demo.example.com".to_string()),
+                    ..Default::default()
+                }))
+            });
+
+        let nats = crate::nats::TypedNatsClient::new_custom(Arc::new(MockNatsClient::new()));
+        let deployment_events = tokio::sync::broadcast::channel(4).0;
+        let mut deployment_events_rx = deployment_events.subscribe();
+        let workspace_events = tokio::sync::broadcast::channel(4).0;
+        let mut workspace_events_rx = workspace_events.subscribe();
+
+        let state = AppState {
+            user_repo: Arc::new(MockUserRepository::new()),
+            app_repo: Arc::new(app_repo),
+            github_repo: Arc::new(crate::repositories::MockGithubRepository::default()),
+            volume_repo: Arc::new(crate::repositories::MockVolumeRepository::new()),
+            scheduler: Arc::new(MockScheduler::new()),
+            nats,
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/dummy")
+                .unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".into(),
+            deployment_events,
+            workspace_events,
+            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            acme_email: "admin@mikrom.spluca.org".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        mark_deployment_failed(&state, deployment_id, app_id, Some("image:tag".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(deployment_events_rx.recv().await.unwrap(), app_id);
+        let workspace_event = workspace_events_rx.recv().await.unwrap();
+        assert_eq!(workspace_event.app_id, Some(app_id));
+        assert_eq!(workspace_event.deployment_id, Some(deployment_id));
+        assert_eq!(workspace_event.user_id, Some(user_id));
+        assert!(matches!(
+            workspace_event.kind,
+            WorkspaceEventKind::DeploymentChanged
+        ));
     }
 }

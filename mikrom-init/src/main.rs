@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use nix::mount::{MsFlags, mount};
+use nix::unistd::User;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -134,6 +135,7 @@ use futures::stream::TryStreamExt;
 async fn setup_system() -> Result<()> {
     // Set hostname
     let _ = nix::unistd::sethostname("localhost");
+    ensure_etc_hosts("localhost")?;
 
     // Bring up loopback interface
     println!("[mikrom-init] Bringing up loopback interface...");
@@ -156,6 +158,32 @@ async fn setup_system() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn ensure_etc_hosts(hostname: &str) -> Result<()> {
+    let etc_dir = Path::new("/etc");
+    if !etc_dir.exists() {
+        fs::create_dir_all(etc_dir)
+            .with_context(|| "Failed to create /etc directory for system files")?;
+    }
+
+    let hosts_path = etc_dir.join("hosts");
+    if !hosts_path.exists() {
+        fs::write(&hosts_path, build_hosts_contents(hostname))
+            .with_context(|| format!("Failed to write {}", hosts_path.display()))?;
+    }
+
+    let hostname_path = etc_dir.join("hostname");
+    if !hostname_path.exists() {
+        fs::write(&hostname_path, format!("{hostname}\n"))
+            .with_context(|| format!("Failed to write {}", hostname_path.display()))?;
+    }
+
+    Ok(())
+}
+
+fn build_hosts_contents(hostname: &str) -> String {
+    format!("127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n127.0.1.1 {hostname}\n")
 }
 
 async fn setup_networking(config: &InitConfig) -> Result<()> {
@@ -232,6 +260,12 @@ fn load_config(path: &str) -> Result<InitConfig> {
 }
 
 fn build_command(config: InitConfig) -> Result<Command> {
+    let user = resolve_run_as_user()?;
+    build_command_with_user(config, &user)
+}
+
+fn build_command_with_user(config: InitConfig, user: &RunAsUser) -> Result<Command> {
+    let path_env = config.env.get("PATH").cloned();
     let mut cmd = match config.entrypoint.split_first() {
         Some((prog, args)) => {
             let mut c = Command::new(prog);
@@ -254,6 +288,12 @@ fn build_command(config: InitConfig) -> Result<Command> {
         cmd.env(key, val);
     }
 
+    cmd.env("PATH", effective_path(path_env.as_deref()));
+
+    cmd.env("HOME", &user.dir);
+    cmd.env("USER", &user.name);
+    cmd.env("LOGNAME", &user.name);
+
     // Set working directory
     let workdir = Path::new(&config.workdir);
     if !workdir.exists() {
@@ -262,8 +302,44 @@ fn build_command(config: InitConfig) -> Result<Command> {
         })?;
     }
     cmd.current_dir(workdir);
+    cmd.uid(user.uid);
+    cmd.gid(user.gid);
 
     Ok(cmd)
+}
+
+fn effective_path(existing: Option<&str>) -> String {
+    let mut parts = vec![
+        "/app/node_modules/.bin".to_string(),
+        "/mise/shims".to_string(),
+        "/usr/local/bin".to_string(),
+    ];
+
+    if let Some(existing) = existing {
+        for part in existing.split(':') {
+            if !part.is_empty() && !parts.iter().any(|candidate| candidate == part) {
+                parts.push(part.to_string());
+            }
+        }
+    }
+
+    if !parts.iter().any(|part| part == "/usr/local/sbin") {
+        parts.push("/usr/local/sbin".to_string());
+    }
+    if !parts.iter().any(|part| part == "/usr/sbin") {
+        parts.push("/usr/sbin".to_string());
+    }
+    if !parts.iter().any(|part| part == "/usr/bin") {
+        parts.push("/usr/bin".to_string());
+    }
+    if !parts.iter().any(|part| part == "/sbin") {
+        parts.push("/sbin".to_string());
+    }
+    if !parts.iter().any(|part| part == "/bin") {
+        parts.push("/bin".to_string());
+    }
+
+    parts.join(":")
 }
 
 fn spawn_application(config: InitConfig) -> Result<tokio::process::Child> {
@@ -271,6 +347,27 @@ fn spawn_application(config: InitConfig) -> Result<tokio::process::Child> {
     let mut cmd: tokio::process::Command = cmd.into();
     cmd.spawn()
         .with_context(|| "Failed to spawn application process")
+}
+
+#[derive(Debug, Clone)]
+struct RunAsUser {
+    uid: u32,
+    gid: u32,
+    dir: String,
+    name: String,
+}
+
+fn resolve_run_as_user() -> Result<RunAsUser> {
+    let user = User::from_name("mikrom")
+        .context("Failed to resolve mikrom user from passwd database")?
+        .ok_or_else(|| anyhow!("User mikrom not found in passwd database"))?;
+
+    Ok(RunAsUser {
+        uid: user.uid.as_raw(),
+        gid: user.gid.as_raw(),
+        dir: user.dir.to_string_lossy().to_string(),
+        name: user.name,
+    })
 }
 
 async fn wait_for_port_ready(port: u16, child: &mut tokio::process::Child) -> Result<()> {
@@ -501,22 +598,125 @@ mod tests {
 
     #[test]
     fn test_build_command_entrypoint() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let config = InitConfig {
             env: HashMap::new(),
-            workdir: "./target/test-app".to_string(),
+            workdir: temp_dir
+                .path()
+                .join("test-app")
+                .to_string_lossy()
+                .to_string(),
             entrypoint: vec!["/bin/sh".to_string(), "-c".to_string()],
             cmd: vec!["echo hello".to_string()],
             volumes: vec![],
         };
-        let _cmd = build_command(config).unwrap();
-        let _ = fs::remove_dir_all("./target/test-app");
+        let user = RunAsUser {
+            uid: 1000,
+            gid: 1000,
+            dir: "/home/mikrom".to_string(),
+            name: "mikrom".to_string(),
+        };
+        let cmd = build_command_with_user(config, &user).unwrap();
+
+        assert_eq!(cmd.get_program(), "/bin/sh");
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(args, vec!["-c", "echo hello"]);
+        assert_eq!(
+            cmd.get_current_dir().unwrap(),
+            temp_dir.path().join("test-app")
+        );
+
+        let envs: HashMap<_, _> = cmd
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().to_string(),
+                    value.map(|v| v.to_string_lossy().to_string()),
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            envs.get("PATH").and_then(|value| value.clone()).unwrap(),
+            effective_path(None)
+        );
+        assert_eq!(
+            envs.get("HOME").and_then(|value| value.clone()).unwrap(),
+            "/home/mikrom"
+        );
+        assert_eq!(
+            envs.get("USER").and_then(|value| value.clone()).unwrap(),
+            "mikrom"
+        );
+        assert_eq!(
+            envs.get("LOGNAME").and_then(|value| value.clone()).unwrap(),
+            "mikrom"
+        );
+    }
+
+    #[test]
+    fn test_build_command_uses_cmd_when_entrypoint_missing() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = InitConfig {
+            env: HashMap::from([(
+                "PATH".to_string(),
+                "/usr/local/bin:/usr/bin:/bin".to_string(),
+            )]),
+            workdir: temp_dir.path().join("app").to_string_lossy().to_string(),
+            entrypoint: vec![],
+            cmd: vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "echo hello".to_string(),
+            ],
+            volumes: vec![],
+        };
+        let user = RunAsUser {
+            uid: 1000,
+            gid: 1000,
+            dir: "/home/mikrom".to_string(),
+            name: "mikrom".to_string(),
+        };
+
+        let cmd = build_command_with_user(config, &user).unwrap();
+        assert_eq!(cmd.get_program(), "/bin/sh");
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(args, vec!["-c", "echo hello"]);
+    }
+
+    #[test]
+    fn test_effective_path_deduplicates_existing_entries() {
+        let path = effective_path(Some(
+            "/mise/shims:/usr/local/bin:/usr/local/bin:/bin:/custom/bin",
+        ));
+        let parts: Vec<_> = path.split(':').collect();
+        assert_eq!(
+            parts
+                .iter()
+                .filter(|part| **part == "/usr/local/bin")
+                .count(),
+            1
+        );
+        assert_eq!(
+            parts.iter().filter(|part| **part == "/mise/shims").count(),
+            1
+        );
+        assert!(parts.contains(&"/custom/bin"));
     }
 
     #[tokio::test]
     async fn test_wait_for_port_ready_detects_listener() {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-            .await
-            .unwrap();
+        let listener = match tokio::net::TcpListener::bind(("127.0.0.1", 0)).await {
+            Ok(listener) => listener,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(e) => panic!("failed to bind test listener: {e}"),
+        };
         let port = listener.local_addr().unwrap().port();
         let accept_task = tokio::spawn(async move {
             let _ = listener.accept().await;
@@ -537,5 +737,28 @@ mod tests {
         // Should not panic or return error if sshd is missing
         let result = start_background_services().await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_effective_path_prepends_mise_and_app_bins() {
+        let path = effective_path(Some("/usr/local/sbin:/usr/local/bin:/usr/bin:/bin"));
+        assert!(path.starts_with("/app/node_modules/.bin:/mise/shims:/usr/local/bin"));
+        assert!(path.contains("/usr/local/sbin"));
+        assert!(path.contains("/usr/bin"));
+        assert!(path.contains("/bin"));
+    }
+
+    #[test]
+    fn test_effective_path_defaults_when_missing() {
+        let path = effective_path(None);
+        assert!(path.starts_with("/app/node_modules/.bin:/mise/shims:/usr/local/bin"));
+    }
+
+    #[test]
+    fn test_build_hosts_contents_matches_expected_format() {
+        let hosts = build_hosts_contents("localhost");
+        assert!(hosts.contains("127.0.0.1 localhost"));
+        assert!(hosts.contains("::1 localhost ip6-localhost ip6-loopback"));
+        assert!(hosts.contains("127.0.1.1 localhost"));
     }
 }

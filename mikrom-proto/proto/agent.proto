@@ -271,6 +271,11 @@ message GetVmStatusResponse {
   string error_message = 4;
 }
 
+message VmFailureEvent {
+  string vm_id = 1;
+  string error_message = 2;
+}
+
 enum VmStatus {
   VM_STATUS_UNSPECIFIED = 0;
   VM_STATUS_STARTING = 1;
