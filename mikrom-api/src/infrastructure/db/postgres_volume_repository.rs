@@ -3,6 +3,7 @@ use crate::domain::volume::{
     AppVolume, AttachedVolume, CreateSnapshotParams, CreateVolumeParams, Volume,
     VolumeAttachmentInfo, VolumeRepository, VolumeSnapshot, VolumeWithAttachments,
 };
+use crate::infrastructure::db::models::{DbAppVolume, DbVolume, DbVolumeSnapshot};
 
 use async_trait::async_trait;
 use sqlx::PgPool;
@@ -21,7 +22,7 @@ impl PostgresVolumeRepository {
 #[async_trait]
 impl VolumeRepository for PostgresVolumeRepository {
     async fn create_volume(&self, params: CreateVolumeParams) -> DomainResult<Volume> {
-        let volume = sqlx::query_as::<_, Volume>(
+        let db_volume = sqlx::query_as::<_, DbVolume>(
             "INSERT INTO volumes (user_id, name, size_mib, pool_name) VALUES ($1, $2, $3, $4) RETURNING *"
         )
         .bind(params.user_id)
@@ -31,15 +32,15 @@ impl VolumeRepository for PostgresVolumeRepository {
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(volume)
+        Ok(db_volume.into())
     }
 
     async fn get_volume(&self, volume_id: Uuid) -> DomainResult<Option<Volume>> {
-        let volume = sqlx::query_as::<_, Volume>("SELECT * FROM volumes WHERE id = $1")
+        let db_volume = sqlx::query_as::<_, DbVolume>("SELECT * FROM volumes WHERE id = $1")
             .bind(volume_id)
             .fetch_optional(&self.pool)
             .await?;
-        Ok(volume)
+        Ok(db_volume.map(|v| v.into()))
     }
 
     async fn list_volumes_by_user(
@@ -129,7 +130,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         mount_point: String,
         access_mode: i32,
     ) -> DomainResult<AppVolume> {
-        let app_volume = sqlx::query_as::<_, AppVolume>(
+        let db_app_volume = sqlx::query_as::<_, DbAppVolume>(
             "INSERT INTO app_volumes (app_id, volume_id, mount_point, access_mode) VALUES ($1, $2, $3, $4) 
              ON CONFLICT (app_id, volume_id) DO UPDATE SET mount_point = EXCLUDED.mount_point, access_mode = EXCLUDED.access_mode
              RETURNING *"
@@ -141,7 +142,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(app_volume)
+        Ok(db_app_volume.into())
     }
 
     async fn detach_volume_from_app(&self, app_id: Uuid, volume_id: Uuid) -> DomainResult<bool> {
@@ -192,7 +193,7 @@ impl VolumeRepository for PostgresVolumeRepository {
     }
 
     async fn create_snapshot(&self, params: CreateSnapshotParams) -> DomainResult<VolumeSnapshot> {
-        let snapshot = sqlx::query_as::<_, VolumeSnapshot>(
+        let db_snapshot = sqlx::query_as::<_, DbVolumeSnapshot>(
             "INSERT INTO volume_snapshots (volume_id, user_id, name) VALUES ($1, $2, $3) RETURNING *"
         )
         .bind(params.volume_id)
@@ -201,26 +202,26 @@ impl VolumeRepository for PostgresVolumeRepository {
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(snapshot)
+        Ok(db_snapshot.into())
     }
 
     async fn get_snapshot(&self, snapshot_id: Uuid) -> DomainResult<Option<VolumeSnapshot>> {
-        let snapshot =
-            sqlx::query_as::<_, VolumeSnapshot>("SELECT * FROM volume_snapshots WHERE id = $1")
+        let db_snapshot =
+            sqlx::query_as::<_, DbVolumeSnapshot>("SELECT * FROM volume_snapshots WHERE id = $1")
                 .bind(snapshot_id)
                 .fetch_optional(&self.pool)
                 .await?;
-        Ok(snapshot)
+        Ok(db_snapshot.map(|s| s.into()))
     }
 
     async fn list_snapshots_by_volume(&self, volume_id: Uuid) -> DomainResult<Vec<VolumeSnapshot>> {
-        let snapshots = sqlx::query_as::<_, VolumeSnapshot>(
+        let db_snapshots = sqlx::query_as::<_, DbVolumeSnapshot>(
             "SELECT * FROM volume_snapshots WHERE volume_id = $1",
         )
         .bind(volume_id)
         .fetch_all(&self.pool)
         .await?;
-        Ok(snapshots)
+        Ok(db_snapshots.into_iter().map(|s| s.into()).collect())
     }
 
     async fn delete_snapshot(&self, snapshot_id: Uuid) -> DomainResult<bool> {

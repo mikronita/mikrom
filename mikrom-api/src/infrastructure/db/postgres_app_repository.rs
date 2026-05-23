@@ -1,6 +1,7 @@
 use crate::domain::app::{App, Deployment, SecurityRule};
 use crate::domain::app::{AppRepository, CreateAppParams, NewDeployment, UpdateDeploymentParams};
 use crate::domain::error::DomainResult;
+use crate::infrastructure::db::models::{DbApp, DbDeployment, DbSecurityRule};
 use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -91,12 +92,12 @@ impl AppRepository for PostgresAppRepository {
         let cpu_threshold = params.cpu_threshold.unwrap_or(80.0);
         let mem_threshold = params.mem_threshold.unwrap_or(80.0);
 
-        let result = sqlx::query_as::<_, App>(
+        let result = sqlx::query_as::<_, DbApp>(
             "INSERT INTO apps (name, git_url, port, hostname, user_id, github_webhook_secret, github_installation_id, github_repo_id, github_repo_full_name, health_check_path, drain_timeout, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *"
         )
         .bind(&params.name)
         .bind(&params.git_url)
-        .bind(params.port)
+        .bind(params.port as i32)
         .bind(&params.hostname)
         .bind(params.user_id)
         .bind(encrypted_secret)
@@ -115,7 +116,7 @@ impl AppRepository for PostgresAppRepository {
         .await;
 
         match result {
-            Ok(app) => self.decrypt_app(app),
+            Ok(db_app) => self.decrypt_app(db_app.into()),
             Err(e) => {
                 if let Some(db_err) = e.as_database_error()
                     && db_err.code().as_deref() == Some("23505")
@@ -131,37 +132,37 @@ impl AppRepository for PostgresAppRepository {
     }
 
     async fn get_app(&self, id: Uuid) -> DomainResult<Option<App>> {
-        let app = sqlx::query_as::<_, App>("SELECT * FROM apps WHERE id = $1")
+        let db_app = sqlx::query_as::<_, DbApp>("SELECT * FROM apps WHERE id = $1")
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
 
-        match app {
-            Some(a) => Ok(Some(self.decrypt_app(a)?)),
+        match db_app {
+            Some(a) => Ok(Some(self.decrypt_app(a.into())?)),
             None => Ok(None),
         }
     }
 
     async fn get_app_by_name(&self, name: &str) -> DomainResult<Option<App>> {
-        let app = sqlx::query_as::<_, App>("SELECT * FROM apps WHERE name = $1")
+        let db_app = sqlx::query_as::<_, DbApp>("SELECT * FROM apps WHERE name = $1")
             .bind(name)
             .fetch_optional(&self.pool)
             .await?;
 
-        match app {
-            Some(a) => Ok(Some(self.decrypt_app(a)?)),
+        match db_app {
+            Some(a) => Ok(Some(self.decrypt_app(a.into())?)),
             None => Ok(None),
         }
     }
 
     async fn get_app_by_github_repo_id(&self, repo_id: i64) -> DomainResult<Option<App>> {
-        let app = sqlx::query_as::<_, App>("SELECT * FROM apps WHERE github_repo_id = $1")
+        let db_app = sqlx::query_as::<_, DbApp>("SELECT * FROM apps WHERE github_repo_id = $1")
             .bind(repo_id)
             .fetch_optional(&self.pool)
             .await?;
 
-        match app {
-            Some(a) => Ok(Some(self.decrypt_app(a)?)),
+        match db_app {
+            Some(a) => Ok(Some(self.decrypt_app(a.into())?)),
             None => Ok(None),
         }
     }
@@ -176,14 +177,14 @@ impl AppRepository for PostgresAppRepository {
     }
 
     async fn list_apps_by_user(&self, user_id: Option<Uuid>) -> DomainResult<Vec<App>> {
-        let apps = match user_id {
+        let db_apps = match user_id {
             None => {
-                sqlx::query_as::<_, App>("SELECT * FROM apps ORDER BY created_at DESC")
+                sqlx::query_as::<_, DbApp>("SELECT * FROM apps ORDER BY created_at DESC")
                     .fetch_all(&self.pool)
                     .await?
             },
             Some(uid) => {
-                sqlx::query_as::<_, App>(
+                sqlx::query_as::<_, DbApp>(
                     "SELECT * FROM apps WHERE user_id = $1 ORDER BY created_at DESC",
                 )
                 .bind(uid)
@@ -192,9 +193,9 @@ impl AppRepository for PostgresAppRepository {
             },
         };
 
-        let mut decrypted_apps = Vec::with_capacity(apps.len());
-        for app in apps {
-            decrypted_apps.push(self.decrypt_app(app)?);
+        let mut decrypted_apps = Vec::with_capacity(db_apps.len());
+        for db_app in db_apps {
+            decrypted_apps.push(self.decrypt_app(db_app.into())?);
         }
         Ok(decrypted_apps)
     }
@@ -209,9 +210,9 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn update_app_port(&self, id: Uuid, port: i32) -> DomainResult<()> {
+    async fn update_app_port(&self, id: Uuid, port: u32) -> DomainResult<()> {
         sqlx::query("UPDATE apps SET port = $1, updated_at = NOW() WHERE id = $2")
-            .bind(port)
+            .bind(port as i32)
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -260,7 +261,7 @@ impl AppRepository for PostgresAppRepository {
         let encrypted_env = crate::crypto::encrypt(&env_raw, &self.master_key)?;
         let env_json = serde_json::Value::String(encrypted_env);
 
-        let deployment = sqlx::query_as::<_, Deployment>(
+        let db_deployment = sqlx::query_as::<_, DbDeployment>(
             r#"
             INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, port, env_vars, trigger_source, git_commit_hash, git_commit_message, git_branch, hypervisor)
             VALUES ($1, $2, 'BUILDING', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -272,7 +273,7 @@ impl AppRepository for PostgresAppRepository {
         .bind(data.vcpus)
         .bind(data.memory_mib)
         .bind(data.disk_mib)
-        .bind(data.port)
+        .bind(data.port as i32)
         .bind(env_json)
         .bind(data.trigger_source)
         .bind(data.git_commit_hash)
@@ -282,7 +283,7 @@ impl AppRepository for PostgresAppRepository {
         .fetch_one(&self.pool)
         .await?;
 
-        self.decrypt_deployment(deployment)
+        self.decrypt_deployment(db_deployment.into())
     }
 
     async fn update_deployment(
@@ -308,9 +309,9 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn update_deployment_port(&self, id: Uuid, port: i32) -> DomainResult<()> {
+    async fn update_deployment_port(&self, id: Uuid, port: u32) -> DomainResult<()> {
         sqlx::query("UPDATE deployments SET port = $1, updated_at = NOW() WHERE id = $2")
-            .bind(port)
+            .bind(port as i32)
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -318,41 +319,42 @@ impl AppRepository for PostgresAppRepository {
     }
 
     async fn get_deployment(&self, id: Uuid) -> DomainResult<Option<Deployment>> {
-        let deployment = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let db_deployment =
+            sqlx::query_as::<_, DbDeployment>("SELECT * FROM deployments WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
 
-        match deployment {
-            Some(d) => Ok(Some(self.decrypt_deployment(d)?)),
+        match db_deployment {
+            Some(d) => Ok(Some(self.decrypt_deployment(d.into())?)),
             None => Ok(None),
         }
     }
 
     async fn get_deployment_by_job_id(&self, job_id: &str) -> DomainResult<Option<Deployment>> {
-        let deployment =
-            sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE job_id = $1")
+        let db_deployment =
+            sqlx::query_as::<_, DbDeployment>("SELECT * FROM deployments WHERE job_id = $1")
                 .bind(job_id)
                 .fetch_optional(&self.pool)
                 .await?;
 
-        match deployment {
-            Some(d) => Ok(Some(self.decrypt_deployment(d)?)),
+        match db_deployment {
+            Some(d) => Ok(Some(self.decrypt_deployment(d.into())?)),
             None => Ok(None),
         }
     }
 
     async fn list_deployments_by_app(&self, app_id: Uuid) -> DomainResult<Vec<Deployment>> {
-        let deployments = sqlx::query_as::<_, Deployment>(
+        let db_deployments = sqlx::query_as::<_, DbDeployment>(
             "SELECT * FROM deployments WHERE app_id = $1 ORDER BY created_at DESC",
         )
         .bind(app_id)
         .fetch_all(&self.pool)
         .await?;
 
-        let mut decrypted_deps = Vec::with_capacity(deployments.len());
-        for dep in deployments {
-            decrypted_deps.push(self.decrypt_deployment(dep)?);
+        let mut decrypted_deps = Vec::with_capacity(db_deployments.len());
+        for db_dep in db_deployments {
+            decrypted_deps.push(self.decrypt_deployment(db_dep.into())?);
         }
         Ok(decrypted_deps)
     }
@@ -361,16 +363,16 @@ impl AppRepository for PostgresAppRepository {
         &self,
         user_id: Option<Uuid>,
     ) -> DomainResult<Vec<Deployment>> {
-        let deployments = match user_id {
+        let db_deployments = match user_id {
             None => {
-                sqlx::query_as::<_, Deployment>(
+                sqlx::query_as::<_, DbDeployment>(
                     "SELECT * FROM deployments ORDER BY created_at DESC",
                 )
                 .fetch_all(&self.pool)
                 .await?
             },
             Some(uid) => {
-                sqlx::query_as::<_, Deployment>(
+                sqlx::query_as::<_, DbDeployment>(
                     "SELECT * FROM deployments WHERE user_id = $1 ORDER BY created_at DESC",
                 )
                 .bind(uid)
@@ -379,23 +381,23 @@ impl AppRepository for PostgresAppRepository {
             },
         };
 
-        let mut decrypted_deps = Vec::with_capacity(deployments.len());
-        for dep in deployments {
-            decrypted_deps.push(self.decrypt_deployment(dep)?);
+        let mut decrypted_deps = Vec::with_capacity(db_deployments.len());
+        for db_dep in db_deployments {
+            decrypted_deps.push(self.decrypt_deployment(db_dep.into())?);
         }
         Ok(decrypted_deps)
     }
 
     async fn get_active_deployment(&self, app_id: Uuid) -> DomainResult<Option<Deployment>> {
-        let deployment = sqlx::query_as::<_, Deployment>(
+        let db_deployment = sqlx::query_as::<_, DbDeployment>(
             "SELECT d.* FROM deployments d JOIN apps a ON d.id = a.active_deployment_id WHERE a.id = $1"
         )
         .bind(app_id)
         .fetch_optional(&self.pool)
         .await?;
 
-        match deployment {
-            Some(d) => Ok(Some(self.decrypt_deployment(d)?)),
+        match db_deployment {
+            Some(d) => Ok(Some(self.decrypt_deployment(d.into())?)),
             None => Ok(None),
         }
     }
@@ -410,34 +412,34 @@ impl AppRepository for PostgresAppRepository {
     }
 
     async fn list_security_rules(&self, app_id: Uuid) -> DomainResult<Vec<SecurityRule>> {
-        let rules = sqlx::query_as::<_, SecurityRule>(
+        let db_rules = sqlx::query_as::<_, DbSecurityRule>(
             "SELECT * FROM security_rules WHERE app_id = $1 ORDER BY priority ASC, created_at ASC",
         )
         .bind(app_id)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rules)
+        Ok(db_rules.into_iter().map(|r| r.into()).collect())
     }
 
     async fn create_security_rule(
         &self,
         app_id: Uuid,
         protocol: String,
-        port_start: i32,
-        port_end: i32,
+        port_start: u32,
+        port_end: u32,
         action: String,
     ) -> DomainResult<SecurityRule> {
-        let rule = sqlx::query_as::<_, SecurityRule>(
+        let db_rule = sqlx::query_as::<_, DbSecurityRule>(
             "INSERT INTO security_rules (app_id, protocol, port_start, port_end, action) VALUES ($1, $2, $3, $4, $5) RETURNING *"
         )
         .bind(app_id)
         .bind(protocol)
-        .bind(port_start)
-        .bind(port_end)
+        .bind(port_start as i32)
+        .bind(port_end as i32)
         .bind(action)
         .fetch_one(&self.pool)
         .await?;
-        Ok(rule)
+        Ok(db_rule.into())
     }
 
     async fn delete_security_rule(&self, id: Uuid) -> DomainResult<()> {
@@ -452,10 +454,8 @@ impl AppRepository for PostgresAppRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::user::{NewUser, UserRepository, UserRole};
     use crate::infrastructure::db::PostgresUserRepository;
-    use crate::repositories::user_repository::NewUser;
-    use crate::repositories::user_repository::UserRepository;
-    use crate::repositories::user_repository::UserRole;
     use crate::test_utils::TestDb;
 
     #[tokio::test]

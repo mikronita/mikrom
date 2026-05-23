@@ -2,10 +2,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use mikrom_api::AppState;
+use mikrom_api::application::ApiContext;
 use mikrom_api::config::ApiConfig;
 use mikrom_api::create_app_with_rate_limits;
-use mikrom_api::db;
-use mikrom_api::infrastructure::db::PostgresUserRepository;
+use mikrom_api::infrastructure::db;
+use mikrom_api::infrastructure::db::{
+    PostgresAppRepository, PostgresGithubRepository, PostgresUserRepository,
+    PostgresVolumeRepository,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -23,19 +27,13 @@ async fn main() -> anyhow::Result<()> {
     let jwt_secret = config.jwt_secret.clone();
     let api_port = config.api_port;
 
-    let user_repo = PostgresUserRepository::new(db_pool.clone());
-    let app_repo = mikrom_api::infrastructure::db::PostgresAppRepository::new(
+    let user_repo = Arc::new(PostgresUserRepository::new(db_pool.clone()));
+    let app_repo = Arc::new(PostgresAppRepository::new(
         db_pool.clone(),
         config.master_key.clone(),
-    );
-    let github_repo =
-        mikrom_api::infrastructure::db::PostgresGithubRepository::new(db_pool.clone());
-    let volume_repo =
-        mikrom_api::infrastructure::db::PostgresVolumeRepository::new(db_pool.clone());
-
-    let (deployment_events, _) = tokio::sync::broadcast::channel(100);
-    let (workspace_events, _) = tokio::sync::broadcast::channel(100);
-    let (mesh_status, _) = tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default());
+    ));
+    let github_repo = Arc::new(PostgresGithubRepository::new(db_pool.clone()));
+    let volume_repo = Arc::new(PostgresVolumeRepository::new(db_pool.clone()));
 
     tracing::info!("Connecting to NATS at {}...", config.nats_url);
     let nats_client = async_nats::connect(&config.nats_url)
@@ -43,13 +41,30 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to connect to NATS: {}", e))?;
     let nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone());
 
-    let scheduler = Arc::new(mikrom_api::scheduler::NatsScheduler::new(nats.clone()));
+    let scheduler = Arc::new(mikrom_api::NatsScheduler::new(nats.clone()));
+
+    let ctx = ApiContext::new(
+        user_repo.clone(),
+        app_repo.clone(),
+        github_repo.clone(),
+        volume_repo.clone(),
+        scheduler.clone(),
+        nats.clone(),
+        db_pool.clone(),
+        config.clone(),
+    );
+
+    let (deployment_events, _) = tokio::sync::broadcast::channel(100);
+    let (workspace_events, _) = tokio::sync::broadcast::channel(100);
+    let (mesh_status, _) =
+        tokio::sync::watch::channel(mikrom_api::domain::worker::MeshStatus::default());
 
     let state = AppState {
-        user_repo: Arc::new(user_repo),
-        app_repo: Arc::new(app_repo),
-        github_repo: Arc::new(github_repo),
-        volume_repo: Arc::new(volume_repo),
+        ctx: ctx.clone(),
+        user_repo,
+        app_repo,
+        github_repo,
+        volume_repo,
         scheduler,
         nats,
         router_addr: config.router_addr,
@@ -70,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
         active_deployment_flows: Arc::new(dashmap::DashSet::new()),
     };
 
-    mikrom_api::vms::prime_mesh_status_cache(&state).await?;
+    mikrom_api::application::vms::prime_mesh_status_cache(&state).await?;
     mikrom_api::start_background_tasks(state.clone());
 
     let rate_limiter = Arc::new(mikrom_api::rate_limit::RateLimiter::new(

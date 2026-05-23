@@ -8,11 +8,11 @@ use mikrom_api::auth::AuthUser;
 use mikrom_api::deploy::handlers::{
     __deploy_app_version_handler_impl as deploy_app_version_handler, ManualDeployRequest,
 };
-use mikrom_api::models::app::{App, Deployment};
+use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::app::{App, Deployment};
+use mikrom_api::domain::github::MockGithubRepository;
+use mikrom_api::domain::user::{MockUserRepository, UserRole};
 use mikrom_api::nats::TypedNatsClient;
-use mikrom_api::repositories::MockGithubRepository;
-use mikrom_api::repositories::app_repository::MockAppRepository;
-use mikrom_api::repositories::user_repository::{MockUserRepository, UserRole};
 use mikrom_api::scheduler::MockScheduler;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -22,11 +22,10 @@ async fn create_test_state(app_repo: MockAppRepository) -> Option<AppState> {
     let nats_client = common::get_nats_client_or_skip().await?;
 
     Some(AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(MockScheduler::new()),
         nats: TypedNatsClient::new(nats_client),

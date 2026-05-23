@@ -5,8 +5,8 @@ use axum::{
 use mikrom_api::AppState;
 use mikrom_api::auth::jwt::create_token;
 use mikrom_api::create_app;
-use mikrom_api::repositories::app_repository::MockAppRepository;
-use mikrom_api::repositories::user_repository::{MockUserRepository, UserRole};
+use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::user::{MockUserRepository, UserRole};
 use mikrom_api::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use std::sync::Arc;
 use tokio_stream::StreamExt;
@@ -41,11 +41,10 @@ async fn setup_app() -> (
     let nats_client = mikrom_api::nats::TypedNatsClient::new_custom(Arc::new(DummyNats));
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: nats_client,
         router_addr: "http://localhost:8080".to_string(),
@@ -59,7 +58,7 @@ async fn setup_app() -> (
         acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,

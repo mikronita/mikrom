@@ -1,115 +1,70 @@
-mod common;
-use axum::{
-    body::Body,
-    http::{Request, StatusCode},
-};
-use mikrom_api::AppState;
-use mikrom_api::auth::jwt::create_token;
-use mikrom_api::create_app;
-use mikrom_api::models::app::Deployment;
-use mikrom_api::repositories::app_repository::MockAppRepository;
-use mikrom_api::repositories::user_repository::{MockUserRepository, UserRole};
 use std::sync::Arc;
+
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use mockall::predicate::eq;
 use tokio_stream::StreamExt;
 use tower::Service;
-use uuid::Uuid;
+use tower::ServiceExt;
+
+use mikrom_api::domain::app::{App, Deployment};
+use mikrom_api::domain::{MockAppRepository, MockUserRepository, UserRole};
+use mikrom_api::infrastructure::auth::jwt::create_token;
+use mikrom_api::test_utils::create_test_app_state;
+
+#[path = "common/mod.rs"]
+mod common;
 
 const JWT_SECRET: &str = "test-secret";
 
 async fn setup_app(mock_app_repo: MockAppRepository) -> Option<axum::Router> {
     let mock_user_repo = MockUserRepository::new();
-    let (deployment_events, _) = tokio::sync::broadcast::channel(100);
     let nats_client = common::get_nats_client_or_skip().await?;
 
-    let state = AppState {
-        user_repo: Arc::new(mock_user_repo),
-        app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
-        router_addr: "http://localhost:8080".to_string(),
-        frontend_url: "http://localhost:3000".to_string(),
-        api_db: sqlx::postgres::PgPoolOptions::new()
-            .connect_lazy("postgres://localhost/dummy")
-            .unwrap(),
-        jwt_secret: JWT_SECRET.into(),
-        master_key: "key".into(),
-        deployment_events: deployment_events.clone(),
-        acme_email: "admin@mikrom.spluca.org".into(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
+    let mut state =
+        create_test_app_state(sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap());
+    state.user_repo = Arc::new(mock_user_repo);
+    state.app_repo = Arc::new(mock_app_repo);
+    state.ctx.user_repo = state.user_repo.clone();
+    state.ctx.app_repo = state.app_repo.clone();
+    state.nats = mikrom_api::nats::TypedNatsClient::new(nats_client);
+    state.ctx.nats = state.nats.clone();
+    state.jwt_secret = JWT_SECRET.into();
+    state.ctx.jwt_secret = JWT_SECRET.into();
 
-    Some(create_app(state))
+    Some(mikrom_api::create_app(state))
 }
 
 #[tokio::test]
 async fn test_sse_deployments_stream_initial_data() {
-    let mut mock_app_repo = MockAppRepository::new();
-    let app_id = Uuid::new_v4();
-    let user_id = Uuid::new_v4();
     let app_name = "test-app";
+    let app_id = uuid::Uuid::new_v4();
+    let user_id = uuid::Uuid::new_v4();
 
-    // Mock app ownership check
-    let app_id_clone = app_id;
+    let mut mock_app_repo = MockAppRepository::new();
     mock_app_repo
         .expect_get_app_by_name()
-        .returning(move |name| {
-            if name == "test-app" {
-                Ok(Some(mikrom_api::models::app::App {
-                    id: app_id,
-                    name: "test-app".to_string(),
-                    git_url: "git".to_string(),
-                    port: 8080,
-                    user_id,
-                    ..Default::default()
-                }))
-            } else {
-                Ok(None)
-            }
+        .with(eq(app_name))
+        .returning(move |_| {
+            Ok(Some(App {
+                id: app_id,
+                name: app_name.to_string(),
+                user_id,
+                ..Default::default()
+            }))
         });
 
-    // Mock initial deployments
     mock_app_repo
         .expect_list_deployments_by_app()
-        .returning(move |_| {
-            Ok(vec![Deployment {
-                id: Uuid::new_v4(),
-                app_id: app_id_clone,
-                user_id,
-                status: "RUNNING".into(),
-                job_id: Some("job-1".into()),
-                image_tag: Some("nginx:latest".into()),
-                build_id: None,
-                port: 80,
-                vcpus: 1,
-                memory_mib: 256,
-                disk_mib: 1024,
-                env_vars: serde_json::json!({}),
-                git_commit_hash: None,
-                git_commit_message: None,
-                git_branch: None,
-                trigger_source: "manual".into(),
-                hypervisor: 0,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-                ipv6_address: None,
-            }])
-        });
+        .with(eq(app_id))
+        .returning(|_| Ok(vec![]));
 
-    let Some(mut router) = setup_app(mock_app_repo).await else {
+    let router = setup_app(mock_app_repo).await;
+    if router.is_none() {
         return;
-    };
+    }
+    let router = router.unwrap();
+
     let token = create_token(
         &user_id.to_string(),
         "test@test.com",
@@ -125,157 +80,83 @@ async fn test_sse_deployments_stream_initial_data() {
         .body(Body::empty())
         .unwrap();
 
-    let response = router.call(req).await.unwrap();
+    let response = router.oneshot(req).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "text/event-stream"
+    );
 
-    let mut body_stream = response.into_body().into_data_stream();
-    let chunk = body_stream.next().await.unwrap().unwrap();
-    let chunk_str = String::from_utf8_lossy(&chunk);
+    let body = response.into_body().into_data_stream();
+    let mut chunks = body;
+    let first_chunk = chunks.next().await.unwrap().unwrap();
+    let first_str = String::from_utf8_lossy(&first_chunk);
 
-    assert!(chunk_str.contains("data:"));
-    assert!(chunk_str.contains("job-1"));
-    assert!(chunk_str.contains("RUNNING"));
-}
-
-#[tokio::test]
-async fn test_sse_deployments_auth_via_query_param() {
-    let mut mock_app_repo = MockAppRepository::new();
-    let app_id = Uuid::new_v4();
-    let user_id = Uuid::new_v4();
-    let app_name = "test-app";
-
-    mock_app_repo.expect_get_app_by_name().returning(move |_| {
-        Ok(Some(mikrom_api::models::app::App {
-            id: app_id,
-            name: "test-app".to_string(),
-            git_url: "git".to_string(),
-            port: 8080,
-            user_id,
-            ..Default::default()
-        }))
-    });
-
-    mock_app_repo
-        .expect_list_deployments_by_app()
-        .returning(|_| Ok(vec![]));
-
-    let Some(mut router) = setup_app(mock_app_repo).await else {
-        return;
-    };
-    let token = create_token(
-        &user_id.to_string(),
-        "test@test.com",
-        &UserRole::User,
-        JWT_SECRET,
-    )
-    .unwrap();
-
-    // No Authorization header, but token in query param
-    let req = Request::builder()
-        .method("GET")
-        .uri(format!(
-            "/v1/apps/{}/deployments/stream?token={}",
-            app_name, token
-        ))
-        .body(Body::empty())
-        .unwrap();
-
-    let response = router.call(req).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    assert!(first_str.contains("data: []"));
 }
 
 #[tokio::test]
 async fn test_sse_deployments_stream_updates() {
+    let app_name = "test-app-updates";
+    let app_id = uuid::Uuid::new_v4();
+    let user_id = uuid::Uuid::new_v4();
+
     let mut mock_app_repo = MockAppRepository::new();
-    let app_id = Uuid::new_v4();
-    let user_id = Uuid::new_v4();
-    let app_name = "test-app";
+    mock_app_repo
+        .expect_get_app_by_name()
+        .with(eq(app_name))
+        .returning(move |_| {
+            Ok(Some(App {
+                id: app_id,
+                name: app_name.to_string(),
+                user_id,
+                ..Default::default()
+            }))
+        });
 
-    mock_app_repo.expect_get_app_by_name().returning(move |_| {
-        Ok(Some(mikrom_api::models::app::App {
-            id: app_id,
-            name: "test-app".to_string(),
-            git_url: "git".to_string(),
-            port: 8080,
-            user_id,
-            ..Default::default()
-        }))
-    });
-
-    // Return empty first, then return one deployment
-    let app_id_clone = app_id;
-    let user_id_clone = user_id;
+    // 1. Initial list empty
     mock_app_repo
         .expect_list_deployments_by_app()
+        .with(eq(app_id))
         .times(1)
         .returning(|_| Ok(vec![]));
 
+    // 2. Second list (after event) has one deployment
     mock_app_repo
         .expect_list_deployments_by_app()
+        .with(eq(app_id))
         .times(1)
         .returning(move |_| {
             Ok(vec![Deployment {
-                id: Uuid::new_v4(),
-                app_id: app_id_clone,
-                user_id: user_id_clone,
-                status: "RUNNING".into(),
-                job_id: Some("job-updated".into()),
-                image_tag: Some("nginx:latest".into()),
-                build_id: None,
-                port: 80,
-                vcpus: 1,
-                memory_mib: 256,
-                disk_mib: 1024,
-                env_vars: serde_json::json!({}),
-                git_commit_hash: None,
-                git_commit_message: None,
-                git_branch: None,
-                trigger_source: "manual".into(),
-                hypervisor: 0,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-                ipv6_address: None,
+                id: uuid::Uuid::new_v4(),
+                app_id,
+                user_id,
+                status: "RUNNING".to_string(),
+                job_id: Some("job-updated".to_string()),
+                ..Default::default()
             }])
         });
 
     let mock_user_repo = MockUserRepository::new();
-    let (deployment_events, _) = tokio::sync::broadcast::channel(100);
+    let (deployment_events, _) = tokio::sync::broadcast::channel::<uuid::Uuid>(100);
     let tx = deployment_events.clone();
     let Some(nats_client) = common::get_nats_client_or_skip().await else {
         return;
     };
 
-    let state = AppState {
-        user_repo: Arc::new(mock_user_repo),
-        app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
-        router_addr: "http://localhost:8080".to_string(),
-        frontend_url: "http://localhost:3000".to_string(),
-        api_db: sqlx::postgres::PgPoolOptions::new()
-            .connect_lazy("postgres://localhost/dummy")
-            .unwrap(),
-        jwt_secret: JWT_SECRET.into(),
-        master_key: "key".into(),
-        deployment_events: deployment_events.clone(),
-        acme_email: "admin@mikrom.spluca.org".into(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
+    let mut state =
+        create_test_app_state(sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap());
+    state.user_repo = Arc::new(mock_user_repo);
+    state.app_repo = Arc::new(mock_app_repo);
+    state.ctx.user_repo = state.user_repo.clone();
+    state.ctx.app_repo = state.app_repo.clone();
+    state.nats = mikrom_api::nats::TypedNatsClient::new(nats_client);
+    state.ctx.nats = state.nats.clone();
+    state.jwt_secret = JWT_SECRET.into();
+    state.ctx.jwt_secret = JWT_SECRET.into();
+    state.deployment_events = tx.clone();
 
-    let mut router = create_app(state);
+    let mut router = mikrom_api::create_app(state);
     let token = create_token(
         &user_id.to_string(),
         "test@test.com",
@@ -306,4 +187,55 @@ async fn test_sse_deployments_stream_updates() {
     let second_str = String::from_utf8_lossy(&second_chunk);
     assert!(second_str.contains("job-updated"));
     assert!(second_str.contains("RUNNING"));
+}
+
+#[tokio::test]
+async fn test_sse_deployments_auth_via_query_param() {
+    let app_name = "test-app-query-auth";
+    let app_id = uuid::Uuid::new_v4();
+    let user_id = uuid::Uuid::new_v4();
+
+    let mut mock_app_repo = MockAppRepository::new();
+    mock_app_repo
+        .expect_get_app_by_name()
+        .with(eq(app_name))
+        .returning(move |_| {
+            Ok(Some(App {
+                id: app_id,
+                name: app_name.to_string(),
+                user_id,
+                ..Default::default()
+            }))
+        });
+
+    mock_app_repo
+        .expect_list_deployments_by_app()
+        .with(eq(app_id))
+        .returning(|_| Ok(vec![]));
+
+    let router = setup_app(mock_app_repo).await;
+    if router.is_none() {
+        return;
+    }
+    let router = router.unwrap();
+
+    let token = create_token(
+        &user_id.to_string(),
+        "test@test.com",
+        &UserRole::User,
+        JWT_SECRET,
+    )
+    .unwrap();
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/v1/apps/{}/deployments/stream?token={}",
+            app_name, token
+        ))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }

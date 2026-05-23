@@ -2,10 +2,8 @@
 mod common;
 use futures::StreamExt;
 use mikrom_api::AppState;
+use mikrom_api::domain::{AppRepository, NewDeployment, UpdateDeploymentParams};
 use mikrom_api::infrastructure::db::PostgresAppRepository;
-use mikrom_api::repositories::app_repository::{
-    AppRepository, NewDeployment, UpdateDeploymentParams,
-};
 use mikrom_api::test_utils::TestDb;
 use std::sync::Arc;
 use tokio::time::{Duration, timeout};
@@ -28,14 +26,13 @@ async fn test_route_reconciliation_on_startup() {
     };
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         app_repo: app_repo.clone(),
         user_repo: Arc::new(mikrom_api::infrastructure::db::PostgresUserRepository::new(
             pool.clone(),
         )),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
+        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
         router_addr: "http://localhost:8080".to_string(),
@@ -67,7 +64,7 @@ async fn test_route_reconciliation_on_startup() {
         .unwrap();
 
     let app = app_repo
-        .create_app(mikrom_api::repositories::app_repository::CreateAppParams {
+        .create_app(mikrom_api::domain::CreateAppParams {
             name: "reconcile-app".to_string(),
             git_url: "https://github.com/test/reconcile".to_string(),
             port: 8080,

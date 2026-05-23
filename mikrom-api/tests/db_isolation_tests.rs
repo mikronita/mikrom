@@ -4,9 +4,9 @@ mod common;
 mod tests {
     use super::common;
     use mikrom_api::AppState;
+    use mikrom_api::domain::app::App;
+    use mikrom_api::infrastructure::db::PostgresAppRepository;
     use mikrom_api::infrastructure::db::PostgresUserRepository;
-    use mikrom_api::models::app::App;
-    use mikrom_api::repositories::PostgresAppRepository;
     use prost::Message;
     use std::sync::Arc;
     use tokio_stream::StreamExt;
@@ -53,15 +53,14 @@ mod tests {
         };
 
         let state = AppState {
+            ctx: mikrom_api::application::ApiContext::default(),
             user_repo: Arc::new(PostgresUserRepository::new(pool.clone())),
             app_repo: Arc::new(PostgresAppRepository::new(
                 pool.clone(),
                 "test-key".to_string(),
             )),
-            volume_repo: Arc::new(
-                mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-            ),
-            github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+            volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
+            github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
             scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
             nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
             router_addr: "http://localhost:8080".to_string(),
@@ -117,14 +116,13 @@ mod tests {
         let expected_hostname = hostname.clone();
         let vpc_prefix = "fd00:abcd::".to_string();
 
-        let mut mock_user_repo =
-            mikrom_api::repositories::user_repository::MockUserRepository::new();
+        let mut mock_user_repo = mikrom_api::domain::user::MockUserRepository::new();
         mock_user_repo.expect_find_by_id().returning(move |_| {
-            Ok(Some(mikrom_api::repositories::user_repository::User {
+            Ok(Some(mikrom_api::domain::user::User {
                 id: user_id,
                 email: "test@example.com".to_string(),
                 password_hash: "hash".to_string(),
-                role: mikrom_api::repositories::user_repository::UserRole::User,
+                role: mikrom_api::domain::user::UserRole::User,
                 first_name: None,
                 last_name: None,
                 vpc_ipv6_prefix: Some(vpc_prefix.clone()),
@@ -165,15 +163,14 @@ mod tests {
             .returning(|_| Ok(true));
 
         let state = AppState {
+            ctx: mikrom_api::application::ApiContext::default(),
             user_repo: Arc::new(mock_user_repo),
             app_repo: Arc::new(PostgresAppRepository::new(
                 pool.clone(),
                 "test-key".to_string(),
             )),
-            volume_repo: Arc::new(
-                mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-            ),
-            github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+            volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
+            github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
             scheduler: Arc::new(mock_scheduler),
             nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
             router_addr: "http://localhost:8080".to_string(),
@@ -242,14 +239,13 @@ mod tests {
         let user_id = Uuid::new_v4();
         let hostname = "no-targets.example.com".to_string();
 
-        let mut mock_user_repo =
-            mikrom_api::repositories::user_repository::MockUserRepository::new();
+        let mut mock_user_repo = mikrom_api::domain::user::MockUserRepository::new();
         mock_user_repo.expect_find_by_id().returning(move |_| {
-            Ok(Some(mikrom_api::repositories::user_repository::User {
+            Ok(Some(mikrom_api::domain::user::User {
                 id: user_id,
                 email: "test@example.com".to_string(),
                 password_hash: "hash".to_string(),
-                role: mikrom_api::repositories::user_repository::UserRole::User,
+                role: mikrom_api::domain::user::UserRole::User,
                 first_name: None,
                 last_name: None,
                 vpc_ipv6_prefix: Some("fd00:abcd::".to_string()),
@@ -263,15 +259,14 @@ mod tests {
         mock_scheduler.expect_update_app_scaling_config().times(0);
 
         let state = AppState {
+            ctx: mikrom_api::application::ApiContext::default(),
             user_repo: Arc::new(mock_user_repo),
             app_repo: Arc::new(PostgresAppRepository::new(
                 pool.clone(),
                 "test-key".to_string(),
             )),
-            volume_repo: Arc::new(
-                mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-            ),
-            github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+            volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
+            github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
             scheduler: Arc::new(mock_scheduler),
             nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
             router_addr: "http://localhost:8080".to_string(),

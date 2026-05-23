@@ -1,13 +1,11 @@
 use crate::domain::error::DomainResult;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub use crate::models::volume::{
-    AppVolume, AttachedVolume, Volume, VolumeAttachmentInfo, VolumeSnapshot, VolumeWithAttachments,
-};
-
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rovo::schemars::JsonSchema, Serialize, Deserialize)]
 #[repr(i32)]
 pub enum VolumeAccessMode {
     ReadWriteOnce = 0,
@@ -40,6 +38,59 @@ impl TryFrom<i32> for VolumeAccessMode {
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         Self::from_i32(value).ok_or(())
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, rovo::schemars::JsonSchema)]
+pub struct Volume {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+    pub size_mib: i32,
+    #[serde(skip_serializing)]
+    pub pool_name: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, rovo::schemars::JsonSchema)]
+pub struct AppVolume {
+    pub app_id: Uuid,
+    pub volume_id: Uuid,
+    pub mount_point: String,
+    pub access_mode: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, rovo::schemars::JsonSchema)]
+pub struct AttachedVolume {
+    #[serde(flatten)]
+    pub volume: Volume,
+    pub mount_point: String,
+    pub access_mode: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, rovo::schemars::JsonSchema)]
+pub struct VolumeAttachmentInfo {
+    pub app_id: Uuid,
+    pub app_name: String,
+    pub mount_point: String,
+    pub access_mode: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, rovo::schemars::JsonSchema)]
+pub struct VolumeWithAttachments {
+    #[serde(flatten)]
+    pub volume: Volume,
+    pub attachments: Vec<VolumeAttachmentInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, rovo::schemars::JsonSchema)]
+pub struct VolumeSnapshot {
+    pub id: Uuid,
+    pub volume_id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug)]

@@ -1,5 +1,5 @@
 use crate::AppState;
-use crate::repositories::app_repository::UpdateDeploymentParams;
+use crate::domain::UpdateDeploymentParams;
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use futures::stream::{FuturesUnordered, StreamExt};
 use mikrom_proto::scheduler::{AppInfo, AppStatusRequest, AppStatusResponse};
@@ -46,7 +46,7 @@ pub async fn start_ip_sync_task(state: AppState) {
                         )
                         .await
                     {
-                        let db_status = crate::scheduler::status_name(inner.status);
+                        let db_status = crate::infrastructure::scheduler::status_name(inner.status);
                         let ipv6_address = inner.ipv6_address;
 
                         sync_deployment_state(&state, &dep, db_status, &ipv6_address).await;
@@ -98,7 +98,7 @@ pub async fn start_nats_job_listener(state: AppState) {
                 };
 
                 if let Some(dep) = dep {
-                    let db_status = crate::scheduler::status_name(info.status);
+                    let db_status = crate::infrastructure::scheduler::status_name(info.status);
                     sync_deployment_state(&state, &dep, db_status, &info.ipv6_address).await;
                 }
             });
@@ -108,7 +108,7 @@ pub async fn start_nats_job_listener(state: AppState) {
 
 async fn sync_deployment_state(
     state: &AppState,
-    dep: &crate::models::app::Deployment,
+    dep: &crate::domain::Deployment,
     db_status: &str,
     ipv6_address: &str,
 ) {

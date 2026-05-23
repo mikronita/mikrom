@@ -1,8 +1,7 @@
 use futures::StreamExt;
-use mikrom_api::AppState;
-use mikrom_api::models::app::{App, Deployment};
-use mikrom_api::repositories::user_repository::{User, UserRole};
-use mikrom_api::repositories::{MockAppRepository, MockGithubRepository, MockUserRepository};
+use mikrom_api::domain::app::{App, Deployment};
+use mikrom_api::domain::user::{User, UserRole};
+use mikrom_api::domain::{MockAppRepository, MockUserRepository};
 use mikrom_api::scheduler::MockScheduler;
 use mikrom_proto::scheduler::DeployResponse;
 use mockall::predicate::*;
@@ -133,39 +132,22 @@ async fn test_promote_running_deployment_while_flow_active_is_immediate() {
         move |_| Ok(Some(a.clone()))
     });
 
-    let state = AppState {
-        user_repo: Arc::new(MockUserRepository::new()),
-        app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        github_repo: Arc::new(MockGithubRepository::default()),
-        scheduler: Arc::new(mock_scheduler),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
-        router_addr: "http://localhost:8080".to_string(),
-        frontend_url: "http://localhost:3000".to_string(),
-        api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
-        jwt_secret: "secret".to_string(),
-        master_key: "key".to_string(),
-        deployment_events: tokio::sync::broadcast::channel(100).0,
-        acme_email: "test@example.com".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
+    let mut state = mikrom_api::test_utils::create_test_app_state(
+        sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+    );
+    state.app_repo = Arc::new(mock_app_repo);
+    state.scheduler = Arc::new(mock_scheduler);
+    state.ctx.app_repo = state.app_repo.clone();
+    state.ctx.scheduler = state.scheduler.clone();
+    state.nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone());
+    state.ctx.nats = state.nats.clone();
 
     state.active_deployment_flows.insert(app_id.into());
 
     let auth = AuthUser {
         user_id: user_id.to_string(),
         email: "test@example.com".to_string(),
-        role: mikrom_api::repositories::user_repository::UserRole::User,
+        role: mikrom_api::domain::user::UserRole::User,
     };
 
     let result = activate_deployment_handler(
@@ -279,37 +261,20 @@ async fn test_promote_running_deployment_with_stale_db_status_uses_runtime_statu
         }
     });
 
-    let state = AppState {
-        user_repo: Arc::new(MockUserRepository::new()),
-        app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        github_repo: Arc::new(MockGithubRepository::default()),
-        scheduler: Arc::new(mock_scheduler),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
-        router_addr: "http://localhost:8080".to_string(),
-        frontend_url: "http://localhost:3000".to_string(),
-        api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
-        jwt_secret: "secret".to_string(),
-        master_key: "key".to_string(),
-        deployment_events: tokio::sync::broadcast::channel(100).0,
-        acme_email: "test@example.com".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
+    let mut state = mikrom_api::test_utils::create_test_app_state(
+        sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+    );
+    state.app_repo = Arc::new(mock_app_repo);
+    state.scheduler = Arc::new(mock_scheduler);
+    state.ctx.app_repo = state.app_repo.clone();
+    state.ctx.scheduler = state.scheduler.clone();
+    state.nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone());
+    state.ctx.nats = state.nats.clone();
 
     let auth = AuthUser {
         user_id: user_id.to_string(),
         email: "test@example.com".to_string(),
-        role: mikrom_api::repositories::user_repository::UserRole::User,
+        role: mikrom_api::domain::user::UserRole::User,
     };
 
     let result = activate_deployment_handler(
@@ -409,37 +374,22 @@ async fn test_promote_unhealthy_deployment_no_cleanup() {
         }))
     });
 
-    let state = AppState {
-        user_repo: Arc::new(mock_user_repo),
-        app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        github_repo: Arc::new(MockGithubRepository::default()),
-        scheduler: Arc::new(mock_scheduler),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
-        router_addr: "http://localhost:8080".to_string(),
-        frontend_url: "http://localhost:3000".to_string(),
-        api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
-        jwt_secret: "secret".to_string(),
-        master_key: "key".to_string(),
-        deployment_events: tokio::sync::broadcast::channel(100).0,
-        acme_email: "test@example.com".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
+    let mut state = mikrom_api::test_utils::create_test_app_state(
+        sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+    );
+    state.user_repo = Arc::new(mock_user_repo);
+    state.app_repo = Arc::new(mock_app_repo);
+    state.scheduler = Arc::new(mock_scheduler);
+    state.ctx.user_repo = state.user_repo.clone();
+    state.ctx.app_repo = state.app_repo.clone();
+    state.ctx.scheduler = state.scheduler.clone();
+    state.nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone());
+    state.ctx.nats = state.nats.clone();
 
     let guard = state.try_start_flow(app_id.into()).unwrap();
 
     // Start zero-downtime flow with cleanup_on_failure = false (since it was RUNNING)
-    mikrom_api::deploy::service::DeploymentService::run_zero_downtime_flow(
+    mikrom_api::application::deployment::service::DeploymentService::run_zero_downtime_flow(
         state.clone(),
         app,
         deployment,

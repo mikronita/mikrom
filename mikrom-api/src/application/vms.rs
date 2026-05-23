@@ -1,0 +1,354 @@
+use crate::AppState;
+pub use crate::domain::worker::MeshStatus;
+use crate::domain::{App, Deployment};
+use crate::error::{ApiError, ApiResult};
+use tokio_stream::StreamExt;
+use uuid::Uuid;
+
+pub struct VmService;
+
+pub struct VmSnapshot {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+    pub size_bytes: u64,
+    pub vm_status: String,
+}
+
+impl VmService {
+    pub async fn validate_app_deployment(
+        state: &AppState,
+        user_id: &str,
+        app_name: &str,
+        job_id: &str,
+    ) -> ApiResult<(App, Deployment)> {
+        let app = state
+            .app_repo
+            .get_app_by_name(app_name)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::NotFound("Application not found".into()))?;
+
+        if app.user_id.to_string() != user_id {
+            return Err(ApiError::Forbidden);
+        }
+
+        let deployment = if let Some(stripped) = job_id.strip_prefix("temp-") {
+            let dep_id = Uuid::parse_str(stripped)
+                .map_err(|_| ApiError::BadRequest("Invalid temp ID".into()))?;
+            state
+                .app_repo
+                .get_deployment(dep_id)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?
+                .ok_or(ApiError::NotFound("Deployment not found".into()))?
+        } else {
+            state
+                .app_repo
+                .get_deployment_by_job_id(job_id)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?
+                .ok_or(ApiError::NotFound("Deployment not found".into()))?
+        };
+
+        if deployment.app_id != app.id {
+            return Err(ApiError::BadRequest(
+                "Deployment does not belong to this application".into(),
+            ));
+        }
+
+        Ok((app, deployment))
+    }
+
+    pub async fn create_snapshot(
+        state: &AppState,
+        user_id: String,
+        job_id: String,
+        snapshot_name: String,
+    ) -> ApiResult<(bool, String)> {
+        let nats_req = mikrom_proto::scheduler::VmSnapshotCreateRequest {
+            job_id,
+            user_id,
+            snapshot_name,
+        };
+        let resp: mikrom_proto::scheduler::VmSnapshotCreateResponse = state
+            .nats
+            .request("mikrom.scheduler.vm_snapshot_create", nats_req)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok((resp.success, resp.message))
+    }
+
+    pub async fn restore_snapshot(
+        state: &AppState,
+        user_id: String,
+        job_id: String,
+        snapshot_name: String,
+    ) -> ApiResult<(bool, String)> {
+        let nats_req = mikrom_proto::scheduler::VmSnapshotRestoreRequest {
+            job_id,
+            user_id,
+            snapshot_name,
+        };
+        let resp: mikrom_proto::scheduler::VmSnapshotRestoreResponse = state
+            .nats
+            .request("mikrom.scheduler.vm_snapshot_restore", nats_req)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok((resp.success, resp.message))
+    }
+
+    pub async fn delete_snapshot(
+        state: &AppState,
+        user_id: String,
+        job_id: String,
+        snapshot_name: String,
+    ) -> ApiResult<(bool, String)> {
+        let nats_req = mikrom_proto::scheduler::VmSnapshotDeleteRequest {
+            job_id,
+            user_id,
+            snapshot_name,
+        };
+        let resp: mikrom_proto::scheduler::VmSnapshotDeleteResponse = state
+            .nats
+            .request("mikrom.scheduler.vm_snapshot_delete", nats_req)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok((resp.success, resp.message))
+    }
+
+    pub async fn list_snapshots(
+        state: &AppState,
+        user_id: String,
+        job_id: String,
+    ) -> ApiResult<(bool, String, Vec<VmSnapshot>)> {
+        let nats_req = mikrom_proto::scheduler::VmSnapshotListRequest { job_id, user_id };
+        let resp: mikrom_proto::scheduler::VmSnapshotListResponse = state
+            .nats
+            .request("mikrom.scheduler.vm_snapshot_list", nats_req)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        let snapshots = resp
+            .snapshots
+            .into_iter()
+            .map(|s| VmSnapshot {
+                id: s.id,
+                name: s.name,
+                created_at: s.created_at,
+                size_bytes: s.size_bytes as u64,
+                vm_status: s.vm_status,
+            })
+            .collect();
+
+        Ok((resp.success, resp.message, snapshots))
+    }
+
+    pub async fn attach_volume(
+        state: &AppState,
+        user_id: String,
+        job_id: String,
+        volume_id: String,
+        mount_point: String,
+        read_only: bool,
+    ) -> ApiResult<(bool, String)> {
+        let nats_req = mikrom_proto::scheduler::AttachVolumeRequest {
+            job_id,
+            user_id,
+            volume_id,
+            mount_point,
+            read_only,
+        };
+        let resp: mikrom_proto::scheduler::AttachVolumeResponse = state
+            .nats
+            .request("mikrom.scheduler.attach_volume", nats_req)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok((resp.success, resp.message))
+    }
+
+    pub async fn detach_volume(
+        state: &AppState,
+        user_id: String,
+        job_id: String,
+        volume_id: String,
+    ) -> ApiResult<(bool, String)> {
+        let nats_req = mikrom_proto::scheduler::DetachVolumeRequest {
+            job_id,
+            user_id,
+            volume_id,
+        };
+        let resp: mikrom_proto::scheduler::DetachVolumeResponse = state
+            .nats
+            .request("mikrom.scheduler.detach_volume", nats_req)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok((resp.success, resp.message))
+    }
+
+    pub async fn start_migration(
+        state: &AppState,
+        user_id: String,
+        job_id: String,
+        target_host: String,
+        target_uri: String,
+    ) -> ApiResult<(bool, String)> {
+        let nats_req = mikrom_proto::scheduler::StartMigrationRequest {
+            job_id,
+            user_id,
+            target_host,
+            target_uri,
+        };
+        let resp: mikrom_proto::scheduler::StartMigrationResponse = state
+            .nats
+            .request("mikrom.scheduler.start_migration", nats_req)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok((resp.success, resp.message))
+    }
+
+    pub async fn cancel_migration(
+        state: &AppState,
+        user_id: String,
+        job_id: String,
+    ) -> ApiResult<(bool, String)> {
+        let nats_req = mikrom_proto::scheduler::CancelMigrationRequest { job_id, user_id };
+        let resp: mikrom_proto::scheduler::CancelMigrationResponse = state
+            .nats
+            .request("mikrom.scheduler.cancel_migration", nats_req)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok((resp.success, resp.message))
+    }
+
+    pub async fn query_migration(
+        state: &AppState,
+        user_id: String,
+        job_id: String,
+    ) -> ApiResult<(bool, String, String)> {
+        let nats_req = mikrom_proto::scheduler::QueryMigrationRequest { job_id, user_id };
+        let resp: mikrom_proto::scheduler::QueryMigrationResponse = state
+            .nats
+            .request("mikrom.scheduler.query_migration", nats_req)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok((resp.success, resp.message, resp.status))
+    }
+
+    pub async fn set_balloon(
+        state: &AppState,
+        user_id: String,
+        job_id: String,
+        target_memory_mib: u32,
+    ) -> ApiResult<(bool, String)> {
+        let nats_req = mikrom_proto::scheduler::SetBalloonRequest {
+            job_id,
+            user_id,
+            target_memory_mib,
+        };
+        let resp: mikrom_proto::scheduler::SetBalloonResponse = state
+            .nats
+            .request("mikrom.scheduler.set_balloon", nats_req)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok((resp.success, resp.message))
+    }
+
+    pub async fn query_balloon(
+        state: &AppState,
+        user_id: String,
+        job_id: String,
+    ) -> ApiResult<(bool, String, u32, u32)> {
+        let nats_req = mikrom_proto::scheduler::QueryBalloonRequest { job_id, user_id };
+        let resp: mikrom_proto::scheduler::QueryBalloonResponse = state
+            .nats
+            .request("mikrom.scheduler.query_balloon", nats_req)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok((
+            resp.success,
+            resp.message,
+            resp.actual_memory_mib,
+            resp.max_memory_mib,
+        ))
+    }
+}
+
+pub async fn fetch_mesh_status(state: &AppState) -> ApiResult<MeshStatus> {
+    use crate::domain::Worker;
+
+    let workers = state.scheduler.list_workers().await?;
+
+    Ok(MeshStatus {
+        total_workers: workers.workers.len(),
+        workers: workers.workers.into_iter().map(Worker::from).collect(),
+    })
+}
+
+pub async fn prime_mesh_status_cache(state: &AppState) -> ApiResult<()> {
+    match fetch_mesh_status(state).await {
+        Ok(snapshot) => {
+            let _ = state.mesh_status.send(snapshot);
+        },
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "Failed to prime mesh status cache during startup; will be updated in background"
+            );
+        },
+    }
+    Ok(())
+}
+
+pub async fn refresh_mesh_status_cache(state: &AppState) -> ApiResult<MeshStatus> {
+    let snapshot = fetch_mesh_status(state).await?;
+    let _ = state.mesh_status.send(snapshot.clone());
+    Ok(snapshot)
+}
+
+pub async fn start_mesh_status_tracker(state: crate::AppState) {
+    let mut worker_heartbeat_sub = match state
+        .nats
+        .subscribe("mikrom.scheduler.worker.heartbeat")
+        .await
+    {
+        Ok(sub) => sub,
+        Err(err) => {
+            tracing::error!("Failed to subscribe to worker heartbeats: {}", err);
+            return;
+        },
+    };
+    let mut router_heartbeat_sub = match state
+        .nats
+        .subscribe("mikrom.scheduler.router.heartbeat")
+        .await
+    {
+        Ok(sub) => sub,
+        Err(err) => {
+            tracing::error!("Failed to subscribe to router heartbeats: {}", err);
+            return;
+        },
+    };
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+
+    loop {
+        tokio::select! {
+            Some(_) = worker_heartbeat_sub.next() => {
+                if let Err(err) = refresh_mesh_status_cache(&state).await {
+                    tracing::warn!("failed to refresh mesh status after worker heartbeat: {}", err);
+                }
+            },
+            Some(_) = router_heartbeat_sub.next() => {
+                if let Err(err) = refresh_mesh_status_cache(&state).await {
+                    tracing::warn!("failed to refresh mesh status after router heartbeat: {}", err);
+                }
+            },
+            _ = interval.tick() => {
+                if let Err(err) = refresh_mesh_status_cache(&state).await {
+                    tracing::warn!("failed to refresh mesh status on interval: {}", err);
+                }
+            },
+            else => break,
+        }
+    }
+}

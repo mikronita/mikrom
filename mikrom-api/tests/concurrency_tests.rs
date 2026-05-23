@@ -1,8 +1,8 @@
 mod common;
 use futures::StreamExt;
 use mikrom_api::AppState;
-use mikrom_api::models::app::{App, Deployment};
-use mikrom_api::repositories::{MockAppRepository, MockGithubRepository, MockUserRepository};
+use mikrom_api::domain::app::{App, Deployment};
+use mikrom_api::domain::{MockAppRepository, MockGithubRepository, MockUserRepository};
 use mikrom_api::scheduler::MockScheduler;
 use mikrom_proto::scheduler::{CheckHealthResponse, DeployResponse};
 use std::sync::Arc;
@@ -52,11 +52,10 @@ async fn test_concurrent_flows_prevented() {
         .unwrap();
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
@@ -111,7 +110,7 @@ async fn test_concurrent_flows_prevented() {
     let guard1 = state
         .try_start_flow(app.id.into())
         .expect("Flow 1 should start");
-    mikrom_api::deploy::service::DeploymentService::run_zero_downtime_flow(
+    mikrom_api::application::deployment::service::DeploymentService::run_zero_downtime_flow(
         state.clone(),
         app.clone(),
         deployment.clone(),

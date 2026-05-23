@@ -1,6 +1,7 @@
 use crate::domain::error::DomainResult;
 use mikrom_proto::scheduler::ListWorkersResponse;
 
+#[mockall::automock]
 #[async_trait::async_trait]
 pub trait Scheduler: Send + Sync {
     async fn pause_app(&self, job_id: String, user_id: String) -> DomainResult<bool>;

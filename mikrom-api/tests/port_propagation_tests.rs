@@ -3,11 +3,11 @@ use mikrom_api::AppState;
 use mikrom_api::deploy::worker::{
     BuildTask, MockBuilderClient, MockSchedulerClient, poll_and_deploy,
 };
-use mikrom_api::models::app::{App, Deployment};
+use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::app::{App, Deployment};
+use mikrom_api::domain::github::MockGithubRepository;
+use mikrom_api::domain::user::MockUserRepository;
 use mikrom_api::nats::TypedNatsClient;
-use mikrom_api::repositories::MockGithubRepository;
-use mikrom_api::repositories::app_repository::MockAppRepository;
-use mikrom_api::repositories::user_repository::MockUserRepository;
 use mikrom_api::scheduler::MockScheduler;
 use mikrom_proto::builder::BuildStatus;
 use std::sync::Arc;
@@ -17,11 +17,12 @@ use uuid::Uuid;
 async fn create_test_state(
     app_repo: MockAppRepository,
     user_repo: MockUserRepository,
-    volume_repo: mikrom_api::repositories::volume_repository::MockVolumeRepository,
+    volume_repo: mikrom_api::domain::MockVolumeRepository,
 ) -> Option<AppState> {
     let nats_client = common::get_nats_client_or_skip().await?;
 
     Some(AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
         volume_repo: Arc::new(volume_repo),
@@ -53,8 +54,7 @@ async fn create_test_state(
 async fn test_port_propagation_from_builder_to_deployment() {
     let mut mock_repo = MockAppRepository::new();
     let mut mock_user_repo = MockUserRepository::new();
-    let mut mock_volume_repo =
-        mikrom_api::repositories::volume_repository::MockVolumeRepository::new();
+    let mut mock_volume_repo = mikrom_api::domain::MockVolumeRepository::new();
     let mut mock_builder = MockBuilderClient::new();
     let _mock_scheduler = MockSchedulerClient::new();
 
@@ -113,11 +113,11 @@ async fn test_port_propagation_from_builder_to_deployment() {
 
     // Mock user
     mock_user_repo.expect_find_by_id().returning(move |id| {
-        Ok(Some(mikrom_api::repositories::user_repository::User {
+        Ok(Some(mikrom_api::domain::user::User {
             id,
             email: "test@example.com".into(),
             password_hash: "hash".into(),
-            role: mikrom_api::repositories::user_repository::UserRole::User,
+            role: mikrom_api::domain::user::UserRole::User,
             first_name: None,
             last_name: None,
             vpc_ipv6_prefix: Some("fd00::/64".to_string()),

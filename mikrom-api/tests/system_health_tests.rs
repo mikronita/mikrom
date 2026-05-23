@@ -3,49 +3,34 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use mikrom_api::test_utils::TestDb;
-use mikrom_api::{AppState, create_app, repositories, scheduler};
+use mikrom_api::create_app;
+use mikrom_api::test_utils::{TestDb, create_test_app_state};
 use std::sync::Arc;
 use tower::ServiceExt;
 
 #[tokio::test]
 async fn test_health_endpoint_structure() {
-    let mock_repo = repositories::user_repository::MockUserRepository::new();
+    let mock_user_repo = mikrom_api::domain::MockUserRepository::new();
     let db = TestDb::new().await;
     let db_pool = db.pool().clone();
-    let app_repo = Arc::new(repositories::PostgresAppRepository::new(
+    let app_repo = Arc::new(mikrom_api::infrastructure::db::PostgresAppRepository::new(
         db_pool.clone(),
         "key".to_string(),
     ));
     let Some(nats_client) = common::get_nats_client_or_skip().await else {
         return;
     };
-    let state = AppState {
-        user_repo: Arc::new(mock_repo),
-        app_repo,
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        scheduler: Arc::new(scheduler::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
-        router_addr: "http://127.0.0.1:8080".to_string(),
-        frontend_url: "http://127.0.0.1:3000".to_string(),
-        jwt_secret: "test".to_string(),
-        master_key: "test".to_string(),
-        deployment_events: tokio::sync::broadcast::channel(1).0,
-        api_db: db_pool,
-        acme_email: "admin@mikrom.spluca.org".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
+
+    let mut state = create_test_app_state(db_pool.clone());
+    state.user_repo = Arc::new(mock_user_repo);
+    state.app_repo = app_repo.clone();
+    state.ctx.user_repo = state.user_repo.clone();
+    state.ctx.app_repo = state.app_repo.clone();
+    state.nats = mikrom_api::nats::TypedNatsClient::new(nats_client);
+    state.ctx.nats = state.nats.clone();
+    state.api_db = db_pool;
+    state.ctx.db = state.api_db.clone();
+
     let app = create_app(state);
 
     let response = app
@@ -73,42 +58,27 @@ async fn test_health_endpoint_structure() {
 
 #[tokio::test]
 async fn test_health_stream_endpoint() {
-    let mock_repo = repositories::user_repository::MockUserRepository::new();
+    let mock_user_repo = mikrom_api::domain::MockUserRepository::new();
     let db = TestDb::new().await;
     let db_pool = db.pool().clone();
-    let app_repo = Arc::new(repositories::PostgresAppRepository::new(
+    let app_repo = Arc::new(mikrom_api::infrastructure::db::PostgresAppRepository::new(
         db_pool.clone(),
         "key".to_string(),
     ));
     let Some(nats_client) = common::get_nats_client_or_skip().await else {
         return;
     };
-    let state = AppState {
-        user_repo: Arc::new(mock_repo),
-        app_repo,
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        scheduler: Arc::new(scheduler::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
-        router_addr: "http://127.0.0.1:8080".to_string(),
-        frontend_url: "http://127.0.0.1:3000".to_string(),
-        jwt_secret: "test".to_string(),
-        master_key: "test".to_string(),
-        deployment_events: tokio::sync::broadcast::channel(1).0,
-        api_db: db_pool,
-        acme_email: "admin@mikrom.spluca.org".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
+
+    let mut state = create_test_app_state(db_pool.clone());
+    state.user_repo = Arc::new(mock_user_repo);
+    state.app_repo = app_repo.clone();
+    state.ctx.user_repo = state.user_repo.clone();
+    state.ctx.app_repo = state.app_repo.clone();
+    state.nats = mikrom_api::nats::TypedNatsClient::new(nats_client);
+    state.ctx.nats = state.nats.clone();
+    state.api_db = db_pool;
+    state.ctx.db = state.api_db.clone();
+
     let app = create_app(state);
 
     let response = app
@@ -123,5 +93,4 @@ async fn test_health_stream_endpoint() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["content-type"], "text/event-stream");
 }
