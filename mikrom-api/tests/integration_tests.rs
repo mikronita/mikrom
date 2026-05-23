@@ -8,8 +8,8 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 
 use mikrom_api::AppState;
+use mikrom_api::infrastructure::db::PostgresUserRepository;
 use mikrom_api::repositories::PostgresAppRepository;
-use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 
 #[path = "common/mod.rs"]
 mod common;

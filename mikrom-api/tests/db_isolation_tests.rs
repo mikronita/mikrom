@@ -4,9 +4,9 @@ mod common;
 mod tests {
     use super::common;
     use mikrom_api::AppState;
+    use mikrom_api::infrastructure::db::PostgresUserRepository;
     use mikrom_api::models::app::App;
     use mikrom_api::repositories::PostgresAppRepository;
-    use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
     use prost::Message;
     use std::sync::Arc;
     use tokio_stream::StreamExt;

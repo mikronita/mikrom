@@ -452,7 +452,7 @@ impl AppRepository for PostgresAppRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repositories::postgres_user_repository::PostgresUserRepository;
+    use crate::infrastructure::db::PostgresUserRepository;
     use crate::repositories::user_repository::NewUser;
     use crate::repositories::user_repository::UserRepository;
     use crate::repositories::user_repository::UserRole;
