@@ -756,8 +756,7 @@ pub async fn pause_deployment(
     let success = state
         .scheduler
         .pause_app(job_id.clone(), auth.user_id.clone())
-        .await
-        .map_err(ApiError::Scheduler)?;
+        .await?;
 
     if success {
         tracing::info!(
@@ -817,8 +816,7 @@ pub async fn resume_deployment(
     let success = state
         .scheduler
         .resume_app(job_id.clone(), auth.user_id.clone())
-        .await
-        .map_err(ApiError::Scheduler)?;
+        .await?;
 
     if success {
         // Update database status
@@ -966,11 +964,7 @@ pub async fn get_mesh_status_handler(
 async fn fetch_mesh_status(state: &crate::AppState) -> ApiResult<MeshStatus> {
     use crate::models::worker::Worker;
 
-    let workers = state
-        .scheduler
-        .list_workers()
-        .await
-        .map_err(ApiError::Internal)?;
+    let workers = state.scheduler.list_workers().await?;
 
     Ok(MeshStatus {
         total_workers: workers.workers.len(),
