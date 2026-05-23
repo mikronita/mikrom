@@ -1,5 +1,6 @@
-use crate::models::app::{App, Deployment};
-use crate::repositories::app_repository::{AppRepository, NewDeployment, UpdateDeploymentParams};
+use crate::domain::app::{App, Deployment, SecurityRule};
+use crate::domain::app::{AppRepository, CreateAppParams, NewDeployment, UpdateDeploymentParams};
+use crate::domain::error::DomainResult;
 use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -14,7 +15,7 @@ impl PostgresAppRepository {
         Self { pool, master_key }
     }
 
-    fn decrypt_app(&self, mut app: App) -> anyhow::Result<App> {
+    fn decrypt_app(&self, mut app: App) -> DomainResult<App> {
         if let Some(ref encrypted) = app.github_webhook_secret {
             match crate::crypto::decrypt(encrypted, &self.master_key) {
                 Ok(decrypted) => {
@@ -26,17 +27,17 @@ impl PostgresAppRepository {
                         error = ?e,
                         "Failed to decrypt github_webhook_secret. Data might be corrupted or MASTER_KEY is incorrect."
                     );
-                    return Err(anyhow::anyhow!(
+                    return Err(crate::domain::DomainError::Infrastructure(format!(
                         "Failed to decrypt application secret: {}",
                         e
-                    ));
+                    )));
                 },
             }
         }
         Ok(app)
     }
 
-    fn decrypt_deployment(&self, mut deployment: Deployment) -> anyhow::Result<Deployment> {
+    fn decrypt_deployment(&self, mut deployment: Deployment) -> DomainResult<Deployment> {
         if let serde_json::Value::String(ref encrypted) = deployment.env_vars {
             match crate::crypto::decrypt(encrypted, &self.master_key) {
                 Ok(decrypted_raw) => match serde_json::from_str(&decrypted_raw) {
@@ -49,10 +50,10 @@ impl PostgresAppRepository {
                             error = ?e,
                             "Failed to parse decrypted env_vars JSON."
                         );
-                        return Err(anyhow::anyhow!(
+                        return Err(crate::domain::DomainError::Infrastructure(format!(
                             "Failed to parse decrypted environment variables: {}",
                             e
-                        ));
+                        )));
                     },
                 },
                 Err(e) => {
@@ -61,10 +62,10 @@ impl PostgresAppRepository {
                         error = ?e,
                         "Failed to decrypt env_vars. Data might be corrupted or MASTER_KEY is incorrect."
                     );
-                    return Err(anyhow::anyhow!(
+                    return Err(crate::domain::DomainError::Infrastructure(format!(
                         "Failed to decrypt deployment environment variables: {}",
                         e
-                    ));
+                    )));
                 },
             }
         }
@@ -74,10 +75,7 @@ impl PostgresAppRepository {
 
 #[async_trait]
 impl AppRepository for PostgresAppRepository {
-    async fn create_app(
-        &self,
-        params: crate::repositories::app_repository::CreateAppParams,
-    ) -> anyhow::Result<App> {
+    async fn create_app(&self, params: CreateAppParams) -> DomainResult<App> {
         let encrypted_secret = if let Some(secret) = params.github_webhook_secret {
             Some(crate::crypto::encrypt(&secret, &self.master_key)?)
         } else {
@@ -122,17 +120,17 @@ impl AppRepository for PostgresAppRepository {
                 if let Some(db_err) = e.as_database_error()
                     && db_err.code().as_deref() == Some("23505")
                 {
-                    return Err(anyhow::anyhow!(
+                    return Err(crate::domain::DomainError::Infrastructure(format!(
                         "Application name '{}' is already taken",
                         params.name
-                    ));
+                    )));
                 }
                 Err(e.into())
             },
         }
     }
 
-    async fn get_app(&self, id: Uuid) -> anyhow::Result<Option<App>> {
+    async fn get_app(&self, id: Uuid) -> DomainResult<Option<App>> {
         let app = sqlx::query_as::<_, App>("SELECT * FROM apps WHERE id = $1")
             .bind(id)
             .fetch_optional(&self.pool)
@@ -144,7 +142,7 @@ impl AppRepository for PostgresAppRepository {
         }
     }
 
-    async fn get_app_by_name(&self, name: &str) -> anyhow::Result<Option<App>> {
+    async fn get_app_by_name(&self, name: &str) -> DomainResult<Option<App>> {
         let app = sqlx::query_as::<_, App>("SELECT * FROM apps WHERE name = $1")
             .bind(name)
             .fetch_optional(&self.pool)
@@ -156,7 +154,7 @@ impl AppRepository for PostgresAppRepository {
         }
     }
 
-    async fn get_app_by_github_repo_id(&self, repo_id: i64) -> anyhow::Result<Option<App>> {
+    async fn get_app_by_github_repo_id(&self, repo_id: i64) -> DomainResult<Option<App>> {
         let app = sqlx::query_as::<_, App>("SELECT * FROM apps WHERE github_repo_id = $1")
             .bind(repo_id)
             .fetch_optional(&self.pool)
@@ -168,7 +166,7 @@ impl AppRepository for PostgresAppRepository {
         }
     }
 
-    async fn delete_app(&self, id: Uuid) -> anyhow::Result<()> {
+    async fn delete_app(&self, id: Uuid) -> DomainResult<()> {
         sqlx::query("DELETE FROM apps WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
@@ -177,7 +175,7 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn list_apps_by_user(&self, user_id: Option<Uuid>) -> anyhow::Result<Vec<App>> {
+    async fn list_apps_by_user(&self, user_id: Option<Uuid>) -> DomainResult<Vec<App>> {
         let apps = match user_id {
             None => {
                 sqlx::query_as::<_, App>("SELECT * FROM apps ORDER BY created_at DESC")
@@ -201,7 +199,7 @@ impl AppRepository for PostgresAppRepository {
         Ok(decrypted_apps)
     }
 
-    async fn set_active_deployment(&self, app_id: Uuid, deployment_id: Uuid) -> anyhow::Result<()> {
+    async fn set_active_deployment(&self, app_id: Uuid, deployment_id: Uuid) -> DomainResult<()> {
         sqlx::query("UPDATE apps SET active_deployment_id = $1, updated_at = NOW() WHERE id = $2")
             .bind(deployment_id)
             .bind(app_id)
@@ -211,7 +209,7 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn update_app_port(&self, id: Uuid, port: i32) -> anyhow::Result<()> {
+    async fn update_app_port(&self, id: Uuid, port: i32) -> DomainResult<()> {
         sqlx::query("UPDATE apps SET port = $1, updated_at = NOW() WHERE id = $2")
             .bind(port)
             .bind(id)
@@ -220,7 +218,7 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn update_app_scaling(&self, id: Uuid, desired_replicas: i32) -> anyhow::Result<()> {
+    async fn update_app_scaling(&self, id: Uuid, desired_replicas: i32) -> DomainResult<()> {
         sqlx::query("UPDATE apps SET desired_replicas = $1, updated_at = NOW() WHERE id = $2")
             .bind(desired_replicas)
             .bind(id)
@@ -237,7 +235,7 @@ impl AppRepository for PostgresAppRepository {
         enabled: bool,
         cpu_threshold: Option<f64>,
         mem_threshold: Option<f64>,
-    ) -> anyhow::Result<()> {
+    ) -> DomainResult<()> {
         sqlx::query(
             "UPDATE apps SET min_replicas = $1, max_replicas = $2, autoscaling_enabled = $3, \
              cpu_threshold = COALESCE($4, cpu_threshold), mem_threshold = COALESCE($5, mem_threshold), \
@@ -254,7 +252,7 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn create_deployment(&self, data: NewDeployment) -> anyhow::Result<Deployment> {
+    async fn create_deployment(&self, data: NewDeployment) -> DomainResult<Deployment> {
         let uid = Uuid::parse_str(&data.user_id)?;
 
         // Encrypt env_vars
@@ -291,7 +289,7 @@ impl AppRepository for PostgresAppRepository {
         &self,
         id: Uuid,
         params: UpdateDeploymentParams,
-    ) -> anyhow::Result<()> {
+    ) -> DomainResult<()> {
         sqlx::query(
             "UPDATE deployments SET status = COALESCE($1, status), job_id = COALESCE($2, job_id), image_tag = COALESCE($3, image_tag), build_id = COALESCE($4, build_id), ipv6_address = COALESCE($5, ipv6_address), git_commit_hash = COALESCE($6, git_commit_hash), git_commit_message = COALESCE($7, git_commit_message), git_branch = COALESCE($8, git_branch), updated_at = NOW() WHERE id = $9"
         )
@@ -310,7 +308,7 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn update_deployment_port(&self, id: Uuid, port: i32) -> anyhow::Result<()> {
+    async fn update_deployment_port(&self, id: Uuid, port: i32) -> DomainResult<()> {
         sqlx::query("UPDATE deployments SET port = $1, updated_at = NOW() WHERE id = $2")
             .bind(port)
             .bind(id)
@@ -319,7 +317,7 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn get_deployment(&self, id: Uuid) -> anyhow::Result<Option<Deployment>> {
+    async fn get_deployment(&self, id: Uuid) -> DomainResult<Option<Deployment>> {
         let deployment = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE id = $1")
             .bind(id)
             .fetch_optional(&self.pool)
@@ -331,7 +329,7 @@ impl AppRepository for PostgresAppRepository {
         }
     }
 
-    async fn get_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<Option<Deployment>> {
+    async fn get_deployment_by_job_id(&self, job_id: &str) -> DomainResult<Option<Deployment>> {
         let deployment =
             sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE job_id = $1")
                 .bind(job_id)
@@ -344,7 +342,7 @@ impl AppRepository for PostgresAppRepository {
         }
     }
 
-    async fn list_deployments_by_app(&self, app_id: Uuid) -> anyhow::Result<Vec<Deployment>> {
+    async fn list_deployments_by_app(&self, app_id: Uuid) -> DomainResult<Vec<Deployment>> {
         let deployments = sqlx::query_as::<_, Deployment>(
             "SELECT * FROM deployments WHERE app_id = $1 ORDER BY created_at DESC",
         )
@@ -362,7 +360,7 @@ impl AppRepository for PostgresAppRepository {
     async fn list_deployments_by_user(
         &self,
         user_id: Option<Uuid>,
-    ) -> anyhow::Result<Vec<Deployment>> {
+    ) -> DomainResult<Vec<Deployment>> {
         let deployments = match user_id {
             None => {
                 sqlx::query_as::<_, Deployment>(
@@ -388,7 +386,7 @@ impl AppRepository for PostgresAppRepository {
         Ok(decrypted_deps)
     }
 
-    async fn get_active_deployment(&self, app_id: Uuid) -> anyhow::Result<Option<Deployment>> {
+    async fn get_active_deployment(&self, app_id: Uuid) -> DomainResult<Option<Deployment>> {
         let deployment = sqlx::query_as::<_, Deployment>(
             "SELECT d.* FROM deployments d JOIN apps a ON d.id = a.active_deployment_id WHERE a.id = $1"
         )
@@ -402,7 +400,7 @@ impl AppRepository for PostgresAppRepository {
         }
     }
 
-    async fn delete_deployment_by_job_id(&self, job_id: &str) -> anyhow::Result<()> {
+    async fn delete_deployment_by_job_id(&self, job_id: &str) -> DomainResult<()> {
         sqlx::query("DELETE FROM deployments WHERE job_id = $1")
             .bind(job_id)
             .execute(&self.pool)
@@ -411,11 +409,8 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn list_security_rules(
-        &self,
-        app_id: Uuid,
-    ) -> anyhow::Result<Vec<crate::models::app::SecurityRule>> {
-        let rules = sqlx::query_as::<_, crate::models::app::SecurityRule>(
+    async fn list_security_rules(&self, app_id: Uuid) -> DomainResult<Vec<SecurityRule>> {
+        let rules = sqlx::query_as::<_, SecurityRule>(
             "SELECT * FROM security_rules WHERE app_id = $1 ORDER BY priority ASC, created_at ASC",
         )
         .bind(app_id)
@@ -431,8 +426,8 @@ impl AppRepository for PostgresAppRepository {
         port_start: i32,
         port_end: i32,
         action: String,
-    ) -> anyhow::Result<crate::models::app::SecurityRule> {
-        let rule = sqlx::query_as::<_, crate::models::app::SecurityRule>(
+    ) -> DomainResult<SecurityRule> {
+        let rule = sqlx::query_as::<_, SecurityRule>(
             "INSERT INTO security_rules (app_id, protocol, port_start, port_end, action) VALUES ($1, $2, $3, $4, $5) RETURNING *"
         )
         .bind(app_id)
@@ -445,7 +440,7 @@ impl AppRepository for PostgresAppRepository {
         Ok(rule)
     }
 
-    async fn delete_security_rule(&self, id: Uuid) -> anyhow::Result<()> {
+    async fn delete_security_rule(&self, id: Uuid) -> DomainResult<()> {
         sqlx::query("DELETE FROM security_rules WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
@@ -487,7 +482,7 @@ mod tests {
         let app_name = "test-app";
         let git_url = "https://github.com/test/repo";
         let app = app_repo
-            .create_app(crate::repositories::app_repository::CreateAppParams {
+            .create_app(CreateAppParams {
                 name: app_name.to_string(),
                 git_url: git_url.to_string(),
                 port: 80,
@@ -516,20 +511,18 @@ mod tests {
 
         // 4. Create a deployment
         let deployment = app_repo
-            .create_deployment(
-                crate::repositories::app_repository::NewDeployment::from_handler(
-                    app.id,
-                    user_id.to_string(),
-                    1,
-                    256,
-                    1024,
-                    8080,
-                    std::collections::HashMap::new(),
-                    "manual".to_string(),
-                    None,
-                    0,
-                ),
-            )
+            .create_deployment(NewDeployment::from_handler(
+                app.id,
+                user_id.to_string(),
+                1,
+                256,
+                1024,
+                8080,
+                std::collections::HashMap::new(),
+                "manual".to_string(),
+                None,
+                0,
+            ))
             .await
             .expect("failed to create deployment");
         assert_eq!(deployment.status, "BUILDING");
@@ -584,7 +577,7 @@ mod tests {
 
         // Create app
         app_repo
-            .create_app(crate::repositories::app_repository::CreateAppParams {
+            .create_app(CreateAppParams {
                 name: name.clone(),
                 git_url: "git".to_string(),
                 port: 8080,

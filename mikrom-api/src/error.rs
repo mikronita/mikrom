@@ -40,8 +40,8 @@ pub enum ApiError {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
 
-    #[error("Repository error: {0}")]
-    Repo(#[from] crate::repositories::user_repository::DbError),
+    #[error("Domain error: {0}")]
+    Domain(#[from] crate::domain::DomainError),
 
     #[error("Authentication failed: {0}")]
     Auth(String),
@@ -66,9 +66,6 @@ pub enum ApiError {
 
     #[error("Scheduler error: {0}")]
     Scheduler(String),
-
-    #[error("Anyhow error: {0}")]
-    Anyhow(#[from] anyhow::Error),
 }
 
 impl IntoResponse for ApiError {
@@ -81,22 +78,15 @@ impl IntoResponse for ApiError {
                     "Database failure".to_string(),
                 )
             },
-            Self::Repo(err) => match err {
-                crate::repositories::user_repository::DbError::NotFound => {
+            Self::Domain(err) => match err {
+                crate::domain::DomainError::NotFound => {
                     (StatusCode::NOT_FOUND, "Entity not found".to_string())
                 },
-                crate::repositories::user_repository::DbError::Conflict(msg) => {
-                    (StatusCode::CONFLICT, msg)
-                },
-                crate::repositories::user_repository::DbError::Sqlx(e) => {
-                    tracing::error!("Repository SQL error: {:?}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Database failure".to_string(),
-                    )
-                },
-                crate::repositories::user_repository::DbError::Internal(msg) => {
-                    tracing::error!("Repository internal error: {}", msg);
+                crate::domain::DomainError::Conflict(msg) => (StatusCode::CONFLICT, msg),
+                crate::domain::DomainError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
+                crate::domain::DomainError::InvalidRequest(msg) => (StatusCode::BAD_REQUEST, msg),
+                crate::domain::DomainError::Infrastructure(msg) => {
+                    tracing::error!("Domain infrastructure error: {}", msg);
                     (StatusCode::INTERNAL_SERVER_ERROR, msg)
                 },
             },
@@ -115,18 +105,6 @@ impl IntoResponse for ApiError {
                     StatusCode::SERVICE_UNAVAILABLE,
                     format!("Scheduler error: {}", msg),
                 )
-            },
-            Self::Anyhow(err) => {
-                let msg = err.to_string();
-                if msg.contains("is already taken") {
-                    (StatusCode::CONFLICT, msg)
-                } else {
-                    tracing::error!("Anyhow error: {:?}", err);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Internal error: {}", err),
-                    )
-                }
             },
             Self::Internal(msg) => {
                 tracing::error!("Internal error: {}", msg);

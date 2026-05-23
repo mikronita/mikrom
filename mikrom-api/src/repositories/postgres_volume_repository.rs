@@ -1,9 +1,9 @@
-use crate::models::volume::{
-    AppVolume, AttachedVolume, Volume, VolumeAttachmentInfo, VolumeSnapshot, VolumeWithAttachments,
+use crate::domain::error::DomainResult;
+use crate::domain::volume::{
+    AppVolume, AttachedVolume, CreateSnapshotParams, CreateVolumeParams, Volume,
+    VolumeAttachmentInfo, VolumeRepository, VolumeSnapshot, VolumeWithAttachments,
 };
-use crate::repositories::volume_repository::{
-    CreateSnapshotParams, CreateVolumeParams, VolumeRepository,
-};
+
 use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -20,7 +20,7 @@ impl PostgresVolumeRepository {
 
 #[async_trait]
 impl VolumeRepository for PostgresVolumeRepository {
-    async fn create_volume(&self, params: CreateVolumeParams) -> anyhow::Result<Volume> {
+    async fn create_volume(&self, params: CreateVolumeParams) -> DomainResult<Volume> {
         let volume = sqlx::query_as::<_, Volume>(
             "INSERT INTO volumes (user_id, name, size_mib, pool_name) VALUES ($1, $2, $3, $4) RETURNING *"
         )
@@ -34,7 +34,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         Ok(volume)
     }
 
-    async fn get_volume(&self, volume_id: Uuid) -> anyhow::Result<Option<Volume>> {
+    async fn get_volume(&self, volume_id: Uuid) -> DomainResult<Option<Volume>> {
         let volume = sqlx::query_as::<_, Volume>("SELECT * FROM volumes WHERE id = $1")
             .bind(volume_id)
             .fetch_optional(&self.pool)
@@ -45,7 +45,7 @@ impl VolumeRepository for PostgresVolumeRepository {
     async fn list_volumes_by_user(
         &self,
         user_id: Uuid,
-    ) -> anyhow::Result<Vec<VolumeWithAttachments>> {
+    ) -> DomainResult<Vec<VolumeWithAttachments>> {
         let rows = sqlx::query!(
             r#"
             SELECT 
@@ -104,7 +104,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         Ok(result)
     }
 
-    async fn is_volume_attached(&self, volume_id: Uuid) -> anyhow::Result<bool> {
+    async fn is_volume_attached(&self, volume_id: Uuid) -> DomainResult<bool> {
         let row = sqlx::query!(
             "SELECT count(*) FROM app_volumes WHERE volume_id = $1",
             volume_id
@@ -114,7 +114,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         Ok(row.count.unwrap_or(0) > 0)
     }
 
-    async fn delete_volume(&self, volume_id: Uuid) -> anyhow::Result<bool> {
+    async fn delete_volume(&self, volume_id: Uuid) -> DomainResult<bool> {
         let result = sqlx::query("DELETE FROM volumes WHERE id = $1")
             .bind(volume_id)
             .execute(&self.pool)
@@ -128,7 +128,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         volume_id: Uuid,
         mount_point: String,
         access_mode: i32,
-    ) -> anyhow::Result<AppVolume> {
+    ) -> DomainResult<AppVolume> {
         let app_volume = sqlx::query_as::<_, AppVolume>(
             "INSERT INTO app_volumes (app_id, volume_id, mount_point, access_mode) VALUES ($1, $2, $3, $4) 
              ON CONFLICT (app_id, volume_id) DO UPDATE SET mount_point = EXCLUDED.mount_point, access_mode = EXCLUDED.access_mode
@@ -144,7 +144,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         Ok(app_volume)
     }
 
-    async fn detach_volume_from_app(&self, app_id: Uuid, volume_id: Uuid) -> anyhow::Result<bool> {
+    async fn detach_volume_from_app(&self, app_id: Uuid, volume_id: Uuid) -> DomainResult<bool> {
         let result = sqlx::query("DELETE FROM app_volumes WHERE app_id = $1 AND volume_id = $2")
             .bind(app_id)
             .bind(volume_id)
@@ -153,7 +153,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         Ok(result.rows_affected() > 0)
     }
 
-    async fn list_volumes_by_app(&self, app_id: Uuid) -> anyhow::Result<Vec<AttachedVolume>> {
+    async fn list_volumes_by_app(&self, app_id: Uuid) -> DomainResult<Vec<AttachedVolume>> {
         let rows = sqlx::query(
             r#"
             SELECT 
@@ -191,10 +191,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         Ok(volumes)
     }
 
-    async fn create_snapshot(
-        &self,
-        params: CreateSnapshotParams,
-    ) -> anyhow::Result<VolumeSnapshot> {
+    async fn create_snapshot(&self, params: CreateSnapshotParams) -> DomainResult<VolumeSnapshot> {
         let snapshot = sqlx::query_as::<_, VolumeSnapshot>(
             "INSERT INTO volume_snapshots (volume_id, user_id, name) VALUES ($1, $2, $3) RETURNING *"
         )
@@ -207,7 +204,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         Ok(snapshot)
     }
 
-    async fn get_snapshot(&self, snapshot_id: Uuid) -> anyhow::Result<Option<VolumeSnapshot>> {
+    async fn get_snapshot(&self, snapshot_id: Uuid) -> DomainResult<Option<VolumeSnapshot>> {
         let snapshot =
             sqlx::query_as::<_, VolumeSnapshot>("SELECT * FROM volume_snapshots WHERE id = $1")
                 .bind(snapshot_id)
@@ -216,10 +213,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         Ok(snapshot)
     }
 
-    async fn list_snapshots_by_volume(
-        &self,
-        volume_id: Uuid,
-    ) -> anyhow::Result<Vec<VolumeSnapshot>> {
+    async fn list_snapshots_by_volume(&self, volume_id: Uuid) -> DomainResult<Vec<VolumeSnapshot>> {
         let snapshots = sqlx::query_as::<_, VolumeSnapshot>(
             "SELECT * FROM volume_snapshots WHERE volume_id = $1",
         )
@@ -229,7 +223,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         Ok(snapshots)
     }
 
-    async fn delete_snapshot(&self, snapshot_id: Uuid) -> anyhow::Result<bool> {
+    async fn delete_snapshot(&self, snapshot_id: Uuid) -> DomainResult<bool> {
         let result = sqlx::query("DELETE FROM volume_snapshots WHERE id = $1")
             .bind(snapshot_id)
             .execute(&self.pool)

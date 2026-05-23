@@ -1,5 +1,6 @@
-use crate::models::github::UserGithubAccount;
-use crate::repositories::github_repository::GithubRepository;
+use crate::domain::error::DomainResult;
+use crate::domain::github::{GithubRepository, UserGithubAccount};
+
 use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -16,10 +17,7 @@ impl PostgresGithubRepository {
 
 #[async_trait]
 impl GithubRepository for PostgresGithubRepository {
-    async fn create_account(
-        &self,
-        account: UserGithubAccount,
-    ) -> anyhow::Result<UserGithubAccount> {
+    async fn create_account(&self, account: UserGithubAccount) -> DomainResult<UserGithubAccount> {
         let created = sqlx::query_as::<_, UserGithubAccount>(
             "INSERT INTO user_github_accounts (user_id, installation_id, github_username) 
              VALUES ($1, $2, $3) 
@@ -39,7 +37,7 @@ impl GithubRepository for PostgresGithubRepository {
     async fn get_account_by_installation_id(
         &self,
         installation_id: i64,
-    ) -> anyhow::Result<Option<UserGithubAccount>> {
+    ) -> DomainResult<Option<UserGithubAccount>> {
         let account = sqlx::query_as::<_, UserGithubAccount>(
             "SELECT * FROM user_github_accounts WHERE installation_id = $1",
         )
@@ -50,10 +48,7 @@ impl GithubRepository for PostgresGithubRepository {
         Ok(account)
     }
 
-    async fn get_accounts_by_user_id(
-        &self,
-        user_id: Uuid,
-    ) -> anyhow::Result<Vec<UserGithubAccount>> {
+    async fn get_accounts_by_user_id(&self, user_id: Uuid) -> DomainResult<Vec<UserGithubAccount>> {
         let accounts = sqlx::query_as::<_, UserGithubAccount>(
             "SELECT * FROM user_github_accounts WHERE user_id = $1",
         )
@@ -64,7 +59,7 @@ impl GithubRepository for PostgresGithubRepository {
         Ok(accounts)
     }
 
-    async fn delete_account(&self, id: Uuid) -> anyhow::Result<()> {
+    async fn delete_account(&self, id: Uuid) -> DomainResult<()> {
         sqlx::query("DELETE FROM user_github_accounts WHERE id = $1")
             .bind(id)
             .execute(&self.pool)

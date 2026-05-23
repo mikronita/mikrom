@@ -1,7 +1,8 @@
+use crate::domain::error::DomainResult;
+use crate::domain::user::{NewUser, User, UserRepository, UserRole};
 use async_trait::async_trait;
 use sqlx::PgPool;
-
-use super::user_repository::{DbError, NewUser, User, UserRepository, UserRole};
+use uuid::Uuid;
 
 pub struct PostgresUserRepository {
     pool: PgPool,
@@ -16,8 +17,8 @@ impl PostgresUserRepository {
 
 #[async_trait]
 impl UserRepository for PostgresUserRepository {
-    async fn find_by_email(&self, email: &str) -> Result<Option<User>, DbError> {
-        let result = sqlx::query_as::<_, (sqlx::types::Uuid, String, String, String, Option<String>, Option<String>, Option<String>)>(
+    async fn find_by_email(&self, email: &str) -> DomainResult<Option<User>> {
+        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>)>(
             "SELECT id, email, password_hash, role, first_name, last_name, vpc_ipv6_prefix FROM users WHERE email = $1",
         )
         .bind(email)
@@ -45,11 +46,11 @@ impl UserRepository for PostgresUserRepository {
         }
     }
 
-    async fn find_by_id(&self, id: sqlx::types::Uuid) -> Result<Option<User>, DbError> {
+    async fn find_by_id(&self, id: Uuid) -> DomainResult<Option<User>> {
         let result = sqlx::query_as::<
             _,
             (
-                sqlx::types::Uuid,
+                Uuid,
                 String,
                 String,
                 String,
@@ -85,8 +86,8 @@ impl UserRepository for PostgresUserRepository {
         }
     }
 
-    async fn create(&self, user: NewUser) -> Result<sqlx::types::Uuid, DbError> {
-        let id = sqlx::types::Uuid::new_v4();
+    async fn create(&self, user: NewUser) -> DomainResult<Uuid> {
+        let id = Uuid::new_v4();
         let role_str = match user.role {
             UserRole::Admin => "admin",
             UserRole::User => "user",
@@ -94,7 +95,7 @@ impl UserRepository for PostgresUserRepository {
 
         let vpc_prefix = mikrom_proto::sixpn::SixPn::generate_vpc_prefix(id.into()).to_string();
 
-        let result = sqlx::query("INSERT INTO users (id, email, password_hash, role, first_name, last_name, vpc_ipv6_prefix) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+        sqlx::query("INSERT INTO users (id, email, password_hash, role, first_name, last_name, vpc_ipv6_prefix) VALUES ($1, $2, $3, $4, $5, $6, $7)")
             .bind(id)
             .bind(&user.email)
             .bind(&user.password_hash)
@@ -103,25 +104,12 @@ impl UserRepository for PostgresUserRepository {
             .bind(&user.last_name)
             .bind(vpc_prefix)
             .execute(&self.pool)
-            .await;
+            .await?;
 
-        match result {
-            Ok(_) => Ok(id),
-            Err(e) => {
-                if let Some(db_err) = e.as_database_error()
-                    && db_err.code().as_deref() == Some("23505")
-                {
-                    return Err(DbError::Conflict(format!(
-                        "Email '{}' is already registered",
-                        user.email
-                    )));
-                }
-                Err(DbError::from(e))
-            },
-        }
+        Ok(id)
     }
 
-    async fn count_by_email(&self, email: &str) -> Result<i64, DbError> {
+    async fn count_by_email(&self, email: &str) -> DomainResult<i64> {
         let (count,) = sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM users WHERE email = $1")
             .bind(email)
             .fetch_one(&self.pool)
@@ -132,14 +120,14 @@ impl UserRepository for PostgresUserRepository {
 
     async fn update_profile(
         &self,
-        id: sqlx::types::Uuid,
+        id: Uuid,
         first_name: Option<String>,
         last_name: Option<String>,
-    ) -> Result<User, DbError> {
+    ) -> DomainResult<User> {
         let result = sqlx::query_as::<
             _,
             (
-                sqlx::types::Uuid,
+                Uuid,
                 String,
                 String,
                 String,
@@ -196,8 +184,7 @@ mod tests {
     async fn test_find_by_email_returns_none_for_unknown_email() {
         let db = TestDb::new().await;
         let repo = PostgresUserRepository::new(db.pool().clone());
-        let result: Result<Option<User>, DbError> =
-            repo.find_by_email("nonexistent@example.com").await;
+        let result = repo.find_by_email("nonexistent@example.com").await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -218,7 +205,7 @@ mod tests {
             .await
             .expect("create failed");
 
-        let user: User = repo
+        let user = repo
             .find_by_email(&email)
             .await
             .expect("find failed")
@@ -232,7 +219,7 @@ mod tests {
     async fn test_count_by_email_returns_zero_for_unknown() {
         let db = TestDb::new().await;
         let repo = PostgresUserRepository::new(db.pool().clone());
-        let count: i64 = repo
+        let count = repo
             .count_by_email("nobody_ever@example.com")
             .await
             .expect("count failed");
@@ -253,7 +240,7 @@ mod tests {
         })
         .await
         .expect("create failed");
-        let count: i64 = repo.count_by_email(&email).await.expect("count failed");
+        let count = repo.count_by_email(&email).await.expect("count failed");
         assert_eq!(count, 1);
     }
 }

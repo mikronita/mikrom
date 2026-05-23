@@ -1,0 +1,84 @@
+use crate::domain::error::DomainResult;
+use async_trait::async_trait;
+use uuid::Uuid;
+
+pub use crate::models::volume::{
+    AppVolume, AttachedVolume, Volume, VolumeAttachmentInfo, VolumeSnapshot, VolumeWithAttachments,
+};
+
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum VolumeAccessMode {
+    ReadWriteOnce = 0,
+    ReadWriteMany = 1,
+    ReadOnlyMany = 2,
+}
+
+impl VolumeAccessMode {
+    pub fn as_i32(self) -> i32 {
+        self as i32
+    }
+
+    pub fn is_read_only(self) -> bool {
+        matches!(self, Self::ReadOnlyMany)
+    }
+
+    pub fn from_i32(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::ReadWriteOnce),
+            1 => Some(Self::ReadWriteMany),
+            2 => Some(Self::ReadOnlyMany),
+            _ => None,
+        }
+    }
+}
+
+impl TryFrom<i32> for VolumeAccessMode {
+    type Error = ();
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        Self::from_i32(value).ok_or(())
+    }
+}
+
+#[derive(Debug)]
+pub struct CreateVolumeParams {
+    pub user_id: Uuid,
+    pub name: String,
+    pub size_mib: i32,
+    pub pool_name: String,
+}
+
+#[derive(Debug)]
+pub struct CreateSnapshotParams {
+    pub volume_id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+}
+
+#[mockall::automock]
+#[async_trait]
+pub trait VolumeRepository: Send + Sync {
+    async fn create_volume(&self, params: CreateVolumeParams) -> DomainResult<Volume>;
+    async fn get_volume(&self, volume_id: Uuid) -> DomainResult<Option<Volume>>;
+    async fn list_volumes_by_user(&self, user_id: Uuid)
+    -> DomainResult<Vec<VolumeWithAttachments>>;
+    async fn delete_volume(&self, volume_id: Uuid) -> DomainResult<bool>;
+
+    async fn attach_volume_to_app(
+        &self,
+        app_id: Uuid,
+        volume_id: Uuid,
+        mount_point: String,
+        access_mode: i32,
+    ) -> DomainResult<AppVolume>;
+    async fn detach_volume_from_app(&self, app_id: Uuid, volume_id: Uuid) -> DomainResult<bool>;
+    async fn list_volumes_by_app(&self, app_id: Uuid) -> DomainResult<Vec<AttachedVolume>>;
+    async fn is_volume_attached(&self, volume_id: Uuid) -> DomainResult<bool>;
+
+    async fn create_snapshot(&self, params: CreateSnapshotParams) -> DomainResult<VolumeSnapshot>;
+    async fn get_snapshot(&self, snapshot_id: Uuid) -> DomainResult<Option<VolumeSnapshot>>;
+    async fn list_snapshots_by_volume(&self, volume_id: Uuid) -> DomainResult<Vec<VolumeSnapshot>>;
+    async fn delete_snapshot(&self, snapshot_id: Uuid) -> DomainResult<bool>;
+}

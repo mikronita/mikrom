@@ -15,13 +15,16 @@ use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
 pub mod acme;
+pub mod application;
 pub mod auth;
 pub mod config;
 pub mod crypto;
 pub mod db;
 pub mod deploy;
+pub mod domain;
 pub mod error;
 pub mod github;
+pub mod infrastructure;
 pub mod models;
 pub mod nats;
 pub mod openapi;
