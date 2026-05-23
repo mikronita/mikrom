@@ -1,0 +1,55 @@
+use crate::domain::error::DomainResult;
+use async_trait::async_trait;
+use uuid::Uuid;
+
+#[derive(
+    sqlx::Type,
+    Default,
+    Debug,
+    Clone,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[sqlx(type_name = "user_role", rename_all = "lowercase")]
+pub enum UserRole {
+    Admin,
+    #[default]
+    User,
+}
+
+#[derive(Debug, Clone)]
+pub struct User {
+    pub id: Uuid,
+    pub email: String,
+    pub password_hash: String,
+    pub role: UserRole,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub vpc_ipv6_prefix: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewUser {
+    pub email: String,
+    pub password_hash: String,
+    pub role: UserRole,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+}
+
+#[mockall::automock]
+#[async_trait]
+pub trait UserRepository: Send + Sync {
+    async fn find_by_email(&self, email: &str) -> DomainResult<Option<User>>;
+    async fn find_by_id(&self, id: Uuid) -> DomainResult<Option<User>>;
+    async fn create(&self, user: NewUser) -> DomainResult<Uuid>;
+    async fn count_by_email(&self, email: &str) -> DomainResult<i64>;
+    async fn update_profile(
+        &self,
+        id: Uuid,
+        first_name: Option<String>,
+        last_name: Option<String>,
+    ) -> DomainResult<User>;
+}

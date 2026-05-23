@@ -186,10 +186,10 @@ async fn test_create_app_duplicate_name() {
         .expect_create_app()
         .times(1)
         .returning(move |params| {
-            Err(anyhow::anyhow!(
+            Err(mikrom_api::domain::DomainError::Conflict(format!(
                 "Application name '{}' is already taken",
                 params.name
-            ))
+            )))
         });
 
     let db = TestDb::new().await;

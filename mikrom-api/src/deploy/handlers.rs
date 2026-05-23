@@ -646,7 +646,7 @@ pub async fn deployments_stream_handler(
 
         // 0. Initial yield: send current state immediately upon connection
         if let Ok(json) = state_clone.app_repo.list_deployments_by_app(app_id).await
-            .and_then(|deps| serde_json::to_string(&deps).map_err(|e| anyhow::anyhow!(e))) {
+            .and_then(|deps| serde_json::to_string(&deps).map_err(|e| crate::domain::DomainError::Infrastructure(e.to_string()))) {
                 yield Ok(Event::default().data(json));
         }
 
@@ -657,14 +657,14 @@ pub async fn deployments_stream_handler(
                     match res {
                         Some(Ok(id)) if id == app_id => {
                             if let Ok(json) = state_clone.app_repo.list_deployments_by_app(app_id).await
-                                .and_then(|deps| serde_json::to_string(&deps).map_err(|e| anyhow::anyhow!(e))) {
+                                .and_then(|deps| serde_json::to_string(&deps).map_err(|e| crate::domain::DomainError::Infrastructure(e.to_string()))) {
                                     yield Ok(Event::default().data(json));
                             }
                         },
                         Some(Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(_))) => {
                             // If we lag, just refresh anyway
                             if let Ok(json) = state_clone.app_repo.list_deployments_by_app(app_id).await
-                                .and_then(|deps| serde_json::to_string(&deps).map_err(|e| anyhow::anyhow!(e))) {
+                                .and_then(|deps| serde_json::to_string(&deps).map_err(|e| crate::domain::DomainError::Infrastructure(e.to_string()))) {
                                     yield Ok(Event::default().data(json));
                             }
                         },
@@ -687,7 +687,7 @@ pub async fn deployments_stream_handler(
                 // 3. Periodic refresh (Brute force fallback to ensure UI stays in sync)
                 _ = interval.tick() => {
                     if let Ok(json) = state_clone.app_repo.list_deployments_by_app(app_id).await
-                        .and_then(|deps| serde_json::to_string(&deps).map_err(|e| anyhow::anyhow!(e))) {
+                        .and_then(|deps| serde_json::to_string(&deps).map_err(|e| crate::domain::DomainError::Infrastructure(e.to_string()))) {
                             yield Ok(Event::default().data(json));
                     }
                 },
