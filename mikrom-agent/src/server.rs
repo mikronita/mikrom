@@ -8,7 +8,7 @@ use parking_lot::RwLock;
 use prost::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::info;
 
 async fn publish_best_effort(
@@ -46,6 +46,24 @@ async fn encode_and_publish_best_effort<T: Message>(
     }
 
     publish_best_effort(nats, reply.to_string(), buf, context).await;
+}
+
+fn is_flapping_nats_session(uptime: Option<Duration>, threshold_secs: u64) -> bool {
+    uptime.is_some_and(|age| age < Duration::from_secs(threshold_secs))
+}
+
+fn abort_nats_listeners(
+    cmd_handle: &mut tokio::task::JoinHandle<()>,
+    health_check_handle: &mut tokio::task::JoinHandle<()>,
+    heartbeat_handle: &mut tokio::task::JoinHandle<()>,
+    mesh_handle: &mut tokio::task::JoinHandle<()>,
+    exporter_handle: &mut tokio::task::JoinHandle<()>,
+) {
+    cmd_handle.abort();
+    health_check_handle.abort();
+    heartbeat_handle.abort();
+    mesh_handle.abort();
+    exporter_handle.abort();
 }
 
 pub struct AgentServer {
@@ -137,10 +155,12 @@ impl AgentServer {
         let _http_handle = http_server.spawn();
 
         let nats_url = self.config.nats_url.clone();
+        let nats_flapping_session_secs = self.config.nats_flapping_session_secs;
         let self_clone = self.clone();
 
         tokio::spawn(async move {
             let mut nats_client = None;
+            let mut nats_session_started_at: Option<Instant> = None;
             let mut consecutive_failures: u32 = 0;
             let max_backoff_secs: u64 = 60;
             let circuit_breaker_threshold: u32 = 10;
@@ -167,6 +187,7 @@ impl AgentServer {
                         Ok(client) => {
                             tracing::info!("Connected to NATS");
                             nats_client = Some(client.clone());
+                            nats_session_started_at = Some(Instant::now());
                             consecutive_failures = 0;
                             // Set NATS client on all hypervisors
                             for hv in (*self_clone.hypervisors).values() {
@@ -206,28 +227,136 @@ impl AgentServer {
                 );
 
                 // 2. Spawn listeners
-                let cmd_handle = self_clone.start_command_listener(client.clone());
-                let health_check_handle = self_clone.start_health_check_listener(client.clone());
-                let heartbeat_handle =
+                let mut cmd_handle = self_clone.start_command_listener(client.clone());
+                let mut health_check_handle =
+                    self_clone.start_health_check_listener(client.clone());
+                let mut heartbeat_handle =
                     self_clone.start_heartbeat_loop(client.clone(), pub_key.clone());
-                let mesh_handle = self_clone.start_mesh_listener(
+                let mut mesh_handle = self_clone.start_mesh_listener(
                     client.clone(),
                     self_clone.config.host_id.clone(),
                     priv_key.clone(),
                 );
-                let exporter_handle = tokio::spawn(async move {
+                let mut exporter_handle = tokio::spawn(async move {
                     exporter.start_export_loop().await;
                 });
 
                 tokio::select! {
-                    _ = cmd_handle => tracing::warn!("Command listener exited"),
-                    _ = health_check_handle => tracing::warn!("Health check listener exited"),
-                    _ = heartbeat_handle => {
-                        tracing::warn!("Heartbeat loop exited, forcing NATS reconnect");
+                    _ = &mut cmd_handle => {
+                        let uptime = nats_session_started_at.map(|started| started.elapsed());
+                        let flapping = is_flapping_nats_session(uptime, nats_flapping_session_secs);
+                        tracing::warn!(
+                            uptime_secs = uptime.map(|d| d.as_secs()).unwrap_or_default(),
+                            flapping,
+                            "Command listener exited; reconnecting NATS"
+                        );
+                        if flapping {
+                            consecutive_failures = consecutive_failures.saturating_add(1);
+                        } else {
+                            consecutive_failures = 0;
+                        }
+                        abort_nats_listeners(
+                            &mut cmd_handle,
+                            &mut health_check_handle,
+                            &mut heartbeat_handle,
+                            &mut mesh_handle,
+                            &mut exporter_handle,
+                        );
                         nats_client = None;
+                        nats_session_started_at = None;
                     }
-                    _ = mesh_handle => tracing::warn!("Mesh listener exited"),
-                    _ = exporter_handle => tracing::warn!("Exporter loop exited"),
+                    _ = &mut health_check_handle => {
+                        let uptime = nats_session_started_at.map(|started| started.elapsed());
+                        let flapping = is_flapping_nats_session(uptime, nats_flapping_session_secs);
+                        tracing::warn!(
+                            uptime_secs = uptime.map(|d| d.as_secs()).unwrap_or_default(),
+                            flapping,
+                            "Health check listener exited; reconnecting NATS"
+                        );
+                        if flapping {
+                            consecutive_failures = consecutive_failures.saturating_add(1);
+                        } else {
+                            consecutive_failures = 0;
+                        }
+                        abort_nats_listeners(
+                            &mut cmd_handle,
+                            &mut health_check_handle,
+                            &mut heartbeat_handle,
+                            &mut mesh_handle,
+                            &mut exporter_handle,
+                        );
+                        nats_client = None;
+                        nats_session_started_at = None;
+                    }
+                    _ = &mut heartbeat_handle => {
+                        let uptime = nats_session_started_at.map(|started| started.elapsed());
+                        let flapping = is_flapping_nats_session(uptime, nats_flapping_session_secs);
+                        tracing::warn!(
+                            uptime_secs = uptime.map(|d| d.as_secs()).unwrap_or_default(),
+                            flapping,
+                            "Heartbeat loop exited; reconnecting NATS"
+                        );
+                        if flapping {
+                            consecutive_failures = consecutive_failures.saturating_add(1);
+                        } else {
+                            consecutive_failures = 0;
+                        }
+                        abort_nats_listeners(
+                            &mut cmd_handle,
+                            &mut health_check_handle,
+                            &mut heartbeat_handle,
+                            &mut mesh_handle,
+                            &mut exporter_handle,
+                        );
+                        nats_client = None;
+                        nats_session_started_at = None;
+                    }
+                    _ = &mut mesh_handle => {
+                        let uptime = nats_session_started_at.map(|started| started.elapsed());
+                        let flapping = is_flapping_nats_session(uptime, nats_flapping_session_secs);
+                        tracing::warn!(
+                            uptime_secs = uptime.map(|d| d.as_secs()).unwrap_or_default(),
+                            flapping,
+                            "Mesh listener exited; reconnecting NATS"
+                        );
+                        if flapping {
+                            consecutive_failures = consecutive_failures.saturating_add(1);
+                        } else {
+                            consecutive_failures = 0;
+                        }
+                        abort_nats_listeners(
+                            &mut cmd_handle,
+                            &mut health_check_handle,
+                            &mut heartbeat_handle,
+                            &mut mesh_handle,
+                            &mut exporter_handle,
+                        );
+                        nats_client = None;
+                        nats_session_started_at = None;
+                    }
+                    _ = &mut exporter_handle => {
+                        let uptime = nats_session_started_at.map(|started| started.elapsed());
+                        let flapping = is_flapping_nats_session(uptime, nats_flapping_session_secs);
+                        tracing::warn!(
+                            uptime_secs = uptime.map(|d| d.as_secs()).unwrap_or_default(),
+                            flapping,
+                            "Exporter loop exited; reconnecting NATS"
+                        );
+                        if flapping {
+                            consecutive_failures = consecutive_failures.saturating_add(1);
+                        } else {
+                            consecutive_failures = 0;
+                        }
+                        abort_nats_listeners(
+                            &mut cmd_handle,
+                            &mut health_check_handle,
+                            &mut heartbeat_handle,
+                            &mut mesh_handle,
+                            &mut exporter_handle,
+                        );
+                        nats_client = None;
+                        nats_session_started_at = None;
+                    }
                 }
             }
         });
@@ -1245,6 +1374,7 @@ mod tests {
     use mikrom_proto::id::{AppId, VmId};
     use prost::Message;
     use std::sync::Arc;
+    use std::time::Duration;
 
     async fn make_hypervisors() -> HashMap<HypervisorType, Arc<dyn VmHypervisor>> {
         let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
@@ -1536,6 +1666,27 @@ mod tests {
         let resp = CheckHealthResponse::decode(&resp_msg.payload[..]).unwrap();
         assert!(!resp.is_healthy, "Should be unhealthy for 302 Redirect");
         assert!(resp.message.contains("HTTP 302 Found"));
+    }
+
+    #[test]
+    fn test_is_flapping_nats_session_flags_short_sessions_only() {
+        assert!(super::is_flapping_nats_session(
+            Some(Duration::from_secs(1)),
+            30
+        ));
+        assert!(super::is_flapping_nats_session(
+            Some(Duration::from_secs(29)),
+            30
+        ));
+        assert!(!super::is_flapping_nats_session(
+            Some(Duration::from_secs(30)),
+            30
+        ));
+        assert!(!super::is_flapping_nats_session(
+            Some(Duration::from_secs(120)),
+            30
+        ));
+        assert!(!super::is_flapping_nats_session(None, 30));
     }
 
     // ── Hypervisor routing tests ─────────────────────────────────

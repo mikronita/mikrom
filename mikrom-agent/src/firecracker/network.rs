@@ -76,9 +76,17 @@ impl crate::firecracker::FirecrackerManager {
 
     pub(crate) async fn setup_tap(&self, vm_id: &VmId) -> Result<(String, u32), HypervisorError> {
         let tap_name = format!("m-tap-{}", &vm_id.to_string()[..8]);
+        let jailer_uid = self.fc_config.jailer_uid;
 
-        self.create_tap_native(&tap_name, self.fc_config.jailer_uid)
-            .map_err(|e| HypervisorError::ProcessError(format!("Failed to create TAP: {e}")))?;
+        tokio::task::spawn_blocking({
+            let tap_name = tap_name.clone();
+            move || Self::create_tap_native(&tap_name, jailer_uid)
+        })
+        .await
+        .map_err(|e| {
+            HypervisorError::ProcessError(format!("Failed to join TAP creation task: {e}"))
+        })?
+        .map_err(|e| HypervisorError::ProcessError(format!("Failed to create TAP: {e}")))?;
 
         let handle = self.rtnl_handle().await?;
         let Some(index) = self.get_link_index(&handle, &tap_name).await? else {
@@ -110,7 +118,7 @@ impl crate::firecracker::FirecrackerManager {
         Ok((tap_name, index))
     }
 
-    pub(crate) fn create_tap_native(&self, name: &str, uid: u32) -> Result<(), String> {
+    pub(crate) fn create_tap_native(name: &str, uid: u32) -> Result<(), String> {
         use std::os::unix::io::AsRawFd;
         let iface_name = CString::new(name).map_err(|e| e.to_string())?;
 

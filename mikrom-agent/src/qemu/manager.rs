@@ -66,8 +66,14 @@ impl QemuManager {
 
     pub async fn with_config(agent_id: String, config: QemuConfig) -> Self {
         let data_dir = &config.data_dir;
-        if !data_dir.exists() {
-            let _ = tokio::fs::create_dir_all(data_dir).await;
+        if !data_dir.exists()
+            && let Err(e) = tokio::fs::create_dir_all(data_dir).await
+        {
+            tracing::warn!(
+                path = %data_dir.display(),
+                error = %e,
+                "Failed to create QEMU data directory"
+            );
         }
         Self {
             agent_id,
@@ -136,9 +142,30 @@ impl QemuManager {
 
             // Enable capabilities
             let cap_cmd = r#"{"execute":"qmp_capabilities"}"#;
-            let _ = writer.write_all(cap_cmd.as_bytes()).await;
-            let _ = writer.write_all(b"\n").await;
-            let _ = writer.flush().await;
+            if let Err(e) = writer.write_all(cap_cmd.as_bytes()).await {
+                tracing::warn!(
+                    vm_id = %vm_id_clone,
+                    error = %e,
+                    "QMP event listener: failed to send capabilities command"
+                );
+                return;
+            }
+            if let Err(e) = writer.write_all(b"\n").await {
+                tracing::warn!(
+                    vm_id = %vm_id_clone,
+                    error = %e,
+                    "QMP event listener: failed to terminate capabilities command"
+                );
+                return;
+            }
+            if let Err(e) = writer.flush().await {
+                tracing::warn!(
+                    vm_id = %vm_id_clone,
+                    error = %e,
+                    "QMP event listener: failed to flush capabilities command"
+                );
+                return;
+            }
 
             // Consume capability response
             loop {
@@ -247,7 +274,13 @@ impl QemuManager {
             tracing::debug!(url = %url, path = %dest.display(), "Using cached image");
             return dest;
         }
-        let _ = tokio::fs::create_dir_all(cache_dir).await;
+        if let Err(e) = tokio::fs::create_dir_all(cache_dir).await {
+            tracing::warn!(
+                path = %cache_dir.display(),
+                error = %e,
+                "Failed to create QEMU cache directory"
+            );
+        }
         tracing::info!(url = %url, dest = %dest.display(), "Downloading image");
         match reqwest::get(url).await {
             Ok(resp) => {
@@ -534,10 +567,9 @@ impl VmHypervisor for QemuManager {
     async fn start_migration(
         &self,
         vm_id: &VmId,
-        target_host: &str,
+        _target_host: &str,
         target_uri: &str,
     ) -> Result<(), HypervisorError> {
-        let _ = target_host;
         self.start_migration(vm_id, target_uri).await
     }
 
