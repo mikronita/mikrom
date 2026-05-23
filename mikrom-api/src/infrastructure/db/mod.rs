@@ -1,8 +1,12 @@
+pub mod connection;
+pub mod models;
 pub mod postgres_app_repository;
 pub mod postgres_github_repository;
 pub mod postgres_user_repository;
 pub mod postgres_volume_repository;
 
+pub use connection::*;
+pub use models::*;
 pub use postgres_app_repository::PostgresAppRepository;
 pub use postgres_github_repository::PostgresGithubRepository;
 pub use postgres_user_repository::PostgresUserRepository;

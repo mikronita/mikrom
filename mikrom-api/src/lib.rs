@@ -14,62 +14,86 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
-pub mod acme;
 pub mod application;
-pub mod auth;
 pub mod config;
-pub mod crypto;
-pub mod db;
-pub mod deploy;
 pub mod domain;
 pub mod error;
-pub mod github;
 pub mod infrastructure;
-pub mod models;
-pub mod nats;
 pub mod openapi;
-pub mod rate_limit;
-pub mod repositories;
-pub mod scheduler;
 pub mod sync;
-pub mod vms;
 pub mod workspace;
+
+// Compatibility re-exports
+pub mod deploy {
+    pub use crate::infrastructure::http::handlers::deploy::*;
+    pub mod handlers {
+        pub use crate::application::deployment::*;
+        pub use crate::infrastructure::http::handlers::deploy::*;
+    }
+    pub mod worker {
+        pub use crate::application::deployment::worker::*;
+    }
+}
+
+pub mod vms {
+    pub use crate::application::vms::*;
+    pub use crate::infrastructure::http::handlers::vms::*;
+}
+
+pub mod github {
+    pub use crate::domain::github::*;
+    pub mod handlers {
+        pub use crate::infrastructure::http::handlers::github::*;
+    }
+}
+
+pub mod scheduler {
+    pub use crate::domain::scheduler::*;
+}
+
+pub use infrastructure::acme;
+pub use infrastructure::auth::{self, extractor::AuthUser};
+pub use infrastructure::crypto;
+pub use infrastructure::http::rate_limit;
+pub use infrastructure::nats;
+pub use infrastructure::scheduler::{NatsScheduler, Scheduler, status_name};
 
 pub mod test_utils;
 
-pub use deploy::deploy_app;
-use deploy::webhooks::{github_webhook_handler, github_webhook_handler_generic};
+pub use domain::{AppRepository, GithubRepository, UserRepository, VolumeRepository};
 pub use error::{ApiError, ApiResult};
-pub use repositories::app_repository::AppRepository;
-pub use repositories::github_repository::GithubRepository;
-pub use repositories::user_repository::UserRepository;
-pub use repositories::volume_repository::VolumeRepository;
-pub use scheduler::Scheduler;
-pub use vms::{
-    attach_volume_runtime_handler, cancel_migration_handler, create_security_rule_handler,
-    delete_deployment_record, delete_security_rule_handler, detach_volume_runtime_handler,
-    get_deployment_logs, get_deployment_status, get_mesh_status_handler, list_active_deployments,
-    list_security_rules_handler, mesh_status_stream_handler, pause_deployment,
-    query_balloon_handler, query_migration_handler, resume_deployment, set_balloon_handler,
-    start_migration_handler, stop_deployment, vm_snapshot_create_handler,
-    vm_snapshot_delete_handler, vm_snapshot_list_handler, vm_snapshot_restore_handler,
-    watch_deployments,
+
+use infrastructure::http::handlers::{
+    auth::{get_profile, login, register, update_profile},
+    github::{github_callback, github_install, list_repos},
+    vms::{
+        attach_volume_runtime_handler, cancel_migration_handler, create_security_rule_handler,
+        delete_deployment_record, delete_security_rule_handler, detach_volume_runtime_handler,
+        get_deployment_logs, get_deployment_status, get_mesh_status_handler,
+        list_active_deployments, list_security_rules_handler, mesh_status_stream_handler,
+        pause_deployment, query_balloon_handler, query_migration_handler, resume_deployment,
+        set_balloon_handler, start_migration_handler, stop_deployment, vm_snapshot_create_handler,
+        vm_snapshot_delete_handler, vm_snapshot_list_handler, vm_snapshot_restore_handler,
+        watch_deployments,
+    },
+    webhooks::{github_webhook_handler, github_webhook_handler_generic},
 };
+
+use crate::application::vms::MeshStatus;
 
 use mikrom_proto::router::RouterConfigUpdate;
 
-use auth::{get_profile, login, register, update_profile};
-use github::handlers::{github_callback, github_install, list_repos};
 pub use workspace::{WorkspaceEvent, WorkspaceEventKind};
 
 #[derive(Clone)]
 pub struct AppState {
+    pub ctx: crate::application::ApiContext,
     pub user_repo: Arc<dyn UserRepository>,
     pub app_repo: Arc<dyn AppRepository>,
     pub github_repo: Arc<dyn GithubRepository>,
     pub volume_repo: Arc<dyn VolumeRepository>,
     pub scheduler: Arc<dyn Scheduler>,
-    pub nats: crate::nats::TypedNatsClient,
+    pub nats: infrastructure::nats::TypedNatsClient,
     pub router_addr: String,
     pub frontend_url: String,
     pub api_db: sqlx::PgPool,
@@ -77,7 +101,7 @@ pub struct AppState {
     pub master_key: String,
     pub deployment_events: tokio::sync::broadcast::Sender<uuid::Uuid>,
     pub workspace_events: tokio::sync::broadcast::Sender<WorkspaceEvent>,
-    pub mesh_status: tokio::sync::watch::Sender<crate::vms::MeshStatus>,
+    pub mesh_status: tokio::sync::watch::Sender<MeshStatus>,
     pub acme_email: String,
     pub acme_staging: bool,
     pub acme_check_interval: u64,
@@ -86,6 +110,41 @@ pub struct AppState {
     pub github_app_slug: Option<String>,
     pub github_webhook_url_base: Option<String>,
     pub active_deployment_flows: Arc<dashmap::DashSet<mikrom_proto::id::AppId>>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        let ctx = crate::application::ApiContext::default();
+        let (deployment_events, _) = tokio::sync::broadcast::channel(32);
+        let (workspace_events, _) = tokio::sync::broadcast::channel(32);
+        let (mesh_status, _) = tokio::sync::watch::channel(MeshStatus::default());
+
+        Self {
+            user_repo: ctx.user_repo.clone(),
+            app_repo: ctx.app_repo.clone(),
+            github_repo: ctx.github_repo.clone(),
+            volume_repo: ctx.volume_repo.clone(),
+            scheduler: ctx.scheduler.clone(),
+            nats: ctx.nats.clone(),
+            router_addr: ctx.config.router_addr.clone(),
+            frontend_url: ctx.config.frontend_url.clone(),
+            api_db: ctx.db.clone(),
+            jwt_secret: ctx.jwt_secret.clone(),
+            master_key: ctx.master_key.clone(),
+            deployment_events,
+            workspace_events,
+            mesh_status,
+            acme_email: ctx.config.acme_email.clone(),
+            acme_staging: ctx.config.acme_staging,
+            acme_check_interval: ctx.config.acme_check_interval,
+            github_app_id: ctx.config.github_app_id.clone(),
+            github_private_key: ctx.config.github_private_key.clone(),
+            github_app_slug: ctx.config.github_app_slug.clone(),
+            github_webhook_url_base: ctx.config.github_webhook_url_base.clone(),
+            active_deployment_flows: Arc::new(dashmap::DashSet::new()),
+            ctx,
+        }
+    }
 }
 
 /// RAII guard to ensure an application's deployment flow is removed from the active set when dropped.
@@ -114,7 +173,7 @@ impl AppState {
         }
     }
 
-    pub async fn notify_router(&self, app: &crate::models::app::App) -> anyhow::Result<()> {
+    pub async fn notify_router(&self, app: &crate::domain::App) -> anyhow::Result<()> {
         let hostname = match &app.hostname {
             Some(h) => h,
             None => return Ok(()),
@@ -450,41 +509,41 @@ pub fn create_app_with_rate_limits(
         )
         .route(
             &format!("{}/apps/{{app_id}}/volumes", API_V1),
-            get(crate::vms::volumes::list_volumes_handler),
+            get(crate::application::volumes::list_volumes_handler),
         )
         .route(
             &format!("{}/apps/{{app_id}}/volumes/attach", API_V1),
-            post(crate::vms::volumes::attach_volume_handler),
+            post(crate::application::volumes::attach_volume_handler),
         )
         .route(
             &format!("{}/apps/{{app_id}}/volumes/{{volume_id}}/detach", API_V1),
-            delete(crate::vms::volumes::detach_volume_handler),
+            delete(crate::application::volumes::detach_volume_handler),
         )
         .route(
             &format!("{}/volumes", API_V1),
-            post(crate::vms::volumes::create_volume_handler)
-                .get(crate::vms::volumes::list_all_volumes_handler),
+            post(crate::application::volumes::create_volume_handler)
+                .get(crate::application::volumes::list_all_volumes_handler),
         )
         .route(
             &format!("{}/volumes/{{volume_id}}/snapshots", API_V1),
-            post(crate::vms::volumes::create_snapshot_handler)
-                .get(crate::vms::volumes::list_snapshots_handler),
+            post(crate::application::volumes::create_snapshot_handler)
+                .get(crate::application::volumes::list_snapshots_handler),
         )
         .route(
             &format!("{}/volumes/{{volume_id}}/restore", API_V1),
-            post(crate::vms::volumes::restore_snapshot_handler),
+            post(crate::application::volumes::restore_snapshot_handler),
         )
         .route(
             &format!("{}/volumes/{{volume_id}}/clone", API_V1),
-            post(crate::vms::volumes::clone_volume_handler),
+            post(crate::application::volumes::clone_volume_handler),
         )
         .route(
             &format!("{}/volumes/{{volume_id}}", API_V1),
-            delete(crate::vms::volumes::delete_volume_handler),
+            delete(crate::application::volumes::delete_volume_handler),
         )
         .route(
             &format!("{}/snapshots/{{snapshot_id}}", API_V1),
-            delete(crate::vms::volumes::delete_snapshot_handler),
+            delete(crate::application::volumes::delete_snapshot_handler),
         )
         .finish_api(&mut api);
 
@@ -533,7 +592,9 @@ pub fn start_background_tasks(state: AppState) {
     tokio::spawn(crate::sync::start_nats_job_listener(state.clone()));
 
     // Track mesh status centrally and fan out updates to clients.
-    tokio::spawn(crate::vms::start_mesh_status_tracker(state.clone()));
+    tokio::spawn(crate::application::vms::start_mesh_status_tracker(
+        state.clone(),
+    ));
 
     // Reconcile routes with router
     let state_for_router = state.clone();

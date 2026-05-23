@@ -13,11 +13,11 @@ use uuid::Uuid;
 use mikrom_api::AppState;
 use mikrom_api::auth::jwt::create_token;
 use mikrom_api::create_app;
-use mikrom_api::models::volume::{AppVolume, Volume, VolumeAttachmentInfo, VolumeWithAttachments};
-use mikrom_api::repositories::app_repository::MockAppRepository;
-use mikrom_api::repositories::github_repository::MockGithubRepository;
-use mikrom_api::repositories::user_repository::{MockUserRepository, UserRole};
-use mikrom_api::repositories::volume_repository::MockVolumeRepository;
+use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::MockVolumeRepository;
+use mikrom_api::domain::github::MockGithubRepository;
+use mikrom_api::domain::user::{MockUserRepository, UserRole};
+use mikrom_api::domain::volume::{AppVolume, Volume, VolumeAttachmentInfo, VolumeWithAttachments};
 
 struct TestDb {
     pool: sqlx::PgPool,
@@ -88,6 +88,7 @@ async fn test_create_global_volume() {
     });
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
@@ -152,10 +153,10 @@ async fn test_attach_volume_to_app() {
         .expect_get_app()
         .with(eq(app_id))
         .returning(move |_| {
-            let app = mikrom_api::models::app::App {
+            let app = mikrom_api::domain::app::App {
                 id: app_id,
                 user_id,
-                ..mikrom_api::models::app::App::default()
+                ..mikrom_api::domain::app::App::default()
             };
             Ok(Some(app))
         });
@@ -215,6 +216,7 @@ async fn test_attach_volume_to_app() {
     };
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
@@ -283,10 +285,10 @@ async fn test_attach_volume_rejects_rwo_conflict() {
         .expect_get_app()
         .with(eq(app_id))
         .returning(move |_| {
-            let app = mikrom_api::models::app::App {
+            let app = mikrom_api::domain::app::App {
                 id: app_id,
                 user_id,
-                ..mikrom_api::models::app::App::default()
+                ..mikrom_api::domain::app::App::default()
             };
             Ok(Some(app))
         });
@@ -340,6 +342,7 @@ async fn test_attach_volume_rejects_rwo_conflict() {
     };
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
@@ -432,6 +435,7 @@ async fn test_list_volumes_with_attachments() {
     };
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
@@ -520,6 +524,7 @@ async fn test_delete_volume_fails_if_attached() {
     };
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),

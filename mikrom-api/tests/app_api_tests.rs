@@ -10,21 +10,19 @@ use uuid::Uuid;
 
 use mikrom_api::AppState;
 use mikrom_api::create_app;
-use mikrom_api::models::app::App;
-use mikrom_api::repositories::{
-    MockAppRepository, MockUserRepository, app_repository::CreateAppParams,
-};
+use mikrom_api::domain::app::App;
+use mikrom_api::domain::{CreateAppParams, MockAppRepository, MockUserRepository};
 use mikrom_api::test_utils::TestDb;
 
 #[tokio::test]
 async fn test_create_app_endpoint() {
     let mut mock_user_repo = MockUserRepository::new();
     mock_user_repo.expect_find_by_id().returning(move |id| {
-        Ok(Some(mikrom_api::repositories::user_repository::User {
+        Ok(Some(mikrom_api::domain::user::User {
             id,
             email: "test@example.com".to_string(),
             password_hash: "hash".to_string(),
-            role: mikrom_api::repositories::user_repository::UserRole::User,
+            role: mikrom_api::domain::user::UserRole::User,
             first_name: None,
             last_name: None,
             vpc_ipv6_prefix: None,
@@ -43,7 +41,7 @@ async fn test_create_app_endpoint() {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -88,12 +86,11 @@ async fn test_create_app_endpoint() {
         .times(0..)
         .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
+        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
@@ -155,13 +152,13 @@ async fn test_create_app_endpoint() {
 
 #[tokio::test]
 async fn test_create_app_duplicate_name() {
-    let mut mock_user_repo = mikrom_api::repositories::user_repository::MockUserRepository::new();
+    let mut mock_user_repo = mikrom_api::domain::user::MockUserRepository::new();
     mock_user_repo.expect_find_by_id().returning(move |id| {
-        Ok(Some(mikrom_api::repositories::user_repository::User {
+        Ok(Some(mikrom_api::domain::user::User {
             id,
             email: "test@example.com".to_string(),
             password_hash: "hash".to_string(),
-            role: mikrom_api::repositories::user_repository::UserRole::User,
+            role: mikrom_api::domain::user::UserRole::User,
             first_name: None,
             last_name: None,
             vpc_ipv6_prefix: None,
@@ -176,7 +173,7 @@ async fn test_create_app_duplicate_name() {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -206,12 +203,11 @@ async fn test_create_app_duplicate_name() {
         .times(0..)
         .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
+        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
@@ -268,11 +264,11 @@ async fn test_create_app_duplicate_name() {
 async fn test_list_apps_includes_secret() {
     let mut mock_user_repo = MockUserRepository::new();
     mock_user_repo.expect_find_by_id().returning(move |id| {
-        Ok(Some(mikrom_api::repositories::user_repository::User {
+        Ok(Some(mikrom_api::domain::user::User {
             id,
             email: "test@example.com".to_string(),
             password_hash: "hash".to_string(),
-            role: mikrom_api::repositories::user_repository::UserRole::User,
+            role: mikrom_api::domain::user::UserRole::User,
             first_name: None,
             last_name: None,
             vpc_ipv6_prefix: None,
@@ -287,7 +283,7 @@ async fn test_list_apps_includes_secret() {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -331,12 +327,11 @@ async fn test_list_apps_includes_secret() {
         .times(0..)
         .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
+        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
@@ -389,11 +384,11 @@ async fn test_list_apps_includes_secret() {
 async fn test_list_apps_reports_idle_when_active_deployment_is_running() {
     let mut mock_user_repo = MockUserRepository::new();
     mock_user_repo.expect_find_by_id().returning(move |id| {
-        Ok(Some(mikrom_api::repositories::user_repository::User {
+        Ok(Some(mikrom_api::domain::user::User {
             id,
             email: "test@example.com".to_string(),
             password_hash: "hash".to_string(),
-            role: mikrom_api::repositories::user_repository::UserRole::User,
+            role: mikrom_api::domain::user::UserRole::User,
             first_name: None,
             last_name: None,
             vpc_ipv6_prefix: None,
@@ -410,7 +405,7 @@ async fn test_list_apps_reports_idle_when_active_deployment_is_running() {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -445,7 +440,7 @@ async fn test_list_apps_reports_idle_when_active_deployment_is_running() {
     mock_app_repo
         .expect_get_active_deployment()
         .returning(move |_| {
-            Ok(Some(mikrom_api::models::app::Deployment {
+            Ok(Some(mikrom_api::domain::app::Deployment {
                 id: deployment_id,
                 app_id,
                 user_id,
@@ -493,12 +488,11 @@ async fn test_list_apps_reports_idle_when_active_deployment_is_running() {
         });
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
+        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         scheduler: mock_scheduler,
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
@@ -549,11 +543,11 @@ async fn test_list_apps_reports_idle_when_active_deployment_is_running() {
 async fn test_get_app_secret_endpoint() {
     let mut mock_user_repo = MockUserRepository::new();
     mock_user_repo.expect_find_by_id().returning(move |id| {
-        Ok(Some(mikrom_api::repositories::user_repository::User {
+        Ok(Some(mikrom_api::domain::user::User {
             id,
             email: "test@example.com".to_string(),
             password_hash: "hash".to_string(),
-            role: mikrom_api::repositories::user_repository::UserRole::User,
+            role: mikrom_api::domain::user::UserRole::User,
             first_name: None,
             last_name: None,
             vpc_ipv6_prefix: None,
@@ -570,7 +564,7 @@ async fn test_get_app_secret_endpoint() {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -612,12 +606,11 @@ async fn test_get_app_secret_endpoint() {
         .times(0..)
         .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
+        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
@@ -670,7 +663,7 @@ async fn test_create_app_with_custom_config() {
     use mikrom_api::deploy::handlers::{
         __create_app_handler_impl as create_app_handler, CreateAppRequest,
     };
-    use mikrom_api::repositories::{MockGithubRepository, MockUserRepository};
+    use mikrom_api::domain::{MockGithubRepository, MockUserRepository};
     use mikrom_api::scheduler::MockScheduler;
     use mockall::predicate;
 
@@ -693,7 +686,7 @@ async fn test_create_app_with_custom_config() {
     mock_app_repo
         .expect_create_app()
         .with(predicate::function(
-            |params: &mikrom_api::repositories::app_repository::CreateAppParams| {
+            |params: &mikrom_api::domain::CreateAppParams| {
                 params.name == "custom-app"
                     && params.health_check_path == Some("/healthz".to_string())
                     && params.drain_timeout == Some(60)
@@ -723,11 +716,11 @@ async fn test_create_app_with_custom_config() {
         .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
     let mut mock_user_repo = MockUserRepository::new();
     mock_user_repo.expect_find_by_id().returning(move |id| {
-        Ok(Some(mikrom_api::repositories::user_repository::User {
+        Ok(Some(mikrom_api::domain::user::User {
             id,
             email: "test@example.com".to_string(),
             password_hash: "hash".to_string(),
-            role: mikrom_api::repositories::user_repository::UserRole::User,
+            role: mikrom_api::domain::user::UserRole::User,
             first_name: None,
             last_name: None,
             vpc_ipv6_prefix: None,
@@ -735,11 +728,10 @@ async fn test_create_app_with_custom_config() {
     });
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: {
@@ -769,7 +761,7 @@ async fn test_create_app_with_custom_config() {
     let auth = AuthUser {
         user_id: user_id.to_string(),
         email: "test@example.com".to_string(),
-        role: mikrom_api::repositories::user_repository::UserRole::User,
+        role: mikrom_api::domain::user::UserRole::User,
     };
 
     let result = create_app_handler(auth, State(state), Json(request)).await;

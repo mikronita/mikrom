@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use mikrom_api::AppState;
 use mikrom_api::create_app;
-use mikrom_api::models::app::{App, Deployment};
-use mikrom_api::repositories::{MockAppRepository, MockUserRepository};
+use mikrom_api::domain::app::{App, Deployment};
+use mikrom_api::domain::{MockAppRepository, MockUserRepository};
 
 async fn setup_test_context() -> (String, Uuid, Uuid, MockAppRepository) {
     let user_id = Uuid::new_v4();
@@ -21,7 +21,7 @@ async fn setup_test_context() -> (String, Uuid, Uuid, MockAppRepository) {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -98,11 +98,10 @@ async fn test_hierarchical_deployment_status_success() {
         return;
     };
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
@@ -116,7 +115,7 @@ async fn test_hierarchical_deployment_status_success() {
         acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
@@ -203,11 +202,10 @@ async fn test_hierarchical_security_cross_app_prevention() {
         .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
@@ -221,7 +219,7 @@ async fn test_hierarchical_security_cross_app_prevention() {
         acme_email: "admin@mikrom.spluca.org".into(),
         acme_staging: true,
         acme_check_interval: 3600,
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,

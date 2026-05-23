@@ -3,16 +3,8 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 #[derive(
-    sqlx::Type,
-    Default,
-    Debug,
-    Clone,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
+    Default, Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-#[sqlx(type_name = "user_role", rename_all = "lowercase")]
 pub enum UserRole {
     Admin,
     #[default]

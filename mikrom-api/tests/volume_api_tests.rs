@@ -12,11 +12,11 @@ use uuid::Uuid;
 
 use mikrom_api::AppState;
 use mikrom_api::create_app;
-use mikrom_api::models::volume::Volume;
-use mikrom_api::repositories::app_repository::MockAppRepository;
-use mikrom_api::repositories::github_repository::MockGithubRepository;
-use mikrom_api::repositories::user_repository::MockUserRepository;
-use mikrom_api::repositories::volume_repository::MockVolumeRepository;
+use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::MockVolumeRepository;
+use mikrom_api::domain::github::MockGithubRepository;
+use mikrom_api::domain::user::MockUserRepository;
+use mikrom_api::domain::volume::Volume;
 
 struct TestDb {
     pool: sqlx::PgPool,
@@ -45,7 +45,7 @@ async fn test_list_volume_snapshots_endpoint() {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -76,6 +76,7 @@ async fn test_list_volume_snapshots_endpoint() {
     };
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
@@ -130,7 +131,7 @@ async fn test_create_volume_snapshot_endpoint() {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -151,20 +152,20 @@ async fn test_create_volume_snapshot_endpoint() {
         });
 
     mock_app_repo.expect_get_app().returning(move |_| {
-        Ok(Some(mikrom_api::models::app::App {
+        Ok(Some(mikrom_api::domain::app::App {
             id: app_id,
             user_id,
             name: "test-app".to_string(),
             git_url: "".to_string(),
             port: 80,
-            ..mikrom_api::models::app::App::default()
+            ..mikrom_api::domain::app::App::default()
         }))
     });
 
     mock_volume_repo
         .expect_create_snapshot()
         .returning(|params| {
-            Ok(mikrom_api::models::volume::VolumeSnapshot {
+            Ok(mikrom_api::domain::volume::VolumeSnapshot {
                 id: Uuid::new_v4(),
                 volume_id: params.volume_id,
                 user_id: params.user_id,
@@ -199,6 +200,7 @@ async fn test_create_volume_snapshot_endpoint() {
     });
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
@@ -253,7 +255,7 @@ async fn test_restore_volume_snapshot_endpoint() {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -299,6 +301,7 @@ async fn test_restore_volume_snapshot_endpoint() {
     });
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
@@ -354,7 +357,7 @@ async fn test_delete_snapshot_endpoint() {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -363,7 +366,7 @@ async fn test_delete_snapshot_endpoint() {
         .expect_get_snapshot()
         .with(eq(snapshot_id))
         .returning(move |id| {
-            Ok(Some(mikrom_api::models::volume::VolumeSnapshot {
+            Ok(Some(mikrom_api::domain::volume::VolumeSnapshot {
                 id,
                 volume_id,
                 user_id,
@@ -418,6 +421,7 @@ async fn test_delete_snapshot_endpoint() {
     });
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
@@ -472,7 +476,7 @@ async fn test_clone_volume_endpoint() {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -532,6 +536,7 @@ async fn test_clone_volume_endpoint() {
     });
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
@@ -595,7 +600,7 @@ async fn test_restore_volume_snapshot_endpoint_failure() {
     let token = mikrom_api::auth::jwt::create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::repositories::user_repository::UserRole::User,
+        &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
     )
     .unwrap();
@@ -641,6 +646,7 @@ async fn test_restore_volume_snapshot_endpoint_failure() {
     });
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),

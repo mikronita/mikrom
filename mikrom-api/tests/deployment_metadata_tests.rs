@@ -1,9 +1,7 @@
+use mikrom_api::domain::user::{NewUser, UserRepository, UserRole};
+use mikrom_api::domain::{AppRepository, NewDeployment, UpdateDeploymentParams};
 use mikrom_api::infrastructure::db::PostgresAppRepository;
 use mikrom_api::infrastructure::db::PostgresUserRepository;
-use mikrom_api::repositories::app_repository::{
-    AppRepository, NewDeployment, UpdateDeploymentParams,
-};
-use mikrom_api::repositories::user_repository::{NewUser, UserRepository, UserRole};
 use mikrom_api::test_utils::TestDb;
 use uuid::Uuid;
 
@@ -33,7 +31,7 @@ async fn test_deployment_metadata_roundtrip() {
 
     // 2. Create an app
     let app = app_repo
-        .create_app(mikrom_api::repositories::app_repository::CreateAppParams {
+        .create_app(mikrom_api::domain::CreateAppParams {
             name: "metadata-app".to_string(),
             git_url: "https://github.com/test/repo".to_string(),
             port: 80,

@@ -6,13 +6,10 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::any,
 };
+use mikrom_api::NatsScheduler;
 use mikrom_api::create_app;
-use mikrom_api::repositories::app_repository::AppRepository;
-use mikrom_api::repositories::{
-    MockGithubRepository, PostgresAppRepository, PostgresUserRepository,
-    volume_repository::MockVolumeRepository,
-};
-use mikrom_api::scheduler::NatsScheduler;
+use mikrom_api::domain::{AppRepository, MockGithubRepository, MockVolumeRepository};
+use mikrom_api::infrastructure::db::{PostgresAppRepository, PostgresUserRepository};
 use mikrom_api::test_utils::TestDb as ApiTestDb;
 use mikrom_proto::subjects;
 use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
@@ -841,13 +838,14 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         "test-key".to_string(),
     ));
     let api_state = mikrom_api::AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo,
         app_repo: api_app_repo.clone(),
         volume_repo: Arc::new(MockVolumeRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
-        scheduler: Arc::new(NatsScheduler {
-            client: nats_client.clone(),
-        }),
+        scheduler: Arc::new(NatsScheduler::new(mikrom_api::nats::TypedNatsClient::new(
+            nats_client.clone(),
+        ))),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
         router_addr: env.proxy_url.clone(),
         frontend_url: "http://localhost:3000".to_string(),
@@ -963,13 +961,13 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         .await;
 
     let deployment = api_app_repo
-        .create_deployment(mikrom_api::repositories::app_repository::NewDeployment {
+        .create_deployment(mikrom_api::domain::NewDeployment {
             app_id: app_record.id,
             user_id: app_record.user_id.to_string(),
             vcpus: 1,
             memory_mib: 128,
             disk_mib: 512,
-            port: i32::from(upstream_port),
+            port: u32::from(upstream_port),
             env_vars: std::collections::HashMap::new(),
             trigger_source: "manual".to_string(),
             git_commit_hash: Some("abc1234".to_string()),
@@ -1012,7 +1010,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
     api_app_repo
         .update_deployment(
             deployment.id,
-            mikrom_api::repositories::app_repository::UpdateDeploymentParams {
+            mikrom_api::domain::UpdateDeploymentParams {
                 status: Some("RUNNING".to_string()),
                 job_id: Some(job_id.clone()),
                 ipv6_address: Some("::1".to_string()),

@@ -69,6 +69,48 @@ pub struct ApiConfig {
     pub github_webhook_url_base: Option<String>,
 }
 
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self {
+            database_url: "postgres://localhost/mikrom".to_string(),
+            nats_url: "nats://localhost:4222".to_string(),
+            jwt_secret: "default_jwt_secret_at_least_32_chars_long".to_string(),
+            master_key: "default_master_key_at_least_32_chars_long".to_string(),
+            api_port: default_api_port(),
+            router_addr: default_router_addr(),
+            frontend_url: default_frontend_url(),
+            use_tls: default_use_tls(),
+            deployment_env: default_deployment_env(),
+            rate_limit_public_rpm: None,
+            rate_limit_auth_login_rpm: None,
+            rate_limit_auth_register_rpm: None,
+            rate_limit_github_install_rpm: None,
+            rate_limit_apps_create_rpm: None,
+            rate_limit_apps_deploy_rpm: None,
+            rate_limit_webhooks_github_generic_rpm: None,
+            rate_limit_webhooks_github_named_rpm: None,
+            rate_limit_authenticated_read_rpm: None,
+            rate_limit_authenticated_write_rpm: None,
+            rate_limit_authenticated_stream_rpm: None,
+            rate_limit_entry_ttl_secs: default_rate_limit_entry_ttl_secs(),
+            rate_limit_cleanup_interval_secs: default_rate_limit_cleanup_interval_secs(),
+            rate_limit_trust_proxy_headers: default_rate_limit_trust_proxy_headers(),
+            nats_request_timeout_secs: default_nats_request_timeout_secs(),
+            nats_storage_timeout_secs: default_nats_storage_timeout_secs(),
+            acme_email: default_acme_email(),
+            acme_staging: default_acme_staging(),
+            acme_check_interval: default_acme_check_interval(),
+            certs_dir: None,
+            github_app_id: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+        }
+    }
+}
+
 fn default_acme_email() -> String {
     "admin@mikrom.spluca.org".to_string()
 }

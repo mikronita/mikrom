@@ -1,5 +1,8 @@
 use crate::config::ApiConfig;
-use crate::domain::{AppRepository, GithubRepository, Scheduler, UserRepository, VolumeRepository};
+use crate::domain::{
+    AppRepository, GithubRepository, MockAppRepository, MockGithubRepository, MockScheduler,
+    MockUserRepository, MockVolumeRepository, Scheduler, UserRepository, VolumeRepository,
+};
 use crate::nats::TypedNatsClient;
 use std::sync::Arc;
 
@@ -21,6 +24,26 @@ pub struct ApiContext {
     pub config: Arc<ApiConfig>,
     pub jwt_secret: String,
     pub master_key: String,
+}
+
+impl Default for ApiContext {
+    fn default() -> Self {
+        let config = ApiConfig::default();
+        let jwt_secret = config.jwt_secret.clone();
+        let master_key = config.master_key.clone();
+        Self {
+            user_repo: Arc::new(MockUserRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::new()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(MockScheduler::new()),
+            nats: TypedNatsClient::default(),
+            db: sqlx::PgPool::connect_lazy("postgres://localhost/test").expect("Valid lazy pool"),
+            config: Arc::new(config),
+            jwt_secret,
+            master_key,
+        }
+    }
 }
 
 impl ApiContext {

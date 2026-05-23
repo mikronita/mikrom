@@ -8,8 +8,8 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 
 use mikrom_api::AppState;
+use mikrom_api::infrastructure::db::PostgresAppRepository;
 use mikrom_api::infrastructure::db::PostgresUserRepository;
-use mikrom_api::repositories::PostgresAppRepository;
 
 #[path = "common/mod.rs"]
 mod common;
@@ -57,17 +57,17 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> Option<axum::Router> {
         }
     });
 
-    let mut mock_volume_repo =
-        mikrom_api::repositories::volume_repository::MockVolumeRepository::new();
+    let mut mock_volume_repo = mikrom_api::domain::MockVolumeRepository::new();
     mock_volume_repo
         .expect_list_volumes_by_app()
         .returning(|_| Ok(vec![]));
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
         volume_repo: Arc::new(mock_volume_repo),
-        github_repo: Arc::new(mikrom_api::repositories::MockGithubRepository::default()),
+        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),

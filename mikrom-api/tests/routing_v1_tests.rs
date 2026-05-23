@@ -2,8 +2,11 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use mikrom_api::domain::MockUserRepository;
+use mikrom_api::infrastructure::db::PostgresAppRepository;
 use mikrom_api::nats::NatsClient;
-use mikrom_api::{AppState, create_app, repositories, scheduler};
+use mikrom_api::test_utils::create_test_app_state;
+use mikrom_api::{AppState, create_app};
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -25,33 +28,18 @@ impl NatsClient for DummyNats {
 }
 
 async fn build_state() -> AppState {
-    AppState {
-        user_repo: Arc::new(repositories::user_repository::MockUserRepository::new()),
-        app_repo: Arc::new(repositories::PostgresAppRepository::new(
-            sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
-            "key".to_string(),
-        )),
-        volume_repo: Arc::new(repositories::volume_repository::MockVolumeRepository::new()),
-        github_repo: Arc::new(repositories::MockGithubRepository::default()),
-        scheduler: Arc::new(scheduler::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new_custom(Arc::new(DummyNats)),
-        router_addr: "http://localhost:8080".to_string(),
-        frontend_url: "http://localhost:3000".to_string(),
-        jwt_secret: "test".to_string(),
-        master_key: "test".to_string(),
-        deployment_events: tokio::sync::broadcast::channel(1).0,
-        api_db: sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
-        acme_email: "admin@mikrom.spluca.org".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    }
+    let db = sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap();
+    let mut state = create_test_app_state(db.clone());
+    let app_repo = Arc::new(PostgresAppRepository::new(db, "key".to_string()));
+    state.app_repo = app_repo.clone();
+    state.ctx.app_repo = app_repo;
+    state.nats = mikrom_api::nats::TypedNatsClient::new_custom(Arc::new(DummyNats));
+    state.ctx.nats = state.nats.clone();
+    state.jwt_secret = "test".to_string();
+    state.ctx.jwt_secret = "test".to_string();
+    state.master_key = "test".to_string();
+    state.ctx.master_key = "test".to_string();
+    state
 }
 
 #[tokio::test]
@@ -81,10 +69,11 @@ async fn test_v1_health_routing() {
 #[tokio::test]
 async fn test_v1_auth_routing() {
     let state = build_state().await;
-    let mut user_repo = repositories::user_repository::MockUserRepository::new();
+    let mut user_repo = MockUserRepository::new();
     user_repo.expect_find_by_email().returning(|_| Ok(None)); // Just return None to avoid 404/panic
     let mut state = state;
     state.user_repo = Arc::new(user_repo);
+    state.ctx.user_repo = state.user_repo.clone();
     let app = create_app(state);
 
     let response = app

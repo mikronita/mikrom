@@ -3,13 +3,13 @@ use axum::extract::Query;
 use axum::extract::State;
 use axum::http::StatusCode;
 use mikrom_api::AppState;
+use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::github::MockGithubRepository;
+use mikrom_api::domain::user::MockUserRepository;
 use mikrom_api::github::handlers::{
     __github_callback_impl as github_callback, InstallCallbackQuery,
 };
 use mikrom_api::nats::TypedNatsClient;
-use mikrom_api::repositories::MockGithubRepository;
-use mikrom_api::repositories::app_repository::MockAppRepository;
-use mikrom_api::repositories::user_repository::MockUserRepository;
 use mikrom_api::scheduler::MockScheduler;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -18,11 +18,10 @@ async fn create_test_state() -> Option<AppState> {
     let nats_client = common::get_nats_client_or_skip().await?;
 
     Some(AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(MockAppRepository::new()),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(MockScheduler::new()),
         nats: TypedNatsClient::new(nats_client),

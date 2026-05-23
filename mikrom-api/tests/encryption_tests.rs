@@ -1,7 +1,7 @@
+use mikrom_api::domain::user::{NewUser, UserRepository, UserRole};
+use mikrom_api::domain::{AppRepository, NewDeployment};
 use mikrom_api::infrastructure::db::PostgresAppRepository;
 use mikrom_api::infrastructure::db::PostgresUserRepository;
-use mikrom_api::repositories::app_repository::{AppRepository, NewDeployment};
-use mikrom_api::repositories::user_repository::{NewUser, UserRepository, UserRole};
 use mikrom_api::test_utils::TestDb;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -32,7 +32,7 @@ async fn test_encryption_at_rest() {
     // 2. Create an app with a secret webhook
     let webhook_secret = "super-secret-webhook-key";
     let app = app_repo
-        .create_app(mikrom_api::repositories::app_repository::CreateAppParams {
+        .create_app(mikrom_api::domain::CreateAppParams {
             name: format!("test-app-{}", Uuid::new_v4()),
             git_url: "https://github.com/test/repo".to_string(),
             port: 8080,

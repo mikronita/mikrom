@@ -1,5 +1,6 @@
 use crate::domain::error::DomainResult;
 use crate::domain::github::{GithubRepository, UserGithubAccount};
+use crate::infrastructure::db::models::DbUserGithubAccount;
 
 use async_trait::async_trait;
 use sqlx::PgPool;
@@ -18,7 +19,7 @@ impl PostgresGithubRepository {
 #[async_trait]
 impl GithubRepository for PostgresGithubRepository {
     async fn create_account(&self, account: UserGithubAccount) -> DomainResult<UserGithubAccount> {
-        let created = sqlx::query_as::<_, UserGithubAccount>(
+        let db_created = sqlx::query_as::<_, DbUserGithubAccount>(
             "INSERT INTO user_github_accounts (user_id, installation_id, github_username) 
              VALUES ($1, $2, $3) 
              ON CONFLICT (user_id, installation_id) 
@@ -31,32 +32,32 @@ impl GithubRepository for PostgresGithubRepository {
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(created)
+        Ok(db_created.into())
     }
 
     async fn get_account_by_installation_id(
         &self,
         installation_id: i64,
     ) -> DomainResult<Option<UserGithubAccount>> {
-        let account = sqlx::query_as::<_, UserGithubAccount>(
+        let db_account = sqlx::query_as::<_, DbUserGithubAccount>(
             "SELECT * FROM user_github_accounts WHERE installation_id = $1",
         )
         .bind(installation_id)
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(account)
+        Ok(db_account.map(|a| a.into()))
     }
 
     async fn get_accounts_by_user_id(&self, user_id: Uuid) -> DomainResult<Vec<UserGithubAccount>> {
-        let accounts = sqlx::query_as::<_, UserGithubAccount>(
+        let db_accounts = sqlx::query_as::<_, DbUserGithubAccount>(
             "SELECT * FROM user_github_accounts WHERE user_id = $1",
         )
         .bind(user_id)
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(accounts)
+        Ok(db_accounts.into_iter().map(|a| a.into()).collect())
     }
 
     async fn delete_account(&self, id: Uuid) -> DomainResult<()> {

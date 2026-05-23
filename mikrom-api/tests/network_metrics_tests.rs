@@ -9,9 +9,9 @@ use futures::StreamExt;
 use mikrom_api::AppState;
 use mikrom_api::auth::jwt::create_token;
 use mikrom_api::create_app;
-use mikrom_api::repositories::app_repository::MockAppRepository;
-use mikrom_api::repositories::github_repository::MockGithubRepository;
-use mikrom_api::repositories::user_repository::{MockUserRepository, UserRole};
+use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::github::MockGithubRepository;
+use mikrom_api::domain::user::{MockUserRepository, UserRole};
 use mikrom_api::scheduler::MockScheduler;
 use std::sync::Arc;
 use tower::Service;
@@ -31,11 +31,10 @@ async fn setup_app(
     let nats_client = async_nats::connect(nats_url).await.ok()?;
 
     let state = AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
-        volume_repo: Arc::new(
-            mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
-        ),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
@@ -80,7 +79,7 @@ async fn test_active_deployments_endpoint_responds() {
     mock_app_repo
         .expect_list_deployments_by_user()
         .returning(move |_| {
-            Ok(vec![mikrom_api::models::app::Deployment {
+            Ok(vec![mikrom_api::domain::app::Deployment {
                 id: dep_id,
                 app_id,
                 user_id,
@@ -91,7 +90,7 @@ async fn test_active_deployments_endpoint_responds() {
         });
 
     mock_app_repo.expect_get_app().returning(move |_| {
-        Ok(Some(mikrom_api::models::app::App {
+        Ok(Some(mikrom_api::domain::app::App {
             id: app_id,
             name: "test-app".to_string(),
             user_id,
@@ -104,7 +103,7 @@ async fn test_active_deployments_endpoint_responds() {
     mock_app_repo
         .expect_get_active_deployment()
         .returning(move |_| {
-            Ok(Some(mikrom_api::models::app::Deployment {
+            Ok(Some(mikrom_api::domain::app::Deployment {
                 id: dep_id,
                 app_id,
                 user_id,
@@ -223,7 +222,7 @@ async fn test_deployment_status_endpoint_responds() {
     let dep_id = Uuid::new_v4();
 
     mock_app_repo.expect_get_app_by_name().returning(move |_| {
-        Ok(Some(mikrom_api::models::app::App {
+        Ok(Some(mikrom_api::domain::app::App {
             id: app_id,
             name: "test-app".to_string(),
             user_id,
@@ -235,7 +234,7 @@ async fn test_deployment_status_endpoint_responds() {
     mock_app_repo
         .expect_get_deployment_by_job_id()
         .returning(move |_| {
-            Ok(Some(mikrom_api::models::app::Deployment {
+            Ok(Some(mikrom_api::domain::app::Deployment {
                 id: dep_id,
                 app_id,
                 user_id,
@@ -248,7 +247,7 @@ async fn test_deployment_status_endpoint_responds() {
     mock_app_repo
         .expect_get_active_deployment()
         .returning(move |_| {
-            Ok(Some(mikrom_api::models::app::Deployment {
+            Ok(Some(mikrom_api::domain::app::Deployment {
                 id: dep_id,
                 app_id,
                 user_id,
@@ -336,7 +335,7 @@ async fn test_watch_deployments_stream_includes_scale_state() {
     let job_id_for_dep = job_id.clone();
 
     mock_app_repo.expect_get_app_by_name().returning(move |_| {
-        Ok(Some(mikrom_api::models::app::App {
+        Ok(Some(mikrom_api::domain::app::App {
             id: app_id,
             name: "test-app".to_string(),
             user_id,
@@ -349,7 +348,7 @@ async fn test_watch_deployments_stream_includes_scale_state() {
     mock_app_repo
         .expect_list_deployments_by_user()
         .returning(move |_| {
-            Ok(vec![mikrom_api::models::app::Deployment {
+            Ok(vec![mikrom_api::domain::app::Deployment {
                 id: dep_id,
                 app_id,
                 user_id,
@@ -365,7 +364,7 @@ async fn test_watch_deployments_stream_includes_scale_state() {
     let dep_id_for_active = dep_id;
     let mut mock_active = mock_app_repo;
     mock_active.expect_get_app().returning(move |_| {
-        Ok(Some(mikrom_api::models::app::App {
+        Ok(Some(mikrom_api::domain::app::App {
             id: app_id_for_active,
             name: "test-app".to_string(),
             user_id: user_id_for_active,
@@ -377,7 +376,7 @@ async fn test_watch_deployments_stream_includes_scale_state() {
     mock_active
         .expect_get_active_deployment()
         .returning(move |_| {
-            Ok(Some(mikrom_api::models::app::Deployment {
+            Ok(Some(mikrom_api::domain::app::Deployment {
                 id: dep_id,
                 app_id,
                 user_id,
@@ -390,7 +389,7 @@ async fn test_watch_deployments_stream_includes_scale_state() {
     let app_id_for_list = app_id;
     let user_id_for_list = user_id;
     mock_active.expect_list_apps_by_user().returning(move |_| {
-        Ok(vec![mikrom_api::models::app::App {
+        Ok(vec![mikrom_api::domain::app::App {
             id: app_id_for_list,
             name: "test-app".to_string(),
             user_id: user_id_for_list,
@@ -403,7 +402,7 @@ async fn test_watch_deployments_stream_includes_scale_state() {
     mock_active
         .expect_list_deployments_by_app()
         .returning(move |_| {
-            Ok(vec![mikrom_api::models::app::Deployment {
+            Ok(vec![mikrom_api::domain::app::Deployment {
                 id: dep_id,
                 app_id,
                 user_id,
