@@ -8,6 +8,7 @@
 
 use crate::state::{Certificate, Route, State};
 use crate::state_manager::StateManager;
+use crate::subjects as router_subjects;
 use crate::wireguard::WireGuardManager;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -16,7 +17,7 @@ use mikrom_proto::router::{
     AcmeChallengeUpdate, RouterConfigAck, RouterConfigUpdate, TlsCertificateUpdate,
 };
 use mikrom_proto::scheduler::{NetworkMeshUpdate, RouterHeartbeat};
-use mikrom_proto::subjects;
+use mikrom_proto::subjects as proto_subjects;
 use pingora::lb::LoadBalancer;
 use pingora::lb::health_check::TcpHealthCheck;
 use pingora::lb::selection::RoundRobin;
@@ -27,6 +28,33 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
+
+async fn publish_best_effort(
+    nats: &async_nats::Client,
+    subject: impl Into<String>,
+    payload: Vec<u8>,
+    context: &'static str,
+) {
+    let subject = subject.into();
+    if let Err(e) = nats.publish(subject.clone(), payload.into()).await {
+        error!(%context, %subject, error = %e, "Failed to publish NATS message");
+    }
+}
+
+async fn publish_response_best_effort<T: Message>(
+    nats: &async_nats::Client,
+    reply: async_nats::Subject,
+    response: &T,
+    context: &'static str,
+) {
+    let mut buf = Vec::new();
+    if let Err(e) = response.encode(&mut buf) {
+        error!(%context, reply = %reply, error = %e, "Failed to encode NATS reply");
+        return;
+    }
+
+    publish_best_effort(nats, reply.to_string(), buf, context).await;
+}
 
 fn tls_alternative_cn_for_host(host: &str) -> Option<String> {
     match host {
@@ -283,7 +311,7 @@ impl BackgroundService for ControlPlane {
             },
         };
         if let Err(e) = self.wg_manager.init(&priv_key, &self.router_id).await {
-            error!("Control Plane: Failed to initialize WireGuard: {e}");
+            error!("Control Plane: Failed to initialize WireGuard: {e:?}");
         }
         let wg_ip = self.wg_manager.get_host_ipv6(&self.router_id);
 
@@ -298,7 +326,7 @@ impl BackgroundService for ControlPlane {
         }
 
         // 2. Setup subscribers
-        let mut router_sub = match nats.subscribe("mikrom.router.>").await {
+        let mut router_sub = match nats.subscribe(router_subjects::ROUTER_SUBJECT_PREFIX).await {
             Ok(s) => s,
             Err(e) => {
                 error!("Control Plane: Failed to subscribe to router updates: {e}");
@@ -306,7 +334,7 @@ impl BackgroundService for ControlPlane {
             },
         };
 
-        let mesh_subject = format!("mikrom.scheduler.network.mesh.{}", self.router_id);
+        let mesh_subject = router_subjects::mesh_updates(&self.router_id);
         let mut mesh_sub = match nats.subscribe(mesh_subject.clone()).await {
             Ok(s) => s,
             Err(e) => {
@@ -331,7 +359,13 @@ impl BackgroundService for ControlPlane {
                     };
                     let mut buf = Vec::new();
                     if heartbeat.encode(&mut buf).is_ok() {
-                        let _ = nats.publish("mikrom.scheduler.router.heartbeat", buf.into()).await;
+                        publish_best_effort(
+                            &nats,
+                            proto_subjects::SCHEDULER_ROUTER_HEARTBEAT,
+                            buf,
+                            "router-heartbeat",
+                        )
+                        .await;
                     }
                 }
                 // Router updates (routes, certs, acme)
@@ -344,7 +378,7 @@ impl BackgroundService for ControlPlane {
                         let master_key = self.master_key.clone();
 
                         match msg.subject.as_ref() {
-                            subjects::ROUTER_CONFIG_UPDATED => {
+                            proto_subjects::ROUTER_CONFIG_UPDATED => {
                                 match RouterConfigUpdate::decode(&msg.payload[..]) {
                                     Ok(update) => {
                                         info!("Control Plane: Received route update for {}", update.hostname);
@@ -360,14 +394,25 @@ impl BackgroundService for ControlPlane {
                                         }
 
                                         // First, delete existing targets for this host to maintain eventual consistency with the desired state
-                                        let _ = sqlx::query("DELETE FROM routes WHERE hostname = $1")
+                                        if let Err(e) = sqlx::query("DELETE FROM routes WHERE hostname = $1")
                                             .bind(&update.hostname)
                                             .execute(&db)
-                                            .await;
+                                            .await
+                                        {
+                                            error!(
+                                                "Control Plane: Failed to delete existing routes for {}: {}",
+                                                update.hostname, e
+                                            );
+                                        }
 
                                         let response = if update.target_urls.is_empty() {
                                             // targets are empty, we already deleted them above
-                                            let _ = tx.try_send(());
+                                            if let Err(e) = tx.try_send(()) {
+                                                debug!(
+                                                    "Control Plane: Failed to schedule state resync after clearing routes for {}: {}",
+                                                    update.hostname, e
+                                                );
+                                            }
                                             RouterConfigAck {
                                                 success: true,
                                                 message: String::new(),
@@ -391,7 +436,12 @@ impl BackgroundService for ControlPlane {
                                             }
 
                                             if success {
-                                                let _ = tx.try_send(());
+                                                if let Err(e) = tx.try_send(()) {
+                                                    debug!(
+                                                        "Control Plane: Failed to schedule state resync after updating routes for {}: {}",
+                                                        update.hostname, e
+                                                    );
+                                                }
                                                 RouterConfigAck {
                                                     success: true,
                                                     message: String::new(),
@@ -405,16 +455,19 @@ impl BackgroundService for ControlPlane {
                                         };
 
                                         if let Some(reply) = msg.reply {
-                                            let mut buf = Vec::new();
-                                            if response.encode(&mut buf).is_ok() {
-                                                let _ = nats.publish(reply, buf.into()).await;
-                                            }
+                                            publish_response_best_effort(
+                                                &nats,
+                                                reply,
+                                                &response,
+                                                "router-config-reply",
+                                            )
+                                            .await;
                                         }
                                     },
                                     Err(e) => error!("Control Plane: Failed to decode RouterConfigUpdate: {}", e),
                                 }
                             }
-                            subjects::ROUTER_TLS_CERT_UPDATED => {
+                            proto_subjects::ROUTER_TLS_CERT_UPDATED => {
                                 match TlsCertificateUpdate::decode(&msg.payload[..]) {
                                     Ok(update) => {
                                         info!("Control Plane: Received TLS certificate update for {}", update.hostname);
@@ -448,7 +501,12 @@ impl BackgroundService for ControlPlane {
                                         .await
                                         {
                                             Ok(_) => {
-                                                let _ = tx.try_send(());
+                                                if let Err(e) = tx.try_send(()) {
+                                                    debug!(
+                                                        "Control Plane: Failed to schedule state resync after updating TLS certificate for {}: {}",
+                                                        update.hostname, e
+                                                    );
+                                                }
                                             },
                                             Err(e) => error!(
                                                 "Control Plane: Failed to persist TLS certificate for {}: {}",
@@ -459,16 +517,30 @@ impl BackgroundService for ControlPlane {
                                     Err(e) => error!("Control Plane: Failed to decode TlsCertificateUpdate: {}", e),
                                 }
                             }
-                            subjects::ROUTER_ACME_CHALLENGE_UPDATED => {
+                            proto_subjects::ROUTER_ACME_CHALLENGE_UPDATED => {
                                 match AcmeChallengeUpdate::decode(&msg.payload[..]) {
                                     Ok(update) => {
                                         info!("Control Plane: Received ACME challenge update: {}", update.token);
 
                                         // FAST-PATH: Update in-memory state immediately
                                         if update.is_delete {
-                                            let _ = state_manager.remove_acme_token(&update.token).await;
-                                        } else {
-                                            let _ = state_manager.add_acme_token(update.token.clone(), update.key_auth.clone()).await;
+                                            if let Err(e) = state_manager
+                                                .remove_acme_token(&update.token)
+                                                .await
+                                            {
+                                                error!(
+                                                    "Control Plane: Failed to remove ACME token {} from memory: {}",
+                                                    update.token, e
+                                                );
+                                            }
+                                        } else if let Err(e) = state_manager
+                                            .add_acme_token(update.token.clone(), update.key_auth.clone())
+                                            .await
+                                        {
+                                            error!(
+                                                "Control Plane: Failed to add ACME token {} to memory: {}",
+                                                update.token, e
+                                            );
                                         }
 
                                         let query = if update.is_delete {
@@ -488,8 +560,11 @@ impl BackgroundService for ControlPlane {
                                                 "Control Plane: Failed to persist ACME challenge {}: {}",
                                                 update.token, e
                                             );
-                                        } else {
-                                            let _ = tx.try_send(());
+                                        } else if let Err(e) = tx.try_send(()) {
+                                            debug!(
+                                                "Control Plane: Failed to schedule state resync after updating ACME challenge {}: {}",
+                                                update.token, e
+                                            );
                                         }
                                     },
                                     Err(e) => error!("Control Plane: Failed to decode AcmeChallengeUpdate: {}", e),

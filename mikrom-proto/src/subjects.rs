@@ -1,69 +1,100 @@
 //! NATS subjects used across the mikrom workspace.
 
-// ── Router Subjects ──────────────────────────────────────────────────────────
+/// Typed representation of the shared NATS subjects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SharedSubject {
+    RouterConfigUpdated,
+    RouterTlsCertUpdated,
+    RouterAcmeChallengeUpdated,
+    RouterTrafficEvent,
+    SchedulerJobUpdates,
+    SchedulerWorkerHeartbeat,
+    SchedulerRouterHeartbeat,
+    SchedulerVmFailed,
+    SchedulerListApps,
+    SchedulerListWorkers,
+    SchedulerDeploy,
+    SchedulerPauseApp,
+    SchedulerResumeApp,
+    SchedulerDeleteApp,
+    SchedulerScaleApp,
+    SchedulerUpdateAppScalingConfig,
+    SchedulerCancelApp,
+    SchedulerGetJob,
+    BuilderBuild,
+    BuilderGetStatus,
+}
 
-/// Router configuration update subject.
-pub const ROUTER_CONFIG_UPDATED: &str = "mikrom.router.config_updated";
+impl SharedSubject {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RouterConfigUpdated => "mikrom.router.config_updated",
+            Self::RouterTlsCertUpdated => "mikrom.router.tls_cert_updated",
+            Self::RouterAcmeChallengeUpdated => "mikrom.router.acme_challenge_updated",
+            Self::RouterTrafficEvent => "mikrom.router.traffic",
+            Self::SchedulerJobUpdates => "mikrom.scheduler.job_updates",
+            Self::SchedulerWorkerHeartbeat => "mikrom.scheduler.worker.heartbeat",
+            Self::SchedulerRouterHeartbeat => "mikrom.scheduler.router.heartbeat",
+            Self::SchedulerVmFailed => "mikrom.scheduler.vm_failed",
+            Self::SchedulerListApps => "mikrom.scheduler.list_apps",
+            Self::SchedulerListWorkers => "mikrom.scheduler.list_workers",
+            Self::SchedulerDeploy => "mikrom.scheduler.deploy",
+            Self::SchedulerPauseApp => "mikrom.scheduler.pause_app",
+            Self::SchedulerResumeApp => "mikrom.scheduler.resume_app",
+            Self::SchedulerDeleteApp => "mikrom.scheduler.delete_app",
+            Self::SchedulerScaleApp => "mikrom.scheduler.scale_app",
+            Self::SchedulerUpdateAppScalingConfig => "mikrom.scheduler.update_app_scaling_config",
+            Self::SchedulerCancelApp => "mikrom.scheduler.cancel_app",
+            Self::SchedulerGetJob => "mikrom.scheduler.get_job",
+            Self::BuilderBuild => "mikrom.builder.build",
+            Self::BuilderGetStatus => "mikrom.builder.get_status",
+        }
+    }
+}
 
-/// Router TLS certificate update subject.
-pub const ROUTER_TLS_CERT_UPDATED: &str = "mikrom.router.tls_cert_updated";
+impl From<SharedSubject> for &'static str {
+    fn from(subject: SharedSubject) -> Self {
+        subject.as_str()
+    }
+}
 
-/// Router ACME challenge update subject.
-pub const ROUTER_ACME_CHALLENGE_UPDATED: &str = "mikrom.router.acme_challenge_updated";
+impl From<SharedSubject> for String {
+    fn from(subject: SharedSubject) -> Self {
+        subject.as_str().to_string()
+    }
+}
 
-/// Router traffic event subject.
-pub const ROUTER_TRAFFIC_EVENT: &str = "mikrom.router.traffic";
+impl std::fmt::Display for SharedSubject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
-// ── Scheduler Subjects ───────────────────────────────────────────────────────
-
-/// Scheduler job updates subject.
-pub const SCHEDULER_JOB_UPDATES: &str = "mikrom.scheduler.job_updates";
-
-/// Scheduler VM failure subject.
-pub const SCHEDULER_VM_FAILED: &str = "mikrom.scheduler.vm_failed";
-
-/// Scheduler list apps subject (request/reply).
-pub const SCHEDULER_LIST_APPS: &str = "mikrom.scheduler.list_apps";
-
-/// Scheduler list workers subject (request/reply).
-pub const SCHEDULER_LIST_WORKERS: &str = "mikrom.scheduler.list_workers";
-
-/// Scheduler deploy subject (request/reply).
-pub const SCHEDULER_DEPLOY: &str = "mikrom.scheduler.deploy";
-
-/// Scheduler pause app subject (request/reply).
-pub const SCHEDULER_PAUSE_APP: &str = "mikrom.scheduler.pause_app";
-
-/// Scheduler resume app subject (request/reply).
-pub const SCHEDULER_RESUME_APP: &str = "mikrom.scheduler.resume_app";
-
-/// Scheduler delete app subject (request/reply).
-pub const SCHEDULER_DELETE_APP: &str = "mikrom.scheduler.delete_app";
-
-/// Scheduler scale app subject (request/reply).
-pub const SCHEDULER_SCALE_APP: &str = "mikrom.scheduler.scale_app";
-
-/// Scheduler update app scaling config subject (request/reply).
-pub const SCHEDULER_UPDATE_APP_SCALING_CONFIG: &str = "mikrom.scheduler.update_app_scaling_config";
-
-/// Scheduler cancel app subject (request/reply).
-pub const SCHEDULER_CANCEL_APP: &str = "mikrom.scheduler.cancel_app";
-
-/// Scheduler get job subject (request/reply).
-pub const SCHEDULER_GET_JOB: &str = "mikrom.scheduler.get_job";
-
-// ── Builder Subjects ─────────────────────────────────────────────────────────
-
-/// Builder build subject (request/reply).
-pub const BUILDER_BUILD: &str = "mikrom.builder.build";
-
-/// Builder get status subject (request/reply).
-pub const BUILDER_GET_STATUS: &str = "mikrom.builder.get_status";
+// Backwards-compatible aliases for existing callers.
+pub const ROUTER_CONFIG_UPDATED: &str = SharedSubject::RouterConfigUpdated.as_str();
+pub const ROUTER_TLS_CERT_UPDATED: &str = SharedSubject::RouterTlsCertUpdated.as_str();
+pub const ROUTER_ACME_CHALLENGE_UPDATED: &str = SharedSubject::RouterAcmeChallengeUpdated.as_str();
+pub const ROUTER_TRAFFIC_EVENT: &str = SharedSubject::RouterTrafficEvent.as_str();
+pub const SCHEDULER_JOB_UPDATES: &str = SharedSubject::SchedulerJobUpdates.as_str();
+pub const SCHEDULER_WORKER_HEARTBEAT: &str = SharedSubject::SchedulerWorkerHeartbeat.as_str();
+pub const SCHEDULER_ROUTER_HEARTBEAT: &str = SharedSubject::SchedulerRouterHeartbeat.as_str();
+pub const SCHEDULER_VM_FAILED: &str = SharedSubject::SchedulerVmFailed.as_str();
+pub const SCHEDULER_LIST_APPS: &str = SharedSubject::SchedulerListApps.as_str();
+pub const SCHEDULER_LIST_WORKERS: &str = SharedSubject::SchedulerListWorkers.as_str();
+pub const SCHEDULER_DEPLOY: &str = SharedSubject::SchedulerDeploy.as_str();
+pub const SCHEDULER_PAUSE_APP: &str = SharedSubject::SchedulerPauseApp.as_str();
+pub const SCHEDULER_RESUME_APP: &str = SharedSubject::SchedulerResumeApp.as_str();
+pub const SCHEDULER_DELETE_APP: &str = SharedSubject::SchedulerDeleteApp.as_str();
+pub const SCHEDULER_SCALE_APP: &str = SharedSubject::SchedulerScaleApp.as_str();
+pub const SCHEDULER_UPDATE_APP_SCALING_CONFIG: &str =
+    SharedSubject::SchedulerUpdateAppScalingConfig.as_str();
+pub const SCHEDULER_CANCEL_APP: &str = SharedSubject::SchedulerCancelApp.as_str();
+pub const SCHEDULER_GET_JOB: &str = SharedSubject::SchedulerGetJob.as_str();
+pub const BUILDER_BUILD: &str = SharedSubject::BuilderBuild.as_str();
+pub const BUILDER_GET_STATUS: &str = SharedSubject::BuilderGetStatus.as_str();
 
 /// Subject prefix for VM logs.
 pub const LOGS_PREFIX: &str = "mikrom.logs";
-
-// ── Helper Functions ─────────────────────────────────────────────────────────
 
 /// Returns the subject for a specific VM's logs.
 pub fn vm_logs(vm_id: &str) -> String {

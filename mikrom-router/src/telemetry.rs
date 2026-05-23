@@ -14,6 +14,18 @@ use tracing::{error, info};
 
 const TELEMETRY_INTERVAL_SECS: u64 = 5;
 
+async fn publish_best_effort(
+    nats: &Client,
+    subject: impl Into<String>,
+    payload: Vec<u8>,
+    context: &'static str,
+) {
+    let subject = subject.into();
+    if let Err(e) = nats.publish(subject.clone(), payload.into()).await {
+        error!(%context, %subject, error = %e, "Failed to publish telemetry to NATS");
+    }
+}
+
 pub struct TelemetryLoop {
     nats_url: String,
     nats_use_tls: bool,
@@ -98,10 +110,13 @@ impl BackgroundService for TelemetryLoop {
                         continue;
                     }
 
-                    let subject = format!("mikrom.metrics.router.{}", self.router_id);
-                    if let Err(e) = nats.publish(subject, buf.into()).await {
-                        error!("Telemetry Loop: Failed to publish telemetry to NATS: {e}");
-                    }
+                    publish_best_effort(
+                        &nats,
+                        crate::subjects::router_metrics(&self.router_id),
+                        buf,
+                        "telemetry-loop",
+                    )
+                    .await;
                 }
                 _ = shutdown.changed() => {
                     info!("Telemetry Loop: Shutting down...");
@@ -148,9 +163,12 @@ pub async fn start_telemetry_loop(
             continue;
         }
 
-        let subject = format!("mikrom.metrics.router.{router_id}");
-        if let Err(e) = nats.publish(subject, buf.into()).await {
-            error!("Failed to publish telemetry to NATS: {e}");
-        }
+        publish_best_effort(
+            &nats,
+            crate::subjects::router_metrics(&router_id),
+            buf,
+            "telemetry-loop",
+        )
+        .await;
     }
 }

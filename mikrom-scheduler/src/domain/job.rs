@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::domain::{AppId, DeploymentId, HostId, JobId, UserId, VmId, VolumeId};
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum JobStatus {
@@ -52,7 +54,7 @@ pub enum AccessMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Volume {
-    pub volume_id: String,
+    pub volume_id: VolumeId,
     pub size_mib: u64,
     pub read_only: bool,
     pub pool_name: String,
@@ -113,32 +115,32 @@ impl Default for VmConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job {
-    pub job_id: String,
-    pub app_id: String,
+    pub job_id: JobId,
+    pub app_id: AppId,
     pub app_name: String,
     pub image: String,
-    pub user_id: String,
+    pub user_id: UserId,
     pub status: JobStatus,
-    pub host_id: Option<String>,
-    pub vm_id: Option<String>,
+    pub host_id: Option<HostId>,
+    pub vm_id: Option<VmId>,
     pub scheduled_at: Option<i64>,
     pub started_at: Option<i64>,
     pub stopped_at: Option<i64>,
     pub error_message: Option<String>,
     pub created_at: i64,
-    pub deployment_id: Option<String>,
+    pub deployment_id: Option<DeploymentId>,
     pub config: VmConfig,
 }
 
 impl Job {
     pub fn new(
-        job_id: String,
-        app_id: String,
+        job_id: JobId,
+        app_id: AppId,
         app_name: String,
         image: String,
         config: VmConfig,
-        user_id: String,
-        deployment_id: Option<String>,
+        user_id: UserId,
+        deployment_id: Option<DeploymentId>,
     ) -> Self {
         Self {
             job_id,
@@ -160,8 +162,8 @@ impl Job {
     }
 
     pub fn schedule(&mut self, host_id: String, vm_id: String) {
-        self.host_id = Some(host_id);
-        self.vm_id = Some(vm_id);
+        self.host_id = Some(HostId::from(host_id));
+        self.vm_id = Some(VmId::from(vm_id));
         self.status = JobStatus::Scheduled;
         self.scheduled_at = Some(chrono::Utc::now().timestamp());
     }

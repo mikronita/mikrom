@@ -15,10 +15,10 @@ use mikrom_api::repositories::{
 use mikrom_api::scheduler::NatsScheduler;
 use mikrom_api::test_utils::TestDb as ApiTestDb;
 use mikrom_proto::subjects;
-use mikrom_scheduler::application::AppService;
+use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
 use mikrom_scheduler::domain::{
-    AgentClient, AppConfig, AppRepository as _, DomainResult, Job, JobRepository as _, JobStatus,
-    VmConfig,
+    AgentClient, AppConfig, AppId, AppRepository as _, DeploymentId, DomainResult, HostId, Job,
+    JobId, JobRepository as _, JobStatus, UserId, VmConfig, VmId,
 };
 use mikrom_scheduler::infrastructure::db::{PgJobRepository, PgWorkerRepository};
 use mikrom_scheduler::infrastructure::nats::NatsEventLoop;
@@ -141,7 +141,7 @@ impl mikrom_scheduler::domain::AppRepository for MemoryAppRepository {
         self.inner
             .write()
             .await
-            .insert(config.id.clone(), config.clone());
+            .insert(config.id.to_string(), config.clone());
         self.mirror_to_api_db(&config).await?;
         Ok(())
     }
@@ -178,6 +178,11 @@ impl mikrom_scheduler::domain::AppRepository for MemoryAppRepository {
     }
 
     async fn remove_app_config(&self, app_id: &str) -> anyhow::Result<()> {
+        self.inner.write().await.remove(app_id);
+        Ok(())
+    }
+
+    async fn remove_app_and_jobs_by_app(&self, app_id: &str) -> anyhow::Result<()> {
         self.inner.write().await.remove(app_id);
         Ok(())
     }
@@ -646,6 +651,7 @@ async fn test_integration_ipv6_connectivity() {
 
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::large_futures)]
 #[allow(unreachable_code, unused_variables, unused_imports)]
 async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
     eprintln!(
@@ -817,7 +823,11 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         agent_client.clone(),
         nats_client.clone(),
         pool.clone(),
-        900,
+        SchedulerRuntimeConfig {
+            router_idle_timeout_secs: 900,
+            worker_stale_threshold_secs: 60,
+            restore_retry_backoff_secs: 3600,
+        },
     ));
     let scheduler_server = SchedulerServer::new(app_service.clone(), None);
     let scheduler_event_loop = NatsEventLoop::new(scheduler_server, nats_client.clone());
@@ -936,8 +946,8 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
 
     scheduler_app_repo
         .upsert(AppConfig {
-            id: app_record.id.to_string(),
-            user_id: app_record.user_id.to_string(),
+            id: AppId::from(app_record.id.to_string()),
+            user_id: UserId::from(app_record.user_id.to_string()),
             vpc_ipv6_prefix: String::new(),
             hostname: hostname.clone(),
             desired_replicas: 1,
@@ -972,8 +982,8 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
 
     let job_id = deployment.id.to_string();
     let mut job = Job::new(
-        job_id.clone(),
-        app_record.id.to_string(),
+        JobId::from(job_id.clone()),
+        AppId::from(app_record.id.to_string()),
         app_record.name.clone(),
         "demo:latest".to_string(),
         VmConfig {
@@ -988,12 +998,12 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
             health_check_path: "/".to_string(),
             hypervisor: mikrom_scheduler::domain::job::HypervisorType::Firecracker,
         },
-        app_record.user_id.to_string(),
-        Some(deployment.id.to_string()),
+        UserId::from(app_record.user_id.to_string()),
+        Some(DeploymentId::from(deployment.id.to_string())),
     );
     job.status = JobStatus::Running;
-    job.host_id = Some(worker_id.clone());
-    job.vm_id = Some("router-e2e-vm".to_string());
+    job.host_id = Some(HostId::from(worker_id.clone()));
+    job.vm_id = Some(VmId::from("router-e2e-vm".to_string()));
     let now = chrono::Utc::now().timestamp();
     job.scheduled_at = Some(now);
     job.started_at = Some(now);
@@ -1048,8 +1058,8 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
 
     scheduler_app_repo
         .update_app_config(AppConfig {
-            id: app_record.id.to_string(),
-            user_id: app_record.user_id.to_string(),
+            id: AppId::from(app_record.id.to_string()),
+            user_id: UserId::from(app_record.user_id.to_string()),
             vpc_ipv6_prefix: String::new(),
             hostname: hostname.clone(),
             desired_replicas: 1,

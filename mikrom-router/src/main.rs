@@ -6,6 +6,7 @@ pub mod nats;
 pub mod proxy;
 pub mod state;
 pub mod state_manager;
+pub mod subjects;
 pub mod telemetry;
 pub mod tls;
 pub mod traffic;

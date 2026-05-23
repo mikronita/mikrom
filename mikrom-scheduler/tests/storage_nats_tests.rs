@@ -1,7 +1,8 @@
 use futures::StreamExt;
 use mikrom_proto::agent::{AgentCommand, AgentCommandResponse};
 use mikrom_proto::scheduler::{CloneVolumeRequest, RestoreSnapshotRequest};
-use mikrom_scheduler::application::AppService;
+use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
+use mikrom_scheduler::domain::HostId;
 use mikrom_scheduler::domain::worker::{MockJobRepository, MockWorkerRepository, Worker};
 use mikrom_scheduler::infrastructure::nats::NatsEventLoop;
 use mikrom_scheduler::server::SchedulerServer;
@@ -21,6 +22,14 @@ async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     }
 }
 
+fn test_runtime() -> SchedulerRuntimeConfig {
+    SchedulerRuntimeConfig {
+        router_idle_timeout_secs: 900,
+        worker_stale_threshold_secs: 60,
+        restore_retry_backoff_secs: 3600,
+    }
+}
+
 #[tokio::test]
 async fn test_scheduler_storage_nats_dispatch() {
     let Some(client) = connect_nats_or_skip().await else {
@@ -31,20 +40,9 @@ async fn test_scheduler_storage_nats_dispatch() {
     let mut job_repo = MockJobRepository::new();
     job_repo.expect_list_jobs().returning(|_, _, _| Ok(vec![]));
 
-    // Correct way: AppService needs the REAL mocked repos
-    let mut app_service = AppService::new(
-        Arc::new(job_repo),
-        Arc::new(mikrom_scheduler::domain::app::MockAppRepository::new()),
-        Arc::new(MockWorkerRepository::new()), // Will re-mock below
-        Arc::new(mikrom_scheduler::infrastructure::nats::NatsAgentClient::new(client.clone())),
-        client.clone(),
-        sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
-        900,
-    );
-
     let mut worker_repo = MockWorkerRepository::new();
     let test_worker = Worker {
-        host_id: "test-host".to_string(),
+        host_id: HostId::from("test-host".to_string()),
         hostname: "test".to_string(),
         advertise_address: "127.0.0.1".to_string(),
         wireguard_pubkey: None,
@@ -53,6 +51,7 @@ async fn test_scheduler_storage_nats_dispatch() {
         metrics: None,
         registered_at: 0,
         last_heartbeat: chrono::Utc::now().timestamp(),
+        status: mikrom_scheduler::domain::WorkerStatus::Online,
         supported_hypervisors: vec![],
     };
     let test_worker_clone = test_worker.clone();
@@ -62,7 +61,15 @@ async fn test_scheduler_storage_nats_dispatch() {
     worker_repo
         .expect_list_workers()
         .returning(move || Ok(vec![test_worker.clone()]));
-    app_service.worker_repo = Arc::new(worker_repo);
+    let app_service = AppService::new(
+        Arc::new(job_repo),
+        Arc::new(mikrom_scheduler::domain::app::MockAppRepository::new()),
+        Arc::new(worker_repo),
+        Arc::new(mikrom_scheduler::infrastructure::nats::NatsAgentClient::new(client.clone())),
+        client.clone(),
+        sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
+        test_runtime(),
+    );
 
     let server = SchedulerServer {
         app_service: Arc::new(app_service),
@@ -73,7 +80,9 @@ async fn test_scheduler_storage_nats_dispatch() {
 
     // Start event loop in background
     let loop_handle = tokio::spawn(async move {
-        let _ = event_loop.run().await;
+        if let Err(e) = event_loop.run().await {
+            tracing::error!(error = %e, "test NATS event loop exited with error");
+        }
     });
 
     // Wait for subscriptions to settle

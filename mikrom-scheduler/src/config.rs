@@ -5,8 +5,17 @@ pub struct SchedulerConfig {
     pub database_url: String,
     pub nats_url: String,
 
+    #[serde(default = "default_http_port")]
+    pub http_port: u16,
+
     #[serde(default = "default_router_idle_timeout_secs")]
     pub router_idle_timeout_secs: i64,
+
+    #[serde(default = "default_worker_stale_threshold_secs")]
+    pub worker_stale_threshold_secs: i64,
+
+    #[serde(default = "default_restore_retry_backoff_secs")]
+    pub restore_retry_backoff_secs: i64,
 
     #[serde(default = "default_database_max_connections")]
     pub database_max_connections: u32,
@@ -22,12 +31,24 @@ fn default_use_tls() -> bool {
     false
 }
 
+fn default_http_port() -> u16 {
+    5003
+}
+
 fn default_database_max_connections() -> u32 {
     10
 }
 
 fn default_router_idle_timeout_secs() -> i64 {
     900
+}
+
+fn default_worker_stale_threshold_secs() -> i64 {
+    60
+}
+
+fn default_restore_retry_backoff_secs() -> i64 {
+    3600
 }
 
 fn default_certs_dir() -> String {
@@ -56,6 +77,7 @@ mod tests {
         ])
         .expect("config should deserialize");
 
+        assert_eq!(config.http_port, 5003);
         assert_eq!(config.router_idle_timeout_secs, 900);
     }
 
@@ -72,5 +94,20 @@ mod tests {
         .expect("config should deserialize");
 
         assert_eq!(config.router_idle_timeout_secs, 120);
+    }
+
+    #[test]
+    fn defaults_restore_retry_backoff_and_worker_stale_threshold() {
+        let config: SchedulerConfig = envy::from_iter(vec![
+            (
+                "DATABASE_URL".to_string(),
+                "postgres://localhost/mikrom".to_string(),
+            ),
+            ("NATS_URL".to_string(), "nats://localhost:4222".to_string()),
+        ])
+        .expect("config should deserialize");
+
+        assert_eq!(config.worker_stale_threshold_secs, 60);
+        assert_eq!(config.restore_retry_backoff_secs, 3600);
     }
 }

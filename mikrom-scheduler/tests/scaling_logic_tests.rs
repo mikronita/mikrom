@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-use mikrom_scheduler::application::AppService;
+use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
 use mikrom_scheduler::domain::{
-    AgentClient, AppConfig, AppRepository, DomainResult, Job, JobRepository, JobStatus, VmConfig,
-    Worker, WorkerRepository,
+    AgentClient, AppConfig, AppId, AppRepository, DeploymentId, DomainResult, HostId, Job, JobId,
+    JobRepository, JobStatus, UserId, VmConfig, VmId, Worker, WorkerRepository,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -17,6 +17,14 @@ async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     }
 }
 
+fn test_runtime() -> SchedulerRuntimeConfig {
+    SchedulerRuntimeConfig {
+        router_idle_timeout_secs: 900,
+        worker_stale_threshold_secs: 60,
+        restore_retry_backoff_secs: 3600,
+    }
+}
+
 struct MockScalingAppRepo {
     apps: Vec<AppConfig>,
 }
@@ -27,7 +35,7 @@ impl AppRepository for MockScalingAppRepo {
         Ok(())
     }
     async fn get_app_config(&self, app_id: &str) -> anyhow::Result<Option<AppConfig>> {
-        Ok(self.apps.iter().find(|a| a.id == app_id).cloned())
+        Ok(self.apps.iter().find(|a| a.id.as_ref() == app_id).cloned())
     }
     async fn get_app_config_by_hostname(
         &self,
@@ -49,6 +57,10 @@ impl AppRepository for MockScalingAppRepo {
     async fn remove_app_config(&self, _: &str) -> anyhow::Result<()> {
         Ok(())
     }
+
+    async fn remove_app_and_jobs_by_app(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 struct MockScalingJobRepo {
@@ -67,7 +79,7 @@ impl JobRepository for MockScalingJobRepo {
             .lock()
             .await
             .iter()
-            .find(|j| j.job_id == job_id)
+            .find(|j| j.job_id.as_ref() == job_id)
             .cloned())
     }
     async fn update_job_status(&self, job_id: &str, status: JobStatus) -> DomainResult<()> {
@@ -76,7 +88,7 @@ impl JobRepository for MockScalingJobRepo {
             .lock()
             .await
             .iter_mut()
-            .find(|j| j.job_id == job_id)
+            .find(|j| j.job_id.as_ref() == job_id)
         {
             job.status = status;
         }
@@ -88,7 +100,7 @@ impl JobRepository for MockScalingJobRepo {
             .lock()
             .await
             .iter_mut()
-            .find(|j| j.job_id == job_id)
+            .find(|j| j.job_id.as_ref() == job_id)
         {
             job.status = JobStatus::Running;
         }
@@ -100,7 +112,7 @@ impl JobRepository for MockScalingJobRepo {
             .lock()
             .await
             .iter_mut()
-            .find(|j| j.job_id == job_id)
+            .find(|j| j.job_id.as_ref() == job_id)
         {
             job.status = JobStatus::Failed;
         }
@@ -112,18 +124,24 @@ impl JobRepository for MockScalingJobRepo {
             .lock()
             .await
             .iter_mut()
-            .find(|j| j.job_id == job_id)
+            .find(|j| j.job_id.as_ref() == job_id)
         {
             job.status = JobStatus::Cancelled;
         }
         Ok(())
     }
     async fn remove_job(&self, job_id: &str) -> DomainResult<()> {
-        self.jobs.lock().await.retain(|j| j.job_id != job_id);
+        self.jobs
+            .lock()
+            .await
+            .retain(|j| j.job_id.as_ref() != job_id);
         Ok(())
     }
     async fn remove_jobs_by_app(&self, app_id: &str) -> DomainResult<()> {
-        self.jobs.lock().await.retain(|j| j.app_id != app_id);
+        self.jobs
+            .lock()
+            .await
+            .retain(|j| j.app_id.as_ref() != app_id);
         Ok(())
     }
     async fn list_jobs<'a>(
@@ -136,7 +154,7 @@ impl JobRepository for MockScalingJobRepo {
         Ok(jobs
             .iter()
             .filter(|j| {
-                let app_match = app_id.map(|id| j.app_id == id).unwrap_or(true);
+                let app_match = app_id.map(|id| j.app_id.as_ref() == id).unwrap_or(true);
                 let status_match = status.map(|s| j.status == s).unwrap_or(true);
                 app_match && status_match
             })
@@ -173,7 +191,7 @@ impl WorkerRepository for MockScalingWorkerRepo {
     }
     async fn get_worker(&self, _: &str) -> DomainResult<Option<Worker>> {
         Ok(Some(Worker {
-            host_id: "host-1".to_string(),
+            host_id: HostId::from("host-1".to_string()),
             hostname: "host1".to_string(),
             advertise_address: "1.1.1.1".to_string(),
             wireguard_pubkey: None,
@@ -182,12 +200,13 @@ impl WorkerRepository for MockScalingWorkerRepo {
             metrics: None,
             registered_at: 0,
             last_heartbeat: chrono::Utc::now().timestamp(),
+            status: mikrom_scheduler::domain::WorkerStatus::Online,
             supported_hypervisors: vec![],
         }))
     }
     async fn list_workers(&self) -> DomainResult<Vec<Worker>> {
         Ok(vec![Worker {
-            host_id: "host-1".to_string(),
+            host_id: HostId::from("host-1".to_string()),
             hostname: "host1".to_string(),
             advertise_address: "1.1.1.1".to_string(),
             wireguard_pubkey: None,
@@ -196,11 +215,16 @@ impl WorkerRepository for MockScalingWorkerRepo {
             metrics: None,
             registered_at: 0,
             last_heartbeat: chrono::Utc::now().timestamp(),
+            status: mikrom_scheduler::domain::WorkerStatus::Online,
             supported_hypervisors: vec![],
         }])
     }
     async fn get_available_workers(&self, _: i64) -> DomainResult<Vec<Worker>> {
         self.list_workers().await
+    }
+
+    async fn mark_stale_workers_offline(&self, _: i64) -> DomainResult<u64> {
+        Ok(0)
     }
 }
 
@@ -295,8 +319,8 @@ impl AgentClient for MockScalingAgentClient {
 async fn test_reconcile_scale_up_from_zero_manual() {
     let app_id = "app-1";
     let app_config = AppConfig {
-        id: app_id.to_string(),
-        user_id: "user-1".to_string(),
+        id: AppId::from(app_id.to_string()),
+        user_id: UserId::from("user-1".to_string()),
         vpc_ipv6_prefix: "fd00::".to_string(),
         hostname: "app1.example.com".to_string(),
         desired_replicas: 1,
@@ -330,7 +354,7 @@ async fn test_reconcile_scale_up_from_zero_manual() {
         agent_client,
         nats_client,
         pool,
-        900,
+        test_runtime(),
     );
 
     service.reconcile_apps().await.unwrap();
@@ -352,8 +376,8 @@ async fn test_reconcile_scale_up_from_zero_with_traffic() {
     let app_id = "app-1";
     let now = chrono::Utc::now().timestamp();
     let app_config = AppConfig {
-        id: app_id.to_string(),
-        user_id: "user-1".to_string(),
+        id: AppId::from(app_id.to_string()),
+        user_id: UserId::from("user-1".to_string()),
         vpc_ipv6_prefix: "fd00::".to_string(),
         hostname: "app1.example.com".to_string(),
         desired_replicas: 1,
@@ -368,19 +392,19 @@ async fn test_reconcile_scale_up_from_zero_with_traffic() {
     };
 
     let paused_job = Job {
-        job_id: "job-1".to_string(),
-        app_id: app_id.to_string(),
+        job_id: JobId::from("job-1".to_string()),
+        app_id: AppId::from(app_id.to_string()),
         app_name: "app1".to_string(),
         image: "img".to_string(),
-        user_id: "user-1".to_string(),
+        user_id: UserId::from("user-1".to_string()),
         status: JobStatus::Paused,
-        host_id: Some("host-1".to_string()),
-        vm_id: Some("vm-1".to_string()),
+        host_id: Some(HostId::from("host-1".to_string())),
+        vm_id: Some(VmId::from("vm-1".to_string())),
         created_at: now - 100,
         started_at: None,
         stopped_at: None,
         scheduled_at: None,
-        deployment_id: Some("dep-1".to_string()),
+        deployment_id: Some(DeploymentId::from("dep-1".to_string())),
         config: VmConfig::default(),
         error_message: None,
     };
@@ -405,7 +429,7 @@ async fn test_reconcile_scale_up_from_zero_with_traffic() {
         agent_client,
         nats_client,
         pool,
-        900,
+        test_runtime(),
     );
 
     service.reconcile_apps().await.unwrap();
@@ -431,8 +455,8 @@ async fn test_reconcile_skips_restore_during_backoff() {
     let app_id = "app-1";
     let now = chrono::Utc::now().timestamp();
     let app_config = AppConfig {
-        id: app_id.to_string(),
-        user_id: "user-1".to_string(),
+        id: AppId::from(app_id.to_string()),
+        user_id: UserId::from("user-1".to_string()),
         vpc_ipv6_prefix: "fd00::".to_string(),
         hostname: "app1.example.com".to_string(),
         desired_replicas: 1,
@@ -447,19 +471,19 @@ async fn test_reconcile_skips_restore_during_backoff() {
     };
 
     let paused_job = Job {
-        job_id: "job-1".to_string(),
-        app_id: app_id.to_string(),
+        job_id: JobId::from("job-1".to_string()),
+        app_id: AppId::from(app_id.to_string()),
         app_name: "app1".to_string(),
         image: "img".to_string(),
-        user_id: "user-1".to_string(),
+        user_id: UserId::from("user-1".to_string()),
         status: JobStatus::Paused,
-        host_id: Some("host-1".to_string()),
-        vm_id: Some("vm-1".to_string()),
+        host_id: Some(HostId::from("host-1".to_string())),
+        vm_id: Some(VmId::from("vm-1".to_string())),
         created_at: now - 100,
         started_at: None,
         stopped_at: None,
         scheduled_at: None,
-        deployment_id: Some("dep-1".to_string()),
+        deployment_id: Some(DeploymentId::from("dep-1".to_string())),
         config: VmConfig::default(),
         error_message: None,
     };
@@ -484,7 +508,7 @@ async fn test_reconcile_skips_restore_during_backoff() {
         agent_client,
         nats_client,
         pool,
-        900,
+        test_runtime(),
     );
 
     service.reconcile_apps().await.unwrap();

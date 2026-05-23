@@ -1,6 +1,6 @@
+use crate::application::{AppContext, publish_job_update_best_effort};
 use crate::domain::{
-    AgentClient, DomainError, DomainResult, Job, JobRepository, JobStatus, SchedulingStrategy,
-    VmConfig, Worker, WorkerRepository,
+    DomainError, DomainResult, Job, JobStatus, SchedulingStrategy, VmConfig, Worker,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,10 +8,7 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct DeploymentService {
-    job_repo: Arc<dyn JobRepository>,
-    worker_repo: Arc<dyn WorkerRepository>,
-    agent_client: Arc<dyn AgentClient>,
-    nats_client: async_nats::Client,
+    ctx: Arc<AppContext>,
 }
 
 pub struct DeployAppParams {
@@ -26,92 +23,116 @@ pub struct DeployAppParams {
 }
 
 impl DeploymentService {
-    pub fn new(
-        job_repo: Arc<dyn JobRepository>,
-        worker_repo: Arc<dyn WorkerRepository>,
-        agent_client: Arc<dyn AgentClient>,
-        nats_client: async_nats::Client,
-    ) -> Self {
-        Self {
-            job_repo,
-            worker_repo,
-            agent_client,
-            nats_client,
-        }
+    pub fn new(ctx: Arc<AppContext>) -> Self {
+        Self { ctx }
     }
 
     pub async fn deploy_app(&self, params: DeployAppParams) -> DomainResult<Job> {
-        let job_id = Uuid::new_v4().to_string();
-        let vm_id = Uuid::new_v4().to_string();
+        let telemetry = self.ctx.telemetry.clone();
+        telemetry
+            .observe_result("app", "deploy_app", async {
+                let job_id = Uuid::new_v4().to_string();
+                let vm_id = Uuid::new_v4().to_string();
 
-        let mut config = params.config;
-        config = self.apply_ipv6_assignment(config, &job_id, &params.vpc_ipv6_prefix);
-        let worker = self
-            .select_best_worker(&config, &params.app_id, params.strategy)
-            .await?;
-        let host_id = worker.host_id.clone();
+                let mut config = params.config;
+                config = self.apply_ipv6_assignment(config, &job_id, &params.vpc_ipv6_prefix);
+                let worker = self
+                    .select_best_worker(&config, &params.app_id, params.strategy)
+                    .await?;
+                let host_id = worker.host_id.clone();
 
-        let mut job = Job::new(
-            job_id.clone(),
-            params.app_id.clone(),
-            params.app_name,
-            params.image.clone(),
-            config,
-            params.user_id.clone(),
-            Some(params.deployment_id),
-        );
-        job.schedule(host_id.clone(), vm_id.clone());
+                let mut job = Job::new(
+                    job_id.clone().into(),
+                    params.app_id.clone().into(),
+                    params.app_name,
+                    params.image.clone(),
+                    config,
+                    params.user_id.clone().into(),
+                    Some(params.deployment_id.clone().into()),
+                );
+                job.schedule(host_id.to_string(), vm_id.to_string());
 
-        self.job_repo.add_job(job.clone()).await?;
+                self.ctx.job_repo.add_job(job.clone()).await?;
 
-        tracing::info!(job_id = %job_id, host_id = %host_id, "Dispatching job to agent");
+                tracing::info!(job_id = %job_id, host_id = %host_id, "Dispatching job to agent");
 
-        if let Err(e) = self
-            .agent_client
-            .start_vm(&host_id, &params.app_id, &params.image, &vm_id, &job.config)
+                if let Err(e) = self
+                    .ctx
+                    .agent_client
+                    .start_vm(&host_id, &params.app_id, &params.image, &vm_id, &job.config)
+                    .await
+                {
+                    tracing::error!(job_id = %job_id, error = %e, "Failed to deploy to agent");
+                    if let Err(remove_err) = self.ctx.job_repo.remove_job(&job_id).await {
+                        tracing::warn!(
+                            job_id = %job_id,
+                            error = %remove_err,
+                            "Failed to roll back partially created job after deployment failure"
+                        );
+                    }
+                    return Err(e);
+                }
+
+                if let Err(e) = self
+                    .ctx
+                    .job_repo
+                    .start_job(&job_id, chrono::Utc::now().timestamp())
+                    .await
+                {
+                    tracing::error!(job_id = %job_id, error = %e, "Failed to persist deployed job");
+                    let host_id_string = host_id.to_string();
+                    if let Err(cleanup_err) =
+                        Self::rollback_failed_deploy(&self.ctx, &job_id, &host_id_string, &vm_id)
+                            .await
+                    {
+                        tracing::warn!(
+                            job_id = %job_id,
+                            host_id = %host_id,
+                            vm_id = %vm_id,
+                            error = %cleanup_err,
+                            "Rollback after start_job failure also failed"
+                        );
+                    }
+                    return Err(e);
+                }
+                job.status = JobStatus::Running;
+                job.started_at = Some(chrono::Utc::now().timestamp());
+
+                // Notify cluster of new job
+                publish_job_update_best_effort(
+                    &self.ctx.nats_client,
+                    &job,
+                    "deploy-app-job-update",
+                )
+                .await;
+
+                Ok(job)
+            })
             .await
-        {
-            tracing::error!(job_id = %job_id, error = %e, "Failed to deploy to agent");
-            let _ = self.job_repo.remove_job(&job_id).await;
-            return Err(e);
-        }
-
-        self.job_repo
-            .start_job(&job_id, chrono::Utc::now().timestamp())
-            .await?;
-        job.status = JobStatus::Running;
-        job.started_at = Some(chrono::Utc::now().timestamp());
-
-        // Notify cluster of new job
-        let _ = self.publish_job_update(&job).await;
-
-        Ok(job)
     }
 
-    async fn publish_job_update(&self, job: &Job) -> DomainResult<()> {
-        use mikrom_proto::scheduler::AppInfo;
-        use prost::Message;
+    async fn rollback_failed_deploy(
+        ctx: &Arc<AppContext>,
+        job_id: &str,
+        host_id: &str,
+        vm_id: &str,
+    ) -> DomainResult<()> {
+        if let Err(e) = ctx.agent_client.delete_vm(host_id, vm_id).await {
+            tracing::warn!(
+                job_id = %job_id,
+                host_id = %host_id,
+                vm_id = %vm_id,
+                error = %e,
+                "Best-effort VM cleanup failed after deployment rollback"
+            );
+        }
 
-        let info = AppInfo {
-            job_id: job.job_id.clone(),
-            app_id: job.app_id.clone(),
-            app_name: job.app_name.clone(),
-            image: job.image.clone(),
-            status: job.status as i32,
-            host_id: job.host_id.clone().unwrap_or_default(),
-            vm_id: job.vm_id.clone().unwrap_or_default(),
-            user_id: job.user_id.clone(),
-            deployment_id: job.deployment_id.clone().unwrap_or_default(),
-            ipv6_address: job.config.ipv6_address.clone().unwrap_or_default(),
-            ..Default::default()
-        };
-
-        let mut buf = Vec::new();
-        if info.encode(&mut buf).is_ok() {
-            let _ = self
-                .nats_client
-                .publish(mikrom_proto::subjects::SCHEDULER_JOB_UPDATES, buf.into())
-                .await;
+        if let Err(e) = ctx.job_repo.remove_job(job_id).await {
+            tracing::warn!(
+                job_id = %job_id,
+                error = %e,
+                "Best-effort job cleanup failed after deployment rollback"
+            );
         }
 
         Ok(())
@@ -142,7 +163,10 @@ impl DeploymentService {
             .metrics
             .as_ref()
             .map_or(0.0, |metrics| metrics.calculate_score(10));
-        let penalty = (*app_counts_per_host.get(&worker.host_id).unwrap_or(&0) as f32) * 0.2;
+        let penalty = (*app_counts_per_host
+            .get(worker.host_id.as_ref())
+            .unwrap_or(&0) as f32)
+            * 0.2;
         (base_score - penalty).max(0.0)
     }
 
@@ -152,7 +176,7 @@ impl DeploymentService {
         app_id: &str,
         strategy: SchedulingStrategy,
     ) -> DomainResult<Worker> {
-        let workers = self.worker_repo.get_available_workers(30).await?;
+        let workers = self.ctx.worker_repo.get_available_workers(30).await?;
 
         if workers.is_empty() {
             return Err(DomainError::NoWorkers);
@@ -202,11 +226,11 @@ impl DeploymentService {
         &self,
         app_id: &str,
     ) -> DomainResult<HashMap<String, u32>> {
-        let jobs = self.job_repo.list_jobs(None, None, None).await?;
+        let jobs = self.ctx.job_repo.list_jobs(None, None, None).await?;
         let mut app_counts_per_host: HashMap<String, u32> = HashMap::new();
 
         for job in jobs {
-            if job.app_id != app_id {
+            if job.app_id != app_id.into() {
                 continue;
             }
 
@@ -215,7 +239,7 @@ impl DeploymentService {
             }
 
             if let Some(host_id) = job.host_id {
-                *app_counts_per_host.entry(host_id).or_insert(0) += 1;
+                *app_counts_per_host.entry(host_id.to_string()).or_insert(0) += 1;
             }
         }
 
