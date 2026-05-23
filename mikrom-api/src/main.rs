@@ -5,7 +5,7 @@ use mikrom_api::AppState;
 use mikrom_api::config::ApiConfig;
 use mikrom_api::create_app_with_rate_limits;
 use mikrom_api::db;
-use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
+use mikrom_api::infrastructure::db::PostgresUserRepository;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,12 +24,14 @@ async fn main() -> anyhow::Result<()> {
     let api_port = config.api_port;
 
     let user_repo = PostgresUserRepository::new(db_pool.clone());
-    let app_repo = mikrom_api::repositories::PostgresAppRepository::new(
+    let app_repo = mikrom_api::infrastructure::db::PostgresAppRepository::new(
         db_pool.clone(),
         config.master_key.clone(),
     );
-    let github_repo = mikrom_api::repositories::PostgresGithubRepository::new(db_pool.clone());
-    let volume_repo = mikrom_api::repositories::PostgresVolumeRepository::new(db_pool.clone());
+    let github_repo =
+        mikrom_api::infrastructure::db::PostgresGithubRepository::new(db_pool.clone());
+    let volume_repo =
+        mikrom_api::infrastructure::db::PostgresVolumeRepository::new(db_pool.clone());
 
     let (deployment_events, _) = tokio::sync::broadcast::channel(100);
     let (workspace_events, _) = tokio::sync::broadcast::channel(100);

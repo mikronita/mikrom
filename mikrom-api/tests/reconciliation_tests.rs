@@ -2,10 +2,10 @@
 mod common;
 use futures::StreamExt;
 use mikrom_api::AppState;
+use mikrom_api::infrastructure::db::PostgresAppRepository;
 use mikrom_api::repositories::app_repository::{
     AppRepository, NewDeployment, UpdateDeploymentParams,
 };
-use mikrom_api::repositories::postgres_app_repository::PostgresAppRepository;
 use mikrom_api::test_utils::TestDb;
 use std::sync::Arc;
 use tokio::time::{Duration, timeout};
@@ -29,11 +29,9 @@ async fn test_route_reconciliation_on_startup() {
 
     let state = AppState {
         app_repo: app_repo.clone(),
-        user_repo: Arc::new(
-            mikrom_api::repositories::postgres_user_repository::PostgresUserRepository::new(
-                pool.clone(),
-            ),
-        ),
+        user_repo: Arc::new(mikrom_api::infrastructure::db::PostgresUserRepository::new(
+            pool.clone(),
+        )),
         volume_repo: Arc::new(
             mikrom_api::repositories::volume_repository::MockVolumeRepository::new(),
         ),

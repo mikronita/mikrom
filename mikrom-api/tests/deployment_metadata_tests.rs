@@ -1,8 +1,8 @@
+use mikrom_api::infrastructure::db::PostgresAppRepository;
+use mikrom_api::infrastructure::db::PostgresUserRepository;
 use mikrom_api::repositories::app_repository::{
     AppRepository, NewDeployment, UpdateDeploymentParams,
 };
-use mikrom_api::repositories::postgres_app_repository::PostgresAppRepository;
-use mikrom_api::repositories::postgres_user_repository::PostgresUserRepository;
 use mikrom_api::repositories::user_repository::{NewUser, UserRepository, UserRole};
 use mikrom_api::test_utils::TestDb;
 use uuid::Uuid;
