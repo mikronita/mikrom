@@ -1,4 +1,5 @@
 use crate::domain::error::DomainResult;
+use crate::domain::id::HostId;
 use crate::domain::job::{Job, JobStatus, VmConfig};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -56,9 +57,25 @@ impl HostMetrics {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum WorkerStatus {
+    Online,
+    Offline,
+}
+
+impl WorkerStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Online => "Online",
+            Self::Offline => "Offline",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Worker {
-    pub host_id: String,
+    pub host_id: HostId,
     pub hostname: String,
     pub advertise_address: String,
     pub wireguard_pubkey: Option<String>,
@@ -67,6 +84,7 @@ pub struct Worker {
     pub metrics: Option<HostMetrics>,
     pub registered_at: i64,
     pub last_heartbeat: i64,
+    pub status: WorkerStatus,
     pub supported_hypervisors: Vec<crate::domain::job::HypervisorType>,
 }
 
@@ -86,6 +104,7 @@ pub trait WorkerRepository: Send + Sync {
     async fn get_worker(&self, host_id: &str) -> DomainResult<Option<Worker>>;
     async fn list_workers(&self) -> DomainResult<Vec<Worker>>;
     async fn get_available_workers(&self, threshold_secs: i64) -> DomainResult<Vec<Worker>>;
+    async fn mark_stale_workers_offline(&self, threshold_secs: i64) -> DomainResult<u64>;
 }
 
 #[mockall::automock]

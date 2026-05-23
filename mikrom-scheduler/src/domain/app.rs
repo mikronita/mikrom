@@ -1,9 +1,10 @@
+use crate::domain::{AppId, UserId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    pub id: String,
-    pub user_id: String,
+    pub id: AppId,
+    pub user_id: UserId,
     pub vpc_ipv6_prefix: String,
     pub hostname: String,
     pub desired_replicas: u32,
@@ -20,8 +21,8 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            id: String::new(),
-            user_id: String::new(),
+            id: AppId::default(),
+            user_id: UserId::default(),
             vpc_ipv6_prefix: String::new(),
             hostname: String::new(),
             desired_replicas: 0,
@@ -47,6 +48,7 @@ pub trait AppRepository: Send + Sync {
     async fn list_all_apps(&self) -> anyhow::Result<Vec<AppConfig>>;
     async fn list_autoscaling_apps(&self) -> anyhow::Result<Vec<AppConfig>>;
     async fn remove_app_config(&self, app_id: &str) -> anyhow::Result<()>;
+    async fn remove_app_and_jobs_by_app(&self, app_id: &str) -> anyhow::Result<()>;
 }
 
 #[cfg(test)]
@@ -62,8 +64,8 @@ mod tests {
     #[test]
     fn test_app_config_roundtrip_preserves_restore_backoff_field() {
         let config = AppConfig {
-            id: "app-1".to_string(),
-            user_id: "user-1".to_string(),
+            id: AppId::from("app-1"),
+            user_id: UserId::from("user-1"),
             vpc_ipv6_prefix: "fd00::".to_string(),
             hostname: "app.example.com".to_string(),
             desired_replicas: 2,

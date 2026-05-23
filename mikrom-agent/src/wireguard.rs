@@ -3,7 +3,9 @@ use base64::Engine as _;
 use futures::stream::TryStreamExt;
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::time::Duration;
 use tokio::net::lookup_host;
+use tokio::time::sleep;
 use tracing::{debug, info};
 
 #[neli::neli_enum(serialized_type = "u8")]
@@ -56,6 +58,10 @@ enum WgAllowedIpAttr {
 }
 
 impl neli::consts::genl::NlAttrType for WgAllowedIpAttr {}
+
+fn is_missing_device_error(error: &impl std::fmt::Display) -> bool {
+    error.to_string().contains("No such device")
+}
 
 pub struct WireGuardManager {
     interface: String,
@@ -130,14 +136,36 @@ impl WireGuardManager {
         info!("Initializing WireGuard interface {}", self.interface);
 
         let handle = self.rtnl_handle().await?;
-        self.delete_link_if_exists(&handle).await?;
-        self.create_wireguard_link(&handle).await?;
+        debug!(
+            "Checking whether WireGuard interface {} already exists",
+            self.interface
+        );
+        self.delete_link_if_exists(&handle).await.with_context(|| {
+            format!(
+                "Failed to delete existing WireGuard link {}",
+                self.interface
+            )
+        })?;
+        debug!("Creating WireGuard interface {}", self.interface);
+        self.create_wireguard_link(&handle).await.with_context(|| {
+            format!(
+                "Failed to create WireGuard interface {}. Ensure the wireguard kernel module is loaded and the process has CAP_NET_ADMIN.",
+                self.interface
+            )
+        })?;
 
         let addr = host_ipv6.parse::<Ipv6Addr>()?;
-        self.configure_device(private_key, self.listen_port, &[], false)
+        debug!("Configuring WireGuard device {}", self.interface);
+        self.configure_device_with_retry(private_key, self.listen_port, &[], false)
             .await?;
-        self.add_address(&handle, IpAddr::V6(addr), 128).await?;
-        self.set_link_up(&handle).await?;
+        debug!("Adding IPv6 address {} to {}", host_ipv6, self.interface);
+        self.add_address(&handle, IpAddr::V6(addr), 128)
+            .await
+            .with_context(|| format!("Failed to add IPv6 address to {}", self.interface))?;
+        debug!("Bringing WireGuard interface {} up", self.interface);
+        self.set_link_up(&handle).await.with_context(|| {
+            format!("Failed to bring WireGuard interface {} up", self.interface)
+        })?;
 
         info!(
             "WireGuard interface {} initialized with IP {}",
@@ -170,6 +198,8 @@ impl WireGuardManager {
     async fn delete_link_if_exists(&self, handle: &rtnetlink::Handle) -> anyhow::Result<()> {
         if let Some(index) = self.link_index(handle).await? {
             handle.link().del(index).execute().await?;
+        } else {
+            debug!("WireGuard interface {} does not exist yet", self.interface);
         }
         Ok(())
     }
@@ -180,16 +210,58 @@ impl WireGuardManager {
             .add()
             .wireguard(self.interface.clone())
             .execute()
-            .await?;
+            .await
+            .context("WireGuard netlink refused to create the interface")?;
 
         let index = self.link_index(handle).await?.ok_or_else(|| {
             anyhow::anyhow!("WireGuard interface {} was not created", self.interface)
         })?;
 
         // Set MTU 1420 for WireGuard to avoid fragmentation issues with 1500 TAP/Ethernet
-        handle.link().set(index).mtu(1420).execute().await?;
+        handle
+            .link()
+            .set(index)
+            .mtu(1420)
+            .execute()
+            .await
+            .context("Failed to set WireGuard MTU to 1420")?;
 
         Ok(index)
+    }
+
+    async fn configure_device_with_retry(
+        &self,
+        private_key: &str,
+        listen_port: u16,
+        peers: &[mikrom_proto::scheduler::Peer],
+        replace_peers: bool,
+    ) -> anyhow::Result<()> {
+        let mut last_error = None;
+
+        for attempt in 1..=3 {
+            match self
+                .configure_device(private_key, listen_port, peers, replace_peers)
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    let is_not_ready = is_missing_device_error(&err);
+                    if !is_not_ready || attempt == 3 {
+                        return Err(err);
+                    }
+
+                    tracing::warn!(
+                        attempt,
+                        error = %err,
+                        "WireGuard device is not ready yet; retrying configuration"
+                    );
+                    last_error = Some(err);
+                    sleep(Duration::from_millis(200 * attempt as u64)).await;
+                },
+            }
+        }
+
+        Err(last_error.expect("retry loop should have returned or stored an error"))
     }
 
     async fn link_index(&self, handle: &rtnetlink::Handle) -> anyhow::Result<Option<u32>> {
@@ -198,7 +270,12 @@ impl WireGuardManager {
             .get()
             .match_name(self.interface.clone())
             .execute();
-        Ok(links.try_next().await?.map(|msg| msg.header.index))
+        match links.try_next().await {
+            Ok(Some(msg)) => Ok(Some(msg.header.index)),
+            Ok(None) => Ok(None),
+            Err(e) if is_missing_device_error(&e) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn add_address(
@@ -250,8 +327,13 @@ impl WireGuardManager {
             utils::Groups,
         };
 
-        let (router, _) = NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
-        let family_id = router.resolve_genl_family("wireguard").await?;
+        let (router, _) = NlRouter::connect(NlFamily::Generic, None, Groups::empty())
+            .await
+            .context("Failed to connect to netlink generic family")?;
+        let family_id = router
+            .resolve_genl_family("wireguard")
+            .await
+            .context("Failed to resolve wireguard generic netlink family")?;
         let mut attrs = Vec::new();
 
         attrs.push(
@@ -331,13 +413,14 @@ impl WireGuardManager {
                 NlmF::ACK,
                 NlPayload::Payload(msg),
             )
-            .await?;
+            .await
+            .context("Failed to send WireGuard SETDEVICE request")?;
 
         while let Some(res) = recv
             .next::<u16, neli::genl::Genlmsghdr<WgCmd, WgDeviceAttr>>()
             .await
         {
-            res?;
+            res.context("WireGuard SETDEVICE returned an error")?;
         }
 
         Ok(())
@@ -673,7 +756,7 @@ impl WireGuardManager {
         use std::os::unix::fs::PermissionsExt;
         tokio::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600)).await?;
 
-        self.configure_device(private_key, self.listen_port, peers, true)
+        self.configure_device_with_retry(private_key, self.listen_port, peers, true)
             .await?;
 
         self.sync_routes(&route_targets).await?;
@@ -795,7 +878,9 @@ impl WireGuardManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::WireGuardManager;
+    use super::is_missing_device_error;
+    use std::io;
 
     #[test]
     fn test_get_host_ipv6_is_deterministic() {
@@ -812,6 +897,18 @@ mod tests {
             ip1.matches(':').count() >= 2,
             "IPv6 should have colons between segments"
         );
+    }
+
+    #[test]
+    fn missing_device_errors_are_treated_as_absent() {
+        let err = io::Error::from_raw_os_error(19);
+        assert!(is_missing_device_error(&err));
+    }
+
+    #[test]
+    fn unrelated_errors_are_not_treated_as_absent() {
+        let err = io::Error::from_raw_os_error(2);
+        assert!(!is_missing_device_error(&err));
     }
 
     #[tokio::test]

@@ -1,17 +1,107 @@
-use crate::domain::{HostMetrics, Worker};
+use super::subjects;
 use crate::server::SchedulerServer;
 use futures::StreamExt;
 use mikrom_proto::scheduler::{
-    AppStatusRequest, CancelRequest, DeleteAllByAppRequest, DeleteAppRequest, DeployRequest,
-    ListAppsRequest, ListWorkersRequest, PauseRequest, ResumeRequest, RouterHeartbeat,
-    WorkerHeartbeat,
+    AppStatusRequest, AppStatusResponse, CancelRequest, CancelResponse, DeleteAllByAppRequest,
+    DeleteAllByAppResponse, DeleteAppRequest, DeleteAppResponse, DeployRequest, DeployResponse,
+    ListAppsRequest, ListAppsResponse, ListWorkersRequest, ListWorkersResponse, PauseRequest,
+    PauseResponse, ResumeRequest, ResumeResponse, RouterHeartbeat, WorkerHeartbeat,
 };
 use prost::Message;
 use std::collections::HashSet;
+use std::fmt::Display;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 const MESH_PRUNING_THRESHOLD_SECS: i64 = 30;
-const DEFAULT_RESTORE_RETRY_BACKOFF_SECS: i64 = 3600;
+
+async fn publish_best_effort(
+    client: &async_nats::Client,
+    subject: impl Into<String>,
+    payload: Vec<u8>,
+    context: &'static str,
+) {
+    let subject = subject.into();
+    if let Err(e) = client.publish(subject.clone(), payload.into()).await {
+        tracing::warn!(
+            %context,
+            %subject,
+            error = %e,
+            "Failed to publish NATS message"
+        );
+    }
+}
+
+async fn publish_response_best_effort<T: Message>(
+    client: &async_nats::Client,
+    reply: async_nats::Subject,
+    response: &T,
+    context: &'static str,
+) {
+    let mut buf = Vec::new();
+    if let Err(e) = response.encode(&mut buf) {
+        tracing::warn!(
+            %context,
+            reply = %reply,
+            error = %e,
+            "Failed to encode NATS reply"
+        );
+        return;
+    }
+
+    publish_best_effort(client, reply.to_string(), buf, context).await;
+}
+
+async fn dispatch_request<TReq, TResp, F, Fut, E>(
+    server: SchedulerServer,
+    client: async_nats::Client,
+    message: async_nats::Message,
+    event: &'static str,
+    reply_context: &'static str,
+    handler: F,
+    error_response: impl FnOnce(E) -> TResp,
+) where
+    TReq: Message + Default + Send + 'static,
+    TResp: Message + Send + 'static,
+    F: FnOnce(TReq) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<TResp, E>> + Send,
+    E: Display,
+{
+    let subject = message.subject.clone();
+    let req = match TReq::decode(&message.payload[..]) {
+        Ok(req) => req,
+        Err(e) => {
+            tracing::warn!(
+                %event,
+                %subject,
+                error = %e,
+                "Failed to decode NATS request"
+            );
+            return;
+        },
+    };
+
+    let telemetry = server.app_service.context.telemetry.clone();
+    let result = telemetry
+        .observe_result("nats", event, async { handler(req).await })
+        .await;
+
+    let Some(reply) = message.reply else {
+        tracing::warn!(
+            %event,
+            %subject,
+            "NATS request did not include a reply subject"
+        );
+        return;
+    };
+
+    let response = match result {
+        Ok(resp) => resp,
+        Err(e) => error_response(e),
+    };
+
+    publish_response_best_effort(&client, reply, &response, reply_context).await;
+}
 
 pub struct NatsEventLoop {
     server: SchedulerServer,
@@ -35,29 +125,17 @@ impl NatsEventLoop {
         self
     }
 
-    fn restore_retry_backoff_secs_from(value: Option<&str>) -> i64 {
-        value
-            .and_then(|raw| raw.parse::<i64>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_RESTORE_RETRY_BACKOFF_SECS)
-    }
-
-    fn restore_retry_backoff_secs() -> i64 {
-        let env_value = std::env::var("MIKROM_RESTORE_RETRY_BACKOFF_SECS").ok();
-        Self::restore_retry_backoff_secs_from(env_value.as_deref())
-    }
-
     pub async fn run(self) -> anyhow::Result<()> {
         let client = self.client.clone();
         let queue_group = self.queue_group.clone();
 
         // 1. Heartbeats
         let mut heartbeat_sub = client
-            .subscribe("mikrom.scheduler.worker.heartbeat")
+            .subscribe(mikrom_proto::subjects::SCHEDULER_WORKER_HEARTBEAT)
             .await?;
 
         let mut router_heartbeat_sub = client
-            .subscribe("mikrom.scheduler.router.heartbeat")
+            .subscribe(mikrom_proto::subjects::SCHEDULER_ROUTER_HEARTBEAT)
             .await?;
         let mut router_traffic_sub = client
             .queue_subscribe(
@@ -68,31 +146,55 @@ impl NatsEventLoop {
 
         // 2. Queue Group Subscriptions for Load Balancing
         let mut deploy_sub = client
-            .queue_subscribe("mikrom.scheduler.deploy", queue_group.clone())
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_DEPLOY,
+                queue_group.clone(),
+            )
             .await?;
         let mut status_sub = client
-            .queue_subscribe("mikrom.scheduler.get_job", queue_group.clone())
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_GET_JOB,
+                queue_group.clone(),
+            )
             .await?;
         let mut list_sub = client
-            .queue_subscribe("mikrom.scheduler.list_apps", queue_group.clone())
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_LIST_APPS,
+                queue_group.clone(),
+            )
             .await?;
         let mut list_workers_sub = client
-            .queue_subscribe("mikrom.scheduler.list_workers", queue_group.clone())
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_LIST_WORKERS,
+                queue_group.clone(),
+            )
             .await?;
         let mut pause_sub = client
-            .queue_subscribe("mikrom.scheduler.pause_app", queue_group.clone())
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_PAUSE_APP,
+                queue_group.clone(),
+            )
             .await?;
         let mut resume_sub = client
-            .queue_subscribe("mikrom.scheduler.resume_app", queue_group.clone())
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_RESUME_APP,
+                queue_group.clone(),
+            )
             .await?;
         let mut cancel_sub = client
-            .queue_subscribe("mikrom.scheduler.cancel_app", queue_group.clone())
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_CANCEL_APP,
+                queue_group.clone(),
+            )
             .await?;
         let mut delete_sub = client
-            .queue_subscribe("mikrom.scheduler.delete_app", queue_group.clone())
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_DELETE_APP,
+                queue_group.clone(),
+            )
             .await?;
         let mut delete_all_sub = client
-            .queue_subscribe("mikrom.scheduler.delete_all_by_app", queue_group.clone())
+            .queue_subscribe(subjects::DELETE_ALL_BY_APP, queue_group.clone())
             .await?;
         let mut scale_sub = client
             .queue_subscribe(
@@ -101,13 +203,10 @@ impl NatsEventLoop {
             )
             .await?;
         let mut health_sub = client
-            .queue_subscribe("mikrom.scheduler.check_health", queue_group.clone())
+            .queue_subscribe(subjects::CHECK_HEALTH, queue_group.clone())
             .await?;
         let mut security_sub = client
-            .queue_subscribe(
-                "mikrom.scheduler.update_security_groups",
-                queue_group.clone(),
-            )
+            .queue_subscribe(subjects::UPDATE_SECURITY_GROUPS, queue_group.clone())
             .await?;
         let mut vm_failed_sub = client
             .queue_subscribe(
@@ -122,55 +221,55 @@ impl NatsEventLoop {
             )
             .await?;
         let mut create_volume_sub = client
-            .queue_subscribe("mikrom.scheduler.create_volume", queue_group.clone())
+            .queue_subscribe(subjects::CREATE_VOLUME, queue_group.clone())
             .await?;
         let mut snapshot_sub = client
-            .queue_subscribe("mikrom.scheduler.create_snapshot", queue_group.clone())
+            .queue_subscribe(subjects::CREATE_SNAPSHOT, queue_group.clone())
             .await?;
         let mut delete_volume_sub = client
-            .queue_subscribe("mikrom.scheduler.delete_volume", queue_group.clone())
+            .queue_subscribe(subjects::DELETE_VOLUME, queue_group.clone())
             .await?;
         let mut delete_snapshot_sub = client
-            .queue_subscribe("mikrom.scheduler.delete_snapshot", queue_group.clone())
+            .queue_subscribe(subjects::DELETE_SNAPSHOT, queue_group.clone())
             .await?;
         let mut restore_snapshot_sub = client
-            .queue_subscribe("mikrom.scheduler.restore_snapshot", queue_group.clone())
+            .queue_subscribe(subjects::RESTORE_SNAPSHOT, queue_group.clone())
             .await?;
         let mut clone_volume_sub = client
-            .queue_subscribe("mikrom.scheduler.clone_volume", queue_group.clone())
+            .queue_subscribe(subjects::CLONE_VOLUME, queue_group.clone())
             .await?;
         let mut vm_snapshot_create_sub = client
-            .queue_subscribe("mikrom.scheduler.vm_snapshot_create", queue_group.clone())
+            .queue_subscribe(subjects::VM_SNAPSHOT_CREATE, queue_group.clone())
             .await?;
         let mut vm_snapshot_restore_sub = client
-            .queue_subscribe("mikrom.scheduler.vm_snapshot_restore", queue_group.clone())
+            .queue_subscribe(subjects::VM_SNAPSHOT_RESTORE, queue_group.clone())
             .await?;
         let mut vm_snapshot_delete_sub = client
-            .queue_subscribe("mikrom.scheduler.vm_snapshot_delete", queue_group.clone())
+            .queue_subscribe(subjects::VM_SNAPSHOT_DELETE, queue_group.clone())
             .await?;
         let mut vm_snapshot_list_sub = client
-            .queue_subscribe("mikrom.scheduler.vm_snapshot_list", queue_group.clone())
+            .queue_subscribe(subjects::VM_SNAPSHOT_LIST, queue_group.clone())
             .await?;
         let mut attach_volume_sub = client
-            .queue_subscribe("mikrom.scheduler.attach_volume", queue_group.clone())
+            .queue_subscribe(subjects::ATTACH_VOLUME, queue_group.clone())
             .await?;
         let mut detach_volume_sub = client
-            .queue_subscribe("mikrom.scheduler.detach_volume", queue_group.clone())
+            .queue_subscribe(subjects::DETACH_VOLUME, queue_group.clone())
             .await?;
         let mut start_migration_sub = client
-            .queue_subscribe("mikrom.scheduler.start_migration", queue_group.clone())
+            .queue_subscribe(subjects::START_MIGRATION, queue_group.clone())
             .await?;
         let mut cancel_migration_sub = client
-            .queue_subscribe("mikrom.scheduler.cancel_migration", queue_group.clone())
+            .queue_subscribe(subjects::CANCEL_MIGRATION, queue_group.clone())
             .await?;
         let mut query_migration_sub = client
-            .queue_subscribe("mikrom.scheduler.query_migration", queue_group.clone())
+            .queue_subscribe(subjects::QUERY_MIGRATION, queue_group.clone())
             .await?;
         let mut set_balloon_sub = client
-            .queue_subscribe("mikrom.scheduler.set_balloon", queue_group.clone())
+            .queue_subscribe(subjects::SET_BALLOON, queue_group.clone())
             .await?;
         let mut query_balloon_sub = client
-            .queue_subscribe("mikrom.scheduler.query_balloon", queue_group.clone())
+            .queue_subscribe(subjects::QUERY_BALLOON, queue_group.clone())
             .await?;
 
         tracing::info!("NATS Event Loop started, listening for messages...");
@@ -247,7 +346,7 @@ impl NatsEventLoop {
             let mut buf = Vec::new();
             if update.encode(&mut buf).is_ok() {
                 let subject = format!("mikrom.scheduler.network.mesh.{}", host_id);
-                let _ = client.publish(subject, buf.into()).await;
+                publish_best_effort(&client, subject, buf, "mesh-update").await;
             }
         }
     }
@@ -322,7 +421,7 @@ impl NatsEventLoop {
                 allowed_ips.sort();
 
                 mikrom_proto::scheduler::Peer {
-                    host_id: w.host_id.clone(),
+                    host_id: w.host_id.to_string(),
                     endpoint: w.advertise_address.clone(),
                     wireguard_pubkey: w.wireguard_pubkey.clone().unwrap_or_default(),
                     allowed_ips,
@@ -335,12 +434,12 @@ impl NatsEventLoop {
         for w in &workers {
             let peers: Vec<_> = all_peers
                 .iter()
-                .filter(|p| p.host_id != w.host_id)
+                .filter(|p| p.host_id != w.host_id.to_string())
                 .cloned()
                 .collect();
 
             updates.insert(
-                w.host_id.clone(),
+                w.host_id.to_string(),
                 mikrom_proto::scheduler::NetworkMeshUpdate { peers },
             );
         }
@@ -352,24 +451,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(req) =
-                mikrom_proto::scheduler::UpdateSecurityGroupsRequest::decode(&message.payload[..])
-            {
-                let result = server.update_security_groups(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => resp,
-                        Err(e) => mikrom_proto::scheduler::UpdateSecurityGroupsResponse {
-                            success: false,
-                            message: e.to_string(),
-                        },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::UpdateSecurityGroupsRequest,
+                mikrom_proto::scheduler::UpdateSecurityGroupsResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                "update_security_groups",
+                "scheduler-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.update_security_groups(req).await }
+                },
+                |e| mikrom_proto::scheduler::UpdateSecurityGroupsResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -377,23 +481,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::UpdateAppScalingConfigRequest;
-            if let Ok(req) = UpdateAppScalingConfigRequest::decode(&message.payload[..]) {
-                let result = server.update_app_scaling_config(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => resp,
-                        Err(e) => mikrom_proto::scheduler::UpdateAppScalingConfigResponse {
-                            success: false,
-                            message: e.to_string(),
-                        },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::UpdateAppScalingConfigRequest,
+                mikrom_proto::scheduler::UpdateAppScalingConfigResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                "update_app_scaling_config",
+                "scheduler-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.update_app_scaling_config(req).await }
+                },
+                |e| mikrom_proto::scheduler::UpdateAppScalingConfigResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -401,35 +511,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(req) =
-                mikrom_proto::scheduler::CheckHealthRequest::decode(&message.payload[..])
-            {
-                tracing::info!(
-                    job_id = %req.job_id,
-                    user_id = %req.user_id,
-                    "Received scheduler check-health request"
-                );
-                let result = server.check_health(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => {
-                            tracing::info!(
-                                is_healthy = resp.is_healthy,
-                                "Scheduler check-health request completed"
-                            );
-                            resp
-                        },
-                        Err(e) => mikrom_proto::scheduler::CheckHealthResponse {
-                            is_healthy: false,
-                            message: e.to_string(),
-                        },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::CheckHealthRequest,
+                mikrom_proto::scheduler::CheckHealthResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                "check_health",
+                "scheduler-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.check_health(req).await }
+                },
+                |e| mikrom_proto::scheduler::CheckHealthResponse {
+                    is_healthy: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -439,30 +543,14 @@ impl NatsEventLoop {
         tokio::spawn(async move {
             match RouterHeartbeat::decode(&message.payload[..]) {
                 Ok(heartbeat) => {
-                    tracing::debug!(
-                        "Received heartbeat from router {} with WG IP {}",
-                        heartbeat.host_id,
-                        heartbeat.wireguard_ip
-                    );
-                    let worker = Worker {
-                        host_id: heartbeat.host_id.clone(),
-                        hostname: heartbeat.hostname.clone(),
-                        advertise_address: heartbeat.advertise_address.clone(),
-                        wireguard_pubkey: Some(heartbeat.wireguard_pubkey.clone()),
-                        wireguard_ip: Some(heartbeat.wireguard_ip.clone()),
-                        wireguard_port: Some(heartbeat.wireguard_port),
-                        metrics: None,
-                        registered_at: chrono::Utc::now().timestamp(),
-                        last_heartbeat: chrono::Utc::now().timestamp(),
-                        supported_hypervisors: vec![],
-                    };
-
-                    if let Err(e) = server.app_service.worker_repo.register(worker).await {
-                        tracing::error!(
-                            "Failed to register router {} from heartbeat: {}",
-                            heartbeat.host_id,
-                            e
-                        );
+                    let telemetry = server.app_service.context.telemetry.clone();
+                    if let Err(e) = telemetry
+                        .observe_result("nats", "router_heartbeat", async {
+                            server.app_service.process_router_heartbeat(heartbeat).await
+                        })
+                        .await
+                    {
+                        tracing::error!("Failed to process router heartbeat: {}", e);
                     } else {
                         // Fast-path: Broadcast mesh update immediately on new registration
                         Self::broadcast_mesh_updates(server, client).await;
@@ -481,122 +569,31 @@ impl NatsEventLoop {
         tokio::spawn(async move {
             match mikrom_proto::router::RouterTrafficEvent::decode(&message.payload[..]) {
                 Ok(event) => {
-                    tracing::info!(
-                        hostname = %event.hostname,
-                        router_id = %event.router_id,
-                        timestamp = %event.timestamp,
-                        "Received router traffic event"
-                    );
-
-                    let Some(mut app) = server
+                    // Fetch app ID for deduplication guard
+                    let app_id = match server
                         .app_service
                         .app_repo
                         .get_app_config_by_hostname(&event.hostname)
                         .await
-                        .ok()
-                        .flatten()
+                    {
+                        Ok(Some(app)) => app.id,
+                        _ => return,
+                    };
+
+                    let Some(_restore_guard) =
+                        Self::acquire_router_restore_guard(&router_restore_in_progress, &app_id)
                     else {
                         return;
                     };
 
-                    let timestamp = if event.timestamp > 0 {
-                        event.timestamp
-                    } else {
-                        chrono::Utc::now().timestamp()
-                    };
-
-                    app.last_router_traffic_at = timestamp;
-                    if let Err(e) = server
-                        .app_service
-                        .app_repo
-                        .update_app_config(app.clone())
+                    let telemetry = server.app_service.context.telemetry.clone();
+                    if let Err(e) = telemetry
+                        .observe_result("nats", "router_traffic", async {
+                            server.app_service.process_router_traffic(event).await
+                        })
                         .await
                     {
-                        tracing::error!(
-                            hostname = %event.hostname,
-                            error = %e,
-                            "Failed to persist router traffic timestamp"
-                        );
-                        return;
-                    }
-
-                    let restore_retry_blocked =
-                        app.restore_retry_after_at > 0 && timestamp < app.restore_retry_after_at;
-
-                    let current_count = server
-                        .app_service
-                        .job_repo
-                        .list_jobs(Some(&app.user_id), Some(&app.id), None)
-                        .await
-                        .map(|jobs| {
-                            jobs.into_iter()
-                                .filter(|job| {
-                                    matches!(
-                                        job.status,
-                                        crate::domain::JobStatus::Pending
-                                            | crate::domain::JobStatus::Scheduled
-                                            | crate::domain::JobStatus::Running
-                                    )
-                                })
-                                .count() as u32
-                        })
-                        .unwrap_or_default();
-
-                    if current_count == 0 && app.desired_replicas > 0 {
-                        if restore_retry_blocked {
-                            tracing::warn!(
-                                app_id = %app.id,
-                                hostname = %event.hostname,
-                                retry_after = %app.restore_retry_after_at,
-                                "Skipping router-triggered restore while backoff is active"
-                            );
-                            return;
-                        }
-
-                        let Some(_restore_guard) = Self::acquire_router_restore_guard(
-                            &router_restore_in_progress,
-                            &app.id,
-                        ) else {
-                            return;
-                        };
-
-                        tracing::info!(
-                            event = "restore_from_router_traffic",
-                            app_id = %app.id,
-                            hostname = %event.hostname,
-                            desired = %app.desired_replicas,
-                            "Router traffic arrived for a scaled-to-zero app; restoring replicas"
-                        );
-
-                        if let Err(e) = server
-                            .app_service
-                            .scale_app(&app.id, app.desired_replicas, &app.user_id)
-                            .await
-                        {
-                            tracing::error!(
-                                app_id = %app.id,
-                                hostname = %event.hostname,
-                                error = %e,
-                                "Failed to restore app after router traffic"
-                            );
-                        } else {
-                            let _ = server
-                                .app_service
-                                .app_repo
-                                .update_app_config(crate::domain::AppConfig {
-                                    last_scaled_to_zero_at: timestamp,
-                                    restore_retry_after_at: 0,
-                                    ..app.clone()
-                                })
-                                .await;
-                            tracing::info!(
-                                event = "restore_from_router_traffic_completed",
-                                app_id = %app.id,
-                                hostname = %event.hostname,
-                                desired = %app.desired_replicas,
-                                "App restored after router traffic"
-                            );
-                        }
+                        tracing::error!("Failed to process router traffic: {}", e);
                     }
                 },
                 Err(e) => {
@@ -612,218 +609,17 @@ impl NatsEventLoop {
         tokio::spawn(async move {
             match WorkerHeartbeat::decode(&message.payload[..]) {
                 Ok(heartbeat) => {
-                    use mikrom_proto::scheduler::VmStatus as ProtoVmStatus;
-
-                    tracing::debug!(
-                        "Received heartbeat from worker {} with WG IP {}",
-                        heartbeat.host_id,
-                        heartbeat.wireguard_ip
-                    );
-                    let worker = Worker {
-                        host_id: heartbeat.host_id.clone(),
-                        hostname: heartbeat.hostname.clone(),
-                        advertise_address: heartbeat.advertise_address.clone(),
-                        wireguard_pubkey: Some(heartbeat.wireguard_pubkey.clone()),
-                        wireguard_ip: Some(heartbeat.wireguard_ip.clone()),
-                        wireguard_port: Some(heartbeat.wireguard_port),
-                        metrics: None, // Will update below
-                        registered_at: chrono::Utc::now().timestamp(),
-                        last_heartbeat: chrono::Utc::now().timestamp(),
-                        supported_hypervisors: heartbeat
-                            .supported_hypervisors
-                            .iter()
-                            .filter_map(|&v| crate::domain::job::HypervisorType::from_i32(v))
-                            .collect(),
-                    };
-
-                    if let Err(e) = server.app_service.worker_repo.register(worker).await {
-                        tracing::error!(
-                            "Failed to register worker {} from heartbeat: {}",
-                            heartbeat.host_id,
-                            e
-                        );
+                    let telemetry = server.app_service.context.telemetry.clone();
+                    if let Err(e) = telemetry
+                        .observe_result("nats", "worker_heartbeat", async {
+                            server.app_service.process_worker_heartbeat(heartbeat).await
+                        })
+                        .await
+                    {
+                        tracing::error!("Failed to process worker heartbeat: {}", e);
                     } else {
                         // Fast-path: Broadcast mesh update immediately on new registration
                         Self::broadcast_mesh_updates(server.clone(), client.clone()).await;
-                    }
-
-                    if let Some(metrics) = heartbeat.metrics {
-                        let running_jobs_by_vm = server
-                            .app_service
-                            .job_repo
-                            .list_jobs(None, None, Some(crate::domain::JobStatus::Running))
-                            .await
-                            .map(|jobs| {
-                                jobs.into_iter()
-                                    .filter(|job| {
-                                        job.host_id.as_deref() == Some(&heartbeat.host_id)
-                                    })
-                                    .filter_map(|job| job.vm_id.clone().map(|vm_id| (vm_id, job)))
-                                    .collect::<std::collections::HashMap<_, _>>()
-                            })
-                            .unwrap_or_default();
-
-                        for (vm_id, vm_metrics) in &metrics.vms {
-                            if vm_metrics.status != ProtoVmStatus::Failed as i32 {
-                                continue;
-                            }
-
-                            let Some(job) = running_jobs_by_vm.get(vm_id) else {
-                                continue;
-                            };
-
-                            let message = if vm_metrics.error_message.is_empty() {
-                                "VM startup failed".to_string()
-                            } else {
-                                vm_metrics.error_message.clone()
-                            };
-
-                            tracing::error!(
-                                job_id = %job.job_id,
-                                vm_id = %vm_id,
-                                host_id = %heartbeat.host_id,
-                                error = %message,
-                                "Detected failed VM in worker heartbeat"
-                            );
-
-                            if let Err(e) = server
-                                .app_service
-                                .job_repo
-                                .fail_job(
-                                    &job.job_id,
-                                    message.clone(),
-                                    chrono::Utc::now().timestamp(),
-                                )
-                                .await
-                            {
-                                tracing::error!(
-                                    job_id = %job.job_id,
-                                    vm_id = %vm_id,
-                                    error = %e,
-                                    "Failed to persist failed VM state"
-                                );
-                                continue;
-                            }
-
-                            let mut updated_job = job.clone();
-                            updated_job.status = crate::domain::JobStatus::Failed;
-                            updated_job.stopped_at = Some(chrono::Utc::now().timestamp());
-                            updated_job.error_message = Some(message);
-
-                            if let Ok(Some(mut app)) = server
-                                .app_service
-                                .app_repo
-                                .get_app_config(&updated_job.app_id)
-                                .await
-                            {
-                                let retry_after = chrono::Utc::now().timestamp()
-                                    + Self::restore_retry_backoff_secs();
-                                app.restore_retry_after_at = retry_after;
-                                if let Err(e) =
-                                    server.app_service.app_repo.update_app_config(app).await
-                                {
-                                    tracing::error!(
-                                        app_id = %updated_job.app_id,
-                                        retry_after = %retry_after,
-                                        error = %e,
-                                        "Failed to persist restore backoff after failed VM heartbeat"
-                                    );
-                                }
-                            }
-
-                            use mikrom_proto::scheduler::AppInfo;
-                            use prost::Message;
-
-                            let info = AppInfo {
-                                job_id: updated_job.job_id.clone(),
-                                app_id: updated_job.app_id.clone(),
-                                app_name: updated_job.app_name.clone(),
-                                image: updated_job.image.clone(),
-                                status: updated_job.status as i32,
-                                host_id: updated_job.host_id.clone().unwrap_or_default(),
-                                vm_id: updated_job.vm_id.clone().unwrap_or_default(),
-                                user_id: updated_job.user_id.clone(),
-                                deployment_id: updated_job
-                                    .deployment_id
-                                    .clone()
-                                    .unwrap_or_default(),
-                                ipv6_address: updated_job
-                                    .config
-                                    .ipv6_address
-                                    .clone()
-                                    .unwrap_or_default(),
-                                ..Default::default()
-                            };
-
-                            let mut buf = Vec::new();
-                            if info.encode(&mut buf).is_ok() {
-                                let _ = client
-                                    .publish(
-                                        mikrom_proto::subjects::SCHEDULER_JOB_UPDATES,
-                                        buf.into(),
-                                    )
-                                    .await;
-                            }
-                        }
-
-                        for (vm_id, vm_metrics) in &metrics.vms {
-                            if vm_metrics.status == ProtoVmStatus::Failed as i32 {
-                                continue;
-                            }
-
-                            let Some(job) = running_jobs_by_vm.get(vm_id) else {
-                                continue;
-                            };
-
-                            let event = serde_json::json!({
-                                "app_id": job.app_id,
-                                "job_id": job.job_id,
-                                "deployment_id": job.deployment_id,
-                                "vm_id": vm_id,
-                                "cpu_usage": vm_metrics.cpu_usage,
-                                "ram_used_bytes": vm_metrics.ram_used_bytes,
-                                "tx_bytes": vm_metrics.tx_bytes,
-                                "rx_bytes": vm_metrics.rx_bytes,
-                                "status": "RUNNING",
-                                "ipv6_address": job.config.ipv6_address,
-                            });
-
-                            let subject = format!("mikrom.metrics.{}.{}", job.app_id, vm_id);
-                            let _ = client.publish(subject, event.to_string().into()).await;
-                        }
-
-                        let host_metrics = HostMetrics {
-                            cpu_usage: metrics.cpu_usage,
-                            ram_used_bytes: metrics.ram_used_bytes,
-                            ram_total_bytes: metrics.ram_total_bytes,
-                            disk_used_bytes: metrics.disk_used_bytes,
-                            disk_total_bytes: metrics.disk_total_bytes,
-                            apps_count: metrics.apps_count,
-                            load_avg_1: metrics.load_avg_1,
-                            load_avg_5: metrics.load_avg_5,
-                            load_avg_15: metrics.load_avg_15,
-                            timestamp: metrics.timestamp,
-                            vms: metrics
-                                .vms
-                                .into_iter()
-                                .map(|(k, v)| {
-                                    (
-                                        k,
-                                        crate::domain::VmMetrics {
-                                            cpu_usage: v.cpu_usage,
-                                            ram_used_bytes: v.ram_used_bytes,
-                                            tx_bytes: v.tx_bytes,
-                                            rx_bytes: v.rx_bytes,
-                                        },
-                                    )
-                                })
-                                .collect(),
-                        };
-                        let _ = server
-                            .app_service
-                            .worker_repo
-                            .update_metrics(&heartbeat.host_id, host_metrics)
-                            .await;
                     }
                 },
                 Err(e) => {
@@ -837,152 +633,41 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(req) = DeployRequest::decode(&message.payload[..]) {
-                tracing::info!(
-                    app_id = %req.app_id,
-                    deployment_id = %req.deployment_id,
-                    user_id = %req.user_id,
-                    "Received scheduler deploy request"
-                );
-                let result = server.deploy_app(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => {
-                            tracing::info!(
-                                job_id = %resp.job_id,
-                                status = %resp.status,
-                                "Scheduler deploy request completed"
-                            );
-                            resp
-                        },
-                        Err(e) => mikrom_proto::scheduler::DeployResponse {
-                            message: e.to_string(),
-                            ..Default::default()
-                        },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<DeployRequest, DeployResponse, _, _, anyhow::Error>(
+                server,
+                client,
+                message,
+                "deploy",
+                "deploy-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.deploy_app(req).await }
+                },
+                |e| DeployResponse {
+                    message: e.to_string(),
+                    ..Default::default()
+                },
+            )
+            .await;
         });
     }
 
     async fn handle_vm_failed(&self, message: async_nats::Message) {
         let server = self.server.clone();
-        let client = self.client.clone();
         tokio::spawn(async move {
-            let Ok(event) = mikrom_proto::agent::VmFailureEvent::decode(&message.payload[..])
-            else {
-                tracing::warn!("Failed to decode VM failure event");
-                return;
-            };
-
-            let Some(job) = server
-                .app_service
-                .job_repo
-                .find_job_by_vm_id(&event.vm_id)
-                .await
-                .ok()
-                .flatten()
-            else {
-                tracing::warn!(vm_id = %event.vm_id, "VM failure event received for unknown job");
-                return;
-            };
-
-            if matches!(
-                job.status,
-                crate::domain::JobStatus::Failed
-                    | crate::domain::JobStatus::Cancelled
-                    | crate::domain::JobStatus::Stopped
-            ) {
-                tracing::debug!(
-                    job_id = %job.job_id,
-                    vm_id = %event.vm_id,
-                    "Ignoring VM failure event for terminal job"
-                );
-                return;
-            }
-
-            let message_text = if event.error_message.is_empty() {
-                "VM startup failed".to_string()
-            } else {
-                event.error_message
-            };
-
-            tracing::error!(
-                job_id = %job.job_id,
-                vm_id = %event.vm_id,
-                error = %message_text,
-                "Received immediate VM failure event"
-            );
-
-            if let Err(e) = server
-                .app_service
-                .job_repo
-                .fail_job(
-                    &job.job_id,
-                    message_text.clone(),
-                    chrono::Utc::now().timestamp(),
-                )
-                .await
-            {
-                tracing::error!(
-                    job_id = %job.job_id,
-                    vm_id = %event.vm_id,
-                    error = %e,
-                    "Failed to persist VM failure event"
-                );
-                return;
-            }
-
-            let mut updated_job = job;
-            updated_job.status = crate::domain::JobStatus::Failed;
-            updated_job.stopped_at = Some(chrono::Utc::now().timestamp());
-            updated_job.error_message = Some(message_text);
-
-            if let Ok(Some(mut app)) = server
-                .app_service
-                .app_repo
-                .get_app_config(&updated_job.app_id)
-                .await
-            {
-                let retry_after =
-                    chrono::Utc::now().timestamp() + Self::restore_retry_backoff_secs();
-                app.restore_retry_after_at = retry_after;
-                if let Err(e) = server.app_service.app_repo.update_app_config(app).await {
-                    tracing::error!(
-                        app_id = %updated_job.app_id,
-                        retry_after = %retry_after,
-                        error = %e,
-                        "Failed to persist restore backoff after VM failure"
-                    );
+            if let Ok(event) = mikrom_proto::agent::VmFailureEvent::decode(&message.payload[..]) {
+                let telemetry = server.app_service.context.telemetry.clone();
+                if let Err(e) = telemetry
+                    .observe_result("nats", "vm_failure", async {
+                        server.app_service.process_vm_failure(event).await
+                    })
+                    .await
+                {
+                    tracing::error!("Failed to process VM failure event: {}", e);
                 }
-            }
-
-            use mikrom_proto::scheduler::AppInfo;
-            use prost::Message;
-
-            let info = AppInfo {
-                job_id: updated_job.job_id.clone(),
-                app_id: updated_job.app_id.clone(),
-                app_name: updated_job.app_name.clone(),
-                image: updated_job.image.clone(),
-                status: updated_job.status as i32,
-                host_id: updated_job.host_id.clone().unwrap_or_default(),
-                vm_id: updated_job.vm_id.clone().unwrap_or_default(),
-                user_id: updated_job.user_id.clone(),
-                deployment_id: updated_job.deployment_id.clone().unwrap_or_default(),
-                ipv6_address: updated_job.config.ipv6_address.clone().unwrap_or_default(),
-                ..Default::default()
-            };
-
-            let mut buf = Vec::new();
-            if info.encode(&mut buf).is_ok() {
-                let _ = client
-                    .publish(mikrom_proto::subjects::SCHEDULER_JOB_UPDATES, buf.into())
-                    .await;
+            } else {
+                tracing::warn!("Failed to decode VM failure event");
             }
         });
     }
@@ -991,22 +676,23 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(req) = AppStatusRequest::decode(&message.payload[..]) {
-                let result = server.get_app_status(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => resp,
-                        Err(e) => mikrom_proto::scheduler::AppStatusResponse {
-                            error_message: e.to_string(),
-                            ..Default::default()
-                        },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<AppStatusRequest, AppStatusResponse, _, _, anyhow::Error>(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_GET_JOB,
+                "status-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.get_app_status(req).await }
+                },
+                |e| AppStatusResponse {
+                    error_message: e.to_string(),
+                    ..Default::default()
+                },
+            )
+            .await;
         });
     }
 
@@ -1014,29 +700,20 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(req) = ListAppsRequest::decode(&message.payload[..]) {
-                tracing::info!(
-                    user_id = %req.user_id,
-                    "Received scheduler list-apps request"
-                );
-                let result = server.list_apps(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => {
-                            tracing::info!(
-                                apps_count = resp.apps.len(),
-                                "Scheduler list-apps request completed"
-                            );
-                            resp
-                        },
-                        Err(_) => mikrom_proto::scheduler::ListAppsResponse { apps: vec![] },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<ListAppsRequest, ListAppsResponse, _, _, anyhow::Error>(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_LIST_APPS,
+                "list-apps-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.list_apps(req).await }
+                },
+                |_| ListAppsResponse { apps: vec![] },
+            )
+            .await;
         });
     }
 
@@ -1044,19 +721,20 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(req) = ListWorkersRequest::decode(&message.payload[..]) {
-                let result = server.list_workers(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => resp,
-                        Err(_) => mikrom_proto::scheduler::ListWorkersResponse { workers: vec![] },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<ListWorkersRequest, ListWorkersResponse, _, _, anyhow::Error>(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_LIST_WORKERS,
+                "list-workers-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.list_workers(req).await }
+                },
+                |_| ListWorkersResponse { workers: vec![] },
+            )
+            .await;
         });
     }
 
@@ -1064,35 +742,23 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(req) = PauseRequest::decode(&message.payload[..]) {
-                let job_id = req.job_id.clone();
-                tracing::info!(
-                    job_id = %job_id,
-                    user_id = %req.user_id,
-                    "Received scheduler pause request"
-                );
-                let result = server.pause_app(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => {
-                            tracing::info!(
-                                job_id = %job_id,
-                                success = resp.success,
-                                "Scheduler pause request completed"
-                            );
-                            resp
-                        },
-                        Err(e) => mikrom_proto::scheduler::PauseResponse {
-                            success: false,
-                            message: e.to_string(),
-                        },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<PauseRequest, PauseResponse, _, _, anyhow::Error>(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_PAUSE_APP,
+                "pause-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.pause_app(req).await }
+                },
+                |e| PauseResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1100,35 +766,23 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(req) = ResumeRequest::decode(&message.payload[..]) {
-                let job_id = req.job_id.clone();
-                tracing::info!(
-                    job_id = %job_id,
-                    user_id = %req.user_id,
-                    "Received scheduler resume request"
-                );
-                let result = server.resume_app(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => {
-                            tracing::info!(
-                                job_id = %job_id,
-                                success = resp.success,
-                                "Scheduler resume request completed"
-                            );
-                            resp
-                        },
-                        Err(e) => mikrom_proto::scheduler::ResumeResponse {
-                            success: false,
-                            message: e.to_string(),
-                        },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<ResumeRequest, ResumeResponse, _, _, anyhow::Error>(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_RESUME_APP,
+                "resume-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.resume_app(req).await }
+                },
+                |e| ResumeResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1136,22 +790,23 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(req) = CancelRequest::decode(&message.payload[..]) {
-                let result = server.cancel_app(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => resp,
-                        Err(e) => mikrom_proto::scheduler::CancelResponse {
-                            success: false,
-                            message: e.to_string(),
-                        },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<CancelRequest, CancelResponse, _, _, anyhow::Error>(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_CANCEL_APP,
+                "cancel-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.cancel_app(req).await }
+                },
+                |e| CancelResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1159,33 +814,23 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(req) = DeleteAppRequest::decode(&message.payload[..]) {
-                tracing::info!(
-                    job_id = %req.job_id,
-                    user_id = %req.user_id,
-                    "Received scheduler delete request"
-                );
-                let result = server.delete_app(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => {
-                            tracing::info!(
-                                success = resp.success,
-                                "Scheduler delete request completed"
-                            );
-                            resp
-                        },
-                        Err(e) => mikrom_proto::scheduler::DeleteAppResponse {
-                            success: false,
-                            message: e.to_string(),
-                        },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<DeleteAppRequest, DeleteAppResponse, _, _, anyhow::Error>(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_DELETE_APP,
+                "delete-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.delete_app(req).await }
+                },
+                |e| DeleteAppResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1193,33 +838,23 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            if let Ok(req) = DeleteAllByAppRequest::decode(&message.payload[..]) {
-                tracing::info!(
-                    app_id = %req.app_id,
-                    user_id = %req.user_id,
-                    "Received scheduler delete-all request"
-                );
-                let result = server.delete_all_by_app(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => {
-                            tracing::info!(
-                                success = resp.success,
-                                "Scheduler delete-all request completed"
-                            );
-                            resp
-                        },
-                        Err(e) => mikrom_proto::scheduler::DeleteAllByAppResponse {
-                            success: false,
-                            message: e.to_string(),
-                        },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<DeleteAllByAppRequest, DeleteAllByAppResponse, _, _, anyhow::Error>(
+                server,
+                client,
+                message,
+                subjects::DELETE_ALL_BY_APP,
+                "delete-all-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.delete_all_by_app(req).await }
+                },
+                |e| DeleteAllByAppResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1227,35 +862,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::ScaleAppRequest;
-            if let Ok(req) = ScaleAppRequest::decode(&message.payload[..]) {
-                tracing::info!(
-                    app_id = %req.app_id,
-                    desired_replicas = %req.desired_replicas,
-                    user_id = %req.user_id,
-                    "Received scheduler scale request"
-                );
-                let result = server.scale_app(req).await;
-                if let Some(reply) = message.reply {
-                    let response = match result {
-                        Ok(resp) => {
-                            tracing::info!(
-                                success = resp.success,
-                                "Scheduler scale request completed"
-                            );
-                            resp
-                        },
-                        Err(e) => mikrom_proto::scheduler::ScaleAppResponse {
-                            success: false,
-                            message: e.to_string(),
-                        },
-                    };
-                    let mut buf = Vec::new();
-                    if response.encode(&mut buf).is_ok() {
-                        let _ = client.publish(reply, buf.into()).await;
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::ScaleAppRequest,
+                mikrom_proto::scheduler::ScaleAppResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_SCALE_APP,
+                "scale-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.scale_app(req).await }
+                },
+                |e| mikrom_proto::scheduler::ScaleAppResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1263,30 +892,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::CreateVolumeRequest;
-            if let Ok(req) = CreateVolumeRequest::decode(&message.payload[..]) {
-                tracing::info!(volume_id = %req.volume_id, "Received scheduler create-volume request");
-                let result = server.create_volume(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::CreateVolumeResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::CreateVolumeRequest,
+                mikrom_proto::scheduler::CreateVolumeResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::CREATE_VOLUME,
+                "create-volume-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.create_volume(req).await }
+                },
+                |e| mikrom_proto::scheduler::CreateVolumeResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1294,30 +922,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::CreateSnapshotRequest;
-            if let Ok(req) = CreateSnapshotRequest::decode(&message.payload[..]) {
-                tracing::info!(volume_id = %req.volume_id, snapshot_name = %req.snapshot_name, "Received scheduler create-snapshot request");
-                let result = server.create_snapshot(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::CreateSnapshotResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::CreateSnapshotRequest,
+                mikrom_proto::scheduler::CreateSnapshotResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::CREATE_SNAPSHOT,
+                "create-snapshot-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.create_snapshot(req).await }
+                },
+                |e| mikrom_proto::scheduler::CreateSnapshotResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1325,30 +952,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::DeleteVolumeRequest;
-            if let Ok(req) = DeleteVolumeRequest::decode(&message.payload[..]) {
-                tracing::info!(volume_id = %req.volume_id, "Received scheduler delete-volume request");
-                let result = server.delete_volume(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::DeleteVolumeResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::DeleteVolumeRequest,
+                mikrom_proto::scheduler::DeleteVolumeResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::DELETE_VOLUME,
+                "delete-volume-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.delete_volume(req).await }
+                },
+                |e| mikrom_proto::scheduler::DeleteVolumeResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1356,30 +982,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::DeleteSnapshotRequest;
-            if let Ok(req) = DeleteSnapshotRequest::decode(&message.payload[..]) {
-                tracing::info!(volume_id = %req.volume_id, snapshot_name = %req.snapshot_name, "Received scheduler delete-snapshot request");
-                let result = server.delete_snapshot(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::DeleteSnapshotResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::DeleteSnapshotRequest,
+                mikrom_proto::scheduler::DeleteSnapshotResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::DELETE_SNAPSHOT,
+                "delete-snapshot-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.delete_snapshot(req).await }
+                },
+                |e| mikrom_proto::scheduler::DeleteSnapshotResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1387,30 +1012,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::RestoreSnapshotRequest;
-            if let Ok(req) = RestoreSnapshotRequest::decode(&message.payload[..]) {
-                tracing::info!(volume_id = %req.volume_id, snapshot_name = %req.snapshot_name, "Received scheduler restore-snapshot request");
-                let result = server.restore_snapshot(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::RestoreSnapshotResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::RestoreSnapshotRequest,
+                mikrom_proto::scheduler::RestoreSnapshotResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::RESTORE_SNAPSHOT,
+                "restore-snapshot-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.restore_snapshot(req).await }
+                },
+                |e| mikrom_proto::scheduler::RestoreSnapshotResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1418,30 +1042,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::CloneVolumeRequest;
-            if let Ok(req) = CloneVolumeRequest::decode(&message.payload[..]) {
-                tracing::info!(source_volume_id = %req.source_volume_id, target_volume_id = %req.target_volume_id, "Received scheduler clone-volume request");
-                let result = server.clone_volume(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::CloneVolumeResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::CloneVolumeRequest,
+                mikrom_proto::scheduler::CloneVolumeResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::CLONE_VOLUME,
+                "clone-volume-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.clone_volume(req).await }
+                },
+                |e| mikrom_proto::scheduler::CloneVolumeResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1449,29 +1072,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::VmSnapshotCreateRequest;
-            if let Ok(req) = VmSnapshotCreateRequest::decode(&message.payload[..]) {
-                let result = server.vm_snapshot_create(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::VmSnapshotCreateResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::VmSnapshotCreateRequest,
+                mikrom_proto::scheduler::VmSnapshotCreateResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::VM_SNAPSHOT_CREATE,
+                "vm-snapshot-create-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.vm_snapshot_create(req).await }
+                },
+                |e| mikrom_proto::scheduler::VmSnapshotCreateResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1479,29 +1102,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::VmSnapshotRestoreRequest;
-            if let Ok(req) = VmSnapshotRestoreRequest::decode(&message.payload[..]) {
-                let result = server.vm_snapshot_restore(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::VmSnapshotRestoreResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::VmSnapshotRestoreRequest,
+                mikrom_proto::scheduler::VmSnapshotRestoreResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::VM_SNAPSHOT_RESTORE,
+                "vm-snapshot-restore-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.vm_snapshot_restore(req).await }
+                },
+                |e| mikrom_proto::scheduler::VmSnapshotRestoreResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1509,29 +1132,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::VmSnapshotDeleteRequest;
-            if let Ok(req) = VmSnapshotDeleteRequest::decode(&message.payload[..]) {
-                let result = server.vm_snapshot_delete(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::VmSnapshotDeleteResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::VmSnapshotDeleteRequest,
+                mikrom_proto::scheduler::VmSnapshotDeleteResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::VM_SNAPSHOT_DELETE,
+                "vm-snapshot-delete-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.vm_snapshot_delete(req).await }
+                },
+                |e| mikrom_proto::scheduler::VmSnapshotDeleteResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1539,30 +1162,30 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::VmSnapshotListRequest;
-            if let Ok(req) = VmSnapshotListRequest::decode(&message.payload[..]) {
-                let result = server.vm_snapshot_list(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::VmSnapshotListResponse {
-                                success: false,
-                                message: e.to_string(),
-                                snapshots: vec![],
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::VmSnapshotListRequest,
+                mikrom_proto::scheduler::VmSnapshotListResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::VM_SNAPSHOT_LIST,
+                "vm-snapshot-list-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.vm_snapshot_list(req).await }
+                },
+                |e| mikrom_proto::scheduler::VmSnapshotListResponse {
+                    success: false,
+                    message: e.to_string(),
+                    snapshots: vec![],
+                },
+            )
+            .await;
         });
     }
 
@@ -1570,29 +1193,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::AttachVolumeRequest;
-            if let Ok(req) = AttachVolumeRequest::decode(&message.payload[..]) {
-                let result = server.attach_volume(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::AttachVolumeResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::AttachVolumeRequest,
+                mikrom_proto::scheduler::AttachVolumeResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::ATTACH_VOLUME,
+                "attach-volume-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.attach_volume(req).await }
+                },
+                |e| mikrom_proto::scheduler::AttachVolumeResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1600,29 +1223,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::DetachVolumeRequest;
-            if let Ok(req) = DetachVolumeRequest::decode(&message.payload[..]) {
-                let result = server.detach_volume(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::DetachVolumeResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::DetachVolumeRequest,
+                mikrom_proto::scheduler::DetachVolumeResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::DETACH_VOLUME,
+                "detach-volume-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.detach_volume(req).await }
+                },
+                |e| mikrom_proto::scheduler::DetachVolumeResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1630,29 +1253,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::StartMigrationRequest;
-            if let Ok(req) = StartMigrationRequest::decode(&message.payload[..]) {
-                let result = server.start_migration(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::StartMigrationResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::StartMigrationRequest,
+                mikrom_proto::scheduler::StartMigrationResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::START_MIGRATION,
+                "start-migration-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.start_migration(req).await }
+                },
+                |e| mikrom_proto::scheduler::StartMigrationResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1660,29 +1283,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::CancelMigrationRequest;
-            if let Ok(req) = CancelMigrationRequest::decode(&message.payload[..]) {
-                let result = server.cancel_migration(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::CancelMigrationResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::CancelMigrationRequest,
+                mikrom_proto::scheduler::CancelMigrationResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::CANCEL_MIGRATION,
+                "cancel-migration-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.cancel_migration(req).await }
+                },
+                |e| mikrom_proto::scheduler::CancelMigrationResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1690,33 +1313,33 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::QueryMigrationRequest;
-            if let Ok(req) = QueryMigrationRequest::decode(&message.payload[..]) {
-                let result = server.query_migration(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::QueryMigrationResponse {
-                                success: false,
-                                message: e.to_string(),
-                                status: "".to_string(),
-                                total_bytes: 0,
-                                transferred_bytes: 0,
-                                remaining_bytes: 0,
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::QueryMigrationRequest,
+                mikrom_proto::scheduler::QueryMigrationResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::QUERY_MIGRATION,
+                "query-migration-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.query_migration(req).await }
+                },
+                |e| mikrom_proto::scheduler::QueryMigrationResponse {
+                    success: false,
+                    message: e.to_string(),
+                    status: "".to_string(),
+                    total_bytes: 0,
+                    transferred_bytes: 0,
+                    remaining_bytes: 0,
+                },
+            )
+            .await;
         });
     }
 
@@ -1724,29 +1347,29 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::SetBalloonRequest;
-            if let Ok(req) = SetBalloonRequest::decode(&message.payload[..]) {
-                let result = server.set_balloon(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::SetBalloonResponse {
-                                success: false,
-                                message: e.to_string(),
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::SetBalloonRequest,
+                mikrom_proto::scheduler::SetBalloonResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::SET_BALLOON,
+                "set-balloon-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.set_balloon(req).await }
+                },
+                |e| mikrom_proto::scheduler::SetBalloonResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
         });
     }
 
@@ -1754,31 +1377,31 @@ impl NatsEventLoop {
         let server = self.server.clone();
         let client = self.client.clone();
         tokio::spawn(async move {
-            use mikrom_proto::scheduler::QueryBalloonRequest;
-            if let Ok(req) = QueryBalloonRequest::decode(&message.payload[..]) {
-                let result = server.query_balloon(req).await;
-                if let Some(reply) = message.reply {
-                    let mut buf = Vec::new();
-                    match result {
-                        Ok(resp) => {
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                        Err(e) => {
-                            let resp = mikrom_proto::scheduler::QueryBalloonResponse {
-                                success: false,
-                                message: e.to_string(),
-                                actual_memory_mib: 0,
-                                max_memory_mib: 0,
-                            };
-                            if resp.encode(&mut buf).is_ok() {
-                                let _ = client.publish(reply, buf.into()).await;
-                            }
-                        },
-                    }
-                }
-            }
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::QueryBalloonRequest,
+                mikrom_proto::scheduler::QueryBalloonResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                subjects::QUERY_BALLOON,
+                "query-balloon-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.query_balloon(req).await }
+                },
+                |e| mikrom_proto::scheduler::QueryBalloonResponse {
+                    success: false,
+                    message: e.to_string(),
+                    actual_memory_mib: 0,
+                    max_memory_mib: 0,
+                },
+            )
+            .await;
         });
     }
 }
@@ -1799,9 +1422,10 @@ impl Drop for RouterRestoreGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::AppService;
-    use crate::application::deployment::DeploymentService;
-    use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository, Worker};
+    use crate::application::{AppService, SchedulerRuntimeConfig};
+    use crate::domain::worker::{
+        MockAgentClient, MockJobRepository, MockWorkerRepository, Worker, WorkerStatus,
+    };
     use chrono::Utc;
     use sqlx::PgPool;
     use std::collections::HashSet;
@@ -1817,6 +1441,14 @@ mod tests {
         }
     }
 
+    fn test_runtime() -> SchedulerRuntimeConfig {
+        SchedulerRuntimeConfig {
+            router_idle_timeout_secs: 900,
+            worker_stale_threshold_secs: 60,
+            restore_retry_backoff_secs: 3600,
+        }
+    }
+
     #[tokio::test]
     async fn test_calculate_mesh_updates_prunes_dead_workers() {
         let mut worker_repo = MockWorkerRepository::new();
@@ -1826,7 +1458,7 @@ mod tests {
 
         // Active worker (10 seconds ago)
         let active_worker = Worker {
-            host_id: "active-host".to_string(),
+            host_id: crate::domain::HostId::from("active-host"),
             hostname: "active".to_string(),
             advertise_address: "1.1.1.1".to_string(),
             wireguard_pubkey: Some("pub-active".to_string()),
@@ -1835,12 +1467,13 @@ mod tests {
             metrics: None,
             registered_at: now,
             last_heartbeat: now - 10,
+            status: WorkerStatus::Online,
             supported_hypervisors: vec![],
         };
 
         // Dead worker (60 seconds ago)
         let dead_worker = Worker {
-            host_id: "dead-host".to_string(),
+            host_id: crate::domain::HostId::from("dead-host"),
             hostname: "dead".to_string(),
             advertise_address: "2.2.2.2".to_string(),
             wireguard_pubkey: Some("pub-dead".to_string()),
@@ -1849,6 +1482,7 @@ mod tests {
             metrics: None,
             registered_at: now,
             last_heartbeat: now - 60,
+            status: WorkerStatus::Offline,
             supported_hypervisors: vec![],
         };
 
@@ -1869,13 +1503,6 @@ mod tests {
         let Some(nats_client) = connect_nats_or_skip().await else {
             return;
         };
-        let deployment = DeploymentService::new(
-            job_repo.clone(),
-            worker_repo.clone(),
-            agent_client.clone(),
-            nats_client.clone(),
-        );
-
         // Dummy AppRepo for tests
         #[derive(Debug)]
         struct DummyAppRepo;
@@ -1905,18 +1532,21 @@ mod tests {
             async fn remove_app_config(&self, _: &str) -> anyhow::Result<()> {
                 Ok(())
             }
+
+            async fn remove_app_and_jobs_by_app(&self, _: &str) -> anyhow::Result<()> {
+                Ok(())
+            }
         }
 
-        let app_service = Arc::new(AppService {
-            deployment,
-            worker_repo,
+        let app_service = Arc::new(AppService::new(
             job_repo,
-            app_repo: Arc::new(DummyAppRepo),
+            Arc::new(DummyAppRepo),
+            worker_repo,
             agent_client,
             nats_client,
             pool,
-            router_idle_timeout_secs: 900,
-        });
+            test_runtime(),
+        ));
 
         let server = SchedulerServer {
             app_service,
@@ -1958,21 +1588,5 @@ mod tests {
 
         let guard = NatsEventLoop::acquire_router_restore_guard(&in_progress, "app-1");
         assert!(guard.is_some());
-    }
-
-    #[test]
-    fn test_restore_retry_backoff_defaults_and_parses_env_value() {
-        assert_eq!(
-            NatsEventLoop::restore_retry_backoff_secs_from(None),
-            DEFAULT_RESTORE_RETRY_BACKOFF_SECS
-        );
-        assert_eq!(
-            NatsEventLoop::restore_retry_backoff_secs_from(Some("0")),
-            DEFAULT_RESTORE_RETRY_BACKOFF_SECS
-        );
-        assert_eq!(
-            NatsEventLoop::restore_retry_backoff_secs_from(Some("1800")),
-            1800
-        );
     }
 }

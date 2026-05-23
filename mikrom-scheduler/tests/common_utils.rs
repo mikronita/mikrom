@@ -9,7 +9,7 @@ pub struct TestDb {
 }
 
 impl TestDb {
-    pub async fn new() -> Self {
+    pub async fn try_new() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
         let test_url = env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
             "postgres://mikrom:mikrom_password@localhost:5432/mikrom_scheduler_test".to_string()
@@ -19,32 +19,25 @@ impl TestDb {
         let db_name = format!("{}_{}", base_db_name, uuid::Uuid::new_v4().simple());
         let maintenance_url = format!("{}/postgres", server_url);
 
-        let mut conn = PgConnection::connect(&maintenance_url)
-            .await
-            .expect("Failed to connect to maintenance database");
+        let mut conn = PgConnection::connect(&maintenance_url).await?;
 
         conn.execute(format!("CREATE DATABASE {}", db_name).as_str())
-            .await
-            .expect("Failed to create test database");
+            .await?;
 
         let pool_url = format!("{}/{}", server_url, db_name);
         let pool = PgPoolOptions::new()
             .max_connections(5)
             .connect(&pool_url)
-            .await
-            .expect("Failed to connect to test db");
+            .await?;
 
         // Run migrations
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await
-            .expect("Failed to run migrations");
+        sqlx::migrate!("./migrations").run(&pool).await?;
 
-        Self {
+        Ok(Self {
             pool,
             db_name,
             server_url,
-        }
+        })
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -74,12 +67,27 @@ impl Drop for TestDb {
             rt.block_on(async {
                 let maintenance_url = format!("{}/postgres", server_url);
                 if let Ok(mut conn) = PgConnection::connect(&maintenance_url).await {
-                    let _ = conn.execute(format!(
+                    if let Err(e) = conn.execute(format!(
                         "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{}' AND pid <> pg_backend_pid()",
                         db_name
-                    ).as_str()).await;
+                    ).as_str()).await {
+                        eprintln!(
+                            "warning: failed to terminate test database sessions for {}: {}",
+                            db_name,
+                            e
+                        );
+                    }
 
-                    let _ = conn.execute(format!("DROP DATABASE IF EXISTS \"{}\"", db_name).as_str()).await;
+                    if let Err(e) = conn
+                        .execute(format!("DROP DATABASE IF EXISTS \"{}\"", db_name).as_str())
+                        .await
+                    {
+                        eprintln!(
+                            "warning: failed to drop test database {}: {}",
+                            db_name,
+                            e
+                        );
+                    }
                 }
             });
         });

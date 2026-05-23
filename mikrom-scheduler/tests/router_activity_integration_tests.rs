@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 use mikrom_proto::router::RouterTrafficEvent;
 use mikrom_proto::subjects;
-use mikrom_scheduler::application::AppService;
+use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
 use mikrom_scheduler::domain::{
-    AgentClient, AppConfig, AppRepository, DomainResult, Job, JobRepository, JobStatus, VmConfig,
-    Worker, WorkerRepository,
+    AgentClient, AppConfig, AppId, AppRepository, DeploymentId, DomainResult, HostId, Job, JobId,
+    JobRepository, JobStatus, UserId, VmConfig, VmId, Worker, WorkerRepository,
 };
 use mikrom_scheduler::infrastructure::db::{PgAppRepository, PgJobRepository, PgWorkerRepository};
 use mikrom_scheduler::infrastructure::nats::NatsEventLoop;
@@ -17,6 +17,14 @@ use tokio::time::Duration;
 
 #[path = "common_utils.rs"]
 mod common_utils;
+
+fn test_runtime() -> SchedulerRuntimeConfig {
+    SchedulerRuntimeConfig {
+        router_idle_timeout_secs: 900,
+        worker_stale_threshold_secs: 60,
+        restore_retry_backoff_secs: 3600,
+    }
+}
 
 #[derive(Clone)]
 struct InMemoryAppRepo {
@@ -32,7 +40,7 @@ impl AppRepository for InMemoryAppRepo {
 
     async fn get_app_config(&self, app_id: &str) -> anyhow::Result<Option<AppConfig>> {
         let app = self.app.lock().await;
-        Ok((app.id == app_id).then_some(app.clone()))
+        Ok((app.id.as_ref() == app_id).then_some(app.clone()))
     }
 
     async fn get_app_config_by_hostname(
@@ -52,6 +60,10 @@ impl AppRepository for InMemoryAppRepo {
     }
 
     async fn remove_app_config(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn remove_app_and_jobs_by_app(&self, _: &str) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -72,7 +84,7 @@ impl AppRepository for InMemoryAppRepoWithUpdateCounter {
 
     async fn get_app_config(&self, app_id: &str) -> anyhow::Result<Option<AppConfig>> {
         let app = self.app.lock().await;
-        Ok((app.id == app_id).then_some(app.clone()))
+        Ok((app.id.as_ref() == app_id).then_some(app.clone()))
     }
 
     async fn get_app_config_by_hostname(
@@ -92,6 +104,10 @@ impl AppRepository for InMemoryAppRepoWithUpdateCounter {
     }
 
     async fn remove_app_config(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn remove_app_and_jobs_by_app(&self, _: &str) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -114,13 +130,13 @@ impl JobRepository for InMemoryJobRepo {
             .lock()
             .await
             .iter()
-            .find(|job| job.job_id == job_id)
+            .find(|job| job.job_id.as_ref() == job_id)
             .cloned())
     }
 
     async fn update_job_status(&self, job_id: &str, status: JobStatus) -> DomainResult<()> {
         let mut jobs = self.jobs.lock().await;
-        if let Some(job) = jobs.iter_mut().find(|job| job.job_id == job_id) {
+        if let Some(job) = jobs.iter_mut().find(|job| job.job_id.as_ref() == job_id) {
             job.status = status;
         }
         Ok(())
@@ -139,12 +155,18 @@ impl JobRepository for InMemoryJobRepo {
     }
 
     async fn remove_job(&self, job_id: &str) -> DomainResult<()> {
-        self.jobs.lock().await.retain(|job| job.job_id != job_id);
+        self.jobs
+            .lock()
+            .await
+            .retain(|job| job.job_id.as_ref() != job_id);
         Ok(())
     }
 
     async fn remove_jobs_by_app(&self, app_id: &str) -> DomainResult<()> {
-        self.jobs.lock().await.retain(|job| job.app_id != app_id);
+        self.jobs
+            .lock()
+            .await
+            .retain(|job| job.app_id.as_ref() != app_id);
         Ok(())
     }
 
@@ -158,8 +180,8 @@ impl JobRepository for InMemoryJobRepo {
         Ok(jobs
             .iter()
             .filter(|job| {
-                (user_id.is_none() || Some(job.user_id.as_str()) == user_id)
-                    && (app_id.is_none() || Some(job.app_id.as_str()) == app_id)
+                (user_id.is_none() || Some(job.user_id.as_ref()) == user_id)
+                    && (app_id.is_none() || Some(job.app_id.as_ref()) == app_id)
                     && (status.is_none() || Some(job.status) == status)
             })
             .cloned()
@@ -187,7 +209,7 @@ impl WorkerRepository for InMemoryWorkerRepo {
         self.workers
             .lock()
             .await
-            .retain(|worker| worker.host_id != host_id);
+            .retain(|worker| worker.host_id.as_ref() != host_id);
         Ok(())
     }
 
@@ -205,7 +227,7 @@ impl WorkerRepository for InMemoryWorkerRepo {
             .lock()
             .await
             .iter()
-            .find(|worker| worker.host_id == host_id)
+            .find(|worker| worker.host_id.as_ref() == host_id)
             .cloned())
     }
 
@@ -215,6 +237,10 @@ impl WorkerRepository for InMemoryWorkerRepo {
 
     async fn get_available_workers(&self, _t: i64) -> DomainResult<Vec<Worker>> {
         Ok(self.workers.lock().await.clone())
+    }
+
+    async fn mark_stale_workers_offline(&self, _: i64) -> DomainResult<u64> {
+        Ok(0)
     }
 }
 
@@ -363,8 +389,8 @@ async fn test_router_traffic_restores_paused_deployment() {
 
     let app_repo = InMemoryAppRepo {
         app: Arc::new(Mutex::new(AppConfig {
-            id: app_id.clone(),
-            user_id: user_id.clone(),
+            id: AppId::from(app_id.clone()),
+            user_id: UserId::from(user_id.clone()),
             vpc_ipv6_prefix: "fd00::".to_string(),
             hostname: hostname.clone(),
             desired_replicas: 1,
@@ -380,20 +406,20 @@ async fn test_router_traffic_restores_paused_deployment() {
     };
 
     let paused_job = Job {
-        job_id: "job-1".to_string(),
-        app_id: app_id.clone(),
+        job_id: JobId::from("job-1".to_string()),
+        app_id: AppId::from(app_id.clone()),
         app_name: "restore-app".to_string(),
         image: "test-image".to_string(),
-        user_id: user_id.clone(),
+        user_id: UserId::from(user_id.clone()),
         status: JobStatus::Paused,
-        host_id: Some("host-1".to_string()),
-        vm_id: Some("vm-1".to_string()),
+        host_id: Some(HostId::from("host-1".to_string())),
+        vm_id: Some(VmId::from("vm-1".to_string())),
         scheduled_at: None,
         started_at: None,
         stopped_at: None,
         error_message: None,
         created_at: chrono::Utc::now().timestamp() - 600,
-        deployment_id: Some("dep-1".to_string()),
+        deployment_id: Some(DeploymentId::from("dep-1".to_string())),
         config: VmConfig::default(),
     };
 
@@ -404,7 +430,7 @@ async fn test_router_traffic_restores_paused_deployment() {
     let worker_repo = InMemoryWorkerRepo::default();
     worker_repo
         .register(Worker {
-            host_id: "host-1".to_string(),
+            host_id: HostId::from("host-1".to_string()),
             hostname: "worker-1".to_string(),
             advertise_address: "worker-1".to_string(),
             wireguard_pubkey: None,
@@ -413,6 +439,7 @@ async fn test_router_traffic_restores_paused_deployment() {
             metrics: None,
             registered_at: chrono::Utc::now().timestamp(),
             last_heartbeat: chrono::Utc::now().timestamp(),
+            status: mikrom_scheduler::domain::WorkerStatus::Online,
             supported_hypervisors: vec![],
         })
         .await
@@ -427,14 +454,16 @@ async fn test_router_traffic_restores_paused_deployment() {
         Arc::new(agent_client.clone()),
         client.clone(),
         pool,
-        900,
+        test_runtime(),
     ));
 
     let server = SchedulerServer::new(app_service.clone(), None);
     let event_loop = NatsEventLoop::new(server, client.clone())
         .with_queue_group(format!("test-group-{}", uuid::Uuid::new_v4()));
     let loop_handle = tokio::spawn(async move {
-        let _ = event_loop.run().await;
+        if let Err(e) = event_loop.run().await {
+            tracing::error!(error = %e, "test NATS event loop exited with error");
+        }
     });
 
     tokio::time::sleep(Duration::from_millis(250)).await;
@@ -503,7 +532,10 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
         },
     };
 
-    let db = common_utils::TestDb::new().await;
+    let Ok(db) = common_utils::TestDb::try_new().await else {
+        eprintln!("Skipping integration test: database unavailable");
+        return;
+    };
     let pool = db.pool().clone();
 
     let app_repo = Arc::new(PgAppRepository::new(pool.clone()));
@@ -518,8 +550,8 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
     let vm_id = format!("vm-{}", uuid::Uuid::new_v4());
 
     let app_config = AppConfig {
-        id: app_id.clone(),
-        user_id: user_id.clone(),
+        id: AppId::from(app_id.clone()),
+        user_id: UserId::from(user_id.clone()),
         vpc_ipv6_prefix: "fd00::".to_string(),
         hostname: hostname.clone(),
         desired_replicas: 1,
@@ -536,7 +568,7 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
 
     worker_repo
         .register(Worker {
-            host_id: host_id.clone(),
+            host_id: HostId::from(host_id.clone()),
             hostname: "worker-1".to_string(),
             advertise_address: "127.0.0.1".to_string(),
             wireguard_pubkey: Some("pub".to_string()),
@@ -545,23 +577,24 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
             metrics: None,
             registered_at: chrono::Utc::now().timestamp(),
             last_heartbeat: chrono::Utc::now().timestamp(),
+            status: mikrom_scheduler::domain::WorkerStatus::Online,
             supported_hypervisors: vec![],
         })
         .await
         .unwrap();
 
     let mut job = Job::new(
-        "job-real-1".to_string(),
-        app_id.clone(),
+        JobId::from("job-real-1".to_string()),
+        AppId::from(app_id.clone()),
         "restore-app".to_string(),
         "test-image".to_string(),
         VmConfig::default(),
-        user_id.clone(),
-        Some("dep-1".to_string()),
+        UserId::from(user_id.clone()),
+        Some(DeploymentId::from("dep-1".to_string())),
     );
     job.status = JobStatus::Paused;
-    job.host_id = Some(host_id.clone());
-    job.vm_id = Some(vm_id.clone());
+    job.host_id = Some(HostId::from(host_id.clone()));
+    job.vm_id = Some(VmId::from(vm_id.clone()));
     job_repo.add_job(job).await.unwrap();
 
     let app_service = Arc::new(AppService::new(
@@ -571,14 +604,16 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
         agent_client.clone(),
         client.clone(),
         pool,
-        900,
+        test_runtime(),
     ));
 
     let server = SchedulerServer::new(app_service.clone(), None);
     let event_loop = NatsEventLoop::new(server, client.clone())
         .with_queue_group(format!("test-group-{}", uuid::Uuid::new_v4()));
     let loop_handle = tokio::spawn(async move {
-        let _ = event_loop.run().await;
+        if let Err(e) = event_loop.run().await {
+            tracing::error!(error = %e, "test NATS event loop exited with error");
+        }
     });
 
     tokio::time::sleep(Duration::from_millis(250)).await;
@@ -648,8 +683,8 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
     let update_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let app_repo = InMemoryAppRepoWithUpdateCounter {
         app: Arc::new(Mutex::new(AppConfig {
-            id: app_id.clone(),
-            user_id: user_id.clone(),
+            id: AppId::from(app_id.clone()),
+            user_id: UserId::from(user_id.clone()),
             vpc_ipv6_prefix: "fd00::".to_string(),
             hostname: hostname.clone(),
             desired_replicas: 1,
@@ -667,17 +702,17 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
 
     let job = {
         let mut job = Job::new(
-            "job-race-1".to_string(),
-            app_id.clone(),
+            JobId::from("job-race-1".to_string()),
+            AppId::from(app_id.clone()),
             "race-app".to_string(),
             "race-image".to_string(),
             VmConfig::default(),
-            user_id.clone(),
-            Some("dep-race".to_string()),
+            UserId::from(user_id.clone()),
+            Some(DeploymentId::from("dep-race".to_string())),
         );
         job.status = JobStatus::Paused;
-        job.host_id = Some("host-race".to_string());
-        job.vm_id = Some("vm-race".to_string());
+        job.host_id = Some(HostId::from("host-race".to_string()));
+        job.vm_id = Some(VmId::from("vm-race".to_string()));
         job
     };
 
@@ -687,7 +722,7 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
     let worker_repo = InMemoryWorkerRepo::default();
     worker_repo
         .register(Worker {
-            host_id: "host-race".to_string(),
+            host_id: HostId::from("host-race".to_string()),
             hostname: "worker-race".to_string(),
             advertise_address: "worker-race".to_string(),
             wireguard_pubkey: None,
@@ -696,6 +731,7 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
             metrics: None,
             registered_at: chrono::Utc::now().timestamp(),
             last_heartbeat: chrono::Utc::now().timestamp(),
+            status: mikrom_scheduler::domain::WorkerStatus::Online,
             supported_hypervisors: vec![],
         })
         .await
@@ -710,7 +746,7 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
         Arc::new(agent_client.clone()),
         client.clone(),
         pool,
-        900,
+        test_runtime(),
     );
 
     let server = SchedulerServer {
@@ -721,7 +757,9 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
     let event_loop = NatsEventLoop::new(server, client.clone())
         .with_queue_group(format!("test-group-{}", uuid::Uuid::new_v4()));
     let handle = tokio::spawn(async move {
-        let _ = event_loop.run().await;
+        if let Err(e) = event_loop.run().await {
+            tracing::error!(error = %e, "test NATS event loop exited with error");
+        }
     });
     tokio::time::sleep(Duration::from_millis(250)).await;
 

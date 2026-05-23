@@ -183,7 +183,7 @@ pub struct PgWorkerRepository {
     pool: PgPool,
 }
 
-const WORKER_COLUMNS: &str = "id, hostname, advertise_address, wireguard_pubkey, wireguard_ip, wireguard_port, metrics, registered_at, last_heartbeat";
+const WORKER_COLUMNS: &str = "id, hostname, advertise_address, wireguard_pubkey, wireguard_ip, wireguard_port, metrics, registered_at, last_heartbeat, status";
 
 impl PgWorkerRepository {
     pub fn new(pool: PgPool) -> Self {
@@ -201,7 +201,7 @@ impl WorkerRepository for PgWorkerRepository {
         sqlx::query(
             r#"
             INSERT INTO workers (id, hostname, advertise_address, wireguard_pubkey, wireguard_ip, wireguard_port, last_heartbeat, registered_at, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Online')
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (id) DO UPDATE SET
                 hostname = EXCLUDED.hostname,
                 advertise_address = EXCLUDED.advertise_address,
@@ -209,7 +209,7 @@ impl WorkerRepository for PgWorkerRepository {
                 wireguard_ip = EXCLUDED.wireguard_ip,
                 wireguard_port = EXCLUDED.wireguard_port,
                 last_heartbeat = EXCLUDED.last_heartbeat,
-                status = 'Online'
+                status = EXCLUDED.status
             "#,
         )
         .bind(&worker.host_id)
@@ -220,6 +220,7 @@ impl WorkerRepository for PgWorkerRepository {
         .bind(worker.wireguard_port.unwrap_or(51820))
         .bind(now)
         .bind(now)
+        .bind(worker.status.as_str())
         .execute(&self.pool)
         .await?;
 
@@ -290,6 +291,20 @@ impl WorkerRepository for PgWorkerRepository {
 
         Ok(rows.iter().map(map_row_to_worker).collect())
     }
+
+    async fn mark_stale_workers_offline(&self, threshold_secs: i64) -> DomainResult<u64> {
+        let now = chrono::Utc::now().timestamp();
+        let threshold = now - threshold_secs;
+
+        let result = sqlx::query(
+            "UPDATE workers SET status = 'Offline' WHERE last_heartbeat < $1 AND status = 'Online'",
+        )
+        .bind(threshold)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
 }
 
 fn map_row_to_job(r: &sqlx::postgres::PgRow) -> Job {
@@ -340,6 +355,11 @@ fn map_row_to_job(r: &sqlx::postgres::PgRow) -> Job {
 fn map_row_to_worker(r: &sqlx::postgres::PgRow) -> Worker {
     let metrics_val: Option<serde_json::Value> = r.try_get("metrics").ok();
     let metrics: Option<HostMetrics> = metrics_val.and_then(|m| serde_json::from_value(m).ok());
+    let status_str: String = r.get("status");
+    let status = match status_str.as_str() {
+        "Online" => crate::domain::WorkerStatus::Online,
+        _ => crate::domain::WorkerStatus::Offline,
+    };
     Worker {
         host_id: r.get("id"),
         hostname: r.get("hostname"),
@@ -350,6 +370,7 @@ fn map_row_to_worker(r: &sqlx::postgres::PgRow) -> Worker {
         metrics,
         registered_at: r.get("registered_at"),
         last_heartbeat: r.get("last_heartbeat"),
+        status,
         supported_hypervisors: vec![],
     }
 }
@@ -458,6 +479,23 @@ impl AppRepository for PgAppRepository {
             .bind(app_id)
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+
+    async fn remove_app_and_jobs_by_app(&self, app_id: &str) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query("DELETE FROM jobs WHERE app_id = $1")
+            .bind(app_id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query("DELETE FROM apps WHERE id = $1")
+            .bind(app_id)
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
         Ok(())
     }
 }

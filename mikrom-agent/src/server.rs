@@ -3,12 +3,50 @@ use crate::hypervisor::{
     HypervisorError, HypervisorType, VmConfig, VmHypervisor, VmInfo, VmStatus, Volume,
 };
 use crate::metrics::MetricsCollector;
+use crate::subjects;
 use parking_lot::RwLock;
 use prost::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
+
+async fn publish_best_effort(
+    nats: &async_nats::Client,
+    subject: impl Into<String>,
+    payload: Vec<u8>,
+    context: &'static str,
+) {
+    let subject = subject.into();
+    if let Err(e) = nats.publish(subject.clone(), payload.into()).await {
+        tracing::warn!(
+            %context,
+            %subject,
+            error = %e,
+            "Failed to publish NATS message"
+        );
+    }
+}
+
+async fn encode_and_publish_best_effort<T: Message>(
+    nats: &async_nats::Client,
+    reply: async_nats::Subject,
+    response: &T,
+    context: &'static str,
+) {
+    let mut buf = Vec::new();
+    if let Err(e) = response.encode(&mut buf) {
+        tracing::warn!(
+            %context,
+            reply = %reply,
+            error = %e,
+            "Failed to encode NATS reply"
+        );
+        return;
+    }
+
+    publish_best_effort(nats, reply.to_string(), buf, context).await;
+}
 
 pub struct AgentServer {
     config: crate::config::AgentConfig,
@@ -85,7 +123,7 @@ impl AgentServer {
         };
 
         if let Err(e) = self.wg_manager.init(&priv_key, &self.config.host_id).await {
-            tracing::error!("Failed to initialize WireGuard: {e}");
+            tracing::error!("Failed to initialize WireGuard: {e:?}");
         }
 
         let pub_key = self.wg_manager.get_public_key(&priv_key)?;
@@ -257,7 +295,7 @@ impl AgentServer {
         priv_key: String,
     ) -> tokio::task::JoinHandle<()> {
         let wg_manager = self.wg_manager.clone();
-        let host_subject = format!("mikrom.scheduler.network.mesh.{}", host_id);
+        let host_subject = subjects::mesh_updates(&host_id);
 
         tokio::spawn(async move {
             let mut host_sub = match client.subscribe(host_subject.clone()).await {
@@ -289,7 +327,7 @@ impl AgentServer {
     fn start_command_listener(&self, client: async_nats::Client) -> tokio::task::JoinHandle<()> {
         let self_clone = self.clone();
         let host_id = self.config.host_id.clone();
-        let subject = format!("mikrom.agent.{}.cmd", host_id);
+        let subject = subjects::agent_command(&host_id);
 
         tokio::spawn(async move {
             let mut cmd_sub = match client.subscribe(subject.clone()).await {
@@ -313,7 +351,7 @@ impl AgentServer {
         client: async_nats::Client,
     ) -> tokio::task::JoinHandle<()> {
         let host_id = self.config.host_id.clone();
-        let subject = format!("mikrom.agent.{}.check_health", host_id);
+        let subject = subjects::agent_health_check(&host_id);
         let hypervisors = self.hypervisors.clone();
         let nats = client.clone();
         let http_client = self.http_client.clone();
@@ -515,11 +553,15 @@ impl AgentServer {
 
     fn ok_response(msg: &str) -> Vec<u8> {
         let mut buf = Vec::new();
-        let _ = mikrom_proto::agent::AgentCommandResponse {
+        if (mikrom_proto::agent::AgentCommandResponse {
             success: true,
             message: msg.to_string(),
+        })
+        .encode(&mut buf)
+        .is_err()
+        {
+            tracing::warn!("Failed to encode successful AgentCommandResponse");
         }
-        .encode(&mut buf);
         buf
     }
 
@@ -905,19 +947,20 @@ impl AgentServer {
         result: Result<Vec<u8>, HypervisorError>,
     ) {
         if let Some(reply) = message.reply {
-            let payload = match result {
-                Ok(bytes) => bytes,
+            match result {
+                Ok(payload) => {
+                    publish_best_effort(nats, reply.to_string(), payload, "agent-command-reply")
+                        .await;
+                },
                 Err(e) => {
-                    let mut buf = Vec::new();
-                    let _ = mikrom_proto::agent::AgentCommandResponse {
+                    let response = mikrom_proto::agent::AgentCommandResponse {
                         success: false,
                         message: e.to_string(),
-                    }
-                    .encode(&mut buf);
-                    buf
+                    };
+                    encode_and_publish_best_effort(nats, reply, &response, "agent-command-reply")
+                        .await;
                 },
-            };
-            let _ = nats.publish(reply, payload.into()).await;
+            }
         }
     }
 
@@ -1084,10 +1127,7 @@ impl AgentServer {
                     message: msg,
                 },
             };
-            let mut buf = Vec::new();
-            if response.encode(&mut buf).is_ok() {
-                let _ = nats.publish(reply, buf.into()).await;
-            }
+            encode_and_publish_best_effort(nats, reply, &response, "health-check-reply").await;
         }
     }
 
@@ -1166,9 +1206,13 @@ impl AgentServer {
 
                 let mut buf = Vec::new();
                 if heartbeat.encode(&mut buf).is_ok() {
-                    let _ = client
-                        .publish("mikrom.scheduler.worker.heartbeat", buf.into())
-                        .await;
+                    publish_best_effort(
+                        &client,
+                        subjects::SCHEDULER_WORKER_HEARTBEAT,
+                        buf,
+                        "worker-heartbeat",
+                    )
+                    .await;
                 }
             }
         })

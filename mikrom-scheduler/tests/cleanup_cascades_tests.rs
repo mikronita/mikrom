@@ -4,12 +4,17 @@ mod common_utils;
 #[cfg(test)]
 mod tests {
     use super::common_utils;
-    use mikrom_scheduler::domain::{Job, JobRepository, VmConfig, Worker, WorkerRepository};
+    use mikrom_scheduler::domain::{
+        AppId, HostId, Job, JobId, JobRepository, UserId, VmConfig, Worker, WorkerRepository,
+    };
     use mikrom_scheduler::infrastructure::db::{PgJobRepository, PgWorkerRepository};
 
     #[tokio::test]
     async fn test_cascading_cleanup_on_job_deletion() {
-        let db = common_utils::TestDb::new().await;
+        let Ok(db) = common_utils::TestDb::try_new().await else {
+            eprintln!("Skipping cleanup cascade test: database unavailable");
+            return;
+        };
         let pool = db.pool().clone();
 
         let job_repo = PgJobRepository::new(pool.clone());
@@ -18,7 +23,7 @@ mod tests {
         // 1. Setup a worker
         let host_id = "test-host".to_string();
         let worker = Worker {
-            host_id: host_id.clone(),
+            host_id: HostId::from(host_id.clone()),
             hostname: "test-hostname".to_string(),
             advertise_address: "127.0.0.1".to_string(),
             wireguard_pubkey: None,
@@ -27,6 +32,7 @@ mod tests {
             metrics: None,
             registered_at: 0,
             last_heartbeat: 0,
+            status: mikrom_scheduler::domain::WorkerStatus::Online,
             supported_hypervisors: vec![],
         };
         worker_repo.register(worker).await.unwrap();
@@ -35,12 +41,12 @@ mod tests {
         let job_id = "job-1".to_string();
         let app_id = "app-1".to_string();
         let job = Job::new(
-            job_id.clone(),
-            app_id.clone(),
+            JobId::from(job_id.clone()),
+            AppId::from(app_id.clone()),
             "test-app".to_string(),
             "alpine:latest".to_string(),
             VmConfig::default(),
-            "user-1".to_string(),
+            UserId::from("user-1".to_string()),
             None,
         );
         job_repo.add_job(job).await.unwrap();
@@ -59,7 +65,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_jobs_by_app() {
-        let db = common_utils::TestDb::new().await;
+        let Ok(db) = common_utils::TestDb::try_new().await else {
+            eprintln!("Skipping cleanup cascade test: database unavailable");
+            return;
+        };
         let pool = db.pool().clone();
         let job_repo = PgJobRepository::new(pool.clone());
 
@@ -68,12 +77,12 @@ mod tests {
         // Add 3 jobs for the same app
         for i in 1..=3 {
             let job = Job::new(
-                format!("job-{}", i),
-                app_id.clone(),
+                JobId::from(format!("job-{}", i)),
+                AppId::from(app_id.clone()),
                 "test-app".to_string(),
                 "alpine".to_string(),
                 VmConfig::default(),
-                "user-1".to_string(),
+                UserId::from("user-1".to_string()),
                 None,
             );
             job_repo.add_job(job).await.unwrap();
@@ -81,12 +90,12 @@ mod tests {
 
         // Add 1 job for a different app
         let other_job = Job::new(
-            "job-other".to_string(),
-            "app-other".to_string(),
+            JobId::from("job-other".to_string()),
+            AppId::from("app-other".to_string()),
             "other-app".to_string(),
             "alpine".to_string(),
             VmConfig::default(),
-            "user-1".to_string(),
+            UserId::from("user-1".to_string()),
             None,
         );
         job_repo.add_job(other_job).await.unwrap();
@@ -102,7 +111,8 @@ mod tests {
         let remaining_jobs = job_repo.list_jobs(None, None, None).await.unwrap();
         assert_eq!(remaining_jobs.len(), 1, "Only 1 job should remain");
         assert_eq!(
-            remaining_jobs[0].app_id, "app-other",
+            remaining_jobs[0].app_id,
+            AppId::from("app-other".to_string()),
             "The job from the other app should remain"
         );
     }

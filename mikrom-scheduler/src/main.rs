@@ -1,6 +1,7 @@
-use mikrom_scheduler::application::AppService;
+use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
 use mikrom_scheduler::config::SchedulerConfig;
 use mikrom_scheduler::infrastructure::db::{PgAppRepository, PgJobRepository, PgWorkerRepository};
+use mikrom_scheduler::infrastructure::http::SchedulerHttpServer;
 use mikrom_scheduler::infrastructure::nats::{NatsAgentClient, NatsEventLoop};
 use mikrom_scheduler::server::SchedulerServer;
 use sqlx::postgres::PgPoolOptions;
@@ -42,6 +43,12 @@ async fn main() -> anyhow::Result<()> {
     let worker_repo = Arc::new(PgWorkerRepository::new(pool.clone()));
     let agent_client = Arc::new(NatsAgentClient::new(nats_client.clone()));
 
+    let runtime = SchedulerRuntimeConfig {
+        router_idle_timeout_secs: config.router_idle_timeout_secs,
+        worker_stale_threshold_secs: config.worker_stale_threshold_secs,
+        restore_retry_backoff_secs: config.restore_retry_backoff_secs,
+    };
+
     let app_service = Arc::new(AppService::new(
         job_repo,
         app_repo,
@@ -49,10 +56,18 @@ async fn main() -> anyhow::Result<()> {
         agent_client,
         nats_client.clone(),
         pool.clone(),
-        config.router_idle_timeout_secs,
+        runtime,
     ));
 
     let server = SchedulerServer::new(app_service.clone(), certs);
+    let observability_server = SchedulerHttpServer::new(
+        config.http_port,
+        pool.clone(),
+        nats_client.clone(),
+        app_service.context.telemetry.clone(),
+        config.worker_stale_threshold_secs,
+        config.database_max_connections,
+    );
 
     // Periodic pool telemetry for diagnosing contention and starvation.
     let pool_for_metrics = pool.clone();
@@ -70,26 +85,20 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Expose health and metrics for Prometheus-style scraping.
+    observability_server.spawn();
+
     // Start background cleanup task
-    let pool_clone = pool.clone();
+    let app_service_for_cleanup = app_service.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
             interval.tick().await;
-            let now = chrono::Utc::now().timestamp();
-            let threshold = now - 60; // 60 seconds heartbeat timeout
 
-            let result = sqlx::query(
-                "UPDATE workers SET status = 'Offline' WHERE last_heartbeat < $1 AND status = 'Online'"
-            )
-            .bind(threshold)
-            .execute(&pool_clone)
-            .await;
-
-            match result {
-                Ok(r) => {
-                    if r.rows_affected() > 0 {
-                        tracing::info!("Marked {} stale workers as Offline", r.rows_affected());
+            match app_service_for_cleanup.cleanup_stale_workers().await {
+                Ok(count) => {
+                    if count > 0 {
+                        tracing::info!("Marked {} stale workers as Offline", count);
                     }
                 },
                 Err(e) => tracing::error!("Failed to cleanup stale workers: {}", e),

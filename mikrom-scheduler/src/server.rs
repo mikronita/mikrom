@@ -1,7 +1,7 @@
 use crate::application::AppService;
-use crate::domain::{VmConfig, Volume};
+use crate::domain::{Job, VmConfig, Volume};
 use mikrom_proto::scheduler::{
-    AppInfo, AppStatusResponse, CancelRequest, CancelResponse, DeleteAllByAppRequest,
+    AppStatusResponse, CancelRequest, CancelResponse, DeleteAllByAppRequest,
     DeleteAllByAppResponse, DeleteAppRequest, DeleteAppResponse, DeployRequest, DeployResponse,
     ListAppsRequest, ListAppsResponse, ListWorkersRequest, ListWorkersResponse, PauseRequest,
     PauseResponse, ResumeRequest, ResumeResponse, UpdateAppScalingConfigRequest,
@@ -20,6 +20,24 @@ impl SchedulerServer {
         Self { app_service, certs }
     }
 
+    fn map_result<T, E, U>(
+        result: Result<T, E>,
+        on_ok: impl FnOnce(T) -> U,
+        on_err: impl FnOnce(E) -> U,
+    ) -> U {
+        match result {
+            Ok(value) => on_ok(value),
+            Err(e) => on_err(e),
+        }
+    }
+
+    fn job_host_vm(job: &Job) -> Option<(&str, &str)> {
+        match (&job.host_id, &job.vm_id) {
+            (Some(host_id), Some(vm_id)) => Some((host_id.as_ref(), vm_id.as_ref())),
+            _ => None,
+        }
+    }
+
     #[tracing::instrument(skip(self, req), fields(app_id = %req.app_id))]
     pub async fn deploy_app(&self, req: DeployRequest) -> anyhow::Result<DeployResponse> {
         let config = req
@@ -36,7 +54,7 @@ impl SchedulerServer {
                     .volumes
                     .iter()
                     .map(|v| Volume {
-                        volume_id: v.volume_id.clone(),
+                        volume_id: crate::domain::VolumeId::from(v.volume_id.clone().to_string()),
                         size_mib: v.size_mib,
                         read_only: v.read_only,
                         pool_name: v.pool_name.clone(),
@@ -72,10 +90,10 @@ impl SchedulerServer {
             .await
         {
             Ok(job) => Ok(DeployResponse {
-                job_id: job.job_id,
+                job_id: job.job_id.to_string(),
                 status: mikrom_proto::scheduler::DeployStatus::Running as i32,
-                host_id: job.host_id.unwrap_or_default(),
-                vm_id: job.vm_id.unwrap_or_default(),
+                host_id: job.host_id.unwrap_or_default().to_string(),
+                vm_id: job.vm_id.unwrap_or_default().to_string(),
                 message: "Deployment successful".to_string(),
             }),
             Err(e) => {
@@ -95,17 +113,18 @@ impl SchedulerServer {
     ) -> anyhow::Result<AppStatusResponse> {
         match self
             .app_service
+            .queries
             .get_app_status(&req.job_id, &req.user_id)
             .await
         {
             Ok(job) => {
                 let (cpu_usage, ram_used_bytes, tx_bytes, rx_bytes) =
-                    self.app_service.get_job_metrics(&job).await;
+                    self.app_service.queries.get_job_metrics(&job).await;
                 Ok(AppStatusResponse {
-                    job_id: job.job_id,
+                    job_id: job.job_id.to_string(),
                     status: job.status as i32,
-                    host_id: job.host_id.unwrap_or_default(),
-                    vm_id: job.vm_id.unwrap_or_default(),
+                    host_id: job.host_id.unwrap_or_default().to_string(),
+                    vm_id: job.vm_id.unwrap_or_default().to_string(),
                     scheduled_at: job.scheduled_at.unwrap_or(0),
                     started_at: job.started_at.unwrap_or(0),
                     stopped_at: job.stopped_at.unwrap_or(0),
@@ -124,170 +143,147 @@ impl SchedulerServer {
     pub async fn list_apps(&self, req: ListAppsRequest) -> anyhow::Result<ListAppsResponse> {
         let status_filter = req.status.and_then(crate::domain::JobStatus::from_i32);
 
-        let jobs = self
+        let apps = self
             .app_service
-            .job_repo
-            .list_jobs(Some(&req.user_id), None, status_filter)
+            .queries
+            .list_apps(&req.user_id, status_filter)
             .await
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-
-        let mut apps = Vec::new();
-        for job in jobs {
-            let (cpu_usage, ram_used_bytes, tx_bytes, rx_bytes) =
-                self.app_service.get_job_metrics(&job).await;
-            apps.push(AppInfo {
-                job_id: job.job_id,
-                app_id: job.app_id,
-                app_name: job.app_name,
-                image: job.image,
-                status: job.status as i32,
-                host_id: job.host_id.unwrap_or_default(),
-                vm_id: job.vm_id.unwrap_or_default(),
-                cpu_usage,
-                ram_used_bytes,
-                user_id: job.user_id,
-                deployment_id: job.deployment_id.unwrap_or_default(),
-                ipv6_address: job.config.ipv6_address.unwrap_or_default(),
-                tx_bytes,
-                rx_bytes,
-            });
-        }
         Ok(ListAppsResponse { apps })
     }
 
     pub async fn pause_app(&self, req: PauseRequest) -> anyhow::Result<PauseResponse> {
-        match self.app_service.pause_app(&req.job_id, &req.user_id).await {
-            Ok(_) => Ok(PauseResponse {
+        Ok(Self::map_result(
+            self.app_service.pause_app(&req.job_id, &req.user_id).await,
+            |_| PauseResponse {
                 success: true,
                 message: "Paused".to_string(),
-            }),
-            Err(e) => Ok(PauseResponse {
+            },
+            |e| PauseResponse {
                 success: false,
                 message: e.to_string(),
-            }),
-        }
+            },
+        ))
     }
 
     pub async fn resume_app(&self, req: ResumeRequest) -> anyhow::Result<ResumeResponse> {
-        match self.app_service.resume_app(&req.job_id, &req.user_id).await {
-            Ok(_) => Ok(ResumeResponse {
+        Ok(Self::map_result(
+            self.app_service.resume_app(&req.job_id, &req.user_id).await,
+            |_| ResumeResponse {
                 success: true,
                 message: "Resumed".to_string(),
-            }),
-            Err(e) => Ok(ResumeResponse {
+            },
+            |e| ResumeResponse {
                 success: false,
                 message: e.to_string(),
-            }),
-        }
+            },
+        ))
     }
 
     pub async fn cancel_app(&self, req: CancelRequest) -> anyhow::Result<CancelResponse> {
-        match self
-            .app_service
-            .job_repo
-            .cancel_job(&req.job_id, chrono::Utc::now().timestamp())
-            .await
-        {
-            Ok(_) => Ok(CancelResponse {
+        Ok(Self::map_result(
+            self.app_service
+                .job_repo
+                .cancel_job(&req.job_id, chrono::Utc::now().timestamp())
+                .await,
+            |_| CancelResponse {
                 success: true,
                 message: "Cancelled".to_string(),
-            }),
-            Err(e) => Ok(CancelResponse {
+            },
+            |e| CancelResponse {
                 success: false,
                 message: e.to_string(),
-            }),
-        }
+            },
+        ))
     }
 
     pub async fn delete_app(&self, req: DeleteAppRequest) -> anyhow::Result<DeleteAppResponse> {
-        match self.app_service.delete_app(&req.job_id, &req.user_id).await {
-            Ok(_) => Ok(DeleteAppResponse {
+        Ok(Self::map_result(
+            self.app_service.delete_app(&req.job_id, &req.user_id).await,
+            |_| DeleteAppResponse {
                 success: true,
                 message: "Deleted".to_string(),
-            }),
-            Err(e) => Ok(DeleteAppResponse {
+            },
+            |e| DeleteAppResponse {
                 success: false,
                 message: e.to_string(),
-            }),
-        }
+            },
+        ))
     }
 
     pub async fn delete_all_by_app(
         &self,
         req: DeleteAllByAppRequest,
     ) -> anyhow::Result<DeleteAllByAppResponse> {
-        match self
-            .app_service
-            .delete_all_by_app(&req.app_id, &req.user_id)
-            .await
-        {
-            Ok(_) => Ok(DeleteAllByAppResponse {
+        Ok(Self::map_result(
+            self.app_service
+                .delete_all_by_app(&req.app_id, &req.user_id)
+                .await,
+            |_| DeleteAllByAppResponse {
                 success: true,
                 message: "All app jobs deleted successfully".to_string(),
-            }),
-            Err(e) => Ok(DeleteAllByAppResponse {
+            },
+            |e| DeleteAllByAppResponse {
                 success: false,
                 message: e.to_string(),
-            }),
-        }
+            },
+        ))
     }
 
     pub async fn scale_app(
         &self,
         req: mikrom_proto::scheduler::ScaleAppRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::ScaleAppResponse> {
-        match self
-            .app_service
-            .scale_app(&req.app_id, req.desired_replicas, &req.user_id)
-            .await
-        {
-            Ok(_) => Ok(mikrom_proto::scheduler::ScaleAppResponse {
+        Ok(Self::map_result(
+            self.app_service
+                .scale_app(&req.app_id, req.desired_replicas, &req.user_id)
+                .await,
+            |_| mikrom_proto::scheduler::ScaleAppResponse {
                 success: true,
                 message: format!("App scaled to {} replicas", req.desired_replicas),
-            }),
-            Err(e) => {
+            },
+            |e| {
                 tracing::error!(app_id = %req.app_id, error = %e, "Scale operation failed");
-                Ok(mikrom_proto::scheduler::ScaleAppResponse {
+                mikrom_proto::scheduler::ScaleAppResponse {
                     success: false,
                     message: format!("Failed to scale app: {}", e),
-                })
+                }
             },
-        }
+        ))
     }
 
     pub async fn update_app_scaling_config(
         &self,
         req: UpdateAppScalingConfigRequest,
     ) -> anyhow::Result<UpdateAppScalingConfigResponse> {
-        match self
-            .app_service
-            .app_repo
-            .update_app_config(crate::domain::AppConfig {
-                id: req.app_id,
-                user_id: req.user_id,
-                vpc_ipv6_prefix: req.vpc_ipv6_prefix,
-                hostname: req.hostname,
-                desired_replicas: req.desired_replicas,
-                min_replicas: req.min_replicas,
-                max_replicas: req.max_replicas,
-                autoscaling_enabled: req.autoscaling_enabled,
-                cpu_threshold: req.cpu_threshold,
-                mem_threshold: req.mem_threshold,
-                last_router_traffic_at: req.last_router_traffic_at,
-                last_scaled_to_zero_at: req.last_scaled_to_zero_at,
-                restore_retry_after_at: 0,
-            })
-            .await
-        {
-            Ok(_) => Ok(UpdateAppScalingConfigResponse {
+        Ok(Self::map_result(
+            self.app_service
+                .app_repo
+                .update_app_config(crate::domain::AppConfig {
+                    id: req.app_id.into(),
+                    user_id: req.user_id.into(),
+                    vpc_ipv6_prefix: req.vpc_ipv6_prefix,
+                    hostname: req.hostname,
+                    desired_replicas: req.desired_replicas,
+                    min_replicas: req.min_replicas,
+                    max_replicas: req.max_replicas,
+                    autoscaling_enabled: req.autoscaling_enabled,
+                    cpu_threshold: req.cpu_threshold,
+                    mem_threshold: req.mem_threshold,
+                    last_router_traffic_at: req.last_router_traffic_at,
+                    last_scaled_to_zero_at: req.last_scaled_to_zero_at,
+                    restore_retry_after_at: 0,
+                })
+                .await,
+            |_| UpdateAppScalingConfigResponse {
                 success: true,
                 message: "App scaling config updated".to_string(),
-            }),
-            Err(e) => Ok(UpdateAppScalingConfigResponse {
+            },
+            |e| UpdateAppScalingConfigResponse {
                 success: false,
                 message: e.to_string(),
-            }),
-        }
+            },
+        ))
     }
 
     pub async fn list_workers(
@@ -296,25 +292,11 @@ impl SchedulerServer {
     ) -> anyhow::Result<ListWorkersResponse> {
         let workers = self
             .app_service
-            .worker_repo
+            .queries
             .list_workers()
             .await
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-
-        let worker_infos = workers
-            .into_iter()
-            .map(|w| mikrom_proto::scheduler::WorkerInfo {
-                host_id: w.host_id,
-                hostname: w.hostname,
-                last_heartbeat: w.last_heartbeat,
-                wireguard_pubkey: w.wireguard_pubkey.unwrap_or_default(),
-                advertise_address: w.advertise_address,
-            })
-            .collect();
-
-        Ok(ListWorkersResponse {
-            workers: worker_infos,
-        })
+        Ok(ListWorkersResponse { workers })
     }
 
     pub async fn check_health(
@@ -323,6 +305,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::CheckHealthResponse> {
         match self
             .app_service
+            .queries
             .check_health(&req.job_id, &req.user_id)
             .await
         {
@@ -345,36 +328,36 @@ impl SchedulerServer {
         &self,
         req: UpdateSecurityGroupsRequest,
     ) -> anyhow::Result<UpdateSecurityGroupsResponse> {
-        match self.app_service.update_security_groups(req).await {
-            Ok(_) => Ok(UpdateSecurityGroupsResponse {
+        Ok(Self::map_result(
+            self.app_service.update_security_groups(req).await,
+            |_| UpdateSecurityGroupsResponse {
                 success: true,
                 message: "Security groups updated".to_string(),
-            }),
-            Err(e) => Ok(UpdateSecurityGroupsResponse {
+            },
+            |e| UpdateSecurityGroupsResponse {
                 success: false,
                 message: e.to_string(),
-            }),
-        }
+            },
+        ))
     }
 
     pub async fn create_volume(
         &self,
         req: mikrom_proto::scheduler::CreateVolumeRequest,
     ) -> anyhow::Result<mikrom_proto::scheduler::CreateVolumeResponse> {
-        match self
-            .app_service
-            .create_volume(&req.host_id, &req.volume_id, req.size_mib, &req.pool_name)
-            .await
-        {
-            Ok(_) => Ok(mikrom_proto::scheduler::CreateVolumeResponse {
+        Ok(Self::map_result(
+            self.app_service
+                .create_volume(&req.host_id, &req.volume_id, req.size_mib, &req.pool_name)
+                .await,
+            |_| mikrom_proto::scheduler::CreateVolumeResponse {
                 success: true,
                 message: "Volume created successfully".to_string(),
-            }),
-            Err(e) => Ok(mikrom_proto::scheduler::CreateVolumeResponse {
+            },
+            |e| mikrom_proto::scheduler::CreateVolumeResponse {
                 success: false,
                 message: e.to_string(),
-            }),
-        }
+            },
+        ))
     }
 
     pub async fn create_snapshot(
@@ -515,19 +498,16 @@ impl SchedulerServer {
                 });
             },
         };
-        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
-            (Some(h), Some(v)) => (h.clone(), v.clone()),
-            _ => {
-                return Ok(mikrom_proto::scheduler::VmSnapshotCreateResponse {
-                    success: false,
-                    message: "Job has no host or VM assigned".to_string(),
-                });
-            },
+        let Some((host_id, vm_id)) = Self::job_host_vm(&job) else {
+            return Ok(mikrom_proto::scheduler::VmSnapshotCreateResponse {
+                success: false,
+                message: "Job has no host or VM assigned".to_string(),
+            });
         };
         match self
             .app_service
             .agent_client
-            .vm_snapshot_create(&host_id, &vm_id, &req.snapshot_name)
+            .vm_snapshot_create(host_id, vm_id, &req.snapshot_name)
             .await
         {
             Ok(_) => Ok(mikrom_proto::scheduler::VmSnapshotCreateResponse {
@@ -558,19 +538,16 @@ impl SchedulerServer {
                 });
             },
         };
-        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
-            (Some(h), Some(v)) => (h.clone(), v.clone()),
-            _ => {
-                return Ok(mikrom_proto::scheduler::VmSnapshotRestoreResponse {
-                    success: false,
-                    message: "Job has no host or VM assigned".to_string(),
-                });
-            },
+        let Some((host_id, vm_id)) = Self::job_host_vm(&job) else {
+            return Ok(mikrom_proto::scheduler::VmSnapshotRestoreResponse {
+                success: false,
+                message: "Job has no host or VM assigned".to_string(),
+            });
         };
         match self
             .app_service
             .agent_client
-            .vm_snapshot_restore(&host_id, &vm_id, &req.snapshot_name)
+            .vm_snapshot_restore(host_id, vm_id, &req.snapshot_name)
             .await
         {
             Ok(_) => Ok(mikrom_proto::scheduler::VmSnapshotRestoreResponse {
@@ -601,19 +578,16 @@ impl SchedulerServer {
                 });
             },
         };
-        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
-            (Some(h), Some(v)) => (h.clone(), v.clone()),
-            _ => {
-                return Ok(mikrom_proto::scheduler::VmSnapshotDeleteResponse {
-                    success: false,
-                    message: "Job has no host or VM assigned".to_string(),
-                });
-            },
+        let Some((host_id, vm_id)) = Self::job_host_vm(&job) else {
+            return Ok(mikrom_proto::scheduler::VmSnapshotDeleteResponse {
+                success: false,
+                message: "Job has no host or VM assigned".to_string(),
+            });
         };
         match self
             .app_service
             .agent_client
-            .vm_snapshot_delete(&host_id, &vm_id, &req.snapshot_name)
+            .vm_snapshot_delete(host_id, vm_id, &req.snapshot_name)
             .await
         {
             Ok(_) => Ok(mikrom_proto::scheduler::VmSnapshotDeleteResponse {
@@ -645,20 +619,17 @@ impl SchedulerServer {
                 });
             },
         };
-        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
-            (Some(h), Some(v)) => (h.clone(), v.clone()),
-            _ => {
-                return Ok(mikrom_proto::scheduler::VmSnapshotListResponse {
-                    success: false,
-                    message: "Job has no host or VM assigned".to_string(),
-                    snapshots: vec![],
-                });
-            },
+        let Some((host_id, vm_id)) = Self::job_host_vm(&job) else {
+            return Ok(mikrom_proto::scheduler::VmSnapshotListResponse {
+                success: false,
+                message: "Job has no host or VM assigned".to_string(),
+                snapshots: vec![],
+            });
         };
         match self
             .app_service
             .agent_client
-            .vm_snapshot_list(&host_id, &vm_id)
+            .vm_snapshot_list(host_id, vm_id)
             .await
         {
             Ok(snaps) => {
@@ -703,21 +674,18 @@ impl SchedulerServer {
                 });
             },
         };
-        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
-            (Some(h), Some(v)) => (h.clone(), v.clone()),
-            _ => {
-                return Ok(mikrom_proto::scheduler::AttachVolumeResponse {
-                    success: false,
-                    message: "Job has no host or VM assigned".to_string(),
-                });
-            },
+        let Some((host_id, vm_id)) = Self::job_host_vm(&job) else {
+            return Ok(mikrom_proto::scheduler::AttachVolumeResponse {
+                success: false,
+                message: "Job has no host or VM assigned".to_string(),
+            });
         };
         match self
             .app_service
             .agent_client
             .attach_volume(
-                &host_id,
-                &vm_id,
+                host_id,
+                vm_id,
                 &req.volume_id,
                 &req.mount_point,
                 req.read_only,
@@ -752,19 +720,16 @@ impl SchedulerServer {
                 });
             },
         };
-        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
-            (Some(h), Some(v)) => (h.clone(), v.clone()),
-            _ => {
-                return Ok(mikrom_proto::scheduler::DetachVolumeResponse {
-                    success: false,
-                    message: "Job has no host or VM assigned".to_string(),
-                });
-            },
+        let Some((host_id, vm_id)) = Self::job_host_vm(&job) else {
+            return Ok(mikrom_proto::scheduler::DetachVolumeResponse {
+                success: false,
+                message: "Job has no host or VM assigned".to_string(),
+            });
         };
         match self
             .app_service
             .agent_client
-            .detach_volume(&host_id, &vm_id, &req.volume_id)
+            .detach_volume(host_id, vm_id, &req.volume_id)
             .await
         {
             Ok(_) => Ok(mikrom_proto::scheduler::DetachVolumeResponse {
@@ -795,19 +760,16 @@ impl SchedulerServer {
                 });
             },
         };
-        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
-            (Some(h), Some(v)) => (h.clone(), v.clone()),
-            _ => {
-                return Ok(mikrom_proto::scheduler::StartMigrationResponse {
-                    success: false,
-                    message: "Job has no host or VM assigned".to_string(),
-                });
-            },
+        let Some((host_id, vm_id)) = Self::job_host_vm(&job) else {
+            return Ok(mikrom_proto::scheduler::StartMigrationResponse {
+                success: false,
+                message: "Job has no host or VM assigned".to_string(),
+            });
         };
         match self
             .app_service
             .agent_client
-            .start_migration(&host_id, &vm_id, &req.target_host, &req.target_uri)
+            .start_migration(host_id, vm_id, &req.target_host, &req.target_uri)
             .await
         {
             Ok(_) => Ok(mikrom_proto::scheduler::StartMigrationResponse {
@@ -838,19 +800,16 @@ impl SchedulerServer {
                 });
             },
         };
-        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
-            (Some(h), Some(v)) => (h.clone(), v.clone()),
-            _ => {
-                return Ok(mikrom_proto::scheduler::CancelMigrationResponse {
-                    success: false,
-                    message: "Job has no host or VM assigned".to_string(),
-                });
-            },
+        let Some((host_id, vm_id)) = Self::job_host_vm(&job) else {
+            return Ok(mikrom_proto::scheduler::CancelMigrationResponse {
+                success: false,
+                message: "Job has no host or VM assigned".to_string(),
+            });
         };
         match self
             .app_service
             .agent_client
-            .cancel_migration(&host_id, &vm_id)
+            .cancel_migration(host_id, vm_id)
             .await
         {
             Ok(_) => Ok(mikrom_proto::scheduler::CancelMigrationResponse {
@@ -885,23 +844,20 @@ impl SchedulerServer {
                 });
             },
         };
-        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
-            (Some(h), Some(v)) => (h.clone(), v.clone()),
-            _ => {
-                return Ok(mikrom_proto::scheduler::QueryMigrationResponse {
-                    success: false,
-                    message: "Job has no host or VM assigned".to_string(),
-                    status: "".to_string(),
-                    total_bytes: 0,
-                    transferred_bytes: 0,
-                    remaining_bytes: 0,
-                });
-            },
+        let Some((host_id, vm_id)) = Self::job_host_vm(&job) else {
+            return Ok(mikrom_proto::scheduler::QueryMigrationResponse {
+                success: false,
+                message: "Job has no host or VM assigned".to_string(),
+                status: "".to_string(),
+                total_bytes: 0,
+                transferred_bytes: 0,
+                remaining_bytes: 0,
+            });
         };
         match self
             .app_service
             .agent_client
-            .query_migration(&host_id, &vm_id)
+            .query_migration(host_id, vm_id)
             .await
         {
             Ok(status) => Ok(mikrom_proto::scheduler::QueryMigrationResponse {
@@ -940,19 +896,16 @@ impl SchedulerServer {
                 });
             },
         };
-        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
-            (Some(h), Some(v)) => (h.clone(), v.clone()),
-            _ => {
-                return Ok(mikrom_proto::scheduler::SetBalloonResponse {
-                    success: false,
-                    message: "Job has no host or VM assigned".to_string(),
-                });
-            },
+        let Some((host_id, vm_id)) = Self::job_host_vm(&job) else {
+            return Ok(mikrom_proto::scheduler::SetBalloonResponse {
+                success: false,
+                message: "Job has no host or VM assigned".to_string(),
+            });
         };
         match self
             .app_service
             .agent_client
-            .set_balloon(&host_id, &vm_id, req.target_memory_mib)
+            .set_balloon(host_id, vm_id, req.target_memory_mib)
             .await
         {
             Ok(_) => Ok(mikrom_proto::scheduler::SetBalloonResponse {
@@ -985,21 +938,18 @@ impl SchedulerServer {
                 });
             },
         };
-        let (host_id, vm_id) = match (&job.host_id, &job.vm_id) {
-            (Some(h), Some(v)) => (h.clone(), v.clone()),
-            _ => {
-                return Ok(mikrom_proto::scheduler::QueryBalloonResponse {
-                    success: false,
-                    message: "Job has no host or VM assigned".to_string(),
-                    actual_memory_mib: 0,
-                    max_memory_mib: 0,
-                });
-            },
+        let Some((host_id, vm_id)) = Self::job_host_vm(&job) else {
+            return Ok(mikrom_proto::scheduler::QueryBalloonResponse {
+                success: false,
+                message: "Job has no host or VM assigned".to_string(),
+                actual_memory_mib: 0,
+                max_memory_mib: 0,
+            });
         };
         match self
             .app_service
             .agent_client
-            .query_balloon(&host_id, &vm_id)
+            .query_balloon(host_id, vm_id)
             .await
         {
             Ok((actual, max)) => Ok(mikrom_proto::scheduler::QueryBalloonResponse {
@@ -1030,7 +980,7 @@ impl Clone for SchedulerServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::AppService;
+    use crate::application::{AppService, SchedulerRuntimeConfig};
     use crate::domain::AppConfig;
     use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository};
     use mockall::predicate::function;
@@ -1048,12 +998,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_app_scaling_config_maps_router_activity_fields() {
+        let Some(nats_client) = connect_nats_or_skip().await else {
+            return;
+        };
+
+        let runtime = SchedulerRuntimeConfig {
+            router_idle_timeout_secs: 900,
+            worker_stale_threshold_secs: 60,
+            restore_retry_backoff_secs: 3600,
+        };
+
         let mut app_repo = crate::domain::app::MockAppRepository::new();
         app_repo
             .expect_update_app_config()
             .with(function(|cfg: &AppConfig| {
-                cfg.id == "app-1"
-                    && cfg.user_id == "user-1"
+                cfg.id == "app-1".into()
+                    && cfg.user_id == "user-1".into()
                     && cfg.hostname == "app.example.com"
                     && cfg.last_router_traffic_at == 123
                     && cfg.last_scaled_to_zero_at == 456
@@ -1062,9 +1022,6 @@ mod tests {
             .times(1)
             .returning(|_| Box::pin(async { Ok(()) }));
 
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
         let service = AppService::new(
             Arc::new(MockJobRepository::new()),
             Arc::new(app_repo),
@@ -1072,7 +1029,7 @@ mod tests {
             Arc::new(MockAgentClient::new()),
             nats_client,
             sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
-            900,
+            runtime,
         );
         let server = SchedulerServer::new(Arc::new(service), None);
 

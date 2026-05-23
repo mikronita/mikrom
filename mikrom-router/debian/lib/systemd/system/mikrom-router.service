@@ -6,6 +6,7 @@ After=network.target nats.service postgresql.service
 Type=simple
 User=root
 EnvironmentFile=/etc/mikrom/router.env
+ExecStartPre=/usr/sbin/modprobe wireguard
 ExecStart=/usr/bin/mikrom-router
 Restart=always
 RestartSec=5

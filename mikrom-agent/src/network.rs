@@ -74,10 +74,15 @@ async fn get_link_index(
     match links.try_next().await {
         Ok(Some(link)) => Ok(Some(link.header.index)),
         Ok(None) => Ok(None),
+        Err(e) if is_missing_device_error(&e) => Ok(None),
         Err(e) => Err(HypervisorError::ProcessError(format!(
             "Failed to get link index for {name}: {e}"
         ))),
     }
+}
+
+fn is_missing_device_error(error: &impl std::fmt::Display) -> bool {
+    error.to_string().contains("No such device")
 }
 
 async fn set_link_up(handle: &rtnetlink::Handle, index: u32) -> Result<(), HypervisorError> {
@@ -151,5 +156,23 @@ async fn run_iptables(args: &[&str]) {
             tracing::warn!("iptables command error: {e}");
         },
         _ => {},
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_missing_device_error;
+    use std::io;
+
+    #[test]
+    fn missing_device_errors_are_treated_as_absent() {
+        let err = io::Error::from_raw_os_error(19);
+        assert!(is_missing_device_error(&err));
+    }
+
+    #[test]
+    fn unrelated_errors_are_not_treated_as_absent() {
+        let err = io::Error::from_raw_os_error(2);
+        assert!(!is_missing_device_error(&err));
     }
 }

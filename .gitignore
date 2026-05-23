@@ -6,3 +6,5 @@ mikrom-router.deb
 .codex
 .claude
 .gemini
+.zig-cache
+zig-out

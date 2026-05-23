@@ -1,4 +1,5 @@
 pub mod event_loop;
+pub mod subjects;
 
 pub use event_loop::NatsEventLoop;
 
@@ -106,7 +107,7 @@ impl AgentClient for NatsAgentClient {
                 .volumes
                 .iter()
                 .map(|v| ProtoVolume {
-                    volume_id: v.volume_id.clone(),
+                    volume_id: v.volume_id.to_string(),
                     size_mib: v.size_mib,
                     read_only: v.read_only,
                     pool_name: v.pool_name.clone(),
@@ -464,7 +465,6 @@ impl AgentClient for NatsAgentClient {
         target_host: &str,
         target_uri: &str,
     ) -> DomainResult<()> {
-        let _ = target_host;
         self.send_command(
             host_id,
             mikrom_proto::agent::agent_command::Command::StartMigration(StartMigrationRequest {
