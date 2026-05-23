@@ -5,10 +5,7 @@ pub struct ApiConfig {
     pub database_url: String,
     pub nats_url: String,
 
-    #[serde(default = "default_jwt_secret")]
     pub jwt_secret: String,
-
-    #[serde(default = "default_master_key")]
     pub master_key: String,
 
     #[serde(default = "default_api_port")]
@@ -27,25 +24,15 @@ pub struct ApiConfig {
     pub deployment_env: String,
 
     pub rate_limit_public_rpm: Option<u32>,
-
     pub rate_limit_auth_login_rpm: Option<u32>,
-
     pub rate_limit_auth_register_rpm: Option<u32>,
-
     pub rate_limit_github_install_rpm: Option<u32>,
-
     pub rate_limit_apps_create_rpm: Option<u32>,
-
     pub rate_limit_apps_deploy_rpm: Option<u32>,
-
     pub rate_limit_webhooks_github_generic_rpm: Option<u32>,
-
     pub rate_limit_webhooks_github_named_rpm: Option<u32>,
-
     pub rate_limit_authenticated_read_rpm: Option<u32>,
-
     pub rate_limit_authenticated_write_rpm: Option<u32>,
-
     pub rate_limit_authenticated_stream_rpm: Option<u32>,
 
     #[serde(default = "default_rate_limit_entry_ttl_secs")]
@@ -56,6 +43,12 @@ pub struct ApiConfig {
 
     #[serde(default = "default_rate_limit_trust_proxy_headers")]
     pub rate_limit_trust_proxy_headers: bool,
+
+    #[serde(default = "default_nats_request_timeout_secs")]
+    pub nats_request_timeout_secs: u64,
+
+    #[serde(default = "default_nats_storage_timeout_secs")]
+    pub nats_storage_timeout_secs: u64,
 
     #[serde(default = "default_acme_email")]
     pub acme_email: String,
@@ -86,14 +79,6 @@ fn default_acme_staging() -> bool {
 
 fn default_acme_check_interval() -> u64 {
     3600 // 1 hour
-}
-
-fn default_jwt_secret() -> String {
-    "secret".to_string()
-}
-
-fn default_master_key() -> String {
-    "default-master-key-change-me-in-production".to_string()
 }
 
 fn default_api_port() -> u16 {
@@ -128,9 +113,26 @@ fn default_rate_limit_trust_proxy_headers() -> bool {
     false
 }
 
+fn default_nats_request_timeout_secs() -> u64 {
+    5
+}
+
+fn default_nats_storage_timeout_secs() -> u64 {
+    30
+}
+
 impl ApiConfig {
     pub fn load() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
-        envy::from_env::<Self>().map_err(anyhow::Error::from)
+        let config = envy::from_env::<Self>().map_err(anyhow::Error::from)?;
+
+        if config.jwt_secret.len() < 32 {
+            anyhow::bail!("JWT_SECRET must be at least 32 characters long");
+        }
+        if config.master_key.len() < 32 {
+            anyhow::bail!("MASTER_KEY must be at least 32 characters long");
+        }
+
+        Ok(config)
     }
 }
