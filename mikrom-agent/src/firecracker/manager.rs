@@ -638,6 +638,13 @@ impl FirecrackerManager {
 
     #[tracing::instrument(skip(self), fields(vm_id = %vm_id))]
     pub async fn stop_vm(&self, vm_id: &VmId) -> Result<(), HypervisorError> {
+        let volumes = {
+            let vms = self.vms.read().await;
+            vms.get(vm_id)
+                .map(|vm| vm.config.volumes.clone())
+                .unwrap_or_default()
+        };
+
         {
             let mut vms = self.vms.write().await;
             match vms.get_mut(vm_id) {
@@ -650,13 +657,14 @@ impl FirecrackerManager {
 
         if let Some(mut proc) = self.processes.lock().await.remove(vm_id) {
             self.stop_running_process(vm_id, &mut proc).await;
-            self.cleanup_exited_process_artifacts(vm_id, &proc).await;
+            self.cleanup_exited_process_artifacts(vm_id, &proc, &volumes)
+                .await;
             if let Some(ref tap) = proc.tap_name {
                 self.cleanup_tap(tap).await;
             }
         } else {
             tracing::info!(vm_id = %vm_id, "Process already gone, performing best-effort cleanup of volumes and artifacts");
-            self.cleanup_process_volumes(vm_id).await;
+            self.cleanup_process_volumes(&volumes).await;
         }
 
         let mut vms = self.vms.write().await;

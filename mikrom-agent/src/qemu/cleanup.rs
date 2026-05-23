@@ -5,6 +5,25 @@ use std::os::unix::process::ExitStatusExt;
 use std::time::Duration;
 
 impl QemuManager {
+    async fn remove_file_best_effort(path: &std::path::Path, context: &'static str) {
+        if let Err(e) = tokio::fs::remove_file(path).await {
+            tracing::debug!(path = %path.display(), error = %e, %context, "Best-effort file removal failed");
+        }
+    }
+
+    async fn kill_child_best_effort(
+        child: &mut tokio::process::Child,
+        context: &'static str,
+        vm_id: &VmId,
+    ) {
+        if let Err(e) = child.kill().await {
+            tracing::debug!(vm_id = %vm_id, error = %e, %context, "Best-effort child kill failed");
+        }
+        if let Err(e) = child.wait().await {
+            tracing::debug!(vm_id = %vm_id, error = %e, %context, "Best-effort child wait failed");
+        }
+    }
+
     pub(crate) async fn run_gc(&self) {
         let mut processes = self.processes.lock().await;
         let mut to_restart = Vec::new();
@@ -82,24 +101,22 @@ impl QemuManager {
             };
 
             if !qmp_ok {
-                let _ = proc.child.kill().await;
-                let _ = proc.child.wait().await;
+                Self::kill_child_best_effort(&mut proc.child, "qemu-stop-child", vm_id).await;
             } else {
                 tokio::time::sleep(Duration::from_millis(500)).await;
-                let _ = proc.child.kill().await;
-                let _ = proc.child.wait().await;
+                Self::kill_child_best_effort(&mut proc.child, "qemu-stop-child-after-qmp", vm_id)
+                    .await;
             }
 
             for mut fsd in proc.virtiofsd {
-                let _ = fsd.kill().await;
-                let _ = fsd.wait().await;
+                Self::kill_child_best_effort(&mut fsd, "qemu-stop-virtiofsd", vm_id).await;
             }
             for sock in &proc.virtiofsd_sockets {
-                let _ = tokio::fs::remove_file(sock).await;
+                Self::remove_file_best_effort(sock, "qemu-stop-virtiofsd-socket").await;
             }
 
-            let _ = tokio::fs::remove_file(&qmp_path).await;
-            let _ = tokio::fs::remove_file(&self.pidfile_path(vm_id)).await;
+            Self::remove_file_best_effort(&qmp_path, "qemu-stop-qmp").await;
+            Self::remove_file_best_effort(&self.pidfile_path(vm_id), "qemu-stop-pidfile").await;
         }
 
         let mut vms = self.vms.write().await;
@@ -116,7 +133,7 @@ impl QemuManager {
         let mut vms = self.vms.write().await;
         vms.remove(vm_id);
         self.logs.remove(vm_id);
-        let _ = tokio::fs::remove_file(&self.vm_state_path(vm_id)).await;
+        Self::remove_file_best_effort(&self.vm_state_path(vm_id), "qemu-delete-vm-state").await;
         Ok(())
     }
 

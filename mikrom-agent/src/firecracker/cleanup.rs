@@ -1,11 +1,23 @@
-use crate::hypervisor::VmStatus;
+use crate::hypervisor::{VmStatus, Volume};
 use futures::stream::TryStreamExt;
 use mikrom_proto::id::VmId;
+use std::collections::HashMap;
 use std::os::unix::process::ExitStatusExt;
 
 impl crate::firecracker::FirecrackerManager {
     pub(crate) async fn run_gc(&self) {
         tracing::debug!("Running agent garbage collector...");
+
+        #[derive(Clone)]
+        enum CleanupKind {
+            Paused {
+                socket_path: String,
+                chroot_dir: Option<String>,
+            },
+            Active {
+                volumes: Vec<Volume>,
+            },
+        }
 
         // Step 1: Collect exited processes while holding the processes lock.
         let mut exited = Vec::new();
@@ -48,6 +60,7 @@ impl crate::firecracker::FirecrackerManager {
 
         // Step 2: Read VM statuses and decide actions while holding vms lock.
         let mut restarts = Vec::new();
+        let mut cleanup_plans: HashMap<VmId, CleanupKind> = HashMap::new();
         {
             let mut vms = self.vms.write().await;
             for (vm_id, exit_status, _proc) in &exited {
@@ -65,26 +78,54 @@ impl crate::firecracker::FirecrackerManager {
                     if let Some(ip) = &vm.config.ip_address {
                         self.release_vm_ip(ip).await;
                     }
+                    cleanup_plans.insert(
+                        *vm_id,
+                        CleanupKind::Active {
+                            volumes: vm.config.volumes.clone(),
+                        },
+                    );
                     restarts.push((*vm_id, vm.app_id, vm.image.clone(), vm.config.clone()));
                 } else if vm.status == VmStatus::Paused {
                     tracing::info!(vm_id = %vm_id, "VM is hibernated, preserving artifacts");
+                    cleanup_plans.insert(
+                        *vm_id,
+                        CleanupKind::Paused {
+                            socket_path: _proc.socket_path.clone(),
+                            chroot_dir: _proc.chroot_dir.clone(),
+                        },
+                    );
                 } else {
                     tracing::info!(vm_id = %vm_id, status = ?vm.status, "VM not running, marking stopped");
                     vm.status = VmStatus::Stopped;
+                    cleanup_plans.insert(
+                        *vm_id,
+                        CleanupKind::Active {
+                            volumes: vm.config.volumes.clone(),
+                        },
+                    );
                 }
             }
         } // vms lock dropped here
 
         // Step 3: Cleanup artifacts (no locks held).
         for (vm_id, _exit_status, proc) in &exited {
-            if let Some(vm) = self.vms.read().await.get(vm_id) {
-                if vm.status == VmStatus::Paused {
-                    self.cleanup_process_chroot(vm_id, proc.chroot_dir.as_deref())
+            let Some(kind) = cleanup_plans.get(vm_id) else {
+                continue;
+            };
+
+            match kind {
+                CleanupKind::Paused {
+                    socket_path,
+                    chroot_dir,
+                } => {
+                    self.cleanup_process_chroot(vm_id, chroot_dir.as_deref())
                         .await;
-                    self.remove_stale_socket(&proc.socket_path).await;
-                } else {
-                    self.cleanup_exited_process_artifacts(vm_id, proc).await;
-                }
+                    self.remove_stale_socket(&socket_path).await;
+                },
+                CleanupKind::Active { volumes } => {
+                    self.cleanup_exited_process_artifacts(vm_id, proc, volumes)
+                        .await;
+                },
             }
         }
 
@@ -108,12 +149,13 @@ impl crate::firecracker::FirecrackerManager {
         &self,
         vm_id: &VmId,
         proc: &crate::firecracker::process::VmProcess,
+        volumes: &[Volume],
     ) {
         self.cleanup_process_paths(vm_id, Some(&proc.socket_path))
             .await;
         self.cleanup_process_chroot(vm_id, proc.chroot_dir.as_deref())
             .await;
-        self.cleanup_process_volumes(vm_id).await;
+        self.cleanup_process_volumes(volumes).await;
     }
 
     pub(crate) async fn cleanup_process_paths(&self, vm_id: &VmId, socket_path: Option<&str>) {
@@ -180,14 +222,7 @@ impl crate::firecracker::FirecrackerManager {
         }
     }
 
-    pub(crate) async fn cleanup_process_volumes(&self, vm_id: &VmId) {
-        let volumes = {
-            let vms = self.vms.read().await;
-            vms.get(vm_id)
-                .map(|vm| vm.config.volumes.clone())
-                .unwrap_or_default()
-        };
-
+    pub(crate) async fn cleanup_process_volumes(&self, volumes: &[Volume]) {
         let _storage = crate::ceph::CephRbd;
         for vol in volumes {
             if !vol.pool_name.is_empty() {

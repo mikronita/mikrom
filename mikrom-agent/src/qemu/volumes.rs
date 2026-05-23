@@ -5,6 +5,19 @@ use std::path::Path;
 use std::time::Duration;
 
 impl QemuManager {
+    async fn qmp_best_effort(
+        &self,
+        vm_id: &VmId,
+        context: &'static str,
+        qmp: &mut crate::qemu::QmpClient,
+        command: &str,
+        args: serde_json::Value,
+    ) {
+        if let Err(e) = qmp.execute_with_args(command, args).await {
+            tracing::debug!(vm_id = %vm_id, error = %e, %context, "Best-effort QMP operation failed");
+        }
+    }
+
     /// Hot-plug a virtio-blk volume into a running VM.
     pub async fn attach_volume(
         &self,
@@ -53,12 +66,26 @@ impl QemuManager {
 
         with_qmp!(self, vm_id, "hot-unplug", |qmp| {
             let del_args = serde_json::json!({ "id": device_id });
-            let _ = qmp.execute_with_args("device_del", del_args).await;
+            self.qmp_best_effort(
+                vm_id,
+                "qemu-detach-device-del",
+                &mut qmp,
+                "device_del",
+                del_args,
+            )
+            .await;
 
             tokio::time::sleep(Duration::from_millis(200)).await;
 
             let blockdel_args = serde_json::json!({ "node-name": node_name });
-            let _ = qmp.execute_with_args("blockdev-del", blockdel_args).await;
+            self.qmp_best_effort(
+                vm_id,
+                "qemu-detach-blockdev-del",
+                &mut qmp,
+                "blockdev-del",
+                blockdel_args,
+            )
+            .await;
 
             tracing::info!(vm_id = %vm_id, volume = %volume_id, "Volume hot-unplugged");
             Ok(())

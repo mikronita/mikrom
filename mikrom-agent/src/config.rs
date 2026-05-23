@@ -39,6 +39,9 @@ pub struct AgentConfig {
 
     #[serde(default = "default_max_vms_per_host")]
     pub max_vms_per_host: u32,
+
+    #[serde(default = "default_nats_flapping_session_secs")]
+    pub nats_flapping_session_secs: u64,
 }
 
 const fn default_qemu_enabled() -> bool {
@@ -51,6 +54,10 @@ const fn default_http_port() -> u16 {
 
 const fn default_max_vms_per_host() -> u32 {
     0 // 0 = unlimited
+}
+
+const fn default_nats_flapping_session_secs() -> u64 {
+    30
 }
 
 fn default_certs_dir() -> String {
@@ -271,5 +278,27 @@ mod tests {
         assert_eq!(second, "host-a");
 
         let _ = std::fs::remove_dir_all(&data_path);
+    }
+
+    #[test]
+    fn default_nats_flapping_session_secs_is_reasonable() {
+        let config = AgentConfig {
+            nats_url: "nats://localhost:4222".to_string(),
+            host_id: "host-1".to_string(),
+            use_tls: false,
+            bridge_ip: "10.0.0.1/8".to_string(),
+            certs_dir: "/certs/agent".to_string(),
+            data_path: std::env::temp_dir(),
+            agent_hostname: None,
+            agent_advertise_address: None,
+            wireguard_port: None,
+            wireguard_pubkey: None,
+            qemu_enabled: true,
+            http_port: 5002,
+            max_vms_per_host: 0,
+            nats_flapping_session_secs: default_nats_flapping_session_secs(),
+        };
+
+        assert_eq!(config.nats_flapping_session_secs, 30);
     }
 }
