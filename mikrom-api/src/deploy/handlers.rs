@@ -579,8 +579,7 @@ pub async fn scale_app_handler(
                 updated_app.desired_replicas as u32,
                 updated_app.user_id.to_string(),
             )
-            .await
-            .map_err(ApiError::Scheduler)?;
+            .await?;
     }
 
     // Case B: Update autoscaling config in scheduler cache
@@ -600,8 +599,7 @@ pub async fn scale_app_handler(
             last_router_traffic_at: chrono::Utc::now().timestamp(),
             last_scaled_to_zero_at: 0,
         })
-        .await
-        .map_err(ApiError::Scheduler)?;
+        .await?;
 
     Ok(StatusCode::OK)
 }
@@ -827,8 +825,7 @@ pub async fn activate_deployment_handler(
             let resume_ok = state
                 .scheduler
                 .resume_app(job_id.clone(), "system".to_string())
-                .await
-                .map_err(ApiError::Scheduler)?;
+                .await?;
 
             if !resume_ok {
                 return Err(ApiError::BadRequest("Failed to resume deployment".into()));
@@ -1405,7 +1402,9 @@ mod tests {
 
         let mut mock_scheduler = MockScheduler::new();
         mock_scheduler.expect_scale_app().returning(|_, _, _| {
-            Err("NATS request failed: no responders: no responders".to_string())
+            Err(crate::domain::DomainError::Infrastructure(
+                "NATS request failed: no responders: no responders".to_string(),
+            ))
         });
         mock_scheduler.expect_update_app_scaling_config().times(0);
         state.scheduler = Arc::new(mock_scheduler);
@@ -1426,8 +1425,8 @@ mod tests {
         .await;
 
         match result {
-            Err(ApiError::Scheduler(_)) => {},
-            _ => panic!("Expected Scheduler error, got {:?}", result),
+            Err(ApiError::Domain(crate::domain::DomainError::Infrastructure(_))) => {},
+            _ => panic!("Expected Scheduler/Infrastructure error, got {:?}", result),
         }
     }
 }

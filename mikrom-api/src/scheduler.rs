@@ -1,105 +1,76 @@
+use crate::domain::error::DomainResult;
+use crate::nats::TypedNatsClient;
 use mikrom_proto::scheduler::ListWorkersResponse;
 
 #[async_trait::async_trait]
 pub trait Scheduler: Send + Sync {
-    async fn pause_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
-    async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
-    async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
-    async fn delete_all_by_app(&self, app_id: String, user_id: String) -> Result<bool, String>;
+    async fn pause_app(&self, job_id: String, user_id: String) -> DomainResult<bool>;
+    async fn resume_app(&self, job_id: String, user_id: String) -> DomainResult<bool>;
+    async fn delete_app(&self, job_id: String, user_id: String) -> DomainResult<bool>;
+    async fn delete_all_by_app(&self, app_id: String, user_id: String) -> DomainResult<bool>;
     async fn scale_app(
         &self,
         app_id: String,
         desired_replicas: u32,
         user_id: String,
-    ) -> Result<bool, String>;
+    ) -> DomainResult<bool>;
     async fn list_apps(
         &self,
         req: mikrom_proto::scheduler::ListAppsRequest,
-    ) -> Result<mikrom_proto::scheduler::ListAppsResponse, String>;
+    ) -> DomainResult<mikrom_proto::scheduler::ListAppsResponse>;
     async fn update_app_scaling_config(
         &self,
         req: mikrom_proto::scheduler::UpdateAppScalingConfigRequest,
-    ) -> Result<bool, String>;
-    async fn list_workers(&self) -> Result<ListWorkersResponse, String>;
+    ) -> DomainResult<bool>;
+    async fn list_workers(&self) -> DomainResult<ListWorkersResponse>;
 }
 
 pub struct NatsScheduler {
-    pub client: async_nats::Client,
+    nats: TypedNatsClient,
+}
+
+impl NatsScheduler {
+    pub fn new(nats: TypedNatsClient) -> Self {
+        Self { nats }
+    }
 }
 
 #[async_trait::async_trait]
 impl Scheduler for NatsScheduler {
-    async fn pause_app(&self, job_id: String, user_id: String) -> Result<bool, String> {
-        use mikrom_proto::scheduler::{PauseRequest, PauseResponse};
-        use prost::Message;
-        let nats_req = PauseRequest { job_id, user_id };
-        let mut buf = Vec::new();
-        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
-
-        let response = self
-            .client
-            .request(mikrom_proto::subjects::SCHEDULER_PAUSE_APP, buf.into())
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let inner = PauseResponse::decode(&response.payload[..]).map_err(|e| e.to_string())?;
-
-        Ok(inner.success)
+    async fn pause_app(&self, job_id: String, user_id: String) -> DomainResult<bool> {
+        let req = mikrom_proto::scheduler::PauseRequest { job_id, user_id };
+        let res: mikrom_proto::scheduler::PauseResponse = self
+            .nats
+            .request(mikrom_proto::subjects::SCHEDULER_PAUSE_APP, req)
+            .await?;
+        Ok(res.success)
     }
 
-    async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String> {
-        use mikrom_proto::scheduler::{ResumeRequest, ResumeResponse};
-        use prost::Message;
-        let nats_req = ResumeRequest { job_id, user_id };
-        let mut buf = Vec::new();
-        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
-
-        let response = self
-            .client
-            .request(mikrom_proto::subjects::SCHEDULER_RESUME_APP, buf.into())
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let inner = ResumeResponse::decode(&response.payload[..]).map_err(|e| e.to_string())?;
-
-        Ok(inner.success)
+    async fn resume_app(&self, job_id: String, user_id: String) -> DomainResult<bool> {
+        let req = mikrom_proto::scheduler::ResumeRequest { job_id, user_id };
+        let res: mikrom_proto::scheduler::ResumeResponse = self
+            .nats
+            .request(mikrom_proto::subjects::SCHEDULER_RESUME_APP, req)
+            .await?;
+        Ok(res.success)
     }
 
-    async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String> {
-        use mikrom_proto::scheduler::{DeleteAppRequest, DeleteAppResponse};
-        use prost::Message;
-        let nats_req = DeleteAppRequest { job_id, user_id };
-        let mut buf = Vec::new();
-        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
-
-        let response = self
-            .client
-            .request(mikrom_proto::subjects::SCHEDULER_DELETE_APP, buf.into())
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let inner = DeleteAppResponse::decode(&response.payload[..]).map_err(|e| e.to_string())?;
-
-        Ok(inner.success)
+    async fn delete_app(&self, job_id: String, user_id: String) -> DomainResult<bool> {
+        let req = mikrom_proto::scheduler::DeleteAppRequest { job_id, user_id };
+        let res: mikrom_proto::scheduler::DeleteAppResponse = self
+            .nats
+            .request(mikrom_proto::subjects::SCHEDULER_DELETE_APP, req)
+            .await?;
+        Ok(res.success)
     }
 
-    async fn delete_all_by_app(&self, app_id: String, user_id: String) -> Result<bool, String> {
-        use mikrom_proto::scheduler::{DeleteAllByAppRequest, DeleteAllByAppResponse};
-        use prost::Message;
-        let nats_req = DeleteAllByAppRequest { app_id, user_id };
-        let mut buf = Vec::new();
-        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
-
-        let response = self
-            .client
-            .request("mikrom.scheduler.delete_all_by_app", buf.into())
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let inner =
-            DeleteAllByAppResponse::decode(&response.payload[..]).map_err(|e| e.to_string())?;
-
-        Ok(inner.success)
+    async fn delete_all_by_app(&self, app_id: String, user_id: String) -> DomainResult<bool> {
+        let req = mikrom_proto::scheduler::DeleteAllByAppRequest { app_id, user_id };
+        let res: mikrom_proto::scheduler::DeleteAllByAppResponse = self
+            .nats
+            .request("mikrom.scheduler.delete_all_by_app", req)
+            .await?;
+        Ok(res.success)
     }
 
     async fn scale_app(
@@ -107,84 +78,51 @@ impl Scheduler for NatsScheduler {
         app_id: String,
         desired_replicas: u32,
         user_id: String,
-    ) -> Result<bool, String> {
-        use mikrom_proto::scheduler::{ScaleAppRequest, ScaleAppResponse};
-        use prost::Message;
-        let nats_req = ScaleAppRequest {
+    ) -> DomainResult<bool> {
+        let req = mikrom_proto::scheduler::ScaleAppRequest {
             app_id,
             desired_replicas,
             user_id,
         };
-        let mut buf = Vec::new();
-        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
-
-        let response = self
-            .client
-            .request(mikrom_proto::subjects::SCHEDULER_SCALE_APP, buf.into())
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let inner = ScaleAppResponse::decode(&response.payload[..]).map_err(|e| e.to_string())?;
-
-        Ok(inner.success)
+        let res: mikrom_proto::scheduler::ScaleAppResponse = self
+            .nats
+            .request(mikrom_proto::subjects::SCHEDULER_SCALE_APP, req)
+            .await?;
+        Ok(res.success)
     }
 
     async fn list_apps(
         &self,
         req: mikrom_proto::scheduler::ListAppsRequest,
-    ) -> Result<mikrom_proto::scheduler::ListAppsResponse, String> {
-        use mikrom_proto::scheduler::ListAppsResponse;
-        use prost::Message;
-        let mut buf = Vec::new();
-        req.encode(&mut buf).map_err(|e| e.to_string())?;
-
-        let response = self
-            .client
-            .request(mikrom_proto::subjects::SCHEDULER_LIST_APPS, buf.into())
-            .await
-            .map_err(|e| e.to_string())?;
-
-        ListAppsResponse::decode(&response.payload[..]).map_err(|e| e.to_string())
+    ) -> DomainResult<mikrom_proto::scheduler::ListAppsResponse> {
+        let res: mikrom_proto::scheduler::ListAppsResponse = self
+            .nats
+            .request(mikrom_proto::subjects::SCHEDULER_LIST_APPS, req)
+            .await?;
+        Ok(res)
     }
 
     async fn update_app_scaling_config(
         &self,
         req: mikrom_proto::scheduler::UpdateAppScalingConfigRequest,
-    ) -> Result<bool, String> {
-        use mikrom_proto::scheduler::UpdateAppScalingConfigResponse;
-        use prost::Message;
-        let mut buf = Vec::new();
-        req.encode(&mut buf).map_err(|e| e.to_string())?;
-
-        let response = self
-            .client
+    ) -> DomainResult<bool> {
+        let res: mikrom_proto::scheduler::UpdateAppScalingConfigResponse = self
+            .nats
             .request(
                 mikrom_proto::subjects::SCHEDULER_UPDATE_APP_SCALING_CONFIG,
-                buf.into(),
+                req,
             )
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let inner = UpdateAppScalingConfigResponse::decode(&response.payload[..])
-            .map_err(|e| e.to_string())?;
-
-        Ok(inner.success)
+            .await?;
+        Ok(res.success)
     }
 
-    async fn list_workers(&self) -> Result<ListWorkersResponse, String> {
-        use mikrom_proto::scheduler::ListWorkersRequest;
-        use prost::Message;
-        let nats_req = ListWorkersRequest {};
-        let mut buf = Vec::new();
-        nats_req.encode(&mut buf).map_err(|e| e.to_string())?;
-
-        let response = self
-            .client
-            .request(mikrom_proto::subjects::SCHEDULER_LIST_WORKERS, buf.into())
-            .await
-            .map_err(|e| e.to_string())?;
-
-        ListWorkersResponse::decode(&response.payload[..]).map_err(|e| e.to_string())
+    async fn list_workers(&self) -> DomainResult<ListWorkersResponse> {
+        let req = mikrom_proto::scheduler::ListWorkersRequest {};
+        let res: ListWorkersResponse = self
+            .nats
+            .request(mikrom_proto::subjects::SCHEDULER_LIST_WORKERS, req)
+            .await?;
+        Ok(res)
     }
 }
 
@@ -192,25 +130,25 @@ mockall::mock! {
     pub Scheduler {}
     #[async_trait::async_trait]
     impl Scheduler for Scheduler {
-        async fn pause_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
-        async fn resume_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
-        async fn delete_app(&self, job_id: String, user_id: String) -> Result<bool, String>;
-        async fn delete_all_by_app(&self, app_id: String, user_id: String) -> Result<bool, String>;
+        async fn pause_app(&self, job_id: String, user_id: String) -> DomainResult<bool>;
+        async fn resume_app(&self, job_id: String, user_id: String) -> DomainResult<bool>;
+        async fn delete_app(&self, job_id: String, user_id: String) -> DomainResult<bool>;
+        async fn delete_all_by_app(&self, app_id: String, user_id: String) -> DomainResult<bool>;
         async fn scale_app(
             &self,
             app_id: String,
             desired_replicas: u32,
             user_id: String,
-        ) -> Result<bool, String>;
+        ) -> DomainResult<bool>;
         async fn list_apps(
             &self,
             req: mikrom_proto::scheduler::ListAppsRequest,
-        ) -> Result<mikrom_proto::scheduler::ListAppsResponse, String>;
+        ) -> DomainResult<mikrom_proto::scheduler::ListAppsResponse>;
         async fn update_app_scaling_config(
             &self,
             req: mikrom_proto::scheduler::UpdateAppScalingConfigRequest,
-        ) -> Result<bool, String>;
-        async fn list_workers(&self) -> Result<ListWorkersResponse, String>;
+        ) -> DomainResult<bool>;
+        async fn list_workers(&self) -> DomainResult<ListWorkersResponse>;
     }
 }
 

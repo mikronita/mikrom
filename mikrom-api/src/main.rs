@@ -41,9 +41,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to connect to NATS: {}", e))?;
     let nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone());
 
-    let scheduler = Arc::new(mikrom_api::scheduler::NatsScheduler {
-        client: nats_client,
-    });
+    let scheduler = Arc::new(mikrom_api::scheduler::NatsScheduler::new(nats.clone()));
 
     let state = AppState {
         user_repo: Arc::new(user_repo),
