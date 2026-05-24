@@ -33,3 +33,14 @@ pub async fn connect_nats(
 
     Ok(client)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::tls_url;
+
+    #[test]
+    fn tls_url_upgrades_nats_scheme_only() {
+        assert_eq!(tls_url("nats://example.com:4222"), "tls://example.com:4222");
+        assert_eq!(tls_url("example.com:4222"), "example.com:4222");
+    }
+}

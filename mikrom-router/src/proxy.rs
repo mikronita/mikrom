@@ -1,3 +1,4 @@
+use crate::health::{self, RouterHealth};
 use crate::state::State;
 use crate::traffic::RouterTrafficPublisher;
 use async_trait::async_trait;
@@ -17,23 +18,9 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-fn canonical_host(host: &str) -> String {
-    if let Some(rest) = host.strip_prefix('[')
-        && let Some((ipv6, suffix)) = rest.split_once(']')
-        && (suffix.is_empty() || suffix.starts_with(':'))
-    {
-        return format!("[{ipv6}]");
-    }
-
-    if let Some((name, port)) = host.rsplit_once(':')
-        && !name.contains(':')
-        && !port.contains(':')
-    {
-        return name.to_string();
-    }
-
-    host.to_string()
-}
+mod host;
+mod http;
+use host::HostName;
 
 pub struct RouterMetricsCounters {
     pub requests_total: AtomicU64,
@@ -66,6 +53,7 @@ impl Default for RouterMetricsCounters {
 
 pub struct MikromProxy {
     state: Arc<RwLock<State>>,
+    health: Arc<RouterHealth>,
     acme_staging: bool,
     upstream_ca: Option<Arc<Box<[X509]>>>,
     pub metrics: Arc<RouterMetricsCounters>,
@@ -76,14 +64,64 @@ pub struct MikromProxy {
 }
 
 pub struct MikromCtx {
-    pub span: tracing::Span,
-    pub request_start_time: chrono::DateTime<chrono::Utc>,
+    pub(crate) request_id: String,
+    pub(crate) span: tracing::Span,
+    pub(crate) request_start_time: chrono::DateTime<chrono::Utc>,
+    pub(crate) host: Option<HostName>,
+    pub(crate) normalized_host: Option<HostName>,
+    pub(crate) upstream: Option<String>,
+}
+
+const fn downstream_request_timeout() -> Duration {
+    Duration::from_secs(10)
+}
+
+const fn downstream_response_timeout() -> Duration {
+    Duration::from_secs(30)
+}
+
+const fn upstream_connect_timeout() -> Duration {
+    Duration::from_secs(5)
+}
+
+const fn upstream_read_timeout() -> Duration {
+    Duration::from_secs(30)
+}
+
+const fn upstream_write_timeout() -> Duration {
+    Duration::from_secs(30)
+}
+
+#[allow(clippy::duration_suboptimal_units)]
+const fn upstream_idle_timeout() -> Duration {
+    Duration::from_secs(60)
+}
+
+const MAX_REQUEST_HEADERS: usize = 128;
+const MAX_REQUEST_HEADER_BYTES: usize = 16 * 1024;
+const MAX_REQUEST_BODY_BYTES: u64 = 16 * 1024 * 1024;
+
+fn header_size_from_pairs<I, N, V>(headers: I) -> usize
+where
+    I: IntoIterator<Item = (N, V)>,
+    N: AsRef<str>,
+    V: AsRef<[u8]>,
+{
+    headers
+        .into_iter()
+        .map(|(name, value)| name.as_ref().len() + value.as_ref().len())
+        .sum()
+}
+
+fn request_content_length_from_value(value: Option<&str>) -> Option<u64> {
+    value.and_then(|value| value.parse::<u64>().ok())
 }
 
 impl MikromProxy {
     #[must_use]
     pub fn new(
         state: Arc<RwLock<State>>,
+        health: Arc<RouterHealth>,
         acme_staging: bool,
         upstream_ca: Option<Arc<Box<[X509]>>>,
         metrics: Arc<RouterMetricsCounters>,
@@ -92,6 +130,7 @@ impl MikromProxy {
     ) -> Self {
         Self {
             state,
+            health,
             acme_staging,
             upstream_ca,
             metrics,
@@ -107,7 +146,7 @@ impl MikromProxy {
         host: &str,
     ) -> Result<(Arc<LoadBalancer<RoundRobin>>, bool, Option<String>)> {
         let raw_host = host;
-        let host = canonical_host(raw_host);
+        let host = HostName::parse(raw_host);
         let state = self.state.read().await;
 
         let res = state
@@ -118,7 +157,7 @@ impl MikromProxy {
             || {
                 Err(Error::explain(
                     ErrorType::HTTPStatus(404),
-                    format!("No route found for host: {host}"),
+                    format!("No route found for host: {}", host.as_str()),
                 ))
             },
             |route| {
@@ -139,9 +178,75 @@ impl MikromProxy {
 
     pub async fn has_route(&self, host: &str) -> bool {
         let raw_host = host;
-        let host = canonical_host(raw_host);
+        let host = HostName::parse(raw_host);
         let state = self.state.read().await;
         state.routes.contains_key(host.as_str()) || state.routes.contains_key(raw_host)
+    }
+
+    fn request_header_size(session: &Session) -> usize {
+        header_size_from_pairs(
+            session
+                .req_header()
+                .headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_bytes())),
+        )
+    }
+
+    fn request_body_too_large(session: &Session) -> bool {
+        request_content_length_from_value(
+            session
+                .req_header()
+                .headers
+                .get("content-length")
+                .and_then(|value| value.to_str().ok()),
+        )
+        .is_some_and(|content_length| content_length > MAX_REQUEST_BODY_BYTES)
+    }
+
+    async fn enforce_request_limits(&self, session: &mut Session) -> Result<Option<bool>> {
+        if session.req_header().headers.len() > MAX_REQUEST_HEADERS
+            || Self::request_header_size(session) > MAX_REQUEST_HEADER_BYTES
+        {
+            return http::write_text_response(
+                session,
+                431,
+                &[("Content-Type", "text/plain")],
+                "Request Header Fields Too Large\n",
+                false,
+            )
+            .await
+            .map(Some);
+        }
+
+        if Self::request_body_too_large(session) {
+            return http::write_text_response(
+                session,
+                413,
+                &[("Content-Type", "text/plain")],
+                "Request body too large\n",
+                false,
+            )
+            .await
+            .map(Some);
+        }
+
+        Ok(None)
+    }
+
+    fn apply_downstream_timeouts(session: &mut Session) {
+        let downstream = session.as_downstream_mut();
+        downstream.set_read_timeout(Some(downstream_request_timeout()));
+        downstream.set_write_timeout(Some(downstream_response_timeout()));
+    }
+
+    #[allow(clippy::missing_const_for_fn)]
+    fn configure_peer_timeouts(peer: &mut HttpPeer) {
+        peer.options.connection_timeout = Some(upstream_connect_timeout());
+        peer.options.total_connection_timeout = Some(upstream_connect_timeout());
+        peer.options.read_timeout = Some(upstream_read_timeout());
+        peer.options.write_timeout = Some(upstream_write_timeout());
+        peer.options.idle_timeout = Some(upstream_idle_timeout());
     }
 
     async fn wait_for_route(
@@ -172,27 +277,6 @@ impl MikromProxy {
         }
     }
 
-    async fn write_text_response(
-        session: &mut Session,
-        status: u16,
-        headers: &[(&str, &str)],
-        body: &str,
-        end_stream: bool,
-    ) -> Result<bool> {
-        let mut response = ResponseHeader::build(status, Some(body.len()))?;
-        for (key, value) in headers {
-            response.insert_header((*key).to_string(), (*value).to_string())?;
-        }
-
-        session
-            .write_response_header(Box::new(response), end_stream)
-            .await?;
-        session
-            .write_response_body(Some(body.to_string().into()), true)
-            .await?;
-        Ok(true)
-    }
-
     async fn maybe_handle_acme_challenge(
         &self,
         session: &mut Session,
@@ -215,7 +299,7 @@ impl MikromProxy {
                 );
             }
 
-            let result = Self::write_text_response(
+            let result = http::write_text_response(
                 session,
                 200,
                 &[("Content-Type", "text/plain")],
@@ -267,13 +351,55 @@ impl MikromProxy {
             .await?;
         Ok(Some(true))
     }
+
+    async fn maybe_handle_health_endpoint(
+        &self,
+        session: &mut Session,
+        path: &str,
+    ) -> Result<Option<bool>> {
+        match path {
+            "/health/live" => health::write_text_response(session, 200, "alive\n")
+                .await
+                .map(Some),
+            "/health/ready" => {
+                let snapshot = self.health.snapshot().await;
+                let status = if snapshot.ready { 200 } else { 503 };
+                health::write_snapshot_response(session, status, &snapshot)
+                    .await
+                    .map(Some)
+            },
+            "/health/deps" => {
+                let snapshot = self.health.snapshot().await;
+                let status = if snapshot.dependencies_ready {
+                    200
+                } else {
+                    503
+                };
+                health::write_snapshot_response(session, status, &snapshot)
+                    .await
+                    .map(Some)
+            },
+            "/health/control-plane" => {
+                let snapshot = self.health.snapshot().await;
+                let status = if snapshot.control_plane_synced {
+                    200
+                } else {
+                    503
+                };
+                health::write_snapshot_response(session, status, &snapshot)
+                    .await
+                    .map(Some)
+            },
+            _ => Ok(None),
+        }
+    }
 }
 
 struct PingoraHeaderInjector<'a>(&'a mut RequestHeader);
 
 impl Injector for PingoraHeaderInjector<'_> {
     fn set(&mut self, key: &str, value: String) {
-        use http::header::HeaderName;
+        use ::http::header::HeaderName;
         match HeaderName::try_from(key) {
             Ok(name) => {
                 if let Err(e) = self.0.insert_header(name, value) {
@@ -296,7 +422,7 @@ impl Extractor for PingoraHeaderExtractor<'_> {
         self.0
             .headers
             .keys()
-            .map(http::HeaderName::as_str)
+            .map(::http::HeaderName::as_str)
             .collect()
     }
 }
@@ -306,8 +432,12 @@ impl ProxyHttp for MikromProxy {
     type CTX = MikromCtx;
     fn new_ctx(&self) -> Self::CTX {
         MikromCtx {
+            request_id: chrono::Utc::now().timestamp_micros().to_string(),
             span: tracing::Span::none(),
             request_start_time: chrono::Utc::now(),
+            host: None,
+            normalized_host: None,
+            upstream: None,
         }
     }
 
@@ -327,13 +457,23 @@ impl ProxyHttp for MikromProxy {
         span.set_parent(parent_cx);
         ctx.span = span;
 
+        Self::apply_downstream_timeouts(session);
+        let request_path = session.req_header().uri.path().to_string();
+
+        if let Some(result) = self
+            .maybe_handle_health_endpoint(session, request_path.as_str())
+            .await?
+        {
+            return Ok(result);
+        }
+
         // 0.1 Rate Limiting (Per IP)
         if let Some(addr) = session.client_addr() {
             let ip = addr.to_string();
             let curr_window_requests = self.rate_limiter.observe(&ip, 1);
             if curr_window_requests > self.rps_limit {
                 warn!("Rate limit exceeded for IP: {ip} (requests: {curr_window_requests})");
-                return Self::write_text_response(
+                return http::write_text_response(
                     session,
                     429,
                     &[("Content-Type", "text/plain"), ("Retry-After", "1")],
@@ -344,20 +484,26 @@ impl ProxyHttp for MikromProxy {
             }
         }
 
+        if let Some(result) = self.enforce_request_limits(session).await? {
+            return Ok(result);
+        }
+
         let host = session
             .get_header("Host")
             .and_then(|h| h.to_str().ok())
             .or_else(|| session.req_header().uri.host())
             .unwrap_or("")
             .to_string();
-        let normalized_host = canonical_host(&host);
+        let normalized_host = HostName::parse(&host);
 
         let path = session.req_header().uri.path().to_string();
+        ctx.host = Some(HostName::parse(&host));
+        ctx.normalized_host = Some(normalized_host.clone());
 
-        if !normalized_host.is_empty()
+        if !normalized_host.as_str().is_empty()
             && let Some(publisher) = &self.traffic_publisher
         {
-            publisher.record(normalized_host.clone());
+            publisher.record(normalized_host.as_str().to_string());
         }
 
         if self
@@ -382,23 +528,24 @@ impl ProxyHttp for MikromProxy {
     async fn upstream_peer(
         &self,
         session: &mut Session,
-        _ctx: &mut Self::CTX,
+        ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
         let host = session
             .get_header("Host")
             .and_then(|h| h.to_str().ok())
             .or_else(|| session.req_header().uri.host())
             .unwrap_or("");
-        let normalized_host = canonical_host(host);
+        let normalized_host = HostName::parse(host);
 
         // 1. Circuit Breaker Check
-        if let Some(entry) = self.wake_up_failures.get(&normalized_host) {
+        if let Some(entry) = self.wake_up_failures.get(normalized_host.as_str()) {
             let (count, last_failure) = *entry;
             if count >= 3 && last_failure.elapsed() < Duration::from_mins(1) {
                 return Err(Error::explain(
                     ErrorType::HTTPStatus(503),
                     format!(
-                        "Application {normalized_host} is currently unavailable (circuit breaker open)"
+                        "Application {} is currently unavailable (circuit breaker open)",
+                        normalized_host.as_str()
                     ),
                 ));
             }
@@ -411,7 +558,7 @@ impl ProxyHttp for MikromProxy {
         loop {
             // Deduplicate and publish traffic event to wake up app if needed
             if let Some(publisher) = &self.traffic_publisher {
-                publisher.record(normalized_host.clone());
+                publisher.record(normalized_host.as_str().to_string());
             }
 
             let (lb, use_tls, alternative_cn) = if self.has_route(host).await {
@@ -427,12 +574,21 @@ impl ProxyHttp for MikromProxy {
 
             if let Some(upstream) = lb.select(&hash, 256) {
                 let addr_str = upstream.addr.to_string();
-                info!("Selected upstream: {upstream:?}, use_tls: {use_tls}");
+                ctx.upstream = Some(addr_str.clone());
+                info!(
+                    request_id = %ctx.request_id,
+                    host = %normalized_host.as_str(),
+                    upstream = %addr_str,
+                    use_tls,
+                    "Selected upstream"
+                );
 
                 // Success: Reset circuit breaker
-                self.wake_up_failures.remove(&normalized_host);
+                self.wake_up_failures.remove(normalized_host.as_str());
 
-                let mut peer = HttpPeer::new(addr_str, use_tls, normalized_host);
+                let mut peer =
+                    HttpPeer::new(addr_str, use_tls, normalized_host.as_str().to_string());
+                Self::configure_peer_timeouts(&mut peer);
                 if use_tls {
                     if let Some(ca) = &self.upstream_ca {
                         peer.options.ca = Some(ca.clone());
@@ -448,14 +604,18 @@ impl ProxyHttp for MikromProxy {
             if now >= deadline {
                 return Err(Error::explain(
                     ErrorType::HTTPStatus(503),
-                    format!("No healthy upstreams for host: {normalized_host} after waiting 30s"),
+                    format!(
+                        "No healthy upstreams for host: {} after waiting 30s",
+                        normalized_host.as_str()
+                    ),
                 ));
             }
 
             // Log selection failure every 2 seconds to avoid spamming but keep visibility
             if now.duration_since(last_log_time).as_secs() >= 2 {
                 info!(
-                    "No healthy upstreams for {normalized_host} yet (app might be waking up), waiting..."
+                    "No healthy upstreams for {} yet (app might be waking up), waiting...",
+                    normalized_host.as_str()
                 );
                 last_log_time = now;
             }
@@ -565,8 +725,30 @@ impl ProxyHttp for MikromProxy {
             } else if (500..600).contains(&code) {
                 self.metrics.responses_5xx.fetch_add(1, Ordering::Relaxed);
             }
+            info!(
+                request_id = %ctx.request_id,
+                host = %ctx
+                    .normalized_host
+                    .as_ref()
+                    .map_or("unknown", HostName::as_str),
+                upstream = %ctx.upstream.as_deref().unwrap_or("unknown"),
+                status = code,
+                latency_ms = latency,
+                "Proxy request completed"
+            );
         } else {
             self.metrics.responses_5xx.fetch_add(1, Ordering::Relaxed);
+            info!(
+                request_id = %ctx.request_id,
+                host = %ctx
+                    .normalized_host
+                    .as_ref()
+                    .map_or("unknown", HostName::as_str),
+                upstream = %ctx.upstream.as_deref().unwrap_or("unknown"),
+                status = 500_u16,
+                latency_ms = latency,
+                "Proxy request completed without response"
+            );
         }
     }
 }
@@ -574,6 +756,7 @@ impl ProxyHttp for MikromProxy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::health::RouterHealth;
     use crate::state::{Route, State};
     use pingora::lb::LoadBalancer;
     use pingora::lb::selection::RoundRobin;
@@ -605,6 +788,7 @@ mod tests {
 
         let proxy = MikromProxy::new(
             state,
+            Arc::new(RouterHealth::new()),
             false,
             None,
             Arc::new(RouterMetricsCounters::new()),
@@ -622,6 +806,7 @@ mod tests {
         let state = Arc::new(RwLock::new(State::default()));
         let proxy = MikromProxy::new(
             state.clone(),
+            Arc::new(RouterHealth::new()),
             false,
             None,
             Arc::new(RouterMetricsCounters::new()),
@@ -654,5 +839,43 @@ mod tests {
             .unwrap();
         assert!(!result.1);
         assert!(result.2.is_none());
+    }
+
+    #[test]
+    fn test_header_size_from_pairs_counts_names_and_values() {
+        let size = header_size_from_pairs([("host", "app.example.com"), ("content-length", "123")]);
+
+        assert_eq!(
+            size,
+            "host".len() + "app.example.com".len() + "content-length".len() + "123".len()
+        );
+    }
+
+    #[test]
+    fn test_request_content_length_parser_handles_invalid_values() {
+        assert_eq!(request_content_length_from_value(Some("42")), Some(42));
+        assert_eq!(
+            request_content_length_from_value(Some("not-a-number")),
+            None
+        );
+        assert_eq!(request_content_length_from_value(None), None);
+    }
+
+    #[test]
+    fn test_configure_peer_timeouts_sets_expected_values() {
+        let mut peer = HttpPeer::new("127.0.0.1:8080", false, "example.com".to_string());
+        MikromProxy::configure_peer_timeouts(&mut peer);
+
+        assert_eq!(
+            peer.options.connection_timeout,
+            Some(upstream_connect_timeout())
+        );
+        assert_eq!(
+            peer.options.total_connection_timeout,
+            Some(upstream_connect_timeout())
+        );
+        assert_eq!(peer.options.read_timeout, Some(upstream_read_timeout()));
+        assert_eq!(peer.options.write_timeout, Some(upstream_write_timeout()));
+        assert_eq!(peer.options.idle_timeout, Some(upstream_idle_timeout()));
     }
 }

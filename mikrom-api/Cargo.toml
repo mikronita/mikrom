@@ -8,6 +8,7 @@ default-run = "mikrom-api"
 [features]
 default = []
 test-utils = []
+api-e2e = ["test-utils"]
 
 [dependencies]
 axum = "0.8"
@@ -60,10 +61,15 @@ mikrom-scheduler = { path = "../mikrom-scheduler" }
 mikrom-agent = { path = "../mikrom-agent" }
 
 [[test]]
-name = "integration"
-path = "tests/integration_tests.rs"
+name = "integration_auth_tests"
+path = "tests/integration_auth_tests.rs"
 test = true
-required-features = ["test-utils"]
+required-features = ["api-e2e"]
+
+[[test]]
+name = "integration_app_lifecycle_tests"
+path = "tests/integration_app_lifecycle_tests.rs"
+required-features = ["api-e2e"]
 
 [[test]]
 name = "openapi_tests"

@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::health::RouterHealth;
     use crate::proxy::{MikromProxy, RouterMetricsCounters};
     use crate::state::{Route, State};
     use pingora::lb::LoadBalancer;
@@ -32,7 +33,8 @@ mod tests {
         }));
 
         let metrics = Arc::new(RouterMetricsCounters::new());
-        let proxy = MikromProxy::new(state, false, None, metrics, None, 100);
+        let health = Arc::new(RouterHealth::new());
+        let proxy = MikromProxy::new(state, health, false, None, metrics, None, 100);
 
         let lb = proxy.get_lb("app.mikrom.local").await.unwrap();
         let t1 = lb.select(b"", 256).unwrap();
@@ -70,7 +72,8 @@ mod tests {
         }));
 
         let metrics = Arc::new(RouterMetricsCounters::new());
-        let proxy = MikromProxy::new(state, false, None, metrics, None, 100);
+        let health = Arc::new(RouterHealth::new());
+        let proxy = MikromProxy::new(state, health, false, None, metrics, None, 100);
 
         let lb = proxy.get_lb("app.mikrom.local").await.unwrap();
         let t1 = lb.select(b"", 256).unwrap().to_string();
@@ -105,7 +108,8 @@ mod tests {
         }));
 
         let metrics = Arc::new(RouterMetricsCounters::new());
-        let proxy = MikromProxy::new(state, false, None, metrics, None, 100);
+        let health = Arc::new(RouterHealth::new());
+        let proxy = MikromProxy::new(state, health, false, None, metrics, None, 100);
 
         let (lb, use_tls, alternative_cn) = proxy
             .get_lb_and_tls("registry.mikrom.spluca.org:443")

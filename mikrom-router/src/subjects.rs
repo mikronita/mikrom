@@ -19,3 +19,17 @@ pub const ROUTER_TLS_CERT_UPDATED: &str = SharedSubject::RouterTlsCertUpdated.as
 pub const ROUTER_ACME_CHALLENGE_UPDATED: &str = SharedSubject::RouterAcmeChallengeUpdated.as_str();
 pub const ROUTER_TRAFFIC_EVENT: &str = SharedSubject::RouterTrafficEvent.as_str();
 pub const SCHEDULER_ROUTER_HEARTBEAT: &str = SharedSubject::SchedulerRouterHeartbeat.as_str();
+
+#[must_use]
+pub const fn control_plane_subjects() -> [&'static str; 3] {
+    [
+        ROUTER_CONFIG_UPDATED,
+        ROUTER_TLS_CERT_UPDATED,
+        ROUTER_ACME_CHALLENGE_UPDATED,
+    ]
+}
+
+#[must_use]
+pub const fn control_plane_subject_wildcard() -> &'static str {
+    "mikrom.router.>"
+}

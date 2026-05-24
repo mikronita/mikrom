@@ -1,3 +1,5 @@
+#![cfg(feature = "scheduler-e2e")]
+
 use futures::StreamExt;
 use mikrom_proto::agent::{AgentCommand, AgentCommandResponse};
 use mikrom_proto::scheduler::{CloneVolumeRequest, RestoreSnapshotRequest};

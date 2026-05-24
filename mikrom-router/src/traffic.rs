@@ -1,3 +1,4 @@
+use crate::runtime;
 use async_trait::async_trait;
 use mikrom_proto::router::RouterTrafficEvent;
 use mikrom_proto::subjects;
@@ -76,28 +77,22 @@ impl RouterTrafficLoop {
 #[async_trait]
 impl BackgroundService for RouterTrafficLoop {
     async fn start(&self, mut shutdown: ShutdownWatch) {
-        crate::init_tracing_once("router-traffic");
+        runtime::init_tracing_once("router-traffic");
 
-        let nats = loop {
-            match crate::nats::connect_nats(
-                &self.nats_url,
-                self.nats_use_tls,
-                self.nats_certs_dir.as_deref(),
-            )
-            .await
-            {
-                Ok(client) => {
-                    info!("Router traffic loop: connected to NATS.");
-                    break client;
-                },
-                Err(e) => {
-                    error!(
-                        "Router traffic loop: failed to connect to NATS: {e}. Retrying in 5s..."
-                    );
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                },
-            }
-        };
+        let nats = runtime::connect_with_backoff(
+            "Router traffic loop NATS",
+            std::time::Duration::from_secs(5),
+            || async {
+                crate::nats::connect_nats(
+                    &self.nats_url,
+                    self.nats_use_tls,
+                    self.nats_certs_dir.as_deref(),
+                )
+                .await
+            },
+        )
+        .await;
+        info!("Router traffic loop: connected to NATS.");
 
         let Some(mut rx) = self.rx.lock().await.take() else {
             warn!("Router traffic loop started without a receiver");

@@ -1,4 +1,5 @@
 use crate::proxy::RouterMetricsCounters;
+use crate::subjects as router_subjects;
 use std::sync::atomic::Ordering;
 
 #[test]
@@ -12,6 +13,23 @@ fn test_metrics_counters() {
     assert_eq!(metrics.requests_total.load(Ordering::Relaxed), 1);
     assert_eq!(metrics.responses_2xx.load(Ordering::Relaxed), 1);
     assert_eq!(metrics.responses_4xx.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn test_control_plane_subjects_cover_router_updates() {
+    let subject_list = router_subjects::control_plane_subjects();
+
+    assert!(subject_list.contains(&router_subjects::ROUTER_CONFIG_UPDATED));
+    assert!(subject_list.contains(&router_subjects::ROUTER_TLS_CERT_UPDATED));
+    assert!(subject_list.contains(&router_subjects::ROUTER_ACME_CHALLENGE_UPDATED));
+}
+
+#[test]
+fn test_control_plane_subscription_uses_wildcard_prefix() {
+    assert_eq!(
+        router_subjects::control_plane_subject_wildcard(),
+        "mikrom.router.>"
+    );
 }
 
 #[cfg(test)]

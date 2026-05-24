@@ -2233,6 +2233,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
+ "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -3053,7 +3054,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-router"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3063,6 +3064,8 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dashmap",
+ "dotenvy",
+ "envy",
  "futures",
  "futures-util",
  "hex",
@@ -3094,7 +3097,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tokio-test",
  "tower 0.5.3",
  "tracing",
  "tracing-opentelemetry 0.28.0",
@@ -4795,6 +4797,8 @@ dependencies = [
  "native-tls",
  "percent-encoding",
  "pin-project-lite",
+ "quinn",
+ "rustls",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -4802,6 +4806,7 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-native-tls",
+ "tokio-rustls",
  "tokio-util",
  "tower 0.5.3",
  "tower-http",
@@ -4811,6 +4816,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
+ "webpki-roots 1.0.7",
 ]
 
 [[package]]

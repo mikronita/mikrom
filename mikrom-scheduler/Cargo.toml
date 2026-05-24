@@ -35,3 +35,4 @@ rand_core = "0.6"
 default = ["build"]
 build = []
 test-utils = []
+scheduler-e2e = []
