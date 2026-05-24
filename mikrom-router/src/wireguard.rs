@@ -14,7 +14,7 @@
 use anyhow::Context;
 use futures::stream::TryStreamExt;
 use netlink_packet_route::route::RouteMessage;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 use tokio::net::lookup_host;
 use tokio::time::sleep;
@@ -507,19 +507,7 @@ impl WireGuardManager {
     ) -> anyhow::Result<neli::genl::Nlattr<WgAllowedIpAttr, neli::types::Buffer>> {
         use neli::genl::{AttrTypeBuilder, NlattrBuilder};
 
-        let (addr, prefix) = if let Some((addr, prefix)) = ip.split_once('/') {
-            (addr, prefix.parse::<u8>()?)
-        } else if ip.contains(':') {
-            (ip, 128)
-        } else {
-            (ip, 32)
-        };
-
-        let addr_ip = if addr.contains(':') {
-            IpAddr::V6(addr.parse::<Ipv6Addr>()?)
-        } else {
-            IpAddr::V4(addr.parse::<Ipv4Addr>()?)
-        };
+        let (addr_ip, prefix) = helpers::parse_ip_prefix(ip)?;
 
         let mut allowedip = NlattrBuilder::default()
             .nla_type(
@@ -613,21 +601,20 @@ impl WireGuardManager {
         host_id: &str,
     ) -> anyhow::Result<()> {
         let own_ip = self.get_host_ipv6(host_id);
-        let (conf, route_targets) =
-            helpers::build_wireguard_config(private_key, self.listen_port, peers, own_ip);
+        let plan = helpers::build_wireguard_config(private_key, self.listen_port, peers, own_ip)?;
 
         let conf_path = format!("{}/{}.conf", self.config_dir, self.interface);
 
         // Write the config file for debugging/persistence, but don't skip sync
         // because the interface might have been recreated in the kernel.
-        tokio::fs::write(&conf_path, &conf).await?;
+        tokio::fs::write(&conf_path, &plan.rendered_config).await?;
         use std::os::unix::fs::PermissionsExt;
         tokio::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600)).await?;
 
         self.configure_device_with_retry(private_key, self.listen_port, peers, true)
             .await?;
 
-        self.sync_routes(&route_targets).await?;
+        self.sync_routes(&plan.route_targets).await?;
 
         debug!(
             "WireGuard mesh updated with {} peers via netlink",
@@ -738,7 +725,7 @@ mod tests {
             "192.168.122.11/32".to_string(),
         ];
 
-        let normalized = helpers::normalize_allowed_ips(&ips);
+        let normalized = helpers::normalize_allowed_ips(&ips).unwrap();
 
         assert_eq!(
             normalized,
@@ -748,6 +735,21 @@ mod tests {
                 "192.168.122.10/32".to_string(),
                 "192.168.122.11/32".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn parse_ip_prefix_handles_ipv4_and_ipv6_targets() {
+        assert_eq!(
+            helpers::parse_ip_prefix("192.168.122.10").unwrap(),
+            (
+                std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 122, 10)),
+                32
+            )
+        );
+        assert_eq!(
+            helpers::parse_ip_prefix("fd00::1/128").unwrap(),
+            (std::net::IpAddr::V6("fd00::1".parse().unwrap()), 128)
         );
     }
 

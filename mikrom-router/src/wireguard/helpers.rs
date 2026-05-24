@@ -3,6 +3,12 @@ use base64::Engine as _;
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct WireGuardConfigPlan {
+    pub rendered_config: String,
+    pub route_targets: Vec<String>,
+}
+
 pub(super) fn decode_private_key(private_key: &str) -> anyhow::Result<Vec<u8>> {
     let key = base64::engine::general_purpose::STANDARD
         .decode(private_key.trim())
@@ -59,7 +65,7 @@ pub(super) fn build_wireguard_config(
     listen_port: u16,
     peers: &[mikrom_proto::scheduler::Peer],
     own_ip: Ipv6Addr,
-) -> (String, Vec<String>) {
+) -> anyhow::Result<WireGuardConfigPlan> {
     let mut conf = format!(
         "[Interface]\nPrivateKey = {}\nListenPort = {}\n\n",
         private_key, listen_port
@@ -73,7 +79,7 @@ pub(super) fn build_wireguard_config(
 
         let pubkey = normalize_public_key_string(&peer.wireguard_pubkey)
             .unwrap_or_else(|_| peer.wireguard_pubkey.clone());
-        let formatted_allowed_ips = normalize_allowed_ips(&peer.allowed_ips);
+        let formatted_allowed_ips = normalize_allowed_ips(&peer.allowed_ips)?;
         let allowed_ips = if formatted_allowed_ips.is_empty() {
             "fd00::/8".to_string()
         } else {
@@ -92,25 +98,20 @@ pub(super) fn build_wireguard_config(
         conf.push_str("PersistentKeepalive = 25\n\n");
     }
 
-    (conf, route_targets)
+    Ok(WireGuardConfigPlan {
+        rendered_config: conf,
+        route_targets,
+    })
 }
 
-pub(super) fn normalize_allowed_ips(allowed_ips: &[String]) -> Vec<String> {
+pub(super) fn normalize_allowed_ips(allowed_ips: &[String]) -> anyhow::Result<Vec<String>> {
     allowed_ips
         .iter()
-        .map(|ip| {
-            if ip.contains('/') {
-                ip.clone()
-            } else if ip.contains(':') {
-                format!("{}/128", ip)
-            } else {
-                format!("{}/32", ip)
-            }
-        })
+        .map(|ip| parse_ip_prefix(ip).map(|(addr, prefix)| format!("{addr}/{prefix}")))
         .collect()
 }
 
-pub(super) fn parse_route_target(target: &str) -> anyhow::Result<(IpAddr, u8)> {
+pub(super) fn parse_ip_prefix(target: &str) -> anyhow::Result<(IpAddr, u8)> {
     if let Some((addr, prefix)) = target.split_once('/') {
         let prefix = prefix.parse::<u8>()?;
         if addr.contains(':') {
@@ -123,6 +124,10 @@ pub(super) fn parse_route_target(target: &str) -> anyhow::Result<(IpAddr, u8)> {
     } else {
         Ok((IpAddr::V4(target.parse::<Ipv4Addr>()?), 32))
     }
+}
+
+pub(super) fn parse_route_target(target: &str) -> anyhow::Result<(IpAddr, u8)> {
+    parse_ip_prefix(target)
 }
 
 pub(super) fn route_message_key(route: &RouteMessage) -> Option<(IpAddr, u8)> {
@@ -165,7 +170,7 @@ mod tests {
             "192.168.122.11/32".to_string(),
         ];
 
-        let normalized = normalize_allowed_ips(&ips);
+        let normalized = normalize_allowed_ips(&ips).unwrap();
 
         assert_eq!(
             normalized,
@@ -194,15 +199,25 @@ mod tests {
             wireguard_port: 51820,
         }];
 
-        let (config, routes) =
-            build_wireguard_config("private-key", 51821, &peers, derive_host_ipv6("router-1"));
+        let plan =
+            build_wireguard_config("private-key", 51821, &peers, derive_host_ipv6("router-1"))
+                .unwrap();
 
-        assert!(config.contains("[Interface]"));
-        assert!(config.contains("PrivateKey = private-key"));
-        assert!(config.contains("Endpoint = 10.0.0.2:51820"));
-        assert!(config.contains("AllowedIPs = fd00::2/128,192.168.122.10/32"));
-        assert_eq!(routes[0], format!("{}/128", derive_host_ipv6("router-1")));
-        assert!(routes.contains(&"fd00::2/128".to_string()));
-        assert!(routes.contains(&"192.168.122.10/32".to_string()));
+        assert!(plan.rendered_config.contains("[Interface]"));
+        assert!(plan.rendered_config.contains("PrivateKey = private-key"));
+        assert!(plan.rendered_config.contains("Endpoint = 10.0.0.2:51820"));
+        assert!(
+            plan.rendered_config
+                .contains("AllowedIPs = fd00::2/128,192.168.122.10/32")
+        );
+        assert_eq!(
+            plan.route_targets[0],
+            format!("{}/128", derive_host_ipv6("router-1"))
+        );
+        assert!(plan.route_targets.contains(&"fd00::2/128".to_string()));
+        assert!(
+            plan.route_targets
+                .contains(&"192.168.122.10/32".to_string())
+        );
     }
 }

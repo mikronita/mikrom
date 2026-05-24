@@ -8,6 +8,12 @@ use prost::Message;
 use sqlx::PgPool;
 use tracing::{debug, error, info};
 
+fn schedule_state_resync(tx: &tokio::sync::mpsc::Sender<()>, context: &'static str, subject: &str) {
+    if let Err(e) = tx.try_send(()) {
+        debug!("Control Plane: Failed to schedule state resync after {context} for {subject}: {e}");
+    }
+}
+
 pub(super) async fn process_router_message(
     control_plane: &ControlPlane,
     msg: async_nats::Message,
@@ -42,7 +48,7 @@ pub(super) async fn process_mesh_message(
             );
             if let Err(e) = control_plane
                 .wg_manager
-                .update_peers(&update.peers, priv_key, &control_plane.router_id)
+                .update_peers(&update.peers, priv_key, control_plane.router_id.as_str())
                 .await
             {
                 error!("Control Plane: Failed to update WireGuard peers: {e}");
@@ -130,17 +136,9 @@ async fn apply_router_config_update(
 
     if update.target_urls.is_empty() {
         if success {
-            if let Err(e) = tx.try_send(()) {
-                debug!(
-                    "Control Plane: Failed to schedule state resync after clearing routes for {}: {}",
-                    update.hostname, e
-                );
-            }
-        } else if let Err(e) = tx.try_send(()) {
-            debug!(
-                "Control Plane: Failed to schedule state resync after route delete failure for {}: {}",
-                update.hostname, e
-            );
+            schedule_state_resync(tx, "clearing routes", &update.hostname);
+        } else {
+            schedule_state_resync(tx, "route delete failure", &update.hostname);
         }
         return RouterConfigAck {
             success,
@@ -149,12 +147,7 @@ async fn apply_router_config_update(
     }
 
     if !success {
-        if let Err(e) = tx.try_send(()) {
-            debug!(
-                "Control Plane: Failed to schedule state resync after route delete failure for {}: {}",
-                update.hostname, e
-            );
-        }
+        schedule_state_resync(tx, "route delete failure", &update.hostname);
         return RouterConfigAck {
             success: false,
             message: last_error,
@@ -181,23 +174,13 @@ async fn apply_router_config_update(
     }
 
     if success {
-        if let Err(e) = tx.try_send(()) {
-            debug!(
-                "Control Plane: Failed to schedule state resync after updating routes for {}: {}",
-                update.hostname, e
-            );
-        }
+        schedule_state_resync(tx, "updating routes", &update.hostname);
         RouterConfigAck {
             success: true,
             message: String::new(),
         }
     } else {
-        if let Err(e) = tx.try_send(()) {
-            debug!(
-                "Control Plane: Failed to schedule state resync after route persistence failure for {}: {}",
-                update.hostname, e
-            );
-        }
+        schedule_state_resync(tx, "route persistence failure", &update.hostname);
         RouterConfigAck {
             success: false,
             message: last_error,
@@ -218,7 +201,7 @@ async fn handle_tls_certificate_update(
                 update.hostname
             );
 
-            match crate::crypto::decrypt(&update.private_key, &control_plane.master_key) {
+            match crate::crypto::decrypt(&update.private_key, control_plane.master_key.as_str()) {
                 Ok(key_pem) => {
                     match control_plane
                         .state_manager
@@ -271,12 +254,7 @@ async fn handle_tls_certificate_update(
             .await
             {
                 Ok(_) => {
-                    if let Err(e) = tx.try_send(()) {
-                        debug!(
-                            "Control Plane: Failed to schedule state resync after updating TLS certificate for {}: {}",
-                            update.hostname, e
-                        );
-                    }
+                    schedule_state_resync(tx, "updating TLS certificate", &update.hostname);
                 },
                 Err(e) => error!(
                     "Control Plane: Failed to persist TLS certificate for {}: {}",
@@ -370,17 +348,9 @@ async fn handle_acme_challenge_update(
                     "Control Plane: Failed to persist ACME challenge {}: {}",
                     update.token, e
                 );
-                if let Err(e) = tx.try_send(()) {
-                    debug!(
-                        "Control Plane: Failed to schedule state resync after ACME persistence failure for {}: {}",
-                        update.token, e
-                    );
-                }
-            } else if let Err(e) = tx.try_send(()) {
-                debug!(
-                    "Control Plane: Failed to schedule state resync after updating ACME challenge {}: {}",
-                    update.token, e
-                );
+                schedule_state_resync(tx, "ACME persistence failure", &update.token);
+            } else {
+                schedule_state_resync(tx, "updating ACME challenge", &update.token);
             }
         },
         Err(e) => error!("Control Plane: Failed to decode AcmeChallengeUpdate: {e}"),

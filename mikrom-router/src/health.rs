@@ -1,16 +1,59 @@
 use pingora::prelude::*;
 use serde::Serialize;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::RwLock;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouterHealthState {
+    Booting,
+    Degraded,
+    Ready,
+    ShuttingDown,
+    Fatal,
+}
+
+impl RouterHealthState {
+    const fn as_u8(self) -> u8 {
+        match self {
+            Self::Booting => 0,
+            Self::Degraded => 1,
+            Self::Ready => 2,
+            Self::ShuttingDown => 3,
+            Self::Fatal => 4,
+        }
+    }
+
+    const fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Degraded,
+            2 => Self::Ready,
+            3 => Self::ShuttingDown,
+            4 => Self::Fatal,
+            _ => Self::Booting,
+        }
+    }
+
+    #[must_use]
+    const fn is_live(self) -> bool {
+        !matches!(self, Self::Fatal | Self::ShuttingDown)
+    }
+
+    #[must_use]
+    const fn is_ready(self) -> bool {
+        matches!(self, Self::Ready)
+    }
+}
+
 pub struct RouterHealth {
+    state: AtomicU8,
     bootstrapped: AtomicBool,
     dependencies_ready: AtomicBool,
     control_plane_synced: AtomicBool,
     wireguard_ready: AtomicBool,
     upstream_ca_ready: AtomicBool,
-    startup_error: RwLock<Option<String>>,
+    shutting_down: AtomicBool,
+    startup_error: Mutex<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -18,6 +61,7 @@ pub struct RouterHealth {
 pub struct HealthSnapshot {
     pub live: bool,
     pub ready: bool,
+    pub state: RouterHealthState,
     pub dependencies_ready: bool,
     pub control_plane_synced: bool,
     pub wireguard_ready: bool,
@@ -25,64 +69,116 @@ pub struct HealthSnapshot {
     pub startup_error: Option<String>,
 }
 
+impl Default for RouterHealth {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RouterHealth {
     #[must_use]
     pub const fn new() -> Self {
         Self {
+            state: AtomicU8::new(RouterHealthState::Booting.as_u8()),
             bootstrapped: AtomicBool::new(false),
             dependencies_ready: AtomicBool::new(false),
             control_plane_synced: AtomicBool::new(false),
             wireguard_ready: AtomicBool::new(false),
             upstream_ca_ready: AtomicBool::new(false),
-            startup_error: RwLock::const_new(None),
+            shutting_down: AtomicBool::new(false),
+            startup_error: Mutex::new(None),
         }
+    }
+
+    fn update_state(&self) {
+        let state = if self.shutting_down.load(Ordering::Acquire) {
+            RouterHealthState::ShuttingDown
+        } else {
+            let bootstrapped = self.bootstrapped.load(Ordering::Acquire);
+            let dependencies_ready = self.dependencies_ready.load(Ordering::Acquire);
+            let control_plane_synced = self.control_plane_synced.load(Ordering::Acquire);
+            let wireguard_ready = self.wireguard_ready.load(Ordering::Acquire);
+            let upstream_ca_ready = self.upstream_ca_ready.load(Ordering::Acquire);
+            let startup_error = self.startup_error.lock().expect("health mutex poisoned");
+
+            if !bootstrapped && startup_error.is_some() {
+                RouterHealthState::Fatal
+            } else if bootstrapped
+                && dependencies_ready
+                && control_plane_synced
+                && wireguard_ready
+                && upstream_ca_ready
+                && startup_error.is_none()
+            {
+                RouterHealthState::Ready
+            } else if bootstrapped && startup_error.is_some() {
+                RouterHealthState::Degraded
+            } else {
+                RouterHealthState::Booting
+            }
+        };
+
+        self.state.store(state.as_u8(), Ordering::Release);
     }
 
     pub fn mark_bootstrapped(&self) {
         self.bootstrapped.store(true, Ordering::Release);
+        self.update_state();
     }
 
     pub fn mark_dependencies_ready(&self) {
         self.dependencies_ready.store(true, Ordering::Release);
+        self.update_state();
     }
 
     pub fn mark_control_plane_synced(&self) {
         self.control_plane_synced.store(true, Ordering::Release);
+        self.update_state();
     }
 
     pub fn mark_wireguard_ready(&self) {
         self.wireguard_ready.store(true, Ordering::Release);
+        self.update_state();
     }
 
     pub fn mark_upstream_ca_ready(&self) {
         self.upstream_ca_ready.store(true, Ordering::Release);
+        self.update_state();
     }
 
-    pub async fn set_startup_error(&self, error: impl Into<String>) {
-        *self.startup_error.write().await = Some(error.into());
+    pub fn mark_shutting_down(&self) {
+        self.shutting_down.store(true, Ordering::Release);
+        self.update_state();
     }
 
-    pub async fn clear_startup_error(&self) {
-        *self.startup_error.write().await = None;
+    pub fn set_startup_error(&self, error: impl Into<String>) {
+        *self.startup_error.lock().expect("health mutex poisoned") = Some(error.into());
+        self.update_state();
     }
 
-    pub async fn snapshot(&self) -> HealthSnapshot {
-        let bootstrapped = self.bootstrapped.load(Ordering::Acquire);
+    pub fn clear_startup_error(&self) {
+        *self.startup_error.lock().expect("health mutex poisoned") = None;
+        self.update_state();
+    }
+
+    pub fn snapshot(&self) -> HealthSnapshot {
+        self.update_state();
+
+        let state = RouterHealthState::from_u8(self.state.load(Ordering::Acquire));
         let dependencies_ready = self.dependencies_ready.load(Ordering::Acquire);
         let control_plane_synced = self.control_plane_synced.load(Ordering::Acquire);
         let wireguard_ready = self.wireguard_ready.load(Ordering::Acquire);
         let upstream_ca_ready = self.upstream_ca_ready.load(Ordering::Acquire);
-        let startup_error = self.startup_error.read().await.clone();
-        let ready = bootstrapped
-            && dependencies_ready
-            && control_plane_synced
-            && wireguard_ready
-            && upstream_ca_ready
-            && startup_error.is_none();
+        let startup_error = self
+            .startup_error
+            .lock()
+            .expect("health mutex poisoned")
+            .clone();
 
         HealthSnapshot {
-            live: true,
-            ready,
+            live: state.is_live(),
+            ready: state.is_ready(),
+            state,
             dependencies_ready,
             control_plane_synced,
             wireguard_ready,
@@ -132,14 +228,15 @@ pub async fn write_text_response(
 
 #[cfg(test)]
 mod tests {
-    use super::RouterHealth;
+    use super::{RouterHealth, RouterHealthState};
 
     #[tokio::test]
     async fn snapshot_reflects_state_transitions() {
         let health = RouterHealth::new();
-        let snapshot = health.snapshot().await;
+        let snapshot = health.snapshot();
         assert!(!snapshot.ready);
         assert!(snapshot.live);
+        assert_eq!(snapshot.state, RouterHealthState::Booting);
 
         health.mark_bootstrapped();
         health.mark_dependencies_ready();
@@ -147,10 +244,11 @@ mod tests {
         health.mark_wireguard_ready();
         health.mark_upstream_ca_ready();
 
-        let snapshot = health.snapshot().await;
+        let snapshot = health.snapshot();
         assert!(snapshot.ready);
         assert!(snapshot.dependencies_ready);
         assert!(snapshot.control_plane_synced);
+        assert_eq!(snapshot.state, RouterHealthState::Ready);
     }
 
     #[tokio::test]
@@ -161,16 +259,30 @@ mod tests {
         health.mark_control_plane_synced();
         health.mark_wireguard_ready();
         health.mark_upstream_ca_ready();
-        health.set_startup_error("temporary failure").await;
+        health.set_startup_error("temporary failure");
 
-        let snapshot = health.snapshot().await;
+        let snapshot = health.snapshot();
         assert!(!snapshot.ready);
+        assert_eq!(snapshot.state, RouterHealthState::Degraded);
         assert_eq!(snapshot.startup_error.as_deref(), Some("temporary failure"));
 
-        health.clear_startup_error().await;
+        health.clear_startup_error();
 
-        let snapshot = health.snapshot().await;
+        let snapshot = health.snapshot();
         assert!(snapshot.ready);
+        assert_eq!(snapshot.state, RouterHealthState::Ready);
         assert_eq!(snapshot.startup_error, None);
+    }
+
+    #[tokio::test]
+    async fn startup_error_before_bootstrap_is_fatal() {
+        let health = RouterHealth::new();
+        health.set_startup_error("fatal failure");
+
+        let snapshot = health.snapshot();
+        assert!(!snapshot.live);
+        assert!(!snapshot.ready);
+        assert_eq!(snapshot.state, RouterHealthState::Fatal);
+        assert_eq!(snapshot.startup_error.as_deref(), Some("fatal failure"));
     }
 }

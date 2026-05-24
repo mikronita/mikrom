@@ -6,7 +6,7 @@ use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::TracerProvider;
 use std::future::Future;
 use std::time::Duration;
-use tracing::error;
+use tracing::{error, info};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -61,12 +61,20 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T>>,
 {
+    let mut attempt = 0_u64;
     loop {
+        attempt += 1;
         match connect().await {
-            Ok(value) => return value,
+            Ok(value) => {
+                if attempt > 1 {
+                    info!(component, attempts = attempt, "Connected after retries");
+                }
+                return value;
+            },
             Err(err) => {
                 error!(
                     component,
+                    attempt,
                     error = %err,
                     "Failed to connect; retrying in {}s",
                     retry_delay.as_secs()
