@@ -367,7 +367,7 @@ impl StateManager {
                 let suffix = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map_or(0_u128, |duration| duration.as_nanos());
-                let temp_path = self.cache_path.with_extension(format!("tmp.{:x}", suffix));
+                let temp_path = self.cache_path.with_extension(format!("tmp.{suffix:x}"));
 
                 if let Err(e) = tokio::fs::write(&temp_path, json).await {
                     error!("Failed to write state cache to {:?}: {e}", temp_path);
