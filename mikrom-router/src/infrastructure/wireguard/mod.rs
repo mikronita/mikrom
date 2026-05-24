@@ -22,6 +22,34 @@ use tracing::{debug, info};
 
 mod helpers;
 
+#[async_trait::async_trait]
+trait WireGuardKeyStore: Sync {
+    async fn read_key(&self, path: &std::path::Path) -> anyhow::Result<Option<String>>;
+    async fn write_key(&self, path: &std::path::Path, key: &str) -> anyhow::Result<()>;
+}
+
+struct FileWireGuardKeyStore;
+
+#[async_trait::async_trait]
+impl WireGuardKeyStore for FileWireGuardKeyStore {
+    async fn read_key(&self, path: &std::path::Path) -> anyhow::Result<Option<String>> {
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        Ok(Some(
+            tokio::fs::read_to_string(path).await?.trim().to_string(),
+        ))
+    }
+
+    async fn write_key(&self, path: &std::path::Path, key: &str) -> anyhow::Result<()> {
+        tokio::fs::write(path, key).await?;
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await?;
+        Ok(())
+    }
+}
+
 #[neli::neli_enum(serialized_type = "u8")]
 enum WgCmd {
     GetDevice = 0,
@@ -98,11 +126,19 @@ impl WireGuardManager {
     }
 
     pub async fn load_or_generate_key(&self, data_dir: &str) -> anyhow::Result<String> {
+        self.load_or_generate_key_with_store(data_dir, &FileWireGuardKeyStore)
+            .await
+    }
+
+    async fn load_or_generate_key_with_store(
+        &self,
+        data_dir: &str,
+        store: &impl WireGuardKeyStore,
+    ) -> anyhow::Result<String> {
         let key_path = std::path::Path::new(data_dir).join("wg.key");
 
-        if key_path.exists() {
-            let key = tokio::fs::read_to_string(&key_path).await?;
-            return Ok(key.trim().to_string());
+        if let Some(key) = store.read_key(&key_path).await? {
+            return Ok(key);
         }
 
         info!("Generating new WireGuard private key...");
@@ -113,10 +149,7 @@ impl WireGuardManager {
         use base64::{Engine as _, engine::general_purpose};
         let priv_b64 = general_purpose::STANDARD.encode(priv_bytes);
 
-        tokio::fs::write(&key_path, &priv_b64).await?;
-        // Set permissions to 600
-        use std::os::unix::fs::PermissionsExt;
-        tokio::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).await?;
+        store.write_key(&key_path, &priv_b64).await?;
 
         Ok(priv_b64)
     }
@@ -763,6 +796,36 @@ mod tests {
     fn unrelated_errors_are_not_treated_as_absent() {
         let err = io::Error::from_raw_os_error(2);
         assert!(!is_missing_device_error(&err));
+    }
+
+    #[tokio::test]
+    async fn load_or_generate_key_with_store_reads_existing_key() {
+        struct MemoryStore {
+            key: Option<String>,
+        }
+
+        #[async_trait::async_trait]
+        impl super::WireGuardKeyStore for MemoryStore {
+            async fn read_key(&self, _path: &std::path::Path) -> anyhow::Result<Option<String>> {
+                Ok(self.key.clone())
+            }
+
+            async fn write_key(&self, _path: &std::path::Path, _key: &str) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+
+        let manager = WireGuardManager::new("wg0");
+        let store = MemoryStore {
+            key: Some("existing-key".to_string()),
+        };
+
+        let key = manager
+            .load_or_generate_key_with_store("/tmp/unused", &store)
+            .await
+            .unwrap();
+
+        assert_eq!(key, "existing-key");
     }
 
     #[test]

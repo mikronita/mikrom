@@ -99,3 +99,33 @@ pub fn server_conf(threads: usize) -> pingora::server::configuration::ServerConf
         ..Default::default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::connect_with_backoff;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn connect_with_backoff_retries_until_success() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_clone = attempts.clone();
+
+        let result = connect_with_backoff("test-component", Duration::from_millis(0), move || {
+            let attempts = attempts_clone.clone();
+            async move {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                if attempt < 2 {
+                    Err(anyhow::anyhow!("temporary failure"))
+                } else {
+                    Ok("connected")
+                }
+            }
+        })
+        .await;
+
+        assert_eq!(result, "connected");
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+}

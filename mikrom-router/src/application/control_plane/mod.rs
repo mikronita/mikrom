@@ -119,6 +119,16 @@ impl ControlPlane {
 
     async fn sync_full_state(&self, db: &PgPool) -> Result<()> {
         info!("Performing full state sync from database...");
+        let (current_state, current_versions) = self.state_manager.snapshot().await;
+        info!(
+            routes = current_state.routes.len(),
+            acme_tokens = current_state.acme_tokens.len(),
+            certificates = current_state.certificates.len(),
+            route_versions = current_versions.route_versions.len(),
+            acme_versions = current_versions.acme_versions.len(),
+            certificate_versions = current_versions.certificate_versions.len(),
+            "Current version snapshot before reconciliation"
+        );
 
         let snapshot = self.load_full_state(db).await?;
 
@@ -126,6 +136,9 @@ impl ControlPlane {
             routes = snapshot.state.routes.len(),
             acme_tokens = snapshot.state.acme_tokens.len(),
             certificates = snapshot.state.certificates.len(),
+            route_versions = snapshot.versions.route_versions.len(),
+            acme_versions = snapshot.versions.acme_versions.len(),
+            certificate_versions = snapshot.versions.certificate_versions.len(),
             "Applying full state sync"
         );
         self.state_manager
