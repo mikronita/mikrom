@@ -17,6 +17,8 @@ use mikrom_api::domain::MockVolumeRepository;
 use mikrom_api::domain::github::MockGithubRepository;
 use mikrom_api::domain::user::MockUserRepository;
 use mikrom_api::domain::volume::Volume;
+use mikrom_api::nats::{NatsClient, TypedNatsClient};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct TestDb {
     pool: sqlx::PgPool,
@@ -32,8 +34,46 @@ impl TestDb {
     }
 }
 
+struct RestoreSnapshotNats {
+    success: bool,
+    message: String,
+    request_count: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl NatsClient for RestoreSnapshotNats {
+    async fn request_raw(&self, subject: String, _payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+        assert_eq!(subject, "mikrom.scheduler.restore_snapshot");
+        self.request_count.fetch_add(1, Ordering::Relaxed);
+
+        let response = mikrom_proto::scheduler::RestoreSnapshotResponse {
+            success: self.success,
+            message: self.message.clone(),
+        };
+        let mut buf = Vec::new();
+        prost::Message::encode(&response, &mut buf).unwrap();
+        Ok(buf)
+    }
+
+    async fn publish_raw(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn subscribe_raw(&self, _subject: String) -> anyhow::Result<async_nats::Subscriber> {
+        Err(anyhow::anyhow!(
+            "unexpected subscribe in restore snapshot test"
+        ))
+    }
+}
+
+fn volume_api_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 #[tokio::test]
 async fn test_list_volume_snapshots_endpoint() {
+    let _guard = volume_api_test_lock().lock().await;
     let mock_user_repo = MockUserRepository::new();
     let mock_app_repo = MockAppRepository::new();
     let mut mock_volume_repo = MockVolumeRepository::new();
@@ -122,6 +162,7 @@ async fn test_list_volume_snapshots_endpoint() {
 
 #[tokio::test]
 async fn test_create_volume_snapshot_endpoint() {
+    let _guard = volume_api_test_lock().lock().await;
     let mock_user_repo = MockUserRepository::new();
     let mut mock_app_repo = MockAppRepository::new();
     let mut mock_volume_repo = MockVolumeRepository::new();
@@ -250,6 +291,7 @@ async fn test_create_volume_snapshot_endpoint() {
 
 #[tokio::test]
 async fn test_restore_volume_snapshot_endpoint() {
+    let _guard = volume_api_test_lock().lock().await;
     let mock_user_repo = MockUserRepository::new();
     let mock_app_repo = MockAppRepository::new();
     let mut mock_volume_repo = MockVolumeRepository::new();
@@ -282,29 +324,11 @@ async fn test_restore_volume_snapshot_endpoint() {
         });
 
     let db = TestDb::new().await;
-    let Some(nats_client) = common::get_nats_client_or_skip().await else {
-        return;
-    };
-
-    let mut subscriber = nats_client
-        .subscribe("mikrom.scheduler.restore_snapshot")
-        .await
-        .unwrap();
-    let nats_client_clone = nats_client.clone();
-    tokio::spawn(async move {
-        if let Some(msg) = subscriber.next().await {
-            let resp = mikrom_proto::scheduler::RestoreSnapshotResponse {
-                success: true,
-                message: "".to_string(),
-            };
-            let mut buf = Vec::new();
-            prost::Message::encode(&resp, &mut buf).unwrap();
-            nats_client_clone
-                .publish(msg.reply.unwrap(), buf.into())
-                .await
-                .unwrap();
-        }
-    });
+    let nats = TypedNatsClient::new_custom(Arc::new(RestoreSnapshotNats {
+        success: true,
+        message: "".to_string(),
+        request_count: AtomicUsize::new(0),
+    }));
 
     let state = AppState {
         ctx: mikrom_api::application::ApiContext::default(),
@@ -313,7 +337,7 @@ async fn test_restore_volume_snapshot_endpoint() {
         github_repo: Arc::new(MockGithubRepository::default()),
         volume_repo: Arc::new(mock_volume_repo),
         scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
+        nats,
         router_addr: "".to_string(),
         frontend_url: "".to_string(),
         jwt_secret: jwt_secret.into(),
@@ -354,6 +378,7 @@ async fn test_restore_volume_snapshot_endpoint() {
 
 #[tokio::test]
 async fn test_delete_snapshot_endpoint() {
+    let _guard = volume_api_test_lock().lock().await;
     let mock_user_repo = MockUserRepository::new();
     let mock_app_repo = MockAppRepository::new();
     let mut mock_volume_repo = MockVolumeRepository::new();
@@ -476,6 +501,7 @@ async fn test_delete_snapshot_endpoint() {
 
 #[tokio::test]
 async fn test_clone_volume_endpoint() {
+    let _guard = volume_api_test_lock().lock().await;
     let mock_user_repo = MockUserRepository::new();
     let mock_app_repo = MockAppRepository::new();
     let mut mock_volume_repo = MockVolumeRepository::new();
@@ -604,6 +630,7 @@ async fn test_clone_volume_endpoint() {
 
 #[tokio::test]
 async fn test_restore_volume_snapshot_endpoint_failure() {
+    let _guard = volume_api_test_lock().lock().await;
     let mock_user_repo = MockUserRepository::new();
     let mock_app_repo = MockAppRepository::new();
     let mut mock_volume_repo = MockVolumeRepository::new();
@@ -636,29 +663,11 @@ async fn test_restore_volume_snapshot_endpoint_failure() {
         });
 
     let db = TestDb::new().await;
-    let Some(nats_client) = common::get_nats_client_or_skip().await else {
-        return;
-    };
-
-    let mut subscriber = nats_client
-        .subscribe("mikrom.scheduler.restore_snapshot")
-        .await
-        .unwrap();
-    let nats_client_clone = nats_client.clone();
-    tokio::spawn(async move {
-        if let Some(msg) = subscriber.next().await {
-            let resp = mikrom_proto::scheduler::RestoreSnapshotResponse {
-                success: false,
-                message: "Image is busy".to_string(),
-            };
-            let mut buf = Vec::new();
-            prost::Message::encode(&resp, &mut buf).unwrap();
-            nats_client_clone
-                .publish(msg.reply.unwrap(), buf.into())
-                .await
-                .unwrap();
-        }
-    });
+    let nats = TypedNatsClient::new_custom(Arc::new(RestoreSnapshotNats {
+        success: false,
+        message: "Image is busy".to_string(),
+        request_count: AtomicUsize::new(0),
+    }));
 
     let state = AppState {
         ctx: mikrom_api::application::ApiContext::default(),
@@ -667,7 +676,7 @@ async fn test_restore_volume_snapshot_endpoint_failure() {
         github_repo: Arc::new(MockGithubRepository::default()),
         volume_repo: Arc::new(mock_volume_repo),
         scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
+        nats,
         router_addr: "".to_string(),
         frontend_url: "".to_string(),
         jwt_secret: jwt_secret.into(),

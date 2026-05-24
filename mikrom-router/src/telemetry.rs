@@ -1,5 +1,6 @@
 #![allow(clippy::missing_const_for_fn)]
 
+use crate::config::{NatsUrl, RouterId};
 use crate::proxy::RouterMetricsCounters;
 use crate::runtime;
 use crate::state::State;
@@ -30,22 +31,22 @@ async fn publish_best_effort(
 }
 
 pub struct TelemetryLoop {
-    nats_url: String,
+    nats_url: NatsUrl,
     nats_use_tls: bool,
     nats_certs_dir: Option<String>,
     metrics_counters: Arc<RouterMetricsCounters>,
     state: Arc<RwLock<State>>,
-    router_id: String,
+    router_id: RouterId,
 }
 
 impl TelemetryLoop {
     pub fn new(
-        nats_url: String,
+        nats_url: NatsUrl,
         nats_use_tls: bool,
         nats_certs_dir: Option<String>,
         metrics_counters: Arc<RouterMetricsCounters>,
         state: Arc<RwLock<State>>,
-        router_id: String,
+        router_id: RouterId,
     ) -> Self {
         Self {
             nats_url,
@@ -61,13 +62,13 @@ impl TelemetryLoop {
 #[async_trait]
 impl BackgroundService for TelemetryLoop {
     async fn start(&self, mut shutdown: ShutdownWatch) {
-        runtime::init_tracing_once(&self.router_id);
+        runtime::init_tracing_once(self.router_id.as_str());
         let nats = runtime::connect_with_backoff(
             "Telemetry Loop NATS",
             std::time::Duration::from_secs(5),
             || async {
                 crate::nats::connect_nats(
-                    &self.nats_url,
+                    self.nats_url.as_str(),
                     self.nats_use_tls,
                     self.nats_certs_dir.as_deref(),
                 )
@@ -105,12 +106,17 @@ impl BackgroundService for TelemetryLoop {
                         responses_3xx = self.metrics_counters.responses_3xx.load(Ordering::Relaxed),
                         responses_4xx = self.metrics_counters.responses_4xx.load(Ordering::Relaxed),
                         responses_5xx = self.metrics_counters.responses_5xx.load(Ordering::Relaxed),
+                        acme_hits = self.metrics_counters.acme_hits.load(Ordering::Relaxed),
+                        acme_misses = self.metrics_counters.acme_misses.load(Ordering::Relaxed),
+                        redirects = self.metrics_counters.redirects.load(Ordering::Relaxed),
+                        rate_limited = self.metrics_counters.rate_limited.load(Ordering::Relaxed),
+                        route_wait_timeouts = self.metrics_counters.route_wait_timeouts.load(Ordering::Relaxed),
                         latency_avg_ms = f64::from(latency_avg_ms),
                         "Telemetry snapshot"
                     );
 
-                    let metrics = RouterMetrics {
-                        router_id: self.router_id.clone(),
+            let metrics = RouterMetrics {
+                        router_id: self.router_id.as_str().to_string(),
                         requests_total,
                         responses_2xx: self.metrics_counters.responses_2xx.load(Ordering::Relaxed),
                         responses_3xx: self.metrics_counters.responses_3xx.load(Ordering::Relaxed),
@@ -128,7 +134,7 @@ impl BackgroundService for TelemetryLoop {
 
                     publish_best_effort(
                         &nats,
-                        crate::subjects::router_metrics(&self.router_id),
+                        crate::subjects::router_metrics(self.router_id.as_str()),
                         buf,
                         "telemetry-loop",
                     )

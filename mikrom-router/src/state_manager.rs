@@ -141,7 +141,13 @@ impl StateManager {
         key_auth: String,
         timestamp: i64,
     ) -> Result<bool> {
-        if !self.should_apply_acme(&token, timestamp).await {
+        if !self
+            .should_apply_if_newer(
+                |versions| versions.acme_versions.get(&token).copied(),
+                timestamp,
+            )
+            .await
+        {
             return Ok(false);
         }
 
@@ -164,7 +170,13 @@ impl StateManager {
     }
 
     pub async fn remove_acme_token(&self, token: &str, timestamp: i64) -> Result<bool> {
-        if !self.should_apply_acme(token, timestamp).await {
+        if !self
+            .should_apply_if_newer(
+                |versions| versions.acme_versions.get(token).copied(),
+                timestamp,
+            )
+            .await
+        {
             return Ok(false);
         }
 
@@ -194,7 +206,13 @@ impl StateManager {
         key_pem: String,
         timestamp: i64,
     ) -> Result<bool> {
-        if !self.should_apply_certificate(&domain, timestamp).await {
+        if !self
+            .should_apply_if_newer(
+                |versions| versions.certificate_versions.get(&domain).copied(),
+                timestamp,
+            )
+            .await
+        {
             return Ok(false);
         }
 
@@ -233,7 +251,13 @@ impl StateManager {
     ) -> Result<bool> {
         use pingora::lb::health_check::TcpHealthCheck;
 
-        if !self.should_apply_route(&host, timestamp).await {
+        if !self
+            .should_apply_if_newer(
+                |versions| versions.route_versions.get(&host).copied(),
+                timestamp,
+            )
+            .await
+        {
             return Ok(false);
         }
 
@@ -349,31 +373,7 @@ impl StateManager {
         (state, versions)
     }
 
-    async fn should_apply_route(&self, host: &str, timestamp: i64) -> bool {
-        self.should_apply_timestamp(
-            |versions| versions.route_versions.get(host).copied(),
-            timestamp,
-        )
-        .await
-    }
-
-    async fn should_apply_acme(&self, token: &str, timestamp: i64) -> bool {
-        self.should_apply_timestamp(
-            |versions| versions.acme_versions.get(token).copied(),
-            timestamp,
-        )
-        .await
-    }
-
-    async fn should_apply_certificate(&self, domain: &str, timestamp: i64) -> bool {
-        self.should_apply_timestamp(
-            |versions| versions.certificate_versions.get(domain).copied(),
-            timestamp,
-        )
-        .await
-    }
-
-    async fn should_apply_timestamp<F>(&self, current_version: F, timestamp: i64) -> bool
+    async fn should_apply_if_newer<F>(&self, current_version: F, timestamp: i64) -> bool
     where
         F: FnOnce(&StateVersions) -> Option<i64>,
     {
@@ -560,5 +560,68 @@ mod tests {
             );
             drop(state);
         }
+    }
+
+    #[tokio::test]
+    async fn stale_certificate_update_is_ignored() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let cache_path = temp_file.path().to_path_buf();
+        let manager = StateManager::new(cache_path).unwrap();
+
+        let applied = manager
+            .add_certificate(
+                "cert.example.com".to_string(),
+                "cert-v1".to_string(),
+                "key-v1".to_string(),
+                10,
+            )
+            .await
+            .unwrap();
+        assert!(applied);
+
+        let ignored = manager
+            .add_certificate(
+                "cert.example.com".to_string(),
+                "cert-v0".to_string(),
+                "key-v0".to_string(),
+                5,
+            )
+            .await
+            .unwrap();
+        assert!(!ignored);
+
+        let cert_pem = {
+            let state = manager.get_state();
+            let state = state.read().await;
+            let cert_pem = state.certificates["cert.example.com"].cert_pem.clone();
+            drop(state);
+            cert_pem
+        };
+        assert_eq!(cert_pem, "cert-v1");
+    }
+
+    #[tokio::test]
+    async fn stale_acme_delete_is_ignored() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let cache_path = temp_file.path().to_path_buf();
+        let manager = StateManager::new(cache_path).unwrap();
+
+        let applied = manager
+            .add_acme_token("token".to_string(), "key-auth".to_string(), 10)
+            .await
+            .unwrap();
+        assert!(applied);
+
+        let ignored = manager.remove_acme_token("token", 5).await.unwrap();
+        assert!(!ignored);
+
+        let key_auth = {
+            let state = manager.get_state();
+            let state = state.read().await;
+            let key_auth = state.acme_tokens["token"].clone();
+            drop(state);
+            key_auth
+        };
+        assert_eq!(key_auth, "key-auth");
     }
 }

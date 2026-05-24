@@ -29,6 +29,11 @@ pub struct RouterMetricsCounters {
     pub responses_4xx: AtomicU64,
     pub responses_5xx: AtomicU64,
     pub latency_sum_ms: AtomicU64,
+    pub acme_hits: AtomicU64,
+    pub acme_misses: AtomicU64,
+    pub redirects: AtomicU64,
+    pub rate_limited: AtomicU64,
+    pub route_wait_timeouts: AtomicU64,
 }
 
 impl RouterMetricsCounters {
@@ -41,6 +46,11 @@ impl RouterMetricsCounters {
             responses_4xx: AtomicU64::new(0),
             responses_5xx: AtomicU64::new(0),
             latency_sum_ms: AtomicU64::new(0),
+            acme_hits: AtomicU64::new(0),
+            acme_misses: AtomicU64::new(0),
+            redirects: AtomicU64::new(0),
+            rate_limited: AtomicU64::new(0),
+            route_wait_timeouts: AtomicU64::new(0),
         }
     }
 }
@@ -293,6 +303,7 @@ impl MikromProxy {
         };
 
         if let Some(key_auth) = key_auth {
+            self.metrics.acme_hits.fetch_add(1, Ordering::Relaxed);
             if self.acme_staging {
                 tracing::info!(
                     "ACME challenge received for host {host}: token={token}, responding with key_auth"
@@ -310,6 +321,7 @@ impl MikromProxy {
             return Ok(Some(result));
         }
 
+        self.metrics.acme_misses.fetch_add(1, Ordering::Relaxed);
         if self.acme_staging {
             tracing::warn!(
                 "ACME challenge received for host {host} but token {token} not found in state"
@@ -349,6 +361,7 @@ impl MikromProxy {
         session
             .write_response_header(Box::new(redirect), true)
             .await?;
+        self.metrics.redirects.fetch_add(1, Ordering::Relaxed);
         Ok(Some(true))
     }
 
@@ -362,14 +375,14 @@ impl MikromProxy {
                 .await
                 .map(Some),
             "/health/ready" => {
-                let snapshot = self.health.snapshot().await;
+                let snapshot = self.health.snapshot();
                 let status = if snapshot.ready { 200 } else { 503 };
                 health::write_snapshot_response(session, status, &snapshot)
                     .await
                     .map(Some)
             },
             "/health/deps" => {
-                let snapshot = self.health.snapshot().await;
+                let snapshot = self.health.snapshot();
                 let status = if snapshot.dependencies_ready {
                     200
                 } else {
@@ -380,7 +393,7 @@ impl MikromProxy {
                     .map(Some)
             },
             "/health/control-plane" => {
-                let snapshot = self.health.snapshot().await;
+                let snapshot = self.health.snapshot();
                 let status = if snapshot.control_plane_synced {
                     200
                 } else {
@@ -473,6 +486,7 @@ impl ProxyHttp for MikromProxy {
             let curr_window_requests = self.rate_limiter.observe(&ip, 1);
             if curr_window_requests > self.rps_limit {
                 warn!("Rate limit exceeded for IP: {ip} (requests: {curr_window_requests})");
+                self.metrics.rate_limited.fetch_add(1, Ordering::Relaxed);
                 return http::write_text_response(
                     session,
                     429,
@@ -602,6 +616,9 @@ impl ProxyHttp for MikromProxy {
 
             let now = std::time::Instant::now();
             if now >= deadline {
+                self.metrics
+                    .route_wait_timeouts
+                    .fetch_add(1, Ordering::Relaxed);
                 return Err(Error::explain(
                     ErrorType::HTTPStatus(503),
                     format!(
@@ -734,6 +751,16 @@ impl ProxyHttp for MikromProxy {
                 upstream = %ctx.upstream.as_deref().unwrap_or("unknown"),
                 status = code,
                 latency_ms = latency,
+                requests_total = self.metrics.requests_total.load(Ordering::Relaxed),
+                responses_2xx = self.metrics.responses_2xx.load(Ordering::Relaxed),
+                responses_3xx = self.metrics.responses_3xx.load(Ordering::Relaxed),
+                responses_4xx = self.metrics.responses_4xx.load(Ordering::Relaxed),
+                responses_5xx = self.metrics.responses_5xx.load(Ordering::Relaxed),
+                acme_hits = self.metrics.acme_hits.load(Ordering::Relaxed),
+                acme_misses = self.metrics.acme_misses.load(Ordering::Relaxed),
+                redirects = self.metrics.redirects.load(Ordering::Relaxed),
+                rate_limited = self.metrics.rate_limited.load(Ordering::Relaxed),
+                route_wait_timeouts = self.metrics.route_wait_timeouts.load(Ordering::Relaxed),
                 "Proxy request completed"
             );
         } else {
@@ -747,6 +774,16 @@ impl ProxyHttp for MikromProxy {
                 upstream = %ctx.upstream.as_deref().unwrap_or("unknown"),
                 status = 500_u16,
                 latency_ms = latency,
+                requests_total = self.metrics.requests_total.load(Ordering::Relaxed),
+                responses_2xx = self.metrics.responses_2xx.load(Ordering::Relaxed),
+                responses_3xx = self.metrics.responses_3xx.load(Ordering::Relaxed),
+                responses_4xx = self.metrics.responses_4xx.load(Ordering::Relaxed),
+                responses_5xx = self.metrics.responses_5xx.load(Ordering::Relaxed),
+                acme_hits = self.metrics.acme_hits.load(Ordering::Relaxed),
+                acme_misses = self.metrics.acme_misses.load(Ordering::Relaxed),
+                redirects = self.metrics.redirects.load(Ordering::Relaxed),
+                rate_limited = self.metrics.rate_limited.load(Ordering::Relaxed),
+                route_wait_timeouts = self.metrics.route_wait_timeouts.load(Ordering::Relaxed),
                 "Proxy request completed without response"
             );
         }

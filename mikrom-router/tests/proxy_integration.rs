@@ -30,6 +30,36 @@ async fn test_integration_acme_challenge() {
 }
 
 #[tokio::test]
+async fn test_integration_health_endpoints() {
+    let Some(env) = setup_test_env(100, false).await else {
+        eprintln!("skipping router integration test: network bind unavailable");
+        return;
+    };
+
+    let client = reqwest::Client::new();
+
+    let live = client
+        .get(format!("{}/health/live", env.proxy_url))
+        .send()
+        .await
+        .expect("Failed to send request to proxy");
+    assert_eq!(live.status(), StatusCode::OK);
+    assert_eq!(live.text().await.unwrap(), "alive\n");
+
+    for path in ["/health/ready", "/health/deps", "/health/control-plane"] {
+        let res = client
+            .get(format!("{}{}", env.proxy_url, path))
+            .send()
+            .await
+            .expect("Failed to send request to proxy");
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let body = res.text().await.unwrap();
+        assert!(body.contains("\"state\": \"booting\""));
+    }
+}
+
+#[tokio::test]
 async fn test_integration_rate_limiting() {
     let Some(env) = setup_test_env(2, false).await else {
         eprintln!("skipping router integration test: network bind unavailable");

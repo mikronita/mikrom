@@ -6,13 +6,19 @@ use std::sync::atomic::Ordering;
 fn test_metrics_counters() {
     let metrics = RouterMetricsCounters::new();
     assert_eq!(metrics.requests_total.load(Ordering::Relaxed), 0);
+    assert_eq!(metrics.acme_hits.load(Ordering::Relaxed), 0);
+    assert_eq!(metrics.redirects.load(Ordering::Relaxed), 0);
 
     metrics.requests_total.fetch_add(1, Ordering::Relaxed);
     metrics.responses_2xx.fetch_add(1, Ordering::Relaxed);
+    metrics.acme_hits.fetch_add(1, Ordering::Relaxed);
+    metrics.rate_limited.fetch_add(1, Ordering::Relaxed);
 
     assert_eq!(metrics.requests_total.load(Ordering::Relaxed), 1);
     assert_eq!(metrics.responses_2xx.load(Ordering::Relaxed), 1);
     assert_eq!(metrics.responses_4xx.load(Ordering::Relaxed), 0);
+    assert_eq!(metrics.acme_hits.load(Ordering::Relaxed), 1);
+    assert_eq!(metrics.rate_limited.load(Ordering::Relaxed), 1);
 }
 
 #[test]
@@ -27,7 +33,7 @@ fn test_control_plane_subjects_cover_router_updates() {
 #[test]
 fn test_control_plane_subscription_uses_wildcard_prefix() {
     assert_eq!(
-        router_subjects::control_plane_subject_wildcard(),
+        router_subjects::control_plane_subject_wildcard().as_str(),
         "mikrom.router.>"
     );
 }

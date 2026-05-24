@@ -132,7 +132,7 @@ pub(crate) async fn setup_test_env(rps_limit: isize, use_ipv6: bool) -> Option<T
     }
 
     let traffic_publisher = Arc::new(mikrom_router::traffic::RouterTrafficPublisher::new(
-        "router-test".to_string(),
+        "router-test".into(),
         mpsc::channel(1).0,
     ));
     let proxy = MikromProxy::new(

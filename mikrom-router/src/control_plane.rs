@@ -6,6 +6,7 @@
     clippy::collapsible_if
 )]
 
+use crate::config::{DatabaseUrl, MasterKey, NatsUrl, RouterId};
 use crate::health::RouterHealth;
 use crate::runtime;
 use crate::state::{Certificate, Route, State};
@@ -71,14 +72,14 @@ struct LoadedState {
 }
 
 pub struct ControlPlane {
-    db_url: String,
-    nats_url: String,
+    db_url: DatabaseUrl,
+    nats_url: NatsUrl,
     nats_use_tls: bool,
     nats_certs_dir: Option<String>,
-    master_key: String,
+    master_key: MasterKey,
     state_manager: Arc<StateManager>,
     health: Arc<RouterHealth>,
-    router_id: String,
+    router_id: RouterId,
     advertise_address: String,
     data_dir: String,
     wg_manager: Arc<WireGuardManager>,
@@ -88,14 +89,14 @@ pub struct ControlPlane {
 impl ControlPlane {
     #[must_use]
     pub fn new(
-        db_url: String,
-        nats_url: String,
+        db_url: DatabaseUrl,
+        nats_url: NatsUrl,
         nats_use_tls: bool,
         nats_certs_dir: Option<String>,
-        master_key: String,
+        master_key: MasterKey,
         state_manager: Arc<StateManager>,
         health: Arc<RouterHealth>,
-        router_id: String,
+        router_id: RouterId,
         advertise_address: String,
         data_dir: String,
         wg_port: u16,
@@ -259,7 +260,7 @@ impl ControlPlane {
             let encrypted_key: String = row.get("private_key");
             let updated_at: i64 = row.get("updated_at");
 
-            let key_pem = match crate::crypto::decrypt(&encrypted_key, &self.master_key) {
+            let key_pem = match crate::crypto::decrypt(&encrypted_key, self.master_key.as_str()) {
                 Ok(key) => key,
                 Err(e) => {
                     error!("Control Plane: Failed to decrypt private key for {domain}: {e}");
@@ -310,9 +311,11 @@ impl BackgroundService for ControlPlane {
             "Control Plane database",
             Duration::from_secs(5),
             || async {
-                let pool = PgPool::connect(&self.db_url)
+                let pool = PgPool::connect(self.db_url.as_str())
                     .await
-                    .with_context(|| format!("Failed to connect to database at {}", self.db_url))?;
+                    .with_context(|| {
+                        format!("Failed to connect to database at {}", self.db_url.as_str())
+                    })?;
                 sqlx::migrate!("./migrations")
                     .run(&pool)
                     .await
@@ -326,7 +329,7 @@ impl BackgroundService for ControlPlane {
         let nats =
             runtime::connect_with_backoff("Control Plane NATS", Duration::from_secs(5), || async {
                 crate::nats::connect_nats(
-                    &self.nats_url,
+                    self.nats_url.as_str(),
                     self.nats_use_tls,
                     self.nats_certs_dir.as_deref(),
                 )
@@ -340,7 +343,7 @@ impl BackgroundService for ControlPlane {
             Ok(k) => k,
             Err(e) => {
                 error!("Control Plane: Failed to load/generate WireGuard key: {e}");
-                self.health.set_startup_error(e.to_string()).await;
+                self.health.set_startup_error(e.to_string());
                 return;
             },
         };
@@ -348,17 +351,24 @@ impl BackgroundService for ControlPlane {
             Ok(k) => k,
             Err(e) => {
                 error!("Control Plane: Failed to get WireGuard public key: {e}");
-                self.health.set_startup_error(e.to_string()).await;
+                self.health.set_startup_error(e.to_string());
                 return;
             },
         };
-        if let Err(e) = self.wg_manager.init(&priv_key, &self.router_id).await {
+        if let Err(e) = self
+            .wg_manager
+            .init(&priv_key, self.router_id.as_str())
+            .await
+        {
             error!("Control Plane: Failed to initialize WireGuard: {e:?}");
-            self.health.set_startup_error(e.to_string()).await;
+            self.health.set_startup_error(e.to_string());
             return;
         }
         self.health.mark_wireguard_ready();
-        let wg_ip = self.wg_manager.get_host_ipv6(&self.router_id).to_string();
+        let wg_ip = self
+            .wg_manager
+            .get_host_ipv6(self.router_id.as_str())
+            .to_string();
 
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
         let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(10));
@@ -368,15 +378,15 @@ impl BackgroundService for ControlPlane {
         // 1. Initial sync
         if let Err(e) = self.sync_full_state(&db).await {
             error!("Control Plane: Initial state sync failed: {e}");
-            self.health.set_startup_error(e.to_string()).await;
+            self.health.set_startup_error(e.to_string());
         } else {
-            self.health.clear_startup_error().await;
+            self.health.clear_startup_error();
             self.health.mark_control_plane_synced();
         }
 
         // 2. Setup subscribers
         let mut router_sub = match nats
-            .subscribe(router_subjects::control_plane_subject_wildcard())
+            .subscribe(router_subjects::control_plane_subject_wildcard().to_string())
             .await
         {
             Ok(s) => s,
@@ -386,8 +396,10 @@ impl BackgroundService for ControlPlane {
             },
         };
 
-        let mesh_subject = router_subjects::mesh_updates(&self.router_id);
-        let mut mesh_sub = match nats.subscribe(mesh_subject.clone()).await {
+        let mut mesh_sub = match nats
+            .subscribe(router_subjects::mesh_updates(self.router_id.as_str()).to_string())
+            .await
+        {
             Ok(s) => s,
             Err(e) => {
                 error!("Control Plane: Failed to subscribe to mesh updates: {e}");
@@ -403,8 +415,8 @@ impl BackgroundService for ControlPlane {
                 // Heartbeat loop
                 _ = heartbeat_interval.tick() => {
                     let heartbeat = RouterHeartbeat {
-                        host_id: self.router_id.clone(),
-                        hostname: self.router_id.clone(),
+                        host_id: self.router_id.as_str().to_string(),
+                        hostname: self.router_id.as_str().to_string(),
                         wireguard_pubkey: pub_key.clone(),
                         wireguard_ip: wg_ip.clone(),
                         wireguard_port: i32::from(self.wg_port),
@@ -441,7 +453,7 @@ impl BackgroundService for ControlPlane {
                         if let Err(e) = self.sync_full_state(&db).await {
                             error!("Control Plane: Failed to sync state after NATS update: {e}");
                         } else {
-                            self.health.clear_startup_error().await;
+                            self.health.clear_startup_error();
                             self.health.mark_control_plane_synced();
                         }
                         pending = false;

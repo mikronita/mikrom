@@ -1,3 +1,4 @@
+use crate::config::{NatsUrl, RouterId};
 use crate::runtime;
 use async_trait::async_trait;
 use mikrom_proto::router::RouterTrafficEvent;
@@ -12,14 +13,14 @@ use tracing::{error, info, warn};
 use dashmap::DashMap;
 
 pub struct RouterTrafficPublisher {
-    router_id: String,
+    router_id: RouterId,
     tx: mpsc::Sender<RouterTrafficEvent>,
     last_sent: DashMap<String, i64>,
 }
 
 impl RouterTrafficPublisher {
     #[must_use]
-    pub fn new(router_id: String, tx: mpsc::Sender<RouterTrafficEvent>) -> Self {
+    pub fn new(router_id: RouterId, tx: mpsc::Sender<RouterTrafficEvent>) -> Self {
         Self {
             router_id,
             tx,
@@ -40,7 +41,7 @@ impl RouterTrafficPublisher {
 
         let event = RouterTrafficEvent {
             hostname,
-            router_id: self.router_id.clone(),
+            router_id: self.router_id.as_str().to_string(),
             timestamp: now,
         };
 
@@ -51,7 +52,7 @@ impl RouterTrafficPublisher {
 }
 
 pub struct RouterTrafficLoop {
-    nats_url: String,
+    nats_url: NatsUrl,
     nats_use_tls: bool,
     nats_certs_dir: Option<String>,
     rx: Arc<Mutex<Option<mpsc::Receiver<RouterTrafficEvent>>>>,
@@ -60,7 +61,7 @@ pub struct RouterTrafficLoop {
 impl RouterTrafficLoop {
     #[must_use]
     pub fn new(
-        nats_url: String,
+        nats_url: NatsUrl,
         nats_use_tls: bool,
         nats_certs_dir: Option<String>,
         rx: mpsc::Receiver<RouterTrafficEvent>,
@@ -84,7 +85,7 @@ impl BackgroundService for RouterTrafficLoop {
             std::time::Duration::from_secs(5),
             || async {
                 crate::nats::connect_nats(
-                    &self.nats_url,
+                    self.nats_url.as_str(),
                     self.nats_use_tls,
                     self.nats_certs_dir.as_deref(),
                 )
@@ -130,7 +131,7 @@ mod tests {
     #[tokio::test]
     async fn test_record_enqueues_router_traffic_event() {
         let (tx, mut rx) = mpsc::channel(4);
-        let publisher = RouterTrafficPublisher::new("router-1".to_string(), tx);
+        let publisher = RouterTrafficPublisher::new("router-1".into(), tx);
 
         publisher.record("app.example.com".to_string());
 

@@ -7,7 +7,7 @@ mod tests {
     #[tokio::test]
     async fn test_traffic_publisher_deduplication() {
         let (tx, mut rx) = mpsc::channel(100);
-        let publisher = RouterTrafficPublisher::new("router-1".to_string(), tx);
+        let publisher = RouterTrafficPublisher::new("router-1".into(), tx);
 
         // Send same hostname multiple times
         publisher.record("app.local".to_string());
@@ -29,7 +29,7 @@ mod tests {
     #[tokio::test]
     async fn test_traffic_publisher_different_hosts() {
         let (tx, mut rx) = mpsc::channel(100);
-        let publisher = RouterTrafficPublisher::new("router-1".to_string(), tx);
+        let publisher = RouterTrafficPublisher::new("router-1".into(), tx);
 
         publisher.record("app1.local".to_string());
         publisher.record("app2.local".to_string());

@@ -1,20 +1,69 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
+macro_rules! string_newtype {
+    ($name:ident) => {
+        #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Hash)]
+        #[serde(transparent)]
+        pub struct $name(String);
+
+        impl $name {
+            #[must_use]
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+
+            #[must_use]
+            pub fn into_inner(self) -> String {
+                self.0
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(value: String) -> Self {
+                Self(value)
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(value: &str) -> Self {
+                Self(value.to_string())
+            }
+        }
+
+        impl AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                self.as_str()
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.as_str())
+            }
+        }
+    };
+}
+
+string_newtype!(DatabaseUrl);
+string_newtype!(NatsUrl);
+string_newtype!(MasterKey);
+string_newtype!(RouterId);
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct RouterConfig {
-    pub database_url: String,
-    pub nats_url: String,
+    pub database_url: DatabaseUrl,
+    pub nats_url: NatsUrl,
 
     #[serde(default = "default_nats_use_tls")]
     pub nats_use_tls: bool,
 
     pub nats_certs_dir: Option<String>,
     pub upstream_ca_certs_dir: Option<String>,
-    pub master_key: String,
+    pub master_key: MasterKey,
 
     #[serde(default = "default_router_id")]
-    pub router_id: String,
+    pub router_id: RouterId,
 
     pub advertise_address: Option<String>,
 
@@ -40,10 +89,10 @@ const fn default_nats_use_tls() -> bool {
     false
 }
 
-fn default_router_id() -> String {
+fn default_router_id() -> RouterId {
     hostname::get().map_or_else(
-        |_| "unknown-router".to_string(),
-        |hostname| hostname.to_string_lossy().into_owned(),
+        |_| RouterId::from("unknown-router"),
+        |hostname| RouterId::from(hostname.to_string_lossy().into_owned()),
     )
 }
 
@@ -82,10 +131,10 @@ impl RouterConfig {
         }
 
         if config.advertise_address.is_none() {
-            config.advertise_address = Some(config.router_id.clone());
+            config.advertise_address = Some(config.router_id.as_str().to_string());
         }
 
-        if config.router_id.trim().is_empty() {
+        if config.router_id.as_str().trim().is_empty() {
             return Err(anyhow::anyhow!("ROUTER_ID cannot be empty"));
         }
 
@@ -130,19 +179,19 @@ impl RouterConfig {
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
-        if self.database_url.trim().is_empty() {
+        if self.database_url.as_str().trim().is_empty() {
             return Err(anyhow::anyhow!("DATABASE_URL cannot be empty"));
         }
 
-        if self.nats_url.trim().is_empty() {
+        if self.nats_url.as_str().trim().is_empty() {
             return Err(anyhow::anyhow!("NATS_URL cannot be empty"));
         }
 
-        if self.router_id.trim().is_empty() {
+        if self.router_id.as_str().trim().is_empty() {
             return Err(anyhow::anyhow!("ROUTER_ID cannot be empty"));
         }
 
-        if self.master_key.trim().is_empty() {
+        if self.master_key.as_str().trim().is_empty() {
             return Err(anyhow::anyhow!("MASTER_KEY cannot be empty"));
         }
 
@@ -175,19 +224,19 @@ impl RouterConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::RouterConfig;
+    use super::{DatabaseUrl, MasterKey, NatsUrl, RouterConfig, RouterId};
     use std::path::PathBuf;
 
     #[test]
     fn validate_rejects_empty_urls() {
         let config = RouterConfig {
-            database_url: String::new(),
-            nats_url: String::new(),
+            database_url: DatabaseUrl::from(""),
+            nats_url: NatsUrl::from(""),
             nats_use_tls: false,
             nats_certs_dir: None,
             upstream_ca_certs_dir: None,
-            master_key: String::new(),
-            router_id: "router-1".to_string(),
+            master_key: MasterKey::from(""),
+            router_id: RouterId::from("router-1"),
             advertise_address: None,
             data_dir: PathBuf::from("/tmp"),
             state_cache_path: None,
@@ -203,13 +252,13 @@ mod tests {
     #[test]
     fn validate_rejects_empty_master_key() {
         let config = RouterConfig {
-            database_url: "postgres://localhost/router".to_string(),
-            nats_url: "nats://localhost:4222".to_string(),
+            database_url: DatabaseUrl::from("postgres://localhost/router"),
+            nats_url: NatsUrl::from("nats://localhost:4222"),
             nats_use_tls: false,
             nats_certs_dir: None,
             upstream_ca_certs_dir: None,
-            master_key: String::new(),
-            router_id: "router-1".to_string(),
+            master_key: MasterKey::from(""),
+            router_id: RouterId::from("router-1"),
             advertise_address: None,
             data_dir: PathBuf::from("/tmp"),
             state_cache_path: None,
@@ -220,5 +269,27 @@ mod tests {
         };
 
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn advertise_address_defaults_to_router_id() {
+        let config = RouterConfig {
+            database_url: DatabaseUrl::from("postgres://localhost/router"),
+            nats_url: NatsUrl::from("nats://localhost:4222"),
+            nats_use_tls: false,
+            nats_certs_dir: None,
+            upstream_ca_certs_dir: None,
+            master_key: MasterKey::from("key"),
+            router_id: RouterId::from("router-1"),
+            advertise_address: None,
+            data_dir: PathBuf::from("/tmp"),
+            state_cache_path: None,
+            wireguard_port: 51822,
+            acme_staging: false,
+            rps_limit: 100,
+            router_threads: 1,
+        };
+
+        assert_eq!(config.advertise_address(), "router-1");
     }
 }
