@@ -1,4 +1,5 @@
 use crate::domain::error::DomainResult;
+use crate::domain::types::{CpuCores, MemoryMb, Port};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,7 @@ pub struct App {
     pub id: Uuid,
     pub name: String,
     pub git_url: String,
-    pub port: u32,
+    pub port: Port,
     pub hostname: Option<String>,
     pub user_id: Uuid,
     pub github_webhook_secret: Option<String>,
@@ -37,7 +38,7 @@ impl Default for App {
             id: Uuid::new_v4(),
             name: String::new(),
             git_url: String::new(),
-            port: 8080,
+            port: Port::new(8080).unwrap(),
             hostname: None,
             user_id: Uuid::new_v4(),
             github_webhook_secret: None,
@@ -61,7 +62,7 @@ impl Default for App {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, rovo::schemars::JsonSchema, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, rovo::schemars::JsonSchema)]
 pub struct Deployment {
     pub id: Uuid,
     pub app_id: Uuid,
@@ -71,10 +72,10 @@ pub struct Deployment {
     pub job_id: Option<String>,
     pub ipv6_address: Option<String>,
     pub status: String,
-    pub vcpus: i32,
-    pub memory_mib: i64,
+    pub vcpus: CpuCores,
+    pub memory_mib: MemoryMb,
     pub disk_mib: i64,
-    pub port: u32,
+    pub port: Port,
     pub env_vars: serde_json::Value,
     pub git_commit_hash: Option<String>,
     pub git_commit_message: Option<String>,
@@ -85,27 +86,54 @@ pub struct Deployment {
     pub hypervisor: i32,
 }
 
+impl Default for Deployment {
+    fn default() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            app_id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            build_id: None,
+            image_tag: None,
+            job_id: None,
+            ipv6_address: None,
+            status: "PENDING".to_string(),
+            vcpus: CpuCores::new(1).unwrap(),
+            memory_mib: MemoryMb::new(128).unwrap(),
+            disk_mib: 1024,
+            port: Port::new(8080).unwrap(),
+            env_vars: serde_json::Value::Object(serde_json::Map::new()),
+            git_commit_hash: None,
+            git_commit_message: None,
+            git_branch: None,
+            trigger_source: "manual".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            hypervisor: 0,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, rovo::schemars::JsonSchema)]
 pub struct SecurityRule {
     pub id: Uuid,
     pub app_id: Uuid,
     pub protocol: String,
-    pub port_start: u32,
-    pub port_end: u32,
+    pub port_start: Port,
+    pub port_end: Port,
     pub action: String,
     pub priority: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct NewDeployment {
     pub app_id: Uuid,
     pub user_id: String,
-    pub vcpus: i32,
-    pub memory_mib: i64,
+    pub vcpus: CpuCores,
+    pub memory_mib: MemoryMb,
     pub disk_mib: i64,
-    pub port: u32,
+    pub port: Port,
     pub env_vars: std::collections::HashMap<String, String>,
     pub trigger_source: String,
     pub git_commit_hash: Option<String>,
@@ -114,15 +142,34 @@ pub struct NewDeployment {
     pub hypervisor: i32,
 }
 
+impl Default for NewDeployment {
+    fn default() -> Self {
+        Self {
+            app_id: Uuid::new_v4(),
+            user_id: String::new(),
+            vcpus: CpuCores::new(1).unwrap(),
+            memory_mib: MemoryMb::new(128).unwrap(),
+            disk_mib: 1024,
+            port: Port::new(8080).unwrap(),
+            env_vars: std::collections::HashMap::new(),
+            trigger_source: "manual".to_string(),
+            git_commit_hash: None,
+            git_commit_message: None,
+            git_branch: None,
+            hypervisor: 0,
+        }
+    }
+}
+
 impl NewDeployment {
     #[allow(clippy::too_many_arguments)]
     pub fn from_handler(
         app_id: Uuid,
         user_id: String,
-        vcpus: i32,
-        memory_mib: i64,
+        vcpus: CpuCores,
+        memory_mib: MemoryMb,
         disk_mib: i64,
-        port: u32,
+        port: Port,
         env_vars: std::collections::HashMap<String, String>,
         trigger_source: String,
         git_metadata: Option<&GitMetadata>,
@@ -168,7 +215,7 @@ pub struct GitMetadata {
 pub struct CreateAppParams {
     pub name: String,
     pub git_url: String,
-    pub port: u32,
+    pub port: Port,
     pub hostname: Option<String>,
     pub user_id: Uuid,
     pub github_webhook_secret: Option<String>,
@@ -190,7 +237,7 @@ impl Default for CreateAppParams {
         Self {
             name: String::new(),
             git_url: String::new(),
-            port: 8080,
+            port: Port::new(8080).unwrap(),
             hostname: None,
             user_id: Uuid::new_v4(),
             github_webhook_secret: None,
@@ -219,7 +266,7 @@ pub trait AppRepository: Send + Sync {
     async fn delete_app(&self, id: Uuid) -> DomainResult<()>;
     async fn list_apps_by_user(&self, user_id: Option<Uuid>) -> DomainResult<Vec<App>>;
     async fn set_active_deployment(&self, app_id: Uuid, deployment_id: Uuid) -> DomainResult<()>;
-    async fn update_app_port(&self, id: Uuid, port: u32) -> DomainResult<()>;
+    async fn update_app_port(&self, id: Uuid, port: Port) -> DomainResult<()>;
     async fn update_app_scaling(&self, id: Uuid, desired_replicas: i32) -> DomainResult<()>;
     async fn update_app_autoscaling(
         &self,
@@ -234,7 +281,7 @@ pub trait AppRepository: Send + Sync {
     async fn create_deployment(&self, data: NewDeployment) -> DomainResult<Deployment>;
     async fn update_deployment(&self, id: Uuid, params: UpdateDeploymentParams)
     -> DomainResult<()>;
-    async fn update_deployment_port(&self, id: Uuid, port: u32) -> DomainResult<()>;
+    async fn update_deployment_port(&self, id: Uuid, port: Port) -> DomainResult<()>;
     async fn get_deployment(&self, id: Uuid) -> DomainResult<Option<Deployment>>;
     async fn get_deployment_by_job_id(&self, job_id: &str) -> DomainResult<Option<Deployment>>;
     async fn list_deployments_by_app(&self, app_id: Uuid) -> DomainResult<Vec<Deployment>>;
@@ -250,8 +297,8 @@ pub trait AppRepository: Send + Sync {
         &self,
         app_id: Uuid,
         protocol: String,
-        port_start: u32,
-        port_end: u32,
+        port_start: Port,
+        port_end: Port,
         action: String,
     ) -> DomainResult<SecurityRule>;
     async fn delete_security_rule(&self, id: Uuid) -> DomainResult<()>;

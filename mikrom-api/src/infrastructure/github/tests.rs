@@ -1,4 +1,4 @@
-use crate::github::generate_jwt;
+use crate::infrastructure::github::generate_jwt;
 
 #[test]
 fn test_generate_jwt_with_escaped_newlines() {

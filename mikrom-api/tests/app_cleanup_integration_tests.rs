@@ -10,9 +10,9 @@ use uuid::Uuid;
 
 use mikrom_api::AppState;
 use mikrom_api::create_app;
+use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::app::App;
 use mikrom_api::domain::{MockAppRepository, MockUserRepository};
-use mikrom_api::scheduler::MockScheduler;
 
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     let nats_url =
@@ -53,7 +53,7 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         id: app_id,
         name: app_name.to_string(),
         git_url: "git".to_string(),
-        port: 8080,
+        port: mikrom_api::domain::types::Port::new(8080).unwrap(),
         hostname: Some("test.example.com".to_string()),
         user_id,
         ..Default::default()
@@ -136,7 +136,10 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 

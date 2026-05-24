@@ -5,15 +5,15 @@ use axum::extract::State;
 use chrono::Utc;
 use mikrom_api::AppState;
 use mikrom_api::auth::AuthUser;
-use mikrom_api::deploy::handlers::{
-    __deploy_app_version_handler_impl as deploy_app_version_handler, ManualDeployRequest,
-};
 use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::app::{App, Deployment};
 use mikrom_api::domain::github::MockGithubRepository;
 use mikrom_api::domain::user::{MockUserRepository, UserRole};
+use mikrom_api::infrastructure::http::handlers::deploy::{
+    __deploy_app_version_handler_impl as deploy_app_version_handler, ManualDeployRequest,
+};
 use mikrom_api::nats::TypedNatsClient;
-use mikrom_api::scheduler::MockScheduler;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -45,7 +45,10 @@ async fn create_test_state(app_repo: MockAppRepository) -> Option<AppState> {
         github_app_slug: Some("test-app".to_string()),
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     })
 }
@@ -77,10 +80,10 @@ async fn test_manual_deploy_without_github_metadata() {
                 app_id: Uuid::new_v4(),
                 user_id: Uuid::new_v4(),
                 status: "BUILDING".into(),
-                vcpus: 1,
-                memory_mib: 256,
+                vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+                memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
                 disk_mib: 1024,
-                port: 8080,
+                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
                 image_tag: None,
                 build_id: None,
                 job_id: None,
@@ -175,10 +178,10 @@ async fn test_manual_deploy_with_github_metadata_fetch_failure() {
                 app_id: Uuid::new_v4(),
                 user_id: Uuid::new_v4(),
                 status: "BUILDING".into(),
-                vcpus: 1,
-                memory_mib: 256,
+                vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+                memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
                 disk_mib: 1024,
-                port: 8080,
+                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
                 image_tag: None,
                 build_id: None,
                 job_id: None,

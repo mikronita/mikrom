@@ -8,29 +8,35 @@ pub use service::{DeployParams, DeploymentService, TriggerBuildParams};
 pub use worker::{BuildTask, start_build_polling};
 pub use workflow::DeploymentPromotionWorkflow;
 
+use crate::domain::types::{CpuCores, MemoryMb, Port};
+
 pub const DEFAULT_DEPLOYMENT_VCPUS: u32 = 1;
 pub const DEFAULT_DEPLOYMENT_MEMORY_MIB: u32 = 512;
 pub const DEPLOYMENT_VCPU_OPTIONS: [u32; 4] = [1, 2, 3, 4];
 pub const DEPLOYMENT_MEMORY_OPTIONS_MIB: [u32; 4] = [512, 1024, 2048, 4096];
 
-pub fn resolve_deployment_vcpus(vcpus: Option<u32>) -> crate::error::ApiResult<u32> {
-    let value = vcpus.unwrap_or(DEFAULT_DEPLOYMENT_VCPUS);
-    if DEPLOYMENT_VCPU_OPTIONS.contains(&value) {
+pub fn resolve_deployment_vcpus(vcpus: Option<CpuCores>) -> crate::error::ApiResult<CpuCores> {
+    let value = vcpus.unwrap_or_else(|| CpuCores::new(DEFAULT_DEPLOYMENT_VCPUS).unwrap());
+    if DEPLOYMENT_VCPU_OPTIONS.contains(&value.value()) {
         Ok(value)
     } else {
         Err(crate::error::ApiError::BadRequest(format!(
-            "Unsupported CPU value {value}. Allowed values are 1, 2, 3, and 4."
+            "Unsupported CPU value {}. Allowed values are 1, 2, 3, and 4.",
+            value.value()
         )))
     }
 }
 
-pub fn resolve_deployment_memory_mib(memory_mib: Option<u32>) -> crate::error::ApiResult<u32> {
-    let value = memory_mib.unwrap_or(DEFAULT_DEPLOYMENT_MEMORY_MIB);
-    if DEPLOYMENT_MEMORY_OPTIONS_MIB.contains(&value) {
+pub fn resolve_deployment_memory_mib(
+    memory_mib: Option<MemoryMb>,
+) -> crate::error::ApiResult<MemoryMb> {
+    let value = memory_mib.unwrap_or_else(|| MemoryMb::new(DEFAULT_DEPLOYMENT_MEMORY_MIB).unwrap());
+    if DEPLOYMENT_MEMORY_OPTIONS_MIB.contains(&value.value()) {
         Ok(value)
     } else {
         Err(crate::error::ApiError::BadRequest(format!(
-            "Unsupported memory value {value}. Allowed values are 512, 1024, 2048, and 4096 MiB."
+            "Unsupported memory value {}. Allowed values are 512, 1024, 2048, and 4096 MiB.",
+            value.value()
         )))
     }
 }
@@ -108,7 +114,7 @@ pub struct AppResponse {
     pub id: uuid::Uuid,
     pub name: String,
     pub git_url: String,
-    pub port: u32,
+    pub port: Port,
     pub hostname: Option<String>,
     pub github_webhook_secret: Option<String>,
     pub github_installation_id: Option<i64>,
@@ -166,9 +172,9 @@ pub struct DeployRequestPayload {
     pub app_name: String,
     pub image: String,
     pub git_url: Option<String>,
-    pub port: Option<u32>,
-    pub vcpus: Option<u32>,
-    pub memory_mib: Option<u32>,
+    pub port: Option<Port>,
+    pub vcpus: Option<CpuCores>,
+    pub memory_mib: Option<MemoryMb>,
     pub disk_mib: Option<u32>,
     pub env: Option<std::collections::HashMap<String, String>>,
     pub hypervisor: Option<String>,

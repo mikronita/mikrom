@@ -1,7 +1,7 @@
 use crate::AppState;
-use crate::application::auth::{AuthResult, AuthService, RegisterParams, UpdateProfileParams};
+use crate::application::auth::{AuthResult, AuthService, RegisterParams};
 use crate::domain::User;
-use crate::error::{ApiError, ApiResult};
+use crate::error::ApiResult;
 use axum::{Json, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -102,10 +102,7 @@ pub async fn get_profile(
     auth: crate::AuthUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<UserResponse>> {
-    let user_uuid = uuid::Uuid::parse_str(&auth.user_id)
-        .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
-
-    let user = AuthService::get_profile(&state, user_uuid).await?;
+    let user = AuthService::get_profile_by_auth(&state, &auth.user_id).await?;
 
     Ok(Json(user.into()))
 }
@@ -116,16 +113,11 @@ pub async fn update_profile(
     State(state): State<AppState>,
     Json(payload): Json<UpdateProfileRequest>,
 ) -> ApiResult<Json<UserResponse>> {
-    let user_uuid = uuid::Uuid::parse_str(&auth.user_id)
-        .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
-
-    let user = AuthService::update_profile(
+    let user = AuthService::update_profile_by_auth(
         &state,
-        UpdateProfileParams {
-            user_id: user_uuid,
-            first_name: payload.first_name,
-            last_name: payload.last_name,
-        },
+        &auth.user_id,
+        payload.first_name,
+        payload.last_name,
     )
     .await?;
 
@@ -167,7 +159,7 @@ mod tests {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(mock_repo),
             app_repo: Arc::new(MockAppRepository::new()),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
             nats,
             router_addr: "http://localhost:8080".to_string(),
             frontend_url: "http://localhost:3000".to_string(),
@@ -178,7 +170,8 @@ mod tests {
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
             workspace_events: tokio::sync::broadcast::channel(1).0,
-            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
@@ -230,7 +223,7 @@ mod tests {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(mock_repo),
             app_repo: Arc::new(MockAppRepository::new()),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
             nats,
             router_addr: "http://localhost:8080".to_string(),
             frontend_url: "http://localhost:3000".to_string(),
@@ -241,7 +234,8 @@ mod tests {
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
             workspace_events: tokio::sync::broadcast::channel(1).0,
-            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,

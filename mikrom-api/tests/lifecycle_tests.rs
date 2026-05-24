@@ -11,11 +11,11 @@ use uuid::Uuid;
 
 use mikrom_api::AppState;
 use mikrom_api::create_app;
+use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::UpdateDeploymentParams;
 use mikrom_api::domain::app::{App, Deployment};
 use mikrom_api::domain::user::{User, UserRole};
 use mikrom_api::domain::{MockAppRepository, MockUserRepository};
-use mikrom_api::scheduler::MockScheduler;
 
 #[tokio::test]
 #[allow(unreachable_code, unused_variables, unused_imports)]
@@ -59,7 +59,7 @@ async fn test_promotion_back_and_forth() {
         user_id,
         name: "test-app".to_string(),
         git_url: "".to_string(),
-        port: 80,
+        port: mikrom_api::domain::types::Port::new(80).unwrap(),
         ..App::default()
     };
 
@@ -239,7 +239,10 @@ async fn test_promotion_back_and_forth() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -318,7 +321,7 @@ async fn test_promotion_pauses_previous_active() {
         user_id,
         name: "test-app".to_string(),
         git_url: "".to_string(),
-        port: 80,
+        port: mikrom_api::domain::types::Port::new(80).unwrap(),
         active_deployment_id: Some(old_dep_id),
         ..App::default()
     };
@@ -403,7 +406,10 @@ async fn test_promotion_pauses_previous_active() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -469,7 +475,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
         user_id,
         name: "test-app".to_string(),
         git_url: "".to_string(),
-        port: 80,
+        port: mikrom_api::domain::types::Port::new(80).unwrap(),
         ..App::default()
     };
 
@@ -614,7 +620,10 @@ async fn test_activate_stopped_deployment_resumes_it() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -677,7 +686,7 @@ async fn test_delete_app_cleans_up_resources() {
         user_id,
         name: "test-app".to_string(),
         git_url: "".to_string(),
-        port: 80,
+        port: mikrom_api::domain::types::Port::new(80).unwrap(),
         ..App::default()
     };
 
@@ -745,7 +754,10 @@ async fn test_delete_app_cleans_up_resources() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 

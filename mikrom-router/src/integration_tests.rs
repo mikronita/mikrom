@@ -7,8 +7,10 @@ use axum::{
     routing::any,
 };
 use mikrom_api::NatsScheduler;
+use mikrom_api::application::vms::MeshStatus;
 use mikrom_api::create_app;
 use mikrom_api::domain::{AppRepository, MockGithubRepository, MockVolumeRepository};
+use mikrom_api::domain::{CpuCores, MemoryMb, Port};
 use mikrom_api::infrastructure::db::{PostgresAppRepository, PostgresUserRepository};
 use mikrom_api::test_utils::TestDb as ApiTestDb;
 use mikrom_proto::subjects;
@@ -854,7 +856,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         master_key: "test-key".to_string(),
         deployment_events: tokio::sync::broadcast::channel(16).0,
         workspace_events: tokio::sync::broadcast::channel(16).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(MeshStatus::default()).0,
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
@@ -964,10 +966,10 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         .create_deployment(mikrom_api::domain::NewDeployment {
             app_id: app_record.id,
             user_id: app_record.user_id.to_string(),
-            vcpus: 1,
-            memory_mib: 128,
+            vcpus: CpuCores::new(1).unwrap(),
+            memory_mib: MemoryMb::new(128).unwrap(),
             disk_mib: 512,
-            port: u32::from(upstream_port),
+            port: Port::new(u32::from(upstream_port)).unwrap(),
             env_vars: std::collections::HashMap::new(),
             trigger_source: "manual".to_string(),
             git_commit_hash: Some("abc1234".to_string()),

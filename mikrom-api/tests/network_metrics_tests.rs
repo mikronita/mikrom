@@ -10,9 +10,9 @@ use mikrom_api::AppState;
 use mikrom_api::auth::jwt::create_token;
 use mikrom_api::create_app;
 use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::github::MockGithubRepository;
 use mikrom_api::domain::user::{MockUserRepository, UserRole};
-use mikrom_api::scheduler::MockScheduler;
 use std::sync::Arc;
 use tower::Service;
 
@@ -54,7 +54,10 @@ async fn setup_app(
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 

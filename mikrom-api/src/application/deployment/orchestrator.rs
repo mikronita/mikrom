@@ -326,7 +326,7 @@ mod tests {
         let app_repo = Arc::new(mock_app_repo);
         let github_repo = Arc::new(MockGithubRepository::default());
         let volume_repo = Arc::new(crate::domain::MockVolumeRepository::new());
-        let scheduler = Arc::new(crate::scheduler::MockScheduler::new());
+        let scheduler = Arc::new(crate::domain::MockScheduler::new());
         let nats = crate::nats::TypedNatsClient::new(nats_client);
         let db = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
 
@@ -358,7 +358,8 @@ mod tests {
             master_key: "key".to_string(),
             deployment_events: tokio::sync::broadcast::channel(100).0,
             workspace_events: tokio::sync::broadcast::channel(100).0,
-            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
             acme_email: "test@example.com".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
@@ -387,7 +388,7 @@ mod tests {
         };
 
         let mut mock_app_repo = MockAppRepository::new();
-        let mut mock_scheduler = crate::scheduler::MockScheduler::new();
+        let mut mock_scheduler = crate::domain::MockScheduler::new();
         let old_dep_id = Uuid::new_v4();
         let app_id = Uuid::new_v4();
         let user_id = Uuid::new_v4();
@@ -450,7 +451,8 @@ mod tests {
             master_key: "key".to_string(),
             deployment_events: tokio::sync::broadcast::channel(100).0,
             workspace_events: tokio::sync::broadcast::channel(100).0,
-            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
             acme_email: "test@example.com".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
@@ -510,7 +512,7 @@ mod tests {
         let app_repo = Arc::new(mock_app_repo);
         let github_repo = Arc::new(MockGithubRepository::default());
         let volume_repo = Arc::new(crate::domain::MockVolumeRepository::new());
-        let scheduler = Arc::new(crate::scheduler::MockScheduler::new());
+        let scheduler = Arc::new(crate::domain::MockScheduler::new());
         let nats = crate::nats::TypedNatsClient::new(nats_client);
         let db = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
 
@@ -542,7 +544,8 @@ mod tests {
             master_key: "key".to_string(),
             deployment_events: tokio::sync::broadcast::channel(100).0,
             workspace_events: tokio::sync::broadcast::channel(100).0,
-            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
             acme_email: "test@example.com".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
@@ -574,7 +577,7 @@ mod tests {
         };
 
         let mut mock_app_repo = MockAppRepository::new();
-        let mut mock_scheduler = crate::scheduler::MockScheduler::new();
+        let mut mock_scheduler = crate::domain::MockScheduler::new();
         let old_dep_id = Uuid::new_v4();
         let new_dep_id = Uuid::new_v4();
         let app_id = Uuid::new_v4();
@@ -636,7 +639,8 @@ mod tests {
             master_key: "key".to_string(),
             deployment_events: tokio::sync::broadcast::channel(100).0,
             workspace_events: tokio::sync::broadcast::channel(100).0,
-            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
             acme_email: "test@example.com".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,

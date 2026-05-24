@@ -1,9 +1,9 @@
 mod common;
 use futures::StreamExt;
 use mikrom_api::AppState;
+use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::app::{App, Deployment};
 use mikrom_api::domain::{MockAppRepository, MockGithubRepository, MockUserRepository};
-use mikrom_api::scheduler::MockScheduler;
 use mikrom_proto::scheduler::{CheckHealthResponse, DeployResponse};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -73,7 +73,10 @@ async fn test_concurrent_flows_prevented() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: Arc::new(dashmap::DashSet::new()),
     };
 

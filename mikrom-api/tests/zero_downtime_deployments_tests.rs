@@ -1,9 +1,9 @@
 mod common;
 use futures::StreamExt;
 use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::UpdateDeploymentParams;
 use mikrom_api::domain::app::{App, Deployment};
-use mikrom_api::scheduler::MockScheduler;
 use mikrom_proto::scheduler::{CheckHealthResponse, DeployResponse};
 use mockall::predicate::eq;
 use std::sync::Arc;
@@ -181,7 +181,7 @@ async fn test_activate_deployment_no_job_id() {
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
     use mikrom_api::auth::AuthUser;
-    use mikrom_api::deploy::handlers::__activate_deployment_handler_impl as activate_deployment_handler;
+    use mikrom_api::infrastructure::http::handlers::deploy::__activate_deployment_handler_impl as activate_deployment_handler;
 
     let mut mock_app_repo = MockAppRepository::new();
     let mock_scheduler = MockScheduler::new();

@@ -34,7 +34,7 @@ async fn test_deployment_metadata_roundtrip() {
         .create_app(mikrom_api::domain::CreateAppParams {
             name: "metadata-app".to_string(),
             git_url: "https://github.com/test/repo".to_string(),
-            port: 80,
+            port: mikrom_api::domain::types::Port::new(80).unwrap(),
             user_id,
             ..Default::default()
         })
@@ -46,10 +46,10 @@ async fn test_deployment_metadata_roundtrip() {
         .create_deployment(NewDeployment {
             app_id: app.id,
             user_id: user_id.to_string(),
-            vcpus: 1,
-            memory_mib: 256,
+            vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+            memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
             disk_mib: 1024,
-            port: 80,
+            port: mikrom_api::domain::types::Port::new(80).unwrap(),
             env_vars: std::collections::HashMap::new(),
             trigger_source: "github_webhook".to_string(),
             git_commit_hash: None,

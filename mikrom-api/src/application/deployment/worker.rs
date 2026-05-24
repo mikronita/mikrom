@@ -1,6 +1,7 @@
 use super::service::{DeployParams, DeploymentService};
 use crate::AppState;
 use crate::domain::UpdateDeploymentParams;
+use crate::domain::types::{CpuCores, MemoryMb, Port};
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -190,10 +191,10 @@ pub struct BuildTask {
     pub build_id: String,
     pub app_name: String,
     pub user_id: String,
-    pub vcpus: u32,
-    pub memory_mib: u64,
-    pub disk_mib: u64,
-    pub port: u32,
+    pub vcpus: CpuCores,
+    pub memory_mib: MemoryMb,
+    pub disk_mib: u32,
+    pub port: Port,
     pub env: HashMap<String, String>,
     pub hypervisor: i32,
 }
@@ -243,9 +244,9 @@ pub async fn resume_pending_builds(state: AppState) {
             build_id,
             app_name: app.name,
             user_id: dep.user_id.to_string(),
-            vcpus: dep.vcpus as u32,
-            memory_mib: dep.memory_mib as u64,
-            disk_mib: dep.disk_mib as u64,
+            vcpus: dep.vcpus,
+            memory_mib: dep.memory_mib,
+            disk_mib: dep.disk_mib as u32,
             port: dep.port,
             env: serde_json::from_value(dep.env_vars).unwrap_or_default(),
             hypervisor: dep.hypervisor,
@@ -296,7 +297,11 @@ pub async fn poll_and_deploy(
                     current_status.5,
                 );
 
-                let final_port = if port > 0 { port } else { task.port };
+                let final_port = if port > 0 {
+                    Port::new(port).unwrap_or(task.port)
+                } else {
+                    task.port
+                };
 
                 // Fetch app and deployment to satisfy service requirements
                 let app = state
@@ -353,8 +358,8 @@ pub async fn poll_and_deploy(
                     DeployParams {
                         image_tag: image_tag.clone(),
                         vcpus: task.vcpus,
-                        memory_mib: task.memory_mib as u32,
-                        disk_mib: task.disk_mib as u32,
+                        memory_mib: task.memory_mib,
+                        disk_mib: task.disk_mib,
                         port: final_port,
                         env: task.env.clone(),
                         hypervisor: task.hypervisor,
@@ -470,9 +475,9 @@ mod tests {
     use super::*;
     use crate::domain::App;
     use crate::domain::MockAppRepository;
+    use crate::domain::MockScheduler;
     use crate::domain::user::MockUserRepository;
     use crate::nats::MockNatsClient;
-    use crate::scheduler::MockScheduler;
     use mockall::predicate::function;
 
     async fn create_test_state() -> AppState {
@@ -494,7 +499,8 @@ mod tests {
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
             workspace_events: tokio::sync::broadcast::channel(1).0,
-            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
@@ -567,7 +573,8 @@ mod tests {
             master_key: "key".into(),
             deployment_events,
             workspace_events,
-            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,

@@ -71,10 +71,10 @@ async fn test_activate_deployment_endpoint() {
         job_id: None,
         ipv6_address: None,
         status: "RUNNING".to_string(),
-        vcpus: 1,
-        memory_mib: 256,
+        vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+        memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
         disk_mib: 1024,
-        port: 8080,
+        port: mikrom_api::domain::types::Port::new(8080).unwrap(),
         env_vars: serde_json::Value::Object(serde_json::Map::new()),
         git_commit_hash: None,
         git_commit_message: None,
@@ -124,7 +124,7 @@ async fn test_activate_deployment_endpoint() {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
@@ -141,7 +141,10 @@ async fn test_activate_deployment_endpoint() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -215,7 +218,7 @@ async fn test_activate_deployment_wrong_owner() {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
@@ -232,7 +235,10 @@ async fn test_activate_deployment_wrong_owner() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -302,10 +308,10 @@ async fn test_activate_deployment_not_running() {
         job_id: None,
         ipv6_address: None,
         status: "FAILED".to_string(), // Not RUNNING
-        vcpus: 1,
-        memory_mib: 256,
+        vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+        memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
         disk_mib: 1024,
-        port: 8080,
+        port: mikrom_api::domain::types::Port::new(8080).unwrap(),
         env_vars: serde_json::Value::Object(serde_json::Map::new()),
         git_commit_hash: None,
         git_commit_message: None,
@@ -337,7 +343,7 @@ async fn test_activate_deployment_not_running() {
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
@@ -354,7 +360,10 @@ async fn test_activate_deployment_not_running() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 

@@ -51,7 +51,7 @@ async fn test_hierarchical_deployment_status_success() {
                 id: app_id,
                 name: app_name.to_string(),
                 git_url: "git".to_string(),
-                port: 8080,
+                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
                 user_id,
                 ..Default::default()
             }))
@@ -69,10 +69,10 @@ async fn test_hierarchical_deployment_status_success() {
                 job_id: None,
                 status: "BUILDING".to_string(),
                 image_tag: Some("nginx".to_string()),
-                vcpus: 1,
-                memory_mib: 256,
+                vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+                memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
                 disk_mib: 1024,
-                port: 8080,
+                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
                 env_vars: serde_json::json!({}),
                 build_id: None,
                 ipv6_address: None,
@@ -86,7 +86,7 @@ async fn test_hierarchical_deployment_status_success() {
             }))
         });
 
-    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
     mock_scheduler
         .expect_list_apps()
         .times(0..)
@@ -121,7 +121,10 @@ async fn test_hierarchical_deployment_status_success() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -158,7 +161,7 @@ async fn test_hierarchical_security_cross_app_prevention() {
                 id: app_a_id,
                 name: app_a_name.to_string(),
                 git_url: "git".to_string(),
-                port: 8080,
+                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
                 user_id,
                 ..Default::default()
             }))
@@ -176,10 +179,10 @@ async fn test_hierarchical_security_cross_app_prevention() {
                 job_id: None,
                 status: "BUILDING".to_string(),
                 image_tag: Some("nginx".to_string()),
-                vcpus: 1,
-                memory_mib: 256,
+                vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+                memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
                 disk_mib: 1024,
-                port: 8080,
+                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
                 env_vars: serde_json::json!({}),
                 build_id: None,
                 ipv6_address: None,
@@ -195,7 +198,7 @@ async fn test_hierarchical_security_cross_app_prevention() {
     let Some(nats_client) = common::get_nats_client_or_skip().await else {
         return;
     };
-    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
     mock_scheduler
         .expect_list_apps()
         .times(0..)
@@ -225,7 +228,10 @@ async fn test_hierarchical_security_cross_app_prevention() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
