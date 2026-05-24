@@ -257,6 +257,33 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
+    async fn update_app_scaling_config(
+        &self,
+        id: Uuid,
+        desired_replicas: i32,
+        min_replicas: i32,
+        max_replicas: i32,
+        enabled: bool,
+        cpu_threshold: Option<f64>,
+        mem_threshold: Option<f64>,
+    ) -> DomainResult<()> {
+        sqlx::query(
+            "UPDATE apps SET desired_replicas = $1, min_replicas = $2, max_replicas = $3, \
+             autoscaling_enabled = $4, cpu_threshold = COALESCE($5, cpu_threshold), \
+             mem_threshold = COALESCE($6, mem_threshold), updated_at = NOW() WHERE id = $7",
+        )
+        .bind(desired_replicas)
+        .bind(min_replicas)
+        .bind(max_replicas)
+        .bind(enabled)
+        .bind(cpu_threshold)
+        .bind(mem_threshold)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn create_deployment(&self, data: NewDeployment) -> DomainResult<Deployment> {
         let uid = Uuid::parse_str(&data.user_id)?;
 

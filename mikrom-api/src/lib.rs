@@ -166,7 +166,7 @@ impl AppState {
                 return Ok(());
             };
 
-            let _ = self
+            if let Err(err) = self
                 .scheduler
                 .update_app_scaling_config(mikrom_proto::scheduler::UpdateAppScalingConfigRequest {
                     app_id: app.id.to_string(),
@@ -182,7 +182,14 @@ impl AppState {
                     last_router_traffic_at: chrono::Utc::now().timestamp(),
                     last_scaled_to_zero_at: 0,
                 })
-                .await;
+                .await
+            {
+                tracing::warn!(
+                    app_id = %app.id,
+                    error = %err,
+                    "Failed to sync scaling config with scheduler while notifying router"
+                );
+            }
         }
 
         Ok(())

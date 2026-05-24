@@ -277,6 +277,17 @@ pub trait AppRepository: Send + Sync {
         cpu_threshold: Option<f64>,
         mem_threshold: Option<f64>,
     ) -> DomainResult<()>;
+    #[allow(clippy::too_many_arguments)]
+    async fn update_app_scaling_config(
+        &self,
+        id: Uuid,
+        desired_replicas: i32,
+        min_replicas: i32,
+        max_replicas: i32,
+        enabled: bool,
+        cpu_threshold: Option<f64>,
+        mem_threshold: Option<f64>,
+    ) -> DomainResult<()>;
 
     async fn create_deployment(&self, data: NewDeployment) -> DomainResult<Deployment>;
     async fn update_deployment(&self, id: Uuid, params: UpdateDeploymentParams)
