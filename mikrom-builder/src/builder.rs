@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
+use bollard::Docker;
 use bollard::auth::DockerCredentials;
+use bollard::body_stream;
 use bollard::query_parameters::{
     BuildImageOptionsBuilder, PushImageOptionsBuilder, RemoveImageOptionsBuilder,
 };
-use bollard::{Docker, body_stream};
 use futures::stream::StreamExt;
 use git2::{FetchOptions, RemoteCallbacks, Repository};
 use glob::Pattern;
@@ -16,7 +17,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{info, instrument};
+use tokio_util::sync::CancellationToken;
+use tracing::{info, instrument, warn};
 use walkdir::WalkDir;
 
 pub struct AppBuilder {
@@ -25,13 +27,10 @@ pub struct AppBuilder {
     registry_pass: Option<String>,
 }
 
-#[allow(dead_code)]
+#[derive(Debug)]
 pub struct BuildResult {
     pub image_tag: String,
     pub exposed_port: u32,
-    pub git_commit_hash: String,
-    pub git_commit_message: String,
-    pub git_branch: String,
 }
 
 #[derive(Clone, Debug)]
@@ -41,10 +40,15 @@ pub struct GitMetadata {
     pub branch: String,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum BuildBackend {
+    Dockerfile,
+    Railpack,
+}
+
 impl AppBuilder {
     pub fn new(
         registry: String,
-        _buildpack_builder: String,
         registry_user: Option<String>,
         registry_pass: Option<String>,
     ) -> Self {
@@ -56,6 +60,7 @@ impl AppBuilder {
     }
 
     #[instrument(skip(self, metadata_tx))]
+    #[allow(clippy::too_many_arguments)]
     pub async fn build_image(
         &self,
         app_id: &str,
@@ -63,14 +68,107 @@ impl AppBuilder {
         git_auth_token: Option<String>,
         image_name: &str,
         tag: &str,
+        cancel: CancellationToken,
         metadata_tx: Option<tokio::sync::mpsc::Sender<GitMetadata>>,
     ) -> Result<BuildResult> {
-        let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
-        let repo_path = temp_dir.path();
+        Self::validate_build_inputs(git_url, image_name, tag)?;
+        let checkout_dir = TempDir::new().context("Failed to create checkout directory")?;
+        Self::check_cancelled(&cancel)?;
+        let repo = Self::clone_repository(git_url, git_auth_token, checkout_dir.path())?;
+        let metadata = Self::extract_git_metadata(&repo)?;
 
-        // 1. Git Clone & Metadata
-        info!(app_id = %app_id, git_url = %git_url, "Cloning repository");
-        let repo = if let Some(token) = git_auth_token {
+        if let Some(tx) = metadata_tx {
+            let _ = tx.send(metadata.clone()).await;
+        }
+
+        let workspace_dir = TempDir::new().context("Failed to create build workspace")?;
+        Self::check_cancelled(&cancel)?;
+        Self::copy_workspace(checkout_dir.path(), workspace_dir.path())?;
+        Self::apply_prebuild_fixes(workspace_dir.path())?;
+
+        let full_image_tag = self.format_image_tag(image_name, tag);
+        let backend = Self::detect_build_backend(workspace_dir.path());
+
+        match backend {
+            BuildBackend::Dockerfile => {
+                self.run_docker_build(workspace_dir.path(), &full_image_tag, &cancel)
+                    .await?
+            },
+            BuildBackend::Railpack => {
+                self.run_railpack_build(workspace_dir.path(), &full_image_tag, &cancel)
+                    .await?
+            },
+        }
+
+        let exposed_port = self
+            .detect_exposed_port(&full_image_tag)
+            .await
+            .unwrap_or(8080);
+
+        let push_result = self.push_to_registry(&full_image_tag).await;
+        self.cleanup_local_image(&full_image_tag).await;
+        push_result?;
+
+        Ok(BuildResult {
+            image_tag: full_image_tag,
+            exposed_port,
+        })
+    }
+
+    fn validate_build_inputs(git_url: &str, image_name: &str, tag: &str) -> Result<()> {
+        if image_name.trim().is_empty() {
+            anyhow::bail!("image_name cannot be empty");
+        }
+        if tag.trim().is_empty() {
+            anyhow::bail!("tag cannot be empty");
+        }
+        if image_name.contains('/') || image_name.contains("..") || image_name.contains('\\') {
+            anyhow::bail!("image_name contains invalid path separators");
+        }
+        if tag.contains('/') || tag.contains('\\') || tag.contains("..") {
+            anyhow::bail!("tag contains invalid path separators");
+        }
+        if !Self::git_url_allowed(git_url) {
+            anyhow::bail!(
+                "git_url scheme is not allowed; only http(s), ssh and git-style URLs are supported"
+            );
+        }
+        Ok(())
+    }
+
+    fn git_url_allowed(git_url: &str) -> bool {
+        let lower = git_url.trim().to_ascii_lowercase();
+        if lower.is_empty() {
+            return false;
+        }
+
+        if lower.starts_with("http://")
+            || lower.starts_with("https://")
+            || lower.starts_with("ssh://")
+            || lower.starts_with("git://")
+            || lower.starts_with("git@")
+        {
+            return true;
+        }
+
+        !lower.contains("://")
+    }
+
+    fn check_cancelled(cancel: &CancellationToken) -> Result<()> {
+        if cancel.is_cancelled() {
+            anyhow::bail!("Build cancelled");
+        }
+        Ok(())
+    }
+
+    fn clone_repository(
+        git_url: &str,
+        git_auth_token: Option<String>,
+        repo_path: &Path,
+    ) -> Result<Repository> {
+        info!(git_url = %git_url, "Cloning repository");
+
+        if let Some(token) = git_auth_token {
             let mut callbacks = RemoteCallbacks::new();
             callbacks.credentials(move |_url, _username_from_url, _allowed_types| {
                 git2::Cred::userpass_plaintext("x-access-token", &token)
@@ -83,85 +181,125 @@ impl AppBuilder {
             builder.fetch_options(fetch_options);
             builder
                 .clone(git_url, repo_path)
-                .context("Failed to clone private repository")?
+                .context("Failed to clone private repository")
         } else {
-            Repository::clone(git_url, repo_path).context("Failed to clone repository")?
-        };
-        let metadata = Self::extract_git_metadata(&repo)?;
-
-        if let Some(tx) = metadata_tx {
-            let _ = tx.send(metadata.clone()).await;
+            Repository::clone(git_url, repo_path).context("Failed to clone repository")
         }
+    }
 
-        // 2. Prepare build environment
-        let full_image_tag = self.format_image_tag(image_name, tag);
-        Self::apply_prebuild_fixes(repo_path)?;
+    fn copy_workspace(checkout_path: &Path, workspace_path: &Path) -> Result<()> {
+        for entry in WalkDir::new(checkout_path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+        {
+            let path = entry.path();
+            if path == checkout_path {
+                continue;
+            }
 
-        // 3. Build Strategy
-        let dockerfile_path = repo_path.join("Dockerfile");
-        if dockerfile_path.exists() {
-            self.run_docker_build(repo_path, &full_image_tag).await?;
-        } else {
-            self.run_railpack_build(repo_path, &full_image_tag).await?;
-        }
+            let rel = path
+                .strip_prefix(checkout_path)
+                .context("Failed to normalize workspace path")?;
+            if rel.starts_with(".git") {
+                continue;
+            }
 
-        // 4. Post-build: Port detection & Registry push
-        let exposed_port = self
-            .detect_exposed_port(&full_image_tag)
-            .await
-            .unwrap_or(8080);
-        let push_result = self.push_to_registry(&full_image_tag).await;
+            let destination = workspace_path.join(rel);
+            let metadata = fs::symlink_metadata(path)
+                .with_context(|| format!("Failed to read metadata for {}", path.display()))?;
 
-        // 5. Cleanup local image to free disk space
-        match Docker::connect_with_local_defaults() {
-            Ok(docker) => {
-                let _ = docker
-                    .remove_image(
-                        &full_image_tag,
-                        Some(RemoveImageOptionsBuilder::default().force(true).build()),
-                        None,
+            if metadata.file_type().is_symlink() {
+                let target = fs::read_link(path)
+                    .with_context(|| format!("Failed to resolve symlink {}", path.display()))?;
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent).with_context(|| {
+                        format!(
+                            "Failed to create parent directory for {}",
+                            destination.display()
+                        )
+                    })?;
+                }
+
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(&target, &destination).with_context(|| {
+                    format!(
+                        "Failed to create symlink {} -> {}",
+                        destination.display(),
+                        target.display()
                     )
-                    .await;
-                info!(image_tag = %full_image_tag, "Cleaned up local image after push");
-            },
-            Err(e) => {
-                tracing::warn!(
-                    image_tag = %full_image_tag,
-                    error = %e,
-                    "Failed to connect to Docker for image cleanup"
-                );
-            },
+                })?;
+
+                #[cfg(not(unix))]
+                {
+                    let content = fs::read(path).with_context(|| {
+                        format!("Failed to read symlink source {}", path.display())
+                    })?;
+                    fs::write(&destination, content).with_context(|| {
+                        format!("Failed to materialize symlink {}", destination.display())
+                    })?;
+                }
+            } else if metadata.is_dir() {
+                fs::create_dir_all(&destination).with_context(|| {
+                    format!("Failed to create directory {}", destination.display())
+                })?;
+            } else {
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent).with_context(|| {
+                        format!(
+                            "Failed to create parent directory for {}",
+                            destination.display()
+                        )
+                    })?;
+                }
+                fs::copy(path, &destination).with_context(|| {
+                    format!(
+                        "Failed to copy {} to {}",
+                        path.display(),
+                        destination.display()
+                    )
+                })?;
+            }
         }
 
-        push_result?;
+        Ok(())
+    }
 
-        Ok(BuildResult {
-            image_tag: full_image_tag,
-            exposed_port,
-            git_commit_hash: metadata.hash,
-            git_commit_message: metadata.message,
-            git_branch: metadata.branch,
-        })
+    fn detect_build_backend(workspace_path: &Path) -> BuildBackend {
+        if workspace_path.join("Dockerfile").exists() {
+            BuildBackend::Dockerfile
+        } else {
+            BuildBackend::Railpack
+        }
     }
 
     fn format_image_tag(&self, image_name: &str, tag: &str) -> String {
-        let registry_base = self
-            .registry
-            .trim_start_matches("https://")
-            .trim_start_matches("http://");
-        format!("{}/{}:{}", registry_base, image_name, tag)
+        format!("{}/{}:{}", self.normalized_registry(), image_name, tag)
     }
 
-    async fn run_docker_build(&self, repo_path: &Path, image_tag: &str) -> Result<()> {
+    fn normalized_registry(&self) -> &str {
+        self.registry
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .trim_end_matches('/')
+    }
+
+    async fn run_docker_build(
+        &self,
+        workspace_path: &Path,
+        image_tag: &str,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
         info!(image_tag = %image_tag, "Dockerfile detected, using docker build");
         let docker = Docker::connect_with_local_defaults()
             .context("Failed to connect to the local Docker daemon")?;
-        let context = Self::build_context(repo_path).await?;
+        let context = Self::build_context(workspace_path).await?;
         let options = BuildImageOptionsBuilder::default()
             .dockerfile("Dockerfile")
             .t(image_tag)
             .rm(true)
             .build();
+
         let (tx, rx) = mpsc::channel::<bytes::Bytes>(8);
         let reader_task = tokio::task::spawn_blocking({
             let context_path = context.path().to_path_buf();
@@ -186,46 +324,82 @@ impl AppBuilder {
                 Ok(())
             }
         });
+
         let mut stream =
             docker.build_image(options, None, Some(body_stream(ReceiverStream::new(rx))));
-        while let Some(message) = stream.next().await {
-            let message = message?;
-            if let Some(line) = message.stream.as_deref() {
-                info!("[DOCKER-BUILD] {}", line.trim_end());
-            }
-            if let Some(status) = message.status.as_deref() {
-                info!("[DOCKER-BUILD] {}", status.trim_end());
-            }
-            if let Some(error) = message.error_detail.and_then(|detail| detail.message) {
-                anyhow::bail!("Docker build failed: {}", error);
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    anyhow::bail!("Build cancelled");
+                },
+                message = stream.next() => {
+                    let Some(message) = message else {
+                        break;
+                    };
+                    let message = message?;
+                    if let Some(line) = message.stream.as_deref() {
+                        info!("[DOCKER-BUILD] {}", line.trim_end());
+                    }
+                    if let Some(status) = message.status.as_deref() {
+                        info!("[DOCKER-BUILD] {}", status.trim_end());
+                    }
+                    if let Some(error) = message.error_detail.and_then(|detail| detail.message) {
+                        anyhow::bail!("Docker build failed: {}", error);
+                    }
+                }
             }
         }
+        drop(stream);
+        if cancel.is_cancelled() {
+            anyhow::bail!("Build cancelled");
+        }
+
         reader_task
             .await
             .context("Docker build context reader failed")??;
         Ok(())
     }
 
-    async fn run_railpack_build(&self, repo_path: &Path, image_tag: &str) -> Result<()> {
+    async fn run_railpack_build(
+        &self,
+        workspace_path: &Path,
+        image_tag: &str,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
         info!(image_tag = %image_tag, "No Dockerfile found, using Railpack");
         let buildkit_host = std::env::var("BUILDKIT_HOST")
             .unwrap_or_else(|_| "docker-container://mikromrust-buildkit-1".to_string());
 
         let mut child = Command::new("railpack")
             .args(["build", ".", "--name", image_tag])
-            .current_dir(repo_path)
+            .current_dir(workspace_path)
             .env("BUILDKIT_HOST", buildkit_host)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .context("Failed to spawn railpack build")?;
 
-        Self::log_output(&mut child).await?;
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                let _ = child.kill().await;
+                anyhow::bail!("Build cancelled");
+            },
+            result = Self::log_output(&mut child) => {
+                result?;
+            },
+        }
 
-        let status = child.wait().await?;
+        let status = tokio::select! {
+            _ = cancel.cancelled() => {
+                let _ = child.kill().await;
+                anyhow::bail!("Build cancelled");
+            },
+            status = child.wait() => status?,
+        };
         if !status.success() {
             anyhow::bail!("Railpack build failed with status {}", status);
         }
+
         Ok(())
     }
 
@@ -263,6 +437,7 @@ impl AppBuilder {
             Some(PushImageOptionsBuilder::default().build()),
             auth_config,
         );
+
         while let Some(message) = stream.next().await {
             let message = message?;
             if let Some(status) = message.status.as_deref() {
@@ -272,10 +447,33 @@ impl AppBuilder {
                 anyhow::bail!("Docker push failed: {}", error);
             }
         }
+
         Ok(())
     }
 
-    /// Safely logs stdout and stderr concurrently without data loss.
+    async fn cleanup_local_image(&self, image_tag: &str) {
+        match Docker::connect_with_local_defaults() {
+            Ok(docker) => {
+                let _ = docker
+                    .remove_image(
+                        image_tag,
+                        Some(RemoveImageOptionsBuilder::default().force(true).build()),
+                        None,
+                    )
+                    .await;
+                info!(image_tag = %image_tag, "Cleaned up local image after push");
+            },
+            Err(e) => {
+                warn!(
+                    image_tag = %image_tag,
+                    error = %e,
+                    "Failed to connect to Docker for image cleanup"
+                );
+            },
+        }
+    }
+
+    /// Logs stdout and stderr from the build backend concurrently.
     async fn log_output(child: &mut tokio::process::Child) -> Result<()> {
         let stdout = child.stdout.take().context("Failed to capture stdout")?;
         let stderr = child.stderr.take().context("Failed to capture stderr")?;
@@ -298,10 +496,9 @@ impl AppBuilder {
         Ok(())
     }
 
-    /// Safely logs stdout and stderr concurrently without data loss.
     fn extract_git_metadata(repo: &Repository) -> Result<GitMetadata> {
         let head = repo.head().context("Failed to get HEAD")?;
-        let branch = head.shorthand().unwrap_or("unknown").to_string();
+        let branch = head.shorthand().unwrap_or("detached").to_string();
         let commit = head.peel_to_commit().context("Failed to peel to commit")?;
         let hash = commit.id().to_string();
         let message = commit.message().unwrap_or("").trim().to_string();
@@ -399,6 +596,10 @@ impl AppBuilder {
             }
 
             let pattern = pattern.trim_start_matches('/').trim_end_matches('/');
+            if pattern == "*" {
+                // An unconditional global ignore must still allow the build metadata and Dockerfile.
+                continue;
+            }
             patterns.push((
                 negated,
                 Pattern::new(pattern)
@@ -435,7 +636,6 @@ impl AppBuilder {
     }
 
     fn apply_prebuild_fixes(repo_path: &Path) -> Result<()> {
-        // 1. PNPM Railpack Fix
         let package_json_path = repo_path.join("package.json");
         let pnpm_lock_path = repo_path.join("pnpm-lock.yaml");
 
@@ -451,14 +651,12 @@ impl AppBuilder {
             }
         }
 
-        // 2. Dockerfile Port Enforcement (Coordinated with review feedback)
         let dockerfile_path = repo_path.join("Dockerfile");
         if dockerfile_path.exists() {
             let content = std::fs::read_to_string(&dockerfile_path)?;
             let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
             let mut expose_found = false;
 
-            // First pass: detect if EXPOSE is present anywhere
             for line in &lines {
                 if line.trim().to_uppercase().starts_with("EXPOSE") {
                     expose_found = true;
@@ -466,14 +664,11 @@ impl AppBuilder {
                 }
             }
 
-            // If EXPOSE is found, we respect the user's choice and do NOTHING.
-            // If NOT found, we inject both ENV and EXPOSE to the final stage (or all stages to be safe).
             if !expose_found {
                 info!("No EXPOSE found, injecting PORT 8080 defaults across all stages");
                 let mut final_lines = Vec::new();
                 for line in lines {
                     final_lines.push(line.clone());
-                    // Inject after every FROM to ensure it persists in multi-stage builds
                     if line.trim().to_uppercase().starts_with("FROM") {
                         final_lines.push("ENV PORT=8080".to_string());
                         final_lines.push("EXPOSE 8080".to_string());
@@ -494,6 +689,77 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+    use tokio_util::sync::CancellationToken;
+
+    #[test]
+    fn test_normalized_registry_trims_scheme_and_slash() {
+        let builder = AppBuilder::new("https://registry.example.com/".to_string(), None, None);
+
+        assert_eq!(
+            builder.format_image_tag("app", "v1"),
+            "registry.example.com/app:v1"
+        );
+    }
+
+    #[test]
+    fn test_validate_build_inputs_rejects_invalid_git_url() {
+        let err = AppBuilder::validate_build_inputs("file:///etc/passwd", "app", "latest")
+            .expect_err("file:// URLs must be rejected");
+        assert!(err.to_string().contains("not allowed"));
+    }
+
+    #[test]
+    fn test_validate_build_inputs_rejects_invalid_image_name() {
+        let err =
+            AppBuilder::validate_build_inputs("https://example.com/repo.git", "foo/bar", "latest")
+                .expect_err("image names with separators must be rejected");
+        assert!(err.to_string().contains("image_name"));
+    }
+
+    #[tokio::test]
+    async fn test_build_image_can_be_cancelled_before_work_begins() {
+        let builder = AppBuilder::new("localhost:5000".to_string(), None, None);
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let err = builder
+            .build_image(
+                "app-1",
+                "https://example.com/repo.git",
+                None,
+                "app",
+                "latest",
+                cancel,
+                None,
+            )
+            .await
+            .expect_err("cancelled build should fail");
+
+        assert!(err.to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn test_workspace_copy_keeps_checkout_pristine() {
+        let checkout = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+
+        fs::write(checkout.path().join("package.json"), r#"{"name":"test"}"#).unwrap();
+        fs::write(checkout.path().join("pnpm-lock.yaml"), "").unwrap();
+        fs::write(
+            checkout.path().join("Dockerfile"),
+            "FROM node:20\nCMD [\"node\"]",
+        )
+        .unwrap();
+
+        AppBuilder::copy_workspace(checkout.path(), workspace.path()).unwrap();
+        AppBuilder::apply_prebuild_fixes(workspace.path()).unwrap();
+
+        let checkout_pkg = fs::read_to_string(checkout.path().join("package.json")).unwrap();
+        let workspace_pkg = fs::read_to_string(workspace.path().join("package.json")).unwrap();
+
+        assert!(!checkout_pkg.contains("packageManager"));
+        assert!(workspace_pkg.contains("packageManager"));
+    }
 
     #[test]
     fn test_apply_prebuild_fixes_injects_pnpm() {
@@ -539,7 +805,6 @@ mod tests {
 
         let new_content = fs::read_to_string(repo_path.join("Dockerfile")).unwrap();
         assert!(new_content.contains("EXPOSE 80"));
-        // Should NOT contain 8080 because EXPOSE was found
         assert!(!new_content.contains("8080"));
     }
 
@@ -570,7 +835,6 @@ mod tests {
         AppBuilder::apply_prebuild_fixes(repo_path).unwrap();
 
         let new_content = fs::read_to_string(repo_path.join("Dockerfile")).unwrap();
-        // Should inject in both stages
         let env_count = new_content.matches("ENV PORT=8080").count();
         let expose_count = new_content.matches("EXPOSE 8080").count();
         assert_eq!(env_count, 2);

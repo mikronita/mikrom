@@ -1,61 +1,129 @@
+use crate::builder::{AppBuilder, GitMetadata};
+use crate::state::{
+    BuildStore, failure_response, metrics_response_from_store, status_response_from_record,
+    success_response_from_result,
+};
 use dashmap::DashMap;
 use futures::StreamExt;
+use mikrom_proto::builder::{
+    BuildProgress, BuildRequest, BuildResponse, BuildStatus, GetBuildMetricsRequest,
+    GetBuildStatusRequest, GetBuildStatusResponse,
+};
 use prost::Message;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::time::Duration;
+use tokio::sync::{Semaphore, mpsc};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use mikrom_proto::builder::{
-    BuildRequest, BuildResponse, BuildStatus, GetBuildStatusRequest, GetBuildStatusResponse,
-};
-
-use crate::builder::{AppBuilder, GitMetadata};
-
+#[derive(Clone)]
 pub struct BuilderServer {
     builder: Arc<AppBuilder>,
-    builds: Arc<DashMap<String, BuildInfo>>,
+    store: Arc<BuildStore>,
+    build_limiter: Arc<Semaphore>,
+    active_builds: Arc<DashMap<String, CancellationToken>>,
+    build_state_ttl: Duration,
 }
 
-#[derive(Clone, Debug)]
-struct BuildInfo {
-    id: String,
-    status: BuildStatus,
-    image_tag: Option<String>,
-    message: Option<String>,
-    exposed_port: u32,
-    git_commit_hash: Option<String>,
-    git_commit_message: Option<String>,
-    git_branch: Option<String>,
+struct BuildLease {
+    build_id: String,
+    active_builds: Arc<DashMap<String, CancellationToken>>,
+}
+
+impl Drop for BuildLease {
+    fn drop(&mut self) {
+        self.active_builds.remove(&self.build_id);
+    }
 }
 
 impl BuilderServer {
-    pub fn new(builder: AppBuilder) -> Self {
-        Self {
+    pub async fn new(
+        builder: AppBuilder,
+        max_concurrent_builds: usize,
+        build_state_ttl: Duration,
+        build_state_path: PathBuf,
+    ) -> anyhow::Result<Self> {
+        let store = BuildStore::load(build_state_path).await?;
+        Ok(Self {
             builder: Arc::new(builder),
-            builds: Arc::new(DashMap::new()),
-        }
+            store: Arc::new(store),
+            build_limiter: Arc::new(Semaphore::new(max_concurrent_builds.max(1))),
+            active_builds: Arc::new(DashMap::new()),
+            build_state_ttl,
+        })
     }
 
-    pub async fn listen(&self, nats_client: async_nats::Client) -> anyhow::Result<()> {
+    pub async fn listen(
+        &self,
+        nats_client: async_nats::Client,
+        shutdown: CancellationToken,
+    ) -> anyhow::Result<()> {
         info!("Starting BuilderServer listeners...");
 
-        let build_task = self.start_build_worker(nats_client.clone());
-        let status_task = self.start_status_worker(nats_client);
+        let build_server = self.clone();
+        let status_server = self.clone();
+        let cleanup_server = self.clone();
+        let build_nats = nats_client.clone();
+        let status_nats = nats_client.clone();
+        let build_shutdown = shutdown.clone();
+        let status_shutdown = shutdown.clone();
+        let cleanup_shutdown = shutdown.clone();
 
-        let (r1, r2) = tokio::join!(build_task, status_task);
+        let build_task = tokio::spawn(async move {
+            build_server
+                .start_build_worker(build_nats, build_shutdown)
+                .await
+        });
+        let status_task = tokio::spawn(async move {
+            status_server
+                .start_status_worker(status_nats, status_shutdown)
+                .await
+        });
+        let metrics_server = self.clone();
+        let metrics_nats_client = nats_client.clone();
+        let metrics_shutdown = shutdown.clone();
+        let metrics_task = tokio::spawn(async move {
+            metrics_server
+                .start_metrics_worker(metrics_nats_client, metrics_shutdown)
+                .await
+        });
+        let cleanup_task =
+            tokio::spawn(
+                async move { cleanup_server.start_cleanup_worker(cleanup_shutdown).await },
+            );
 
-        if let Err(e) = r1 {
-            error!("Build worker failed: {}", e);
-        }
-        if let Err(e) = r2 {
-            error!("Status worker failed: {}", e);
+        shutdown.cancelled().await;
+        info!("Shutdown requested, cancelling active builds");
+        self.cancel_active_builds();
+
+        let join_timeout = tokio::time::timeout(Duration::from_secs(10), async {
+            let _ = build_task.await;
+            let _ = status_task.await;
+            let _ = metrics_task.await;
+            let _ = cleanup_task.await;
+        })
+        .await;
+
+        if join_timeout.is_err() {
+            warn!("Timed out waiting for builder tasks to stop cleanly");
         }
 
         Ok(())
     }
 
-    async fn start_build_worker(&self, nats: async_nats::Client) -> anyhow::Result<()> {
+    fn cancel_active_builds(&self) {
+        for entry in self.active_builds.iter() {
+            entry.value().cancel();
+        }
+    }
+
+    async fn start_build_worker(
+        &self,
+        nats: async_nats::Client,
+        shutdown: CancellationToken,
+    ) -> anyhow::Result<()> {
         let mut subscription = nats
             .queue_subscribe("mikrom.builder.build", "builders".to_string())
             .await
@@ -63,24 +131,55 @@ impl BuilderServer {
 
         info!("Listening for build requests on mikrom.builder.build (Queue Group: builders)");
 
-        while let Some(message) = subscription.next().await {
-            let nats = nats.clone();
-            let builder = self.builder.clone();
-            let builds = self.builds.clone();
+        loop {
+            tokio::select! {
+                _ = shutdown.cancelled() => break,
+                message = subscription.next() => {
+                    let Some(message) = message else {
+                        break;
+                    };
 
-            tokio::spawn(async move {
-                if let Err(e) = Self::handle_build_request(nats, builder, builds, message).await {
-                    error!("Error handling build request: {}", e);
+                    let permit = tokio::select! {
+                        _ = shutdown.cancelled() => break,
+                        permit = self.build_limiter.clone().acquire_owned() => {
+                            permit.map_err(|e| anyhow::anyhow!("Build limiter closed: {}", e))?
+                        }
+                    };
+
+                    let nats = nats.clone();
+                    let builder = self.builder.clone();
+                    let store = self.store.clone();
+                    let active_builds = self.active_builds.clone();
+                    let build_cancel = shutdown.child_token();
+
+                    tokio::spawn(async move {
+                        let _permit = permit;
+                        if let Err(e) = Self::handle_build_request(
+                            nats,
+                            builder,
+                            store,
+                            active_builds,
+                            build_cancel,
+                            message,
+                        )
+                        .await
+                        {
+                            error!("Error handling build request: {}", e);
+                        }
+                    });
                 }
-            });
+            }
         }
+
         Ok(())
     }
 
     async fn handle_build_request(
         nats: async_nats::Client,
         builder: Arc<AppBuilder>,
-        builds: Arc<DashMap<String, BuildInfo>>,
+        store: Arc<BuildStore>,
+        active_builds: Arc<DashMap<String, CancellationToken>>,
+        build_cancel: CancellationToken,
         message: async_nats::Message,
     ) -> anyhow::Result<()> {
         let req = BuildRequest::decode(&message.payload[..])
@@ -89,7 +188,14 @@ impl BuilderServer {
         let build_id = Uuid::new_v4().to_string();
         info!(build_id = %build_id, app_id = %req.app_id, "Received build request");
 
-        // Acknowledge build start if reply subject exists
+        let lease = BuildLease {
+            build_id: build_id.clone(),
+            active_builds,
+        };
+        lease
+            .active_builds
+            .insert(build_id.clone(), build_cancel.clone());
+
         if let Some(reply) = message.reply {
             let resp = BuildResponse {
                 success: true,
@@ -99,32 +205,18 @@ impl BuilderServer {
             let _ = nats.publish(reply, resp.encode_to_vec().into()).await;
         }
 
-        // Initialize build state
-        builds.insert(
-            build_id.clone(),
-            BuildInfo {
-                id: build_id.clone(),
-                status: BuildStatus::Building,
-                image_tag: None,
-                message: None,
-                exposed_port: 0,
-                git_commit_hash: None,
-                git_commit_message: None,
-                git_branch: None,
-            },
-        );
+        if let Err(e) = store.insert_new(build_id.clone()).await {
+            error!(build_id = %build_id, error = %e, "Failed to persist initial build state");
+        }
 
         let (tx, rx) = mpsc::channel::<GitMetadata>(1);
-
-        // Spawn metadata monitor
         tokio::spawn(Self::monitor_git_metadata(
             build_id.clone(),
-            builds.clone(),
+            store.clone(),
             nats.clone(),
             rx,
         ));
 
-        // Execute build
         let result = builder
             .build_image(
                 &req.app_id,
@@ -132,100 +224,158 @@ impl BuilderServer {
                 req.git_auth_token,
                 &req.image_name,
                 &req.tag,
+                build_cancel.clone(),
                 Some(tx),
             )
             .await;
 
-        // Finalize state and notify
-        Self::finalize_build(build_id, builds, nats, result).await;
+        match result {
+            Ok(result) => {
+                if let Err(e) = store.finalize_success(&build_id, &result).await {
+                    error!(build_id = %build_id, error = %e, "Failed to persist successful build state");
+                }
+                if let Some(record) = store.get(&build_id) {
+                    let status_response =
+                        success_response_from_result(build_id.clone(), &record, &result);
+                    let _ = nats
+                        .publish(
+                            format!("mikrom.builder.{}.status", build_id),
+                            status_response.encode_to_vec().into(),
+                        )
+                        .await;
+                }
+            },
+            Err(e) => {
+                let err_msg = e.to_string();
+                let cancelled = err_msg.to_ascii_lowercase().contains("cancel");
+                let persist_result = if cancelled {
+                    store.finalize_cancelled(&build_id, err_msg.clone()).await
+                } else {
+                    store.finalize_failure(&build_id, err_msg.clone()).await
+                };
+                if let Err(persist_error) = persist_result {
+                    error!(build_id = %build_id, error = %persist_error, "Failed to persist failed build state");
+                }
+                let status_response = failure_response(build_id.clone(), err_msg);
+                let _ = nats
+                    .publish(
+                        format!("mikrom.builder.{}.status", build_id),
+                        status_response.encode_to_vec().into(),
+                    )
+                    .await;
+                return Ok(());
+            },
+        }
+
+        drop(lease);
+        Ok(())
+    }
+
+    async fn start_metrics_worker(
+        &self,
+        nats: async_nats::Client,
+        shutdown: CancellationToken,
+    ) -> anyhow::Result<()> {
+        let mut subscription = nats
+            .queue_subscribe("mikrom.builder.get_metrics", "builders".to_string())
+            .await
+            .map_err(|e| anyhow::anyhow!("Metrics subscription failed: {}", e))?;
+
+        info!("Listening for build metrics requests on mikrom.builder.get_metrics");
+
+        loop {
+            tokio::select! {
+                _ = shutdown.cancelled() => break,
+                message = subscription.next() => {
+                    let Some(message) = message else {
+                        break;
+                    };
+                    let nats = nats.clone();
+                    let store = self.store.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = Self::handle_metrics_request(nats, store, message).await {
+                            error!("Error handling metrics request: {}", e);
+                        }
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_metrics_request(
+        nats: async_nats::Client,
+        store: Arc<BuildStore>,
+        message: async_nats::Message,
+    ) -> anyhow::Result<()> {
+        let reply = message
+            .reply
+            .ok_or_else(|| anyhow::anyhow!("Metrics request missing reply subject"))?;
+
+        let _req = GetBuildMetricsRequest::decode(&message.payload[..])
+            .map_err(|e| anyhow::anyhow!("Failed to decode GetBuildMetricsRequest: {}", e))?;
+        let metrics = store.metrics_snapshot().await;
+        let records = store.list_records().await;
+        let response = metrics_response_from_store(&metrics, &records);
+        let payload = response.encode_to_vec();
+
+        nats.publish(reply, payload.into())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to publish metrics response: {}", e))?;
 
         Ok(())
     }
 
     async fn monitor_git_metadata(
         build_id: String,
-        builds: Arc<DashMap<String, BuildInfo>>,
+        store: Arc<BuildStore>,
         nats: async_nats::Client,
         mut rx: mpsc::Receiver<GitMetadata>,
     ) {
-        #[allow(clippy::collapsible_if)]
         if let Some(meta) = rx.recv().await {
-            if let Some(mut info) = builds.get_mut(&build_id) {
-                info.git_commit_hash = Some(meta.hash.clone());
-                info.git_commit_message = Some(meta.message.clone());
-                info.git_branch = Some(meta.branch.clone());
+            if let Err(e) = store
+                .set_git_metadata(
+                    &build_id,
+                    meta.hash.clone(),
+                    meta.message.clone(),
+                    meta.branch.clone(),
+                )
+                .await
+            {
+                error!(build_id = %build_id, error = %e, "Failed to persist git metadata");
+            }
 
-                let progress = GetBuildStatusResponse {
-                    build_id: build_id.clone(),
-                    status: BuildStatus::Building as i32,
-                    git_commit_hash: meta.hash,
-                    git_commit_message: meta.message,
-                    git_branch: meta.branch,
-                    ..Default::default()
-                };
+            let progress = BuildProgress {
+                build_id: build_id.clone(),
+                message: format!("Cloned {} on {}", meta.hash, meta.branch),
+                percent: 10.0,
+            };
 
+            let _ = nats
+                .publish(
+                    format!("mikrom.builder.{}.progress", build_id),
+                    progress.encode_to_vec().into(),
+                )
+                .await;
+
+            if let Some(record) = store.get(&build_id) {
+                let status = status_response_from_record(&record);
                 let _ = nats
                     .publish(
                         format!("mikrom.builder.{}.status", build_id),
-                        progress.encode_to_vec().into(),
+                        status.encode_to_vec().into(),
                     )
                     .await;
             }
         }
     }
 
-    async fn finalize_build(
-        build_id: String,
-        builds: Arc<DashMap<String, BuildInfo>>,
+    async fn start_status_worker(
+        &self,
         nats: async_nats::Client,
-        result: anyhow::Result<crate::builder::BuildResult>,
-    ) {
-        let status_response = if let Some(mut info) = builds.get_mut(&build_id) {
-            match result {
-                Ok(res) => {
-                    info!(build_id = %build_id, "Build successful");
-                    info.status = BuildStatus::Success;
-                    info.image_tag = Some(res.image_tag.clone());
-                    info.exposed_port = res.exposed_port;
-
-                    GetBuildStatusResponse {
-                        build_id: build_id.clone(),
-                        status: BuildStatus::Success as i32,
-                        image_tag: res.image_tag,
-                        exposed_port: res.exposed_port,
-                        git_commit_hash: info.git_commit_hash.clone().unwrap_or_default(),
-                        git_commit_message: info.git_commit_message.clone().unwrap_or_default(),
-                        git_branch: info.git_branch.clone().unwrap_or_default(),
-                        message: "Build successful".to_string(),
-                    }
-                },
-                Err(e) => {
-                    error!(build_id = %build_id, error = %e, "Build failed");
-                    info.status = BuildStatus::Failed;
-                    info.message = Some(e.to_string());
-
-                    GetBuildStatusResponse {
-                        build_id: build_id.clone(),
-                        status: BuildStatus::Failed as i32,
-                        message: e.to_string(),
-                        ..Default::default()
-                    }
-                },
-            }
-        } else {
-            warn!(build_id = %build_id, "Build record not found during finalization");
-            return;
-        };
-
-        let _ = nats
-            .publish(
-                format!("mikrom.builder.{}.status", build_id),
-                status_response.encode_to_vec().into(),
-            )
-            .await;
-    }
-
-    async fn start_status_worker(&self, nats: async_nats::Client) -> anyhow::Result<()> {
+        shutdown: CancellationToken,
+    ) -> anyhow::Result<()> {
         let mut subscription = nats
             .queue_subscribe("mikrom.builder.get_status", "builders".to_string())
             .await
@@ -233,22 +383,30 @@ impl BuilderServer {
 
         info!("Listening for build status requests on mikrom.builder.get_status");
 
-        while let Some(message) = subscription.next().await {
-            let nats = nats.clone();
-            let builds = self.builds.clone();
-
-            tokio::spawn(async move {
-                if let Err(e) = Self::handle_status_request(nats, builds, message).await {
-                    error!("Error handling status request: {}", e);
+        loop {
+            tokio::select! {
+                _ = shutdown.cancelled() => break,
+                message = subscription.next() => {
+                    let Some(message) = message else {
+                        break;
+                    };
+                    let nats = nats.clone();
+                    let store = self.store.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = Self::handle_status_request(nats, store, message).await {
+                            error!("Error handling status request: {}", e);
+                        }
+                    });
                 }
-            });
+            }
         }
+
         Ok(())
     }
 
     async fn handle_status_request(
         nats: async_nats::Client,
-        builds: Arc<DashMap<String, BuildInfo>>,
+        store: Arc<BuildStore>,
         message: async_nats::Message,
     ) -> anyhow::Result<()> {
         let reply = message
@@ -258,17 +416,8 @@ impl BuilderServer {
         let req = GetBuildStatusRequest::decode(&message.payload[..])
             .map_err(|e| anyhow::anyhow!("Failed to decode GetBuildStatusRequest: {}", e))?;
 
-        let resp = match builds.get(&req.build_id) {
-            Some(info) => GetBuildStatusResponse {
-                build_id: info.id.clone(),
-                status: info.status as i32,
-                image_tag: info.image_tag.clone().unwrap_or_default(),
-                message: info.message.clone().unwrap_or_default(),
-                exposed_port: info.exposed_port,
-                git_commit_hash: info.git_commit_hash.clone().unwrap_or_default(),
-                git_commit_message: info.git_commit_message.clone().unwrap_or_default(),
-                git_branch: info.git_branch.clone().unwrap_or_default(),
-            },
+        let resp = match store.get(&req.build_id) {
+            Some(record) => status_response_from_record(&record),
             None => GetBuildStatusResponse {
                 build_id: req.build_id,
                 status: BuildStatus::Failed as i32,
@@ -280,6 +429,27 @@ impl BuilderServer {
         nats.publish(reply, resp.encode_to_vec().into())
             .await
             .map_err(|e| anyhow::anyhow!("Failed to publish status response: {}", e))?;
+
+        Ok(())
+    }
+
+    async fn start_cleanup_worker(&self, shutdown: CancellationToken) -> anyhow::Result<()> {
+        let ttl = self.build_state_ttl;
+        let store = self.store.clone();
+        let period = ttl.min(Duration::from_secs(60)).max(Duration::from_secs(1));
+        let mut interval = tokio::time::interval(period);
+
+        loop {
+            tokio::select! {
+                _ = shutdown.cancelled() => break,
+                _ = interval.tick() => {
+                    let removed = store.remove_expired(ttl).await?;
+                    if removed > 0 {
+                        info!(removed, "Removed expired build state entries");
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
