@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use tracing::info;
 
 pub fn run(config: &RouterConfig) -> Result<()> {
-    runtime::init_tracing_once(config.router_id.as_str());
+    runtime::init_bootstrap_tracing_once();
     info!("Starting Mikrom Router (Pingora)...");
     let health = Arc::new(RouterHealth::new());
     health.mark_bootstrapped();
