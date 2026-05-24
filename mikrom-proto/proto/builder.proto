@@ -7,6 +7,7 @@ option go_package = "github.com/antpard/mikrom/mikrom-proto/proto/builder/v1";
 service BuilderService {
   rpc BuildApp(BuildRequest) returns (BuildResponse);
   rpc GetBuildStatus(GetBuildStatusRequest) returns (GetBuildStatusResponse);
+  rpc GetBuildMetrics(GetBuildMetricsRequest) returns (GetBuildMetricsResponse);
 }
 
 message BuildRequest {
@@ -38,10 +39,62 @@ message GetBuildStatusResponse {
   string git_branch = 8;
 }
 
+message GetBuildMetricsRequest {}
+
+message GetBuildMetricsResponse {
+  BuildMetrics metrics = 1;
+  repeated BuildRecord records = 2;
+}
+
 message BuildProgress {
   string build_id = 1;
   string message = 2;
   float percent = 3;
+}
+
+message BuildMetrics {
+  uint64 total_started = 1;
+  uint64 total_succeeded = 2;
+  uint64 total_failed = 3;
+  uint64 total_cancelled = 4;
+  uint64 total_expired_removed = 5;
+  uint64 active_builds = 6;
+  uint64 events_recorded = 7;
+  double average_duration_ms = 8;
+  uint64 max_duration_ms = 9;
+  int64 last_event_at_unix = 10;
+}
+
+message BuildEvent {
+  int64 at_unix = 1;
+  BuildEventKind kind = 2;
+  string message = 3;
+  optional float percent = 4;
+}
+
+message BuildRecord {
+  string id = 1;
+  BuildStatus status = 2;
+  string image_tag = 3;
+  string message = 4;
+  uint32 exposed_port = 5;
+  string git_commit_hash = 6;
+  string git_commit_message = 7;
+  string git_branch = 8;
+  int64 created_at_unix = 9;
+  optional int64 completed_at_unix = 10;
+  optional uint64 completed_duration_ms = 11;
+  repeated BuildEvent events = 12;
+}
+
+enum BuildEventKind {
+  BUILD_EVENT_KIND_UNSPECIFIED = 0;
+  BUILD_EVENT_KIND_QUEUED = 1;
+  BUILD_EVENT_KIND_GIT_METADATA_CAPTURED = 2;
+  BUILD_EVENT_KIND_BUILD_SUCCEEDED = 3;
+  BUILD_EVENT_KIND_BUILD_FAILED = 4;
+  BUILD_EVENT_KIND_BUILD_CANCELLED = 5;
+  BUILD_EVENT_KIND_EXPIRED_REMOVED = 6;
 }
 
 enum BuildStatus {

@@ -45,6 +45,15 @@ pub struct GetBuildStatusResponse {
     #[prost(string, tag = "8")]
     pub git_branch: ::prost::alloc::string::String,
 }
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct GetBuildMetricsRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetBuildMetricsResponse {
+    #[prost(message, optional, tag = "1")]
+    pub metrics: ::core::option::Option<BuildMetrics>,
+    #[prost(message, repeated, tag = "2")]
+    pub records: ::prost::alloc::vec::Vec<BuildRecord>,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BuildProgress {
     #[prost(string, tag = "1")]
@@ -53,6 +62,108 @@ pub struct BuildProgress {
     pub message: ::prost::alloc::string::String,
     #[prost(float, tag = "3")]
     pub percent: f32,
+}
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct BuildMetrics {
+    #[prost(uint64, tag = "1")]
+    pub total_started: u64,
+    #[prost(uint64, tag = "2")]
+    pub total_succeeded: u64,
+    #[prost(uint64, tag = "3")]
+    pub total_failed: u64,
+    #[prost(uint64, tag = "4")]
+    pub total_cancelled: u64,
+    #[prost(uint64, tag = "5")]
+    pub total_expired_removed: u64,
+    #[prost(uint64, tag = "6")]
+    pub active_builds: u64,
+    #[prost(uint64, tag = "7")]
+    pub events_recorded: u64,
+    #[prost(double, tag = "8")]
+    pub average_duration_ms: f64,
+    #[prost(uint64, tag = "9")]
+    pub max_duration_ms: u64,
+    #[prost(int64, tag = "10")]
+    pub last_event_at_unix: i64,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BuildEvent {
+    #[prost(int64, tag = "1")]
+    pub at_unix: i64,
+    #[prost(enumeration = "BuildEventKind", tag = "2")]
+    pub kind: i32,
+    #[prost(string, tag = "3")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(float, optional, tag = "4")]
+    pub percent: ::core::option::Option<f32>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BuildRecord {
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(enumeration = "BuildStatus", tag = "2")]
+    pub status: i32,
+    #[prost(string, tag = "3")]
+    pub image_tag: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "5")]
+    pub exposed_port: u32,
+    #[prost(string, tag = "6")]
+    pub git_commit_hash: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub git_commit_message: ::prost::alloc::string::String,
+    #[prost(string, tag = "8")]
+    pub git_branch: ::prost::alloc::string::String,
+    #[prost(int64, tag = "9")]
+    pub created_at_unix: i64,
+    #[prost(int64, optional, tag = "10")]
+    pub completed_at_unix: ::core::option::Option<i64>,
+    #[prost(uint64, optional, tag = "11")]
+    pub completed_duration_ms: ::core::option::Option<u64>,
+    #[prost(message, repeated, tag = "12")]
+    pub events: ::prost::alloc::vec::Vec<BuildEvent>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum BuildEventKind {
+    Unspecified = 0,
+    Queued = 1,
+    GitMetadataCaptured = 2,
+    BuildSucceeded = 3,
+    BuildFailed = 4,
+    BuildCancelled = 5,
+    ExpiredRemoved = 6,
+}
+impl BuildEventKind {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "BUILD_EVENT_KIND_UNSPECIFIED",
+            Self::Queued => "BUILD_EVENT_KIND_QUEUED",
+            Self::GitMetadataCaptured => "BUILD_EVENT_KIND_GIT_METADATA_CAPTURED",
+            Self::BuildSucceeded => "BUILD_EVENT_KIND_BUILD_SUCCEEDED",
+            Self::BuildFailed => "BUILD_EVENT_KIND_BUILD_FAILED",
+            Self::BuildCancelled => "BUILD_EVENT_KIND_BUILD_CANCELLED",
+            Self::ExpiredRemoved => "BUILD_EVENT_KIND_EXPIRED_REMOVED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "BUILD_EVENT_KIND_UNSPECIFIED" => Some(Self::Unspecified),
+            "BUILD_EVENT_KIND_QUEUED" => Some(Self::Queued),
+            "BUILD_EVENT_KIND_GIT_METADATA_CAPTURED" => Some(Self::GitMetadataCaptured),
+            "BUILD_EVENT_KIND_BUILD_SUCCEEDED" => Some(Self::BuildSucceeded),
+            "BUILD_EVENT_KIND_BUILD_FAILED" => Some(Self::BuildFailed),
+            "BUILD_EVENT_KIND_BUILD_CANCELLED" => Some(Self::BuildCancelled),
+            "BUILD_EVENT_KIND_EXPIRED_REMOVED" => Some(Self::ExpiredRemoved),
+            _ => None,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
