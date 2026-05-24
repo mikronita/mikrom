@@ -14,6 +14,7 @@ use pingora_limits::rate::Rate;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use std::time::Instant;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -125,6 +126,8 @@ const STRIPPED_UPSTREAM_HEADERS: &[&str] = &[
     "x-forwarded-proto",
     "x-real-ip",
 ];
+
+static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 fn header_size_from_pairs<I, N, V>(headers: I) -> usize
 where
@@ -465,10 +468,16 @@ impl Extractor for PingoraHeaderExtractor<'_> {
 impl ProxyHttp for MikromProxy {
     type CTX = MikromCtx;
     fn new_ctx(&self) -> Self::CTX {
+        let request_seq = REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let request_time = chrono::Utc::now();
         MikromCtx {
-            request_id: chrono::Utc::now().timestamp_micros().to_string(),
+            request_id: format!(
+                "{}-{:x}",
+                request_time.timestamp_nanos_opt().unwrap_or_default(),
+                request_seq
+            ),
             span: tracing::Span::none(),
-            request_start_time: chrono::Utc::now(),
+            request_start_time: request_time,
             host: None,
             normalized_host: None,
             upstream: None,
@@ -660,6 +669,41 @@ impl ProxyHttp for MikromProxy {
 
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         }
+    }
+
+    fn fail_to_connect(
+        &self,
+        session: &mut Session,
+        _peer: &HttpPeer,
+        ctx: &mut Self::CTX,
+        e: Box<Error>,
+    ) -> Box<Error> {
+        let host = ctx
+            .normalized_host
+            .as_ref()
+            .map(|host| host.as_str().to_string())
+            .or_else(|| {
+                session
+                    .get_header("Host")
+                    .and_then(|h| h.to_str().ok())
+                    .map(|host| HostName::parse(host).as_str().to_string())
+            })
+            .unwrap_or_default();
+
+        if !host.is_empty() {
+            let now = Instant::now();
+            self.wake_up_failures
+                .entry(host)
+                .and_modify(|entry| {
+                    entry.0 = entry.0.saturating_add(1);
+                    entry.1 = now;
+                })
+                .or_insert((1, now));
+        }
+
+        let mut retry_e = e;
+        retry_e.set_retry(true);
+        retry_e
     }
 
     async fn upstream_request_filter(

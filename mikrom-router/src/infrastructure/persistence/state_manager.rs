@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
@@ -102,19 +103,31 @@ impl StateVersions {
     }
 }
 
+#[derive(Clone, Default)]
+struct StateSnapshot {
+    state: State,
+    versions: StateVersions,
+}
+
 pub struct StateManager {
     state: Arc<RwLock<State>>,
     versions: Arc<RwLock<StateVersions>>,
+    snapshot: Arc<RwLock<StateSnapshot>>,
     cache_path: PathBuf,
 }
 
 impl StateManager {
     pub fn new(cache_path: PathBuf) -> Result<Self> {
         let (initial_state, initial_versions) = Self::load_cached_state(&cache_path);
+        let snapshot = StateSnapshot {
+            state: initial_state.clone(),
+            versions: initial_versions.clone(),
+        };
 
         Ok(Self {
             state: Arc::new(RwLock::new(initial_state)),
             versions: Arc::new(RwLock::new(initial_versions)),
+            snapshot: Arc::new(RwLock::new(snapshot)),
             cache_path,
         })
     }
@@ -125,9 +138,8 @@ impl StateManager {
     }
 
     pub(crate) async fn snapshot(&self) -> (State, StateVersions) {
-        let state = self.state.read().await.clone();
-        let versions = self.versions.read().await.clone();
-        (state, versions)
+        let snapshot = self.snapshot.read().await;
+        (snapshot.state.clone(), snapshot.versions.clone())
     }
 
     pub async fn update_state(&self, new_state: State) -> Result<()> {
@@ -154,6 +166,8 @@ impl StateManager {
             *current_versions = versions;
         }
 
+        self.update_snapshot_cache(&state_clone, &versions_clone)
+            .await;
         self.persist_snapshot(&state_clone, &versions_clone).await;
         Ok(())
     }
@@ -185,6 +199,8 @@ impl StateManager {
             (state_clone, versions_clone)
         };
 
+        self.update_snapshot_cache(&state_clone, &versions_clone)
+            .await;
         self.persist_snapshot(&state_clone, &versions_clone).await;
         Ok(true)
     }
@@ -212,6 +228,8 @@ impl StateManager {
             (state_clone, versions_clone)
         };
 
+        self.update_snapshot_cache(&state_clone, &versions_clone)
+            .await;
         self.persist_snapshot(&state_clone, &versions_clone).await;
         Ok(true)
     }
@@ -253,6 +271,8 @@ impl StateManager {
             (state_clone, versions_clone)
         };
 
+        self.update_snapshot_cache(&state_clone, &versions_clone)
+            .await;
         self.persist_snapshot(&state_clone, &versions_clone).await;
         Ok(true)
     }
@@ -288,6 +308,8 @@ impl StateManager {
                 (state_clone, versions_clone)
             };
 
+            self.update_snapshot_cache(&state_clone, &versions_clone)
+                .await;
             self.persist_snapshot(&state_clone, &versions_clone).await;
             return Ok(true);
         }
@@ -331,6 +353,8 @@ impl StateManager {
             (state_clone, versions_clone)
         };
 
+        self.update_snapshot_cache(&state_clone, &versions_clone)
+            .await;
         self.persist_snapshot(&state_clone, &versions_clone).await;
         Ok(true)
     }
@@ -340,8 +364,23 @@ impl StateManager {
 
         match serde_json::to_string_pretty(&s_state) {
             Ok(json) => {
-                if let Err(e) = tokio::fs::write(&self.cache_path, json).await {
-                    error!("Failed to write state cache to {:?}: {e}", self.cache_path);
+                let suffix = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0_u128, |duration| duration.as_nanos());
+                let temp_path = self.cache_path.with_extension(format!("tmp.{:x}", suffix));
+
+                if let Err(e) = tokio::fs::write(&temp_path, json).await {
+                    error!("Failed to write state cache to {:?}: {e}", temp_path);
+                    let _ = tokio::fs::remove_file(&temp_path).await;
+                    return;
+                }
+
+                if let Err(e) = tokio::fs::rename(&temp_path, &self.cache_path).await {
+                    error!(
+                        "Failed to move state cache from {:?} to {:?}: {e}",
+                        temp_path, self.cache_path
+                    );
+                    let _ = tokio::fs::remove_file(&temp_path).await;
                 }
             },
             Err(e) => error!("Failed to serialize state for cache: {e}"),
@@ -390,6 +429,12 @@ impl StateManager {
     {
         let versions = self.versions.read().await;
         !matches!(current_version(&versions), Some(current) if timestamp <= current)
+    }
+
+    async fn update_snapshot_cache(&self, state: &State, versions: &StateVersions) {
+        let mut snapshot = self.snapshot.write().await;
+        snapshot.state = state.clone();
+        snapshot.versions = versions.clone();
     }
 
     fn prepare_certificates(certificates: &mut HashMap<String, Certificate>) {
