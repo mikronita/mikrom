@@ -7,16 +7,16 @@ use opentelemetry_sdk::trace::TracerProvider;
 use std::future::Future;
 use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::time::Duration;
-use tracing::{error, info};
 use tracing::Dispatch;
-use tracing::subscriber::Interest;
+use tracing::Event;
 use tracing::Metadata;
 use tracing::span::{Attributes, Id, Record};
-use tracing::Event;
+use tracing::subscriber::Interest;
+use tracing::{error, info};
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::Registry;
-use tracing_subscriber::Layer;
 use tracing_subscriber::util::SubscriberInitExt;
 
 type DynTelemetryLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
@@ -47,7 +47,9 @@ impl Layer<Registry> for DeferredTelemetry {
     }
 
     fn on_layer(&mut self, subscriber: &mut Registry) {
-        if let Ok(mut guard) = self.layer.lock() && let Some(layer) = guard.as_mut() {
+        if let Ok(mut guard) = self.layer.lock()
+            && let Some(layer) = guard.as_mut()
+        {
             layer.on_layer(subscriber);
         }
     }
@@ -66,7 +68,8 @@ impl Layer<Registry> for DeferredTelemetry {
     }
 
     fn max_level_hint(&self) -> Option<tracing_subscriber::filter::LevelFilter> {
-        self.with_layer(|layer| layer.max_level_hint()).flatten()
+        self.with_layer(tracing_subscriber::Layer::max_level_hint)
+            .flatten()
     }
 
     fn on_record(&self, span: &Id, values: &Record<'_>, ctx: Context<'_, Registry>) {
@@ -158,6 +161,7 @@ fn enable_tracing(router_id: &str) -> Result<()> {
         .lock()
         .map_err(|_| anyhow::anyhow!("failed to lock tracing telemetry layer"))?;
     *guard = Some(telemetry);
+    drop(guard);
 
     Ok(())
 }
