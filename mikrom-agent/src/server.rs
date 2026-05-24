@@ -57,13 +57,11 @@ fn abort_nats_listeners(
     health_check_handle: &mut tokio::task::JoinHandle<()>,
     heartbeat_handle: &mut tokio::task::JoinHandle<()>,
     mesh_handle: &mut tokio::task::JoinHandle<()>,
-    exporter_handle: &mut tokio::task::JoinHandle<()>,
 ) {
     cmd_handle.abort();
     health_check_handle.abort();
     heartbeat_handle.abort();
     mesh_handle.abort();
-    exporter_handle.abort();
 }
 
 pub struct AgentServer {
@@ -219,14 +217,7 @@ impl AgentServer {
                     continue;
                 };
 
-                // 1. Initialize MetricsExporter
-                let exporter = crate::metrics::MetricsExporter::new(
-                    client.clone(),
-                    self_clone.metrics_collector.clone(),
-                    self_clone.hypervisors.clone(),
-                );
-
-                // 2. Spawn listeners
+                // 1. Spawn listeners
                 let mut cmd_handle = self_clone.start_command_listener(client.clone());
                 let mut health_check_handle =
                     self_clone.start_health_check_listener(client.clone());
@@ -237,9 +228,6 @@ impl AgentServer {
                     self_clone.config.host_id.clone(),
                     priv_key.clone(),
                 );
-                let mut exporter_handle = tokio::spawn(async move {
-                    exporter.start_export_loop().await;
-                });
 
                 tokio::select! {
                     _ = &mut cmd_handle => {
@@ -260,7 +248,6 @@ impl AgentServer {
                             &mut health_check_handle,
                             &mut heartbeat_handle,
                             &mut mesh_handle,
-                            &mut exporter_handle,
                         );
                         nats_client = None;
                         nats_session_started_at = None;
@@ -283,7 +270,6 @@ impl AgentServer {
                             &mut health_check_handle,
                             &mut heartbeat_handle,
                             &mut mesh_handle,
-                            &mut exporter_handle,
                         );
                         nats_client = None;
                         nats_session_started_at = None;
@@ -306,7 +292,6 @@ impl AgentServer {
                             &mut health_check_handle,
                             &mut heartbeat_handle,
                             &mut mesh_handle,
-                            &mut exporter_handle,
                         );
                         nats_client = None;
                         nats_session_started_at = None;
@@ -329,30 +314,6 @@ impl AgentServer {
                             &mut health_check_handle,
                             &mut heartbeat_handle,
                             &mut mesh_handle,
-                            &mut exporter_handle,
-                        );
-                        nats_client = None;
-                        nats_session_started_at = None;
-                    }
-                    _ = &mut exporter_handle => {
-                        let uptime = nats_session_started_at.map(|started| started.elapsed());
-                        let flapping = is_flapping_nats_session(uptime, nats_flapping_session_secs);
-                        tracing::warn!(
-                            uptime_secs = uptime.map(|d| d.as_secs()).unwrap_or_default(),
-                            flapping,
-                            "Exporter loop exited; reconnecting NATS"
-                        );
-                        if flapping {
-                            consecutive_failures = consecutive_failures.saturating_add(1);
-                        } else {
-                            consecutive_failures = 0;
-                        }
-                        abort_nats_listeners(
-                            &mut cmd_handle,
-                            &mut health_check_handle,
-                            &mut heartbeat_handle,
-                            &mut mesh_handle,
-                            &mut exporter_handle,
                         );
                         nats_client = None;
                         nats_session_started_at = None;

@@ -219,50 +219,6 @@ impl Clone for MetricsCollector {
     }
 }
 
-pub struct MetricsExporter {
-    client: async_nats::Client,
-    collector: MetricsCollector,
-    hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>,
-}
-
-impl MetricsExporter {
-    pub fn new(
-        client: async_nats::Client,
-        collector: MetricsCollector,
-        hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>,
-    ) -> Self {
-        Self {
-            client,
-            collector,
-            hypervisors,
-        }
-    }
-
-    pub async fn start_export_loop(&self) {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-        loop {
-            interval.tick().await;
-            let metrics = self.collector.collect().await;
-
-            // Use the first available hypervisor's agent_id (all should share the same)
-            let host_id = self
-                .hypervisors
-                .values()
-                .next()
-                .map(|hv| hv.agent_id().to_string())
-                .unwrap_or_default();
-
-            let subject = format!("mikrom.telemetry.host.{}", host_id);
-
-            if let Ok(payload) = serde_json::to_vec(&metrics)
-                && let Err(e) = self.client.publish(subject, payload.into()).await
-            {
-                tracing::error!("Failed to publish metrics to NATS: {}", e);
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

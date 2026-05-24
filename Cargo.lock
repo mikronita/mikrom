@@ -3138,32 +3138,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mikrom-telemetry"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "async-nats",
- "axum 0.8.9",
- "chrono",
- "dotenvy",
- "envy",
- "futures",
- "mikrom-proto",
- "opentelemetry 0.31.0",
- "opentelemetry-otlp 0.31.1",
- "opentelemetry_sdk 0.31.0",
- "prometheus",
- "prost 0.13.5",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-opentelemetry 0.32.1",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

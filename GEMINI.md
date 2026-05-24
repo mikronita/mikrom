@@ -9,7 +9,6 @@ Mikrom is a microVM orchestration system that deploys containerized workloads in
 - **mikrom-agent**: NATS-based agent running on worker nodes for microVM lifecycle.
 - **mikrom-builder**: Automated build engine using Railpack to turn Git repos into OCI images.
 - **mikrom-router**: High-performance dynamic ingress router based on Caddy and Go (Ports 80/443).
-- **mikrom-telemetry**: Metrics and logs collector for Prometheus and Loki (Port 9090).
 - **mikrom-cli**: Command-line interface to interact with the system.
 - **mikrom-proto**: Shared Protocol Buffer definitions and generated code.
 - **mikrom-app**: Next.js 16 frontend application (React 19, Tailwind CSS 4).

@@ -29,8 +29,6 @@ User (CLI/Web)
 User (Traffic)
   → mikrom-router   (Caddy-based Dynamic Ingress Proxy)
     → App MicroVM      (Target instance)
-Observability
-  → mikrom-telemetry (Prometheus & Loki metrics/logs)
 ```
 
 ## Repository Layout
@@ -40,7 +38,6 @@ Observability
 | `mikrom-api/` | The central brain. Manages Users, Apps, and Deployments. |
 | `mikrom-builder/` | The build engine. Clones Git repos and builds OCI images using Railpack. |
 | `mikrom-router/` | High-performance Caddy-based dynamic reverse proxy. |
-| `mikrom-telemetry/` | Observability service for metrics (Prometheus) and logs (Loki). |
 | `mikrom-scheduler/` | Intelligent resource manager. Places workloads on the best workers. |
 | `mikrom-agent/` | The worker daemon. Manages microVMs (Firecracker or QEMU microvm via a pluggable `VmHypervisor` trait), network isolation, and host metrics. |
 | `mikrom-app/` | Dashboard (Next.js 16, React 19, Tailwind CSS 4). |
@@ -68,7 +65,6 @@ make run-scheduler  # Internal NATS
 make run-builder    # Internal NATS
 make run-agent      # port 5003
 make run-router     # port 80/443
-make run-telemetry  # port 9090
 make run-app        # port 3000
 ```
 

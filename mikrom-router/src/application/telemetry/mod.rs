@@ -1,23 +1,20 @@
 #![allow(clippy::missing_const_for_fn)]
 
-use crate::app::config::{NatsUrl, RouterId};
+use crate::app::config::RouterId;
 use crate::app::runtime;
 use crate::application::proxy::RouterMetricsCounters;
 use crate::domain::health::{RouterHealth, RouterHealthState};
 use crate::domain::state::State;
-use async_nats::Client;
 use async_trait::async_trait;
-use mikrom_proto::router::RouterMetrics;
+use axum::{Router, routing::get};
 use pingora::server::ShutdownWatch;
 use pingora::services::background::BackgroundService;
-use prost::Message;
+use std::fmt::Write;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tokio::sync::RwLock;
-use tokio::time::{Duration, interval};
 use tracing::{error, info};
-
-const TELEMETRY_INTERVAL_SECS: u64 = 5;
 
 #[derive(Debug, Clone, PartialEq)]
 #[allow(clippy::struct_excessive_bools)]
@@ -45,18 +42,6 @@ struct TelemetrySnapshot {
     health_wireguard_ready: bool,
     health_upstream_ca_ready: bool,
     health_has_startup_error: bool,
-}
-
-async fn publish_best_effort(
-    nats: &Client,
-    subject: impl Into<String>,
-    payload: Vec<u8>,
-    context: &'static str,
-) {
-    let subject = subject.into();
-    if let Err(e) = nats.publish(subject.clone(), payload.into()).await {
-        error!(%context, %subject, error = %e, "Failed to publish telemetry to NATS");
-    }
 }
 
 fn build_snapshot(
@@ -102,10 +87,9 @@ fn build_snapshot(
     }
 }
 
+#[derive(Clone)]
 pub struct TelemetryLoop {
-    nats_url: NatsUrl,
-    nats_use_tls: bool,
-    nats_certs_dir: Option<String>,
+    metrics_port: u16,
     metrics_counters: Arc<RouterMetricsCounters>,
     health: Arc<RouterHealth>,
     state: Arc<RwLock<State>>,
@@ -114,18 +98,14 @@ pub struct TelemetryLoop {
 
 impl TelemetryLoop {
     pub fn new(
-        nats_url: NatsUrl,
-        nats_use_tls: bool,
-        nats_certs_dir: Option<String>,
+        metrics_port: u16,
         metrics_counters: Arc<RouterMetricsCounters>,
         health: Arc<RouterHealth>,
         state: Arc<RwLock<State>>,
         router_id: RouterId,
     ) -> Self {
         Self {
-            nats_url,
-            nats_use_tls,
-            nats_certs_dir,
+            metrics_port,
             metrics_counters,
             health,
             state,
@@ -134,99 +114,170 @@ impl TelemetryLoop {
     }
 }
 
+async fn handle_metrics(
+    axum::extract::State(state): axum::extract::State<Arc<TelemetryLoop>>,
+) -> String {
+    let app_state = state.state.read().await;
+    let snapshot = build_snapshot(
+        &state.router_id,
+        &state.metrics_counters,
+        &state.health,
+        &app_state,
+    );
+    drop(app_state);
+    format_snapshot(&snapshot)
+}
+
+fn format_snapshot(snapshot: &TelemetrySnapshot) -> String {
+    let mut output = String::new();
+
+    let _ = writeln!(output, "# TYPE mikrom_router_requests_total counter");
+    let _ = writeln!(
+        output,
+        "mikrom_router_requests_total{{router_id=\"{}\"}} {}",
+        snapshot.router_id, snapshot.requests_total
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_responses_total counter");
+    let _ = writeln!(
+        output,
+        "mikrom_router_responses_total{{router_id=\"{}\",family=\"2xx\"}} {}",
+        snapshot.router_id, snapshot.responses_2xx
+    );
+    let _ = writeln!(
+        output,
+        "mikrom_router_responses_total{{router_id=\"{}\",family=\"3xx\"}} {}",
+        snapshot.router_id, snapshot.responses_3xx
+    );
+    let _ = writeln!(
+        output,
+        "mikrom_router_responses_total{{router_id=\"{}\",family=\"4xx\"}} {}",
+        snapshot.router_id, snapshot.responses_4xx
+    );
+    let _ = writeln!(
+        output,
+        "mikrom_router_responses_total{{router_id=\"{}\",family=\"5xx\"}} {}",
+        snapshot.router_id, snapshot.responses_5xx
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_routes_count gauge");
+    let _ = writeln!(
+        output,
+        "mikrom_router_routes_count{{router_id=\"{}\"}} {}",
+        snapshot.router_id, snapshot.routes
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_certificates_count gauge");
+    let _ = writeln!(
+        output,
+        "mikrom_router_certificates_count{{router_id=\"{}\"}} {}",
+        snapshot.router_id, snapshot.certificates
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_acme_tokens_count gauge");
+    let _ = writeln!(
+        output,
+        "mikrom_router_acme_tokens_count{{router_id=\"{}\"}} {}",
+        snapshot.router_id, snapshot.acme_tokens
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_acme_hits counter");
+    let _ = writeln!(
+        output,
+        "mikrom_router_acme_hits{{router_id=\"{}\"}} {}",
+        snapshot.router_id, snapshot.acme_hits
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_acme_misses counter");
+    let _ = writeln!(
+        output,
+        "mikrom_router_acme_misses{{router_id=\"{}\"}} {}",
+        snapshot.router_id, snapshot.acme_misses
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_redirects counter");
+    let _ = writeln!(
+        output,
+        "mikrom_router_redirects{{router_id=\"{}\"}} {}",
+        snapshot.router_id, snapshot.redirects
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_rate_limited counter");
+    let _ = writeln!(
+        output,
+        "mikrom_router_rate_limited{{router_id=\"{}\"}} {}",
+        snapshot.router_id, snapshot.rate_limited
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_route_wait_timeouts counter");
+    let _ = writeln!(
+        output,
+        "mikrom_router_route_wait_timeouts{{router_id=\"{}\"}} {}",
+        snapshot.router_id, snapshot.route_wait_timeouts
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_latency_avg_ms gauge");
+    let _ = writeln!(
+        output,
+        "mikrom_router_latency_avg_ms{{router_id=\"{}\"}} {}",
+        snapshot.router_id, snapshot.latency_avg_ms
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_health_live gauge");
+    let _ = writeln!(
+        output,
+        "mikrom_router_health_live{{router_id=\"{}\"}} {}",
+        snapshot.router_id,
+        u32::from(snapshot.health_live)
+    );
+
+    let _ = writeln!(output, "# TYPE mikrom_router_health_ready gauge");
+    let _ = writeln!(
+        output,
+        "mikrom_router_health_ready{{router_id=\"{}\"}} {}",
+        snapshot.router_id,
+        u32::from(snapshot.health_ready)
+    );
+
+    output
+}
+
 #[async_trait]
 impl BackgroundService for TelemetryLoop {
     async fn start(&self, mut shutdown: ShutdownWatch) {
         runtime::init_tracing_once(self.router_id.as_str());
-        let nats = runtime::connect_with_backoff(
-            "Telemetry Loop NATS",
-            std::time::Duration::from_secs(5),
-            || async {
-                crate::infrastructure::nats::connect_nats(
-                    self.nats_url.as_str(),
-                    self.nats_use_tls,
-                    self.nats_certs_dir.as_deref(),
-                )
-                .await
-            },
-        )
-        .await;
-        info!("Telemetry Loop: Connected to NATS.");
-
-        let mut interval = interval(Duration::from_secs(TELEMETRY_INTERVAL_SECS));
         info!(
-            "Telemetry Loop: Starting loop for router: {}",
-            self.router_id
+            "Telemetry Loop (Metrics HTTP Server): Starting on port {}...",
+            self.metrics_port
         );
 
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    let state = self.state.read().await;
-                    let snapshot = build_snapshot(
-                        &self.router_id,
-                        &self.metrics_counters,
-                        &self.health,
-                        &state,
-                    );
-                    drop(state);
+        let app_state = Arc::new(self.clone());
+        let app = Router::new()
+            .route("/metrics", get(handle_metrics))
+            .with_state(app_state);
 
-                    info!(
-                        router_id = %snapshot.router_id,
-                        routes = snapshot.routes,
-                        certificates = snapshot.certificates,
-                        acme_tokens = snapshot.acme_tokens,
-                        requests_total = snapshot.requests_total,
-                        responses_2xx = snapshot.responses_2xx,
-                        responses_3xx = snapshot.responses_3xx,
-                        responses_4xx = snapshot.responses_4xx,
-                        responses_5xx = snapshot.responses_5xx,
-                        acme_hits = snapshot.acme_hits,
-                        acme_misses = snapshot.acme_misses,
-                        redirects = snapshot.redirects,
-                        rate_limited = snapshot.rate_limited,
-                        route_wait_timeouts = snapshot.route_wait_timeouts,
-                        latency_avg_ms = snapshot.latency_avg_ms,
-                        health_state = ?snapshot.health_state,
-                        health_live = snapshot.health_live,
-                        health_ready = snapshot.health_ready,
-                        health_dependencies_ready = snapshot.health_dependencies_ready,
-                        health_control_plane_synced = snapshot.health_control_plane_synced,
-                        health_wireguard_ready = snapshot.health_wireguard_ready,
-                        health_upstream_ca_ready = snapshot.health_upstream_ca_ready,
-                        health_has_startup_error = snapshot.health_has_startup_error,
-                        "Telemetry snapshot"
-                    );
+        let addr = SocketAddr::from(([0, 0, 0, 0], self.metrics_port));
+        let listener = match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!(
+                    "Telemetry Loop: Failed to bind HTTP server to {}: {}",
+                    addr, e
+                );
+                return;
+            },
+        };
 
-                    let metrics = RouterMetrics {
-                        router_id: snapshot.router_id.clone(),
-                        requests_total: snapshot.requests_total,
-                        responses_2xx: snapshot.responses_2xx,
-                        responses_3xx: snapshot.responses_3xx,
-                        responses_4xx: snapshot.responses_4xx,
-                        responses_5xx: snapshot.responses_5xx,
-                        latency_avg_ms: snapshot.latency_avg_ms,
-                        timestamp: chrono::Utc::now().timestamp(),
-                    };
+        let server_future = axum::serve(listener, app);
 
-                    let mut buf = Vec::new();
-                    if let Err(e) = metrics.encode(&mut buf) {
-                        error!("Telemetry Loop: Failed to encode telemetry: {e}");
-                        continue;
-                    }
-
-                    publish_best_effort(
-                        &nats,
-                        crate::domain::subjects::router_metrics(self.router_id.as_str()),
-                        buf,
-                        "telemetry-loop",
-                    )
-                    .await;
+        tokio::select! {
+            res = server_future => {
+                if let Err(e) = res {
+                    error!("Telemetry Loop HTTP server error: {}", e);
                 }
-                _ = shutdown.changed() => {
-                    info!("Telemetry Loop: Shutting down...");
-                    break;
-                }
+            }
+            _ = shutdown.changed() => {
+                info!("Telemetry Loop (Metrics HTTP Server): Shutdown signal received. Stopping...");
             }
         }
     }
@@ -281,5 +332,36 @@ mod tests {
         assert!(snapshot.health_live);
         assert!(snapshot.health_ready);
         assert!(!snapshot.health_has_startup_error);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_handler_output() {
+        use super::{TelemetryLoop, handle_metrics};
+        use std::sync::Arc;
+        use tokio::sync::RwLock;
+
+        let metrics = Arc::new(RouterMetricsCounters::new());
+        metrics.requests_total.store(42, Ordering::Relaxed);
+        metrics.responses_2xx.store(40, Ordering::Relaxed);
+        metrics.responses_5xx.store(2, Ordering::Relaxed);
+
+        let health = Arc::new(RouterHealth::new());
+        health.mark_bootstrapped();
+
+        let state = Arc::new(RwLock::new(State::default()));
+        let router_id = RouterId::from("test-router");
+
+        let telemetry_loop = TelemetryLoop::new(9092, metrics, health, state, router_id);
+
+        let response = handle_metrics(axum::extract::State(Arc::new(telemetry_loop))).await;
+
+        assert!(response.contains("mikrom_router_requests_total{router_id=\"test-router\"} 42\n"));
+        assert!(response.contains(
+            "mikrom_router_responses_total{router_id=\"test-router\",family=\"2xx\"} 40\n"
+        ));
+        assert!(response.contains(
+            "mikrom_router_responses_total{router_id=\"test-router\",family=\"5xx\"} 2\n"
+        ));
+        assert!(response.contains("mikrom_router_routes_count{router_id=\"test-router\"} 0\n"));
     }
 }
