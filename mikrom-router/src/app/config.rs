@@ -134,10 +134,6 @@ impl RouterConfig {
             config.advertise_address = Some(config.router_id.as_str().to_string());
         }
 
-        if config.router_id.as_str().trim().is_empty() {
-            return Err(anyhow::anyhow!("ROUTER_ID cannot be empty"));
-        }
-
         config.validate()?;
 
         if !config.data_dir.exists() {
@@ -195,8 +191,20 @@ impl RouterConfig {
             return Err(anyhow::anyhow!("MASTER_KEY cannot be empty"));
         }
 
+        if self
+            .advertise_address
+            .as_deref()
+            .is_some_and(|address| address.trim().is_empty())
+        {
+            return Err(anyhow::anyhow!("ADVERTISE_ADDRESS cannot be empty"));
+        }
+
         if self.router_threads == 0 {
             return Err(anyhow::anyhow!("ROUTER_THREADS must be greater than zero"));
+        }
+
+        if self.rps_limit <= 0 {
+            return Err(anyhow::anyhow!("RPS_LIMIT must be greater than zero"));
         }
 
         if self.wireguard_port == 0 {
@@ -206,6 +214,26 @@ impl RouterConfig {
         if self.nats_use_tls && self.nats_certs_dir.is_none() {
             return Err(anyhow::anyhow!(
                 "NATS_USE_TLS is enabled but no NATS_CERTS_DIR or CERTS_DIR was configured"
+            ));
+        }
+
+        if self
+            .nats_certs_dir
+            .as_deref()
+            .is_some_and(|path| path.trim().is_empty())
+        {
+            return Err(anyhow::anyhow!(
+                "NATS_CERTS_DIR/CERTS_DIR cannot be empty when configured"
+            ));
+        }
+
+        if self
+            .upstream_ca_certs_dir
+            .as_deref()
+            .is_some_and(|path| path.trim().is_empty())
+        {
+            return Err(anyhow::anyhow!(
+                "UPSTREAM_CA_CERTS_DIR cannot be empty when configured"
             ));
         }
 
@@ -291,5 +319,71 @@ mod tests {
         };
 
         assert_eq!(config.advertise_address(), "router-1");
+    }
+
+    #[test]
+    fn validate_rejects_blank_advertise_address() {
+        let config = RouterConfig {
+            database_url: DatabaseUrl::from("postgres://localhost/router"),
+            nats_url: NatsUrl::from("nats://localhost:4222"),
+            nats_use_tls: false,
+            nats_certs_dir: None,
+            upstream_ca_certs_dir: None,
+            master_key: MasterKey::from("key"),
+            router_id: RouterId::from("router-1"),
+            advertise_address: Some("   ".to_string()),
+            data_dir: PathBuf::from("/tmp"),
+            state_cache_path: None,
+            wireguard_port: 51822,
+            acme_staging: false,
+            rps_limit: 100,
+            router_threads: 1,
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_nonpositive_rps_limit() {
+        let config = RouterConfig {
+            database_url: DatabaseUrl::from("postgres://localhost/router"),
+            nats_url: NatsUrl::from("nats://localhost:4222"),
+            nats_use_tls: false,
+            nats_certs_dir: None,
+            upstream_ca_certs_dir: None,
+            master_key: MasterKey::from("key"),
+            router_id: RouterId::from("router-1"),
+            advertise_address: None,
+            data_dir: PathBuf::from("/tmp"),
+            state_cache_path: None,
+            wireguard_port: 51822,
+            acme_staging: false,
+            rps_limit: 0,
+            router_threads: 1,
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_blank_certs_directories() {
+        let config = RouterConfig {
+            database_url: DatabaseUrl::from("postgres://localhost/router"),
+            nats_url: NatsUrl::from("nats://localhost:4222"),
+            nats_use_tls: false,
+            nats_certs_dir: Some(" ".to_string()),
+            upstream_ca_certs_dir: Some(String::new()),
+            master_key: MasterKey::from("key"),
+            router_id: RouterId::from("router-1"),
+            advertise_address: None,
+            data_dir: PathBuf::from("/tmp"),
+            state_cache_path: None,
+            wireguard_port: 51822,
+            acme_staging: false,
+            rps_limit: 100,
+            router_threads: 1,
+        };
+
+        assert!(config.validate().is_err());
     }
 }

@@ -77,12 +77,29 @@ impl SerializableState {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 #[allow(clippy::struct_field_names)]
 pub(crate) struct StateVersions {
     pub(crate) route_versions: HashMap<String, i64>,
     pub(crate) acme_versions: HashMap<String, i64>,
     pub(crate) certificate_versions: HashMap<String, i64>,
+}
+
+impl StateVersions {
+    #[must_use]
+    pub(crate) fn route_version(&self, host: &str) -> Option<i64> {
+        self.route_versions.get(host).copied()
+    }
+
+    #[must_use]
+    pub(crate) fn acme_version(&self, token: &str) -> Option<i64> {
+        self.acme_versions.get(token).copied()
+    }
+
+    #[must_use]
+    pub(crate) fn certificate_version(&self, domain: &str) -> Option<i64> {
+        self.certificate_versions.get(domain).copied()
+    }
 }
 
 pub struct StateManager {
@@ -105,6 +122,12 @@ impl StateManager {
     #[must_use]
     pub fn get_state(&self) -> Arc<RwLock<State>> {
         self.state.clone()
+    }
+
+    pub(crate) async fn snapshot(&self) -> (State, StateVersions) {
+        let state = self.state.read().await.clone();
+        let versions = self.versions.read().await.clone();
+        (state, versions)
     }
 
     pub async fn update_state(&self, new_state: State) -> Result<()> {
@@ -142,10 +165,7 @@ impl StateManager {
         timestamp: i64,
     ) -> Result<bool> {
         if !self
-            .should_apply_if_newer(
-                |versions| versions.acme_versions.get(&token).copied(),
-                timestamp,
-            )
+            .should_apply_if_newer(|versions| versions.acme_version(&token), timestamp)
             .await
         {
             return Ok(false);
@@ -171,10 +191,7 @@ impl StateManager {
 
     pub async fn remove_acme_token(&self, token: &str, timestamp: i64) -> Result<bool> {
         if !self
-            .should_apply_if_newer(
-                |versions| versions.acme_versions.get(token).copied(),
-                timestamp,
-            )
+            .should_apply_if_newer(|versions| versions.acme_version(token), timestamp)
             .await
         {
             return Ok(false);
@@ -207,10 +224,7 @@ impl StateManager {
         timestamp: i64,
     ) -> Result<bool> {
         if !self
-            .should_apply_if_newer(
-                |versions| versions.certificate_versions.get(&domain).copied(),
-                timestamp,
-            )
+            .should_apply_if_newer(|versions| versions.certificate_version(&domain), timestamp)
             .await
         {
             return Ok(false);
@@ -252,10 +266,7 @@ impl StateManager {
         use pingora::lb::health_check::TcpHealthCheck;
 
         if !self
-            .should_apply_if_newer(
-                |versions| versions.route_versions.get(&host).copied(),
-                timestamp,
-            )
+            .should_apply_if_newer(|versions| versions.route_version(&host), timestamp)
             .await
         {
             return Ok(false);
@@ -623,5 +634,119 @@ mod tests {
             key_auth
         };
         assert_eq!(key_auth, "key-auth");
+    }
+
+    #[tokio::test]
+    async fn versions_snapshot_tracks_latest_entity_revisions() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let cache_path = temp_file.path().to_path_buf();
+        let manager = StateManager::new(cache_path).unwrap();
+
+        assert!(
+            manager
+                .update_route_targets(
+                    "route.example.com".to_string(),
+                    vec!["127.0.0.1:8080".to_string()],
+                    11,
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            manager
+                .add_acme_token("token".to_string(), "key-auth".to_string(), 12)
+                .await
+                .unwrap()
+        );
+        assert!(
+            manager
+                .add_certificate(
+                    "cert.example.com".to_string(),
+                    "cert-v1".to_string(),
+                    "key-v1".to_string(),
+                    13,
+                )
+                .await
+                .unwrap()
+        );
+
+        let (_, versions) = manager.snapshot().await;
+        assert_eq!(versions.route_version("route.example.com"), Some(11));
+        assert_eq!(versions.acme_version("token"), Some(12));
+        assert_eq!(versions.certificate_version("cert.example.com"), Some(13));
+    }
+
+    #[tokio::test]
+    async fn corrupt_cache_falls_back_to_empty_state() {
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(temp_file.path(), "{not valid json").unwrap();
+
+        let manager = StateManager::new(temp_file.path().to_path_buf()).unwrap();
+        {
+            let state_arc = manager.get_state();
+            let state = state_arc.read().await;
+
+            assert!(state.routes.is_empty());
+            assert!(state.acme_tokens.is_empty());
+            assert!(state.certificates.is_empty());
+            drop(state);
+        }
+    }
+
+    #[tokio::test]
+    async fn persisted_cache_is_restored_after_restart() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let cache_path = temp_file.path().to_path_buf();
+
+        let manager = StateManager::new(cache_path.clone()).unwrap();
+        assert!(
+            manager
+                .update_route_targets(
+                    "restart.example.com".to_string(),
+                    vec!["127.0.0.1:8080".to_string()],
+                    21,
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            manager
+                .add_acme_token("token-restart".to_string(), "key-auth".to_string(), 22)
+                .await
+                .unwrap()
+        );
+        assert!(
+            manager
+                .add_certificate(
+                    "restart.example.com".to_string(),
+                    "cert-v1".to_string(),
+                    "key-v1".to_string(),
+                    23,
+                )
+                .await
+                .unwrap()
+        );
+
+        drop(manager);
+
+        let manager = StateManager::new(cache_path).unwrap();
+        {
+            let state_arc = manager.get_state();
+            let state = state_arc.read().await;
+
+            assert!(state.routes.contains_key("restart.example.com"));
+            assert_eq!(
+                state.acme_tokens.get("token-restart").map(String::as_str),
+                Some("key-auth")
+            );
+            assert_eq!(
+                state
+                    .certificates
+                    .get("restart.example.com")
+                    .map(|cert| cert.cert_pem.as_str()),
+                Some("cert-v1")
+            );
+            drop(state);
+        }
     }
 }

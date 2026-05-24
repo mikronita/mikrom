@@ -61,6 +61,7 @@ pub fn run(config: &RouterConfig) -> Result<()> {
         config.nats_use_tls,
         config.nats_certs_dir.clone(),
         metrics_counters.clone(),
+        health.clone(),
         state.clone(),
         config.router_id.clone(),
     );

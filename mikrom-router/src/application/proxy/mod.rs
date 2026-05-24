@@ -110,6 +110,21 @@ const fn upstream_idle_timeout() -> Duration {
 const MAX_REQUEST_HEADERS: usize = 128;
 const MAX_REQUEST_HEADER_BYTES: usize = 16 * 1024;
 const MAX_REQUEST_BODY_BYTES: u64 = 16 * 1024 * 1024;
+const STRIPPED_UPSTREAM_HEADERS: &[&str] = &[
+    "connection",
+    "proxy-connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-real-ip",
+];
 
 fn header_size_from_pairs<I, N, V>(headers: I) -> usize
 where
@@ -125,6 +140,12 @@ where
 
 fn request_content_length_from_value(value: Option<&str>) -> Option<u64> {
     value.and_then(|value| value.parse::<u64>().ok())
+}
+
+fn strip_untrusted_forwarding_headers(upstream_request: &mut RequestHeader) {
+    for header in STRIPPED_UPSTREAM_HEADERS {
+        upstream_request.remove_header(*header);
+    }
 }
 
 impl MikromProxy {
@@ -648,6 +669,8 @@ impl ProxyHttp for MikromProxy {
         ctx: &mut Self::CTX,
     ) -> Result<()> {
         // 1. Add standard proxy headers
+        strip_untrusted_forwarding_headers(upstream_request);
+
         #[allow(clippy::collapsible_if)]
         if let Some(addr) = session.client_addr() {
             if let Some(inet) = addr.as_inet() {
@@ -914,5 +937,23 @@ mod tests {
         assert_eq!(peer.options.read_timeout, Some(upstream_read_timeout()));
         assert_eq!(peer.options.write_timeout, Some(upstream_write_timeout()));
         assert_eq!(peer.options.idle_timeout, Some(upstream_idle_timeout()));
+    }
+
+    #[test]
+    fn test_strip_untrusted_forwarding_headers_removes_spoofed_values() {
+        let mut header = RequestHeader::build("GET", b"/", None).unwrap();
+        header.insert_header("Connection", "keep-alive").unwrap();
+        header.insert_header("X-Forwarded-For", "1.2.3.4").unwrap();
+        header.insert_header("X-Real-IP", "1.2.3.4").unwrap();
+        header.insert_header("X-Forwarded-Proto", "https").unwrap();
+        header.insert_header("X-Custom", "value").unwrap();
+
+        strip_untrusted_forwarding_headers(&mut header);
+
+        assert!(header.headers.get("connection").is_none());
+        assert!(header.headers.get("x-forwarded-for").is_none());
+        assert!(header.headers.get("x-real-ip").is_none());
+        assert!(header.headers.get("x-forwarded-proto").is_none());
+        assert_eq!(header.headers.get("x-custom").unwrap(), "value");
     }
 }
