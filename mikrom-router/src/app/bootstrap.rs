@@ -57,9 +57,7 @@ pub fn run(config: &RouterConfig) -> Result<()> {
     server.add_service(background_service("Control Plane", cp));
 
     let telemetry_loop = telemetry::TelemetryLoop::new(
-        config.nats_url.clone(),
-        config.nats_use_tls,
-        config.nats_certs_dir.clone(),
+        config.metrics_port,
         metrics_counters.clone(),
         health.clone(),
         state.clone(),

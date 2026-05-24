@@ -86,7 +86,6 @@ test-all-crates: ceph-libs ## Run unit tests for all crates
 	$(CEPH_ENV) cargo nextest run -p mikrom-builder && \
 	$(CEPH_ENV) cargo nextest run -p mikrom-api --features test-utils && \
 	$(CEPH_ENV) cargo nextest run -p mikrom-init && \
-	$(CEPH_ENV) cargo nextest run -p mikrom-telemetry && \
 	$(CEPH_ENV) cargo nextest run -p mikrom-router
 
 .PHONY: test-all
@@ -115,10 +114,6 @@ run-agent: ceph-libs ## Run mikrom-agent with watch (port 5003)
 run-builder: ## Run mikrom-builder with watch
 	cd mikrom-builder && cargo watch -x run
 
-.PHONY: run-telemetry
-run-telemetry: ## Run mikrom-telemetry with watch
-	cd mikrom-telemetry && cargo watch -x run
-
 .PHONY: run-router
 run-router: ## Run mikrom-router (Rust/Pingora)
 	cd mikrom-router && cargo watch -x run
@@ -138,7 +133,6 @@ dev: ## Launch all services in tmux windows
 	@tmux new-session -d -s mikrom -n api 'make run-api 2>&1 | tee /tmp/mikrom-api.log'
 	@tmux new-window -t mikrom -n scheduler 'make run-scheduler 2>&1 | tee /tmp/mikrom-scheduler.log'
 	@tmux new-window -t mikrom -n builder 'make run-builder 2>&1 | tee /tmp/mikrom-builder.log'
-	@tmux new-window -t mikrom -n telemetry 'make run-telemetry'
 	@tmux new-window -t mikrom -n app 'make run-app'
 	@tmux select-window -t mikrom:api
 	@tmux attach-session -t mikrom
@@ -210,10 +204,6 @@ logs-scheduler: ## Follow mikrom-scheduler logs
 .PHONY: logs-agent
 logs-agent: ## Follow mikrom-agent logs
 	docker compose logs -f mikrom-agent
-
-.PHONY: logs-telemetry
-logs-telemetry: ## Follow mikrom-telemetry logs
-	docker compose logs -f mikrom-telemetry
 
 .PHONY: db-start
 db-start: ## Start PostgreSQL instance (for local development)
