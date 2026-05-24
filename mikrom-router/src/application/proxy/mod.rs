@@ -1,6 +1,6 @@
-use crate::health::{self, RouterHealth};
-use crate::state::State;
-use crate::traffic::RouterTrafficPublisher;
+use crate::application::traffic::RouterTrafficPublisher;
+use crate::domain::health::{self, RouterHealth};
+use crate::domain::state::State;
 use async_trait::async_trait;
 use dashmap::DashMap;
 use openssl::x509::X509;
@@ -793,8 +793,8 @@ impl ProxyHttp for MikromProxy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::health::RouterHealth;
-    use crate::state::{Route, State};
+    use crate::domain::health::RouterHealth;
+    use crate::domain::state::{Route, State};
     use pingora::lb::LoadBalancer;
     use pingora::lb::selection::RoundRobin;
     use std::collections::HashMap;

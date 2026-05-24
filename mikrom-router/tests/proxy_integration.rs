@@ -149,7 +149,7 @@ async fn test_integration_http_to_https_redirection() {
         let mut s = env.state.write().await;
         s.certificates.insert(
             "localhost".to_string(),
-            mikrom_router::state::Certificate {
+            mikrom_router::domain::state::Certificate {
                 cert_pem: "fake-cert".to_string(),
                 key_pem: "fake-key".to_string(),
                 parsed_chain: Vec::new(),

@@ -1,9 +1,9 @@
 #![allow(clippy::missing_const_for_fn)]
 
-use crate::config::{NatsUrl, RouterId};
-use crate::proxy::RouterMetricsCounters;
-use crate::runtime;
-use crate::state::State;
+use crate::app::config::{NatsUrl, RouterId};
+use crate::app::runtime;
+use crate::application::proxy::RouterMetricsCounters;
+use crate::domain::state::State;
 use async_nats::Client;
 use async_trait::async_trait;
 use mikrom_proto::router::RouterMetrics;
@@ -67,7 +67,7 @@ impl BackgroundService for TelemetryLoop {
             "Telemetry Loop NATS",
             std::time::Duration::from_secs(5),
             || async {
-                crate::nats::connect_nats(
+                crate::infrastructure::nats::connect_nats(
                     self.nats_url.as_str(),
                     self.nats_use_tls,
                     self.nats_certs_dir.as_deref(),
@@ -134,7 +134,7 @@ impl BackgroundService for TelemetryLoop {
 
                     publish_best_effort(
                         &nats,
-                        crate::subjects::router_metrics(self.router_id.as_str()),
+                        crate::domain::subjects::router_metrics(self.router_id.as_str()),
                         buf,
                         "telemetry-loop",
                     )

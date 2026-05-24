@@ -1,5 +1,5 @@
-use crate::config::{NatsUrl, RouterId};
-use crate::runtime;
+use crate::app::config::{NatsUrl, RouterId};
+use crate::app::runtime;
 use async_trait::async_trait;
 use mikrom_proto::router::RouterTrafficEvent;
 use mikrom_proto::subjects;
@@ -84,7 +84,7 @@ impl BackgroundService for RouterTrafficLoop {
             "Router traffic loop NATS",
             std::time::Duration::from_secs(5),
             || async {
-                crate::nats::connect_nats(
+                crate::infrastructure::nats::connect_nats(
                     self.nats_url.as_str(),
                     self.nats_use_tls,
                     self.nats_certs_dir.as_deref(),

@@ -3,9 +3,10 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::any,
 };
-use mikrom_router::health::RouterHealth;
-use mikrom_router::proxy::{MikromProxy, RouterMetricsCounters};
-use mikrom_router::state::{Route, State};
+use mikrom_router::application::proxy::{MikromProxy, RouterMetricsCounters};
+use mikrom_router::application::traffic::RouterTrafficPublisher;
+use mikrom_router::domain::health::RouterHealth;
+use mikrom_router::domain::state::{Route, State};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use pingora::lb::LoadBalancer;
 use pingora::lb::selection::RoundRobin;
@@ -131,7 +132,7 @@ pub(crate) async fn setup_test_env(rps_limit: isize, use_ipv6: bool) -> Option<T
         drop(s);
     }
 
-    let traffic_publisher = Arc::new(mikrom_router::traffic::RouterTrafficPublisher::new(
+    let traffic_publisher = Arc::new(RouterTrafficPublisher::new(
         "router-test".into(),
         mpsc::channel(1).0,
     ));

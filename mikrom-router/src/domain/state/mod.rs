@@ -4,9 +4,8 @@ use pingora::lb::LoadBalancer;
 use pingora::lb::selection::RoundRobin;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
-
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
 pub struct State {

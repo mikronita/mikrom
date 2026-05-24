@@ -1,5 +1,5 @@
-use crate::proxy::RouterMetricsCounters;
-use crate::subjects as router_subjects;
+use crate::application::proxy::RouterMetricsCounters;
+use crate::domain::subjects as router_subjects;
 use std::sync::atomic::Ordering;
 
 #[test]
@@ -40,7 +40,7 @@ fn test_control_plane_subscription_uses_wildcard_prefix() {
 
 #[cfg(test)]
 mod ipv6_helpers {
-    use crate::state::Route;
+    use crate::domain::state::Route;
     use pingora::lb::LoadBalancer;
     use pingora::lb::selection::RoundRobin;
     use std::net::{IpAddr, Ipv6Addr};

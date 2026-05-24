@@ -1,4 +1,4 @@
-use crate::state::{Certificate, Route, State};
+use crate::domain::state::{Certificate, Route, State};
 use anyhow::Result;
 use pingora::lb::LoadBalancer;
 use pingora::lb::selection::RoundRobin;
@@ -399,7 +399,7 @@ impl StateManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Route;
+    use crate::domain::state::Route;
     use pingora::lb::LoadBalancer;
     use pingora::lb::selection::RoundRobin;
     use std::collections::HashMap;

@@ -1,4 +1,4 @@
-use crate::state::State;
+use crate::domain::state::State;
 use async_trait::async_trait;
 use openssl::pkey::PKey;
 use openssl::x509::X509;

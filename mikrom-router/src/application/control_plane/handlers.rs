@@ -201,7 +201,10 @@ async fn handle_tls_certificate_update(
                 update.hostname
             );
 
-            match crate::crypto::decrypt(&update.private_key, control_plane.master_key.as_str()) {
+            match crate::infrastructure::crypto::decrypt(
+                &update.private_key,
+                control_plane.master_key.as_str(),
+            ) {
                 Ok(key_pem) => {
                     match control_plane
                         .state_manager
