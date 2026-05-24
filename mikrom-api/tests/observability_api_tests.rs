@@ -22,7 +22,7 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> Option<(axum::Router, as
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.ok()?;
 
-    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
     mock_scheduler
         .expect_list_apps()
         .times(0..)
@@ -52,7 +52,10 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> Option<(axum::Router, as
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -71,7 +74,7 @@ async fn test_app_logs_stream_auth() {
             id: app_id,
             name: "test-app".to_string(),
             git_url: "git".to_string(),
-            port: 8080,
+            port: mikrom_api::domain::types::Port::new(8080).unwrap(),
             user_id,
             ..Default::default()
         }))
@@ -112,7 +115,7 @@ async fn test_app_metrics_stream_auth() {
             id: app_id,
             name: "test-app".to_string(),
             git_url: "git".to_string(),
-            port: 8080,
+            port: mikrom_api::domain::types::Port::new(8080).unwrap(),
             user_id,
             ..Default::default()
         }))
@@ -154,7 +157,7 @@ async fn test_app_logs_stream_includes_scale_state() {
             id: app_id,
             name: "test-app".to_string(),
             git_url: "git".to_string(),
-            port: 8080,
+            port: mikrom_api::domain::types::Port::new(8080).unwrap(),
             user_id,
             active_deployment_id: Some(dep_id),
             desired_replicas: 1,
@@ -230,7 +233,7 @@ async fn test_app_logs_stream_wraps_plain_text_with_scale_state() {
             id: app_id,
             name: "test-app".to_string(),
             git_url: "git".to_string(),
-            port: 8080,
+            port: mikrom_api::domain::types::Port::new(8080).unwrap(),
             user_id,
             active_deployment_id: Some(dep_id),
             desired_replicas: 1,
@@ -304,7 +307,7 @@ async fn test_app_metrics_stream_includes_scale_state() {
             id: app_id,
             name: "test-app".to_string(),
             git_url: "git".to_string(),
-            port: 8080,
+            port: mikrom_api::domain::types::Port::new(8080).unwrap(),
             user_id,
             active_deployment_id: Some(dep_id),
             desired_replicas: 1,

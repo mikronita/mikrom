@@ -109,6 +109,12 @@ impl AuthService {
             .ok_or(ApiError::NotFound("User not found".into()))
     }
 
+    pub async fn get_profile_by_auth(state: &AppState, auth_user_id: &str) -> ApiResult<User> {
+        let user_id = Uuid::parse_str(auth_user_id)
+            .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
+        Self::get_profile(state, user_id).await
+    }
+
     pub async fn update_profile(state: &AppState, params: UpdateProfileParams) -> ApiResult<User> {
         state
             .user_repo
@@ -127,5 +133,25 @@ impl AuthService {
         });
 
         Self::get_profile(state, params.user_id).await
+    }
+
+    pub async fn update_profile_by_auth(
+        state: &AppState,
+        auth_user_id: &str,
+        first_name: Option<String>,
+        last_name: Option<String>,
+    ) -> ApiResult<User> {
+        let user_id = Uuid::parse_str(auth_user_id)
+            .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
+
+        Self::update_profile(
+            state,
+            UpdateProfileParams {
+                user_id,
+                first_name,
+                last_name,
+            },
+        )
+        .await
     }
 }

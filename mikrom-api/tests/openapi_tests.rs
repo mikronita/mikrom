@@ -5,11 +5,11 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
 use mikrom_api::AppState;
+use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::{
     MockAppRepository, MockGithubRepository, MockUserRepository, MockVolumeRepository,
 };
 use mikrom_api::nats::{NatsClient, TypedNatsClient};
-use mikrom_api::scheduler::MockScheduler;
 
 #[path = "common/mod.rs"]
 mod common;

@@ -35,7 +35,7 @@ async fn test_encryption_at_rest() {
         .create_app(mikrom_api::domain::CreateAppParams {
             name: format!("test-app-{}", Uuid::new_v4()),
             git_url: "https://github.com/test/repo".to_string(),
-            port: 8080,
+            port: mikrom_api::domain::types::Port::new(8080).unwrap(),
             user_id,
             github_webhook_secret: Some(webhook_secret.to_string()),
             ..Default::default()
@@ -72,10 +72,10 @@ async fn test_encryption_at_rest() {
         .create_deployment(NewDeployment {
             app_id: app.id,
             user_id: user_id.to_string(),
-            vcpus: 1,
-            memory_mib: 256,
+            vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+            memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
             disk_mib: 1024,
-            port: 8080,
+            port: mikrom_api::domain::types::Port::new(8080).unwrap(),
             env_vars: env_vars.clone(),
             trigger_source: "manual".to_string(),
             git_commit_hash: None,

@@ -170,8 +170,12 @@ async fn github_webhook_handler_core(
     // 6. Trigger Build
     let state_clone = state.clone();
     tokio::spawn(async move {
-        if let Err(e) =
-            crate::deploy::handlers::trigger_app_build(state_clone, app, git_metadata).await
+        if let Err(e) = crate::application::deployment::DeploymentService::trigger_app_build(
+            &state_clone,
+            &app,
+            git_metadata.as_ref(),
+        )
+        .await
         {
             error!("Background auto-deploy failed: {}", e);
         }
@@ -201,7 +205,7 @@ mod tests {
             app_repo: Arc::new(app_repo),
             github_repo: Arc::new(crate::domain::github::MockGithubRepository::default()),
             volume_repo: Arc::new(crate::domain::MockVolumeRepository::new()),
-            scheduler: Arc::new(crate::scheduler::MockScheduler::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
             nats,
             router_addr: "http://localhost:8080".into(),
             frontend_url: "http://localhost:3000".into(),
@@ -212,7 +216,8 @@ mod tests {
             master_key: "key".into(),
             deployment_events: tokio::sync::broadcast::channel(1).0,
             workspace_events: tokio::sync::broadcast::channel(1).0,
-            mesh_status: tokio::sync::watch::channel(crate::vms::MeshStatus::default()).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
             acme_email: "admin@mikrom.spluca.org".into(),
             acme_staging: true,
             acme_check_interval: 3600,
@@ -241,7 +246,7 @@ mod tests {
             id: app_id,
             name: "test-app".to_string(),
             git_url: "https://github.com/owner/test-repo".into(),
-            port: 8080,
+            port: crate::domain::types::Port::new(8080).unwrap(),
             github_webhook_secret: Some(secret.to_string()),
             ..App::default()
         };
@@ -306,7 +311,7 @@ mod tests {
             id: app_id,
             name: "test-app".to_string(),
             git_url: "".into(),
-            port: 8080,
+            port: crate::domain::types::Port::new(8080).unwrap(),
             github_webhook_secret: Some(secret.to_string()),
             ..App::default()
         };
@@ -344,7 +349,7 @@ mod tests {
             id: app_id,
             name: "test-repo".to_string(),
             git_url: "https://github.com/owner/test-repo".into(),
-            port: 8080,
+            port: crate::domain::types::Port::new(8080).unwrap(),
             github_webhook_secret: Some(secret.to_string()),
             ..App::default()
         };
@@ -385,7 +390,7 @@ mod tests {
             id: app_id,
             name: "generic-app".to_string(),
             git_url: "https://github.com/owner/generic-repo".into(),
-            port: 8080,
+            port: crate::domain::types::Port::new(8080).unwrap(),
             github_webhook_secret: Some(secret.to_string()),
             github_repo_id: Some(repo_id),
             github_repo_full_name: Some("owner/generic-repo".to_string()),
@@ -426,7 +431,7 @@ mod tests {
             id: app_id,
             name: "metadata-app".to_string(),
             git_url: "https://github.com/owner/metadata-repo".into(),
-            port: 8080,
+            port: crate::domain::types::Port::new(8080).unwrap(),
             github_webhook_secret: Some(secret.to_string()),
             github_repo_id: Some(repo_id),
             github_repo_full_name: Some("owner/metadata-repo".to_string()),

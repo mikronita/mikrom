@@ -1,8 +1,8 @@
 use futures::StreamExt;
+use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::app::{App, Deployment};
 use mikrom_api::domain::user::{User, UserRole};
 use mikrom_api::domain::{MockAppRepository, MockUserRepository};
-use mikrom_api::scheduler::MockScheduler;
 use mikrom_proto::scheduler::DeployResponse;
 use mockall::predicate::*;
 use std::sync::Arc;
@@ -36,7 +36,7 @@ async fn test_promote_running_deployment_while_flow_active_is_immediate() {
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
     use mikrom_api::auth::AuthUser;
-    use mikrom_api::deploy::handlers::__activate_deployment_handler_impl as activate_deployment_handler;
+    use mikrom_api::infrastructure::http::handlers::deploy::__activate_deployment_handler_impl as activate_deployment_handler;
 
     eprintln!(
         "skipping test_promote_running_deployment_while_flow_active_is_immediate: flaky under parallel nextest due runtime promotion state"
@@ -66,8 +66,8 @@ async fn test_promote_running_deployment_while_flow_active_is_immediate() {
         status: "RUNNING".to_string(),
         job_id: Some("job-running".to_string()),
         image_tag: Some("v1".to_string()),
-        vcpus: 1,
-        memory_mib: 256,
+        vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+        memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
         disk_mib: 1024,
         env_vars: serde_json::json!({}),
         ..Default::default()
@@ -167,7 +167,7 @@ async fn test_promote_running_deployment_with_stale_db_status_uses_runtime_statu
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
     use mikrom_api::auth::AuthUser;
-    use mikrom_api::deploy::handlers::__activate_deployment_handler_impl as activate_deployment_handler;
+    use mikrom_api::infrastructure::http::handlers::deploy::__activate_deployment_handler_impl as activate_deployment_handler;
 
     eprintln!(
         "skipping test_promote_running_deployment_with_stale_db_status_uses_runtime_status: flaky under parallel nextest due shared NATS subjects"
@@ -197,8 +197,8 @@ async fn test_promote_running_deployment_with_stale_db_status_uses_runtime_statu
         status: "SCHEDULED".to_string(),
         job_id: Some("job-running-runtime".to_string()),
         image_tag: Some("v2".to_string()),
-        vcpus: 1,
-        memory_mib: 256,
+        vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+        memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
         disk_mib: 1024,
         env_vars: serde_json::json!({}),
         ..Default::default()

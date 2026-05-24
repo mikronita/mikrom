@@ -4,13 +4,13 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use mikrom_api::AppState;
 use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::github::MockGithubRepository;
 use mikrom_api::domain::user::MockUserRepository;
-use mikrom_api::github::handlers::{
+use mikrom_api::infrastructure::http::handlers::github::{
     __github_callback_impl as github_callback, InstallCallbackQuery,
 };
 use mikrom_api::nats::TypedNatsClient;
-use mikrom_api::scheduler::MockScheduler;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -41,7 +41,10 @@ async fn create_test_state() -> Option<AppState> {
         github_app_slug: Some("test-app".to_string()),
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     })
 }

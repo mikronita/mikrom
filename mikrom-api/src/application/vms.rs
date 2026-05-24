@@ -1,18 +1,170 @@
 use crate::AppState;
+use crate::domain::App;
+use crate::domain::Deployment;
 pub use crate::domain::worker::MeshStatus;
-use crate::domain::{App, Deployment};
 use crate::error::{ApiError, ApiResult};
+use serde::Serialize;
 use tokio_stream::StreamExt;
 use uuid::Uuid;
 
 pub struct VmService;
 
+#[derive(Debug, Clone, Serialize, rovo::schemars::JsonSchema)]
 pub struct VmSnapshot {
     pub id: String,
     pub name: String,
     pub created_at: i64,
     pub size_bytes: u64,
     pub vm_status: String,
+}
+
+pub struct LiveDeploymentInfoParams<'a> {
+    pub app_id: String,
+    pub app_name: String,
+    pub deployment: Option<&'a Deployment>,
+    pub job_id: String,
+    pub host_id: String,
+    pub vm_id: String,
+    pub image: String,
+    pub status: String,
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+    pub scale_state: crate::application::deployment::AppScaleState,
+}
+
+pub struct LiveDeploymentStatusParams<'a> {
+    pub app_id: String,
+    pub app_name: String,
+    pub deployment: &'a Deployment,
+    pub job_id: String,
+    pub status: String,
+    pub host_id: String,
+    pub vm_id: String,
+    pub scheduled_at: i64,
+    pub started_at: i64,
+    pub stopped_at: i64,
+    pub error_message: String,
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+    pub ipv6_address: Option<String>,
+    pub scale_state: crate::application::deployment::AppScaleState,
+}
+
+pub struct LiveDeploymentEventParams<'a> {
+    pub app_id: String,
+    pub app_name: String,
+    pub deployment: Option<&'a Deployment>,
+    pub job_id: String,
+    pub image: String,
+    pub status: String,
+    pub host_id: String,
+    pub vm_id: String,
+    pub ipv6_address: Option<String>,
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+    pub scheduled_at: i64,
+    pub started_at: i64,
+    pub stopped_at: i64,
+    pub error_message: String,
+    pub scale_state: crate::application::deployment::AppScaleState,
+}
+
+#[derive(Debug, Clone, Serialize, rovo::schemars::JsonSchema)]
+pub struct LiveDeploymentInfo {
+    pub job_id: String,
+    pub deployment_id: String,
+    pub app_id: String,
+    pub app_name: String,
+    pub image: String,
+    pub status: String,
+    pub host_id: String,
+    pub vm_id: String,
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+    pub ipv6_address: Option<String>,
+    pub vcpus: i32,
+    pub memory_mib: i64,
+    pub scale_state: crate::application::deployment::AppScaleState,
+}
+
+#[derive(Debug, Clone, Serialize, rovo::schemars::JsonSchema)]
+pub struct LiveDeploymentStatus {
+    pub job_id: String,
+    pub deployment_id: String,
+    pub app_id: String,
+    pub app_name: String,
+    pub image: String,
+    pub status: String,
+    pub host_id: String,
+    pub vm_id: String,
+    pub scheduled_at: i64,
+    pub started_at: i64,
+    pub stopped_at: i64,
+    pub error_message: String,
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+    pub ipv6_address: Option<String>,
+    pub vcpus: i32,
+    pub memory_mib: i64,
+    pub scale_state: crate::application::deployment::AppScaleState,
+}
+
+#[derive(Debug, Clone, Serialize, rovo::schemars::JsonSchema)]
+pub struct LiveDeploymentEvent {
+    pub job_id: String,
+    pub deployment_id: String,
+    pub app_id: String,
+    pub app_name: String,
+    pub image: String,
+    pub status: String,
+    pub git_commit_hash: Option<String>,
+    pub git_commit_message: Option<String>,
+    pub git_branch: Option<String>,
+    pub host_id: String,
+    pub vm_id: String,
+    pub ipv6_address: Option<String>,
+    pub vcpus: i32,
+    pub memory_mib: i64,
+    pub cpu_usage: f32,
+    pub ram_used_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+    pub scale_state: crate::application::deployment::AppScaleState,
+    pub scheduled_at: i64,
+    pub started_at: i64,
+    pub stopped_at: i64,
+    pub error_message: String,
+}
+
+#[derive(Debug, Clone, Serialize, rovo::schemars::JsonSchema)]
+pub struct OperationResult {
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, rovo::schemars::JsonSchema)]
+pub struct SnapshotListResult {
+    pub success: bool,
+    pub message: String,
+    pub snapshots: Vec<crate::application::vms::VmSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, rovo::schemars::JsonSchema)]
+pub struct BalloonQueryResult {
+    pub success: bool,
+    pub message: String,
+    pub actual_memory_mib: u32,
+    pub max_memory_mib: u32,
 }
 
 impl VmService {
@@ -58,6 +210,122 @@ impl VmService {
         }
 
         Ok((app, deployment))
+    }
+
+    pub async fn build_live_deployment_info(
+        params: LiveDeploymentInfoParams<'_>,
+    ) -> LiveDeploymentInfo {
+        let vcpus = params
+            .deployment
+            .map(|deployment| deployment.vcpus.value() as i32)
+            .unwrap_or(1);
+        let memory_mib = params
+            .deployment
+            .map(|deployment| deployment.memory_mib.value() as i64)
+            .unwrap_or(128);
+        let ipv6_address = params
+            .deployment
+            .and_then(|deployment| deployment.ipv6_address.clone());
+
+        LiveDeploymentInfo {
+            job_id: params.job_id,
+            deployment_id: params
+                .deployment
+                .map(|deployment| deployment.id.to_string())
+                .unwrap_or_default(),
+            app_id: params.app_id,
+            app_name: params.app_name,
+            image: params.image,
+            status: params.status,
+            host_id: params.host_id,
+            vm_id: params.vm_id,
+            cpu_usage: params.cpu_usage,
+            ram_used_bytes: params.ram_used_bytes,
+            tx_bytes: params.tx_bytes,
+            rx_bytes: params.rx_bytes,
+            ipv6_address,
+            vcpus,
+            memory_mib,
+            scale_state: params.scale_state,
+        }
+    }
+
+    pub fn build_live_deployment_status(
+        params: LiveDeploymentStatusParams<'_>,
+    ) -> LiveDeploymentStatus {
+        LiveDeploymentStatus {
+            job_id: params.job_id,
+            deployment_id: params.deployment.id.to_string(),
+            app_id: params.app_id,
+            app_name: params.app_name,
+            image: params.deployment.image_tag.clone().unwrap_or_default(),
+            status: params.status,
+            host_id: params.host_id,
+            vm_id: params.vm_id,
+            scheduled_at: params.scheduled_at,
+            started_at: params.started_at,
+            stopped_at: params.stopped_at,
+            error_message: params.error_message,
+            cpu_usage: params.cpu_usage,
+            ram_used_bytes: params.ram_used_bytes,
+            tx_bytes: params.tx_bytes,
+            rx_bytes: params.rx_bytes,
+            ipv6_address: params.ipv6_address,
+            vcpus: params.deployment.vcpus.value() as i32,
+            memory_mib: params.deployment.memory_mib.value() as i64,
+            scale_state: params.scale_state,
+        }
+    }
+
+    pub fn build_live_deployment_event(
+        params: LiveDeploymentEventParams<'_>,
+    ) -> LiveDeploymentEvent {
+        let vcpus = params
+            .deployment
+            .map(|deployment| deployment.vcpus.value() as i32)
+            .unwrap_or(1);
+        let memory_mib = params
+            .deployment
+            .map(|deployment| deployment.memory_mib.value() as i64)
+            .unwrap_or(128);
+        let git_commit_hash = params
+            .deployment
+            .and_then(|deployment| deployment.git_commit_hash.clone());
+        let git_commit_message = params
+            .deployment
+            .and_then(|deployment| deployment.git_commit_message.clone());
+        let git_branch = params
+            .deployment
+            .and_then(|deployment| deployment.git_branch.clone());
+
+        LiveDeploymentEvent {
+            job_id: params.job_id,
+            deployment_id: params
+                .deployment
+                .map(|deployment| deployment.id.to_string())
+                .unwrap_or_default(),
+            app_id: params.app_id,
+            app_name: params.app_name,
+            image: params.image,
+            status: params.status,
+            git_commit_hash,
+            git_commit_message,
+            git_branch,
+            host_id: params.host_id,
+            vm_id: params.vm_id,
+            ipv6_address: params.ipv6_address,
+            vcpus,
+            memory_mib,
+            cpu_usage: params.cpu_usage,
+            ram_used_bytes: params.ram_used_bytes,
+            tx_bytes: params.tx_bytes,
+            rx_bytes: params.rx_bytes,
+            scale_state: params.scale_state,
+            scheduled_at: params.scheduled_at,
+            started_at: params.started_at,
+            stopped_at: params.stopped_at,
+            error_message: params.error_message,
+        }
     }
 
     pub async fn create_snapshot(

@@ -1,13 +1,14 @@
 use crate::AppState;
 use crate::application::deployment::{
-    AppResponse, DEFAULT_DEPLOYMENT_MEMORY_MIB, DEFAULT_DEPLOYMENT_VCPUS, DeployParams,
-    DeployRequestPayload, DeployResponseBody, DeploymentOrchestrator, DeploymentService,
-    build_app_response, build_app_response_with_scale_state,
+    AppResponse, DeployRequestPayload, DeployResponseBody, DeploymentOrchestrator,
+    DeploymentService, build_app_response, build_app_response_with_scale_state,
     resolve_app_scale_state_from_running_count, resolve_deployment_hypervisor,
     resolve_deployment_memory_mib, resolve_deployment_vcpus,
 };
 use crate::auth::AuthUser;
+use crate::domain::CreateAppParams;
 use crate::domain::Deployment;
+use crate::domain::types::{CpuCores, MemoryMb, Port};
 use crate::error::{ApiError, ApiResult};
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::{
@@ -30,7 +31,7 @@ use uuid::Uuid;
 pub struct CreateAppRequest {
     pub name: String,
     pub git_url: String,
-    pub port: Option<u32>,
+    pub port: Option<Port>,
     pub github_installation_id: Option<i64>,
     pub github_repo_id: Option<i64>,
     pub github_repo_full_name: Option<String>,
@@ -53,7 +54,7 @@ pub async fn get_app_secret_handler(
     State(state): State<AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<Json<AppSecretResponse>> {
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
 
     Ok(Json(AppSecretResponse {
         github_webhook_secret: app.github_webhook_secret,
@@ -73,9 +74,9 @@ pub struct ScaleAppRequest {
 #[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
 pub struct ManualDeployRequest {
     /// CPU cores to allocate. Allowed values: 1, 2, 3, or 4.
-    pub vcpus: Option<u32>,
+    pub vcpus: Option<CpuCores>,
     /// Memory to allocate in MiB. Allowed values: 512, 1024, 2048, or 4096.
-    pub memory_mib: Option<u32>,
+    pub memory_mib: Option<MemoryMb>,
     pub disk_mib: Option<u32>,
     pub env: Option<std::collections::HashMap<String, String>>,
     pub image: Option<String>,
@@ -89,7 +90,7 @@ pub async fn create_app_handler(
     State(state): State<AppState>,
     Json(payload): Json<CreateAppRequest>,
 ) -> ApiResult<(StatusCode, Json<AppResponse>)> {
-    let port = payload.port.unwrap_or(8080);
+    let port = payload.port.unwrap_or_else(|| Port::new(8080).unwrap());
 
     // Force scale-to-zero by default (min_replicas = 0)
     let min = 0;
@@ -120,17 +121,11 @@ pub async fn create_app_handler(
 
     let user_id =
         Uuid::parse_str(&auth.user_id).map_err(|_| ApiError::Auth("Invalid user ID".into()))?;
-    let user = state
-        .user_repo
-        .find_by_id(user_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("User not found".into()))?;
-
     let webhook_secret = Alphanumeric.sample_string(&mut rand::rng(), 32);
 
-    let app = state
-        .app_repo
-        .create_app(crate::domain::CreateAppParams {
+    let app = DeploymentService::create_app(
+        &state,
+        CreateAppParams {
             name: payload.name.clone(),
             git_url: payload.git_url,
             port,
@@ -147,120 +142,11 @@ pub async fn create_app_handler(
             max_replicas: Some(max),
             autoscaling_enabled: payload.autoscaling_enabled,
             ..Default::default()
-        })
-        .await?;
+        },
+    )
+    .await?;
 
-    state.publish_workspace_event(WorkspaceEvent {
-        kind: WorkspaceEventKind::AppCreated,
-        user_id: Some(user_id),
-        app_id: Some(app.id),
-        app_name: Some(app.name.clone()),
-        deployment_id: app.active_deployment_id,
-        volume_id: None,
-        resource_id: None,
-    });
-
-    // Notify Scheduler about initial scaling config
-    let _ = state
-        .scheduler
-        .update_app_scaling_config(mikrom_proto::scheduler::UpdateAppScalingConfigRequest {
-            app_id: app.id.to_string(),
-            user_id: app.user_id.to_string(),
-            min_replicas: app.min_replicas as u32,
-            max_replicas: app.max_replicas as u32,
-            autoscaling_enabled: app.autoscaling_enabled,
-            cpu_threshold: app.cpu_threshold,
-            mem_threshold: app.mem_threshold,
-            vpc_ipv6_prefix: user.vpc_ipv6_prefix.clone().unwrap_or_default(),
-            desired_replicas: app.desired_replicas as u32,
-            hostname: app.hostname.clone().unwrap_or_default(),
-            last_router_traffic_at: 0,
-            last_scaled_to_zero_at: 0,
-        })
-        .await;
-
-    // Automatically create GitHub Webhook if repo is connected
-    tracing::info!(
-        app_name = %app.name,
-        has_inst = app.github_installation_id.is_some(),
-        has_repo = app.github_repo_full_name.is_some(),
-        has_app_id = state.github_app_id.is_some(),
-        has_key = state.github_private_key.is_some(),
-        "Checking if automatic GitHub webhook should be created"
-    );
-
-    #[allow(clippy::collapsible_if)]
-    if let Some(installation_id) = app.github_installation_id {
-        if let Some(repo_full_name) = &app.github_repo_full_name {
-            if let Some(github_app_id) = &state.github_app_id {
-                if let Some(github_private_key) = &state.github_private_key {
-                    tracing::info!(app_name = %app.name, "Initiating automatic GitHub webhook creation");
-                    let webhook_url = if let Some(base) = &state.github_webhook_url_base {
-                        if base.contains("smee.io") {
-                            // Smee.io doesn't support subpaths on the public URL
-                            base.to_string()
-                        } else {
-                            format!(
-                                "{}/v1/webhooks/github/{}",
-                                base.trim_end_matches('/'),
-                                app.name
-                            )
-                        }
-                    } else {
-                        // Fallback: Try to guess the API URL from the frontend URL
-                        let url = format!(
-                            "{}/v1/webhooks/github/{}",
-                            state.frontend_url.replace("3000", "5001"),
-                            app.name
-                        );
-                        tracing::warn!(
-                            app_name = %app.name,
-                            %url,
-                            "GITHUB_WEBHOOK_URL_BASE is missing, using fragile fallback URL guessing"
-                        );
-                        url
-                    };
-
-                    // Use a background task to not block the response
-                    let github_app_id = github_app_id.clone();
-                    let github_private_key = github_private_key.clone();
-                    let repo_full_name = repo_full_name.clone();
-                    let webhook_secret = webhook_secret.clone();
-
-                    let app_id = app.id;
-                    tokio::spawn(async move {
-                        if let Err(e) = crate::infrastructure::github::create_repository_webhook(
-                            &github_app_id,
-                            &github_private_key,
-                            installation_id,
-                            &repo_full_name,
-                            &webhook_url,
-                            &webhook_secret,
-                        )
-                        .await
-                        {
-                            tracing::error!(%app_id, error = %e, "Failed to automatically create GitHub webhook");
-                        } else {
-                            tracing::info!(app_name = %payload.name, "Successfully created automatic GitHub webhook");
-                        }
-                    });
-                }
-            }
-        }
-    }
-
-    // Trigger immediate ACME certification if hostname is present
-    if let Some(hostname) = &app.hostname {
-        let state_for_acme = state.clone();
-        let hostname = hostname.clone();
-        tokio::spawn(async move {
-            if let Err(e) =
-                crate::acme::trigger_domain_certification(&state_for_acme, &hostname).await
-            {
-                tracing::error!(hostname = %hostname, error = %e, "Immediate ACME certification on app creation failed");
-            }
-        });
-    }
+    DeploymentService::maybe_create_github_webhook(&state, &app, &webhook_secret).await;
 
     Ok((
         StatusCode::CREATED,
@@ -334,7 +220,7 @@ pub async fn delete_app_handler(
     State(state): State<AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<StatusCode> {
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
 
     #[allow(clippy::collapsible_if)]
     if let Some(hostname) = &app.hostname {
@@ -386,7 +272,7 @@ pub async fn scale_app_handler(
     Path(app_name): Path<String>,
     Json(payload): Json<ScaleAppRequest>,
 ) -> ApiResult<StatusCode> {
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
 
     let user_uuid =
         Uuid::parse_str(&auth.user_id).map_err(|_| ApiError::Auth("Invalid user ID".into()))?;
@@ -498,7 +384,7 @@ pub async fn list_deployments_handler(
     State(state): State<AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<Json<Vec<Deployment>>> {
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
     let deployments = state
         .app_repo
         .list_deployments_by_app(app.id)
@@ -513,7 +399,7 @@ pub async fn deployments_stream_handler(
     State(state): State<AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<crate::error::SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
     let app_id = app.id;
     let rx = state.deployment_events.subscribe();
     let state_clone = state.clone();
@@ -597,7 +483,7 @@ pub async fn activate_deployment_handler(
     State(state): State<AppState>,
     Path((app_name, deployment_id)): Path<(String, Uuid)>,
 ) -> ApiResult<StatusCode> {
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
 
     let deployment = state
         .app_repo
@@ -785,7 +671,7 @@ pub async fn deploy_app(
                     user_id: user_uuid,
                     name: payload.app_name.clone(),
                     git_url,
-                    port: payload.port.unwrap_or(8080),
+                    port: payload.port.unwrap_or_else(|| Port::new(8080).unwrap()),
                     ..Default::default()
                 };
                 DeploymentService::create_app(&state, create_params).await?
@@ -802,8 +688,8 @@ pub async fn deploy_app(
         .create_deployment(crate::domain::NewDeployment::from_handler(
             app.id,
             auth.user_id.clone(),
-            vcpus as i32,
-            memory_mib as i64,
+            vcpus,
+            memory_mib,
             disk_mib as i64,
             app.port,
             env_vars.clone(),
@@ -822,12 +708,12 @@ pub async fn deploy_app(
         &state,
         &app,
         &deployment,
-        DeployParams {
+        crate::application::deployment::DeployParams {
             image_tag: image.clone(),
             vcpus,
             memory_mib,
             disk_mib,
-            port: app.port as u32,
+            port: app.port,
             env: env_vars,
             hypervisor,
         },
@@ -869,166 +755,22 @@ pub async fn deploy_app_version_handler(
     let image = payload.image.clone();
     let hypervisor = resolve_deployment_hypervisor(payload.hypervisor.as_deref());
 
-    let app = get_app_by_name_and_auth(&state, &app_name, &auth).await?;
-
-    let git_metadata = fetch_app_git_metadata(&state, &app).await;
-
-    let deployment = state
-        .app_repo
-        .create_deployment(crate::domain::NewDeployment::from_handler(
-            app.id,
-            auth.user_id.clone(),
-            vcpus as i32,
-            memory_mib as i64,
-            disk_mib as i64,
-            app.port,
-            env_vars.clone(),
-            "manual".to_string(),
-            git_metadata.as_ref(),
-            hypervisor,
-        ))
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let guard = state.try_start_flow(app.id.into()).ok_or_else(|| {
-        ApiError::BadRequest("A deployment flow is already in progress for this application".into())
-    })?;
-
-    if let Some(image_tag) = image {
-        return direct_image_deploy(
-            &state,
-            app,
-            deployment,
-            image_tag,
-            vcpus,
-            memory_mib,
-            disk_mib,
-            env_vars,
-            hypervisor,
-            guard,
-            auth.user_id,
-        )
-        .await;
-    }
-
-    DeploymentService::trigger_build(
+    let response = DeploymentService::deploy_app_version(
         &state,
-        &app,
-        &deployment,
-        crate::application::deployment::TriggerBuildParams {
-            vcpus,
-            memory_mib: memory_mib as u64,
-            disk_mib: disk_mib as u64,
-            env: env_vars,
-            hypervisor,
-            guard,
-        },
-    )
-    .await?;
-
-    Ok(Json(DeployResponseBody {
-        job_id: None,
-        deployment_id: Some(deployment.id.to_string()),
-        status: "BUILDING".to_string(),
-        host_id: None,
-        vm_id: None,
-        image_tag: None,
-        message: "Build initiated via NATS".to_string(),
-    }))
-}
-
-async fn fetch_app_git_metadata(
-    state: &AppState,
-    app: &crate::domain::App,
-) -> Option<crate::domain::GitMetadata> {
-    let installation_id = app.github_installation_id?;
-    let repo_full_name = app.github_repo_full_name.as_ref()?;
-    let (github_app_id, github_private_key) = match (
-        &state.github_app_id,
-        &state.github_private_key,
-    ) {
-        (Some(id), Some(key)) => (id, key),
-        _ => {
-            tracing::warn!(app_id = %app.id, "GitHub linked but API credentials missing in state");
-            return None;
-        },
-    };
-
-    match crate::infrastructure::github::get_repo_latest_commit(
-        github_app_id,
-        github_private_key,
-        installation_id,
-        repo_full_name,
-        "main",
-    )
-    .await
-    {
-        Ok(meta) => Some(meta),
-        Err(_) => crate::infrastructure::github::get_repo_latest_commit(
-            github_app_id,
-            github_private_key,
-            installation_id,
-            repo_full_name,
-            "master",
-        )
-        .await
-        .ok(),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn direct_image_deploy(
-    state: &AppState,
-    app: crate::domain::App,
-    deployment: crate::domain::Deployment,
-    image_tag: String,
-    vcpus: u32,
-    memory_mib: u32,
-    disk_mib: u32,
-    env_vars: std::collections::HashMap<String, String>,
-    hypervisor: i32,
-    guard: crate::DeploymentFlowGuard,
-    user_id: String,
-) -> ApiResult<Json<DeployResponseBody>> {
-    info!(app = %app.name, image = %image_tag, "Direct image deployment requested, skipping build");
-
-    let deployment_id = deployment.id;
-
-    let inner = DeploymentService::deploy_to_scheduler(
-        state,
-        &app,
-        &deployment,
-        DeployParams {
-            image_tag: image_tag.clone(),
+        &auth.user_id,
+        &app_name,
+        crate::application::deployment::service::DeployVersionParams {
             vcpus,
             memory_mib,
             disk_mib,
-            port: app.port,
             env: env_vars,
+            image,
             hypervisor,
         },
     )
     .await?;
 
-    DeploymentService::run_zero_downtime_flow(
-        state.clone(),
-        app,
-        deployment,
-        inner.clone(),
-        user_id,
-        true,
-        guard,
-    );
-
-    Ok(Json(DeployResponseBody {
-        job_id: Some(inner.job_id),
-        deployment_id: Some(deployment_id.to_string()),
-        status: "HEALTH_CHECKING".to_string(),
-        host_id: Some(inner.host_id),
-        vm_id: Some(inner.vm_id),
-        image_tag: Some(image_tag),
-        message: "Deployment triggered, health check in progress".to_string(),
-    }))
+    Ok(Json(response))
 }
 
 pub async fn trigger_app_build(
@@ -1036,68 +778,7 @@ pub async fn trigger_app_build(
     app: crate::domain::App,
     git_metadata: Option<crate::domain::GitMetadata>,
 ) -> ApiResult<Uuid> {
-    let vcpus = DEFAULT_DEPLOYMENT_VCPUS;
-    let memory_mib = DEFAULT_DEPLOYMENT_MEMORY_MIB;
-    let disk_mib = 1024;
-    let env_vars = std::collections::HashMap::new();
-
-    let deployment = state
-        .app_repo
-        .create_deployment(crate::domain::NewDeployment::from_handler(
-            app.id,
-            app.user_id.to_string(),
-            vcpus as i32,
-            memory_mib as i64,
-            disk_mib as i64,
-            app.port,
-            env_vars.clone(),
-            "github_webhook".to_string(),
-            git_metadata.as_ref(),
-            0,
-        ))
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // Protect against concurrent flows
-    let guard = state.try_start_flow(app.id.into()).ok_or_else(|| {
-        ApiError::BadRequest("A deployment flow is already in progress for this application".into())
-    })?;
-
-    DeploymentService::trigger_build(
-        &state,
-        &app,
-        &deployment,
-        crate::application::deployment::TriggerBuildParams {
-            vcpus,
-            memory_mib: memory_mib as u64,
-            disk_mib: disk_mib as u64,
-            env: env_vars,
-            hypervisor: 0,
-            guard,
-        },
-    )
-    .await?;
-
-    Ok(deployment.id)
-}
-
-async fn get_app_by_name_and_auth(
-    state: &AppState,
-    app_name: &str,
-    auth: &AuthUser,
-) -> ApiResult<crate::domain::App> {
-    let app = state
-        .app_repo
-        .get_app_by_name(app_name)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or_else(|| ApiError::NotFound("Application not found".into()))?;
-
-    if app.user_id.to_string() != auth.user_id {
-        return Err(ApiError::Forbidden);
-    }
-
-    Ok(app)
+    DeploymentService::trigger_app_build(&state, &app, git_metadata.as_ref()).await
 }
 
 #[cfg(test)]
@@ -1106,11 +787,11 @@ mod tests {
     use crate::AppState;
     use crate::application::deployment::{AppScaleState, resolve_app_scale_state};
     use crate::auth::AuthUser;
+    use crate::domain::MockScheduler;
     use crate::domain::github::MockGithubRepository;
     use crate::domain::{
         MockAppRepository, MockUserRepository, MockVolumeRepository, User, UserRole,
     };
-    use crate::scheduler::MockScheduler;
     use axum::extract::{Path, State};
     use std::sync::Arc;
     use uuid::Uuid;
@@ -1208,10 +889,10 @@ mod tests {
                     job_id: Some("job-1".to_string()),
                     ipv6_address: Some("fd00::1".to_string()),
                     status: "RUNNING".to_string(),
-                    vcpus: 1,
-                    memory_mib: 512,
+                    vcpus: crate::domain::types::CpuCores::new(1).unwrap(),
+                    memory_mib: crate::domain::types::MemoryMb::new(512).unwrap(),
                     disk_mib: 1024,
-                    port: 8080,
+                    port: crate::domain::types::Port::new(8080).unwrap(),
                     env_vars: serde_json::json!({}),
                     git_commit_hash: None,
                     git_commit_message: None,
@@ -1226,7 +907,7 @@ mod tests {
         let mut state = create_test_state().await;
         state.app_repo = Arc::new(mock_app_repo);
 
-        let mut mock_scheduler = crate::scheduler::MockScheduler::new();
+        let mut mock_scheduler = crate::domain::MockScheduler::new();
         let app_id_str = app_id.to_string();
         mock_scheduler.expect_list_apps().returning(move |req| {
             if req.status == Some(mikrom_proto::scheduler::DeployStatus::Running as i32) {

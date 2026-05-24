@@ -93,7 +93,7 @@ async fn test_create_global_volume() {
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
         volume_repo: Arc::new(mock_volume_repo),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "".to_string(),
         frontend_url: "".to_string(),
@@ -109,7 +109,10 @@ async fn test_create_global_volume() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -221,7 +224,7 @@ async fn test_attach_volume_to_app() {
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
         volume_repo: Arc::new(mock_volume_repo),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "".to_string(),
         frontend_url: "".to_string(),
@@ -237,7 +240,10 @@ async fn test_attach_volume_to_app() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -347,7 +353,7 @@ async fn test_attach_volume_rejects_rwo_conflict() {
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
         volume_repo: Arc::new(mock_volume_repo),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "".to_string(),
         frontend_url: "".to_string(),
@@ -363,7 +369,10 @@ async fn test_attach_volume_rejects_rwo_conflict() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -440,7 +449,7 @@ async fn test_list_volumes_with_attachments() {
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
         volume_repo: Arc::new(mock_volume_repo),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "".to_string(),
         frontend_url: "".to_string(),
@@ -456,7 +465,10 @@ async fn test_list_volumes_with_attachments() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -529,7 +541,7 @@ async fn test_delete_volume_fails_if_attached() {
         app_repo: Arc::new(mock_app_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
         volume_repo: Arc::new(mock_volume_repo),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "".to_string(),
         frontend_url: "".to_string(),
@@ -545,7 +557,10 @@ async fn test_delete_volume_fails_if_attached() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 

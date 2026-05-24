@@ -61,7 +61,7 @@ mod tests {
             )),
             volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
             github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
-            scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+            scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
             nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
             router_addr: "http://localhost:8080".to_string(),
             frontend_url: "http://localhost:3000".to_string(),
@@ -77,7 +77,10 @@ mod tests {
             github_app_slug: None,
             github_webhook_url_base: None,
             workspace_events: tokio::sync::broadcast::channel(100).0,
-            mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+            mesh_status: tokio::sync::watch::channel(
+                mikrom_api::application::vms::MeshStatus::default(),
+            )
+            .0,
             active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
         };
 
@@ -129,7 +132,7 @@ mod tests {
             }))
         });
 
-        let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+        let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
         mock_scheduler.expect_list_apps().returning({
             let app_id = app_id.to_string();
             let user_id = user_id.to_string();
@@ -187,7 +190,10 @@ mod tests {
             github_app_slug: None,
             github_webhook_url_base: None,
             workspace_events: tokio::sync::broadcast::channel(100).0,
-            mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+            mesh_status: tokio::sync::watch::channel(
+                mikrom_api::application::vms::MeshStatus::default(),
+            )
+            .0,
             active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
         };
 
@@ -200,7 +206,7 @@ mod tests {
             id: app_id,
             name: "notify-router-app".to_string(),
             git_url: "https://github.com/test/notify-router".to_string(),
-            port: 8080,
+            port: mikrom_api::domain::types::Port::new(8080).unwrap(),
             hostname: Some(hostname.clone()),
             user_id,
             active_deployment_id: None,
@@ -252,7 +258,7 @@ mod tests {
             }))
         });
 
-        let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+        let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
         mock_scheduler
             .expect_list_apps()
             .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse { apps: vec![] }));
@@ -283,7 +289,10 @@ mod tests {
             github_app_slug: None,
             github_webhook_url_base: None,
             workspace_events: tokio::sync::broadcast::channel(100).0,
-            mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+            mesh_status: tokio::sync::watch::channel(
+                mikrom_api::application::vms::MeshStatus::default(),
+            )
+            .0,
             active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
         };
 
@@ -296,7 +305,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "no-targets-app".to_string(),
             git_url: "https://github.com/test/no-targets".to_string(),
-            port: 8080,
+            port: mikrom_api::domain::types::Port::new(8080).unwrap(),
             hostname: Some(hostname.clone()),
             user_id,
             ..App::default()

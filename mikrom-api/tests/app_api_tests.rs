@@ -77,7 +77,7 @@ async fn test_create_app_endpoint() {
     let Some(nats_client) = common::get_nats_client_or_skip().await else {
         return;
     };
-    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
     mock_scheduler
         .expect_update_app_scaling_config()
         .returning(|_| Ok(true));
@@ -107,7 +107,10 @@ async fn test_create_app_endpoint() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -194,7 +197,7 @@ async fn test_create_app_duplicate_name() {
     let Some(nats_client) = common::get_nats_client_or_skip().await else {
         return;
     };
-    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
     mock_scheduler
         .expect_update_app_scaling_config()
         .returning(|_| Ok(true));
@@ -224,7 +227,10 @@ async fn test_create_app_duplicate_name() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -299,7 +305,7 @@ async fn test_list_apps_includes_secret() {
                 id: app_id,
                 name: "test-app".to_string(),
                 git_url: "git".to_string(),
-                port: 8080,
+                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
                 hostname: Some("test-app.apps.mikrom.spluca.org".to_string()),
                 user_id,
                 github_webhook_secret: Some(secret.clone()),
@@ -318,7 +324,7 @@ async fn test_list_apps_includes_secret() {
     let Some(nats_client) = common::get_nats_client_or_skip().await else {
         return;
     };
-    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
     mock_scheduler
         .expect_update_app_scaling_config()
         .returning(|_| Ok(true));
@@ -348,7 +354,10 @@ async fn test_list_apps_includes_secret() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -417,7 +426,7 @@ async fn test_list_apps_reports_idle_when_active_deployment_is_running() {
                 id: app_id,
                 name: app_name.to_string(),
                 git_url: "https://github.com/test/repo".to_string(),
-                port: 8080,
+                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
                 hostname: Some("idle.example.com".to_string()),
                 user_id,
                 github_webhook_secret: Some("secret".to_string()),
@@ -449,10 +458,10 @@ async fn test_list_apps_reports_idle_when_active_deployment_is_running() {
                 job_id: Some("job-1".to_string()),
                 ipv6_address: Some("fd00::1".to_string()),
                 status: "RUNNING".to_string(),
-                vcpus: 1,
-                memory_mib: 256,
+                vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+                memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
                 disk_mib: 1024,
-                port: 8080,
+                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
                 env_vars: serde_json::json!({}),
                 git_commit_hash: None,
                 git_commit_message: None,
@@ -470,7 +479,7 @@ async fn test_list_apps_reports_idle_when_active_deployment_is_running() {
         return;
     };
 
-    let mut mock_scheduler = Arc::new(mikrom_api::scheduler::MockScheduler::new());
+    let mut mock_scheduler = Arc::new(mikrom_api::domain::MockScheduler::new());
     let mock_scheduler_inner = Arc::get_mut(&mut mock_scheduler).unwrap();
     mock_scheduler_inner
         .expect_list_apps()
@@ -509,7 +518,10 @@ async fn test_list_apps_reports_idle_when_active_deployment_is_running() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -578,7 +590,7 @@ async fn test_get_app_secret_endpoint() {
                 id: app_id,
                 name: name.to_string(),
                 git_url: "git".to_string(),
-                port: 8080,
+                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
                 hostname: None,
                 user_id,
                 github_webhook_secret: Some(webhook_secret.to_string()),
@@ -597,7 +609,7 @@ async fn test_get_app_secret_endpoint() {
     let Some(nats_client) = common::get_nats_client_or_skip().await else {
         return;
     };
-    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
     mock_scheduler
         .expect_update_app_scaling_config()
         .returning(|_| Ok(true));
@@ -627,7 +639,10 @@ async fn test_get_app_secret_endpoint() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -660,11 +675,12 @@ async fn test_create_app_with_custom_config() {
     use axum::Json;
     use axum::extract::State;
     use mikrom_api::auth::AuthUser;
-    use mikrom_api::deploy::handlers::{
+    use mikrom_api::domain::MockScheduler;
+    use mikrom_api::domain::Port;
+    use mikrom_api::domain::{MockGithubRepository, MockUserRepository};
+    use mikrom_api::infrastructure::http::handlers::deploy::{
         __create_app_handler_impl as create_app_handler, CreateAppRequest,
     };
-    use mikrom_api::domain::{MockGithubRepository, MockUserRepository};
-    use mikrom_api::scheduler::MockScheduler;
     use mockall::predicate;
 
     let mut mock_app_repo = MockAppRepository::new();
@@ -674,7 +690,7 @@ async fn test_create_app_with_custom_config() {
     let request = CreateAppRequest {
         name: "custom-app".to_string(),
         git_url: "https://github.com/custom/repo".to_string(),
-        port: Some(3000),
+        port: Some(Port::new(3000).unwrap()),
         github_installation_id: None,
         github_repo_id: None,
         github_repo_full_name: None,
@@ -754,7 +770,10 @@ async fn test_create_app_with_custom_config() {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 

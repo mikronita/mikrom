@@ -19,7 +19,7 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> Option<axum::Router> {
     let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".to_string());
     let nats_client = common::get_nats_client_or_skip().await?;
 
-    let mut mock_scheduler = mikrom_api::scheduler::MockScheduler::new();
+    let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
     mock_scheduler
         .expect_delete_all_by_app()
         .returning(|_, _| Ok(true));
@@ -84,7 +84,10 @@ async fn create_app(pool: PgPool, jwt_secret: &str) -> Option<axum::Router> {
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
     Some(mikrom_api::create_app(state))

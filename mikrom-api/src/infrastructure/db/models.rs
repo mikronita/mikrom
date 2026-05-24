@@ -36,7 +36,10 @@ impl From<DbApp> for crate::domain::app::App {
             id: db.id,
             name: db.name,
             git_url: db.git_url,
-            port: db.port as u32,
+            port: db
+                .port
+                .try_into()
+                .expect("Database contains invalid port for App"),
             hostname: db.hostname,
             user_id: db.user_id,
             github_webhook_secret: db.github_webhook_secret,
@@ -95,10 +98,19 @@ impl From<DbDeployment> for crate::domain::app::Deployment {
             job_id: db.job_id,
             ipv6_address: db.ipv6_address,
             status: db.status,
-            vcpus: db.vcpus,
-            memory_mib: db.memory_mib,
+            vcpus: db
+                .vcpus
+                .try_into()
+                .expect("Database contains invalid vcpus for Deployment"),
+            memory_mib: db
+                .memory_mib
+                .try_into()
+                .expect("Database contains invalid memory_mib for Deployment"),
             disk_mib: db.disk_mib,
-            port: db.port as u32,
+            port: db
+                .port
+                .try_into()
+                .expect("Database contains invalid port for Deployment"),
             env_vars: db.env_vars,
             git_commit_hash: db.git_commit_hash,
             git_commit_message: db.git_commit_message,
@@ -130,8 +142,14 @@ impl From<DbSecurityRule> for crate::domain::app::SecurityRule {
             id: db.id,
             app_id: db.app_id,
             protocol: db.protocol,
-            port_start: db.port_start as u32,
-            port_end: db.port_end as u32,
+            port_start: db
+                .port_start
+                .try_into()
+                .expect("Database contains invalid port_start for SecurityRule"),
+            port_end: db
+                .port_end
+                .try_into()
+                .expect("Database contains invalid port_end for SecurityRule"),
             action: db.action,
             priority: db.priority,
             created_at: db.created_at,

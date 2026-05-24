@@ -45,7 +45,7 @@ async fn setup_app() -> (
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
         volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
-        scheduler: Arc::new(mikrom_api::scheduler::MockScheduler::new()),
+        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
         nats: nats_client,
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
@@ -64,7 +64,10 @@ async fn setup_app() -> (
         github_app_slug: None,
         github_webhook_url_base: None,
         workspace_events: workspace_events.clone(),
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 

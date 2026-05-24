@@ -97,7 +97,7 @@ impl AppRepository for PostgresAppRepository {
         )
         .bind(&params.name)
         .bind(&params.git_url)
-        .bind(params.port as i32)
+        .bind(i32::from(params.port))
         .bind(&params.hostname)
         .bind(params.user_id)
         .bind(encrypted_secret)
@@ -210,9 +210,13 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn update_app_port(&self, id: Uuid, port: u32) -> DomainResult<()> {
+    async fn update_app_port(
+        &self,
+        id: Uuid,
+        port: crate::domain::types::Port,
+    ) -> DomainResult<()> {
         sqlx::query("UPDATE apps SET port = $1, updated_at = NOW() WHERE id = $2")
-            .bind(port as i32)
+            .bind(i32::from(port))
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -270,10 +274,10 @@ impl AppRepository for PostgresAppRepository {
         )
         .bind(data.app_id)
         .bind(uid)
-        .bind(data.vcpus)
-        .bind(data.memory_mib)
+        .bind(i32::from(data.vcpus))
+        .bind(i64::from(i32::from(data.memory_mib)))
         .bind(data.disk_mib)
-        .bind(data.port as i32)
+        .bind(i32::from(data.port))
         .bind(env_json)
         .bind(data.trigger_source)
         .bind(data.git_commit_hash)
@@ -309,9 +313,13 @@ impl AppRepository for PostgresAppRepository {
         Ok(())
     }
 
-    async fn update_deployment_port(&self, id: Uuid, port: u32) -> DomainResult<()> {
+    async fn update_deployment_port(
+        &self,
+        id: Uuid,
+        port: crate::domain::types::Port,
+    ) -> DomainResult<()> {
         sqlx::query("UPDATE deployments SET port = $1, updated_at = NOW() WHERE id = $2")
-            .bind(port as i32)
+            .bind(i32::from(port))
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -425,8 +433,8 @@ impl AppRepository for PostgresAppRepository {
         &self,
         app_id: Uuid,
         protocol: String,
-        port_start: u32,
-        port_end: u32,
+        port_start: crate::domain::types::Port,
+        port_end: crate::domain::types::Port,
         action: String,
     ) -> DomainResult<SecurityRule> {
         let db_rule = sqlx::query_as::<_, DbSecurityRule>(
@@ -434,11 +442,12 @@ impl AppRepository for PostgresAppRepository {
         )
         .bind(app_id)
         .bind(protocol)
-        .bind(port_start as i32)
-        .bind(port_end as i32)
+        .bind(i32::from(port_start))
+        .bind(i32::from(port_end))
         .bind(action)
         .fetch_one(&self.pool)
         .await?;
+
         Ok(db_rule.into())
     }
 
@@ -485,7 +494,7 @@ mod tests {
             .create_app(CreateAppParams {
                 name: app_name.to_string(),
                 git_url: git_url.to_string(),
-                port: 80,
+                port: crate::domain::types::Port::new(80).unwrap(),
                 hostname: None,
                 user_id,
                 github_webhook_secret: None,
@@ -514,10 +523,10 @@ mod tests {
             .create_deployment(NewDeployment::from_handler(
                 app.id,
                 user_id.to_string(),
-                1,
-                256,
+                crate::domain::types::CpuCores::new(1).unwrap(),
+                crate::domain::types::MemoryMb::new(256).unwrap(),
                 1024,
-                8080,
+                crate::domain::types::Port::new(8080).unwrap(),
                 std::collections::HashMap::new(),
                 "manual".to_string(),
                 None,
@@ -580,7 +589,7 @@ mod tests {
             .create_app(CreateAppParams {
                 name: name.clone(),
                 git_url: "git".to_string(),
-                port: 8080,
+                port: crate::domain::types::Port::new(8080).unwrap(),
                 hostname: None,
                 user_id,
                 github_webhook_secret: None,

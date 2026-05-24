@@ -1,14 +1,15 @@
 mod common;
 use mikrom_api::AppState;
-use mikrom_api::deploy::worker::{
+use mikrom_api::application::deployment::worker::{
     BuildTask, MockBuilderClient, MockSchedulerClient, poll_and_deploy,
 };
 use mikrom_api::domain::MockAppRepository;
+use mikrom_api::domain::MockScheduler;
+use mikrom_api::domain::Port;
 use mikrom_api::domain::app::{App, Deployment};
 use mikrom_api::domain::github::MockGithubRepository;
 use mikrom_api::domain::user::MockUserRepository;
 use mikrom_api::nats::TypedNatsClient;
-use mikrom_api::scheduler::MockScheduler;
 use mikrom_proto::builder::BuildStatus;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -45,7 +46,10 @@ async fn create_test_state(
         github_app_slug: Some("test-app".to_string()),
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(mikrom_api::vms::MeshStatus::default()).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     })
 }
@@ -68,7 +72,7 @@ async fn test_port_propagation_from_builder_to_deployment() {
         name: "test-app".to_string(),
         git_url: "https://github.com/owner/repo".into(),
         user_id,
-        port: 8080, // Default port
+        port: mikrom_api::domain::types::Port::new(8080).unwrap(), // Default port
         ..Default::default()
     };
 
@@ -77,7 +81,7 @@ async fn test_port_propagation_from_builder_to_deployment() {
         app_id,
         user_id,
         status: "BUILDING".into(),
-        port: 8080,
+        port: mikrom_api::domain::types::Port::new(8080).unwrap(),
         ..Default::default()
     };
 
@@ -97,7 +101,7 @@ async fn test_port_propagation_from_builder_to_deployment() {
         .expect_update_deployment_port()
         .with(
             mockall::predicate::eq(deployment_id),
-            mockall::predicate::eq(80),
+            mockall::predicate::eq(Port::new(80).unwrap()),
         )
         .times(1)
         .returning(|_, _| Ok(()));
@@ -151,10 +155,10 @@ async fn test_port_propagation_from_builder_to_deployment() {
         app_name: app.name.clone(),
         user_id: user_id.to_string(),
         build_id: build_id.clone(),
-        vcpus: 1,
-        memory_mib: 256,
+        vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+        memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
         disk_mib: 1024,
-        port: 8080, // Original port
+        port: mikrom_api::domain::types::Port::new(8080).unwrap(), // Original port
         env: std::collections::HashMap::new(),
         hypervisor: 0,
     };
