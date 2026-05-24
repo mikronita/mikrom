@@ -12,14 +12,15 @@
 )]
 
 use anyhow::Context;
-use base64::Engine as _;
 use futures::stream::TryStreamExt;
-use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
+use netlink_packet_route::route::RouteMessage;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 use tokio::net::lookup_host;
 use tokio::time::sleep;
 use tracing::{debug, info};
+
+mod helpers;
 
 #[neli::neli_enum(serialized_type = "u8")]
 enum WgCmd {
@@ -96,11 +97,6 @@ impl WireGuardManager {
         self
     }
 
-    pub fn with_config_dir(mut self, dir: &str) -> Self {
-        self.config_dir = dir.to_string();
-        self
-    }
-
     pub async fn load_or_generate_key(&self, data_dir: &str) -> anyhow::Result<String> {
         let key_path = std::path::Path::new(data_dir).join("wg.key");
 
@@ -161,12 +157,11 @@ impl WireGuardManager {
             )
         })?;
 
-        let addr = host_ipv6.parse::<Ipv6Addr>()?;
         debug!("Configuring WireGuard device {}", self.interface);
         self.configure_device_with_retry(private_key, self.listen_port, &[], false)
             .await?;
         debug!("Adding IPv6 address {} to {}", host_ipv6, self.interface);
-        self.add_address(&handle, IpAddr::V6(addr), 128)
+        self.add_address(&handle, IpAddr::V6(host_ipv6), 128)
             .await
             .with_context(|| format!("Failed to add IPv6 address to {}", self.interface))?;
         debug!("Bringing WireGuard interface {} up", self.interface);
@@ -181,19 +176,8 @@ impl WireGuardManager {
         Ok(())
     }
 
-    pub fn get_host_ipv6(&self, host_id: &str) -> String {
-        // Use a stable hash function instead of DefaultHasher
-        // DJB2 hash algorithm (simple, stable, fast)
-        let mut hash: u64 = 5381;
-        for c in host_id.bytes() {
-            hash = ((hash << 5).wrapping_add(hash)) ^ (c as u64);
-        }
-
-        // Use 32 bits of the hash to create a 'normal' looking IPv6 (fd00::xxxx:xxxx)
-        let s1 = (hash >> 16) & 0xFFFF;
-        let s2 = hash & 0xFFFF;
-
-        format!("fd00::{:x}:{:x}", s1, s2)
+    pub fn get_host_ipv6(&self, host_id: &str) -> Ipv6Addr {
+        helpers::derive_host_ipv6(host_id)
     }
 
     fn rtnl_handle() -> anyhow::Result<rtnetlink::Handle> {
@@ -263,13 +247,14 @@ impl WireGuardManager {
                         "WireGuard device is not ready yet; retrying configuration"
                     );
                     last_error = Some(err);
-                    let delay_ms = 200 * u64::try_from(attempt).expect("attempt count is positive");
+                    let delay_ms = 200_u64 * u64::try_from(attempt).unwrap_or(0);
                     sleep(Duration::from_millis(delay_ms)).await;
                 },
             }
         }
 
-        Err(last_error.expect("retry loop should have returned or stored an error"))
+        Err(last_error
+            .unwrap_or_else(|| anyhow::anyhow!("WireGuard retry loop exited without an error")))
     }
 
     async fn link_index(&self, handle: &rtnetlink::Handle) -> anyhow::Result<Option<u32>> {
@@ -355,7 +340,7 @@ impl WireGuardManager {
                 .build()?,
         );
 
-        let private_key_bytes = Self::decode_private_key(private_key)?;
+        let private_key_bytes = helpers::decode_private_key(private_key)?;
         attrs.push(
             NlattrBuilder::default()
                 .nla_type(
@@ -448,7 +433,7 @@ impl WireGuardManager {
             .nla_payload(Vec::<u8>::new())
             .build()?;
 
-        let pubkey = Self::normalize_public_key(&peer.wireguard_pubkey)?;
+        let pubkey = helpers::normalize_public_key(&peer.wireguard_pubkey)?;
         peer_attr = peer_attr.nest(
             &NlattrBuilder::default()
                 .nla_type(
@@ -471,7 +456,9 @@ impl WireGuardManager {
                 .build()?,
         )?;
 
-        let endpoint = Self::peer_endpoint_bytes(&peer.endpoint, peer.wireguard_port).await?;
+        let endpoint_port =
+            u16::try_from(peer.wireguard_port).context("Invalid WireGuard peer port")?;
+        let endpoint = Self::peer_endpoint_bytes(&peer.endpoint, endpoint_port).await?;
         peer_attr = peer_attr.nest(
             &NlattrBuilder::default()
                 .nla_type(
@@ -544,8 +531,8 @@ impl WireGuardManager {
             .build()?;
 
         let family = match addr_ip {
-            IpAddr::V4(_) => u16::try_from(libc::AF_INET).expect("AF_INET fits in u16"),
-            IpAddr::V6(_) => u16::try_from(libc::AF_INET6).expect("AF_INET6 fits in u16"),
+            IpAddr::V4(_) => u16::try_from(libc::AF_INET).unwrap_or(0),
+            IpAddr::V6(_) => u16::try_from(libc::AF_INET6).unwrap_or(0),
         };
 
         allowedip = allowedip.nest(
@@ -566,7 +553,7 @@ impl WireGuardManager {
                         .nla_type(WgAllowedIpAttr::Ipaddr)
                         .build()?,
                 )
-                .nla_payload(Self::ip_bytes(addr_ip))
+                .nla_payload(helpers::ip_bytes(addr_ip))
                 .build()?,
         )?;
 
@@ -584,8 +571,7 @@ impl WireGuardManager {
         Ok(allowedip)
     }
 
-    async fn peer_endpoint_bytes(host: &str, port: i32) -> anyhow::Result<Vec<u8>> {
-        let port = u16::try_from(port).context("Invalid WireGuard peer port")?;
+    async fn peer_endpoint_bytes(host: &str, port: u16) -> anyhow::Result<Vec<u8>> {
         let mut addrs = lookup_host((host, port))
             .await
             .with_context(|| format!("Failed to resolve WireGuard peer endpoint {host}:{port}"))?;
@@ -596,18 +582,18 @@ impl WireGuardManager {
         Ok(match socket {
             SocketAddr::V4(addr) => {
                 let sockaddr = libc::sockaddr_in {
-                    sin_family: u16::try_from(libc::AF_INET).expect("AF_INET fits in u16"),
+                    sin_family: u16::try_from(libc::AF_INET).unwrap_or(0),
                     sin_port: addr.port().to_be(),
                     sin_addr: libc::in_addr {
                         s_addr: u32::from(*addr.ip()).to_be(),
                     },
                     sin_zero: [0; 8],
                 };
-                Self::struct_bytes(&sockaddr)
+                helpers::struct_bytes(&sockaddr)
             },
             SocketAddr::V6(addr) => {
                 let sockaddr = libc::sockaddr_in6 {
-                    sin6_family: u16::try_from(libc::AF_INET6).expect("AF_INET6 fits in u16"),
+                    sin6_family: u16::try_from(libc::AF_INET6).unwrap_or(0),
                     sin6_port: addr.port().to_be(),
                     sin6_flowinfo: addr.flowinfo(),
                     sin6_addr: libc::in6_addr {
@@ -615,117 +601,20 @@ impl WireGuardManager {
                     },
                     sin6_scope_id: addr.scope_id(),
                 };
-                Self::struct_bytes(&sockaddr)
+                helpers::struct_bytes(&sockaddr)
             },
         })
     }
 
-    fn decode_private_key(private_key: &str) -> anyhow::Result<Vec<u8>> {
-        let key = base64::engine::general_purpose::STANDARD
-            .decode(private_key.trim())
-            .context("Failed to decode WireGuard private key")?;
-        if key.len() != 32 {
-            return Err(anyhow::anyhow!(
-                "Invalid WireGuard private key length: expected 32 bytes, got {}",
-                key.len()
-            ));
-        }
-        Ok(key)
-    }
-
-    fn normalize_public_key(public_key: &str) -> anyhow::Result<Vec<u8>> {
-        let normalized =
-            if public_key.len() == 64 && public_key.chars().all(|c| c.is_ascii_hexdigit()) {
-                hex::decode(public_key).context("Failed to decode hex WireGuard public key")?
-            } else {
-                base64::engine::general_purpose::STANDARD
-                    .decode(public_key.trim())
-                    .context("Failed to decode WireGuard public key")?
-            };
-
-        if normalized.len() != 32 {
-            return Err(anyhow::anyhow!(
-                "Invalid WireGuard public key length: expected 32 bytes, got {}",
-                normalized.len()
-            ));
-        }
-
-        Ok(normalized)
-    }
-
-    fn ip_bytes(ip: IpAddr) -> Vec<u8> {
-        match ip {
-            IpAddr::V4(addr) => addr.octets().to_vec(),
-            IpAddr::V6(addr) => addr.octets().to_vec(),
-        }
-    }
-
-    fn struct_bytes<T: Sized>(value: &T) -> Vec<u8> {
-        unsafe {
-            std::slice::from_raw_parts(
-                std::ptr::from_ref(value).cast::<u8>(),
-                std::mem::size_of::<T>(),
-            )
-            .to_vec()
-        }
-    }
     pub async fn update_peers(
         &self,
         peers: &[mikrom_proto::scheduler::Peer],
         private_key: &str,
         host_id: &str,
     ) -> anyhow::Result<()> {
-        let mut conf = format!(
-            "[Interface]\nPrivateKey = {}\nListenPort = {}\n\n",
-            private_key, self.listen_port
-        );
-
-        let mut route_targets = Vec::new();
-
-        // Always include our own WireGuard IP in desired routes to prevent it from being deleted
-        // if the kernel/system added it to the routing table we are managing.
         let own_ip = self.get_host_ipv6(host_id);
-        route_targets.push(format!("{}/128", own_ip));
-
-        for peer in peers {
-            if peer.wireguard_pubkey.is_empty() || peer.endpoint.is_empty() {
-                continue;
-            }
-
-            // Normalize public key: if it's hex, convert to base64
-            let pubkey = if peer.wireguard_pubkey.len() == 64
-                && peer.wireguard_pubkey.chars().all(|c| c.is_ascii_hexdigit())
-            {
-                if let Ok(bytes) = hex::decode(&peer.wireguard_pubkey) {
-                    use base64::{Engine as _, engine::general_purpose};
-                    general_purpose::STANDARD.encode(bytes)
-                } else {
-                    peer.wireguard_pubkey.clone()
-                }
-            } else {
-                peer.wireguard_pubkey.clone()
-            };
-
-            // AllowedIPs: Ensure every IP has a prefix length, but don't double-prefix
-            let formatted_allowed_ips = Self::normalize_allowed_ips(&peer.allowed_ips);
-
-            let allowed_ips = if formatted_allowed_ips.is_empty() {
-                "fd00::/8".to_string()
-            } else {
-                formatted_allowed_ips.join(",")
-            };
-
-            route_targets.extend(formatted_allowed_ips.iter().cloned());
-
-            conf.push_str("[Peer]\n");
-            conf.push_str(&format!("PublicKey = {}\n", pubkey));
-            conf.push_str(&format!(
-                "Endpoint = {}:{}\n",
-                peer.endpoint, peer.wireguard_port
-            ));
-            conf.push_str(&format!("AllowedIPs = {}\n", allowed_ips));
-            conf.push_str("PersistentKeepalive = 25\n\n");
-        }
+        let (conf, route_targets) =
+            helpers::build_wireguard_config(private_key, self.listen_port, peers, own_ip);
 
         let conf_path = format!("{}/{}.conf", self.config_dir, self.interface);
 
@@ -747,25 +636,10 @@ impl WireGuardManager {
         Ok(())
     }
 
-    fn normalize_allowed_ips(allowed_ips: &[String]) -> Vec<String> {
-        allowed_ips
-            .iter()
-            .map(|ip| {
-                if ip.contains('/') {
-                    ip.clone()
-                } else if ip.contains(':') {
-                    format!("{}/128", ip)
-                } else {
-                    format!("{}/32", ip)
-                }
-            })
-            .collect()
-    }
-
     async fn sync_routes(&self, route_targets: &[String]) -> anyhow::Result<()> {
         let desired_keys: std::collections::HashSet<(IpAddr, u8)> = route_targets
             .iter()
-            .filter_map(|target| Self::parse_route_target(target).ok())
+            .filter_map(|target| helpers::parse_route_target(target).ok())
             .collect();
 
         let handle = Self::rtnl_handle()?;
@@ -778,7 +652,7 @@ impl WireGuardManager {
 
         let current_routes = Self::current_routes_for_interface(&handle, index).await?;
         for route in current_routes {
-            if let Some(key) = Self::route_message_key(&route) {
+            if let Some(key) = helpers::route_message_key(&route) {
                 if !desired_keys.contains(&key) {
                     let _ = handle.route().del(route).execute().await;
                 }
@@ -826,30 +700,6 @@ impl WireGuardManager {
         Ok(())
     }
 
-    fn route_message_key(route: &RouteMessage) -> Option<(IpAddr, u8)> {
-        let prefix = route.header.destination_prefix_length;
-        route.attributes.iter().find_map(|attr| match attr {
-            RouteAttribute::Destination(RouteAddress::Inet(v4)) => Some((IpAddr::V4(*v4), prefix)),
-            RouteAttribute::Destination(RouteAddress::Inet6(v6)) => Some((IpAddr::V6(*v6), prefix)),
-            _ => None,
-        })
-    }
-
-    fn parse_route_target(target: &str) -> anyhow::Result<(IpAddr, u8)> {
-        if let Some((addr, prefix)) = target.split_once('/') {
-            let prefix = prefix.parse::<u8>()?;
-            if addr.contains(':') {
-                Ok((IpAddr::V6(addr.parse::<Ipv6Addr>()?), prefix))
-            } else {
-                Ok((IpAddr::V4(addr.parse::<Ipv4Addr>()?), prefix))
-            }
-        } else if target.contains(':') {
-            Ok((IpAddr::V6(target.parse::<Ipv6Addr>()?), 128))
-        } else {
-            Ok((IpAddr::V4(target.parse::<Ipv4Addr>()?), 32))
-        }
-    }
-
     async fn current_routes_for_interface(
         handle: &rtnetlink::Handle,
         index: u32,
@@ -865,7 +715,7 @@ impl WireGuardManager {
             .chain(routes_v6)
             .filter(|route| {
                 route.attributes.iter().any(|attr| {
-                    matches!(attr, RouteAttribute::Oif(route_index) if *route_index == index)
+                    matches!(attr, netlink_packet_route::route::RouteAttribute::Oif(route_index) if *route_index == index)
                 })
             })
             .collect())
@@ -875,6 +725,7 @@ impl WireGuardManager {
 #[cfg(test)]
 mod tests {
     use super::WireGuardManager;
+    use super::helpers;
     use super::is_missing_device_error;
     use std::io;
 
@@ -887,7 +738,7 @@ mod tests {
             "192.168.122.11/32".to_string(),
         ];
 
-        let normalized = WireGuardManager::normalize_allowed_ips(&ips);
+        let normalized = helpers::normalize_allowed_ips(&ips);
 
         assert_eq!(
             normalized,
@@ -910,5 +761,14 @@ mod tests {
     fn unrelated_errors_are_not_treated_as_absent() {
         let err = io::Error::from_raw_os_error(2);
         assert!(!is_missing_device_error(&err));
+    }
+
+    #[test]
+    fn host_ipv6_derivation_is_stable() {
+        let manager = WireGuardManager::new("wg0");
+        assert_eq!(
+            manager.get_host_ipv6("router-1").to_string(),
+            manager.get_host_ipv6("router-1").to_string()
+        );
     }
 }

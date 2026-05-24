@@ -1,6 +1,6 @@
 [package]
 name = "mikrom-router"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 
 [dependencies]
@@ -8,12 +8,17 @@ anyhow.workspace = true
 async-nats.workspace = true
 async-trait = "0.1.89"
 chrono = "0.4.44"
+dotenvy = "0.15"
 futures-util = "0.3.32"
 hostname = "0.4.2"
 http = "1.1"
+envy.workspace = true
+mikrom-api = { path = "../mikrom-api", optional = true }
 mikrom-proto = { version = "0.3.0", path = "../mikrom-proto" }
+mikrom-scheduler = { path = "../mikrom-scheduler", optional = true }
 openssl = "0.10.79"
 openssl-sys = "0.9.115"
+rustls = { version = "0.23", features = ["ring"], optional = true }
 opentelemetry = "0.27"
 opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
@@ -42,19 +47,24 @@ thiserror = "2"
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
 rand = "0.8"
 hex = "0.4.3"
+tower = { version = "0.5", features = ["util"], optional = true }
+uuid = { version = "1", features = ["v4", "serde"], optional = true }
+
+[features]
+default = []
+integration-tests = []
+scale-to-zero-e2e = [
+    "dep:mikrom-api",
+    "dep:mikrom-scheduler",
+    "dep:rustls",
+    "dep:tower",
+    "dep:uuid",
+]
 
 [lints]
 workspace = true
 
 [dev-dependencies]
+axum = "0.8.6"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 tempfile = "3.10"
-reqwest = { version = "0.12", features = ["json"] }
-axum = "0.8"
-tokio = { version = "1.37", features = ["full"] }
-
-tokio-test = "0.4.5"
-mikrom-api = { path = "../mikrom-api", features = ["test-utils"] }
-mikrom-scheduler = { path = "../mikrom-scheduler", features = ["test-utils"] }
-tower = { version = "0.5", features = ["util"] }
-uuid = { version = "1", features = ["v4"] }
-rustls = { version = "0.23", features = ["ring"] }

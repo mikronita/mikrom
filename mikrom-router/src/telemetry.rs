@@ -1,6 +1,8 @@
 #![allow(clippy::missing_const_for_fn)]
 
 use crate::proxy::RouterMetricsCounters;
+use crate::runtime;
+use crate::state::State;
 use async_nats::Client;
 use async_trait::async_trait;
 use mikrom_proto::router::RouterMetrics;
@@ -9,6 +11,7 @@ use pingora::services::background::BackgroundService;
 use prost::Message;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use tokio::sync::RwLock;
 use tokio::time::{Duration, interval};
 use tracing::{error, info};
 
@@ -31,6 +34,7 @@ pub struct TelemetryLoop {
     nats_use_tls: bool,
     nats_certs_dir: Option<String>,
     metrics_counters: Arc<RouterMetricsCounters>,
+    state: Arc<RwLock<State>>,
     router_id: String,
 }
 
@@ -40,6 +44,7 @@ impl TelemetryLoop {
         nats_use_tls: bool,
         nats_certs_dir: Option<String>,
         metrics_counters: Arc<RouterMetricsCounters>,
+        state: Arc<RwLock<State>>,
         router_id: String,
     ) -> Self {
         Self {
@@ -47,6 +52,7 @@ impl TelemetryLoop {
             nats_use_tls,
             nats_certs_dir,
             metrics_counters,
+            state,
             router_id,
         }
     }
@@ -55,26 +61,21 @@ impl TelemetryLoop {
 #[async_trait]
 impl BackgroundService for TelemetryLoop {
     async fn start(&self, mut shutdown: ShutdownWatch) {
-        crate::init_tracing_once(&self.router_id);
-        // Connect to NATS
-        let nats = loop {
-            match crate::nats::connect_nats(
-                &self.nats_url,
-                self.nats_use_tls,
-                self.nats_certs_dir.as_deref(),
-            )
-            .await
-            {
-                Ok(client) => {
-                    info!("Telemetry Loop: Connected to NATS.");
-                    break client;
-                },
-                Err(e) => {
-                    error!("Telemetry Loop: Failed to connect to NATS: {e}. Retrying in 5s...");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                },
-            }
-        };
+        runtime::init_tracing_once(&self.router_id);
+        let nats = runtime::connect_with_backoff(
+            "Telemetry Loop NATS",
+            std::time::Duration::from_secs(5),
+            || async {
+                crate::nats::connect_nats(
+                    &self.nats_url,
+                    self.nats_use_tls,
+                    self.nats_certs_dir.as_deref(),
+                )
+                .await
+            },
+        )
+        .await;
+        info!("Telemetry Loop: Connected to NATS.");
 
         let mut interval = interval(Duration::from_secs(TELEMETRY_INTERVAL_SECS));
         info!(
@@ -85,6 +86,7 @@ impl BackgroundService for TelemetryLoop {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
+                    let state = self.state.read().await;
                     let requests_total = self.metrics_counters.requests_total.load(Ordering::Relaxed);
                     #[allow(clippy::cast_precision_loss)]
                     let latency_avg_ms = if requests_total > 0 {
@@ -92,6 +94,20 @@ impl BackgroundService for TelemetryLoop {
                     } else {
                         0.0
                     };
+
+                    info!(
+                        router_id = %self.router_id,
+                        routes = state.routes.len(),
+                        certificates = state.certificates.len(),
+                        acme_tokens = state.acme_tokens.len(),
+                        requests_total,
+                        responses_2xx = self.metrics_counters.responses_2xx.load(Ordering::Relaxed),
+                        responses_3xx = self.metrics_counters.responses_3xx.load(Ordering::Relaxed),
+                        responses_4xx = self.metrics_counters.responses_4xx.load(Ordering::Relaxed),
+                        responses_5xx = self.metrics_counters.responses_5xx.load(Ordering::Relaxed),
+                        latency_avg_ms = f64::from(latency_avg_ms),
+                        "Telemetry snapshot"
+                    );
 
                     let metrics = RouterMetrics {
                         router_id: self.router_id.clone(),
@@ -124,51 +140,5 @@ impl BackgroundService for TelemetryLoop {
                 }
             }
         }
-    }
-}
-
-pub async fn start_telemetry_loop(
-    nats: Client,
-    metrics_counters: Arc<RouterMetricsCounters>,
-    router_id: String,
-) {
-    let mut interval = interval(Duration::from_secs(TELEMETRY_INTERVAL_SECS));
-    info!("Starting telemetry loop for router: {router_id}");
-
-    loop {
-        interval.tick().await;
-
-        let requests_total = metrics_counters.requests_total.load(Ordering::Relaxed);
-        #[allow(clippy::cast_precision_loss)]
-        let latency_avg_ms = if requests_total > 0 {
-            metrics_counters.latency_sum_ms.load(Ordering::Relaxed) as f32 / requests_total as f32
-        } else {
-            0.0
-        };
-
-        let metrics = RouterMetrics {
-            router_id: router_id.clone(),
-            requests_total,
-            responses_2xx: metrics_counters.responses_2xx.load(Ordering::Relaxed),
-            responses_3xx: metrics_counters.responses_3xx.load(Ordering::Relaxed),
-            responses_4xx: metrics_counters.responses_4xx.load(Ordering::Relaxed),
-            responses_5xx: metrics_counters.responses_5xx.load(Ordering::Relaxed),
-            latency_avg_ms: f64::from(latency_avg_ms),
-            timestamp: chrono::Utc::now().timestamp(),
-        };
-
-        let mut buf = Vec::new();
-        if let Err(e) = metrics.encode(&mut buf) {
-            error!("Failed to encode telemetry: {e}");
-            continue;
-        }
-
-        publish_best_effort(
-            &nats,
-            crate::subjects::router_metrics(&router_id),
-            buf,
-            "telemetry-loop",
-        )
-        .await;
     }
 }

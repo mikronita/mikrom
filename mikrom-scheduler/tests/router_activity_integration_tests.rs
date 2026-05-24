@@ -1,3 +1,5 @@
+#![cfg(feature = "scheduler-e2e")]
+
 use async_trait::async_trait;
 use mikrom_proto::router::RouterTrafficEvent;
 use mikrom_proto::subjects;

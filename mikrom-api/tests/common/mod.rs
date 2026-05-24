@@ -1,6 +1,8 @@
 use async_nats::Client;
 use std::env;
 
+pub mod integration;
+
 /// Returns a connected NATS client for testing, or `None` when NATS is unavailable.
 #[allow(dead_code)]
 pub async fn get_nats_client_or_skip() -> Option<Client> {

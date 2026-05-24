@@ -9,68 +9,95 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 struct SerializableState {
     pub routes: HashMap<String, Vec<String>>, // host -> targets
     pub acme_tokens: HashMap<String, String>,
     pub certificates: HashMap<String, Certificate>,
+    #[serde(default)]
+    pub route_versions: HashMap<String, i64>,
+    #[serde(default)]
+    pub acme_versions: HashMap<String, i64>,
+    #[serde(default)]
+    pub certificate_versions: HashMap<String, i64>,
+}
+
+impl From<&State> for SerializableState {
+    fn from(state: &State) -> Self {
+        Self::from_snapshot(state, &StateVersions::default())
+    }
+}
+
+impl SerializableState {
+    fn from_snapshot(state: &State, versions: &StateVersions) -> Self {
+        Self {
+            routes: state
+                .routes
+                .iter()
+                .map(|(host, route)| (host.clone(), route.targets.clone()))
+                .collect(),
+            acme_tokens: state.acme_tokens.clone(),
+            certificates: state.certificates.clone(),
+            route_versions: versions.route_versions.clone(),
+            acme_versions: versions.acme_versions.clone(),
+            certificate_versions: versions.certificate_versions.clone(),
+        }
+    }
+
+    fn into_snapshot(self) -> (State, StateVersions) {
+        let mut state = State::default();
+
+        for (host, targets) in self.routes {
+            if let Ok(lb) = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice()) {
+                state.routes.insert(
+                    host.clone(),
+                    Route {
+                        host,
+                        targets,
+                        lb: Arc::new(lb),
+                        use_tls: false,
+                        tls_alternative_cn: None,
+                    },
+                );
+            }
+        }
+
+        state.acme_tokens = self.acme_tokens;
+        state.certificates = self.certificates;
+        StateManager::prepare_certificates(&mut state.certificates);
+
+        (
+            state,
+            StateVersions {
+                route_versions: self.route_versions,
+                acme_versions: self.acme_versions,
+                certificate_versions: self.certificate_versions,
+            },
+        )
+    }
+}
+
+#[derive(Clone, Default)]
+#[allow(clippy::struct_field_names)]
+pub(crate) struct StateVersions {
+    pub(crate) route_versions: HashMap<String, i64>,
+    pub(crate) acme_versions: HashMap<String, i64>,
+    pub(crate) certificate_versions: HashMap<String, i64>,
 }
 
 pub struct StateManager {
     state: Arc<RwLock<State>>,
+    versions: Arc<RwLock<StateVersions>>,
     cache_path: PathBuf,
 }
 
 impl StateManager {
     pub fn new(cache_path: PathBuf) -> Result<Self> {
-        let mut initial_state = State::default();
-
-        if cache_path.exists() {
-            info!("Loading state from cache: {:?}", cache_path);
-            match std::fs::read_to_string(&cache_path) {
-                Ok(content) => match serde_json::from_str::<SerializableState>(&content) {
-                    Ok(s_state) => {
-                        for (host, targets) in s_state.routes {
-                            if let Ok(lb) =
-                                LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice())
-                            {
-                                initial_state.routes.insert(
-                                    host.clone(),
-                                    Route {
-                                        host,
-                                        targets,
-                                        lb: Arc::new(lb),
-                                        use_tls: false,
-                                        tls_alternative_cn: None,
-                                    },
-                                );
-                            }
-                        }
-                        initial_state.acme_tokens = s_state.acme_tokens;
-                        initial_state.certificates = s_state.certificates;
-
-                        // Pre-parse certificates
-                        for cert in initial_state.certificates.values_mut() {
-                            use openssl::pkey::PKey;
-                            use openssl::x509::X509;
-
-                            if let Ok(chain) = X509::stack_from_pem(cert.cert_pem.as_bytes()) {
-                                cert.parsed_chain = chain;
-                            }
-                            if let Ok(pkey) = PKey::private_key_from_pem(cert.key_pem.as_bytes()) {
-                                cert.parsed_key = Some(pkey);
-                            }
-                        }
-                        info!("Successfully restored state from cache.");
-                    },
-                    Err(e) => warn!("Failed to parse state cache: {e}"),
-                },
-                Err(e) => warn!("Failed to read state cache: {e}"),
-            }
-        }
+        let (initial_state, initial_versions) = Self::load_cached_state(&cache_path);
 
         Ok(Self {
             state: Arc::new(RwLock::new(initial_state)),
+            versions: Arc::new(RwLock::new(initial_versions)),
             cache_path,
         })
     }
@@ -80,47 +107,84 @@ impl StateManager {
         self.state.clone()
     }
 
-    pub async fn update_state(&self, mut new_state: State) -> Result<()> {
-        // Pre-parse certificates for performance
-        for cert in new_state.certificates.values_mut() {
-            use openssl::pkey::PKey;
-            use openssl::x509::X509;
+    pub async fn update_state(&self, new_state: State) -> Result<()> {
+        self.replace_state(new_state, StateVersions::default())
+            .await
+    }
 
-            if let Ok(chain) = X509::stack_from_pem(cert.cert_pem.as_bytes()) {
-                cert.parsed_chain = chain;
-            }
-            if let Ok(pkey) = PKey::private_key_from_pem(cert.key_pem.as_bytes()) {
-                cert.parsed_key = Some(pkey);
-            }
+    pub(crate) async fn replace_state(
+        &self,
+        mut new_state: State,
+        versions: StateVersions,
+    ) -> Result<()> {
+        Self::prepare_certificates(&mut new_state.certificates);
+
+        let state_clone = new_state.clone();
+        let versions_clone = versions.clone();
+
+        {
+            let mut state = self.state.write().await;
+            *state = new_state;
+        }
+        {
+            let mut current_versions = self.versions.write().await;
+            *current_versions = versions;
         }
 
-        // Persist to disk
-        self.persist_state(&new_state).await;
-
-        let mut state = self.state.write().await;
-        *state = new_state;
-        drop(state);
+        self.persist_snapshot(&state_clone, &versions_clone).await;
         Ok(())
     }
 
-    pub async fn add_acme_token(&self, token: String, key_auth: String) -> Result<()> {
-        let mut state = self.state.write().await;
-        state.acme_tokens.insert(token, key_auth);
-        let state_clone = state.clone();
-        drop(state);
+    pub async fn add_acme_token(
+        &self,
+        token: String,
+        key_auth: String,
+        timestamp: i64,
+    ) -> Result<bool> {
+        if !self.should_apply_acme(&token, timestamp).await {
+            return Ok(false);
+        }
 
-        self.persist_state(&state_clone).await;
-        Ok(())
+        let (state_clone, versions_clone) = {
+            let mut state = self.state.write().await;
+            state.acme_tokens.insert(token.clone(), key_auth);
+            let state_clone = state.clone();
+            drop(state);
+
+            let mut versions = self.versions.write().await;
+            versions.acme_versions.insert(token, timestamp);
+            let versions_clone = versions.clone();
+            drop(versions);
+
+            (state_clone, versions_clone)
+        };
+
+        self.persist_snapshot(&state_clone, &versions_clone).await;
+        Ok(true)
     }
 
-    pub async fn remove_acme_token(&self, token: &str) -> Result<()> {
-        let mut state = self.state.write().await;
-        state.acme_tokens.remove(token);
-        let state_clone = state.clone();
-        drop(state);
+    pub async fn remove_acme_token(&self, token: &str, timestamp: i64) -> Result<bool> {
+        if !self.should_apply_acme(token, timestamp).await {
+            return Ok(false);
+        }
 
-        self.persist_state(&state_clone).await;
-        Ok(())
+        let token = token.to_string();
+        let (state_clone, versions_clone) = {
+            let mut state = self.state.write().await;
+            state.acme_tokens.remove(&token);
+            let state_clone = state.clone();
+            drop(state);
+
+            let mut versions = self.versions.write().await;
+            versions.acme_versions.insert(token, timestamp);
+            let versions_clone = versions.clone();
+            drop(versions);
+
+            (state_clone, versions_clone)
+        };
+
+        self.persist_snapshot(&state_clone, &versions_clone).await;
+        Ok(true)
     }
 
     pub async fn add_certificate(
@@ -128,9 +192,11 @@ impl StateManager {
         domain: String,
         cert_pem: String,
         key_pem: String,
-    ) -> Result<()> {
-        use openssl::pkey::PKey;
-        use openssl::x509::X509;
+        timestamp: i64,
+    ) -> Result<bool> {
+        if !self.should_apply_certificate(&domain, timestamp).await {
+            return Ok(false);
+        }
 
         let mut cert = Certificate {
             cert_pem,
@@ -139,33 +205,56 @@ impl StateManager {
             parsed_key: None,
         };
 
-        // Pre-parse certificate
-        if let Ok(chain) = X509::stack_from_pem(cert.cert_pem.as_bytes()) {
-            cert.parsed_chain = chain;
-        }
-        if let Ok(pkey) = PKey::private_key_from_pem(cert.key_pem.as_bytes()) {
-            cert.parsed_key = Some(pkey);
-        }
+        Self::prepare_certificate(&mut cert);
 
-        let mut state = self.state.write().await;
-        state.certificates.insert(domain, cert);
-        let state_clone = state.clone();
-        drop(state);
-
-        self.persist_state(&state_clone).await;
-        Ok(())
-    }
-
-    pub async fn update_route_targets(&self, host: String, targets: Vec<String>) -> Result<()> {
-        use pingora::lb::health_check::TcpHealthCheck;
-
-        if targets.is_empty() {
+        let (state_clone, versions_clone) = {
             let mut state = self.state.write().await;
-            state.routes.remove(&host);
+            state.certificates.insert(domain.clone(), cert);
             let state_clone = state.clone();
             drop(state);
-            self.persist_state(&state_clone).await;
-            return Ok(());
+
+            let mut versions = self.versions.write().await;
+            versions.certificate_versions.insert(domain, timestamp);
+            let versions_clone = versions.clone();
+            drop(versions);
+
+            (state_clone, versions_clone)
+        };
+
+        self.persist_snapshot(&state_clone, &versions_clone).await;
+        Ok(true)
+    }
+
+    pub async fn update_route_targets(
+        &self,
+        host: String,
+        targets: Vec<String>,
+        timestamp: i64,
+    ) -> Result<bool> {
+        use pingora::lb::health_check::TcpHealthCheck;
+
+        if !self.should_apply_route(&host, timestamp).await {
+            return Ok(false);
+        }
+
+        if targets.is_empty() {
+            let host_key = host.clone();
+            let (state_clone, versions_clone) = {
+                let mut state = self.state.write().await;
+                state.routes.remove(&host_key);
+                let state_clone = state.clone();
+                drop(state);
+
+                let mut versions = self.versions.write().await;
+                versions.route_versions.insert(host_key, timestamp);
+                let versions_clone = versions.clone();
+                drop(versions);
+
+                (state_clone, versions_clone)
+            };
+
+            self.persist_snapshot(&state_clone, &versions_clone).await;
+            return Ok(true);
         }
 
         let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice())?;
@@ -177,42 +266,42 @@ impl StateManager {
         lb.set_health_check(Box::new(hc));
         lb.health_check_frequency = Some(std::time::Duration::from_millis(250));
 
-        let mut state = self.state.write().await;
-        // Reuse use_tls and alternative_cn if they exist
-        let (use_tls, alternative_cn) = state
-            .routes
-            .get(&host)
-            .map(|r| (r.use_tls, r.tls_alternative_cn.clone()))
-            .unwrap_or((false, None));
+        let host_key = host.clone();
+        let (state_clone, versions_clone) = {
+            let mut state = self.state.write().await;
+            let (use_tls, alternative_cn) = state
+                .routes
+                .get(&host_key)
+                .map_or((false, None), |r| (r.use_tls, r.tls_alternative_cn.clone()));
 
-        state.routes.insert(
-            host.clone(),
-            Route {
-                host,
-                targets,
-                lb: Arc::new(lb),
-                use_tls,
-                tls_alternative_cn: alternative_cn,
-            },
-        );
+            state.routes.insert(
+                host_key.clone(),
+                Route {
+                    host,
+                    targets,
+                    lb: Arc::new(lb),
+                    use_tls,
+                    tls_alternative_cn: alternative_cn,
+                },
+            );
 
-        let state_clone = state.clone();
-        drop(state);
+            let state_clone = state.clone();
+            drop(state);
 
-        self.persist_state(&state_clone).await;
-        Ok(())
+            let mut versions = self.versions.write().await;
+            versions.route_versions.insert(host_key, timestamp);
+            let versions_clone = versions.clone();
+            drop(versions);
+
+            (state_clone, versions_clone)
+        };
+
+        self.persist_snapshot(&state_clone, &versions_clone).await;
+        Ok(true)
     }
 
-    async fn persist_state(&self, state: &State) {
-        let s_state = SerializableState {
-            routes: state
-                .routes
-                .iter()
-                .map(|(k, v)| (k.clone(), v.targets.clone()))
-                .collect(),
-            acme_tokens: state.acme_tokens.clone(),
-            certificates: state.certificates.clone(),
-        };
+    async fn persist_snapshot(&self, state: &State, versions: &StateVersions) {
+        let s_state = SerializableState::from_snapshot(state, versions);
 
         match serde_json::to_string_pretty(&s_state) {
             Ok(json) => {
@@ -222,6 +311,88 @@ impl StateManager {
             },
             Err(e) => error!("Failed to serialize state for cache: {e}"),
         }
+    }
+
+    fn load_cached_state(cache_path: &PathBuf) -> (State, StateVersions) {
+        let initial_state = State::default();
+        let initial_versions = StateVersions::default();
+
+        if !cache_path.exists() {
+            return (initial_state, initial_versions);
+        }
+
+        info!("Loading state from cache: {:?}", cache_path);
+        let content = match std::fs::read_to_string(cache_path) {
+            Ok(content) => content,
+            Err(e) => {
+                warn!("Failed to read state cache: {e}");
+                return (initial_state, initial_versions);
+            },
+        };
+
+        let s_state = match serde_json::from_str::<SerializableState>(&content) {
+            Ok(s_state) => s_state,
+            Err(e) => {
+                warn!("Failed to parse state cache: {e}");
+                return (initial_state, initial_versions);
+            },
+        };
+
+        let (state, versions) = s_state.into_snapshot();
+
+        info!(
+            routes = state.routes.len(),
+            acme_tokens = state.acme_tokens.len(),
+            certificates = state.certificates.len(),
+            "Successfully restored state from cache"
+        );
+        (state, versions)
+    }
+
+    async fn should_apply_route(&self, host: &str, timestamp: i64) -> bool {
+        self.should_apply_timestamp(
+            |versions| versions.route_versions.get(host).copied(),
+            timestamp,
+        )
+        .await
+    }
+
+    async fn should_apply_acme(&self, token: &str, timestamp: i64) -> bool {
+        self.should_apply_timestamp(
+            |versions| versions.acme_versions.get(token).copied(),
+            timestamp,
+        )
+        .await
+    }
+
+    async fn should_apply_certificate(&self, domain: &str, timestamp: i64) -> bool {
+        self.should_apply_timestamp(
+            |versions| versions.certificate_versions.get(domain).copied(),
+            timestamp,
+        )
+        .await
+    }
+
+    async fn should_apply_timestamp<F>(&self, current_version: F, timestamp: i64) -> bool
+    where
+        F: FnOnce(&StateVersions) -> Option<i64>,
+    {
+        let versions = self.versions.read().await;
+        !matches!(current_version(&versions), Some(current) if timestamp <= current)
+    }
+
+    fn prepare_certificates(certificates: &mut HashMap<String, Certificate>) {
+        for cert in certificates.values_mut() {
+            Self::prepare_certificate(cert);
+        }
+    }
+
+    fn prepare_certificate(cert: &mut Certificate) {
+        use openssl::pkey::PKey;
+        use openssl::x509::X509;
+
+        cert.parsed_chain = X509::stack_from_pem(cert.cert_pem.as_bytes()).unwrap_or_default();
+        cert.parsed_key = PKey::private_key_from_pem(cert.key_pem.as_bytes()).ok();
     }
 }
 
@@ -284,5 +455,110 @@ mod tests {
         assert!(state.routes.is_empty());
         assert!(state.acme_tokens.is_empty());
         drop(state);
+    }
+
+    #[test]
+    fn serializable_state_round_trips_routes_and_certificates() {
+        let state = State {
+            routes: {
+                let mut routes = HashMap::new();
+                let targets = vec!["127.0.0.1:8080".to_string()];
+                let lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice()).unwrap();
+                routes.insert(
+                    "roundtrip.example.com".to_string(),
+                    Route {
+                        host: "roundtrip.example.com".to_string(),
+                        targets,
+                        lb: Arc::new(lb),
+                        use_tls: true,
+                        tls_alternative_cn: Some("alt.example.com".to_string()),
+                    },
+                );
+                routes
+            },
+            acme_tokens: {
+                let mut tokens = HashMap::new();
+                tokens.insert("token".to_string(), "key-auth".to_string());
+                tokens
+            },
+            certificates: {
+                let mut certs = HashMap::new();
+                certs.insert(
+                    "roundtrip.example.com".to_string(),
+                    Certificate {
+                        cert_pem: "invalid-cert".to_string(),
+                        key_pem: "invalid-key".to_string(),
+                        parsed_chain: Vec::new(),
+                        parsed_key: None,
+                    },
+                );
+                certs
+            },
+        };
+
+        let serialized = serde_json::to_string(&SerializableState::from(&state)).unwrap();
+        let loaded = serde_json::from_str::<SerializableState>(&serialized).unwrap();
+
+        assert_eq!(
+            loaded.routes["roundtrip.example.com"],
+            vec!["127.0.0.1:8080"]
+        );
+        assert_eq!(loaded.acme_tokens["token"], "key-auth");
+        assert_eq!(
+            loaded.certificates["roundtrip.example.com"].cert_pem,
+            "invalid-cert"
+        );
+    }
+
+    #[test]
+    fn prepare_certificate_keeps_invalid_pem_non_fatal() {
+        let mut cert = Certificate {
+            cert_pem: "not-a-cert".to_string(),
+            key_pem: "not-a-key".to_string(),
+            parsed_chain: Vec::new(),
+            parsed_key: None,
+        };
+
+        StateManager::prepare_certificate(&mut cert);
+
+        assert!(cert.parsed_chain.is_empty());
+        assert!(cert.parsed_key.is_none());
+    }
+
+    #[tokio::test]
+    async fn stale_route_update_is_ignored() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let cache_path = temp_file.path().to_path_buf();
+        let manager = StateManager::new(cache_path).unwrap();
+
+        let applied = manager
+            .update_route_targets(
+                "router.example.com".to_string(),
+                vec!["127.0.0.1:8080".to_string()],
+                10,
+            )
+            .await
+            .unwrap();
+        assert!(applied);
+
+        let ignored = manager
+            .update_route_targets(
+                "router.example.com".to_string(),
+                vec!["127.0.0.1:9090".to_string()],
+                5,
+            )
+            .await
+            .unwrap();
+        assert!(!ignored);
+
+        {
+            let state = manager.get_state();
+            let state = state.read().await;
+            assert_eq!(
+                state.routes["router.example.com"].targets,
+                vec!["127.0.0.1:8080"]
+            );
+            drop(state);
+        }
     }
 }
