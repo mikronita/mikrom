@@ -4,6 +4,7 @@ use crate::application::deployment::{AppScaleState, resolve_app_scale_state};
 use crate::application::vms::{
     LiveDeploymentEventParams, LiveDeploymentInfo, LiveDeploymentStatus, MeshStatus, VmService,
 };
+use crate::domain::Deployment;
 use crate::domain::types::Port;
 use crate::error::{ApiError, ApiResult, SseResponse};
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
@@ -142,6 +143,78 @@ async fn resolve_app_scale_state_by_id(state: &crate::AppState, app_id: &str) ->
     }
 }
 
+struct CachedWatchDeployments {
+    app_name: String,
+    scale_state: AppScaleState,
+    deployments: std::collections::HashMap<String, Deployment>,
+}
+
+async fn load_watch_deployments_cache(
+    state: &crate::AppState,
+    auth_user_uuid: Option<uuid::Uuid>,
+) -> std::collections::HashMap<String, CachedWatchDeployments> {
+    let mut cache = std::collections::HashMap::new();
+    let Some(auth_user_uuid) = auth_user_uuid else {
+        return cache;
+    };
+
+    let apps = match state.app_repo.list_apps_by_user(Some(auth_user_uuid)).await {
+        Ok(apps) => apps,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "Failed to refresh deployment watch cache apps"
+            );
+            return cache;
+        },
+    };
+
+    let deployments = match state
+        .app_repo
+        .list_deployments_by_user(Some(auth_user_uuid))
+        .await
+    {
+        Ok(deployments) => deployments,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "Failed to refresh deployment watch cache deployments"
+            );
+            return cache;
+        },
+    };
+
+    let mut deployments_by_app = std::collections::HashMap::new();
+    for dep in deployments {
+        deployments_by_app
+            .entry(dep.app_id.to_string())
+            .or_insert_with(Vec::new)
+            .push(dep);
+    }
+
+    for app in apps {
+        let scale_state = resolve_app_scale_state(state, &app).await;
+        let app_id = app.id.to_string();
+        let app_name = app.name.clone();
+        let app_deployments = deployments_by_app.remove(&app_id).unwrap_or_default();
+        let mut deployment_map = std::collections::HashMap::new();
+        for dep in app_deployments {
+            deployment_map.insert(dep.id.to_string(), dep);
+        }
+
+        cache.insert(
+            app_id,
+            CachedWatchDeployments {
+                app_name,
+                scale_state,
+                deployments: deployment_map,
+            },
+        );
+    }
+
+    cache
+}
+
 #[rovo::rovo]
 #[tracing::instrument(skip(state, auth))]
 pub async fn list_active_deployments(
@@ -245,6 +318,7 @@ pub async fn watch_deployments(
         let mut nats_stream = nats_sub;
         let mut local_stream = tokio_stream::wrappers::BroadcastStream::new(local_rx);
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
+        let mut deployment_cache = load_watch_deployments_cache(&state_clone, auth_user_uuid).await;
 
         use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
 
@@ -263,47 +337,43 @@ pub async fn watch_deployments(
             .map(|response| response.apps)
             .unwrap_or_default();
 
-        let mut user_deployments = std::collections::HashMap::new();
-        if let Ok(deps) = state_clone.app_repo.list_deployments_by_user(auth_user_uuid).await {
-            for dep in deps {
-                user_deployments.insert(dep.id.to_string(), dep);
-            }
-        }
-
         for job in scheduler_apps {
             if crate::infrastructure::scheduler::status_name(job.status) != "RUNNING" {
                 continue;
             }
 
-            let dep = user_deployments.get(&job.deployment_id);
-            let scale_state = resolve_app_scale_state_by_id(&state_clone, &job.app_id).await;
-            let event = VmService::build_live_deployment_event(LiveDeploymentEventParams {
-                app_id: job.app_id,
-                app_name: job.app_name,
-                deployment: dep,
-                job_id: job.job_id,
-                image: job.image,
-                status: "RUNNING".to_string(),
-                host_id: job.host_id,
-                vm_id: job.vm_id,
-                ipv6_address: if job.ipv6_address.is_empty() {
-                    None
-                } else {
-                    Some(job.ipv6_address)
-                },
-                cpu_usage: job.cpu_usage,
-                ram_used_bytes: job.ram_used_bytes,
-                tx_bytes: job.tx_bytes,
-                rx_bytes: job.rx_bytes,
-                scheduled_at: 0,
-                started_at: 0,
-                stopped_at: 0,
-                error_message: String::new(),
-                scale_state,
-            });
+            if let Some(cached) = deployment_cache.get(&job.app_id)
+                && let Some(dep) = cached.deployments.get(&job.deployment_id)
+            {
+                let event = VmService::build_live_deployment_event(LiveDeploymentEventParams {
+                    app_id: job.app_id,
+                    app_name: cached.app_name.clone(),
+                    deployment: Some(dep),
+                    job_id: job.job_id,
+                    image: job.image,
+                    status: "RUNNING".to_string(),
+                    host_id: job.host_id,
+                    vm_id: job.vm_id,
+                    ipv6_address: if job.ipv6_address.is_empty() {
+                        None
+                    } else {
+                        Some(job.ipv6_address)
+                    }
+                    ,
+                    cpu_usage: job.cpu_usage,
+                    ram_used_bytes: job.ram_used_bytes,
+                    tx_bytes: job.tx_bytes,
+                    rx_bytes: job.rx_bytes,
+                    scheduled_at: 0,
+                    started_at: 0,
+                    stopped_at: 0,
+                    error_message: String::new(),
+                    scale_state: cached.scale_state,
+                });
 
-            if let Ok(json) = serde_json::to_string(&event) {
-                yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
+                if let Ok(json) = serde_json::to_string(&event) {
+                    yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
+                }
             }
         }
 
@@ -313,16 +383,14 @@ pub async fn watch_deployments(
                     use mikrom_proto::scheduler::AppInfo;
                     use prost::Message;
 
-                    if let Some(job) = AppInfo::decode(&msg.payload[..]).ok().filter(|job| job.user_id == auth_user_id) {
-                        let deployment = match uuid::Uuid::parse_str(&job.deployment_id) {
-                            Ok(id) => state_clone.app_repo.get_deployment(id).await.ok().flatten(),
-                            Err(_) => None,
-                        };
-                        let scale_state = resolve_app_scale_state_by_id(&state_clone, &job.app_id).await;
+                    if let Some(job) = AppInfo::decode(&msg.payload[..]).ok().filter(|job| job.user_id == auth_user_id)
+                        && let Some(cached) = deployment_cache.get(&job.app_id)
+                        && let Some(deployment) = cached.deployments.get(&job.deployment_id)
+                    {
                         let event = VmService::build_live_deployment_event(LiveDeploymentEventParams {
                             app_id: job.app_id,
-                            app_name: job.app_name,
-                            deployment: deployment.as_ref(),
+                            app_name: cached.app_name.clone(),
+                            deployment: Some(deployment),
                             job_id: job.job_id,
                             image: job.image,
                             status: crate::infrastructure::scheduler::status_name(job.status).to_string(),
@@ -341,7 +409,7 @@ pub async fn watch_deployments(
                             started_at: 0,
                             stopped_at: 0,
                             error_message: String::new(),
-                            scale_state,
+                            scale_state: cached.scale_state,
                         });
 
                         if let Ok(json) = serde_json::to_string(&event) {
@@ -350,18 +418,16 @@ pub async fn watch_deployments(
                     }
                 },
                 res = local_stream.next() => {
-                    if let Some(Ok(app_id)) = res {
-                        let app_res = state_clone.app_repo.get_app(app_id).await;
-                        let deps_res = state_clone.app_repo.list_deployments_by_app(app_id).await;
+                    if let Some(Ok(_app_id)) = res {
+                        deployment_cache = load_watch_deployments_cache(&state_clone, auth_user_uuid).await;
 
-                        if let (Ok(Some(app)), Ok(deps)) = (app_res, deps_res) {
-                            let scale_state = resolve_app_scale_state(&state_clone, &app).await;
-                            for dep in deps {
+                        for cached in deployment_cache.values() {
+                            for dep in cached.deployments.values() {
                                 if ["RUNNING", "DRAINING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
                                     let event = VmService::build_live_deployment_event(LiveDeploymentEventParams {
                                         app_id: dep.app_id.to_string(),
-                                        app_name: app.name.clone(),
-                                        deployment: Some(&dep),
+                                        app_name: cached.app_name.clone(),
+                                        deployment: Some(dep),
                                         job_id: dep.job_id.clone().unwrap_or_default(),
                                         image: dep.image_tag.clone().unwrap_or_default(),
                                         status: dep.status.clone(),
@@ -376,7 +442,7 @@ pub async fn watch_deployments(
                                         started_at: 0,
                                         stopped_at: 0,
                                         error_message: String::new(),
-                                        scale_state,
+                                        scale_state: cached.scale_state,
                                     });
 
                                     if let Ok(json) = serde_json::to_string(&event) {
@@ -388,6 +454,8 @@ pub async fn watch_deployments(
                     }
                 },
                 _ = interval.tick() => {
+                    deployment_cache = load_watch_deployments_cache(&state_clone, auth_user_uuid).await;
+
                     use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
 
                     let scheduler_res = state_clone
@@ -403,76 +471,37 @@ pub async fn watch_deployments(
                         .await;
 
                     if let Ok(inner) = scheduler_res {
-                        let mut user_deployments = std::collections::HashMap::new();
-                        if let Ok(deps) = state_clone.app_repo.list_deployments_by_user(auth_user_uuid).await {
-                            for dep in deps {
-                                user_deployments.insert(dep.id.to_string(), dep);
-                            }
-                        }
-
                         for job in inner.apps {
-                            let dep = user_deployments.get(&job.deployment_id);
-                            let scale_state = resolve_app_scale_state_by_id(&state_clone, &job.app_id).await;
-                            let event = VmService::build_live_deployment_event(LiveDeploymentEventParams {
-                                app_id: job.app_id,
-                                app_name: job.app_name,
-                                deployment: dep,
-                                job_id: job.job_id,
-                                image: job.image,
-                                status: crate::infrastructure::scheduler::status_name(job.status).to_string(),
-                                host_id: job.host_id,
-                                vm_id: job.vm_id,
-                                ipv6_address: if job.ipv6_address.is_empty() {
-                                    None
-                                } else {
-                                    Some(job.ipv6_address)
-                                },
-                                cpu_usage: job.cpu_usage,
-                                ram_used_bytes: job.ram_used_bytes,
-                                tx_bytes: job.tx_bytes,
-                                rx_bytes: job.rx_bytes,
-                                scheduled_at: 0,
-                                started_at: 0,
-                                stopped_at: 0,
-                                error_message: String::new(),
-                                scale_state,
-                            });
+                            if let Some(cached) = deployment_cache.get(&job.app_id)
+                                && let Some(dep) = cached.deployments.get(&job.deployment_id)
+                            {
+                                let event = VmService::build_live_deployment_event(LiveDeploymentEventParams {
+                                    app_id: job.app_id,
+                                    app_name: cached.app_name.clone(),
+                                    deployment: Some(dep),
+                                    job_id: job.job_id,
+                                    image: job.image,
+                                    status: crate::infrastructure::scheduler::status_name(job.status).to_string(),
+                                    host_id: job.host_id,
+                                    vm_id: job.vm_id,
+                                    ipv6_address: if job.ipv6_address.is_empty() {
+                                        None
+                                    } else {
+                                        Some(job.ipv6_address)
+                                    },
+                                    cpu_usage: job.cpu_usage,
+                                    ram_used_bytes: job.ram_used_bytes,
+                                    tx_bytes: job.tx_bytes,
+                                    rx_bytes: job.rx_bytes,
+                                    scheduled_at: 0,
+                                    started_at: 0,
+                                    stopped_at: 0,
+                                    error_message: String::new(),
+                                    scale_state: cached.scale_state,
+                                });
 
-                            if let Ok(json) = serde_json::to_string(&event) {
-                                yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
-                            }
-                        }
-                    } else if let Ok(apps) = state_clone.app_repo.list_apps_by_user(auth_user_uuid).await {
-                        for app in apps {
-                            if let Ok(deps) = state_clone.app_repo.list_deployments_by_app(app.id).await {
-                                let scale_state = resolve_app_scale_state(&state_clone, &app).await;
-                                for dep in deps {
-                                    if ["RUNNING", "DRAINING", "BUILDING", "SCHEDULED", "PAUSED", "STOPPED", "FAILED"].contains(&dep.status.as_str()) {
-                                        let event = VmService::build_live_deployment_event(LiveDeploymentEventParams {
-                                            app_id: dep.app_id.to_string(),
-                                            app_name: app.name.clone(),
-                                            deployment: Some(&dep),
-                                            job_id: dep.job_id.clone().unwrap_or_default(),
-                                            image: dep.image_tag.clone().unwrap_or_default(),
-                                            status: dep.status.clone(),
-                                            host_id: String::new(),
-                                            vm_id: String::new(),
-                                            ipv6_address: dep.ipv6_address.clone(),
-                                            cpu_usage: 0.0,
-                                            ram_used_bytes: 0,
-                                            tx_bytes: 0,
-                                            rx_bytes: 0,
-                                            scheduled_at: 0,
-                                            started_at: 0,
-                                            stopped_at: 0,
-                                            error_message: String::new(),
-                                            scale_state,
-                                        });
-
-                                        if let Ok(json) = serde_json::to_string(&event) {
-                                            yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
-                                        }
-                                    }
+                                if let Ok(json) = serde_json::to_string(&event) {
+                                    yield Ok::<Event, std::convert::Infallible>(Event::default().data(json));
                                 }
                             }
                         }

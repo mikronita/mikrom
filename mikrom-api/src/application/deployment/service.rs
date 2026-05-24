@@ -107,7 +107,7 @@ impl DeploymentService {
         });
 
         // Notify Scheduler about initial scaling config
-        let _ = state
+        if let Err(err) = state
             .scheduler
             .update_app_scaling_config(mikrom_proto::scheduler::UpdateAppScalingConfigRequest {
                 app_id: app.id.to_string(),
@@ -123,7 +123,14 @@ impl DeploymentService {
                 last_router_traffic_at: 0,
                 last_scaled_to_zero_at: 0,
             })
-            .await;
+            .await
+        {
+            tracing::warn!(
+                app_id = %app.id,
+                error = %err,
+                "Failed to sync initial scaling config with scheduler"
+            );
+        }
 
         // Trigger immediate ACME certification if hostname is present
         if let Some(hostname) = &app.hostname {
@@ -141,7 +148,11 @@ impl DeploymentService {
         Ok(app)
     }
 
-    pub async fn maybe_create_github_webhook(state: &AppState, app: &App, webhook_secret: &str) {
+    pub async fn maybe_create_github_webhook(
+        state: &AppState,
+        app: &App,
+        webhook_secret: &str,
+    ) -> ApiResult<()> {
         let (
             Some(installation_id),
             Some(repo_full_name),
@@ -154,31 +165,23 @@ impl DeploymentService {
             state.github_private_key.as_ref(),
         )
         else {
-            return;
+            return Ok(());
         };
 
-        let webhook_url = if let Some(base) = &state.github_webhook_url_base {
-            if base.contains("smee.io") {
-                base.to_string()
-            } else {
-                format!(
-                    "{}/v1/webhooks/github/{}",
-                    base.trim_end_matches('/'),
-                    app.name
-                )
-            }
+        let Some(base) = &state.github_webhook_url_base else {
+            return Err(ApiError::BadRequest(
+                "GITHUB_WEBHOOK_URL_BASE must be configured to create GitHub webhooks".into(),
+            ));
+        };
+
+        let webhook_url = if base.contains("smee.io") {
+            base.to_string()
         } else {
-            let url = format!(
+            format!(
                 "{}/v1/webhooks/github/{}",
-                state.frontend_url.replace("3000", "5001"),
+                base.trim_end_matches('/'),
                 app.name
-            );
-            tracing::warn!(
-                app_name = %app.name,
-                %url,
-                "GITHUB_WEBHOOK_URL_BASE is missing, using fragile fallback URL guessing"
-            );
-            url
+            )
         };
 
         let github_app_id = github_app_id.clone();
@@ -204,6 +207,8 @@ impl DeploymentService {
                 tracing::info!(app_name = %app_name, "Successfully created automatic GitHub webhook");
             }
         });
+
+        Ok(())
     }
 
     pub async fn trigger_immediate_acme_certification(state: &AppState, app: &App) {
@@ -533,36 +538,21 @@ impl DeploymentService {
             ));
         }
 
-        // 1. Update DB (partial updates supported)
-        if let Some(replicas) = params.desired_replicas {
-            state
-                .app_repo
-                .update_app_scaling(app.id, replicas)
-                .await
-                .map_err(|e| ApiError::Internal(e.to_string()))?;
-        }
-
-        if params.autoscaling_enabled.is_some()
-            || params.min_replicas.is_some()
-            || params.max_replicas.is_some()
-            || params.cpu_threshold.is_some()
-            || params.mem_threshold.is_some()
-        {
-            state
-                .app_repo
-                .update_app_autoscaling(
-                    app.id,
-                    min, // Forced to 0
-                    max,
-                    params
-                        .autoscaling_enabled
-                        .unwrap_or(app.autoscaling_enabled),
-                    Some(params.cpu_threshold.unwrap_or(app.cpu_threshold)),
-                    Some(params.mem_threshold.unwrap_or(app.mem_threshold)),
-                )
-                .await
-                .map_err(|e| ApiError::Internal(e.to_string()))?;
-        }
+        state
+            .app_repo
+            .update_app_scaling_config(
+                app.id,
+                desired,
+                min, // Forced to 0
+                max,
+                params
+                    .autoscaling_enabled
+                    .unwrap_or(app.autoscaling_enabled),
+                Some(params.cpu_threshold.unwrap_or(app.cpu_threshold)),
+                Some(params.mem_threshold.unwrap_or(app.mem_threshold)),
+            )
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
 
         // 2. Fetch updated app state to notify scheduler
         let updated_app = state
@@ -680,12 +670,30 @@ impl DeploymentService {
             git_auth_token,
         };
 
-        let build_resp: mikrom_proto::builder::BuildResponse = state
+        let build_resp: mikrom_proto::builder::BuildResponse = match state
             .nats
             .with_timeout(std::time::Duration::from_secs(5))
             .request("mikrom.builder.build", build_req)
             .await
-            .map_err(|e| ApiError::Internal(format!("Failed to trigger build via NATS: {}", e)))?;
+        {
+            Ok(resp) => resp,
+            Err(err) => {
+                let _ = state
+                    .app_repo
+                    .update_deployment(
+                        deployment.id,
+                        UpdateDeploymentParams {
+                            status: Some("FAILED".to_string()),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
+                return Err(ApiError::Internal(format!(
+                    "Failed to trigger build via NATS: {}",
+                    err
+                )));
+            },
+        };
 
         let build_id = build_resp.build_id;
         state

@@ -575,27 +575,44 @@ pub async fn refresh_mesh_status_cache(state: &AppState) -> ApiResult<MeshStatus
 }
 
 pub async fn start_mesh_status_tracker(state: crate::AppState) {
-    let mut worker_heartbeat_sub = match state
-        .nats
-        .subscribe("mikrom.scheduler.worker.heartbeat")
-        .await
-    {
-        Ok(sub) => sub,
-        Err(err) => {
-            tracing::error!("Failed to subscribe to worker heartbeats: {}", err);
-            return;
-        },
+    let mut backoff = std::time::Duration::from_secs(1);
+    let mut worker_heartbeat_sub = loop {
+        match state
+            .nats
+            .subscribe("mikrom.scheduler.worker.heartbeat")
+            .await
+        {
+            Ok(sub) => break sub,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    retry_after_secs = backoff.as_secs(),
+                    "Failed to subscribe to worker heartbeats; retrying"
+                );
+                tokio::time::sleep(backoff).await;
+                backoff = std::cmp::min(backoff * 2, std::time::Duration::from_secs(30));
+            },
+        }
     };
-    let mut router_heartbeat_sub = match state
-        .nats
-        .subscribe("mikrom.scheduler.router.heartbeat")
-        .await
-    {
-        Ok(sub) => sub,
-        Err(err) => {
-            tracing::error!("Failed to subscribe to router heartbeats: {}", err);
-            return;
-        },
+
+    backoff = std::time::Duration::from_secs(1);
+    let mut router_heartbeat_sub = loop {
+        match state
+            .nats
+            .subscribe("mikrom.scheduler.router.heartbeat")
+            .await
+        {
+            Ok(sub) => break sub,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    retry_after_secs = backoff.as_secs(),
+                    "Failed to subscribe to router heartbeats; retrying"
+                );
+                tokio::time::sleep(backoff).await;
+                backoff = std::cmp::min(backoff * 2, std::time::Duration::from_secs(30));
+            },
+        }
     };
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
 

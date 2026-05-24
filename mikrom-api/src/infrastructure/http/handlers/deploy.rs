@@ -123,6 +123,15 @@ pub async fn create_app_handler(
         Uuid::parse_str(&auth.user_id).map_err(|_| ApiError::Auth("Invalid user ID".into()))?;
     let webhook_secret = Alphanumeric.sample_string(&mut rand::rng(), 32);
 
+    if payload.github_installation_id.is_some()
+        && payload.github_repo_full_name.is_some()
+        && state.github_webhook_url_base.is_none()
+    {
+        return Err(ApiError::BadRequest(
+            "GITHUB_WEBHOOK_URL_BASE must be configured to create GitHub webhooks".into(),
+        ));
+    }
+
     let app = DeploymentService::create_app(
         &state,
         CreateAppParams {
@@ -146,7 +155,7 @@ pub async fn create_app_handler(
     )
     .await?;
 
-    DeploymentService::maybe_create_github_webhook(&state, &app, &webhook_secret).await;
+    DeploymentService::maybe_create_github_webhook(&state, &app, &webhook_secret).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -305,36 +314,21 @@ pub async fn scale_app_handler(
         ));
     }
 
-    // 1. Update DB (partial updates supported)
-    if let Some(replicas) = payload.desired_replicas {
-        state
-            .app_repo
-            .update_app_scaling(app.id, replicas)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-    }
-
-    if payload.autoscaling_enabled.is_some()
-        || payload.min_replicas.is_some()
-        || payload.max_replicas.is_some()
-        || payload.cpu_threshold.is_some()
-        || payload.mem_threshold.is_some()
-    {
-        state
-            .app_repo
-            .update_app_autoscaling(
-                app.id,
-                min, // Forced to 0
-                max, // payload.max_replicas.unwrap_or(app.max_replicas)
-                payload
-                    .autoscaling_enabled
-                    .unwrap_or(app.autoscaling_enabled),
-                Some(payload.cpu_threshold.unwrap_or(app.cpu_threshold)),
-                Some(payload.mem_threshold.unwrap_or(app.mem_threshold)),
-            )
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-    }
+    state
+        .app_repo
+        .update_app_scaling_config(
+            app.id,
+            desired,
+            min, // Forced to 0
+            max, // payload.max_replicas.unwrap_or(app.max_replicas)
+            payload
+                .autoscaling_enabled
+                .unwrap_or(app.autoscaling_enabled),
+            Some(payload.cpu_threshold.unwrap_or(app.cpu_threshold)),
+            Some(payload.mem_threshold.unwrap_or(app.mem_threshold)),
+        )
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // 2. Fetch updated app state to notify scheduler
     let updated_app = state
@@ -1036,16 +1030,23 @@ mod tests {
         }
         {
             let shared_app = shared_app.clone();
-            mock_app_repo
-                .expect_update_app_scaling()
-                .returning(move |_, replicas| {
-                    shared_app.lock().unwrap().desired_replicas = replicas;
+            mock_app_repo.expect_update_app_scaling_config().returning(
+                move |_, desired, min, max, enabled, cpu, mem| {
+                    let mut app = shared_app.lock().unwrap();
+                    app.desired_replicas = desired;
+                    app.min_replicas = min;
+                    app.max_replicas = max;
+                    app.autoscaling_enabled = enabled;
+                    if let Some(cpu) = cpu {
+                        app.cpu_threshold = cpu;
+                    }
+                    if let Some(mem) = mem {
+                        app.mem_threshold = mem;
+                    }
                     Ok(())
-                });
+                },
+            );
         }
-        mock_app_repo
-            .expect_update_app_autoscaling()
-            .returning(|_, _, _, _, _, _| Ok(()));
         {
             let shared_app = shared_app.clone();
             mock_app_repo.expect_get_app().returning(move |_| {
