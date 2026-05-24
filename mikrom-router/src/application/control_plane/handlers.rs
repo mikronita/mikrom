@@ -88,6 +88,8 @@ async fn apply_router_config_update(
         update.hostname
     );
 
+    let previous_snapshot = control_plane.state_manager.snapshot().await;
+
     let applied = match control_plane
         .state_manager
         .update_route_targets(
@@ -121,70 +123,59 @@ async fn apply_router_config_update(
         };
     }
 
-    let delete_result = sqlx::query("DELETE FROM routes WHERE hostname = $1")
-        .bind(&update.hostname)
-        .execute(db)
-        .await;
-    let mut success = delete_result.is_ok();
-    let mut last_error = delete_result.err().map_or_else(String::new, |e| {
-        error!(
-            "Control Plane: Failed to delete existing routes for {}: {}",
-            update.hostname, e
-        );
-        e.to_string()
-    });
-
-    if update.target_urls.is_empty() {
-        if success {
-            schedule_state_resync(tx, "clearing routes", &update.hostname);
-        } else {
-            schedule_state_resync(tx, "route delete failure", &update.hostname);
-        }
-        return RouterConfigAck {
-            success,
-            message: last_error,
-        };
-    }
-
-    if !success {
-        schedule_state_resync(tx, "route delete failure", &update.hostname);
-        return RouterConfigAck {
-            success: false,
-            message: last_error,
-        };
-    }
-
-    for target_url in &update.target_urls {
-        if let Err(e) = sqlx::query(
-            "INSERT INTO routes (hostname, target_url, updated_at) VALUES ($1, $2, TO_TIMESTAMP($3))",
-        )
+    let db_result = async {
+        let mut db_tx = db.begin().await?;
+        sqlx::query("DELETE FROM routes WHERE hostname = $1")
             .bind(&update.hostname)
-            .bind(target_url)
-            .bind(update.timestamp)
-            .execute(db)
-            .await
-        {
-            error!(
-                "Control Plane: Failed to persist target {} for {}: {}",
-                target_url, update.hostname, e
-            );
-            success = false;
-            last_error = e.to_string();
-        }
-    }
+            .execute(&mut *db_tx)
+            .await?;
 
-    if success {
-        schedule_state_resync(tx, "updating routes", &update.hostname);
-        RouterConfigAck {
-            success: true,
-            message: String::new(),
+        for target_url in &update.target_urls {
+            sqlx::query(
+                "INSERT INTO routes (hostname, target_url, updated_at) VALUES ($1, $2, TO_TIMESTAMP($3))",
+            )
+                .bind(&update.hostname)
+                .bind(target_url)
+                .bind(update.timestamp)
+                .execute(&mut *db_tx)
+                .await?;
         }
-    } else {
-        schedule_state_resync(tx, "route persistence failure", &update.hostname);
-        RouterConfigAck {
-            success: false,
-            message: last_error,
-        }
+
+        db_tx.commit().await?;
+        Ok::<(), sqlx::Error>(())
+    }
+    .await;
+
+    match db_result {
+        Ok(()) => {
+            schedule_state_resync(tx, "updating routes", &update.hostname);
+            RouterConfigAck {
+                success: true,
+                message: String::new(),
+            }
+        },
+        Err(e) => {
+            error!(
+                "Control Plane: Failed to persist route update for {}: {}",
+                update.hostname, e
+            );
+
+            if let Err(restore_err) = control_plane
+                .state_manager
+                .replace_state(previous_snapshot.0, previous_snapshot.1)
+                .await
+            {
+                error!(
+                    "Control Plane: Failed to restore in-memory route state for {} after DB error: {}",
+                    update.hostname, restore_err
+                );
+            }
+
+            RouterConfigAck {
+                success: false,
+                message: e.to_string(),
+            }
+        },
     }
 }
 
