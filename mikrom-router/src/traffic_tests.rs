@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::traffic::RouterTrafficPublisher;
+    use crate::application::traffic::RouterTrafficPublisher;
     use std::time::Duration;
     use tokio::sync::mpsc;
 

@@ -6,13 +6,13 @@
     clippy::collapsible_if
 )]
 
-use crate::config::{DatabaseUrl, MasterKey, NatsUrl, RouterId};
-use crate::health::RouterHealth;
-use crate::runtime;
-use crate::state::{Certificate, Route, State};
-use crate::state_manager::{StateManager, StateVersions};
-use crate::subjects as router_subjects;
-use crate::wireguard::WireGuardManager;
+use crate::app::config::{DatabaseUrl, MasterKey, NatsUrl, RouterId};
+use crate::app::runtime;
+use crate::domain::health::RouterHealth;
+use crate::domain::state::{Certificate, Route, State};
+use crate::domain::subjects as router_subjects;
+use crate::infrastructure::persistence::state_manager::{StateManager, StateVersions};
+use crate::infrastructure::wireguard::WireGuardManager;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -260,7 +260,10 @@ impl ControlPlane {
             let encrypted_key: String = row.get("private_key");
             let updated_at: i64 = row.get("updated_at");
 
-            let key_pem = match crate::crypto::decrypt(&encrypted_key, self.master_key.as_str()) {
+            let key_pem = match crate::infrastructure::crypto::decrypt(
+                &encrypted_key,
+                self.master_key.as_str(),
+            ) {
                 Ok(key) => key,
                 Err(e) => {
                     error!("Control Plane: Failed to decrypt private key for {domain}: {e}");
@@ -328,7 +331,7 @@ impl BackgroundService for ControlPlane {
 
         let nats =
             runtime::connect_with_backoff("Control Plane NATS", Duration::from_secs(5), || async {
-                crate::nats::connect_nats(
+                crate::infrastructure::nats::connect_nats(
                     self.nats_url.as_str(),
                     self.nats_use_tls,
                     self.nats_certs_dir.as_deref(),

@@ -1,7 +1,9 @@
-use crate::config::RouterConfig;
-use crate::health::RouterHealth;
-use crate::runtime;
-use crate::{control_plane, proxy, state_manager, telemetry, tls, traffic, upstream_ca};
+use crate::app::config::RouterConfig;
+use crate::app::runtime;
+use crate::application::{control_plane, proxy, telemetry, traffic};
+use crate::domain::health::RouterHealth;
+use crate::infrastructure::persistence::state_manager;
+use crate::infrastructure::{tls, upstream_ca};
 use anyhow::Result;
 use pingora::listeners::tls::TlsSettings;
 use pingora::prelude::*;

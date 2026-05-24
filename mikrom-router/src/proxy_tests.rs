@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::health::RouterHealth;
-    use crate::proxy::{MikromProxy, RouterMetricsCounters};
-    use crate::state::{Route, State};
+    use crate::application::proxy::{MikromProxy, RouterMetricsCounters};
+    use crate::domain::health::RouterHealth;
+    use crate::domain::state::{Route, State};
     use pingora::lb::LoadBalancer;
     use pingora::lb::selection::RoundRobin;
     use std::collections::HashMap;
