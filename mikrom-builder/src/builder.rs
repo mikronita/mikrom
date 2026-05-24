@@ -151,7 +151,22 @@ impl AppBuilder {
             return true;
         }
 
-        !lower.contains("://")
+        // Support other SSH SCP-like URLs, e.g. `username@hostname:path/to/repo.git`
+        // It must contain `@` and `:` and the username part must be alphanumeric/dash/underscore
+        if let (Some(at_idx), Some(colon_idx)) = (lower.find('@'), lower.find(':')) {
+            let username = &lower[..at_idx];
+            if at_idx < colon_idx
+                && !lower.contains("://")
+                && !username.is_empty()
+                && username
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            {
+                return true;
+            }
+        }
+
+        false
     }
 
     fn check_cancelled(cancel: &CancellationToken) -> Result<()> {
@@ -230,14 +245,42 @@ impl AppBuilder {
                     )
                 })?;
 
-                #[cfg(not(unix))]
+                #[cfg(windows)]
                 {
-                    let content = fs::read(path).with_context(|| {
-                        format!("Failed to read symlink source {}", path.display())
-                    })?;
-                    fs::write(&destination, content).with_context(|| {
-                        format!("Failed to materialize symlink {}", destination.display())
-                    })?;
+                    let target_path = if target.is_absolute() {
+                        target.clone()
+                    } else {
+                        path.parent()
+                            .map(|p| p.join(&target))
+                            .unwrap_or_else(|| target.clone())
+                    };
+                    let is_dir = target_path.is_dir();
+                    if is_dir {
+                        std::os::windows::fs::symlink_dir(&target, &destination).with_context(
+                            || {
+                                format!(
+                                    "Failed to create directory symlink {} -> {}",
+                                    destination.display(),
+                                    target.display()
+                                )
+                            },
+                        )?;
+                    } else {
+                        std::os::windows::fs::symlink_file(&target, &destination).with_context(
+                            || {
+                                format!(
+                                    "Failed to create file symlink {} -> {}",
+                                    destination.display(),
+                                    target.display()
+                                )
+                            },
+                        )?;
+                    }
+                }
+
+                #[cfg(not(any(unix, windows)))]
+                {
+                    anyhow::bail!("Unsupported platform for symlinks");
                 }
             } else if metadata.is_dir() {
                 fs::create_dir_all(&destination).with_context(|| {
@@ -839,5 +882,34 @@ mod tests {
         let expose_count = new_content.matches("EXPOSE 8080").count();
         assert_eq!(env_count, 2);
         assert_eq!(expose_count, 2);
+    }
+
+    #[test]
+    fn test_git_url_allowed() {
+        // Allowed remote schemes/prefixes
+        assert!(AppBuilder::git_url_allowed(
+            "https://github.com/user/repo.git"
+        ));
+        assert!(AppBuilder::git_url_allowed(
+            "http://github.com/user/repo.git"
+        ));
+        assert!(AppBuilder::git_url_allowed("git@github.com:user/repo.git"));
+        assert!(AppBuilder::git_url_allowed(
+            "git://github.com/user/repo.git"
+        ));
+        assert!(AppBuilder::git_url_allowed(
+            "ssh://git@github.com/user/repo.git"
+        ));
+        assert!(AppBuilder::git_url_allowed(
+            "git-user@somehost.com:repos/myrepo.git"
+        ));
+
+        // Rejected local or invalid paths
+        assert!(!AppBuilder::git_url_allowed(""));
+        assert!(!AppBuilder::git_url_allowed("/etc/passwd"));
+        assert!(!AppBuilder::git_url_allowed("file:///etc/passwd"));
+        assert!(!AppBuilder::git_url_allowed("C:\\Users\\admin\\repo"));
+        assert!(!AppBuilder::git_url_allowed("../some/relative/path"));
+        assert!(!AppBuilder::git_url_allowed("relative/path/repo.git"));
     }
 }
