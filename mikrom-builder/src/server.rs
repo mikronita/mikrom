@@ -25,6 +25,7 @@ pub struct BuilderServer {
     build_limiter: Arc<Semaphore>,
     active_builds: Arc<DashMap<String, CancellationToken>>,
     build_state_ttl: Duration,
+    tracker: Arc<tokio_util::task::TaskTracker>,
 }
 
 struct BuildLease {
@@ -52,6 +53,7 @@ impl BuilderServer {
             build_limiter: Arc::new(Semaphore::new(max_concurrent_builds.max(1))),
             active_builds: Arc::new(DashMap::new()),
             build_state_ttl,
+            tracker: Arc::new(tokio_util::task::TaskTracker::new()),
         })
     }
 
@@ -98,11 +100,15 @@ impl BuilderServer {
         info!("Shutdown requested, cancelling active builds");
         self.cancel_active_builds();
 
+        self.tracker.close();
+        let wait_tracker = self.tracker.wait();
+
         let join_timeout = tokio::time::timeout(Duration::from_secs(10), async {
             let _ = build_task.await;
             let _ = status_task.await;
             let _ = metrics_task.await;
             let _ = cleanup_task.await;
+            wait_tracker.await;
         })
         .await;
 
@@ -152,7 +158,8 @@ impl BuilderServer {
                     let active_builds = self.active_builds.clone();
                     let build_cancel = shutdown.child_token();
 
-                    tokio::spawn(async move {
+                    let tracker = self.tracker.clone();
+                    tracker.spawn(async move {
                         let _permit = permit;
                         if let Err(e) = Self::handle_build_request(
                             nats,

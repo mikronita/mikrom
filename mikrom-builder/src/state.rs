@@ -354,23 +354,26 @@ impl BuildStore {
             metrics: metrics_snapshot,
         };
 
-        let payload =
-            serde_json::to_vec_pretty(&snapshot).context("Failed to serialize build state")?;
+        let path = self.path.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let payload =
+                serde_json::to_vec(&snapshot).context("Failed to serialize build state")?;
 
-        if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .with_context(|| format!("Failed to create state dir {}", parent.display()))?;
-        }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("Failed to create state dir {}", parent.display()))?;
+            }
 
-        let tmp_path = self.path.with_extension("json.tmp");
-        tokio::fs::write(&tmp_path, payload)
-            .await
-            .with_context(|| format!("Failed to write temporary state {}", tmp_path.display()))?;
-        tokio::fs::rename(&tmp_path, &self.path)
-            .await
-            .with_context(|| format!("Failed to commit build state {}", self.path.display()))?;
-        Ok(())
+            let tmp_path = path.with_extension("json.tmp");
+            std::fs::write(&tmp_path, payload).with_context(|| {
+                format!("Failed to write temporary state {}", tmp_path.display())
+            })?;
+            std::fs::rename(&tmp_path, &path)
+                .with_context(|| format!("Failed to commit build state {}", path.display()))?;
+            Ok(())
+        })
+        .await
+        .context("Failed to join state persistence blocking task")?
     }
 
     async fn snapshot_metrics(&self) -> BuildMetrics {
