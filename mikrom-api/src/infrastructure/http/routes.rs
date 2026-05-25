@@ -87,7 +87,8 @@ pub fn create_app_with_rate_limits(
         )
         .route(
             &format!("{}/apps/{{app_name}}", crate::API_V1),
-            delete(crate::infrastructure::http::handlers::deploy::delete_app_handler),
+            get(crate::infrastructure::http::handlers::deploy::get_app_handler)
+                .delete(crate::infrastructure::http::handlers::deploy::delete_app_handler),
         )
         .route(
             &format!("{}/apps/{{app_name}}/secret", crate::API_V1),

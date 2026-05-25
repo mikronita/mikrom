@@ -49,6 +49,16 @@ pub struct AppSecretResponse {
 }
 
 #[rovo::rovo]
+pub async fn get_app_handler(
+    auth: AuthUser,
+    State(state): State<AppState>,
+    Path(app_name): Path<String>,
+) -> ApiResult<Json<AppResponse>> {
+    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
+    Ok(Json(build_app_response(&state, &app).await))
+}
+
+#[rovo::rovo]
 pub async fn get_app_secret_handler(
     auth: AuthUser,
     State(state): State<AppState>,
@@ -1098,6 +1108,73 @@ mod tests {
         match result {
             Err(ApiError::Domain(crate::domain::DomainError::Infrastructure(_))) => {},
             _ => panic!("Expected Scheduler/Infrastructure error, got {:?}", result),
+        }
+    }
+
+    #[tokio::test]
+    async fn get_app_handler_returns_app_response() {
+        let mut state = create_test_state().await;
+        let user_id = Uuid::new_v4();
+        let app_id = Uuid::new_v4();
+        let auth = AuthUser {
+            user_id: user_id.to_string(),
+            email: "test@example.com".to_string(),
+            role: crate::domain::UserRole::User,
+        };
+
+        let app = crate::domain::App {
+            id: app_id,
+            user_id,
+            name: "test-app".to_string(),
+            git_url: "https://github.com/test/repo".to_string(),
+            port: crate::domain::types::Port::new(8080).unwrap(),
+            hostname: Some("test-app.apps.mikrom.spluca.org".to_string()),
+            desired_replicas: 1,
+            min_replicas: 0,
+            max_replicas: 1,
+            autoscaling_enabled: false,
+            ..crate::domain::App::default()
+        };
+
+        let mut mock_app_repo = MockAppRepository::new();
+        mock_app_repo
+            .expect_get_app_by_name()
+            .with(mockall::predicate::eq("test-app"))
+            .times(1)
+            .returning(move |_| Ok(Some(app.clone())));
+        state.app_repo = Arc::new(mock_app_repo);
+
+        let result = __get_app_handler_impl(auth, State(state), Path("test-app".to_string())).await;
+
+        let response = result.expect("should return app");
+        assert_eq!(response.0.name, "test-app");
+        assert_eq!(response.0.id, app_id);
+    }
+
+    #[tokio::test]
+    async fn get_app_handler_returns_not_found_when_missing() {
+        let mut state = create_test_state().await;
+        let user_id = Uuid::new_v4();
+        let auth = AuthUser {
+            user_id: user_id.to_string(),
+            email: "test@example.com".to_string(),
+            role: UserRole::User,
+        };
+
+        let mut mock_app_repo = MockAppRepository::new();
+        mock_app_repo
+            .expect_get_app_by_name()
+            .with(mockall::predicate::eq("missing-app"))
+            .times(1)
+            .returning(|_| Ok(None));
+        state.app_repo = Arc::new(mock_app_repo);
+
+        let result =
+            __get_app_handler_impl(auth, State(state), Path("missing-app".to_string())).await;
+
+        match result {
+            Err(ApiError::NotFound(msg)) => assert!(msg.contains("not found")),
+            _ => panic!("Expected NotFound error, got {:?}", result),
         }
     }
 }

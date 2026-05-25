@@ -1,0 +1,70 @@
+use crate::domain::error::CliResult;
+use crate::domain::models::*;
+use async_trait::async_trait;
+use mockall::automock;
+
+#[automock]
+#[async_trait]
+pub trait ApiClient: Send + Sync {
+    async fn health(&self) -> CliResult<HealthResponse>;
+    async fn register(&self, email: &str, password: &str) -> CliResult<RegisterResponse>;
+    async fn login(&self, email: &str, password: &str) -> CliResult<LoginResponse>;
+    async fn whoami(&self) -> CliResult<WhoamiResponse>;
+    async fn update_profile(
+        &self,
+        first_name: Option<String>,
+        last_name: Option<String>,
+    ) -> CliResult<WhoamiResponse>;
+
+    async fn list_apps(&self) -> CliResult<Vec<AppInfo>>;
+    async fn get_app(&self, app_name: &str) -> CliResult<AppInfo>;
+    async fn create_app(&self, name: &str, git_url: &str) -> CliResult<AppInfo>;
+    async fn delete_app(&self, app_id: &str) -> CliResult<()>;
+    async fn get_app_secret(&self, app_name: &str) -> CliResult<Option<String>>;
+    async fn deploy_app_version(
+        &self,
+        app_id: &str,
+        vcpus: u32,
+        memory_mib: u32,
+        hypervisor: Option<String>,
+    ) -> CliResult<DeployResponse>;
+    async fn activate_deployment(&self, app_id: &str, deployment_id: &str) -> CliResult<()>;
+    async fn list_app_deployments(&self, app_id: &str) -> CliResult<Vec<DeploymentInfo>>;
+
+    async fn list_active_deployments(&self) -> CliResult<Vec<LiveDeploymentInfo>>;
+    async fn get_deployment_status(
+        &self,
+        app_name: &str,
+        job_id: &str,
+    ) -> CliResult<LiveDeploymentStatus>;
+    async fn stop_deployment(&self, app_name: &str, job_id: &str) -> CliResult<serde_json::Value>;
+    async fn pause_deployment(&self, app_name: &str, job_id: &str) -> CliResult<serde_json::Value>;
+    async fn resume_deployment(&self, app_name: &str, job_id: &str)
+    -> CliResult<serde_json::Value>;
+    async fn delete_deployment_record(
+        &self,
+        app_name: &str,
+        job_id: &str,
+    ) -> CliResult<serde_json::Value>;
+
+    async fn scale_app(&self, app_id: &str, req: ScaleRequest) -> CliResult<()>;
+
+    async fn list_volumes(&self, app_id: &str) -> CliResult<Vec<AttachedVolume>>;
+    async fn list_all_volumes(&self) -> CliResult<Vec<VolumeWithAttachments>>;
+    async fn create_volume(&self, name: &str, size_mib: i32) -> CliResult<Volume>;
+    async fn attach_volume(
+        &self,
+        app_id: &str,
+        volume_id: &str,
+        mount_point: &str,
+        access_mode: i32,
+    ) -> CliResult<AppVolume>;
+    async fn detach_volume(&self, app_id: &str, volume_id: &str) -> CliResult<()>;
+    async fn create_volume_snapshot(
+        &self,
+        volume_id: &str,
+        name: &str,
+    ) -> CliResult<VolumeSnapshot>;
+    async fn restore_volume_snapshot(&self, volume_id: &str, snapshot_name: &str) -> CliResult<()>;
+    async fn delete_volume(&self, volume_id: &str) -> CliResult<()>;
+}

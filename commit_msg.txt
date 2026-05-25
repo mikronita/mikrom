@@ -1,0 +1,15 @@
+refactor(cli): industrial-grade hexagonal refactor, add GET /apps/{name}, completions, retries
+
+- Refactor mikrom-cli to hexagonal architecture (domain/application/infrastructure)
+- Replace anyhow with structured CliError + thiserror
+- Add trait ApiClient with mockall for testable HTTP client
+- Build ReqwestApiClient with exponential backoff retry (3 attempts)
+- Refactor Config with envy env overrides + URL validation
+- Remove dead code (stub commands: app watch, deployment logs/watch, system watch)
+- Add --verbose/-v, --no-color, --yes/-y global flags
+- Add interactive confirmation [y/N] for destructive operations
+- Add completion <shell> subcommand via clap_complete
+- Extract output helpers (print_json, format_timestamp)
+- Add 169 tests (unit with MockApiClient, Wiremock integration, assert_cmd e2e)
+- Add GET /v1/apps/{app_name} endpoint to mikrom-api with tests
+- Fix volume_id short flag -v conflict with global --verbose

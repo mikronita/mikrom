@@ -36,6 +36,11 @@ pub enum Commands {
     /// System Status
     #[command(subcommand)]
     System(SystemCommands),
+    /// Generate shell completion scripts
+    Completion {
+        #[arg(value_enum, help = "Shell to generate completions for")]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -56,7 +61,7 @@ pub enum VolumeCommands {
     Attach {
         #[arg(long, short, help = "Name of the application")]
         app: String,
-        #[arg(long, short, help = "Volume ID")]
+        #[arg(long, help = "Volume ID")]
         volume_id: String,
         #[arg(long, short, help = "Mount point inside the VM (e.g. /data)")]
         mount: String,
@@ -72,27 +77,29 @@ pub enum VolumeCommands {
     Detach {
         #[arg(long, short, help = "Name of the application")]
         app: String,
-        #[arg(long, short, help = "Volume ID")]
+        #[arg(long, help = "Volume ID")]
         volume_id: String,
     },
     /// Create a snapshot of a volume
     Snapshot {
-        #[arg(long, short, help = "Volume ID")]
+        #[arg(long, help = "Volume ID")]
         volume_id: String,
         #[arg(long, short, help = "Snapshot name")]
         name: String,
     },
     /// Restore a volume to a specific snapshot
     Restore {
-        #[arg(long, short, help = "Volume ID")]
+        #[arg(long, help = "Volume ID")]
         volume_id: String,
         #[arg(long, short, help = "Snapshot name to restore")]
         snapshot: String,
     },
     /// Delete a volume
     Delete {
-        #[arg(long, short, help = "Volume ID")]
+        #[arg(long, help = "Volume ID")]
         volume_id: String,
+        #[arg(long, short, help = "Skip confirmation prompt")]
+        yes: bool,
     },
 }
 
@@ -138,6 +145,8 @@ pub enum AppCommands {
     Delete {
         #[arg(long, short, help = "Name of the application to delete")]
         name: String,
+        #[arg(long, short, help = "Skip confirmation prompt")]
+        yes: bool,
     },
     /// Deploy a new version of an application (triggers build)
     Deploy {
@@ -175,11 +184,6 @@ pub enum AppCommands {
         #[arg(long, short, help = "Name of the application")]
         name: String,
     },
-    /// Stream deployment events for an application
-    Watch {
-        #[arg(long, short, help = "Name of the application")]
-        name: String,
-    },
     /// Show the GitHub webhook secret for an application
     Secret {
         #[arg(long, short, help = "Name of the application")]
@@ -198,6 +202,8 @@ pub enum AppCommands {
         replicas: Option<i32>,
         #[arg(long, help = "Enable/disable autoscaling (--auto true/false)")]
         auto: Option<bool>,
+        #[arg(long, short = 'm', help = "Minimum replicas for autoscaling (0-3)")]
+        min: Option<i32>,
         #[arg(long, short = 'M', help = "Maximum replicas for autoscaling (1-3)")]
         max: Option<i32>,
         #[arg(long, short = 'c', help = "CPU threshold percentage for autoscaling")]
@@ -221,15 +227,6 @@ pub enum DeploymentCommands {
         app: String,
         #[arg(long, short, help = "The unique Job ID for this instance")]
         job_id: String,
-    },
-    /// Fetch or tail logs for a deployment
-    Logs {
-        #[arg(long, short, help = "Name of the application")]
-        app: String,
-        #[arg(long, short, help = "The unique Job ID for this instance")]
-        job_id: String,
-        #[arg(long, short, help = "Follow the log stream in real-time")]
-        follow: bool,
     },
     /// Stop a running deployment (kills the instance)
     Stop {
@@ -258,9 +255,9 @@ pub enum DeploymentCommands {
         app: String,
         #[arg(long, short, help = "The unique Job ID to remove")]
         job_id: String,
+        #[arg(long, short, help = "Skip confirmation prompt")]
+        yes: bool,
     },
-    /// Stream all cluster-wide deployment events
-    Watch,
 }
 
 #[derive(Subcommand, Debug)]
@@ -280,6 +277,4 @@ pub enum ConfigCommands {
 pub enum SystemCommands {
     /// Check the health of all system services
     Health,
-    /// Stream system health updates in real-time
-    Watch,
 }

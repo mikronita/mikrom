@@ -1,4 +1,5 @@
-use mikrom_cli::client::MikromClient;
+use mikrom_cli::application::ports::ApiClient;
+use mikrom_cli::infrastructure::http::client::ReqwestApiClient;
 use serde_json::json;
 use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -6,7 +7,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 #[tokio::test]
 async fn test_client_health() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), None);
+    let client = ReqwestApiClient::new(server.uri(), None).unwrap();
 
     Mock::given(method("GET"))
         .and(path("/v1/health"))
@@ -26,7 +27,7 @@ async fn test_client_health() {
 #[tokio::test]
 async fn test_client_register() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), None);
+    let client = ReqwestApiClient::new(server.uri(), None).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/auth/register"))
@@ -50,7 +51,7 @@ async fn test_client_register() {
 #[tokio::test]
 async fn test_client_login() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), None);
+    let client = ReqwestApiClient::new(server.uri(), None).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/auth/login"))
@@ -67,7 +68,7 @@ async fn test_client_login() {
 #[tokio::test]
 async fn test_client_whoami() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("GET"))
         .and(path("/v1/auth/me"))
@@ -90,7 +91,7 @@ async fn test_client_whoami() {
 #[tokio::test]
 async fn test_client_update_profile() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("PUT"))
         .and(path("/v1/auth/me"))
@@ -118,7 +119,7 @@ async fn test_client_update_profile() {
 #[tokio::test]
 async fn test_client_create_app() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/apps"))
@@ -144,7 +145,7 @@ async fn test_client_create_app() {
 #[tokio::test]
 async fn test_client_list_apps() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("GET"))
         .and(path("/v1/apps"))
@@ -168,7 +169,7 @@ async fn test_client_list_apps() {
 #[tokio::test]
 async fn test_client_get_app_secret() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("GET"))
         .and(path("/v1/apps/test-app/secret"))
@@ -179,13 +180,13 @@ async fn test_client_get_app_secret() {
         .await;
 
     let res = client.get_app_secret("test-app").await.unwrap();
-    assert_eq!(res, "real-secret-456");
+    assert_eq!(res, Some("real-secret-456".to_string()));
 }
 
 #[tokio::test]
 async fn test_client_deploy_app() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/apps/test-app/deploy"))
@@ -208,7 +209,7 @@ async fn test_client_deploy_app() {
 #[tokio::test]
 async fn test_client_activate_deployment() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/apps/test-app/deployments/dep-123/activate"))
@@ -225,7 +226,7 @@ async fn test_client_activate_deployment() {
 #[tokio::test]
 async fn test_client_stop_deployment() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("DELETE"))
         .and(path("/v1/apps/test-app/deployments/job-123"))
@@ -242,7 +243,7 @@ async fn test_client_stop_deployment() {
 #[tokio::test]
 async fn test_client_pause_deployment() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/apps/test-app/deployments/job-123/pause"))
@@ -262,7 +263,7 @@ async fn test_client_pause_deployment() {
 #[tokio::test]
 async fn test_client_resume_deployment() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/apps/test-app/deployments/job-123/resume"))
@@ -282,7 +283,7 @@ async fn test_client_resume_deployment() {
 #[tokio::test]
 async fn test_client_list_app_volumes() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("GET"))
         .and(path("/v1/apps/app-123/volumes"))
@@ -309,7 +310,7 @@ async fn test_client_list_app_volumes() {
 #[tokio::test]
 async fn test_client_list_all_volumes_includes_attachments() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("GET"))
         .and(path("/v1/volumes"))
@@ -341,7 +342,7 @@ async fn test_client_list_all_volumes_includes_attachments() {
 #[tokio::test]
 async fn test_client_create_volume_uses_global_endpoint() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/volumes"))
@@ -367,7 +368,7 @@ async fn test_client_create_volume_uses_global_endpoint() {
 #[tokio::test]
 async fn test_client_attach_volume_uses_attach_endpoint() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/apps/app-123/volumes/attach"))
@@ -398,7 +399,7 @@ async fn test_client_attach_volume_uses_attach_endpoint() {
 #[tokio::test]
 async fn test_client_detach_volume_uses_detach_endpoint() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("DELETE"))
         .and(path("/v1/apps/app-123/volumes/vol-1/detach"))
@@ -412,7 +413,7 @@ async fn test_client_detach_volume_uses_detach_endpoint() {
 #[tokio::test]
 async fn test_client_delete_deployment_record() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("DELETE"))
         .and(path("/v1/apps/test-app/deployments/job-123/delete"))
@@ -432,7 +433,7 @@ async fn test_client_delete_deployment_record() {
 #[tokio::test]
 async fn test_client_get_deployment_status() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("GET"))
         .and(path("/v1/apps/test-app/deployments/job-123"))
@@ -464,7 +465,7 @@ async fn test_client_get_deployment_status() {
 #[tokio::test]
 async fn test_client_list_active_deployments_with_ipv6() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), Some("token".into()));
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
 
     Mock::given(method("GET"))
         .and(path("/v1/deployments/active"))
@@ -487,7 +488,7 @@ async fn test_client_list_active_deployments_with_ipv6() {
 #[tokio::test]
 async fn test_client_error_handling() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), None);
+    let client = ReqwestApiClient::new(server.uri(), None).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/auth/login"))
@@ -506,7 +507,7 @@ async fn test_client_error_handling() {
 #[tokio::test]
 async fn test_client_error_handling_invalid_error_json() {
     let server = MockServer::start().await;
-    let client = MikromClient::new(server.uri(), None);
+    let client = ReqwestApiClient::new(server.uri(), None).unwrap();
 
     Mock::given(method("POST"))
         .and(path("/v1/auth/login"))
@@ -517,5 +518,6 @@ async fn test_client_error_handling_invalid_error_json() {
     let res = client.login("test@example.com", "wrong").await;
     assert!(res.is_err());
     let err_msg = res.unwrap_err().to_string();
-    assert!(err_msg.contains("Failed to parse error response"));
+    // With retry logic, 500 is retryable; after max retries we get a generic message
+    assert!(err_msg.contains("Max retries exceeded"));
 }
