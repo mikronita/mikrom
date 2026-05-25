@@ -52,12 +52,14 @@ impl ReqwestApiClient {
         Fut: std::future::Future<Output = Result<reqwest::Response, reqwest::Error>>,
     {
         let max_retries = 3;
-        let mut last_err = None;
 
         for attempt in 0..max_retries {
             match operation().await {
                 Ok(resp) => {
-                    if resp.status().is_success() || !Self::is_retryable(resp.status()) {
+                    if resp.status().is_success()
+                        || !Self::is_retryable(resp.status())
+                        || attempt == max_retries - 1
+                    {
                         return Ok(resp);
                     }
                     // Server error: wait and retry
@@ -69,10 +71,9 @@ impl ReqwestApiClient {
                         delay
                     );
                     tokio::time::sleep(delay).await;
-                    last_err = Some(resp.status().to_string());
                 },
                 Err(e) => {
-                    if e.is_timeout() || e.is_connect() {
+                    if (e.is_timeout() || e.is_connect()) && attempt < max_retries - 1 {
                         let delay = std::time::Duration::from_millis(200 * (1 << attempt));
                         tracing::warn!(
                             error = %e,
@@ -81,7 +82,6 @@ impl ReqwestApiClient {
                             delay
                         );
                         tokio::time::sleep(delay).await;
-                        last_err = Some(e.to_string());
                     } else {
                         return Err(CliError::Http(e));
                     }
@@ -89,13 +89,7 @@ impl ReqwestApiClient {
             }
         }
 
-        Err(CliError::Api {
-            status: 503,
-            message: format!(
-                "Max retries exceeded. Last error: {}",
-                last_err.unwrap_or_default()
-            ),
-        })
+        unreachable!()
     }
 
     fn build_request<B: Serialize>(
