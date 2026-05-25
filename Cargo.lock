@@ -659,39 +659,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aya-log-ebpf"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a10bbadd0829895a91eb1cd2bb02d7af145704087f03812bed60cb9fe65dbb3"
-dependencies = [
- "aya-ebpf",
- "aya-log-common",
- "aya-log-ebpf-macros",
-]
-
-[[package]]
-name = "aya-log-ebpf-macros"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6d8251a75f56077db51892041aa6b77c70ef2723845d7a210979700b2f01bc4"
-dependencies = [
- "aya-log-common",
- "aya-log-parser",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "aya-log-parser"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14b102eb5c88c9aa0b49102d3fbcee08ecb0dfa81014f39b373311de7a7032cb"
-dependencies = [
- "aya-log-common",
-]
-
-[[package]]
 name = "aya-obj"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2902,7 +2869,6 @@ dependencies = [
  "aya-log",
  "base64 0.22.1",
  "bollard",
- "bytes",
  "chrono",
  "dashmap",
  "dotenvy",
@@ -2920,14 +2886,11 @@ dependencies = [
  "parking_lot",
  "prost 0.13.5",
  "rand 0.8.6",
- "rand_core 0.6.4",
  "reqwest 0.13.3",
  "rtnetlink",
  "serde",
  "serde_json",
- "shlex",
  "sysinfo",
- "tar",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2942,7 +2905,6 @@ name = "mikrom-agent-ebpf"
 version = "0.3.0"
 dependencies = [
  "aya-ebpf",
- "aya-log-ebpf",
  "mikrom-agent-ebpf-common",
  "network-types",
 ]
@@ -3127,13 +3089,11 @@ dependencies = [
  "neli",
  "netlink-packet-route",
  "openssl",
- "openssl-sys",
  "opentelemetry 0.27.1",
  "opentelemetry-otlp 0.27.0",
  "opentelemetry_sdk 0.27.1",
  "pingora",
  "pingora-limits",
- "pingora-openssl",
  "prost 0.13.5",
  "rand 0.8.6",
  "reqwest 0.12.28",
@@ -3152,7 +3112,6 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "x25519-dalek",
- "x509-parser 0.18.1",
 ]
 
 [[package]]
@@ -3167,22 +3126,17 @@ dependencies = [
  "dotenvy",
  "envy",
  "futures",
- "hex",
  "mikrom-proto",
  "mockall",
  "prost 0.13.5",
- "rand 0.8.6",
- "rand_core 0.6.4",
  "serde",
  "serde_json",
- "sha2",
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
  "tower-http",
  "tracing",
  "uuid",
- "x25519-dalek",
 ]
 
 [[package]]

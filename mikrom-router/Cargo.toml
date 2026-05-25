@@ -17,14 +17,12 @@ mikrom-api = { path = "../mikrom-api", optional = true }
 mikrom-proto = { version = "0.3.0", path = "../mikrom-proto" }
 mikrom-scheduler = { path = "../mikrom-scheduler", optional = true }
 openssl = "0.10.79"
-openssl-sys = "0.9.115"
 rustls = { version = "0.23", features = ["ring"], optional = true }
 opentelemetry = "0.27"
 opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 pingora = { version = "0.8.0", features = ["openssl", "lb", "proxy"] }
 pingora-limits = "0.8.0"
-pingora-openssl = "0.8.0"
 prost.workspace = true
 axum = "0.8"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -35,7 +33,6 @@ tokio = { workspace = true, features = ["full"] }
 tracing = "0.1.44"
 tracing-opentelemetry = "0.28"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-x509-parser = "0.18.1"
 aes-gcm = "0.10"
 base64 = "0.22"
 futures = "0.3.32"
