@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
+    #[serde(default)]
     pub api_url: Option<String>,
+    #[serde(default)]
     pub token: Option<String>,
 }
 
@@ -12,8 +14,25 @@ impl Config {
         dirs::config_dir().map(|d| d.join("mikrom").join("config.toml"))
     }
 
-    pub fn load() -> Self {
+    pub fn load() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
+
+        let mut config = Self::load_from_file();
+
+        // Override with environment variables if present
+        if let Ok(env_config) = envy::from_env::<Self>() {
+            if env_config.api_url.is_some() {
+                config.api_url = env_config.api_url;
+            }
+            if env_config.token.is_some() {
+                config.token = env_config.token;
+            }
+        }
+
+        Ok(config)
+    }
+
+    fn load_from_file() -> Self {
         let Some(path) = Self::path() else {
             return Self::default();
         };
@@ -42,11 +61,16 @@ impl Config {
     }
 
     pub fn api_url(&self) -> &str {
-        static OVERRIDE_URL: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-        if let Some(url) = OVERRIDE_URL.get_or_init(|| std::env::var("MIKROM_API_URL").ok()) {
-            return url;
-        }
         self.api_url.as_deref().unwrap_or("http://localhost:5001")
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(url) = &self.api_url {
+            let _ = url
+                .parse::<reqwest::Url>()
+                .map_err(|e| anyhow::anyhow!("Invalid API URL '{}': {}", url, e))?;
+        }
+        Ok(())
     }
 }
 
@@ -59,8 +83,6 @@ mod tests {
     fn temp_path(dir: &TempDir) -> PathBuf {
         dir.path().join("config.toml")
     }
-
-    // ── api_url() ────────────────────────────────────────────────────────────────
 
     #[test]
     fn test_api_url_returns_default_when_none() {
@@ -75,8 +97,6 @@ mod tests {
         };
         assert_eq!(cfg.api_url(), "http://remote:9000");
     }
-
-    // ── load_from ────────────────────────────────────────────────────────────────
 
     #[test]
     fn test_load_from_missing_file_returns_default() {
@@ -115,8 +135,6 @@ mod tests {
         assert!(cfg.api_url.is_none());
         assert_eq!(cfg.token.as_deref(), Some("eyJhbGciOiJIUzI1NiJ9"));
     }
-
-    // ── save_to / roundtrip ──────────────────────────────────────────────────────
 
     #[test]
     fn test_save_and_load_roundtrip() {
@@ -282,5 +300,29 @@ token = "deser-token"
         let cfg: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.api_url.as_deref(), Some("http://deser:5001"));
         assert_eq!(cfg.token.as_deref(), Some("deser-token"));
+    }
+
+    #[test]
+    fn test_validate_accepts_valid_url() {
+        let cfg = Config {
+            api_url: Some("http://localhost:5001".to_string()),
+            token: None,
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_invalid_url() {
+        let cfg = Config {
+            api_url: Some("not-a-url".to_string()),
+            token: None,
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_empty_config_is_ok() {
+        let cfg = Config::default();
+        assert!(cfg.validate().is_ok());
     }
 }

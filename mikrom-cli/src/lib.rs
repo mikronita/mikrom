@@ -1,5 +1,6 @@
-pub mod client;
+pub mod application;
 pub mod commands;
 pub mod config;
-pub mod handlers;
-pub mod ui;
+pub mod domain;
+pub mod infrastructure;
+pub mod output;

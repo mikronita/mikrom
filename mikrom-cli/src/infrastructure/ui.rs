@@ -1,4 +1,3 @@
-use serde::Serialize;
 use yansi::Paint;
 
 // Emojis for better UX
@@ -60,11 +59,6 @@ pub fn step(emoji: &str, msg: &str) {
 
 pub fn label_value(emoji: &str, label: &str, value: &str) {
     println!("  {} {:<12} {}", emoji, label, value);
-}
-
-pub fn print_json<T: Serialize>(value: &T) -> anyhow::Result<()> {
-    println!("{}", serde_json::to_string_pretty(value)?);
-    Ok(())
 }
 
 pub fn table(title: &str, headers: &[&str], rows: &[Vec<String>]) {
