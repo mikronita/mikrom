@@ -11,12 +11,12 @@ chrono = "0.4.44"
 dotenvy = "0.15"
 futures-util = "0.3.32"
 hostname = "0.4.2"
-http = "1.1"
+http = "1.4"
 envy.workspace = true
 mikrom-api = { path = "../mikrom-api", optional = true }
 mikrom-proto = { version = "0.3.0", path = "../mikrom-proto" }
 mikrom-scheduler = { path = "../mikrom-scheduler", optional = true }
-openssl = "0.10.79"
+openssl = "0.10.80"
 rustls = { version = "0.23", features = ["ring"], optional = true }
 opentelemetry = "0.27"
 opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic"] }
@@ -26,8 +26,8 @@ pingora-limits = "0.8.0"
 prost.workspace = true
 axum = "0.8"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-dashmap = "6.1.0"
+serde_json = "1.0.150"
+dashmap = "6.2.1"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres"] }
 tokio = { workspace = true, features = ["full"] }
 tracing = "0.1.44"
@@ -63,6 +63,6 @@ scale-to-zero-e2e = [
 workspace = true
 
 [dev-dependencies]
-axum = "0.8.6"
+axum = "0.8.9"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-tempfile = "3.10"
+tempfile = "3.27"
