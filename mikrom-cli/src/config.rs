@@ -20,7 +20,7 @@ impl Config {
         let mut config = Self::load_from_file();
 
         // Override with environment variables if present
-        if let Ok(env_config) = envy::from_env::<Self>() {
+        if let Ok(env_config) = envy::prefixed("MIKROM_").from_env::<Self>() {
             if env_config.api_url.is_some() {
                 config.api_url = env_config.api_url;
             }

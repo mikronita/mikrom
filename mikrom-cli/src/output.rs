@@ -1,7 +1,10 @@
 use serde::Serialize;
 
 pub fn print_json<T: Serialize>(value: &T) {
-    println!("{}", serde_json::to_string_pretty(value).unwrap());
+    match serde_json::to_string_pretty(value) {
+        Ok(json) => println!("{}", json),
+        Err(err) => eprintln!("Error: Failed to serialize response to JSON: {}", err),
+    }
 }
 
 pub fn format_timestamp(ts: i64) -> String {

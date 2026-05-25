@@ -518,6 +518,7 @@ async fn test_client_error_handling_invalid_error_json() {
     let res = client.login("test@example.com", "wrong").await;
     assert!(res.is_err());
     let err_msg = res.unwrap_err().to_string();
-    // With retry logic, 500 is retryable; after max retries we get a generic message
-    assert!(err_msg.contains("Max retries exceeded"));
+    // 500 is retryable; on the last attempt the response is returned,
+    // and parsing the invalid JSON body yields this message
+    assert!(err_msg.contains("Failed to parse error response"));
 }
