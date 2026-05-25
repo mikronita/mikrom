@@ -128,115 +128,112 @@ async fn handle_metrics(
     format_snapshot(&snapshot)
 }
 
+#[allow(clippy::too_many_lines)]
 fn format_snapshot(snapshot: &TelemetrySnapshot) -> String {
     let mut output = String::new();
+    let router_id = &snapshot.router_id;
 
-    let _ = writeln!(output, "# TYPE mikrom_router_requests_total counter");
-    let _ = writeln!(
-        output,
-        "mikrom_router_requests_total{{router_id=\"{}\"}} {}",
-        snapshot.router_id, snapshot.requests_total
+    // Helper to write a standard metric with only a router_id label.
+    let write_metric =
+        |out: &mut String, name: &str, type_: &str, value: &dyn std::fmt::Display| {
+            let _ = writeln!(out, "# TYPE {name} {type_}");
+            let _ = writeln!(out, "{name}{{router_id=\"{router_id}\"}} {value}");
+        };
+
+    write_metric(
+        &mut output,
+        "mikrom_router_requests_total",
+        "counter",
+        &snapshot.requests_total,
     );
 
     let _ = writeln!(output, "# TYPE mikrom_router_responses_total counter");
     let _ = writeln!(
         output,
-        "mikrom_router_responses_total{{router_id=\"{}\",family=\"2xx\"}} {}",
-        snapshot.router_id, snapshot.responses_2xx
+        "mikrom_router_responses_total{{router_id=\"{router_id}\",family=\"2xx\"}} {}",
+        snapshot.responses_2xx
     );
     let _ = writeln!(
         output,
-        "mikrom_router_responses_total{{router_id=\"{}\",family=\"3xx\"}} {}",
-        snapshot.router_id, snapshot.responses_3xx
+        "mikrom_router_responses_total{{router_id=\"{router_id}\",family=\"3xx\"}} {}",
+        snapshot.responses_3xx
     );
     let _ = writeln!(
         output,
-        "mikrom_router_responses_total{{router_id=\"{}\",family=\"4xx\"}} {}",
-        snapshot.router_id, snapshot.responses_4xx
+        "mikrom_router_responses_total{{router_id=\"{router_id}\",family=\"4xx\"}} {}",
+        snapshot.responses_4xx
     );
     let _ = writeln!(
         output,
-        "mikrom_router_responses_total{{router_id=\"{}\",family=\"5xx\"}} {}",
-        snapshot.router_id, snapshot.responses_5xx
-    );
-
-    let _ = writeln!(output, "# TYPE mikrom_router_routes_count gauge");
-    let _ = writeln!(
-        output,
-        "mikrom_router_routes_count{{router_id=\"{}\"}} {}",
-        snapshot.router_id, snapshot.routes
+        "mikrom_router_responses_total{{router_id=\"{router_id}\",family=\"5xx\"}} {}",
+        snapshot.responses_5xx
     );
 
-    let _ = writeln!(output, "# TYPE mikrom_router_certificates_count gauge");
-    let _ = writeln!(
-        output,
-        "mikrom_router_certificates_count{{router_id=\"{}\"}} {}",
-        snapshot.router_id, snapshot.certificates
+    write_metric(
+        &mut output,
+        "mikrom_router_routes_count",
+        "gauge",
+        &snapshot.routes,
     );
-
-    let _ = writeln!(output, "# TYPE mikrom_router_acme_tokens_count gauge");
-    let _ = writeln!(
-        output,
-        "mikrom_router_acme_tokens_count{{router_id=\"{}\"}} {}",
-        snapshot.router_id, snapshot.acme_tokens
+    write_metric(
+        &mut output,
+        "mikrom_router_certificates_count",
+        "gauge",
+        &snapshot.certificates,
     );
-
-    let _ = writeln!(output, "# TYPE mikrom_router_acme_hits counter");
-    let _ = writeln!(
-        output,
-        "mikrom_router_acme_hits{{router_id=\"{}\"}} {}",
-        snapshot.router_id, snapshot.acme_hits
+    write_metric(
+        &mut output,
+        "mikrom_router_acme_tokens_count",
+        "gauge",
+        &snapshot.acme_tokens,
     );
-
-    let _ = writeln!(output, "# TYPE mikrom_router_acme_misses counter");
-    let _ = writeln!(
-        output,
-        "mikrom_router_acme_misses{{router_id=\"{}\"}} {}",
-        snapshot.router_id, snapshot.acme_misses
+    write_metric(
+        &mut output,
+        "mikrom_router_acme_hits",
+        "counter",
+        &snapshot.acme_hits,
     );
-
-    let _ = writeln!(output, "# TYPE mikrom_router_redirects counter");
-    let _ = writeln!(
-        output,
-        "mikrom_router_redirects{{router_id=\"{}\"}} {}",
-        snapshot.router_id, snapshot.redirects
+    write_metric(
+        &mut output,
+        "mikrom_router_acme_misses",
+        "counter",
+        &snapshot.acme_misses,
     );
-
-    let _ = writeln!(output, "# TYPE mikrom_router_rate_limited counter");
-    let _ = writeln!(
-        output,
-        "mikrom_router_rate_limited{{router_id=\"{}\"}} {}",
-        snapshot.router_id, snapshot.rate_limited
+    write_metric(
+        &mut output,
+        "mikrom_router_redirects",
+        "counter",
+        &snapshot.redirects,
     );
-
-    let _ = writeln!(output, "# TYPE mikrom_router_route_wait_timeouts counter");
-    let _ = writeln!(
-        output,
-        "mikrom_router_route_wait_timeouts{{router_id=\"{}\"}} {}",
-        snapshot.router_id, snapshot.route_wait_timeouts
+    write_metric(
+        &mut output,
+        "mikrom_router_rate_limited",
+        "counter",
+        &snapshot.rate_limited,
     );
-
-    let _ = writeln!(output, "# TYPE mikrom_router_latency_avg_ms gauge");
-    let _ = writeln!(
-        output,
-        "mikrom_router_latency_avg_ms{{router_id=\"{}\"}} {}",
-        snapshot.router_id, snapshot.latency_avg_ms
+    write_metric(
+        &mut output,
+        "mikrom_router_route_wait_timeouts",
+        "counter",
+        &snapshot.route_wait_timeouts,
     );
-
-    let _ = writeln!(output, "# TYPE mikrom_router_health_live gauge");
-    let _ = writeln!(
-        output,
-        "mikrom_router_health_live{{router_id=\"{}\"}} {}",
-        snapshot.router_id,
-        u32::from(snapshot.health_live)
+    write_metric(
+        &mut output,
+        "mikrom_router_latency_avg_ms",
+        "gauge",
+        &snapshot.latency_avg_ms,
     );
-
-    let _ = writeln!(output, "# TYPE mikrom_router_health_ready gauge");
-    let _ = writeln!(
-        output,
-        "mikrom_router_health_ready{{router_id=\"{}\"}} {}",
-        snapshot.router_id,
-        u32::from(snapshot.health_ready)
+    write_metric(
+        &mut output,
+        "mikrom_router_health_live",
+        "gauge",
+        &u32::from(snapshot.health_live),
+    );
+    write_metric(
+        &mut output,
+        "mikrom_router_health_ready",
+        "gauge",
+        &u32::from(snapshot.health_ready),
     );
 
     output

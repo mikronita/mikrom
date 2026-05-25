@@ -160,40 +160,44 @@ impl AgentHttpServer {
         );
 
         // VM resource metrics
-        let _ = writeln!(output, "# TYPE mikrom_vm_cpu_usage gauge");
-        for vm in metrics.vms.values() {
-            let _ = writeln!(
-                output,
-                "mikrom_vm_cpu_usage{{app_id=\"{}\",vm_id=\"{}\"}} {}",
-                vm.app_id, vm.vm_id, vm.cpu_usage
-            );
-        }
+        if !metrics.vms.is_empty() {
+            let vms: Vec<_> = metrics.vms.values().collect();
 
-        let _ = writeln!(output, "# TYPE mikrom_vm_ram_usage_bytes gauge");
-        for vm in metrics.vms.values() {
-            let _ = writeln!(
-                output,
-                "mikrom_vm_ram_usage_bytes{{app_id=\"{}\",vm_id=\"{}\"}} {}",
-                vm.app_id, vm.vm_id, vm.ram_used_bytes
-            );
-        }
+            let _ = writeln!(output, "# TYPE mikrom_vm_cpu_usage gauge");
+            for vm in &vms {
+                let _ = writeln!(
+                    output,
+                    "mikrom_vm_cpu_usage{{app_id=\"{}\",vm_id=\"{}\"}} {}",
+                    vm.app_id, vm.vm_id, vm.cpu_usage
+                );
+            }
 
-        let _ = writeln!(output, "# TYPE mikrom_vm_network_tx_bytes gauge");
-        for vm in metrics.vms.values() {
-            let _ = writeln!(
-                output,
-                "mikrom_vm_network_tx_bytes{{app_id=\"{}\",vm_id=\"{}\"}} {}",
-                vm.app_id, vm.vm_id, vm.tx_bytes
-            );
-        }
+            let _ = writeln!(output, "# TYPE mikrom_vm_ram_usage_bytes gauge");
+            for vm in &vms {
+                let _ = writeln!(
+                    output,
+                    "mikrom_vm_ram_usage_bytes{{app_id=\"{}\",vm_id=\"{}\"}} {}",
+                    vm.app_id, vm.vm_id, vm.ram_used_bytes
+                );
+            }
 
-        let _ = writeln!(output, "# TYPE mikrom_vm_network_rx_bytes gauge");
-        for vm in metrics.vms.values() {
-            let _ = writeln!(
-                output,
-                "mikrom_vm_network_rx_bytes{{app_id=\"{}\",vm_id=\"{}\"}} {}",
-                vm.app_id, vm.vm_id, vm.rx_bytes
-            );
+            let _ = writeln!(output, "# TYPE mikrom_vm_network_tx_bytes gauge");
+            for vm in &vms {
+                let _ = writeln!(
+                    output,
+                    "mikrom_vm_network_tx_bytes{{app_id=\"{}\",vm_id=\"{}\"}} {}",
+                    vm.app_id, vm.vm_id, vm.tx_bytes
+                );
+            }
+
+            let _ = writeln!(output, "# TYPE mikrom_vm_network_rx_bytes gauge");
+            for vm in &vms {
+                let _ = writeln!(
+                    output,
+                    "mikrom_vm_network_rx_bytes{{app_id=\"{}\",vm_id=\"{}\"}} {}",
+                    vm.app_id, vm.vm_id, vm.rx_bytes
+                );
+            }
         }
 
         output
