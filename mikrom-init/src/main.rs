@@ -37,7 +37,7 @@ fn default_workdir() -> String {
     "/app".to_string()
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     println!("[mikrom-init] Initializing microVM environment...");
 
@@ -710,7 +710,7 @@ mod tests {
         assert!(parts.contains(&"/custom/bin"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn test_wait_for_port_ready_detects_listener() {
         let listener = match tokio::net::TcpListener::bind(("127.0.0.1", 0)).await {
             Ok(listener) => listener,
@@ -732,7 +732,7 @@ mod tests {
         let _ = accept_task.await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn test_start_background_services_missing_sshd() {
         // Should not panic or return error if sshd is missing
         let result = start_background_services().await;

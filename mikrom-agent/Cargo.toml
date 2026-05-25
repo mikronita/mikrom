@@ -14,7 +14,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 parking_lot = "0.12"
-dashmap = "6.2"
+dashmap.workspace = true
 sysinfo = "0.32"
 hostname = "0.4"
 envy.workspace = true
@@ -24,7 +24,7 @@ dotenvy = "0.15"
 anyhow.workspace = true
 async-nats.workspace = true
 futures = "0.3.32"
-reqwest = { version = "0.13.4", features = ["json"] }
+reqwest = { workspace = true, features = ["json"] }
 aya = { version = "0.13", features = ["async_tokio"] }
 aya-log = "0.2"
 mikrom-agent-ebpf-common = { path = "../mikrom-agent-ebpf-common", features = ["user"] }

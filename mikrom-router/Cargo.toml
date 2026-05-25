@@ -27,7 +27,7 @@ prost.workspace = true
 axum = "0.8"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
-dashmap = "6.2.1"
+dashmap.workspace = true
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres"] }
 tokio = { workspace = true, features = ["full"] }
 tracing = "0.1.44"
@@ -64,5 +64,5 @@ workspace = true
 
 [dev-dependencies]
 axum = "0.8.9"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { workspace = true, default-features = false, features = ["rustls"] }
 tempfile = "3.27"
