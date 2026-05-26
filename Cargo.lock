@@ -3063,7 +3063,6 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
- "pingora",
  "prost 0.13.5",
  "rcgen 0.13.2",
  "serde",

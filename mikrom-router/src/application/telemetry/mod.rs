@@ -276,6 +276,7 @@ impl BackgroundService for TelemetryLoop {
         let loop_state = self.clone();
         let metrics_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            interval.tick().await;
             loop {
                 interval.tick().await;
                 let snapshot = {

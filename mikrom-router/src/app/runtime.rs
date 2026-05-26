@@ -196,7 +196,15 @@ fn enable_tracing(router_id: &str) -> Result<()> {
         .map_err(|_| anyhow::anyhow!("failed to lock tracing telemetry layer"))?
         .extend(stack.into_layers());
 
+    tracing::callsite::rebuild_interest_cache();
+
     Ok(())
+}
+
+pub fn shutdown_telemetry() {
+    if let Some(providers) = TELEMETRY_PROVIDERS.get() {
+        providers.shutdown();
+    }
 }
 
 pub async fn connect_with_backoff<T, F, Fut>(
