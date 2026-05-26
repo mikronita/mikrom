@@ -924,11 +924,6 @@ mod tests {
         job_repo
             .expect_list_jobs()
             .returning(move |_, _, _| Ok(vec![job.clone()]));
-        job_repo
-            .expect_remove_jobs_by_app()
-            .with(eq("app-1"))
-            .times(1)
-            .returning(|_| Ok(()));
 
         let mut agent_client = MockAgentClient::new();
         agent_client
@@ -970,11 +965,6 @@ mod tests {
         job_repo
             .expect_list_jobs()
             .returning(move |_, _, _| Ok(vec![job.clone()]));
-        job_repo
-            .expect_remove_jobs_by_app()
-            .with(eq("app-1"))
-            .times(0)
-            .returning(|_| Ok(()));
 
         let mut agent_client = MockAgentClient::new();
         agent_client

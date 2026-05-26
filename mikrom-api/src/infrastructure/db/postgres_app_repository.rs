@@ -16,6 +16,18 @@ impl PostgresAppRepository {
         Self { pool, master_key }
     }
 
+    fn deployment_select_columns(prefix: Option<&str>) -> String {
+        let prefix = prefix.map(|p| format!("{p}.")).unwrap_or_default();
+        format!(
+            "{prefix}id, {prefix}app_id, {prefix}user_id, {prefix}build_id, {prefix}image_tag, \
+             {prefix}job_id, {prefix}ipv6_address, {prefix}status, {prefix}vcpus, \
+             {prefix}memory_mib, {prefix}disk_mib, {prefix}port, {prefix}env_vars, \
+             {prefix}git_commit_hash, {prefix}git_commit_message, {prefix}git_branch, \
+             {prefix}trigger_source, {prefix}created_at, {prefix}updated_at, \
+             {prefix}hypervisor::INT4 AS hypervisor"
+        )
+    }
+
     fn decrypt_app(&self, mut app: App) -> DomainResult<App> {
         if let Some(ref encrypted) = app.github_webhook_secret {
             match crate::crypto::decrypt(encrypted, &self.master_key) {
@@ -292,13 +304,14 @@ impl AppRepository for PostgresAppRepository {
         let encrypted_env = crate::crypto::encrypt(&env_raw, &self.master_key)?;
         let env_json = serde_json::Value::String(encrypted_env);
 
-        let db_deployment = sqlx::query_as::<_, DbDeployment>(
+        let db_deployment = sqlx::query_as::<_, DbDeployment>(&format!(
             r#"
             INSERT INTO deployments (app_id, user_id, status, vcpus, memory_mib, disk_mib, port, env_vars, trigger_source, git_commit_hash, git_commit_message, git_branch, hypervisor)
             VALUES ($1, $2, 'BUILDING', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            RETURNING *
+            RETURNING {}
             "#,
-        )
+            Self::deployment_select_columns(None)
+        ))
         .bind(data.app_id)
         .bind(uid)
         .bind(i32::from(data.vcpus))
@@ -354,11 +367,13 @@ impl AppRepository for PostgresAppRepository {
     }
 
     async fn get_deployment(&self, id: Uuid) -> DomainResult<Option<Deployment>> {
-        let db_deployment =
-            sqlx::query_as::<_, DbDeployment>("SELECT * FROM deployments WHERE id = $1")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let db_deployment = sqlx::query_as::<_, DbDeployment>(&format!(
+            "SELECT {} FROM deployments WHERE id = $1",
+            Self::deployment_select_columns(None)
+        ))
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
 
         match db_deployment {
             Some(d) => Ok(Some(self.decrypt_deployment(d.into())?)),
@@ -367,11 +382,13 @@ impl AppRepository for PostgresAppRepository {
     }
 
     async fn get_deployment_by_job_id(&self, job_id: &str) -> DomainResult<Option<Deployment>> {
-        let db_deployment =
-            sqlx::query_as::<_, DbDeployment>("SELECT * FROM deployments WHERE job_id = $1")
-                .bind(job_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let db_deployment = sqlx::query_as::<_, DbDeployment>(&format!(
+            "SELECT {} FROM deployments WHERE job_id = $1",
+            Self::deployment_select_columns(None)
+        ))
+        .bind(job_id)
+        .fetch_optional(&self.pool)
+        .await?;
 
         match db_deployment {
             Some(d) => Ok(Some(self.decrypt_deployment(d.into())?)),
@@ -380,9 +397,10 @@ impl AppRepository for PostgresAppRepository {
     }
 
     async fn list_deployments_by_app(&self, app_id: Uuid) -> DomainResult<Vec<Deployment>> {
-        let db_deployments = sqlx::query_as::<_, DbDeployment>(
-            "SELECT * FROM deployments WHERE app_id = $1 ORDER BY created_at DESC",
-        )
+        let db_deployments = sqlx::query_as::<_, DbDeployment>(&format!(
+            "SELECT {} FROM deployments WHERE app_id = $1 ORDER BY created_at DESC",
+            Self::deployment_select_columns(None)
+        ))
         .bind(app_id)
         .fetch_all(&self.pool)
         .await?;
@@ -400,16 +418,18 @@ impl AppRepository for PostgresAppRepository {
     ) -> DomainResult<Vec<Deployment>> {
         let db_deployments = match user_id {
             None => {
-                sqlx::query_as::<_, DbDeployment>(
-                    "SELECT * FROM deployments ORDER BY created_at DESC",
-                )
+                sqlx::query_as::<_, DbDeployment>(&format!(
+                    "SELECT {} FROM deployments ORDER BY created_at DESC",
+                    Self::deployment_select_columns(None)
+                ))
                 .fetch_all(&self.pool)
                 .await?
             },
             Some(uid) => {
-                sqlx::query_as::<_, DbDeployment>(
-                    "SELECT * FROM deployments WHERE user_id = $1 ORDER BY created_at DESC",
-                )
+                sqlx::query_as::<_, DbDeployment>(&format!(
+                    "SELECT {} FROM deployments WHERE user_id = $1 ORDER BY created_at DESC",
+                    Self::deployment_select_columns(None)
+                ))
                 .bind(uid)
                 .fetch_all(&self.pool)
                 .await?
@@ -424,9 +444,10 @@ impl AppRepository for PostgresAppRepository {
     }
 
     async fn get_active_deployment(&self, app_id: Uuid) -> DomainResult<Option<Deployment>> {
-        let db_deployment = sqlx::query_as::<_, DbDeployment>(
-            "SELECT d.* FROM deployments d JOIN apps a ON d.id = a.active_deployment_id WHERE a.id = $1"
-        )
+        let db_deployment = sqlx::query_as::<_, DbDeployment>(&format!(
+            "SELECT {} FROM deployments d JOIN apps a ON d.id = a.active_deployment_id WHERE a.id = $1",
+            Self::deployment_select_columns(Some("d"))
+        ))
         .bind(app_id)
         .fetch_optional(&self.pool)
         .await?;

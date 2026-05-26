@@ -27,6 +27,7 @@ pub trait BuilderClient: Send + Sync {
         Option<String>,
         Option<String>,
         Option<String>,
+        String,
     )>;
 }
 
@@ -75,6 +76,7 @@ impl BuilderClient for RealBuilderClient {
         Option<String>,
         Option<String>,
         Option<String>,
+        String,
     )> {
         let resp: GetBuildStatusResponse = self
             .nats
@@ -107,6 +109,7 @@ impl BuilderClient for RealBuilderClient {
             } else {
                 Some(resp.git_branch)
             },
+            resp.message,
         ))
     }
 }
@@ -280,7 +283,15 @@ pub async fn poll_and_deploy(
                 "Failed initial build status check for {}: {}",
                 task.build_id, e
             );
-            (BuildStatus::Building, String::new(), 0, None, None, None)
+            (
+                BuildStatus::Building,
+                String::new(),
+                0,
+                None,
+                None,
+                None,
+                String::new(),
+            )
         },
     };
 
@@ -399,7 +410,17 @@ pub async fn poll_and_deploy(
                 break;
             },
             BuildStatus::Failed => {
-                error!(build_id = %task.build_id, "Build failed, aborting deployment");
+                let failure_message = if current_status.6.is_empty() {
+                    "Build failed".to_string()
+                } else {
+                    current_status.6.clone()
+                };
+                error!(
+                    build_id = %task.build_id,
+                    message = %failure_message,
+                    image_tag = %current_status.1,
+                    "Build failed, aborting deployment"
+                );
                 mark_deployment_failed(&state, task.deployment_id, task.app_id, None).await?;
                 break;
             },
@@ -418,6 +439,7 @@ pub async fn poll_and_deploy(
                                     Some(resp.git_commit_hash).filter(|s| !s.is_empty()),
                                     Some(resp.git_commit_message).filter(|s| !s.is_empty()),
                                     Some(resp.git_branch).filter(|s| !s.is_empty()),
+                                    resp.message,
                                 );
                             }
                         }

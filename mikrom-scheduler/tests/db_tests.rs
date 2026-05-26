@@ -4,8 +4,11 @@ mod common_utils;
 #[cfg(test)]
 mod tests {
     use super::common_utils;
-    use mikrom_scheduler::domain::{AppConfig, AppId, AppRepository, UserId};
+    use mikrom_scheduler::domain::{
+        AppConfig, AppId, AppRepository, Job, JobId, JobRepository, UserId, VmConfig,
+    };
     use mikrom_scheduler::infrastructure::db::PgAppRepository;
+    use mikrom_scheduler::infrastructure::db::PgJobRepository;
     use sqlx::Row;
 
     #[tokio::test]
@@ -79,5 +82,59 @@ mod tests {
         assert!(by_hostname.autoscaling_enabled);
         assert_eq!(by_hostname.cpu_threshold, 75.0);
         assert_eq!(by_hostname.mem_threshold, 65.0);
+    }
+
+    #[tokio::test]
+    async fn test_scheduler_remove_app_and_jobs_by_app_cleans_app_row() {
+        let Ok(db) = common_utils::TestDb::try_new().await else {
+            eprintln!("Skipping db test: database unavailable");
+            return;
+        };
+        let pool = db.pool().clone();
+        let app_repo = PgAppRepository::new(pool.clone());
+        let job_repo = PgJobRepository::new(pool.clone());
+
+        let app = AppConfig {
+            id: AppId::from("app-delete".to_string()),
+            user_id: UserId::from("user-delete".to_string()),
+            vpc_ipv6_prefix: "fd00:abcd::".to_string(),
+            hostname: "delete.example.com".to_string(),
+            desired_replicas: 1,
+            min_replicas: 0,
+            max_replicas: 1,
+            autoscaling_enabled: false,
+            cpu_threshold: 80.0,
+            mem_threshold: 80.0,
+            last_router_traffic_at: 0,
+            last_scaled_to_zero_at: 0,
+            restore_retry_after_at: 0,
+        };
+
+        app_repo.update_app_config(app.clone()).await.unwrap();
+
+        let job = Job::new(
+            JobId::from("job-delete".to_string()),
+            app.id.clone(),
+            "delete-app".to_string(),
+            "nginx:latest".to_string(),
+            VmConfig::default(),
+            app.user_id.clone(),
+            None,
+        );
+        job_repo.add_job(job).await.unwrap();
+
+        app_repo
+            .remove_app_and_jobs_by_app(app.id.as_ref())
+            .await
+            .unwrap();
+
+        assert!(
+            app_repo
+                .get_app_config(app.id.as_ref())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(job_repo.get_job("job-delete").await.unwrap().is_none());
     }
 }

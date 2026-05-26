@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use mikrom_proto::router::RouterConfigAck;
 use mikrom_proto::router::RouterConfigUpdate;
 
 pub mod application;
@@ -146,7 +147,7 @@ impl AppState {
                     app.port
                 };
 
-                target_urls.push(format!("http://[{}]:{}", job.ipv6_address, port));
+                target_urls.push(format!("[{}]:{}", job.ipv6_address, port));
             }
         }
 
@@ -157,9 +158,19 @@ impl AppState {
             timestamp: chrono::Utc::now().timestamp(),
         };
 
-        self.nats
-            .publish(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
+        let ack: RouterConfigAck = self
+            .nats
+            .with_timeout(std::time::Duration::from_secs(5))
+            .request(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
             .await?;
+
+        if !ack.success {
+            return Err(anyhow::anyhow!(
+                "router rejected route update for {}: {}",
+                hostname,
+                ack.message
+            ));
+        }
 
         if has_targets {
             let Some(user) = self.user_repo.find_by_id(app.user_id).await.ok().flatten() else {
@@ -219,14 +230,20 @@ impl AppState {
             timestamp: chrono::Utc::now().timestamp(),
         };
 
-        // We use publish (fire-and-forget) for route removal because:
-        // 1. App deletion should be fast.
-        // 2. The router is eventually consistent and will sync state from DB on restart.
-        // 3. Waiting for a router ACK often causes timeouts if the router is busy.
-        self.nats
-            .publish(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
+        let ack: RouterConfigAck = self
+            .nats
+            .with_timeout(std::time::Duration::from_secs(5))
+            .request(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
             .await
-            .map_err(|e| anyhow::anyhow!("failed to publish route removal: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("failed to request route removal: {}", e))?;
+
+        if !ack.success {
+            return Err(anyhow::anyhow!(
+                "router rejected route removal for {}: {}",
+                hostname,
+                ack.message
+            ));
+        }
 
         Ok(())
     }

@@ -98,3 +98,79 @@ async fn test_deployment_metadata_roundtrip() {
     assert_eq!(updated.git_commit_message.as_deref(), Some(commit_msg));
     assert_eq!(updated.git_branch.as_deref(), Some(branch));
 }
+
+#[tokio::test]
+async fn test_deployment_hypervisor_roundtrip_with_smallint_schema() {
+    let db = TestDb::new().await;
+    let pool = db.pool().clone();
+
+    sqlx::query(
+        "ALTER TABLE deployments ALTER COLUMN hypervisor TYPE SMALLINT USING hypervisor::SMALLINT",
+    )
+    .execute(&pool)
+    .await
+    .expect("failed to downgrade hypervisor column type");
+
+    let user_repo = PostgresUserRepository::new(pool.clone());
+    let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".to_string());
+
+    let email = format!("hypervisor_test_{}@example.com", Uuid::new_v4());
+    let user_id = user_repo
+        .create(NewUser {
+            email,
+            password_hash: "pass".into(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+        })
+        .await
+        .expect("failed to create user");
+
+    let app = app_repo
+        .create_app(mikrom_api::domain::CreateAppParams {
+            name: "hypervisor-app".to_string(),
+            git_url: "https://github.com/test/repo".to_string(),
+            port: mikrom_api::domain::types::Port::new(80).unwrap(),
+            user_id,
+            ..Default::default()
+        })
+        .await
+        .expect("failed to create app");
+
+    let deployment = app_repo
+        .create_deployment(NewDeployment {
+            app_id: app.id,
+            user_id: user_id.to_string(),
+            vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+            memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
+            disk_mib: 1024,
+            port: mikrom_api::domain::types::Port::new(80).unwrap(),
+            env_vars: std::collections::HashMap::new(),
+            trigger_source: "manual".to_string(),
+            git_commit_hash: None,
+            git_commit_message: None,
+            git_branch: None,
+            hypervisor: 2,
+        })
+        .await
+        .expect("failed to create deployment");
+
+    assert_eq!(deployment.hypervisor, 2);
+
+    let raw_hypervisor: i16 =
+        sqlx::query_scalar("SELECT hypervisor FROM deployments WHERE id = $1")
+            .bind(deployment.id)
+            .fetch_one(&pool)
+            .await
+            .expect("failed to fetch raw hypervisor");
+
+    assert_eq!(raw_hypervisor, 2);
+
+    let fetched = app_repo
+        .get_deployment(deployment.id)
+        .await
+        .expect("failed to fetch deployment")
+        .expect("deployment missing");
+
+    assert_eq!(fetched.hypervisor, 2);
+}
