@@ -56,6 +56,8 @@ Mikrom uses PostgreSQL to track the state of the cluster:
 | `JWT_SECRET` | — | Secret used to sign/verify JWT tokens |
 | `NATS_URL` | `nats://127.0.0.1:4222` | URL of the NATS server |
 | `USE_TLS` | `false` | Enable mutual TLS for NATS communication |
+| `ENABLE_TELEMETRY` | `true` | Enable OTLP export of logs, traces, and metrics to SigNoz |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://192.168.122.128:4317` | OTLP gRPC endpoint for SigNoz |
 | `DEPLOYMENT_ENV` | `development` | Selects the default rate-limit profile: `development`, `staging`, or `production` |
 | `RATE_LIMIT_PUBLIC_RPM` | profile default | Requests per minute for unauthenticated public endpoints |
 | `RATE_LIMIT_AUTH_LOGIN_RPM` | profile default | Requests per minute for `/v1/auth/login` |

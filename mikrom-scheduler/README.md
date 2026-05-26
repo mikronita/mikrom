@@ -46,6 +46,8 @@ Messages are defined in `mikrom-proto/proto/*.proto`.
 | `ROUTER_IDLE_TIMEOUT_SECS` | `900` | Idle time before scaling an app to zero after router traffic stops |
 | `MAX_APPS_PER_HOST` | `10` | Resource isolation limit |
 | `USE_TLS` | `false` | Enable mutual TLS for NATS |
+| `ENABLE_TELEMETRY` | `true` | Enable OTLP export of logs, traces, and metrics to SigNoz |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://192.168.122.128:4317` | OTLP gRPC endpoint for SigNoz |
 
 ## Development
 

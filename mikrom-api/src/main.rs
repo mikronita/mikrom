@@ -18,7 +18,9 @@ async fn main() -> anyhow::Result<()> {
 
     let config = ApiConfig::load()?;
 
-    mikrom_proto::telemetry::init_telemetry("mikrom-api", env!("CARGO_PKG_VERSION"), None)?;
+    let _telemetry =
+        mikrom_proto::telemetry::init_telemetry("mikrom-api", env!("CARGO_PKG_VERSION"), None)?;
+    mikrom_proto::telemetry::record_service_startup("mikrom-api");
 
     let db_pool = db::connect(&config.database_url).await?;
     db::run_migrations(&db_pool).await?;

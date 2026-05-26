@@ -15,7 +15,7 @@
 - NATS, usado para control plane, telemetría y tráfico.
 - WireGuard en el kernel, más permisos `CAP_NET_ADMIN`, para crear y mantener la interfaz.
 - Un directorio de CA upstream si vas a hacer TLS hacia upstreams con CA propia.
-- Opcionalmente un endpoint OTLP para tracing.
+- Opcionalmente un endpoint OTLP para logs, trazas y métricas.
 
 ## Configuración
 
@@ -103,12 +103,12 @@ Comportamiento de recuperación:
 
 ## Observabilidad
 
-- Tracing OTLP: `OTEL_EXPORTER_OTLP_ENDPOINT`
-- Las métricas y snapshots de telemetría incluyen estado de salud, contadores HTTP, ACME, redirecciones y latencia media.
+- SigNoz OTLP gRPC: `OTEL_EXPORTER_OTLP_ENDPOINT` (`http://192.168.122.128:4317` por defecto)
+- Las métricas operativas se exportan por OTLP e incluyen estado de salud, contadores HTTP, ACME, redirecciones y latencia media.
+- El router ya no expone un `GET /metrics` local; esa información sale por OpenTelemetry hacia SigNoz.
 
 ## Desarrollo local
 
 - Usa `cargo test -p mikrom-router` para la validación normal.
 - Usa `cargo clippy -p mikrom-router --all-targets` para revisión estática.
 - El binario espera poder crear su directorio de datos y el archivo de cache si no existen.
-

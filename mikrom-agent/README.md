@@ -47,6 +47,8 @@ When a deployment is triggered:
 | `AGENT_HOST_ID` | random UUID | Stable identifier for this node; persisted under `data_path/host_id.txt` |
 | `AGENT_HOSTNAME` | — | IP/Hostname advertised to the scheduler |
 | `USE_TLS` | `false` | Enable mutual TLS for NATS |
+| `ENABLE_TELEMETRY` | `true` | Enable OTLP export of logs, traces, and metrics to SigNoz |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://192.168.122.128:4317` | OTLP gRPC endpoint for SigNoz |
 
 ## Development
 

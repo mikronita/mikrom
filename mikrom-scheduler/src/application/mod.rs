@@ -144,7 +144,7 @@ impl AppContext {
             worker_repo,
             agent_client,
             nats_client,
-            telemetry: SchedulerTelemetry::default(),
+            telemetry: SchedulerTelemetry,
             runtime,
         }
     }

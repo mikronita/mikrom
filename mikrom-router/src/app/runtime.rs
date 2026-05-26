@@ -1,62 +1,71 @@
 use anyhow::Result;
-use opentelemetry::trace::TracerProvider as _;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::trace::TracerProvider;
+use mikrom_proto::telemetry::{DynTelemetryLayer, TelemetryProviders, build_telemetry_stack};
 use std::future::Future;
 use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::time::Duration;
-use tracing::Dispatch;
-use tracing::Event;
-use tracing::Metadata;
 use tracing::span::{Attributes, Id, Record};
 use tracing::subscriber::Interest;
-use tracing::{error, info};
+use tracing::{Dispatch, Event, Metadata, error, info};
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::Registry;
 use tracing_subscriber::util::SubscriberInitExt;
 
-type DynTelemetryLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
-
 static TRACING_INIT: Once = Once::new();
 static TELEMETRY_INIT: Once = Once::new();
-static TELEMETRY_LAYER: OnceLock<Arc<Mutex<Option<DynTelemetryLayer>>>> = OnceLock::new();
+static TELEMETRY_LAYER: OnceLock<Arc<Mutex<Vec<DynTelemetryLayer>>>> = OnceLock::new();
+static TELEMETRY_PROVIDERS: OnceLock<Arc<TelemetryProviders>> = OnceLock::new();
 
 #[derive(Clone)]
 struct DeferredTelemetry {
-    layer: Arc<Mutex<Option<DynTelemetryLayer>>>,
+    layers: Arc<Mutex<Vec<DynTelemetryLayer>>>,
 }
 
 impl DeferredTelemetry {
-    fn new(layer: Arc<Mutex<Option<DynTelemetryLayer>>>) -> Self {
-        Self { layer }
+    fn new(layers: Arc<Mutex<Vec<DynTelemetryLayer>>>) -> Self {
+        Self { layers }
     }
 
-    fn with_layer<R>(&self, f: impl FnOnce(&DynTelemetryLayer) -> R) -> Option<R> {
-        let guard = self.layer.lock().ok()?;
-        guard.as_ref().map(f)
+    fn with_layers<R>(&self, f: impl FnOnce(&[DynTelemetryLayer]) -> R) -> Option<R> {
+        let guard = self.layers.lock().ok()?;
+        Some(f(&guard))
     }
 }
 
 impl Layer<Registry> for DeferredTelemetry {
     fn on_register_dispatch(&self, dispatch: &Dispatch) {
-        let _ = self.with_layer(|layer| layer.on_register_dispatch(dispatch));
+        let _ = self.with_layers(|layers| {
+            for layer in layers {
+                layer.on_register_dispatch(dispatch);
+            }
+        });
     }
 
-    fn on_layer(&mut self, subscriber: &mut Registry) {
-        if let Ok(mut guard) = self.layer.lock()
-            && let Some(layer) = guard.as_mut()
-        {
-            layer.on_layer(subscriber);
-        }
-    }
+    fn on_layer(&mut self, _subscriber: &mut Registry) {}
 
     fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
-        let _ = self.with_layer(|layer| layer.register_callsite(metadata));
-        Interest::always()
+        let mut saw_sometimes = false;
+        let mut saw_always = false;
+        let _ = self.with_layers(|layers| {
+            for layer in layers {
+                let interest = layer.register_callsite(metadata);
+                if interest.is_always() {
+                    saw_always = true;
+                    break;
+                }
+                if interest.is_sometimes() {
+                    saw_sometimes = true;
+                }
+            }
+        });
+        if saw_always {
+            Interest::always()
+        } else if saw_sometimes {
+            Interest::sometimes()
+        } else {
+            Interest::never()
+        }
     }
 
     fn enabled(&self, _metadata: &Metadata<'_>, _ctx: Context<'_, Registry>) -> bool {
@@ -64,20 +73,37 @@ impl Layer<Registry> for DeferredTelemetry {
     }
 
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, Registry>) {
-        let _ = self.with_layer(|layer| layer.on_new_span(attrs, id, ctx));
+        let _ = self.with_layers(|layers| {
+            for layer in layers {
+                layer.on_new_span(attrs, id, ctx.clone());
+            }
+        });
     }
 
     fn max_level_hint(&self) -> Option<tracing_subscriber::filter::LevelFilter> {
-        self.with_layer(tracing_subscriber::Layer::max_level_hint)
-            .flatten()
+        self.with_layers(|layers| {
+            layers
+                .iter()
+                .filter_map(tracing_subscriber::Layer::max_level_hint)
+                .max()
+        })
+        .flatten()
     }
 
     fn on_record(&self, span: &Id, values: &Record<'_>, ctx: Context<'_, Registry>) {
-        let _ = self.with_layer(|layer| layer.on_record(span, values, ctx));
+        let _ = self.with_layers(|layers| {
+            for layer in layers {
+                layer.on_record(span, values, ctx.clone());
+            }
+        });
     }
 
     fn on_follows_from(&self, span: &Id, follows: &Id, ctx: Context<'_, Registry>) {
-        let _ = self.with_layer(|layer| layer.on_follows_from(span, follows, ctx));
+        let _ = self.with_layers(|layers| {
+            for layer in layers {
+                layer.on_follows_from(span, follows, ctx.clone());
+            }
+        });
     }
 
     fn event_enabled(&self, _event: &Event<'_>, _ctx: Context<'_, Registry>) -> bool {
@@ -85,29 +111,49 @@ impl Layer<Registry> for DeferredTelemetry {
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, Registry>) {
-        let _ = self.with_layer(|layer| layer.on_event(event, ctx));
+        let _ = self.with_layers(|layers| {
+            for layer in layers {
+                layer.on_event(event, ctx.clone());
+            }
+        });
     }
 
     fn on_enter(&self, id: &Id, ctx: Context<'_, Registry>) {
-        let _ = self.with_layer(|layer| layer.on_enter(id, ctx));
+        let _ = self.with_layers(|layers| {
+            for layer in layers {
+                layer.on_enter(id, ctx.clone());
+            }
+        });
     }
 
     fn on_exit(&self, id: &Id, ctx: Context<'_, Registry>) {
-        let _ = self.with_layer(|layer| layer.on_exit(id, ctx));
+        let _ = self.with_layers(|layers| {
+            for layer in layers {
+                layer.on_exit(id, ctx.clone());
+            }
+        });
     }
 
     fn on_close(&self, id: Id, ctx: Context<'_, Registry>) {
-        let _ = self.with_layer(|layer| layer.on_close(id, ctx));
+        let _ = self.with_layers(|layers| {
+            for layer in layers {
+                layer.on_close(id.clone(), ctx.clone());
+            }
+        });
     }
 
     fn on_id_change(&self, old: &Id, new: &Id, ctx: Context<'_, Registry>) {
-        let _ = self.with_layer(|layer| layer.on_id_change(old, new, ctx));
+        let _ = self.with_layers(|layers| {
+            for layer in layers {
+                layer.on_id_change(old, new, ctx.clone());
+            }
+        });
     }
 }
 
 pub fn init_bootstrap_tracing_once() {
     TRACING_INIT.call_once(|| {
-        let telemetry_layer = Arc::new(Mutex::new(None));
+        let telemetry_layer = Arc::new(Mutex::new(Vec::new()));
         if TELEMETRY_LAYER.set(telemetry_layer.clone()).is_err() {
             eprintln!("Tracing telemetry layer was initialized more than once");
         }
@@ -131,37 +177,24 @@ pub fn init_tracing_once(router_id: &str) {
 }
 
 fn enable_tracing(router_id: &str) -> Result<()> {
-    let exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_tonic()
-        .with_endpoint(
-            std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-                .unwrap_or_else(|_| "http://localhost:4317".to_string()),
-        )
-        .build()?;
+    let Some(stack) =
+        build_telemetry_stack("mikrom-router", env!("CARGO_PKG_VERSION"), Some(router_id))?
+    else {
+        return Ok(());
+    };
 
-    let provider = TracerProvider::builder()
-        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
-        .with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
-            "service.name",
-            format!("mikrom-router-{router_id}"),
-        )]))
-        .build();
-
-    opentelemetry::global::set_tracer_provider(provider.clone());
-    opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
-
-    let tracer = provider.tracer("mikrom-router");
-    let telemetry: DynTelemetryLayer = Box::new(tracing_opentelemetry::layer().with_tracer(tracer));
+    let providers = Arc::new(stack.providers());
+    providers.install_globals();
+    let _ = TELEMETRY_PROVIDERS.set(providers);
 
     let layer = TELEMETRY_LAYER
         .get()
         .ok_or_else(|| anyhow::anyhow!("Tracing subscriber was not initialized"))?;
 
-    let mut guard = layer
+    layer
         .lock()
-        .map_err(|_| anyhow::anyhow!("failed to lock tracing telemetry layer"))?;
-    *guard = Some(telemetry);
-    drop(guard);
+        .map_err(|_| anyhow::anyhow!("failed to lock tracing telemetry layer"))?
+        .extend(stack.into_layers());
 
     Ok(())
 }
@@ -216,7 +249,7 @@ pub fn server_conf(threads: usize) -> pingora::server::configuration::ServerConf
 
 #[cfg(test)]
 mod tests {
-    use super::connect_with_backoff;
+    use super::{connect_with_backoff, server_conf, server_threads};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
@@ -241,5 +274,19 @@ mod tests {
 
         assert_eq!(result, "connected");
         assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn server_threads_never_returns_zero() {
+        assert_eq!(server_threads(0), 1);
+        assert_eq!(server_threads(4), 4);
+    }
+
+    #[test]
+    fn server_conf_uses_the_expected_upgrade_socket() {
+        let conf = server_conf(0);
+        assert_eq!(conf.upgrade_sock, "/tmp/mikrom_router_upgrade.sock");
+        assert_eq!(conf.threads, 1);
+        assert_eq!(conf.grace_period_seconds, Some(30));
     }
 }

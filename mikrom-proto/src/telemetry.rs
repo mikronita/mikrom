@@ -1,211 +1,355 @@
-use chrono::Utc;
+use anyhow::Result;
 use opentelemetry::KeyValue;
-use opentelemetry::trace::TracerProvider;
+use opentelemetry::global;
+use opentelemetry::metrics::Counter;
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{
-    Resource,
-    trace::{BatchSpanProcessor, Sampler, SdkTracerProvider},
-};
+use opentelemetry_sdk::metrics::PeriodicReader;
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::{Resource, logs::SdkLoggerProvider, metrics::SdkMeterProvider};
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
-use serde::{Deserialize, Serialize};
-use std::io::Write;
-use tokio::sync::mpsc;
-use tracing_subscriber::fmt::MakeWriter;
-use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
+use std::future::Future;
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::time::Duration;
+use tracing::{error, info};
+use tracing_subscriber::Layer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry::Registry;
+use tracing_subscriber::util::SubscriberInitExt;
+
+pub type DynTelemetryLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
 
 const DEFAULT_LOG_LEVEL: &str = "info";
-const DEFAULT_OTLP_ENDPOINT: &str = "http://localhost:4317";
+const DEFAULT_OTLP_ENDPOINT: &str = "http://192.168.122.128:4317";
+static TELEMETRY_RUNTIME: OnceLock<Arc<tokio::runtime::Runtime>> = OnceLock::new();
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogEntry {
-    pub vm_id: String,
-    pub app_id: String,
-    pub source: String,
-    pub message: serde_json::Value,
-    pub timestamp: i64,
+#[derive(Clone)]
+pub struct TelemetryProviders {
+    tracer_provider: SdkTracerProvider,
+    meter_provider: SdkMeterProvider,
+    logger_provider: SdkLoggerProvider,
 }
 
-struct NatsWriter {
-    tx: mpsc::Sender<Vec<u8>>,
-}
-
-impl Write for NatsWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let _ = self.tx.try_send(buf.to_vec());
-        Ok(buf.len())
+impl TelemetryProviders {
+    fn new(
+        tracer_provider: SdkTracerProvider,
+        meter_provider: SdkMeterProvider,
+        logger_provider: SdkLoggerProvider,
+    ) -> Self {
+        Self {
+            tracer_provider,
+            meter_provider,
+            logger_provider,
+        }
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+    pub fn install_globals(&self) {
+        global::set_tracer_provider(self.tracer_provider.clone());
+        global::set_meter_provider(self.meter_provider.clone());
+        global::set_text_map_propagator(
+            opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+        );
+    }
+
+    pub fn shutdown(&self) {
+        let _ = self.logger_provider.shutdown();
+        let _ = self.meter_provider.shutdown();
+        let _ = self.tracer_provider.shutdown();
     }
 }
 
-struct NatsMakeWriter {
-    tx: mpsc::Sender<Vec<u8>>,
+pub struct TelemetryStack {
+    providers: TelemetryProviders,
+    layers: Vec<DynTelemetryLayer>,
 }
 
-impl<'a> MakeWriter<'a> for NatsMakeWriter {
-    type Writer = NatsWriter;
+impl TelemetryStack {
+    #[must_use]
+    pub fn providers(&self) -> TelemetryProviders {
+        self.providers.clone()
+    }
 
-    fn make_writer(&self) -> Self::Writer {
-        NatsWriter {
-            tx: self.tx.clone(),
+    #[must_use]
+    pub fn into_layers(self) -> Vec<DynTelemetryLayer> {
+        self.layers
+    }
+
+    pub fn install_globals(&self) {
+        self.providers.install_globals();
+    }
+
+    pub fn shutdown(&self) {
+        self.providers.shutdown();
+    }
+}
+
+pub struct TelemetryGuard(Option<TelemetryStack>);
+
+impl TelemetryGuard {
+    pub fn disabled() -> Self {
+        Self(None)
+    }
+}
+
+impl Drop for TelemetryGuard {
+    fn drop(&mut self) {
+        if let Some(stack) = self.0.as_ref() {
+            stack.shutdown();
         }
     }
 }
 
-/// Initializes the tracing and logging system.
-///
-/// Configurable via environment variables:
-/// - `LOG_FORMAT`: set to `json` for structured logging.
-/// - `ENABLE_TELEMETRY`: set to `true` to enable OTLP tracing.
-/// - `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP collector endpoint (default: http://localhost:4317).
-/// - `NATS_URL`: if set, logs will also be sent to NATS.
+#[must_use]
+pub fn telemetry_endpoint() -> String {
+    std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string())
+}
+
+#[must_use]
+pub fn telemetry_enabled() -> bool {
+    std::env::var("ENABLE_TELEMETRY").as_deref() == Ok("true")
+}
+
+fn service_resource(
+    service_name: &str,
+    service_version: &str,
+    instance_id: Option<&str>,
+) -> Resource {
+    let mut attributes = vec![
+        KeyValue::new(SERVICE_NAME, service_name.to_string()),
+        KeyValue::new(SERVICE_VERSION, service_version.to_string()),
+    ];
+
+    if let Some(instance_id) = instance_id {
+        attributes.push(KeyValue::new(
+            "service.instance.id",
+            instance_id.to_string(),
+        ));
+    }
+
+    Resource::builder().with_attributes(attributes).build()
+}
+
+fn build_providers(
+    service_name: &str,
+    service_version: &str,
+    instance_id: Option<&str>,
+) -> Result<TelemetryProviders> {
+    let runtime = TELEMETRY_RUNTIME.get_or_init(|| {
+        Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("mikrom-otel")
+                .build()
+                .expect("failed to build telemetry runtime"),
+        )
+    });
+
+    let build = || {
+        runtime.block_on(async move {
+            let endpoint = telemetry_endpoint();
+            let resource = service_resource(service_name, service_version, instance_id);
+
+            let span_exporter = opentelemetry_otlp::SpanExporter::builder()
+                .with_tonic()
+                .with_endpoint(endpoint.clone())
+                .build()?;
+            let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
+                .with_tonic()
+                .with_endpoint(endpoint.clone())
+                .build()?;
+            let log_exporter = opentelemetry_otlp::LogExporter::builder()
+                .with_tonic()
+                .with_endpoint(endpoint)
+                .build()?;
+
+            let tracer_provider = SdkTracerProvider::builder()
+                .with_batch_exporter(span_exporter)
+                .with_resource(resource.clone())
+                .build();
+
+            let meter_provider = SdkMeterProvider::builder()
+                .with_reader(PeriodicReader::builder(metric_exporter).build())
+                .with_resource(resource.clone())
+                .build();
+
+            let logger_provider = SdkLoggerProvider::builder()
+                .with_batch_exporter(log_exporter)
+                .with_resource(resource)
+                .build();
+
+            Ok(TelemetryProviders::new(
+                tracer_provider,
+                meter_provider,
+                logger_provider,
+            ))
+        })
+    };
+
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::task::block_in_place(build)
+    } else {
+        build()
+    }
+}
+
+pub fn build_telemetry_stack(
+    service_name: &str,
+    service_version: &str,
+    instance_id: Option<&str>,
+) -> Result<Option<TelemetryStack>> {
+    if !telemetry_enabled() {
+        return Ok(None);
+    }
+
+    let providers = build_providers(service_name, service_version, instance_id)?;
+
+    let tracer = providers.tracer_provider.tracer(service_name.to_string());
+    let trace_layer: DynTelemetryLayer =
+        Box::new(tracing_opentelemetry::layer().with_tracer(tracer));
+    let log_layer: DynTelemetryLayer =
+        Box::new(OpenTelemetryTracingBridge::new(&providers.logger_provider));
+
+    Ok(Some(TelemetryStack {
+        providers,
+        layers: vec![trace_layer, log_layer],
+    }))
+}
+
 pub fn init_telemetry(
     service_name: &str,
     service_version: &str,
     default_level: Option<&str>,
-) -> anyhow::Result<()> {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(default_level.unwrap_or(DEFAULT_LOG_LEVEL)));
-
+) -> Result<TelemetryGuard> {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new(default_level.unwrap_or(DEFAULT_LOG_LEVEL))
+    });
     let is_json = std::env::var("LOG_FORMAT").as_deref() == Ok("json");
-    let enable_telemetry = std::env::var("ENABLE_TELEMETRY").as_deref() == Ok("true");
-    let nats_url = std::env::var("NATS_URL").ok();
 
-    let telemetry_layer = if enable_telemetry {
-        let tracer = create_tracer(service_name, service_version)?;
-        Some(tracing_opentelemetry::layer().with_tracer(tracer))
-    } else {
-        None
-    };
+    if !telemetry_enabled() {
+        if is_json {
+            Registry::default()
+                .with(filter)
+                .with(tracing_subscriber::fmt::layer().json())
+                .init();
+        } else {
+            Registry::default()
+                .with(filter)
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+        }
 
-    let (nats_layer, nats_handle) = if let Some(url) = nats_url {
-        let (tx, rx) = mpsc::channel(1000);
-        let service_name = service_name.to_string();
-        let handle = tokio::spawn(async move {
-            if let Err(e) = run_nats_logger(url, service_name, rx).await {
-                eprintln!("NATS Logger failed: {}", e);
-            }
-        });
+        return Ok(TelemetryGuard::disabled());
+    }
 
-        let layer = tracing_subscriber::fmt::layer()
-            .json()
-            .with_writer(NatsMakeWriter { tx });
-        (Some(layer), Some(handle))
-    } else {
-        (None, None)
-    };
+    let providers = build_providers(service_name, service_version, None)?;
+    providers.install_globals();
 
-    // We don't strictly need to keep the handle, but it's good to know it's there
-    let _ = nats_handle;
-
-    let registry = Registry::default()
-        .with(filter)
-        .with(telemetry_layer)
-        .with(nats_layer);
+    let tracer = providers.tracer_provider.tracer(service_name.to_string());
+    let trace_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+    let log_layer = OpenTelemetryTracingBridge::new(&providers.logger_provider);
 
     if is_json {
-        registry
+        Registry::default()
+            .with(filter)
+            .with(trace_layer)
+            .with(log_layer)
             .with(tracing_subscriber::fmt::layer().json())
             .init();
     } else {
-        registry.with(tracing_subscriber::fmt::layer()).init();
+        Registry::default()
+            .with(filter)
+            .with(trace_layer)
+            .with(log_layer)
+            .with(tracing_subscriber::fmt::layer())
+            .init();
     }
 
-    Ok(())
+    Ok(TelemetryGuard(Some(TelemetryStack {
+        providers,
+        layers: Vec::new(),
+    })))
 }
 
-async fn run_nats_logger(
-    url: String,
-    service_name: String,
-    mut rx: mpsc::Receiver<Vec<u8>>,
-) -> anyhow::Result<()> {
-    let nats = async_nats::connect(&url).await?;
-    let subject = format!("mikrom.logs.{}.system", service_name);
+pub fn record_service_startup(service_name: &'static str) {
+    let meter = global::meter(service_name);
+    let counter: Counter<u64> = meter.u64_counter("mikrom_service_startups_total").build();
+    counter.add(1, &[]);
+}
 
-    while let Some(data) = rx.recv().await {
-        let message_str = String::from_utf8_lossy(&data).trim().to_string();
-        if message_str.is_empty() {
-            continue;
-        }
-
-        let message =
-            serde_json::from_str(&message_str).unwrap_or(serde_json::Value::String(message_str));
-
-        let entry = LogEntry {
-            vm_id: "system".to_string(),
-            app_id: service_name.clone(),
-            source: "stdout".to_string(),
-            message,
-            timestamp: Utc::now().timestamp_nanos_opt().unwrap_or(0),
-        };
-
-        if let Ok(payload) = serde_json::to_vec(&vec![entry]) {
-            let _ = nats.publish(subject.clone(), payload.into()).await;
+pub async fn connect_with_backoff<T, F, Fut>(
+    component: &'static str,
+    retry_delay: Duration,
+    mut connect: F,
+) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    let mut attempt = 0_u64;
+    loop {
+        attempt += 1;
+        match connect().await {
+            Ok(value) => {
+                if attempt > 1 {
+                    info!(component, attempts = attempt, "Connected after retries");
+                }
+                return value;
+            },
+            Err(err) => {
+                error!(
+                    component,
+                    attempt,
+                    error = %err,
+                    "Failed to connect; retrying in {}s",
+                    retry_delay.as_secs()
+                );
+                tokio::time::sleep(retry_delay).await;
+            },
         }
     }
-
-    Ok(())
 }
 
-fn create_tracer(
-    service_name: &str,
-    service_version: &str,
-) -> anyhow::Result<opentelemetry_sdk::trace::Tracer> {
-    let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-        .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string());
+#[must_use]
+pub fn server_threads(requested: usize) -> usize {
+    requested.max(1)
+}
 
-    let exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_tonic()
-        .with_endpoint(otlp_endpoint)
-        .build()?;
-
-    let resource = Resource::builder()
-        .with_attributes(vec![
-            KeyValue::new(SERVICE_NAME, service_name.to_string()),
-            KeyValue::new(SERVICE_VERSION, service_version.to_string()),
-        ])
-        .build();
-
-    let processor = BatchSpanProcessor::builder(exporter).build();
-
-    let provider = SdkTracerProvider::builder()
-        .with_span_processor(processor)
-        .with_resource(resource)
-        .with_sampler(Sampler::AlwaysOn)
-        .build();
-
-    Ok(provider.tracer("mikrom"))
+#[must_use]
+pub fn server_conf(threads: usize) -> pingora::server::configuration::ServerConf {
+    pingora::server::configuration::ServerConf {
+        upgrade_sock: "/tmp/mikrom_router_upgrade.sock".to_string(),
+        grace_period_seconds: Some(30),
+        threads: server_threads(threads),
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn test_log_entry_serialization() {
-        let entry = LogEntry {
-            vm_id: "system".to_string(),
-            app_id: "test-service".to_string(),
-            source: "stdout".to_string(),
-            message: serde_json::json!("test message"),
-            timestamp: 123456789,
-        };
-
-        let json = serde_json::to_string(&vec![entry]).unwrap();
-        assert!(json.contains("\"vm_id\":\"system\""));
-        assert!(json.contains("\"app_id\":\"test-service\""));
-        assert!(json.contains("\"message\":\"test message\""));
-    }
+    use super::connect_with_backoff;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[tokio::test]
-    async fn test_nats_writer_channel() {
-        let (tx, mut rx) = mpsc::channel(10);
-        let mut writer = NatsWriter { tx };
+    async fn test_connect_with_backoff_succeeds() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_clone = attempts.clone();
+        let result = connect_with_backoff("test", std::time::Duration::from_millis(1), move || {
+            let attempts = attempts_clone.clone();
+            async move {
+                let current = attempts.fetch_add(1, Ordering::SeqCst);
+                if current < 1 {
+                    Err(anyhow::anyhow!("temporary"))
+                } else {
+                    Ok(42)
+                }
+            }
+        })
+        .await;
 
-        writer.write_all(b"hello world").unwrap();
-        let received = rx.recv().await.unwrap();
-        assert_eq!(received, b"hello world");
+        assert_eq!(result, 42);
     }
 }
