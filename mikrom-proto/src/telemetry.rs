@@ -10,8 +10,6 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::{Resource, logs::SdkLoggerProvider, metrics::SdkMeterProvider};
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
 use std::future::Future;
-use std::sync::Arc;
-use std::sync::OnceLock;
 use std::time::Duration;
 use tracing::{error, info};
 use tracing_subscriber::Layer;
@@ -23,7 +21,6 @@ pub type DynTelemetryLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
 
 const DEFAULT_LOG_LEVEL: &str = "info";
 const DEFAULT_OTLP_ENDPOINT: &str = "http://192.168.122.128:4317";
-static TELEMETRY_RUNTIME: OnceLock<Arc<tokio::runtime::Runtime>> = OnceLock::new();
 
 #[derive(Clone)]
 pub struct TelemetryProviders {
@@ -137,60 +134,52 @@ fn build_providers(
     service_version: &str,
     instance_id: Option<&str>,
 ) -> Result<TelemetryProviders> {
-    let runtime = TELEMETRY_RUNTIME.get_or_init(|| {
-        Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .thread_name("mikrom-otel")
-                .build()
-                .expect("failed to build telemetry runtime"),
-        )
-    });
-
     let build = || {
-        runtime.block_on(async move {
-            let endpoint = telemetry_endpoint();
-            let resource = service_resource(service_name, service_version, instance_id);
+        let endpoint = telemetry_endpoint();
+        let resource = service_resource(service_name, service_version, instance_id);
 
-            let span_exporter = opentelemetry_otlp::SpanExporter::builder()
-                .with_tonic()
-                .with_endpoint(endpoint.clone())
-                .build()?;
-            let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-                .with_tonic()
-                .with_endpoint(endpoint.clone())
-                .build()?;
-            let log_exporter = opentelemetry_otlp::LogExporter::builder()
-                .with_tonic()
-                .with_endpoint(endpoint)
-                .build()?;
+        let span_exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint(endpoint.clone())
+            .build()?;
+        let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
+            .with_tonic()
+            .with_endpoint(endpoint.clone())
+            .build()?;
+        let log_exporter = opentelemetry_otlp::LogExporter::builder()
+            .with_tonic()
+            .with_endpoint(endpoint)
+            .build()?;
 
-            let tracer_provider = SdkTracerProvider::builder()
-                .with_batch_exporter(span_exporter)
-                .with_resource(resource.clone())
-                .build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_batch_exporter(span_exporter)
+            .with_resource(resource.clone())
+            .build();
 
-            let meter_provider = SdkMeterProvider::builder()
-                .with_reader(PeriodicReader::builder(metric_exporter).build())
-                .with_resource(resource.clone())
-                .build();
+        let meter_provider = SdkMeterProvider::builder()
+            .with_reader(PeriodicReader::builder(metric_exporter).build())
+            .with_resource(resource.clone())
+            .build();
 
-            let logger_provider = SdkLoggerProvider::builder()
-                .with_batch_exporter(log_exporter)
-                .with_resource(resource)
-                .build();
+        let logger_provider = SdkLoggerProvider::builder()
+            .with_batch_exporter(log_exporter)
+            .with_resource(resource)
+            .build();
 
-            Ok(TelemetryProviders::new(
-                tracer_provider,
-                meter_provider,
-                logger_provider,
-            ))
-        })
+        Ok(TelemetryProviders::new(
+            tracer_provider,
+            meter_provider,
+            logger_provider,
+        ))
     };
 
     if tokio::runtime::Handle::try_current().is_ok() {
-        tokio::task::block_in_place(build)
+        build()
     } else {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let _guard = runtime.enter();
         build()
     }
 }
@@ -309,21 +298,6 @@ where
                 tokio::time::sleep(retry_delay).await;
             },
         }
-    }
-}
-
-#[must_use]
-pub fn server_threads(requested: usize) -> usize {
-    requested.max(1)
-}
-
-#[must_use]
-pub fn server_conf(threads: usize) -> pingora::server::configuration::ServerConf {
-    pingora::server::configuration::ServerConf {
-        upgrade_sock: "/tmp/mikrom_router_upgrade.sock".to_string(),
-        grace_period_seconds: Some(30),
-        threads: server_threads(threads),
-        ..Default::default()
     }
 }
 

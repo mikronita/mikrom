@@ -7,6 +7,7 @@ use crate::infrastructure::{tls, upstream_ca};
 use anyhow::Result;
 use pingora::listeners::tls::TlsSettings;
 use pingora::prelude::*;
+use pingora::server::RunArgs;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -95,5 +96,7 @@ pub fn run(config: &RouterConfig) -> Result<()> {
     proxy_service.add_tls_with_settings("[::]:443", None, tls_settings);
 
     server.add_service(proxy_service);
-    server.run_forever()
+    server.run(RunArgs::default());
+    runtime::shutdown_telemetry();
+    Ok(())
 }

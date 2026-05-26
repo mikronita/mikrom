@@ -15,7 +15,6 @@ opentelemetry-appender-tracing = { version = "0.31.1" }
 tracing-opentelemetry = "0.32.1"
 opentelemetry-semantic-conventions = "0.31.0"
 anyhow = "1.0.102"
-pingora = { version = "0.8.0", features = ["openssl", "lb", "proxy"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 async-nats = { workspace = true }
