@@ -12,11 +12,12 @@ async fn main() -> anyhow::Result<()> {
 
     let config = AgentConfig::load()?;
 
-    mikrom_proto::telemetry::init_telemetry(
+    let _telemetry = mikrom_proto::telemetry::init_telemetry(
         "mikrom-agent",
         env!("CARGO_PKG_VERSION"),
         default_level.as_deref(),
     )?;
+    mikrom_proto::telemetry::record_service_startup("mikrom-agent");
 
     let hostname = config.hostname();
     let advertise_address = config

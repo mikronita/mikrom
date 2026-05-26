@@ -43,7 +43,6 @@ struct SchedulerMetricsSnapshot {
     workers_stale: u64,
     jobs_total: u64,
     job_status_counts: BTreeMap<String, u64>,
-    telemetry: String,
 }
 
 impl SchedulerHttpServer {
@@ -196,7 +195,6 @@ impl SchedulerHttpState {
             .count_query("jobs_total", "SELECT COUNT(*) FROM jobs")
             .await;
         let job_status_counts = self.job_status_counts().await;
-        let telemetry = self.telemetry.render_metrics();
 
         SchedulerMetricsSnapshot {
             uptime_seconds,
@@ -213,7 +211,6 @@ impl SchedulerHttpState {
             workers_stale,
             jobs_total,
             job_status_counts,
-            telemetry,
         }
     }
 
@@ -399,8 +396,6 @@ impl SchedulerMetricsSnapshot {
             )
             .ok();
         }
-
-        output.push_str(&self.telemetry);
         output
     }
 }
@@ -430,10 +425,6 @@ mod tests {
             workers_stale: 0,
             jobs_total: 3,
             job_status_counts,
-            telemetry: String::from(
-                "# TYPE mikrom_scheduler_event_calls_total counter\n\
-                mikrom_scheduler_event_calls_total{component=\"http\",event=\"ready\"} 1\n",
-            ),
         };
 
         let rendered = snapshot.render();
@@ -444,6 +435,5 @@ mod tests {
         assert!(rendered.contains("mikrom_scheduler_jobs_total 3"));
         assert!(rendered.contains("mikrom_scheduler_jobs{status=\"running\"} 3"));
         assert!(rendered.contains("mikrom_scheduler_jobs{status=\"failed\"} 0"));
-        assert!(rendered.contains("mikrom_scheduler_event_calls_total"));
     }
 }

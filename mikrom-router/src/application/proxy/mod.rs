@@ -497,7 +497,7 @@ impl ProxyHttp for MikromProxy {
         let span = tracing::info_span!("proxy_request", 
             method = ?session.req_header().method,
             uri = %session.req_header().uri);
-        span.set_parent(parent_cx);
+        let _ = span.set_parent(parent_cx);
         ctx.span = span;
 
         Self::apply_downstream_timeouts(session);

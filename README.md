@@ -12,7 +12,7 @@ Mikrom is a modern **Platform-as-a-Service (PaaS)** that deploys containerized w
 - **🔒 Automatic TLS**: Seamless ACME integration (Let's Encrypt) for all your applications.
 - **🐙 GitHub Integration**: Connect your repositories for automated deployments on every push.
 - **🦀 Built with Rust**: High-performance, memory-safe backend services.
-- **📊 Real-time Observability**: Metrics and logs collection via NATS, Prometheus, and Loki.
+- **📊 Real-time Observability**: Metrics, logs, and traces export via OTLP to SigNoz, plus NATS for internal event flow.
 - **🛠️ Power CLI**: Full control over your apps and deployments from your terminal.
 - **🖥️ Dual Hypervisor**: Choose between Firecracker and QEMU microvm per deployment — or let the scheduler decide automatically.
 

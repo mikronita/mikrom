@@ -12,7 +12,12 @@ use std::time::Duration;
 async fn main() -> anyhow::Result<()> {
     let config = SchedulerConfig::load()?;
 
-    mikrom_proto::telemetry::init_telemetry("mikrom-scheduler", env!("CARGO_PKG_VERSION"), None)?;
+    let _telemetry = mikrom_proto::telemetry::init_telemetry(
+        "mikrom-scheduler",
+        env!("CARGO_PKG_VERSION"),
+        None,
+    )?;
+    mikrom_proto::telemetry::record_service_startup("mikrom-scheduler");
 
     tracing::info!("Connecting to database...");
     let database_max_connections = config.database_max_connections.max(1);
@@ -85,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Expose health and metrics for Prometheus-style scraping.
+    // Expose health and metrics for operational visibility.
     observability_server.spawn();
 
     // Start background cleanup task

@@ -13,6 +13,8 @@ use tracing::info;
 
 pub fn run(config: &RouterConfig) -> Result<()> {
     runtime::init_bootstrap_tracing_once();
+    runtime::init_tracing_once(config.router_id.as_str());
+    mikrom_proto::telemetry::record_service_startup("mikrom-router");
     info!("Starting Mikrom Router (Pingora)...");
     let health = Arc::new(RouterHealth::new());
     health.mark_bootstrapped();
@@ -57,7 +59,6 @@ pub fn run(config: &RouterConfig) -> Result<()> {
     server.add_service(background_service("Control Plane", cp));
 
     let telemetry_loop = telemetry::TelemetryLoop::new(
-        config.metrics_port,
         metrics_counters.clone(),
         health.clone(),
         state.clone(),

@@ -47,11 +47,11 @@ static INIT: std::sync::Once = std::sync::Once::new();
 fn init_test_tracing() {
     INIT.call_once(|| {
         use opentelemetry::trace::TracerProvider as _;
-        use opentelemetry_sdk::trace::TracerProvider;
+        use opentelemetry_sdk::trace::SdkTracerProvider;
 
         opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
-        let provider = TracerProvider::builder().build();
+        let provider = SdkTracerProvider::builder().build();
         let tracer = provider.tracer("mikrom-router-test");
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 

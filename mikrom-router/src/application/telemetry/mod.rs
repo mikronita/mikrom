@@ -6,15 +6,16 @@ use crate::application::proxy::RouterMetricsCounters;
 use crate::domain::health::{RouterHealth, RouterHealthState};
 use crate::domain::state::State;
 use async_trait::async_trait;
-use axum::{Router, routing::get};
+use opentelemetry::KeyValue;
+use opentelemetry::global;
+use opentelemetry::metrics::{Counter, Gauge};
 use pingora::server::ShutdownWatch;
 use pingora::services::background::BackgroundService;
-use std::fmt::Write;
-use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::Ordering;
 use tokio::sync::RwLock;
-use tracing::{error, info};
+use tracing::info;
 
 #[derive(Debug, Clone, PartialEq)]
 #[allow(clippy::struct_excessive_bools)]
@@ -87,9 +88,154 @@ fn build_snapshot(
     }
 }
 
+#[derive(Default, Clone)]
+struct RouterOtelSnapshot {
+    requests_total: u64,
+    responses_2xx: u64,
+    responses_3xx: u64,
+    responses_4xx: u64,
+    responses_5xx: u64,
+    acme_hits: u64,
+    acme_misses: u64,
+    redirects: u64,
+    rate_limited: u64,
+    route_wait_timeouts: u64,
+}
+
+struct RouterOtelMetrics {
+    requests_total: Counter<u64>,
+    responses_2xx: Counter<u64>,
+    responses_3xx: Counter<u64>,
+    responses_4xx: Counter<u64>,
+    responses_5xx: Counter<u64>,
+    acme_hits: Counter<u64>,
+    acme_misses: Counter<u64>,
+    redirects: Counter<u64>,
+    rate_limited: Counter<u64>,
+    route_wait_timeouts: Counter<u64>,
+    routes: Gauge<u64>,
+    certificates: Gauge<u64>,
+    acme_tokens: Gauge<u64>,
+    latency_avg_ms: Gauge<f64>,
+    health_live: Gauge<u64>,
+    health_ready: Gauge<u64>,
+    health_dependencies_ready: Gauge<u64>,
+    health_control_plane_synced: Gauge<u64>,
+    health_wireguard_ready: Gauge<u64>,
+    health_upstream_ca_ready: Gauge<u64>,
+    health_has_startup_error: Gauge<u64>,
+    last: std::sync::Mutex<RouterOtelSnapshot>,
+}
+
+impl RouterOtelMetrics {
+    fn get() -> &'static Self {
+        static METRICS: OnceLock<RouterOtelMetrics> = OnceLock::new();
+        METRICS.get_or_init(|| {
+            let meter = global::meter("mikrom-router");
+            Self {
+                requests_total: meter.u64_counter("mikrom_router_requests_total").build(),
+                responses_2xx: meter
+                    .u64_counter("mikrom_router_responses_2xx_total")
+                    .build(),
+                responses_3xx: meter
+                    .u64_counter("mikrom_router_responses_3xx_total")
+                    .build(),
+                responses_4xx: meter
+                    .u64_counter("mikrom_router_responses_4xx_total")
+                    .build(),
+                responses_5xx: meter
+                    .u64_counter("mikrom_router_responses_5xx_total")
+                    .build(),
+                acme_hits: meter.u64_counter("mikrom_router_acme_hits_total").build(),
+                acme_misses: meter.u64_counter("mikrom_router_acme_misses_total").build(),
+                redirects: meter.u64_counter("mikrom_router_redirects_total").build(),
+                rate_limited: meter
+                    .u64_counter("mikrom_router_rate_limited_total")
+                    .build(),
+                route_wait_timeouts: meter
+                    .u64_counter("mikrom_router_route_wait_timeouts_total")
+                    .build(),
+                routes: meter.u64_gauge("mikrom_router_routes_count").build(),
+                certificates: meter.u64_gauge("mikrom_router_certificates_count").build(),
+                acme_tokens: meter.u64_gauge("mikrom_router_acme_tokens_count").build(),
+                latency_avg_ms: meter.f64_gauge("mikrom_router_latency_avg_ms").build(),
+                health_live: meter.u64_gauge("mikrom_router_health_live").build(),
+                health_ready: meter.u64_gauge("mikrom_router_health_ready").build(),
+                health_dependencies_ready: meter
+                    .u64_gauge("mikrom_router_health_dependencies_ready")
+                    .build(),
+                health_control_plane_synced: meter
+                    .u64_gauge("mikrom_router_health_control_plane_synced")
+                    .build(),
+                health_wireguard_ready: meter
+                    .u64_gauge("mikrom_router_health_wireguard_ready")
+                    .build(),
+                health_upstream_ca_ready: meter
+                    .u64_gauge("mikrom_router_health_upstream_ca_ready")
+                    .build(),
+                health_has_startup_error: meter
+                    .u64_gauge("mikrom_router_health_has_startup_error")
+                    .build(),
+                last: std::sync::Mutex::new(RouterOtelSnapshot::default()),
+            }
+        })
+    }
+
+    fn record_snapshot(&self, snapshot: &TelemetrySnapshot) {
+        let attrs = [KeyValue::new("router_id", snapshot.router_id.clone())];
+        {
+            let mut last = self
+                .last
+                .lock()
+                .expect("router otel metrics mutex poisoned");
+
+            macro_rules! emit_delta {
+                ($field:ident, $counter:expr) => {{
+                    let current = snapshot.$field;
+                    let previous = last.$field;
+                    if current >= previous {
+                        $counter.add(current - previous, &attrs);
+                    }
+                    last.$field = current;
+                }};
+            }
+
+            emit_delta!(requests_total, self.requests_total);
+            emit_delta!(responses_2xx, self.responses_2xx);
+            emit_delta!(responses_3xx, self.responses_3xx);
+            emit_delta!(responses_4xx, self.responses_4xx);
+            emit_delta!(responses_5xx, self.responses_5xx);
+            emit_delta!(acme_hits, self.acme_hits);
+            emit_delta!(acme_misses, self.acme_misses);
+            emit_delta!(redirects, self.redirects);
+            emit_delta!(rate_limited, self.rate_limited);
+            emit_delta!(route_wait_timeouts, self.route_wait_timeouts);
+        }
+
+        self.routes.record(snapshot.routes as u64, &attrs);
+        self.certificates
+            .record(snapshot.certificates as u64, &attrs);
+        self.acme_tokens.record(snapshot.acme_tokens as u64, &attrs);
+        self.latency_avg_ms.record(snapshot.latency_avg_ms, &attrs);
+        self.health_live
+            .record(u64::from(snapshot.health_live), &attrs);
+        self.health_ready
+            .record(u64::from(snapshot.health_ready), &attrs);
+        self.health_dependencies_ready
+            .record(u64::from(snapshot.health_dependencies_ready), &attrs);
+        self.health_control_plane_synced
+            .record(u64::from(snapshot.health_control_plane_synced), &attrs);
+        self.health_wireguard_ready
+            .record(u64::from(snapshot.health_wireguard_ready), &attrs);
+        self.health_upstream_ca_ready
+            .record(u64::from(snapshot.health_upstream_ca_ready), &attrs);
+        self.health_has_startup_error
+            .record(u64::from(snapshot.health_has_startup_error), &attrs);
+    }
+}
+
 #[derive(Clone)]
 pub struct TelemetryLoop {
-    metrics_port: u16,
     metrics_counters: Arc<RouterMetricsCounters>,
     health: Arc<RouterHealth>,
     state: Arc<RwLock<State>>,
@@ -98,14 +244,12 @@ pub struct TelemetryLoop {
 
 impl TelemetryLoop {
     pub fn new(
-        metrics_port: u16,
         metrics_counters: Arc<RouterMetricsCounters>,
         health: Arc<RouterHealth>,
         state: Arc<RwLock<State>>,
         router_id: RouterId,
     ) -> Self {
         Self {
-            metrics_port,
             metrics_counters,
             health,
             state,
@@ -114,175 +258,50 @@ impl TelemetryLoop {
     }
 }
 
-async fn handle_metrics(
-    axum::extract::State(state): axum::extract::State<Arc<TelemetryLoop>>,
-) -> String {
-    let app_state = state.state.read().await;
-    let snapshot = build_snapshot(
-        &state.router_id,
-        &state.metrics_counters,
-        &state.health,
-        &app_state,
-    );
-    drop(app_state);
-    format_snapshot(&snapshot)
-}
-
-#[allow(clippy::too_many_lines)]
-fn format_snapshot(snapshot: &TelemetrySnapshot) -> String {
-    let mut output = String::new();
-    let router_id = &snapshot.router_id;
-
-    // Helper to write a standard metric with only a router_id label.
-    let write_metric =
-        |out: &mut String, name: &str, type_: &str, value: &dyn std::fmt::Display| {
-            let _ = writeln!(out, "# TYPE {name} {type_}");
-            let _ = writeln!(out, "{name}{{router_id=\"{router_id}\"}} {value}");
-        };
-
-    write_metric(
-        &mut output,
-        "mikrom_router_requests_total",
-        "counter",
-        &snapshot.requests_total,
-    );
-
-    let _ = writeln!(output, "# TYPE mikrom_router_responses_total counter");
-    let _ = writeln!(
-        output,
-        "mikrom_router_responses_total{{router_id=\"{router_id}\",family=\"2xx\"}} {}",
-        snapshot.responses_2xx
-    );
-    let _ = writeln!(
-        output,
-        "mikrom_router_responses_total{{router_id=\"{router_id}\",family=\"3xx\"}} {}",
-        snapshot.responses_3xx
-    );
-    let _ = writeln!(
-        output,
-        "mikrom_router_responses_total{{router_id=\"{router_id}\",family=\"4xx\"}} {}",
-        snapshot.responses_4xx
-    );
-    let _ = writeln!(
-        output,
-        "mikrom_router_responses_total{{router_id=\"{router_id}\",family=\"5xx\"}} {}",
-        snapshot.responses_5xx
-    );
-
-    write_metric(
-        &mut output,
-        "mikrom_router_routes_count",
-        "gauge",
-        &snapshot.routes,
-    );
-    write_metric(
-        &mut output,
-        "mikrom_router_certificates_count",
-        "gauge",
-        &snapshot.certificates,
-    );
-    write_metric(
-        &mut output,
-        "mikrom_router_acme_tokens_count",
-        "gauge",
-        &snapshot.acme_tokens,
-    );
-    write_metric(
-        &mut output,
-        "mikrom_router_acme_hits",
-        "counter",
-        &snapshot.acme_hits,
-    );
-    write_metric(
-        &mut output,
-        "mikrom_router_acme_misses",
-        "counter",
-        &snapshot.acme_misses,
-    );
-    write_metric(
-        &mut output,
-        "mikrom_router_redirects",
-        "counter",
-        &snapshot.redirects,
-    );
-    write_metric(
-        &mut output,
-        "mikrom_router_rate_limited",
-        "counter",
-        &snapshot.rate_limited,
-    );
-    write_metric(
-        &mut output,
-        "mikrom_router_route_wait_timeouts",
-        "counter",
-        &snapshot.route_wait_timeouts,
-    );
-    write_metric(
-        &mut output,
-        "mikrom_router_latency_avg_ms",
-        "gauge",
-        &snapshot.latency_avg_ms,
-    );
-    write_metric(
-        &mut output,
-        "mikrom_router_health_live",
-        "gauge",
-        &u32::from(snapshot.health_live),
-    );
-    write_metric(
-        &mut output,
-        "mikrom_router_health_ready",
-        "gauge",
-        &u32::from(snapshot.health_ready),
-    );
-
-    output
-}
-
 #[async_trait]
 impl BackgroundService for TelemetryLoop {
     async fn start(&self, mut shutdown: ShutdownWatch) {
         runtime::init_tracing_once(self.router_id.as_str());
-        info!(
-            "Telemetry Loop (Metrics HTTP Server): Starting on port {}...",
-            self.metrics_port
-        );
-
-        let app_state = Arc::new(self.clone());
-        let app = Router::new()
-            .route("/metrics", get(handle_metrics))
-            .with_state(app_state);
-
-        let addr = SocketAddr::from(([0, 0, 0, 0], self.metrics_port));
-        let listener = match tokio::net::TcpListener::bind(addr).await {
-            Ok(l) => l,
-            Err(e) => {
-                error!(
-                    "Telemetry Loop: Failed to bind HTTP server to {}: {}",
-                    addr, e
-                );
-                return;
-            },
+        let initial_snapshot = {
+            let app_state = self.state.read().await;
+            build_snapshot(
+                &self.router_id,
+                &self.metrics_counters,
+                &self.health,
+                &app_state,
+            )
         };
+        RouterOtelMetrics::get().record_snapshot(&initial_snapshot);
 
-        let server_future = axum::serve(listener, app);
+        let loop_state = self.clone();
+        let metrics_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                let snapshot = {
+                    let app_state = loop_state.state.read().await;
+                    build_snapshot(
+                        &loop_state.router_id,
+                        &loop_state.metrics_counters,
+                        &loop_state.health,
+                        &app_state,
+                    )
+                };
+                RouterOtelMetrics::get().record_snapshot(&snapshot);
+            }
+        });
 
-        tokio::select! {
-            res = server_future => {
-                if let Err(e) = res {
-                    error!("Telemetry Loop HTTP server error: {}", e);
-                }
-            }
-            _ = shutdown.changed() => {
-                info!("Telemetry Loop (Metrics HTTP Server): Shutdown signal received. Stopping...");
-            }
-        }
+        info!("Telemetry Loop: starting OTel metrics recorder");
+
+        let _ = shutdown.changed().await;
+        info!("Telemetry Loop: shutdown signal received. Stopping...");
+        metrics_task.abort();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{TelemetrySnapshot, build_snapshot};
+    use super::{RouterOtelMetrics, TelemetrySnapshot, build_snapshot};
     use crate::app::config::RouterId;
     use crate::application::proxy::RouterMetricsCounters;
     use crate::domain::health::{RouterHealth, RouterHealthState};
@@ -331,34 +350,32 @@ mod tests {
         assert!(!snapshot.health_has_startup_error);
     }
 
-    #[tokio::test]
-    async fn test_metrics_handler_output() {
-        use super::{TelemetryLoop, handle_metrics};
-        use std::sync::Arc;
-        use tokio::sync::RwLock;
+    #[test]
+    fn otel_metrics_record_snapshot_without_panicking() {
+        let metrics = RouterMetricsCounters::new();
+        metrics.requests_total.store(1, Ordering::Relaxed);
+        metrics.responses_2xx.store(1, Ordering::Relaxed);
 
-        let metrics = Arc::new(RouterMetricsCounters::new());
-        metrics.requests_total.store(42, Ordering::Relaxed);
-        metrics.responses_2xx.store(40, Ordering::Relaxed);
-        metrics.responses_5xx.store(2, Ordering::Relaxed);
-
-        let health = Arc::new(RouterHealth::new());
+        let health = RouterHealth::new();
         health.mark_bootstrapped();
 
-        let state = Arc::new(RwLock::new(State::default()));
-        let router_id = RouterId::from("test-router");
+        let state = State::default();
+        let snapshot = build_snapshot(
+            &RouterId::from("router-otel-test"),
+            &metrics,
+            &health,
+            &state,
+        );
 
-        let telemetry_loop = TelemetryLoop::new(9092, metrics, health, state, router_id);
-
-        let response = handle_metrics(axum::extract::State(Arc::new(telemetry_loop))).await;
-
-        assert!(response.contains("mikrom_router_requests_total{router_id=\"test-router\"} 42\n"));
-        assert!(response.contains(
-            "mikrom_router_responses_total{router_id=\"test-router\",family=\"2xx\"} 40\n"
-        ));
-        assert!(response.contains(
-            "mikrom_router_responses_total{router_id=\"test-router\",family=\"5xx\"} 2\n"
-        ));
-        assert!(response.contains("mikrom_router_routes_count{router_id=\"test-router\"} 0\n"));
+        RouterOtelMetrics::get().record_snapshot(&snapshot);
+        metrics.requests_total.store(2, Ordering::Relaxed);
+        metrics.responses_2xx.store(2, Ordering::Relaxed);
+        let snapshot = build_snapshot(
+            &RouterId::from("router-otel-test"),
+            &metrics,
+            &health,
+            &state,
+        );
+        RouterOtelMetrics::get().record_snapshot(&snapshot);
     }
 }

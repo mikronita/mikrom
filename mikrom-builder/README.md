@@ -32,6 +32,8 @@ The automated build engine for the Mikrom PaaS. It turns Git repositories into O
 | `BUILD_STATE_TTL_SECS` | `3600` | Retention window for finished build state |
 | `BUILD_STATE_PATH` | `/tmp/mikrom-builder-state.json` | Persistent build status store |
 | `BUILDKIT_HOST` | `docker-container://mikromrust-buildkit-1` | Build backend (local Docker or buildkitd) |
+| `ENABLE_TELEMETRY` | `true` | Enable OTLP export of logs, traces, and metrics to SigNoz |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://192.168.122.128:4317` | OTLP gRPC endpoint for SigNoz |
 
 Operational notes:
 

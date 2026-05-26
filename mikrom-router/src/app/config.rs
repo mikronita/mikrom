@@ -83,9 +83,6 @@ pub struct RouterConfig {
 
     #[serde(default = "default_router_threads")]
     pub router_threads: usize,
-
-    #[serde(default = "default_metrics_port")]
-    pub metrics_port: u16,
 }
 
 const fn default_nats_use_tls() -> bool {
@@ -117,10 +114,6 @@ const fn default_rps_limit() -> isize {
 
 fn default_router_threads() -> usize {
     std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
-}
-
-const fn default_metrics_port() -> u16 {
-    9092
 }
 
 impl RouterConfig {
@@ -218,10 +211,6 @@ impl RouterConfig {
             return Err(anyhow::anyhow!("WIREGUARD_PORT must be greater than zero"));
         }
 
-        if self.metrics_port == 0 {
-            return Err(anyhow::anyhow!("METRICS_PORT must be greater than zero"));
-        }
-
         if self.nats_use_tls && self.nats_certs_dir.is_none() {
             return Err(anyhow::anyhow!(
                 "NATS_USE_TLS is enabled but no NATS_CERTS_DIR or CERTS_DIR was configured"
@@ -283,7 +272,6 @@ mod tests {
             acme_staging: false,
             rps_limit: 100,
             router_threads: 1,
-            metrics_port: 9092,
         };
 
         assert!(config.validate().is_err());
@@ -306,7 +294,6 @@ mod tests {
             acme_staging: false,
             rps_limit: 100,
             router_threads: 1,
-            metrics_port: 9092,
         };
 
         assert!(config.validate().is_err());
@@ -329,7 +316,6 @@ mod tests {
             acme_staging: false,
             rps_limit: 100,
             router_threads: 1,
-            metrics_port: 9092,
         };
 
         assert_eq!(config.advertise_address(), "router-1");
@@ -352,7 +338,6 @@ mod tests {
             acme_staging: false,
             rps_limit: 100,
             router_threads: 1,
-            metrics_port: 9092,
         };
 
         assert!(config.validate().is_err());
@@ -375,7 +360,6 @@ mod tests {
             acme_staging: false,
             rps_limit: 0,
             router_threads: 1,
-            metrics_port: 9092,
         };
 
         assert!(config.validate().is_err());
@@ -398,7 +382,6 @@ mod tests {
             acme_staging: false,
             rps_limit: 100,
             router_threads: 1,
-            metrics_port: 9092,
         };
 
         assert!(config.validate().is_err());

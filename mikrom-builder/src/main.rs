@@ -15,11 +15,12 @@ async fn main() -> anyhow::Result<()> {
     let config =
         Config::from_env().map_err(|e| anyhow::anyhow!("Failed to load configuration: {e}"))?;
 
-    mikrom_proto::telemetry::init_telemetry(
+    let _telemetry = mikrom_proto::telemetry::init_telemetry(
         "mikrom-builder",
         env!("CARGO_PKG_VERSION"),
         Some(&config.log_level),
     )?;
+    mikrom_proto::telemetry::record_service_startup("mikrom-builder");
 
     info!("Connecting to NATS at {}...", config.nats_url);
     let nats_client = async_nats::connect(&config.nats_url)
