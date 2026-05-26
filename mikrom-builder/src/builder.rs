@@ -450,6 +450,7 @@ impl AppBuilder {
         info!(image_tag = %image_tag, "Pushing to registry...");
         let docker = Docker::connect_with_local_defaults()
             .context("Failed to connect to the local Docker daemon")?;
+        let (image_name, tag) = Self::split_image_reference(image_tag);
 
         let auth_config = match (&self.registry_user, &self.registry_pass) {
             (Some(username), Some(password)) => {
@@ -475,11 +476,12 @@ impl AppBuilder {
             ),
         };
 
-        let mut stream = docker.push_image(
-            image_tag,
-            Some(PushImageOptionsBuilder::default().build()),
-            auth_config,
-        );
+        let mut push_options = PushImageOptionsBuilder::default();
+        if let Some(tag) = tag.as_deref() {
+            push_options = push_options.tag(tag);
+        }
+
+        let mut stream = docker.push_image(&image_name, Some(push_options.build()), auth_config);
 
         while let Some(message) = stream.next().await {
             let message = message?;
@@ -492,6 +494,25 @@ impl AppBuilder {
         }
 
         Ok(())
+    }
+
+    fn split_image_reference(image_tag: &str) -> (String, Option<String>) {
+        let last_slash = image_tag.rfind('/');
+        let last_colon = image_tag.rfind(':');
+
+        if let Some(colon_idx) = last_colon
+            && last_slash
+                .map(|slash_idx| colon_idx > slash_idx)
+                .unwrap_or(true)
+        {
+            let image_name = image_tag[..colon_idx].to_string();
+            let tag = image_tag[colon_idx + 1..].to_string();
+            if !tag.is_empty() {
+                return (image_name, Some(tag));
+            }
+        }
+
+        (image_tag.to_string(), None)
     }
 
     async fn cleanup_local_image(&self, image_tag: &str) {
@@ -742,6 +763,22 @@ mod tests {
             builder.format_image_tag("app", "v1"),
             "registry.example.com/app:v1"
         );
+    }
+
+    #[test]
+    fn test_split_image_reference_separates_tag_from_repository() {
+        let (name, tag) = AppBuilder::split_image_reference("registry.example.com/mikrom/app:1234");
+
+        assert_eq!(name, "registry.example.com/mikrom/app");
+        assert_eq!(tag.as_deref(), Some("1234"));
+    }
+
+    #[test]
+    fn test_split_image_reference_leaves_tagless_refs_untouched() {
+        let (name, tag) = AppBuilder::split_image_reference("registry.example.com/mikrom/app");
+
+        assert_eq!(name, "registry.example.com/mikrom/app");
+        assert!(tag.is_none());
     }
 
     #[test]

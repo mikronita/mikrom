@@ -314,7 +314,7 @@ impl JobLifecycleService {
                     }
                 }
 
-                self.ctx.job_repo.remove_jobs_by_app(app_id).await?;
+                self.ctx.app_repo.remove_app_and_jobs_by_app(app_id).await?;
 
                 for job in app_jobs {
                     let mut deleted_job = job;

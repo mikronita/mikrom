@@ -141,6 +141,7 @@ async fn test_port_propagation_from_builder_to_deployment() {
                     Some("hash".to_string()),
                     Some("msg".to_string()),
                     Some("branch".to_string()),
+                    "Build successful".to_string(),
                 ))
             })
         });

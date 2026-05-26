@@ -1,11 +1,11 @@
 #![cfg(feature = "test-utils")]
 mod common;
-use futures::StreamExt;
 use mikrom_api::AppState;
 use mikrom_api::domain::{AppRepository, NewDeployment, UpdateDeploymentParams};
 use mikrom_api::infrastructure::db::PostgresAppRepository;
 use mikrom_api::test_utils::TestDb;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
 
 #[tokio::test]
@@ -113,10 +113,39 @@ async fn test_route_reconciliation_on_startup() {
         .await
         .unwrap();
 
-    let mut sub = nats_client
-        .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
-        .await
-        .unwrap();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let received_update = Arc::new(Mutex::new(None));
+    let received_update_task = Arc::clone(&received_update);
+    let nats_for_task = nats_client.clone();
+    tokio::spawn(async move {
+        use mikrom_proto::router::{RouterConfigAck, RouterConfigUpdate};
+        use prost::Message;
+
+        let mut sub = match nats_for_task
+            .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
+            .await
+        {
+            Ok(sub) => sub,
+            Err(_) => return,
+        };
+        let _ = ready_tx.send(());
+
+        if let Some(msg) = futures::StreamExt::next(&mut sub).await {
+            let update = RouterConfigUpdate::decode(&msg.payload[..]).unwrap();
+            *received_update_task.lock().await = Some(update);
+
+            if let Some(reply) = msg.reply {
+                let ack = RouterConfigAck {
+                    success: true,
+                    message: String::new(),
+                };
+                let mut buf = Vec::new();
+                ack.encode(&mut buf).unwrap();
+                let _ = nats_for_task.publish(reply, buf.into()).await;
+            }
+        }
+    });
+    let _ = ready_rx.await;
 
     let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
     let app_id_str = app.id.to_string();
@@ -149,18 +178,17 @@ async fn test_route_reconciliation_on_startup() {
         .await
         .expect("Reconciliation failed");
 
-    let msg = timeout(Duration::from_secs(2), sub.next())
-        .await
-        .expect("Timeout waiting for reconciliation message")
-        .expect("No message received");
-
-    use mikrom_proto::router::RouterConfigUpdate;
-    use prost::Message;
-    let update = RouterConfigUpdate::decode(&msg.payload[..]).unwrap();
+    let update = timeout(Duration::from_secs(2), async {
+        loop {
+            if let Some(update) = received_update.lock().await.clone() {
+                break update;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("Timeout waiting for reconciliation message");
 
     assert_eq!(update.hostname, "reconcile.mikrom.local");
-    assert_eq!(
-        update.target_urls,
-        vec!["http://[fd00::1]:8080".to_string()]
-    );
+    assert_eq!(update.target_urls, vec!["[fd00::1]:8080".to_string()]);
 }

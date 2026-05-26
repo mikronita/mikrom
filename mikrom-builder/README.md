@@ -25,7 +25,8 @@ The automated build engine for the Mikrom PaaS. It turns Git repositories into O
 | Variable | Default | Description |
 |---|---|---|
 | `NATS_URL` | `nats://localhost:4222` | URL of the NATS server |
-| `REGISTRY_URL` | `localhost:5000` | Target OCI registry |
+| `REGISTRY` | `registry.mikrom.spluca.org/mikrom` | Target OCI registry |
+| `REGISTRY_URL` | alias for `REGISTRY` | Backward-compatible environment name |
 | `REGISTRY_USER` | — | Registry username |
 | `REGISTRY_PASS` | — | Registry password |
 | `MAX_CONCURRENT_BUILDS` | `2` | Maximum builds processed in parallel |

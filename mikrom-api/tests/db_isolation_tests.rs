@@ -9,7 +9,6 @@ mod tests {
     use mikrom_api::infrastructure::db::PostgresUserRepository;
     use prost::Message;
     use std::sync::Arc;
-    use tokio_stream::StreamExt;
     use uuid::Uuid;
 
     #[tokio::test]
@@ -197,10 +196,38 @@ mod tests {
             active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
         };
 
-        let mut sub = nats_client
-            .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
-            .await
-            .unwrap();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let received_update = Arc::new(tokio::sync::Mutex::new(None));
+        let received_update_task = Arc::clone(&received_update);
+        let nats_for_task = nats_client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::router::{RouterConfigAck, RouterConfigUpdate};
+
+            let mut sub = match nats_for_task
+                .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
+                .await
+            {
+                Ok(sub) => sub,
+                Err(_) => return,
+            };
+            let _ = ready_tx.send(());
+
+            if let Some(msg) = futures::StreamExt::next(&mut sub).await {
+                let update = RouterConfigUpdate::decode(&msg.payload[..]).unwrap();
+                *received_update_task.lock().await = Some(update);
+
+                if let Some(reply) = msg.reply {
+                    let ack = RouterConfigAck {
+                        success: true,
+                        message: String::new(),
+                    };
+                    let mut buf = Vec::new();
+                    ack.encode(&mut buf).unwrap();
+                    let _ = nats_for_task.publish(reply, buf.into()).await;
+                }
+            }
+        });
+        let _ = ready_rx.await;
 
         let app = App {
             id: app_id,
@@ -209,29 +236,24 @@ mod tests {
             port: mikrom_api::domain::types::Port::new(8080).unwrap(),
             hostname: Some(hostname.clone()),
             user_id,
-            active_deployment_id: None,
-            desired_replicas: 1,
-            min_replicas: 1,
-            max_replicas: 3,
-            autoscaling_enabled: false,
-            cpu_threshold: 80.0,
-            mem_threshold: 80.0,
             ..App::default()
         };
 
         state.notify_router(&app).await.unwrap();
 
-        let msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
-            .await
-            .expect("Timeout waiting for router config update")
-            .expect("No router config update received");
+        let update = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Some(update) = received_update.lock().await.clone() {
+                    break update;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("Timeout waiting for router config update");
 
-        let update = mikrom_proto::router::RouterConfigUpdate::decode(&msg.payload[..]).unwrap();
         assert_eq!(update.hostname, hostname);
-        assert_eq!(
-            update.target_urls,
-            vec!["http://[fd00::10]:8080".to_string()]
-        );
+        assert_eq!(update.target_urls, vec!["[fd00::10]:8080".to_string()]);
     }
 
     #[tokio::test]
@@ -296,10 +318,38 @@ mod tests {
             active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
         };
 
-        let mut sub = nats_client
-            .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
-            .await
-            .unwrap();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let received_update = Arc::new(tokio::sync::Mutex::new(None));
+        let received_update_task = Arc::clone(&received_update);
+        let nats_for_task = nats_client.clone();
+        tokio::spawn(async move {
+            use mikrom_proto::router::{RouterConfigAck, RouterConfigUpdate};
+
+            let mut sub = match nats_for_task
+                .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
+                .await
+            {
+                Ok(sub) => sub,
+                Err(_) => return,
+            };
+            let _ = ready_tx.send(());
+
+            if let Some(msg) = futures::StreamExt::next(&mut sub).await {
+                let update = RouterConfigUpdate::decode(&msg.payload[..]).unwrap();
+                *received_update_task.lock().await = Some(update);
+
+                if let Some(reply) = msg.reply {
+                    let ack = RouterConfigAck {
+                        success: true,
+                        message: String::new(),
+                    };
+                    let mut buf = Vec::new();
+                    ack.encode(&mut buf).unwrap();
+                    let _ = nats_for_task.publish(reply, buf.into()).await;
+                }
+            }
+        });
+        let _ = ready_rx.await;
 
         let app = App {
             id: Uuid::new_v4(),
@@ -313,12 +363,17 @@ mod tests {
 
         state.notify_router(&app).await.unwrap();
 
-        let msg = tokio::time::timeout(std::time::Duration::from_secs(2), sub.next())
-            .await
-            .expect("Timeout waiting for router config update")
-            .expect("No router config update received");
+        let update = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Some(update) = received_update.lock().await.clone() {
+                    break update;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("Timeout waiting for router config update");
 
-        let update = mikrom_proto::router::RouterConfigUpdate::decode(&msg.payload[..]).unwrap();
         assert_eq!(update.hostname, hostname);
         assert!(update.target_urls.is_empty());
     }
