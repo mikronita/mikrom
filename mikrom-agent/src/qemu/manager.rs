@@ -868,7 +868,15 @@ mod tests {
         assert!(args[0].contains("sleep"), "binary should be sleep");
         assert!(args.contains(&"-machine".to_string()));
         assert!(args.contains(&"microvm".to_string()));
+        assert!(args.contains(&"-accel".to_string()));
+        assert!(args.contains(&"kvm".to_string()));
         assert!(args.contains(&"-kernel".to_string()));
+        assert!(args.iter().any(|a| a.contains("if=none,id=root")));
+        assert!(args
+            .iter()
+            .any(|a| a == "console=hvc0 root=/dev/vda reboot=t panic=1"));
+        assert!(args.contains(&"virtio-serial-device".to_string()));
+        assert!(args.iter().any(|a| a == "virtconsole,chardev=console"));
         assert!(args.iter().any(|a| a.starts_with("vhost-vsock-device")));
     }
 
@@ -1117,11 +1125,13 @@ mod tests {
         let qmp_path = data_dir.join(format!("qemu-{stale_str}.qmp"));
         let pid_path = data_dir.join(format!("qemu-{stale_str}.pid"));
         let log_path = data_dir.join(format!("qemu-{stale_str}.log"));
+        let err_log_path = data_dir.join(format!("qemu-{stale_str}.err.log"));
 
         tokio::fs::write(&state_path, "{}").await.unwrap();
         tokio::fs::write(&qmp_path, "").await.unwrap();
         tokio::fs::write(&pid_path, "12345\n").await.unwrap();
         tokio::fs::write(&log_path, "boot log\n").await.unwrap();
+        tokio::fs::write(&err_log_path, "stderr log\n").await.unwrap();
 
         // Create stale virtiofsd socket
         let fsd_dir = &qemu.config.virtiofsd_socket_dir;
@@ -1133,7 +1143,9 @@ mod tests {
         let active_vm_id = new_vm_id();
         let active_str = active_vm_id.to_string();
         let active_state = data_dir.join(format!("qemu-{active_str}.json"));
+        let active_err_log = data_dir.join(format!("qemu-{active_str}.err.log"));
         tokio::fs::write(&active_state, "{}").await.unwrap();
+        tokio::fs::write(&active_err_log, "active stderr\n").await.unwrap();
 
         // Seed the active VM into the manager
         qemu.vms.write().await.insert(
@@ -1157,6 +1169,7 @@ mod tests {
         assert!(!qmp_path.exists(), "stale QMP socket should be removed");
         assert!(!pid_path.exists(), "stale pidfile should be removed");
         assert!(!log_path.exists(), "stale serial log should be removed");
+        assert!(!err_log_path.exists(), "stale stderr log should be removed");
         assert!(
             !fsd_sock.exists(),
             "stale virtiofsd socket should be removed"
@@ -1164,9 +1177,11 @@ mod tests {
 
         // Verify active VM files are preserved
         assert!(active_state.exists(), "active VM state should be preserved");
+        assert!(active_err_log.exists(), "active stderr log should be preserved");
 
         // Clean up
         let _ = tokio::fs::remove_file(&active_state).await;
+        let _ = tokio::fs::remove_file(&active_err_log).await;
         let _ = tokio::fs::remove_dir_all(data_dir).await;
         let _ = tokio::fs::remove_dir_all(fsd_dir).await;
     }
