@@ -170,15 +170,20 @@ impl QemuManager {
                 paths.push(entry.path());
             }
             for path in paths {
-                let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+                let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
                     continue;
                 };
-                // Expected formats: "qemu-{vm_id}" or "qemu-{vm_id}.{ext}"
-                let vm_id_str = if name.starts_with("qemu-") {
-                    name.strip_prefix("qemu-").unwrap_or(name).to_string()
-                } else {
+                let Some(rest) = file_name.strip_prefix("qemu-") else {
                     continue;
                 };
+                let vm_id_str = rest
+                    .strip_suffix(".err.log")
+                    .or_else(|| rest.strip_suffix(".log"))
+                    .or_else(|| rest.strip_suffix(".pid"))
+                    .or_else(|| rest.strip_suffix(".qmp"))
+                    .or_else(|| rest.strip_suffix(".json"))
+                    .unwrap_or(rest)
+                    .to_string();
 
                 if active_set.contains(&vm_id_str) {
                     continue;
