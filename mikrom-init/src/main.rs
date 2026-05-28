@@ -233,9 +233,8 @@ async fn setup_networking(config: &InitConfig) -> Result<()> {
 
     // Explicitly enable IPv6 for this interface via sysctl
     let disable_ipv6_path = format!("/proc/sys/net/ipv6/conf/{}/disable_ipv6", link_name);
-    if Path::new(&disable_ipv6_path).exists()
-        && let Err(e) = std::fs::write(&disable_ipv6_path, "0")
-    {
+    if Path::new(&disable_ipv6_path).exists() && std::fs::write(&disable_ipv6_path, "0").is_err() {
+        let e = std::fs::write(&disable_ipv6_path, "0").unwrap_err();
         eprintln!(
             "[mikrom-init] Warning: Failed to enable IPv6 on {}: {}",
             link_name, e

@@ -165,7 +165,8 @@ impl CloudHypervisorManager {
         };
 
         // Extract prefix from IPv6 address (e.g., fd40:b90d:fc9e:cf57::1 -> fd40:b90d:fc9e:cf57::/64)
-        if let Ok(ip) = addr.parse::<std::net::Ipv6Addr>() {
+        let ip_part = addr.split('/').next().unwrap_or(addr);
+        if let Ok(ip) = ip_part.parse::<std::net::Ipv6Addr>() {
             let mut segments = ip.segments();
             // Assuming /64 prefix, we zero out the last 4 segments
             segments[4] = 0;
