@@ -24,6 +24,7 @@ impl CloudHypervisorProcess {
         })?;
 
         let mut cmd = Command::new(binary_path);
+        cmd.kill_on_drop(true);
 
         cmd.arg("--api-socket")
             .arg(&socket_path)

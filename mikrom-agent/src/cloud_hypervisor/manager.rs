@@ -294,6 +294,8 @@ impl CloudHypervisorManager {
                 self.cleanup_tap(&tap_name).await;
             }
             self.vms.remove(&vm_id);
+            let path = self.config.data_path.join("vms").join(vm_id.to_string());
+            let _ = tokio::fs::remove_dir_all(path).await;
         }
     }
 
@@ -386,12 +388,26 @@ impl VmHypervisor for CloudHypervisorManager {
         config: VmConfig,
     ) -> Result<(), HypervisorError> {
         let self_clone = self.clone_stub();
+        let image_clone = image.clone();
+        let config_clone = config.clone();
         tokio::spawn(async move {
             if let Err(e) = self_clone
                 .start_vm_background(vm_id, app_id, image, config)
                 .await
             {
                 tracing::error!(vm_id = %vm_id, error = %e, "Failed to start Cloud Hypervisor VM in background");
+                self_clone.vms.insert(
+                    vm_id,
+                    VmInfo {
+                        vm_id,
+                        app_id,
+                        image: image_clone,
+                        config: config_clone,
+                        status: VmStatus::Failed,
+                        started_at: None,
+                        error_message: Some(e.to_string()),
+                    },
+                );
             }
         });
         Ok(())

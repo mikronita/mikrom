@@ -89,6 +89,7 @@ impl CloudHypervisorManager {
         let _ = tokio::fs::remove_file(socket_path).await;
 
         let mut cmd = tokio::process::Command::new(binary);
+        cmd.kill_on_drop(true);
         cmd.arg("--socket-path").arg(socket_path);
         cmd.arg("--shared-dir").arg(shared_dir);
         cmd.arg("--sandbox").arg("none");
