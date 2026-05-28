@@ -2,12 +2,10 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { 
-    Database as DatabaseIcon, 
-    ArrowLeft, 
-    Radio, 
-    Cpu, 
-    HardDrive, 
-    Shield, 
+    Database as DatabaseIcon,
+    Radio,
+    Cpu,
+    HardDrive,
     Settings, 
     Terminal, 
     Globe2,

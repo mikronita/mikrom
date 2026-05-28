@@ -6,11 +6,11 @@
 		open = $bindable(false),
 		children,
 		...restProps
-	}: {
-		open?: boolean;
-		children?: Snippet;
-		[key: string]: any;
-	} = $props();
+  	}: {
+  		open?: boolean;
+  		children?: Snippet;
+  		[key: string]: unknown;
+  	} = $props();
 </script>
 
 <TooltipPrimitive.Root bind:open {...restProps}>

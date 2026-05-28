@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Database as DatabaseIcon, Plus, Calendar, Cpu, HardDrive, Radio, Search } from "lucide-svelte";
+  import { Database as DatabaseIcon, Plus, Calendar, Cpu, HardDrive, Radio } from "lucide-svelte";
   import {
     Card,
     CardHeader,

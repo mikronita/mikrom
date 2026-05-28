@@ -1,17 +1,22 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Calendar, Camera, Copy, HardDrive, History, Link, Plus, RotateCcw, Search, Trash2 } from "lucide-svelte";
+  import { Calendar, Camera, Copy, HardDrive, Plus, RotateCcw, Trash2 } from "lucide-svelte";
   import {
     Card,
     CardHeader,
     CardTitle,
-    CardDescription,
     CardContent,
     CardSkeleton,
     Button,
     AlertDialog,
     EmptyState,
     TableSkeleton,
+    Table,
+    TableHeader,
+    TableBody,
+    TableRow,
+    TableHead,
+    TableCell,
     Modal,
     Field,
     FieldGroup,
@@ -27,26 +32,22 @@
   import { formatDate } from "$lib/utils";
 
   import { getToken } from "$lib/auth";
-  import { 
-    createVolume, 
-    attachVolume, 
-    detachVolume,
-    createVolumeSnapshot, 
-    cloneVolumeFromSnapshot, 
-    deleteVolume, 
-    deleteVolumeSnapshot, 
-    restoreVolumeSnapshot, 
-    type Volume, 
-    type VolumeSnapshot, 
-    type AttachedVolume,
-    type VolumeWithAttachments
+  import {
+    createVolume,
+    attachVolume,
+    cloneVolumeFromSnapshot,
+    deleteVolume,
+    deleteVolumeSnapshot,
+    restoreVolumeSnapshot,
+    type Volume,
+    type VolumeSnapshot,
   } from "$lib/api";
   import { toast } from "$lib/toast";
   import { appsStore, refreshApps } from "$lib/stores/apps";
   import { volumesStore, snapshotsStore, volumesLoading, snapshotsLoading, refreshVolumes, refreshSnapshots } from "$lib/stores/volumes";
 
   let selectedApp = "";
-  let selectedAppId = "";
+  let _selectedAppId = "";
   let showCreateVolume = false;
   let showAttachVolume = false;
   let showCloneModal = false;
@@ -68,20 +69,20 @@
 
   async function loadVolumes(appName: string) {
     if (!appName) {
-      selectedAppId = "";
+      _selectedAppId = "";
       await refreshVolumes();
       return;
     }
     const app = $appsStore.find((item) => item.name === appName);
     if (!app) {
-      selectedAppId = "";
+      _selectedAppId = "";
       return;
     }
-    selectedAppId = app.id;
+    _selectedAppId = app.id;
     await refreshVolumes(app.id);
   }
 
-  async function loadSnapshots(volume_id: string) {
+  async function _loadSnapshots(volume_id: string) {
     await refreshSnapshots(volume_id);
   }
 
@@ -108,36 +109,17 @@
   async function attachVolumeNow() {
     const token = getToken();
     if (!token || !attachParams.volume_id || !attachParams.app_id) return;
-    
+
     const result = await attachVolume(token, attachParams.app_id, {
       volume_id: attachParams.volume_id,
       mount_point: attachParams.mount_point,
       access_mode: attachParams.access_mode
     });
-    
+
     if (result.error) return toast.error(result.error);
     toast.success("Volume attached successfully");
     showAttachVolume = false;
     await loadVolumes(selectedApp);
-  }
-
-  async function detachVolumeNow(appId: string, volumeId: string) {
-    const token = getToken();
-    if (!token) return;
-    const result = await detachVolume(token, appId, volumeId);
-    if (result.error) return toast.error(result.error);
-    toast.success("Volume detached");
-    await loadVolumes(selectedApp);
-  }
-
-  async function createSnapshot(volumeId: string) {
-    const token = getToken();
-    if (!token) return;
-    const snapName = `snap-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-    const result = await createVolumeSnapshot(token, volumeId, { name: snapName });
-    if (result.error) return toast.error(result.error);
-    toast.success("Snapshot created");
-    await loadSnapshots(volumeId);
   }
 
   async function deleteVolumeNow(id: string) {
@@ -155,7 +137,7 @@
     const result = await deleteVolumeSnapshot(token, id);
     if (result.error) return toast.error(result.error);
     toast.success("Snapshot deleted");
-    await loadSnapshots(volumeForSnapshots);
+    await _loadSnapshots(volumeForSnapshots);
   }
 
   async function confirmDeleteVolume() {
@@ -203,14 +185,6 @@
 
   function formatSize(size: number) {
     return size >= 1024 ? `${(size / 1024).toFixed(1)} GiB` : `${size} MiB`;
-  }
-
-  function isAttachedVolume(v: Volume | AttachedVolume | VolumeWithAttachments): v is AttachedVolume {
-    return "mount_point" in v;
-  }
-
-  function isVolumeWithAttachments(v: Volume | AttachedVolume | VolumeWithAttachments): v is VolumeWithAttachments {
-    return "attachments" in v;
   }
 </script>
 

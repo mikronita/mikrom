@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Database as DatabaseIcon, Cpu, HardDrive, Layers } from "lucide-svelte";
+  import { Layers } from "lucide-svelte";
   import { 
     Modal, 
     Button, 

@@ -8,13 +8,13 @@
 		type = "single",
 		children,
 		...restProps
-	}: {
-		open?: boolean;
-		value?: any;
-		type?: "single" | "multiple";
-		children?: Snippet;
-		[key: string]: any;
-	} = $props();
+  	}: {
+  		open?: boolean;
+  		value?: unknown;
+  		type?: "single" | "multiple";
+  		children?: Snippet;
+  		[key: string]: unknown;
+  	} = $props();
 </script>
 
 <SelectPrimitive.Root bind:open bind:value={value} {type} {...restProps}>

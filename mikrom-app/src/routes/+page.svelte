@@ -114,12 +114,6 @@
     return "outline";
   }
 
-  function getHealthVariant(status: string) {
-    if (status === "ONLINE") return "outline";
-    if (status === "CHECKING") return "outline";
-    return "destructive";
-  }
-
   function getAppStatusClass(status: string) {
     const normalized = status.toLowerCase();
     if (normalized === "running") {

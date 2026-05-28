@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as AlertDialog from "./ui/alert-dialog/index.js";
-  import { Button } from "./ui/button/index.js";
+
 
   let {
     open = $bindable(false),
