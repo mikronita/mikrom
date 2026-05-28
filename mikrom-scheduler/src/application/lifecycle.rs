@@ -211,7 +211,7 @@ impl JobLifecycleService {
                 let job = self.get_app_status(job_id, user_id).await?;
 
                 if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id)
-                    && let Err(e) = self.ctx.agent_client.delete_vm(host_id, vm_id).await
+                    && let Err(e) = self.ctx.agent_client.delete_vm(host_id, vm_id, job.config.hypervisor).await
                 {
                     tracing::warn!(
                         job_id = %job_id,
@@ -284,7 +284,11 @@ impl JobLifecycleService {
 
                 for job in &app_jobs {
                     if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id)
-                        && let Err(e) = self.ctx.agent_client.delete_vm(host_id, vm_id).await
+                        && let Err(e) = self
+                            .ctx
+                            .agent_client
+                            .delete_vm(host_id, vm_id, job.config.hypervisor)
+                            .await
                     {
                         let is_missing_vm = matches!(
                             &e,

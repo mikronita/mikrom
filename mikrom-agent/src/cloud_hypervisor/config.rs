@@ -112,8 +112,13 @@ mod tests {
     #[test]
     fn test_vm_config_serialization() {
         let config = VmConfig {
-            cpus: CpusConfig { boot_vcpus: 2, max_vcpus: 4 },
-            memory: MemoryConfig { size: 1024 * 1024 * 1024 },
+            cpus: CpusConfig {
+                boot_vcpus: 2,
+                max_vcpus: 4,
+            },
+            memory: MemoryConfig {
+                size: 1024 * 1024 * 1024,
+            },
             payload: PayloadConfig {
                 kernel: "/path/to/kernel".to_string(),
                 cmdline: Some("console=ttyS0".to_string()),

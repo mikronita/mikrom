@@ -1,6 +1,6 @@
+use crate::cloud_hypervisor::CloudHypervisorManager;
 use crate::config::AgentConfig;
 use crate::firecracker::FirecrackerManager;
-use crate::cloud_hypervisor::CloudHypervisorManager;
 use crate::hypervisor::vm_hypervisor::{HypervisorType, VmHypervisor};
 use crate::qemu::QemuManager;
 use std::collections::HashMap;

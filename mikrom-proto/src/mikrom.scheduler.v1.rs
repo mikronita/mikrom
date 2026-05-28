@@ -453,6 +453,8 @@ pub struct DeployResponse {
     pub vm_id: ::prost::alloc::string::String,
     #[prost(string, tag = "5")]
     pub message: ::prost::alloc::string::String,
+    #[prost(enumeration = "HypervisorType", tag = "7")]
+    pub hypervisor: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppStatusRequest {
@@ -489,6 +491,8 @@ pub struct AppStatusResponse {
     pub tx_bytes: u64,
     #[prost(uint64, tag = "14")]
     pub rx_bytes: u64,
+    #[prost(enumeration = "HypervisorType", tag = "15")]
+    pub hypervisor: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CancelRequest {
@@ -546,6 +550,8 @@ pub struct AppInfo {
     pub tx_bytes: u64,
     #[prost(uint64, tag = "14")]
     pub rx_bytes: u64,
+    #[prost(enumeration = "HypervisorType", tag = "15")]
+    pub hypervisor: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UpdateAppScalingConfigRequest {

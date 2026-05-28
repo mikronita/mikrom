@@ -219,7 +219,12 @@ impl AgentClient for RecordingAgentClient {
         Ok(())
     }
 
-    async fn delete_vm(&self, _host_id: &str, _vm_id: &str) -> DomainResult<()> {
+    async fn delete_vm(
+        &self,
+        _host_id: &str,
+        _vm_id: &str,
+        _hv: mikrom_scheduler::domain::HypervisorType,
+    ) -> DomainResult<()> {
         Ok(())
     }
 

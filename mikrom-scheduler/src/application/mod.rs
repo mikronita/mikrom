@@ -560,7 +560,12 @@ mod tests {
         async fn stop_vm(&self, _h: &str, _v: &str) -> DomainResult<()> {
             Ok(())
         }
-        async fn delete_vm(&self, _h: &str, _v: &str) -> DomainResult<()> {
+        async fn delete_vm(
+            &self,
+            _h: &str,
+            _v: &str,
+            _hv: crate::domain::job::HypervisorType,
+        ) -> DomainResult<()> {
             Ok(())
         }
         async fn check_health(&self, _h: &str, _v: &str) -> DomainResult<bool> {
@@ -928,9 +933,9 @@ mod tests {
         let mut agent_client = MockAgentClient::new();
         agent_client
             .expect_delete_vm()
-            .with(eq("host-1"), eq("vm-1"))
+            .with(eq("host-1"), eq("vm-1"), mockall::predicate::always())
             .times(1)
-            .returning(|_, _| {
+            .returning(|_, _, _| {
                 Err(DomainError::Infrastructure(
                     "VM not found: vm-1".to_string(),
                 ))
@@ -969,9 +974,9 @@ mod tests {
         let mut agent_client = MockAgentClient::new();
         agent_client
             .expect_delete_vm()
-            .with(eq("host-1"), eq("vm-1"))
+            .with(eq("host-1"), eq("vm-1"), mockall::predicate::always())
             .times(1)
-            .returning(|_, _| Err(DomainError::Infrastructure("boom".to_string())));
+            .returning(|_, _, _| Err(DomainError::Infrastructure("boom".to_string())));
 
         let mut app_repo = MockAppRepository::new();
         app_repo
@@ -1163,6 +1168,7 @@ mod tests {
         let mut job_repo = MockJobRepository::new();
         job_repo.expect_list_jobs().returning(|_, _, _| Ok(vec![]));
         job_repo.expect_add_job().times(1).returning(|_| Ok(()));
+        job_repo.expect_get_job().returning(|_| Ok(None)); // Added for rollback_failed_deploy
         job_repo
             .expect_start_job()
             .times(1)
@@ -1193,9 +1199,10 @@ mod tests {
             .with(
                 eq("host-1"),
                 mockall::predicate::function(|vm_id: &str| !vm_id.is_empty()),
+                mockall::predicate::always(),
             )
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
 
         let app_repo = Arc::new(DummyAppRepo);
         let job_repo = Arc::new(job_repo);
@@ -1256,9 +1263,9 @@ mod tests {
         let mut agent_client = MockAgentClient::new();
         agent_client
             .expect_delete_vm()
-            .with(eq("host-1"), eq("vm-1"))
+            .with(eq("host-1"), eq("vm-1"), mockall::predicate::always())
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
 
         let app_repo = Arc::new(DummyAppRepo);
         let job_repo = Arc::new(job_repo);

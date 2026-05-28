@@ -154,7 +154,7 @@ impl SchedulerClient for RealSchedulerClient {
         let inner = self
             .state
             .nats
-            .with_timeout(std::time::Duration::from_secs(5))
+            .with_timeout(std::time::Duration::from_secs(15))
             .request("mikrom.scheduler.delete_all_by_app", req)
             .await?;
         Ok(inner)

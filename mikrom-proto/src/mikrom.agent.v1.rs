@@ -161,6 +161,8 @@ pub struct AgentCommandResponse {
 pub struct DeleteVmRequest {
     #[prost(string, tag = "1")]
     pub vm_id: ::prost::alloc::string::String,
+    #[prost(enumeration = "HypervisorType", tag = "2")]
+    pub hypervisor: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteVmResponse {

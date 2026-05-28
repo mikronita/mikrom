@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
 use mikrom_scheduler::domain::{
-    AgentClient, AppConfig, AppId, AppRepository, DeploymentId, DomainResult, HostId, Job, JobId,
-    JobRepository, JobStatus, UserId, VmConfig, VmId, Worker, WorkerRepository,
+    AgentClient, AppConfig, AppId, AppRepository, DeploymentId, DomainResult, HostId,
+    HypervisorType, Job, JobId, JobRepository, JobStatus, UserId, VmConfig, VmId, Worker,
+    WorkerRepository,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -244,7 +245,7 @@ impl AgentClient for MockScalingAgentClient {
     async fn stop_vm(&self, _: &str, _: &str) -> DomainResult<()> {
         Ok(())
     }
-    async fn delete_vm(&self, _: &str, _: &str) -> DomainResult<()> {
+    async fn delete_vm(&self, _: &str, _: &str, _: HypervisorType) -> DomainResult<()> {
         Ok(())
     }
     async fn check_health(&self, _: &str, _: &str) -> DomainResult<bool> {

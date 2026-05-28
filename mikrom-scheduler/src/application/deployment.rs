@@ -117,7 +117,12 @@ impl DeploymentService {
         host_id: &str,
         vm_id: &str,
     ) -> DomainResult<()> {
-        if let Err(e) = ctx.agent_client.delete_vm(host_id, vm_id).await {
+        let hypervisor = match ctx.job_repo.get_job(job_id).await? {
+            Some(job) => job.config.hypervisor,
+            None => crate::domain::job::HypervisorType::Firecracker, // Fallback
+        };
+
+        if let Err(e) = ctx.agent_client.delete_vm(host_id, vm_id, hypervisor).await {
             tracing::warn!(
                 job_id = %job_id,
                 host_id = %host_id,

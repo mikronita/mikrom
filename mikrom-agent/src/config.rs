@@ -56,6 +56,31 @@ pub struct AgentConfig {
     pub nats_flapping_session_secs: u64,
 }
 
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            nats_url: "nats://localhost:4222".to_string(),
+            host_id: "test-host".to_string(),
+            use_tls: false,
+            bridge_ip: "10.0.0.1/8".to_string(),
+            certs_dir: "/certs/agent".to_string(),
+            data_path: PathBuf::from("/tmp/mikrom-test"),
+            agent_hostname: None,
+            agent_advertise_address: None,
+            wireguard_port: Some(51820),
+            wireguard_pubkey: None,
+            qemu_enabled: true,
+            cloud_hypervisor_enabled: true,
+            cloud_hypervisor_binary: PathBuf::from("/usr/bin/cloud-hypervisor"),
+            cloud_hypervisor_kernel: PathBuf::from("/opt/cloud-hypervisor/vmlinux.bin"),
+            cloud_hypervisor_base_rootfs: PathBuf::from("/opt/cloud-hypervisor/base-rootfs.ext4"),
+            http_port: 5002,
+            max_vms_per_host: 0,
+            nats_flapping_session_secs: 30,
+        }
+    }
+}
+
 const fn default_qemu_enabled() -> bool {
     true
 }

@@ -163,11 +163,17 @@ impl AgentClient for NatsAgentClient {
         .await
     }
 
-    async fn delete_vm(&self, host_id: &str, vm_id: &str) -> DomainResult<()> {
+    async fn delete_vm(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        hypervisor: crate::domain::job::HypervisorType,
+    ) -> DomainResult<()> {
         self.send_command(
             host_id,
             mikrom_proto::agent::agent_command::Command::DeleteVm(DeleteVmRequest {
                 vm_id: vm_id.to_string(),
+                hypervisor: hypervisor as i32,
             }),
         )
         .await

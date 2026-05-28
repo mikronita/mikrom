@@ -617,6 +617,7 @@ pub async fn activate_deployment_handler(
                 host_id: String::new(),
                 vm_id: String::new(),
                 message: "Resumed".to_string(),
+                hypervisor: deployment.hypervisor,
             };
             let cleanup_on_failure = true;
 

@@ -370,6 +370,7 @@ message DeployResponse {
   string host_id = 3;
   string vm_id = 4;
   string message = 5;
+  HypervisorType hypervisor = 7;
 }
 
 enum DeployStatus {
@@ -402,6 +403,7 @@ message AppStatusResponse {
   string ipv6_address = 12;
   uint64 tx_bytes = 13;
   uint64 rx_bytes = 14;
+  HypervisorType hypervisor = 15;
 }
 
 message CancelRequest {
@@ -438,6 +440,7 @@ message AppInfo {
   string ipv6_address = 12;
   uint64 tx_bytes = 13;
   uint64 rx_bytes = 14;
+  HypervisorType hypervisor = 15;
 }
 
 message UpdateAppScalingConfigRequest {

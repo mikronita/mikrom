@@ -199,19 +199,17 @@ async fn setup_networking(config: &InitConfig) -> Result<()> {
         .map_err(|e| anyhow!("Failed to read /sys/class/net: {e}"))?;
 
     let mut candidates = Vec::new();
-    for entry in entries {
-        if let Ok(entry) = entry {
-            let name = entry.file_name().to_string_lossy().to_string();
-            // Ignore loopback and common virtual tunnel interfaces
-            if name != "lo" && name != "sit0" && name != "tunl0" && !name.starts_with("gre") {
-                candidates.push(name);
-            }
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        // Ignore loopback and common virtual tunnel interfaces
+        if name != "lo" && name != "sit0" && name != "tunl0" && !name.starts_with("gre") {
+            candidates.push(name);
         }
     }
 
     // Sort to be deterministic and prefer eth0 or enp*
     candidates.sort();
-    
+
     if let Some(name) = candidates.first() {
         println!("[mikrom-init] Detected network interface: {}", name);
         iface_name = Some(name.clone());
@@ -221,7 +219,11 @@ async fn setup_networking(config: &InitConfig) -> Result<()> {
 
     // Get the index of the detected link
     let mut links = handle.link().get().match_name(link_name.clone()).execute();
-    let link_index = if let Some(msg) = links.try_next().await.map_err(|e| anyhow!("Failed to get {} link: {e}", link_name))? {
+    let link_index = if let Some(msg) = links
+        .try_next()
+        .await
+        .map_err(|e| anyhow!("Failed to get {} link: {e}", link_name))?
+    {
         msg.header.index
     } else {
         return Err(anyhow!("Interface {} not found in netlink", link_name));
@@ -231,22 +233,31 @@ async fn setup_networking(config: &InitConfig) -> Result<()> {
 
     // Explicitly enable IPv6 for this interface via sysctl
     let disable_ipv6_path = format!("/proc/sys/net/ipv6/conf/{}/disable_ipv6", link_name);
-    if Path::new(&disable_ipv6_path).exists() {
-        if let Err(e) = std::fs::write(&disable_ipv6_path, "0") {
-            eprintln!("[mikrom-init] Warning: Failed to enable IPv6 on {}: {}", link_name, e);
-        }
+    if Path::new(&disable_ipv6_path).exists()
+        && let Err(e) = std::fs::write(&disable_ipv6_path, "0")
+    {
+        eprintln!(
+            "[mikrom-init] Warning: Failed to enable IPv6 on {}: {}",
+            link_name, e
+        );
     }
 
     // Try to bring the link up first
     if let Err(e) = handle.link().set(link_index).up().execute().await {
-        eprintln!("[mikrom-init] Warning: Failed to set {} up: {}", link_name, e);
+        eprintln!(
+            "[mikrom-init] Warning: Failed to set {} up: {}",
+            link_name, e
+        );
     } else {
         println!("[mikrom-init] {} is now UP", link_name);
     }
 
     // Try to set MTU separately (ignore errors as some drivers don't allow changing it)
     if let Err(e) = handle.link().set(link_index).mtu(1500).execute().await {
-        eprintln!("[mikrom-init] Warning: Failed to set MTU on {}: {} (ignoring)", link_name, e);
+        eprintln!(
+            "[mikrom-init] Warning: Failed to set MTU on {}: {} (ignoring)",
+            link_name, e
+        );
     }
 
     if let Some(ipv6_addr_str) = config.env.get("IPV6_ADDR") {
@@ -272,7 +283,10 @@ async fn setup_networking(config: &InitConfig) -> Result<()> {
 
         if let Some(ipv6_gw_str) = config.env.get("IPV6_GW") {
             let gw = ipv6_gw_str.parse::<std::net::Ipv6Addr>()?;
-            println!("[mikrom-init] Configuring IPv6 gateway: {} via {}", gw, link_name);
+            println!(
+                "[mikrom-init] Configuring IPv6 gateway: {} via {}",
+                gw, link_name
+            );
 
             handle
                 .route()

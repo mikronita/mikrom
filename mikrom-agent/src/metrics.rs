@@ -13,7 +13,7 @@ pub struct VmMetrics {
     pub ram_used_bytes: u64,
     pub status: VmStatus,
     pub error_message: Option<String>,
-    pub firecracker_metrics: Option<serde_json::Value>,
+    pub raw_metrics: Option<serde_json::Value>,
     pub tx_bytes: u64,
     pub rx_bytes: u64,
 }
@@ -173,32 +173,65 @@ impl MetricsCollector {
                     ram_used_bytes: 0,
                     status: vm.status,
                     error_message: vm.error_message,
-                    firecracker_metrics: None,
+                    raw_metrics: vm.raw_metrics,
                     tx_bytes: 0,
                     rx_bytes: 0,
                 };
 
                 if let Some(pid) = vm.pid.filter(|pid| *pid > 0) {
-                    let pid = sysinfo::Pid::from_u32(pid);
+                    let pid_sys = sysinfo::Pid::from_u32(pid);
                     let sys = self.sys.read();
-                    if let Some(process) = sys.process(pid) {
+                    if let Some(process) = sys.process(pid_sys) {
                         vm_metrics.cpu_usage = process.cpu_usage();
                         vm_metrics.ram_used_bytes = process.memory();
+                    } else {
+                        tracing::debug!(vm_id = %vm.vm_id, pid = pid, "Process not found by sysinfo");
                     }
                 }
 
-                // Attempt to read hypervisor metrics if path is available
-                if let Some(metrics_path) = vm.metrics_path
-                    && let Ok(content) = tokio::fs::read_to_string(&metrics_path).await
+                // If raw_metrics is empty but metrics_path is available (Firecracker), try to read it
+                if vm_metrics.raw_metrics.is_none()
+                    && let Some(metrics_path) = &vm.metrics_path
+                    && let Ok(content) = std::fs::read_to_string(metrics_path)
                     && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
                 {
-                    vm_metrics.firecracker_metrics = Some(json);
+                    vm_metrics.raw_metrics = Some(json);
                 }
 
-                // Attempt to read eBPF stats if ifindex is available
-                if let Some(_ifindex) = vm.tap_ifindex {
-                    // TODO: read eBPF stats when available via the hypervisor
+                // Universal network metrics via sysfs statistics
+                if let Some(tap_name) = &vm.tap_name {
+                    let rx_path = format!("/sys/class/net/{}/statistics/rx_bytes", tap_name);
+                    let tx_path = format!("/sys/class/net/{}/statistics/tx_bytes", tap_name);
+
+                    // Host RX = VM TX
+                    if let Ok(rx_str) = std::fs::read_to_string(&rx_path)
+                        && let Ok(rx) = rx_str.trim().parse::<u64>()
+                    {
+                        vm_metrics.tx_bytes = rx;
+                    } else {
+                        tracing::debug!(vm_id = %vm.vm_id, tap_name = %tap_name, path = %rx_path, "Failed to read RX stats from sysfs");
+                    }
+
+                    // Host TX = VM RX
+                    if let Ok(tx_str) = std::fs::read_to_string(&tx_path)
+                        && let Ok(tx) = tx_str.trim().parse::<u64>()
+                    {
+                        vm_metrics.rx_bytes = tx;
+                    } else {
+                        tracing::debug!(vm_id = %vm.vm_id, tap_name = %tap_name, path = %tx_path, "Failed to read TX stats from sysfs");
+                    }
+                } else {
+                    tracing::debug!(vm_id = %vm.vm_id, "No tap_name available for VM metrics");
                 }
+
+                tracing::debug!(
+                    vm_id = %vm.vm_id,
+                    cpu = vm_metrics.cpu_usage,
+                    ram = vm_metrics.ram_used_bytes,
+                    tx = vm_metrics.tx_bytes,
+                    rx = vm_metrics.rx_bytes,
+                    "Collected VM metrics"
+                );
 
                 metrics.vms.insert(vm_metrics.vm_id, vm_metrics);
             }
@@ -234,7 +267,7 @@ mod tests {
             ram_used_bytes: 1024,
             status: VmStatus::Running,
             error_message: None,
-            firecracker_metrics: None,
+            raw_metrics: None,
             tx_bytes: 100,
             rx_bytes: 200,
         };
@@ -260,7 +293,7 @@ mod tests {
                 ram_used_bytes: 2048,
                 status: VmStatus::Running,
                 error_message: None,
-                firecracker_metrics: None,
+                raw_metrics: None,
                 tx_bytes: 300,
                 rx_bytes: 400,
             },
