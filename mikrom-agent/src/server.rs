@@ -506,9 +506,10 @@ impl AgentServer {
         hypervisors: &'a HashMap<HypervisorType, Arc<dyn VmHypervisor>>,
     ) -> Option<&'a Arc<dyn VmHypervisor>> {
         let htype = match req.config.as_ref()?.hypervisor {
-            1 => HypervisorType::Firecracker,
+            0 | 1 => HypervisorType::Firecracker,
             2 => HypervisorType::QemuMicrovm,
-            _ => HypervisorType::Firecracker,
+            3 => HypervisorType::CloudHypervisor,
+            _ => return None,
         };
         hypervisors.get(&htype)
     }

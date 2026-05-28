@@ -186,13 +186,18 @@ impl DeploymentService {
             .into_iter()
             .filter(|w| {
                 // When hypervisor is unspecified, accept any worker.
-                // Otherwise, reject workers that advertise a non-empty list
-                // that does not contain the requested hypervisor.
-                if config.hypervisor != crate::domain::job::HypervisorType::Unspecified
-                    && !w.supported_hypervisors.is_empty()
-                    && !w.supported_hypervisors.contains(&config.hypervisor)
-                {
-                    return false;
+                // Otherwise, reject workers that do not explicitly contain the requested hypervisor.
+                // Note: We assume workers with an empty list are old agents that only support Firecracker.
+                if config.hypervisor != crate::domain::job::HypervisorType::Unspecified {
+                    let supported = if w.supported_hypervisors.is_empty() {
+                        vec![crate::domain::job::HypervisorType::Firecracker]
+                    } else {
+                        w.supported_hypervisors.clone()
+                    };
+
+                    if !supported.contains(&config.hypervisor) {
+                        return false;
+                    }
                 }
                 if let Some(ref metrics) = w.metrics {
                     metrics.can_fit_vm(config.memory_mib, config.disk_mib)

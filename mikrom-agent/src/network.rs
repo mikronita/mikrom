@@ -8,32 +8,32 @@ const BRIDGE_CIDR: &str = "10.0.0.1/8";
 pub(crate) async fn ensure_bridge() -> Result<(), HypervisorError> {
     let handle = rtnl_handle().await?;
 
-    if get_link_index(&handle, BRIDGE_NAME).await?.is_some() {
-        return Ok(());
+    if get_link_index(&handle, BRIDGE_NAME).await?.is_none() {
+        handle
+            .link()
+            .add()
+            .bridge(BRIDGE_NAME.to_string())
+            .execute()
+            .await
+            .map_err(|e| {
+                HypervisorError::ProcessError(format!("Failed to create bridge {BRIDGE_NAME}: {e}"))
+            })?;
     }
-
-    handle
-        .link()
-        .add()
-        .bridge(BRIDGE_NAME.to_string())
-        .execute()
-        .await
-        .map_err(|e| {
-            HypervisorError::ProcessError(format!("Failed to create bridge {BRIDGE_NAME}: {e}"))
-        })?;
 
     let Some(index) = get_link_index(&handle, BRIDGE_NAME).await? else {
         return Err(HypervisorError::ProcessError(format!(
-            "Failed to find bridge {BRIDGE_NAME} after creation"
+            "Failed to find bridge {BRIDGE_NAME}"
         )));
     };
 
     let (addr, prefix) = parse_ip_cidr(BRIDGE_CIDR)?;
     set_link_up(&handle, index).await?;
     set_link_mtu(&handle, index, 1420).await?;
-    add_ip_address(&handle, index, addr, prefix).await?;
-    add_ip_address(&handle, index, IpAddr::V6("fd00::1".parse().unwrap()), 128).await?;
-    add_ip_address(&handle, index, IpAddr::V6("fe80::1".parse().unwrap()), 64).await?;
+
+    // Always try to add addresses, ignore "File exists" errors
+    let _ = add_ip_address(&handle, index, addr, prefix).await;
+    let _ = add_ip_address(&handle, index, IpAddr::V6("fd00::1".parse().unwrap()), 128).await;
+    let _ = add_ip_address(&handle, index, IpAddr::V6("fe80::1".parse().unwrap()), 64).await;
 
     set_proc_sysctl("net/ipv4/ip_forward", "1").await?;
     set_proc_sysctl("net/ipv6/conf/all/forwarding", "1").await?;

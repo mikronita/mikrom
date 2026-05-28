@@ -69,6 +69,7 @@ pub enum HypervisorType {
     Unspecified = 0,
     Firecracker = 1,
     QemuMicrovm = 2,
+    CloudHypervisor = 3,
 }
 
 impl HypervisorType {
@@ -77,6 +78,7 @@ impl HypervisorType {
             0 => Some(Self::Unspecified),
             1 => Some(Self::Firecracker),
             2 => Some(Self::QemuMicrovm),
+            3 => Some(Self::CloudHypervisor),
             _ => None,
         }
     }
