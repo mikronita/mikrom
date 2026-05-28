@@ -9,11 +9,11 @@
     class: className = "",
     ...rest
   }: {
-    value?: any;
+    value?: string | number;
     readonly?: boolean;
     readOnly?: boolean;
     class?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   } = $props();
 
   const isReadonly = $derived(readonly || readOnly);

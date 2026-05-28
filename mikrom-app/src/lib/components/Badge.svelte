@@ -8,10 +8,10 @@
     children,
     ...rest
   }: {
-    variant?: any;
+    variant?: string;
     class?: string;
-    children?: any;
-    [key: string]: any;
+    children?: import("svelte").Snippet;
+    [key: string]: unknown;
   } = $props();
 </script>
 
