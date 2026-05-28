@@ -327,6 +327,7 @@ message DeployRequest {
 }
 
 enum HypervisorType {
+  reserved 2;
   HYPERTYPE_UNSPECIFIED = 0;
   HYPERTYPE_FIRECRACKER = 1;
   HYPERTYPE_CLOUD_HYPERVISOR = 3;
