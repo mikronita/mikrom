@@ -70,6 +70,19 @@ impl AppQueryService {
             .await
     }
 
+    pub async fn resolve_hypervisor(&self, job: &Job) -> crate::domain::job::HypervisorType {
+        if job.config.hypervisor != crate::domain::job::HypervisorType::Unspecified {
+            return job.config.hypervisor;
+        }
+        if let Some(ref host_id) = job.host_id
+            && let Ok(Some(worker)) = self.ctx.worker_repo.get_worker(host_id.as_ref()).await
+            && !worker.supported_hypervisors.is_empty()
+        {
+            return worker.supported_hypervisors[0];
+        }
+        crate::domain::job::HypervisorType::Firecracker
+    }
+
     pub async fn list_apps(
         &self,
         user_id: &str,
@@ -84,10 +97,28 @@ impl AppQueryService {
                     .list_jobs(Some(user_id), None, status)
                     .await?;
 
+                let workers = self.ctx.worker_repo.list_workers().await?;
+                let worker_map: std::collections::HashMap<String, crate::domain::Worker> = workers
+                    .into_iter()
+                    .map(|w| (w.host_id.to_string(), w))
+                    .collect();
+
                 let mut apps = Vec::new();
                 for job in jobs {
                     let (cpu_usage, ram_used_bytes, tx_bytes, rx_bytes) =
                         self.get_job_metrics(&job).await;
+                    let hypervisor = if job.config.hypervisor
+                        != crate::domain::job::HypervisorType::Unspecified
+                    {
+                        job.config.hypervisor
+                    } else if let Some(ref host_id) = job.host_id {
+                        worker_map
+                            .get(host_id.as_ref())
+                            .and_then(|w| w.supported_hypervisors.first().copied())
+                            .unwrap_or(crate::domain::job::HypervisorType::Firecracker)
+                    } else {
+                        crate::domain::job::HypervisorType::Firecracker
+                    };
                     apps.push(AppInfo {
                         job_id: job.job_id.to_string(),
                         app_id: job.app_id.to_string(),
@@ -103,7 +134,7 @@ impl AppQueryService {
                         ipv6_address: job.config.ipv6_address.unwrap_or_default(),
                         tx_bytes,
                         rx_bytes,
-                        hypervisor: job.config.hypervisor as i32,
+                        hypervisor: hypervisor as i32,
                     });
                 }
 

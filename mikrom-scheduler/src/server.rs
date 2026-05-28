@@ -121,6 +121,7 @@ impl SchedulerServer {
             Ok(job) => {
                 let (cpu_usage, ram_used_bytes, tx_bytes, rx_bytes) =
                     self.app_service.queries.get_job_metrics(&job).await;
+                let hypervisor = self.app_service.queries.resolve_hypervisor(&job).await;
                 Ok(AppStatusResponse {
                     job_id: job.job_id.to_string(),
                     status: job.status as i32,
@@ -135,7 +136,7 @@ impl SchedulerServer {
                     ipv6_address: job.config.ipv6_address.unwrap_or_default(),
                     tx_bytes,
                     rx_bytes,
-                    hypervisor: job.config.hypervisor as i32,
+                    hypervisor: hypervisor as i32,
                 })
             },
             Err(e) => Err(anyhow::anyhow!(e.to_string())),

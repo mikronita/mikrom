@@ -287,6 +287,18 @@ pub async fn list_active_deployments(
                     ram_used_bytes: sch_app.ram_used_bytes,
                     tx_bytes: sch_app.tx_bytes,
                     rx_bytes: sch_app.rx_bytes,
+                    ipv6_address: if sch_app.ipv6_address.is_empty() {
+                        dep.and_then(|d| d.ipv6_address.clone())
+                    } else {
+                        Some(sch_app.ipv6_address.clone())
+                    },
+                    hypervisor: if sch_app.hypervisor != 0 {
+                        Some(crate::infrastructure::scheduler::hypervisor_name(
+                            sch_app.hypervisor,
+                        ))
+                    } else {
+                        dep.map(|d| crate::infrastructure::scheduler::hypervisor_name(d.hypervisor))
+                    },
                     scale_state,
                 },
             )
@@ -358,8 +370,12 @@ pub async fn watch_deployments(
                         None
                     } else {
                         Some(job.ipv6_address)
-                    }
-                    ,
+                    },
+                    hypervisor: if job.hypervisor != 0 {
+                        Some(crate::infrastructure::scheduler::hypervisor_name(job.hypervisor))
+                    } else {
+                        Some(crate::infrastructure::scheduler::hypervisor_name(dep.hypervisor))
+                    },
                     cpu_usage: job.cpu_usage,
                     ram_used_bytes: job.ram_used_bytes,
                     tx_bytes: job.tx_bytes,
@@ -401,6 +417,11 @@ pub async fn watch_deployments(
                             } else {
                                 Some(job.ipv6_address)
                             },
+                            hypervisor: if job.hypervisor != 0 {
+                                Some(crate::infrastructure::scheduler::hypervisor_name(job.hypervisor))
+                            } else {
+                                Some(crate::infrastructure::scheduler::hypervisor_name(deployment.hypervisor))
+                            },
                             cpu_usage: job.cpu_usage,
                             ram_used_bytes: job.ram_used_bytes,
                             tx_bytes: job.tx_bytes,
@@ -434,6 +455,7 @@ pub async fn watch_deployments(
                                         host_id: String::new(),
                                         vm_id: String::new(),
                                         ipv6_address: dep.ipv6_address.clone(),
+                                        hypervisor: Some(crate::infrastructure::scheduler::hypervisor_name(dep.hypervisor)),
                                         cpu_usage: 0.0,
                                         ram_used_bytes: 0,
                                         tx_bytes: 0,
@@ -488,6 +510,11 @@ pub async fn watch_deployments(
                                         None
                                     } else {
                                         Some(job.ipv6_address)
+                                    },
+                                    hypervisor: if job.hypervisor != 0 {
+                                        Some(crate::infrastructure::scheduler::hypervisor_name(job.hypervisor))
+                                    } else {
+                                        Some(crate::infrastructure::scheduler::hypervisor_name(dep.hypervisor))
                                     },
                                     cpu_usage: job.cpu_usage,
                                     ram_used_bytes: job.ram_used_bytes,
@@ -554,6 +581,9 @@ pub async fn get_deployment_status(
                 tx_bytes: 0,
                 rx_bytes: 0,
                 ipv6_address: dep.ipv6_address.clone(),
+                hypervisor: Some(crate::infrastructure::scheduler::hypervisor_name(
+                    dep.hypervisor,
+                )),
                 scale_state,
             },
         )));
@@ -571,6 +601,16 @@ pub async fn get_deployment_status(
         .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
 
     let scale_state = resolve_app_scale_state(&state, &app).await;
+
+    let hypervisor = if inner.hypervisor != 0 {
+        Some(crate::infrastructure::scheduler::hypervisor_name(
+            inner.hypervisor,
+        ))
+    } else {
+        Some(crate::infrastructure::scheduler::hypervisor_name(
+            dep.hypervisor,
+        ))
+    };
 
     Ok(Json(VmService::build_live_deployment_status(
         crate::application::vms::LiveDeploymentStatusParams {
@@ -594,6 +634,7 @@ pub async fn get_deployment_status(
             } else {
                 dep.ipv6_address.clone()
             },
+            hypervisor,
             scale_state,
         },
     )))
