@@ -106,6 +106,7 @@ export interface LiveDeploymentInfo {
   cpu_usage?: number;
   ram_used_bytes?: number;
   ipv6_address?: string;
+  hypervisor?: string;
   git_commit_hash?: string | null;
   git_commit_message?: string | null;
   git_branch?: string | null;

@@ -106,6 +106,17 @@ impl Scheduler for NatsScheduler {
 }
 
 #[must_use]
+pub fn hypervisor_name(code: i32) -> String {
+    use mikrom_proto::scheduler::HypervisorType;
+    match HypervisorType::try_from(code).unwrap_or(HypervisorType::HypertypeUnspecified) {
+        HypervisorType::HypertypeUnspecified => "unspecified",
+        HypervisorType::HypertypeFirecracker => "firecracker",
+        HypervisorType::HypertypeCloudHypervisor => "cloud-hypervisor",
+    }
+    .to_string()
+}
+
+#[must_use]
 pub fn status_name(code: i32) -> &'static str {
     if code == 7 {
         return "STOPPED";
