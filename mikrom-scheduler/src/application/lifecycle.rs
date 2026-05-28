@@ -308,9 +308,8 @@ impl JobLifecycleService {
                             host_id = %host_id,
                             vm_id = %vm_id,
                             error = %e,
-                            "Failed to delete VM while deleting app"
+                            "Failed to delete VM while deleting app; continuing cleanup anyway"
                         );
-                        return Err(e);
                     }
                 }
 

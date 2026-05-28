@@ -955,7 +955,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_delete_all_by_app_returns_error_when_vm_delete_fails() {
+    async fn test_delete_all_by_app_continues_even_when_vm_delete_fails() {
         let Some(nats_client) = connect_nats_or_skip().await else {
             return;
         };
@@ -973,8 +973,15 @@ mod tests {
             .times(1)
             .returning(|_, _| Err(DomainError::Infrastructure("boom".to_string())));
 
+        let mut app_repo = MockAppRepository::new();
+        app_repo
+            .expect_remove_app_and_jobs_by_app()
+            .with(eq("app-1"))
+            .times(1)
+            .returning(|_| Box::pin(async { Ok(()) }));
+
         let worker_repo = Arc::new(MockWorkerRepository::new());
-        let app_repo = Arc::new(DummyAppRepo);
+        let app_repo = Arc::new(app_repo);
         let job_repo = Arc::new(job_repo);
         let agent_client = Arc::new(agent_client);
         let _pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
@@ -988,12 +995,10 @@ mod tests {
             test_runtime(),
         );
 
-        let err = service
+        service
             .delete_all_by_app("app-1", "user-1")
             .await
-            .expect_err("cleanup should fail");
-
-        assert!(matches!(err, DomainError::Infrastructure(_)));
+            .expect("cleanup should succeed even if agent fails");
     }
 
     #[tokio::test]
