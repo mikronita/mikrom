@@ -5,6 +5,19 @@ use std::os::unix::process::ExitStatusExt;
 use std::time::Duration;
 
 impl QemuManager {
+    fn is_pid_alive(&self, pid: u32) -> bool {
+        let mut system = sysinfo::System::new();
+        system.refresh_processes(
+            sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from(pid as usize)]),
+            true,
+        );
+        if let Some(process) = system.process(sysinfo::Pid::from(pid as usize)) {
+            process.name().to_string_lossy().contains("qemu-system")
+        } else {
+            false
+        }
+    }
+
     async fn remove_file_best_effort(path: &std::path::Path, context: &'static str) {
         if let Err(e) = tokio::fs::remove_file(path).await {
             tracing::debug!(path = %path.display(), error = %e, %context, "Best-effort file removal failed");
@@ -129,11 +142,32 @@ impl QemuManager {
     }
 
     pub async fn delete_vm(&self, vm_id: &VmId) -> Result<(), HypervisorError> {
-        self.stop_vm(vm_id).await.ok();
+        // 1. Best-effort stop.
+        let _ = self.stop_vm(vm_id).await;
+
+        // Cleanup any orphaned processes based on PID file
+        let pidfile = self.pidfile_path(vm_id);
+        if pidfile.exists()
+            && let Ok(pid_str) = std::fs::read_to_string(&pidfile)
+            && let Ok(pid) = pid_str.trim().parse::<u32>()
+            && self.is_pid_alive(pid)
+        {
+            tracing::info!(vm_id = %vm_id, pid = pid, "Killing orphaned QEMU process");
+            let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let _ = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        }
+
+        if pidfile.exists() {
+            let _ = tokio::fs::remove_file(&pidfile).await;
+        }
+
+        // 2. Finally remove from memory and disk
         let mut vms = self.vms.write().await;
         vms.remove(vm_id);
         self.logs.remove(vm_id);
         Self::remove_file_best_effort(&self.vm_state_path(vm_id), "qemu-delete-vm-state").await;
+
         Ok(())
     }
 

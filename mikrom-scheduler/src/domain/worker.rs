@@ -121,7 +121,12 @@ pub trait AgentClient: Send + Sync {
     async fn pause_vm(&self, host_id: &str, vm_id: &str) -> DomainResult<()>;
     async fn resume_vm(&self, host_id: &str, vm_id: &str) -> DomainResult<()>;
     async fn stop_vm(&self, host_id: &str, vm_id: &str) -> DomainResult<()>;
-    async fn delete_vm(&self, host_id: &str, vm_id: &str) -> DomainResult<()>;
+    async fn delete_vm(
+        &self,
+        host_id: &str,
+        vm_id: &str,
+        hypervisor: crate::domain::job::HypervisorType,
+    ) -> DomainResult<()>;
     async fn check_health(&self, host_id: &str, vm_id: &str) -> DomainResult<bool>;
     async fn update_firewall(
         &self,

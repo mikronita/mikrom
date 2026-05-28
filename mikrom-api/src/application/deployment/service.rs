@@ -625,6 +625,7 @@ impl DeploymentService {
                 status: 1, // Pending/Building
                 user_id: app.user_id.to_string(),
                 deployment_id: deployment.id.to_string(),
+                hypervisor: deployment.hypervisor,
                 ..Default::default()
             };
             let _ = state
@@ -798,7 +799,7 @@ impl DeploymentService {
 
         let nats_result: ApiResult<DeployResponse> = state
             .nats
-            .with_timeout(std::time::Duration::from_secs(5))
+            .with_timeout(std::time::Duration::from_secs(15))
             .request("mikrom.scheduler.deploy", nats_req)
             .await
             .map_err(|e| ApiError::Internal(e.to_string()));
@@ -850,6 +851,7 @@ impl DeploymentService {
                     status: Some(db_status.to_string()),
                     job_id: Some(inner.job_id.clone()),
                     image_tag: Some(params.image_tag),
+                    hypervisor: Some(inner.hypervisor),
                     ..Default::default()
                 },
             )

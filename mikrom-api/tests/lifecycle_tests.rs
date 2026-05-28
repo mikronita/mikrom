@@ -197,6 +197,7 @@ async fn test_promotion_back_and_forth() {
                     host_id: "host-1".to_string(),
                     vm_id: "vm-1".to_string(),
                     message: "Started".to_string(),
+                    hypervisor: 1, // Firecracker
                 };
                 let mut buf = Vec::new();
                 resp.encode(&mut buf).unwrap();
@@ -579,6 +580,7 @@ async fn test_activate_stopped_deployment_resumes_it() {
                 host_id: "host-1".to_string(),
                 vm_id: "vm-1".to_string(),
                 message: "Started".to_string(),
+                hypervisor: 1, // Firecracker
             };
             let mut buf = Vec::new();
             resp.encode(&mut buf).unwrap();

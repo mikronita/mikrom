@@ -5,8 +5,9 @@ use mikrom_proto::router::RouterTrafficEvent;
 use mikrom_proto::subjects;
 use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
 use mikrom_scheduler::domain::{
-    AgentClient, AppConfig, AppId, AppRepository, DeploymentId, DomainResult, HostId, Job, JobId,
-    JobRepository, JobStatus, UserId, VmConfig, VmId, Worker, WorkerRepository,
+    AgentClient, AppConfig, AppId, AppRepository, DeploymentId, DomainResult, HostId,
+    HypervisorType, Job, JobId, JobRepository, JobStatus, UserId, VmConfig, VmId, Worker,
+    WorkerRepository,
 };
 use mikrom_scheduler::infrastructure::db::{PgAppRepository, PgJobRepository, PgWorkerRepository};
 use mikrom_scheduler::infrastructure::nats::NatsEventLoop;
@@ -288,7 +289,7 @@ impl AgentClient for RecordingAgentClient {
         Ok(())
     }
 
-    async fn delete_vm(&self, _h: &str, _v: &str) -> DomainResult<()> {
+    async fn delete_vm(&self, _h: &str, _v: &str, _hv: HypervisorType) -> DomainResult<()> {
         Ok(())
     }
 

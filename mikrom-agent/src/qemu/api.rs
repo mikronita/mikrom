@@ -24,6 +24,7 @@ impl QemuManager {
                     socket_path: proc.map(|p| p.qmp_socket.to_string_lossy().to_string()),
                     tap_name: proc.map(|p| p.tap_name.clone()),
                     tap_ifindex: None,
+                    raw_metrics: None,
                 }
             })
             .collect()

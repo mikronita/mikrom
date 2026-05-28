@@ -128,6 +128,34 @@ impl FirecrackerManager {
         )))
     }
 
+    /// Attempt to find and stop a Firecracker process that is not in our active memory.
+    pub(crate) async fn stop_orphaned_process(&self, vm_id: &VmId) {
+        let paths = VmPaths::new(&self.fc_config.data_dir, &self.agent_id, *vm_id);
+        let socket_path = paths.socket_path();
+
+        if socket_path.exists() {
+            tracing::info!(vm_id = %vm_id, "Found orphaned API socket, attempting to shutdown via API");
+            // Try graceful shutdown via API
+            let shutdown_payload = serde_json::json!({
+                "action_type": "ShutdownHttp"
+            })
+            .to_string();
+
+            if let Err(e) = fc_put(
+                &socket_path.to_string_lossy(),
+                "/actions",
+                &shutdown_payload,
+            )
+            .await
+            {
+                tracing::debug!(vm_id = %vm_id, "Graceful orphaned shutdown failed (expected if not yet started): {e}");
+            } else {
+                tracing::info!(vm_id = %vm_id, "Gracefully shut down orphaned Firecracker process via API");
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
+
     pub async fn get_vm_info(&self, vm_id: &VmId) -> Option<VmInfo> {
         let vms = self.vms.read().await;
         vms.get(vm_id).cloned()
@@ -156,6 +184,7 @@ impl FirecrackerManager {
                     socket_path,
                     tap_name,
                     tap_ifindex: proc.and_then(|p| p.tap_ifindex),
+                    raw_metrics: None,
                 }
             })
             .collect()
@@ -724,7 +753,13 @@ impl FirecrackerManager {
             vms.get(vm_id).and_then(|vm| vm.config.ipv6_address.clone())
         };
 
+        // Attempt to stop the VM if it's in memory. If not, stop_vm will fail with VmNotFound,
+        // which we ignore for a purge.
         let _ = self.stop_vm(vm_id).await;
+
+        // If it wasn't in vms memory, stop_vm didn't do much.
+        // We should try to kill any orphaned process based on expected PID or socket.
+        self.stop_orphaned_process(vm_id).await;
 
         if let Some(ipv6) = ipv6_address.as_deref() {
             self.cleanup_ipv6_route(ipv6).await;
@@ -736,8 +771,7 @@ impl FirecrackerManager {
         }
         let _ = self.persist_runtime_state().await;
 
-        // Best-effort cleanup of any leftover artifacts when the process was
-        // already gone before stop_vm ran.
+        // Best-effort cleanup of any leftover artifacts.
         self.cleanup_process_paths(vm_id, None).await;
         self.cleanup_vm_chroot(vm_id).await;
 

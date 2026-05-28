@@ -45,7 +45,7 @@ impl CloudHypervisorManager {
 
     pub(crate) async fn setup_tap(&self, vm_id: &VmId) -> Result<(String, u32), HypervisorError> {
         let tap_name = format!("ch-tap-{}", &vm_id.to_string()[..8]);
-        
+
         // CH typically runs as root or a specific user.
         // For now, let's create it with current process UID.
         let uid = unsafe { libc::getuid() };
@@ -148,7 +148,10 @@ impl CloudHypervisorManager {
         }
     }
 
-    pub(crate) async fn setup_routing(&self, ipv6_addr: Option<&str>) -> Result<(), HypervisorError> {
+    pub(crate) async fn setup_routing(
+        &self,
+        ipv6_addr: Option<&str>,
+    ) -> Result<(), HypervisorError> {
         let Some(addr) = ipv6_addr else {
             return Ok(());
         };
@@ -170,8 +173,14 @@ impl CloudHypervisorManager {
             segments[6] = 0;
             segments[7] = 0;
             let prefix = std::net::Ipv6Addr::new(
-                segments[0], segments[1], segments[2], segments[3],
-                segments[4], segments[5], segments[6], segments[7]
+                segments[0],
+                segments[1],
+                segments[2],
+                segments[3],
+                segments[4],
+                segments[5],
+                segments[6],
+                segments[7],
             );
 
             let res = handle
@@ -183,10 +192,12 @@ impl CloudHypervisorManager {
                 .execute()
                 .await;
 
-            if let Err(e) = res {
-                if !e.to_string().contains("File exists") {
-                    return Err(HypervisorError::ProcessError(format!("Failed to add route for {prefix}/64: {e}")));
-                }
+            if let Err(e) = res
+                && !e.to_string().contains("File exists")
+            {
+                return Err(HypervisorError::ProcessError(format!(
+                    "Failed to add route for {prefix}/64: {e}"
+                )));
             }
         }
 

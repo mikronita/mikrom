@@ -10,7 +10,7 @@ pub struct PgJobRepository {
     pool: PgPool,
 }
 
-const JOB_COLUMNS: &str = "job_id, app_id, app_name, image, user_id, status, host_id, vm_id, vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path, ipv6_address, ipv6_gateway, scheduled_at, started_at, stopped_at, error_message";
+const JOB_COLUMNS: &str = "job_id, app_id, app_name, image, user_id, status, host_id, vm_id, vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path, ipv6_address, ipv6_gateway, scheduled_at, started_at, stopped_at, error_message, hypervisor";
 
 impl PgJobRepository {
     pub fn new(pool: PgPool) -> Self {
@@ -29,8 +29,8 @@ impl JobRepository for PgJobRepository {
             INSERT INTO jobs (
                 job_id, app_id, app_name, image, user_id, status, host_id, vm_id,
                 vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path,
-                ipv6_address, ipv6_gateway
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                ipv6_address, ipv6_gateway, hypervisor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             "#
         )
         .bind(&job.job_id)
@@ -51,6 +51,7 @@ impl JobRepository for PgJobRepository {
         .bind(&job.config.health_check_path)
         .bind(&job.config.ipv6_address)
         .bind(&job.config.ipv6_gateway)
+        .bind(job.config.hypervisor as i32)
         .execute(&self.pool)
         .await?;
 
@@ -195,7 +196,11 @@ impl PgWorkerRepository {
 impl WorkerRepository for PgWorkerRepository {
     async fn register(&self, worker: Worker) -> DomainResult<()> {
         let now = chrono::Utc::now().timestamp();
-        let hvs: Vec<i32> = worker.supported_hypervisors.iter().map(|&h| h as i32).collect();
+        let hvs: Vec<i32> = worker
+            .supported_hypervisors
+            .iter()
+            .map(|&h| h as i32)
+            .collect();
 
         // Keep the worker record hot with a single upsert. We avoid a pre-delete because it
         // amplifies write contention on the workers table under heartbeat bursts.
@@ -350,7 +355,8 @@ fn map_row_to_job(r: &sqlx::postgres::PgRow) -> Job {
             ipv6_gateway: r.get("ipv6_gateway"),
             volumes: vec![], // TODO: Volumes
             health_check_path: r.get("health_check_path"),
-            hypervisor: Default::default(),
+            hypervisor: crate::domain::job::HypervisorType::from_i32(r.get("hypervisor"))
+                .unwrap_or_default(),
         },
     }
 }

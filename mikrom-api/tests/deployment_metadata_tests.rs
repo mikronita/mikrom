@@ -80,6 +80,7 @@ async fn test_deployment_metadata_roundtrip() {
                 git_commit_hash: Some(commit_hash.to_string()),
                 git_commit_message: Some(commit_msg.to_string()),
                 git_branch: Some(branch.to_string()),
+                hypervisor: Some(1), // Firecracker
             },
         )
         .await

@@ -872,9 +872,10 @@ mod tests {
         assert!(args.contains(&"kvm".to_string()));
         assert!(args.contains(&"-kernel".to_string()));
         assert!(args.iter().any(|a| a.contains("if=none,id=root")));
-        assert!(args
-            .iter()
-            .any(|a| a == "console=hvc0 root=/dev/vda reboot=t panic=1"));
+        assert!(
+            args.iter()
+                .any(|a| a == "console=hvc0 root=/dev/vda reboot=t panic=1")
+        );
         assert!(args.contains(&"virtio-serial-device".to_string()));
         assert!(args.iter().any(|a| a == "virtconsole,chardev=console"));
         assert!(args.iter().any(|a| a.starts_with("vhost-vsock-device")));
@@ -1131,7 +1132,9 @@ mod tests {
         tokio::fs::write(&qmp_path, "").await.unwrap();
         tokio::fs::write(&pid_path, "12345\n").await.unwrap();
         tokio::fs::write(&log_path, "boot log\n").await.unwrap();
-        tokio::fs::write(&err_log_path, "stderr log\n").await.unwrap();
+        tokio::fs::write(&err_log_path, "stderr log\n")
+            .await
+            .unwrap();
 
         // Create stale virtiofsd socket
         let fsd_dir = &qemu.config.virtiofsd_socket_dir;
@@ -1145,7 +1148,9 @@ mod tests {
         let active_state = data_dir.join(format!("qemu-{active_str}.json"));
         let active_err_log = data_dir.join(format!("qemu-{active_str}.err.log"));
         tokio::fs::write(&active_state, "{}").await.unwrap();
-        tokio::fs::write(&active_err_log, "active stderr\n").await.unwrap();
+        tokio::fs::write(&active_err_log, "active stderr\n")
+            .await
+            .unwrap();
 
         // Seed the active VM into the manager
         qemu.vms.write().await.insert(
@@ -1177,7 +1182,10 @@ mod tests {
 
         // Verify active VM files are preserved
         assert!(active_state.exists(), "active VM state should be preserved");
-        assert!(active_err_log.exists(), "active stderr log should be preserved");
+        assert!(
+            active_err_log.exists(),
+            "active stderr log should be preserved"
+        );
 
         // Clean up
         let _ = tokio::fs::remove_file(&active_state).await;

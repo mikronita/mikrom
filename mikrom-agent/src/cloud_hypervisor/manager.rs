@@ -1,9 +1,9 @@
-use crate::config::AgentConfig;
-use crate::hypervisor::vm_hypervisor::{HypervisorType, VmHypervisor};
-use crate::hypervisor::{HypervisorError, VmDetailedInfo, VmInfo, VmStatus, VmConfig};
 use crate::cloud_hypervisor::api::{ch_request, wait_for_socket};
 use crate::cloud_hypervisor::config as ch_config;
 use crate::cloud_hypervisor::process::CloudHypervisorProcess;
+use crate::config::AgentConfig;
+use crate::hypervisor::vm_hypervisor::{HypervisorType, VmHypervisor};
+use crate::hypervisor::{HypervisorError, VmConfig, VmDetailedInfo, VmInfo, VmStatus};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use mikrom_proto::id::{AppId, VmId};
@@ -14,8 +14,8 @@ use tokio::sync::RwLock;
 
 pub struct CloudHypervisorManager {
     pub(crate) config: AgentConfig,
-    active_vms: DashMap<VmId, Arc<RwLock<CloudHypervisorProcess>>>,
-    vms: DashMap<VmId, VmInfo>,
+    active_vms: Arc<DashMap<VmId, Arc<RwLock<CloudHypervisorProcess>>>>,
+    vms: Arc<DashMap<VmId, VmInfo>>,
     builder: Arc<crate::builder::ImageBuilder>,
     nats_client: Arc<RwLock<Option<async_nats::Client>>>,
 }
@@ -29,8 +29,8 @@ impl CloudHypervisorManager {
 
         Self {
             config,
-            active_vms: DashMap::new(),
-            vms: DashMap::new(),
+            active_vms: Arc::new(DashMap::new()),
+            vms: Arc::new(DashMap::new()),
             builder: Arc::new(builder),
             nats_client: Arc::new(RwLock::new(None)),
         }
@@ -64,7 +64,7 @@ impl CloudHypervisorManager {
         let serial_log_str = serial_log.to_string_lossy().to_string();
 
         // 1. Networking: Setup TAP
-        let (tap_name, _) = self.setup_tap(&vm_id).await?;
+        let (tap_name, tap_ifindex) = self.setup_tap(&vm_id).await?;
         self.setup_routing(config.ipv6_address.as_deref()).await?;
 
         // 2. Storage: Ensure volumes
@@ -72,18 +72,26 @@ impl CloudHypervisorManager {
         let mut fs_devices = Vec::new();
         let mut sidecars = Vec::new();
 
-        let rootfs_path = self.config.data_path.join("vms").join(vm_id.to_string()).join("rootfs.ext4");
-        
+        let rootfs_path = self
+            .config
+            .data_path
+            .join("vms")
+            .join(vm_id.to_string())
+            .join("rootfs.ext4");
+
         tracing::info!(vm_id = %vm_id, image = %image, "Preparing rootfs for Cloud Hypervisor");
-        self.builder.docker_to_ext4(crate::builder::DockerToExt4Params {
-            image: &image,
-            output_path: &rootfs_path,
-            base_rootfs_path: &self.config.cloud_hypervisor_base_rootfs.to_string_lossy(),
-            port: config.port,
-            ipv6_addr: config.ipv6_address.clone(),
-            ipv6_gw: config.ipv6_gateway.clone(),
-            volumes: &config.volumes,
-        }).await.map_err(|e| HypervisorError::ProcessError(format!("Image builder failed: {e}")))?;
+        self.builder
+            .docker_to_ext4(crate::builder::DockerToExt4Params {
+                image: &image,
+                output_path: &rootfs_path,
+                base_rootfs_path: &self.config.cloud_hypervisor_base_rootfs.to_string_lossy(),
+                port: config.port,
+                ipv6_addr: config.ipv6_address.clone(),
+                ipv6_gw: config.ipv6_gateway.clone(),
+                volumes: &config.volumes,
+            })
+            .await
+            .map_err(|e| HypervisorError::ProcessError(format!("Image builder failed: {e}")))?;
 
         disks.push(ch_config::DiskConfig {
             path: rootfs_path.to_string_lossy().to_string(),
@@ -95,10 +103,17 @@ impl CloudHypervisorManager {
             let host_path = self.ensure_volume(vol).await?;
             use mikrom_proto::agent::AccessMode;
             if vol.access_mode == AccessMode::ReadWriteMany as i32 {
-                let fs_socket = self.config.data_path.join("vms").join(vm_id.to_string()).join(format!("fs-{}.sock", vol.volume_id));
-                let sidecar = self.start_virtiofsd(&vm_id, &vol.volume_id, &host_path, &fs_socket).await?;
+                let fs_socket = self
+                    .config
+                    .data_path
+                    .join("vms")
+                    .join(vm_id.to_string())
+                    .join(format!("fs-{}.sock", vol.volume_id));
+                let sidecar = self
+                    .start_virtiofsd(&vm_id, &vol.volume_id, &host_path, &fs_socket)
+                    .await?;
                 sidecars.push(sidecar);
-                
+
                 fs_devices.push(ch_config::FsConfig {
                     tag: vol.volume_id.clone(),
                     socket: fs_socket.to_string_lossy().to_string(),
@@ -120,7 +135,9 @@ impl CloudHypervisorManager {
             vm_id.to_string(),
             socket_path.clone(),
             log_path,
-        ).await?;
+            Some(tap_ifindex),
+        )
+        .await?;
         proc.sidecars = sidecars;
 
         // 4. Wait for API socket
@@ -133,10 +150,14 @@ impl CloudHypervisorManager {
                 max_vcpus: config.vcpus,
             },
             memory: ch_config::MemoryConfig {
-                size: config.memory_mib as u64 * 1024 * 1024,
+                size: config.memory_mib * 1024 * 1024,
             },
             payload: ch_config::PayloadConfig {
-                kernel: self.config.cloud_hypervisor_kernel.to_string_lossy().to_string(),
+                kernel: self
+                    .config
+                    .cloud_hypervisor_kernel
+                    .to_string_lossy()
+                    .to_string(),
                 cmdline: Some(self.build_boot_args(&config)),
                 ..Default::default()
             },
@@ -191,7 +212,7 @@ impl CloudHypervisorManager {
                 } else {
                     return Err(e);
                 }
-            }
+            },
         }
 
         // 7. Send vm.boot
@@ -209,20 +230,23 @@ impl CloudHypervisorManager {
                 } else {
                     return Err(e);
                 }
-            }
+            },
         }
 
         let proc_arc = Arc::new(RwLock::new(proc));
         self.active_vms.insert(vm_id, proc_arc.clone());
-        self.vms.insert(vm_id, VmInfo {
+        self.vms.insert(
             vm_id,
-            app_id,
-            image,
-            config,
-            status: VmStatus::Running,
-            started_at: Some(chrono::Utc::now().timestamp_millis()),
-            error_message: None,
-        });
+            VmInfo {
+                vm_id,
+                app_id,
+                image,
+                config,
+                status: VmStatus::Running,
+                started_at: Some(chrono::Utc::now().timestamp_millis()),
+                error_message: None,
+            },
+        );
 
         // 8. Persist state for reconciliation
         let proc_lock = proc_arc.read().await;
@@ -254,11 +278,11 @@ impl CloudHypervisorManager {
                 Ok(Some(status)) => {
                     tracing::info!(vm_id = %vm_id, status = ?status, "Detected Cloud Hypervisor process exit via GC");
                     exited.push(vm_id);
-                }
-                Ok(None) => {}
+                },
+                Ok(None) => {},
                 Err(e) => {
                     tracing::error!(vm_id = %vm_id, error = %e, "Error checking Cloud Hypervisor process status");
-                }
+                },
             }
         }
 
@@ -273,7 +297,11 @@ impl CloudHypervisorManager {
         }
     }
 
-    async fn persist_vm_state(&self, vm_id: &VmId, proc: &CloudHypervisorProcess) -> Result<(), HypervisorError> {
+    async fn persist_vm_state(
+        &self,
+        vm_id: &VmId,
+        proc: &CloudHypervisorProcess,
+    ) -> Result<(), HypervisorError> {
         let info = self.vms.get(vm_id).ok_or_else(|| {
             HypervisorError::ProcessError(format!("VM info not found for {vm_id}"))
         })?;
@@ -286,24 +314,33 @@ impl CloudHypervisorManager {
             gw6: info.config.ipv6_gateway.clone(),
             mac: info.config.mac_address.clone(),
             tap_name: format!("ch-tap-{}", &vm_id.to_string()[..8]),
+            tap_ifindex: proc.tap_ifindex,
             started_at: info.started_at.unwrap_or(0),
         };
 
-        let path = self.config.data_path.join("vms").join(vm_id.to_string()).join("state.json");
+        let path = self
+            .config
+            .data_path
+            .join("vms")
+            .join(vm_id.to_string())
+            .join("state.json");
         let payload = serde_json::to_vec_pretty(&state).map_err(|e| {
             HypervisorError::ProcessError(format!("Failed to serialize VM state: {e}"))
         })?;
 
-        tokio::fs::write(path, payload).await.map_err(|e| {
-            HypervisorError::ProcessError(format!("Failed to write VM state: {e}"))
-        })?;
+        tokio::fs::write(path, payload)
+            .await
+            .map_err(|e| HypervisorError::ProcessError(format!("Failed to write VM state: {e}")))?;
 
         Ok(())
     }
 
     fn is_pid_alive(&self, pid: u32) -> bool {
         let mut system = sysinfo::System::new();
-        system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from(pid as usize)]), true);
+        system.refresh_processes(
+            sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from(pid as usize)]),
+            true,
+        );
         if let Some(process) = system.process(sysinfo::Pid::from(pid as usize)) {
             process.name().to_string_lossy().contains("cloud-hypervis")
         } else {
@@ -321,6 +358,7 @@ struct PersistedChVm {
     gw6: Option<String>,
     mac: Option<String>,
     tap_name: String,
+    tap_ifindex: Option<u32>,
     started_at: i64,
 }
 
@@ -349,7 +387,10 @@ impl VmHypervisor for CloudHypervisorManager {
     ) -> Result<(), HypervisorError> {
         let self_clone = self.clone_stub();
         tokio::spawn(async move {
-            if let Err(e) = self_clone.start_vm_background(vm_id, app_id, image, config).await {
+            if let Err(e) = self_clone
+                .start_vm_background(vm_id, app_id, image, config)
+                .await
+            {
                 tracing::error!(vm_id = %vm_id, error = %e, "Failed to start Cloud Hypervisor VM in background");
             }
         });
@@ -362,7 +403,7 @@ impl VmHypervisor for CloudHypervisorManager {
 
         if let Some((_, proc_lock)) = self.active_vms.remove(vm_id) {
             let mut proc = proc_lock.write().await;
-            
+
             // 1. Try graceful shutdown via ACPI power button
             tracing::info!(vm_id = %vm_id, "Attempting graceful shutdown via power button...");
             let _ = ch_request("PUT", &socket_str, "/api/v1/vm.power-button", None).await;
@@ -374,7 +415,7 @@ impl VmHypervisor for CloudHypervisorManager {
                     Ok(Some(_)) => {
                         exited = true;
                         break;
-                    }
+                    },
                     _ => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
                 }
             }
@@ -389,11 +430,11 @@ impl VmHypervisor for CloudHypervisorManager {
             self.cleanup_tap(&tap_name).await;
         }
         self.vms.remove(vm_id);
-        
+
         // Remove state file
         let path = self.config.data_path.join("vms").join(vm_id.to_string());
         let _ = tokio::fs::remove_dir_all(path).await;
-        
+
         Ok(())
     }
 
@@ -406,7 +447,56 @@ impl VmHypervisor for CloudHypervisorManager {
     }
 
     async fn delete_vm(&self, vm_id: &VmId) -> Result<(), HypervisorError> {
-        self.stop_vm(vm_id).await
+        // 1. Best-effort stop
+        let _ = self.stop_vm(vm_id).await;
+
+        let (socket_path, _, _, _) = self.get_vm_paths(vm_id);
+
+        if socket_path.exists() {
+            tracing::info!(vm_id = %vm_id, "Attempting to shut down orphaned Cloud Hypervisor via API");
+            let _ = ch_request(
+                "PUT",
+                &socket_path.to_string_lossy(),
+                "/api/v1/vm.power-button",
+                None,
+            )
+            .await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let _ = ch_request(
+                "PUT",
+                &socket_path.to_string_lossy(),
+                "/api/v1/vm.shutdown",
+                None,
+            )
+            .await;
+        }
+
+        let path = self.config.data_path.join("vms").join(vm_id.to_string());
+        let state_path = path.join("state.json");
+
+        if state_path.exists()
+            && let Ok(state_str) = tokio::fs::read_to_string(&state_path).await
+            && let Ok(state) = serde_json::from_str::<PersistedChVm>(&state_str)
+        {
+            let pid = state.pid;
+            if self.is_pid_alive(pid) {
+                tracing::info!(vm_id = %vm_id, pid = pid, "Killing orphaned Cloud Hypervisor process via PID");
+                let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                let _ = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+            }
+        }
+
+        let tap_name = format!("ch-tap-{}", &vm_id.to_string()[..8]);
+        self.cleanup_tap(&tap_name).await;
+
+        // 2. Remove state directory
+        let _ = tokio::fs::remove_dir_all(path).await;
+
+        // 3. Finally remove from memory
+        self.vms.remove(vm_id);
+
+        Ok(())
     }
 
     async fn restart_vm(&self, _vm_id: &VmId) -> Result<(), HypervisorError> {
@@ -415,20 +505,20 @@ impl VmHypervisor for CloudHypervisorManager {
 
     async fn get_vm_info(&self, vm_id: &VmId) -> Option<VmInfo> {
         let mut info = self.vms.get(vm_id)?.clone();
-        
+
         let socket_path = self.get_vm_paths(vm_id).0;
         let socket_str = socket_path.to_string_lossy().to_string();
 
-        if let Ok(resp_body) = ch_request("GET", &socket_str, "/api/v1/vm.info", None).await {
-            if let Ok(ch_info) = serde_json::from_str::<ch_config::VmInfoResponse>(&resp_body) {
-                info.status = match ch_info.state.as_str() {
-                    "Created" => VmStatus::Starting,
-                    "Running" => VmStatus::Running,
-                    "Paused" => VmStatus::Paused,
-                    "Shutdown" => VmStatus::Stopped,
-                    _ => VmStatus::Failed,
-                };
-            }
+        if let Ok(resp_body) = ch_request("GET", &socket_str, "/api/v1/vm.info", None).await
+            && let Ok(ch_info) = serde_json::from_str::<ch_config::VmInfoResponse>(&resp_body)
+        {
+            info.status = match ch_info.state.as_str() {
+                "Created" => VmStatus::Starting,
+                "Running" => VmStatus::Running,
+                "Paused" => VmStatus::Paused,
+                "Shutdown" => VmStatus::Stopped,
+                _ => VmStatus::Failed,
+            };
         }
 
         Some(info)
@@ -438,25 +528,38 @@ impl VmHypervisor for CloudHypervisorManager {
         let mut results = Vec::new();
         for entry in self.vms.iter() {
             let vm_id = entry.key();
-            
+
             if let Some(info) = self.get_vm_info(vm_id).await {
-                let pid = if let Some(proc_lock) = self.active_vms.get(vm_id) {
+                let (pid, tap_ifindex) = if let Some(proc_lock) = self.active_vms.get(vm_id) {
                     let proc = proc_lock.read().await;
-                    Some(proc.pid)
+                    (Some(proc.pid), proc.tap_ifindex)
+                } else {
+                    (None, None)
+                };
+
+                // Fetch CH counters
+                let socket_path = self.get_vm_paths(vm_id).0;
+                let socket_str = socket_path.to_string_lossy().to_string();
+                let raw_metrics = if info.status == VmStatus::Running {
+                    match ch_request("GET", &socket_str, "/api/v1/vm.counters", None).await {
+                        Ok(resp) => serde_json::from_str(&resp).ok(),
+                        Err(_) => None,
+                    }
                 } else {
                     None
                 };
 
                 results.push(VmDetailedInfo {
-                    vm_id: vm_id.clone(),
+                    vm_id: *vm_id,
                     app_id: info.app_id,
                     status: info.status,
                     error_message: info.error_message.clone(),
                     pid,
                     metrics_path: None,
-                    socket_path: Some(self.get_vm_paths(vm_id).0.to_string_lossy().to_string()),
+                    socket_path: Some(socket_str),
                     tap_name: Some(format!("ch-tap-{}", &vm_id.to_string()[..8])),
-                    tap_ifindex: None,
+                    tap_ifindex,
+                    raw_metrics,
                 });
             }
         }
@@ -464,7 +567,9 @@ impl VmHypervisor for CloudHypervisorManager {
     }
 
     async fn get_vm_started_at_ms(&self, vm_id: &VmId) -> Option<u64> {
-        self.vms.get(vm_id).and_then(|v| v.started_at.map(|t| t as u64))
+        self.vms
+            .get(vm_id)
+            .and_then(|v| v.started_at.map(|t| t as u64))
     }
 
     async fn is_app_started(&self, _vm_id: &VmId) -> bool {
@@ -493,9 +598,9 @@ impl VmHypervisor for CloudHypervisorManager {
             return Ok(());
         }
 
-        let mut entries = tokio::fs::read_dir(&vms_dir).await.map_err(|e| {
-            HypervisorError::ProcessError(format!("Failed to read vms dir: {e}"))
-        })?;
+        let mut entries = tokio::fs::read_dir(&vms_dir)
+            .await
+            .map_err(|e| HypervisorError::ProcessError(format!("Failed to read vms dir: {e}")))?;
 
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
@@ -519,39 +624,42 @@ impl VmHypervisor for CloudHypervisorManager {
             // Check if PID is still alive and is cloud-hypervisor
             if self.is_pid_alive(state.pid) {
                 tracing::info!(vm_id = %state.vm_id, pid = %state.pid, "Reconciling Cloud Hypervisor VM");
-                
-                let socket_path = path.join("ch.sock");
 
                 // Reconstruct the process handle
                 // We use a command that exits immediately just to satisfy the tokio::process::Child requirement
                 let mut cmd = tokio::process::Command::new("true");
                 let child = cmd.spawn().unwrap();
-                
+
                 let proc = CloudHypervisorProcess {
                     vm_id: state.vm_id.to_string(),
-                    socket_path: socket_path.clone(),
+                    socket_path: self.get_vm_paths(&state.vm_id).0,
                     pid: state.pid,
                     child,
                     sidecars: Vec::new(),
+                    tap_ifindex: state.tap_ifindex,
                 };
 
-                self.active_vms.insert(state.vm_id, Arc::new(RwLock::new(proc)));
-                self.vms.insert(state.vm_id, VmInfo {
-                    vm_id: state.vm_id,
-                    app_id: state.app_id,
-                    image: "".to_string(), // Placeholder, might want to persist image too
-                    config: VmConfig {
-                        vcpus: 1, // Default or persist it
-                        memory_mib: 512,
-                        ipv6_address: state.ipv6.clone(),
-                        ipv6_gateway: state.gw6.clone(),
-                        mac_address: state.mac.clone(),
-                        ..Default::default()
+                self.active_vms
+                    .insert(state.vm_id, Arc::new(RwLock::new(proc)));
+                self.vms.insert(
+                    state.vm_id,
+                    VmInfo {
+                        vm_id: state.vm_id,
+                        app_id: state.app_id,
+                        image: "".to_string(), // Placeholder, might want to persist image too
+                        config: VmConfig {
+                            vcpus: 1, // Default or persist it
+                            memory_mib: 512,
+                            ipv6_address: state.ipv6.clone(),
+                            ipv6_gateway: state.gw6.clone(),
+                            mac_address: state.mac.clone(),
+                            ..Default::default()
+                        },
+                        status: VmStatus::Running,
+                        error_message: None,
+                        started_at: Some(state.started_at),
                     },
-                    status: VmStatus::Running,
-                    error_message: None,
-                    started_at: Some(state.started_at),
-                });
+                );
 
                 // Ensure routing is still there
                 let _ = self.setup_routing(state.ipv6.as_deref()).await;
@@ -583,13 +691,12 @@ impl VmHypervisor for CloudHypervisorManager {
                 continue;
             }
 
-            if let Some(vm_id_str) = path.file_name().and_then(|n| n.to_str()) {
-                if !active_ids.contains(vm_id_str) {
-                    if uuid::Uuid::parse_str(vm_id_str).is_ok() {
-                        tracing::debug!(vm_id = %vm_id_str, "Removing stale Cloud Hypervisor VM directory");
-                        let _ = tokio::fs::remove_dir_all(&path).await;
-                    }
-                }
+            if let Some(vm_id_str) = path.file_name().and_then(|n| n.to_str())
+                && !active_ids.contains(vm_id_str)
+                && uuid::Uuid::parse_str(vm_id_str).is_ok()
+            {
+                tracing::debug!(vm_id = %vm_id_str, "Removing stale Cloud Hypervisor VM directory");
+                let _ = tokio::fs::remove_dir_all(&path).await;
             }
         }
     }
@@ -628,6 +735,7 @@ mod tests {
             gw6: Some("fe80::1".to_string()),
             mac: Some("aa:bb:cc:dd:ee:ff".to_string()),
             tap_name: "ch-tap-test".to_string(),
+            tap_ifindex: Some(1),
             started_at: 1716900000,
         };
 

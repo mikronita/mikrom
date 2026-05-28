@@ -117,6 +117,7 @@ message AgentCommandResponse {
 
 message DeleteVmRequest {
   string vm_id = 1;
+  HypervisorType hypervisor = 2;
 }
 
 message DeleteVmResponse {

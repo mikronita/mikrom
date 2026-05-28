@@ -48,8 +48,10 @@ pub async fn start_ip_sync_task(state: AppState) {
                     {
                         let db_status = crate::infrastructure::scheduler::status_name(inner.status);
                         let ipv6_address = inner.ipv6_address;
+                        let hypervisor = inner.hypervisor;
 
-                        sync_deployment_state(&state, &dep, db_status, &ipv6_address).await;
+                        sync_deployment_state(&state, &dep, db_status, &ipv6_address, hypervisor)
+                            .await;
                     }
                 }
             });
@@ -99,7 +101,14 @@ pub async fn start_nats_job_listener(state: AppState) {
 
                 if let Some(dep) = dep {
                     let db_status = crate::infrastructure::scheduler::status_name(info.status);
-                    sync_deployment_state(&state, &dep, db_status, &info.ipv6_address).await;
+                    sync_deployment_state(
+                        &state,
+                        &dep,
+                        db_status,
+                        &info.ipv6_address,
+                        info.hypervisor,
+                    )
+                    .await;
                 }
             });
         }
@@ -111,6 +120,7 @@ async fn sync_deployment_state(
     dep: &crate::domain::Deployment,
     db_status: &str,
     ipv6_address: &str,
+    hypervisor: i32,
 ) {
     let active_app = state.app_repo.get_app(dep.app_id).await.ok().flatten();
     let active_deployment_id = active_app.as_ref().and_then(|app| app.active_deployment_id);
@@ -119,8 +129,9 @@ async fn sync_deployment_state(
         should_apply_cluster_status(dep.status.as_str(), db_status, active_deployment_id, dep.id);
     let has_new_ipv6 =
         !ipv6_address.is_empty() && dep.ipv6_address.as_deref() != Some(ipv6_address);
+    let has_new_hypervisor = hypervisor != 0 && dep.hypervisor != hypervisor;
 
-    let deployment_changed = status_changed || has_new_ipv6;
+    let deployment_changed = status_changed || has_new_ipv6 || has_new_hypervisor;
 
     if deployment_changed {
         let _ = state
@@ -144,6 +155,11 @@ async fn sync_deployment_state(
                     git_commit_hash: dep.git_commit_hash.clone(),
                     git_commit_message: dep.git_commit_message.clone(),
                     git_branch: dep.git_branch.clone(),
+                    hypervisor: if has_new_hypervisor {
+                        Some(hypervisor)
+                    } else {
+                        None
+                    },
                 },
             )
             .await;

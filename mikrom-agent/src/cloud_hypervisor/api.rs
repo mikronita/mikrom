@@ -35,12 +35,13 @@ pub async fn ch_request(
         body_str.len()
     );
 
-    stream.write_all(request.as_bytes()).await.map_err(|e| {
-        HypervisorError::ApiError {
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|e| HypervisorError::ApiError {
             path: api_path.to_string(),
             msg: format!("write: {e}"),
-        }
-    })?;
+        })?;
 
     // Use a buffered reader to read headers line by line
     let mut reader = BufReader::new(stream);
@@ -91,10 +92,10 @@ pub async fn ch_request(
             break;
         }
 
-        if let Some((key, value)) = line.split_once(':') {
-            if key.trim().to_lowercase() == "content-length" {
-                content_length = value.trim().parse::<usize>().ok();
-            }
+        if let Some((key, value)) = line.split_once(':')
+            && key.trim().to_lowercase() == "content-length"
+        {
+            content_length = value.trim().parse::<usize>().ok();
         }
     }
 
@@ -164,11 +165,14 @@ pub async fn wait_for_socket(path: &str, timeout: Duration) -> Result<(), Hyperv
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::net::UnixListener;
-    use tokio::io::AsyncWriteExt;
     use tempfile::tempdir;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::UnixListener;
 
-    async fn spawn_mock_server(path: PathBuf, response: &'static [u8]) -> tokio::task::JoinHandle<()> {
+    async fn spawn_mock_server(
+        path: PathBuf,
+        response: &'static [u8],
+    ) -> tokio::task::JoinHandle<()> {
         let listener = UnixListener::bind(path).unwrap();
         tokio::spawn(async move {
             if let Ok((mut stream, _)) = listener.accept().await {
@@ -187,11 +191,13 @@ mod tests {
         let dir = tempdir().unwrap();
         let socket_path = dir.path().join("test.sock");
         let socket_str = socket_path.to_string_lossy().to_string();
-        
+
         let response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\n\r\n{\"status\":\"ok\"}";
         let _server = spawn_mock_server(socket_path, response).await;
 
-        let result = ch_request("GET", &socket_str, "/api/v1/info", None).await.unwrap();
+        let result = ch_request("GET", &socket_str, "/api/v1/info", None)
+            .await
+            .unwrap();
         assert_eq!(result, "{\"status\":\"ok\"}");
     }
 
@@ -200,11 +206,13 @@ mod tests {
         let dir = tempdir().unwrap();
         let socket_path = dir.path().join("test-204.sock");
         let socket_str = socket_path.to_string_lossy().to_string();
-        
+
         let response = b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n";
         let _server = spawn_mock_server(socket_path, response).await;
 
-        let result = ch_request("PUT", &socket_str, "/api/v1/vm.boot", None).await.unwrap();
+        let result = ch_request("PUT", &socket_str, "/api/v1/vm.boot", None)
+            .await
+            .unwrap();
         assert_eq!(result, "");
     }
 
@@ -213,9 +221,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let socket_path = dir.path().join("test-cl.sock");
         let socket_str = socket_path.to_string_lossy().to_string();
-        
+
         // Response with headers in mixed case and extra whitespace
-        let response = b"HTTP/1.1 200 OK\r\ncoNTent-lEngth: 5\r\nConnection: close\r\n\r\nhello world";
+        let response =
+            b"HTTP/1.1 200 OK\r\ncoNTent-lEngth: 5\r\nConnection: close\r\n\r\nhello world";
         let _server = spawn_mock_server(socket_path, response).await;
 
         let result = ch_request("GET", &socket_str, "/test", None).await.unwrap();
@@ -228,7 +237,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let socket_path = dir.path().join("test-err.sock");
         let socket_str = socket_path.to_string_lossy().to_string();
-        
+
         let response = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 15\r\n\r\n{\"error\":\"bad\"}";
         let _server = spawn_mock_server(socket_path, response).await;
 

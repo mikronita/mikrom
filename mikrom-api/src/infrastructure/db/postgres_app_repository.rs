@@ -336,7 +336,7 @@ impl AppRepository for PostgresAppRepository {
         params: UpdateDeploymentParams,
     ) -> DomainResult<()> {
         sqlx::query(
-            "UPDATE deployments SET status = COALESCE($1, status), job_id = COALESCE($2, job_id), image_tag = COALESCE($3, image_tag), build_id = COALESCE($4, build_id), ipv6_address = COALESCE($5, ipv6_address), git_commit_hash = COALESCE($6, git_commit_hash), git_commit_message = COALESCE($7, git_commit_message), git_branch = COALESCE($8, git_branch), updated_at = NOW() WHERE id = $9"
+            "UPDATE deployments SET status = COALESCE($1, status), job_id = COALESCE($2, job_id), image_tag = COALESCE($3, image_tag), build_id = COALESCE($4, build_id), ipv6_address = COALESCE($5, ipv6_address), git_commit_hash = COALESCE($6, git_commit_hash), git_commit_message = COALESCE($7, git_commit_message), git_branch = COALESCE($8, git_branch), hypervisor = COALESCE($9, hypervisor), updated_at = NOW() WHERE id = $10"
         )
         .bind(params.status)
         .bind(params.job_id)
@@ -346,6 +346,7 @@ impl AppRepository for PostgresAppRepository {
         .bind(params.git_commit_hash)
         .bind(params.git_commit_message)
         .bind(params.git_branch)
+        .bind(params.hypervisor)
         .bind(id)
         .execute(&self.pool)
         .await?;

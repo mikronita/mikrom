@@ -557,7 +557,7 @@ impl AgentServer {
         };
 
         let hypervisors = &*self.hypervisors;
-        let hv = if let mikrom_proto::agent::agent_command::Command::StartVm(ref req) = cmd {
+        let mut hv = if let mikrom_proto::agent::agent_command::Command::StartVm(ref req) = cmd {
             Self::resolve_hypervisor_for_start(req, hypervisors)
         } else if let Some(vid) = Self::extract_vm_id_from_command(&cmd) {
             let vm_id = Self::parse_vm_id(vid)?;
@@ -565,6 +565,39 @@ impl AgentServer {
         } else {
             None
         };
+
+        // Fallback for DeleteVm if not found in memory
+        if hv.is_none()
+            && let mikrom_proto::agent::agent_command::Command::DeleteVm(ref req) = cmd
+        {
+            let requested_hv = match req.hypervisor {
+                1 => Some(HypervisorType::Firecracker),
+                2 => Some(HypervisorType::QemuMicrovm),
+                3 => Some(HypervisorType::CloudHypervisor),
+                _ => None,
+            };
+
+            if let Some(htype) = requested_hv {
+                hv = hypervisors.get(&htype);
+            }
+
+            // If we still don't have a hypervisor (e.g., hypervisor was Unspecified in the request
+            // or the requested one is not enabled), we broadcast the delete to all enabled hypervisors.
+            if hv.is_none() {
+                tracing::info!(vm_id = %req.vm_id, "Broadcasting best-effort DeleteVm to all hypervisors");
+                if let Ok(vm_id) = Self::parse_vm_id(&req.vm_id) {
+                    let mut futures = Vec::new();
+                    for h in hypervisors.values() {
+                        futures.push(h.delete_vm(&vm_id));
+                    }
+                    let _ = futures::future::join_all(futures).await;
+                    return Ok(Self::ok_response(
+                        "Best-effort purge performed across all hypervisors",
+                    ));
+                }
+            }
+        }
+
         let hv =
             hv.ok_or_else(|| HypervisorError::ProcessError("No hypervisor available".to_string()))?;
 
@@ -1271,6 +1304,7 @@ impl AgentServer {
                     })
                     .collect::<HashMap<String, VmMetrics>>();
 
+                let vms_count = proto_vms.len();
                 let heartbeat = WorkerHeartbeat {
                     host_id: host_id.clone(),
                     hostname: hostname.clone(),
@@ -1294,6 +1328,8 @@ impl AgentServer {
                     advertise_address: advertise_address.clone(),
                     supported_hypervisors: supported_hypervisors.clone(),
                 };
+
+                tracing::debug!(vms_count = vms_count, "Publishing worker heartbeat");
 
                 let mut buf = Vec::new();
                 if heartbeat.encode(&mut buf).is_ok() {
@@ -1863,5 +1899,25 @@ mod tests {
             pool_name: "rbd".into(),
         });
         assert!(AgentServer::extract_vm_id_from_command(&cmd).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_delete_vm_orphaned() {
+        use mikrom_proto::agent::agent_command::Command;
+        use mikrom_proto::agent::{DeleteVmRequest, HypervisorType as ProtoHypervisor};
+
+        let config = crate::config::AgentConfig::default();
+        let server = AgentServer::new(config, "127.0.0.1".into()).await;
+
+        let vm_id = VmId::new();
+        let cmd = Command::DeleteVm(DeleteVmRequest {
+            vm_id: vm_id.to_string(),
+            hypervisor: ProtoHypervisor::HypertypeFirecracker as i32,
+        });
+
+        // The VM is NOT in memory, but since we provided the hypervisor type,
+        // it should resolve to Firecracker and attempt deletion (which succeeds because it's best-effort).
+        let result = server.dispatch_agent_command(Some(cmd)).await;
+        assert!(result.is_ok());
     }
 }

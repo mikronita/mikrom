@@ -42,6 +42,7 @@ async fn test_zero_downtime_flow_success() {
         host_id: "host-1".to_string(),
         vm_id: "vm-new".to_string(),
         message: "Scheduled".to_string(),
+        hypervisor: 1, // Firecracker
     };
 
     // Mocks for run_zero_downtime_flow

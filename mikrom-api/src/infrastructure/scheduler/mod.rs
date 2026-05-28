@@ -46,6 +46,7 @@ impl Scheduler for NatsScheduler {
         let req = mikrom_proto::scheduler::DeleteAllByAppRequest { app_id, user_id };
         let res: mikrom_proto::scheduler::DeleteAllByAppResponse = self
             .nats
+            .with_timeout(std::time::Duration::from_secs(15))
             .request("mikrom.scheduler.delete_all_by_app", req)
             .await?;
         Ok(res.success)

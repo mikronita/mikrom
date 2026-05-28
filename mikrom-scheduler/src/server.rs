@@ -95,6 +95,7 @@ impl SchedulerServer {
                 host_id: job.host_id.unwrap_or_default().to_string(),
                 vm_id: job.vm_id.unwrap_or_default().to_string(),
                 message: "Deployment successful".to_string(),
+                hypervisor: job.config.hypervisor as i32,
             }),
             Err(e) => {
                 tracing::error!("Deployment failed for app {}: {}", req.app_id, e);
@@ -134,6 +135,7 @@ impl SchedulerServer {
                     ipv6_address: job.config.ipv6_address.unwrap_or_default(),
                     tx_bytes,
                     rx_bytes,
+                    hypervisor: job.config.hypervisor as i32,
                 })
             },
             Err(e) => Err(anyhow::anyhow!(e.to_string())),

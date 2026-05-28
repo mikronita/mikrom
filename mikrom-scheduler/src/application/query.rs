@@ -103,6 +103,7 @@ impl AppQueryService {
                         ipv6_address: job.config.ipv6_address.unwrap_or_default(),
                         tx_bytes,
                         rx_bytes,
+                        hypervisor: job.config.hypervisor as i32,
                     });
                 }
 

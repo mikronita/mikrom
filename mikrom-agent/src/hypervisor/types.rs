@@ -62,4 +62,5 @@ pub struct VmDetailedInfo {
     pub socket_path: Option<String>,
     pub tap_name: Option<String>,
     pub tap_ifindex: Option<u32>,
+    pub raw_metrics: Option<serde_json::Value>,
 }

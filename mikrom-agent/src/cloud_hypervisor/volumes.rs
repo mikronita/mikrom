@@ -11,7 +11,7 @@ impl CloudHypervisorManager {
                 let mount_point = self.config.data_path.join("cephfs").join(&vol.volume_id);
                 let mount_str = mount_point.to_string_lossy().to_string();
                 let _ = tokio::fs::create_dir_all(&mount_point).await;
-                
+
                 CephFs::mount_volume(&vol.volume_id, &mount_str)
                     .await
                     .map_err(|e| {
@@ -46,11 +46,14 @@ impl CloudHypervisorManager {
         // ... formatting logic could be here, similar to FirecrackerManager ...
         // For brevity and focus on CH integration, assuming formatted or handled elsewhere
         // if needed.
-        
+
         Ok(dev_path)
     }
 
-    pub(crate) async fn ensure_local_volume(&self, vol: &Volume) -> Result<String, HypervisorError> {
+    pub(crate) async fn ensure_local_volume(
+        &self,
+        vol: &Volume,
+    ) -> Result<String, HypervisorError> {
         let vol_dir = self.config.data_path.join("volumes");
         tokio::fs::create_dir_all(&vol_dir).await.map_err(|e| {
             HypervisorError::ProcessError(format!("Failed to create volumes dir: {e}"))
@@ -78,7 +81,7 @@ impl CloudHypervisorManager {
         socket_path: &std::path::Path,
     ) -> Result<tokio::process::Child, HypervisorError> {
         // Assume virtiofsd is in PATH or specify in config.
-        let binary = "virtiofsd"; 
+        let binary = "virtiofsd";
 
         if let Some(parent) = socket_path.parent() {
             let _ = tokio::fs::create_dir_all(parent).await;
