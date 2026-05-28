@@ -8,8 +8,9 @@ pub use async_trait::async_trait;
 /// Supported hypervisor types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HypervisorType {
-    Firecracker,
-    QemuMicrovm,
+    Firecracker = 1,
+    QemuMicrovm = 2,
+    CloudHypervisor = 3,
 }
 
 impl HypervisorType {
@@ -17,6 +18,7 @@ impl HypervisorType {
         match self {
             HypervisorType::Firecracker => "firecracker",
             HypervisorType::QemuMicrovm => "qemu-microvm",
+            HypervisorType::CloudHypervisor => "cloud-hypervisor",
         }
     }
 }

@@ -90,7 +90,7 @@ pub struct ManualDeployRequest {
     pub disk_mib: Option<u32>,
     pub env: Option<std::collections::HashMap<String, String>>,
     pub image: Option<String>,
-    /// Hypervisor to use: "firecracker" or "qemu". Defaults to scheduler-selected.
+    /// Hypervisor to use: "firecracker", "qemu", or "cloud-hypervisor". Defaults to scheduler-selected.
     pub hypervisor: Option<String>,
 }
 

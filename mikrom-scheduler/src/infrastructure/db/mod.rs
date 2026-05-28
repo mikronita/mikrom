@@ -183,7 +183,7 @@ pub struct PgWorkerRepository {
     pool: PgPool,
 }
 
-const WORKER_COLUMNS: &str = "id, hostname, advertise_address, wireguard_pubkey, wireguard_ip, wireguard_port, metrics, registered_at, last_heartbeat, status";
+const WORKER_COLUMNS: &str = "id, hostname, advertise_address, wireguard_pubkey, wireguard_ip, wireguard_port, metrics, registered_at, last_heartbeat, status, supported_hypervisors";
 
 impl PgWorkerRepository {
     pub fn new(pool: PgPool) -> Self {
@@ -195,13 +195,14 @@ impl PgWorkerRepository {
 impl WorkerRepository for PgWorkerRepository {
     async fn register(&self, worker: Worker) -> DomainResult<()> {
         let now = chrono::Utc::now().timestamp();
+        let hvs: Vec<i32> = worker.supported_hypervisors.iter().map(|&h| h as i32).collect();
 
         // Keep the worker record hot with a single upsert. We avoid a pre-delete because it
         // amplifies write contention on the workers table under heartbeat bursts.
         sqlx::query(
             r#"
-            INSERT INTO workers (id, hostname, advertise_address, wireguard_pubkey, wireguard_ip, wireguard_port, last_heartbeat, registered_at, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO workers (id, hostname, advertise_address, wireguard_pubkey, wireguard_ip, wireguard_port, last_heartbeat, registered_at, status, supported_hypervisors)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (id) DO UPDATE SET
                 hostname = EXCLUDED.hostname,
                 advertise_address = EXCLUDED.advertise_address,
@@ -209,7 +210,8 @@ impl WorkerRepository for PgWorkerRepository {
                 wireguard_ip = EXCLUDED.wireguard_ip,
                 wireguard_port = EXCLUDED.wireguard_port,
                 last_heartbeat = EXCLUDED.last_heartbeat,
-                status = EXCLUDED.status
+                status = EXCLUDED.status,
+                supported_hypervisors = EXCLUDED.supported_hypervisors
             "#,
         )
         .bind(&worker.host_id)
@@ -221,6 +223,7 @@ impl WorkerRepository for PgWorkerRepository {
         .bind(now)
         .bind(now)
         .bind(worker.status.as_str())
+        .bind(&hvs)
         .execute(&self.pool)
         .await?;
 
@@ -360,6 +363,12 @@ fn map_row_to_worker(r: &sqlx::postgres::PgRow) -> Worker {
         "Online" => crate::domain::WorkerStatus::Online,
         _ => crate::domain::WorkerStatus::Offline,
     };
+    let hvs_raw: Vec<i32> = r.try_get("supported_hypervisors").unwrap_or_default();
+    let supported_hypervisors = hvs_raw
+        .into_iter()
+        .filter_map(crate::domain::job::HypervisorType::from_i32)
+        .collect();
+
     Worker {
         host_id: r.get("id"),
         hostname: r.get("hostname"),
@@ -371,7 +380,7 @@ fn map_row_to_worker(r: &sqlx::postgres::PgRow) -> Worker {
         registered_at: r.get("registered_at"),
         last_heartbeat: r.get("last_heartbeat"),
         status,
-        supported_hypervisors: vec![],
+        supported_hypervisors,
     }
 }
 

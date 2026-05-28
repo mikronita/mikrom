@@ -45,6 +45,9 @@ pub fn resolve_deployment_hypervisor(hypervisor: Option<&str>) -> i32 {
     match hypervisor {
         Some("firecracker") => mikrom_proto::scheduler::HypervisorType::HypertypeFirecracker as i32,
         Some("qemu") => mikrom_proto::scheduler::HypervisorType::HypertypeQemuMicrovm as i32,
+        Some("cloud-hypervisor") => {
+            mikrom_proto::scheduler::HypervisorType::HypertypeCloudHypervisor as i32
+        },
         _ => mikrom_proto::scheduler::HypervisorType::HypertypeUnspecified as i32,
     }
 }

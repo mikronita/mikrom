@@ -235,7 +235,7 @@ impl crate::firecracker::FirecrackerManager {
     }
 
     pub(crate) async fn cleanup_all_stale_resources(&self) {
-        tracing::info!(
+        tracing::debug!(
             agent_id = %self.agent_id,
             data_dir = %self.fc_config.data_dir,
             "Cleaning up stale Firecracker resources..."

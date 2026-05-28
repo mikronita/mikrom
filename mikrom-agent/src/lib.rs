@@ -1,5 +1,6 @@
 pub mod builder;
 pub mod ceph;
+pub mod cloud_hypervisor;
 pub mod config;
 pub mod ebpf;
 pub mod firecracker;
