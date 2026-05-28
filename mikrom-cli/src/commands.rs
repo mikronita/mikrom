@@ -168,7 +168,7 @@ pub enum AppCommands {
         #[arg(
             long,
             short = 'H',
-            help = "Hypervisor type: firecracker, qemu, cloud-hypervisor, or unspecified (default)"
+            help = "Hypervisor type: firecracker, cloud-hypervisor, or unspecified (default)"
         )]
         hypervisor: Option<String>,
     },

@@ -2,7 +2,6 @@ use crate::cloud_hypervisor::CloudHypervisorManager;
 use crate::config::AgentConfig;
 use crate::firecracker::FirecrackerManager;
 use crate::hypervisor::vm_hypervisor::{HypervisorType, VmHypervisor};
-use crate::qemu::QemuManager;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -21,13 +20,6 @@ pub async fn create_hypervisors(
         HypervisorType::Firecracker,
         Arc::new(FirecrackerManager::new().await),
     );
-
-    if config.qemu_enabled {
-        hvs.insert(
-            HypervisorType::QemuMicrovm,
-            Arc::new(QemuManager::new(config.host_id.clone()).await),
-        );
-    }
 
     if config.cloud_hypervisor_enabled {
         hvs.insert(

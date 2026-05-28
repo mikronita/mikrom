@@ -205,7 +205,6 @@ export const DEPLOYMENT_MEMORY_OPTIONS = [
 export const DEPLOYMENT_HYPERVISOR_OPTIONS = [
   { label: "Default", value: "" },
   { label: "Firecracker", value: "firecracker" },
-  { label: "QEMU", value: "qemu" },
   { label: "Cloud Hypervisor", value: "cloud-hypervisor" },
 ] as const;
 
