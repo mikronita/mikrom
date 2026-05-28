@@ -9,7 +9,6 @@ pub use async_trait::async_trait;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HypervisorType {
     Firecracker = 1,
-    QemuMicrovm = 2,
     CloudHypervisor = 3,
 }
 
@@ -17,7 +16,6 @@ impl HypervisorType {
     pub fn as_str(&self) -> &'static str {
         match self {
             HypervisorType::Firecracker => "firecracker",
-            HypervisorType::QemuMicrovm => "qemu-microvm",
             HypervisorType::CloudHypervisor => "cloud-hypervisor",
         }
     }
@@ -32,7 +30,7 @@ impl fmt::Display for HypervisorType {
 /// Trait that every hypervisor implementation must satisfy.
 ///
 /// This is the central abstraction that allows Mikrom to support multiple
-/// VMMs (Firecracker, QEMU microvm, etc.) on the same agent host.
+/// VMMs (Firecracker, Cloud Hypervisor, etc.) on the same agent host.
 #[async_trait]
 pub trait VmHypervisor: Send + Sync + fmt::Debug {
     fn hypervisor_type(&self) -> HypervisorType;

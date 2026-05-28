@@ -5,7 +5,7 @@ This document provides operator-focused guidance for the `mikrom-agent` daemon.
 ## Overview
 
 The agent runs on each compute node and is responsible for:
-- Managing VMs via Firecracker and/or QEMU
+- Managing VMs via Firecracker and/or Cloud Hypervisor
 - Receiving deployment commands from the scheduler over NATS
 - Publishing system and VM metrics via NATS
 - Maintaining WireGuard mesh networking
@@ -24,10 +24,10 @@ The agent runs on each compute node and is responsible for:
 │  └──────────────┘  └──────────────────────┘  │
 │  ┌────────────────────────────────────────┐  │
 │  │         Hypervisor Registry           │  │
-│  │  ┌─────────────┐  ┌────────────────┐  │  │
-│  │  │ Firecracker │  │ QEMU microvm   │  │  │
-│  │  │ Manager     │  │ Manager        │  │  │
-│  │  └─────────────┘  └────────────────┘  │  │
+│  │  ┌─────────────┐  ┌──────────────────┐  │  │
+│  │  │ Firecracker │  │ Cloud Hypervisor │  │  │
+│  │  │ Manager     │  │ Manager          │  │  │
+│  │  └─────────────┘  └──────────────────┘  │  │
 │  └────────────────────────────────────────┘  │
 └─────────────────────────────────────────────┘
 ```
@@ -47,7 +47,6 @@ All configuration is via environment variables (loaded from `.env` if present):
 | `CERTS_DIR` | `/certs/agent` | TLS certificate directory |
 | `WIREGUARD_PORT` | — | WireGuard listen port (auto if unset) |
 | `USE_TLS` | `false` | Enable mTLS for NATS |
-| `QEMU_ENABLED` | `true` | Enable QEMU microvm hypervisor |
 | `HTTP_PORT` | `5002` | Port for health/metrics HTTP server |
 | `MAX_VMS_PER_HOST` | `0` (unlimited) | Hard limit on concurrent VMs |
 
@@ -76,8 +75,8 @@ mikrom_agent_up 1
 mikrom_agent_hypervisors 2
 mikrom_agent_vms_total{hypervisor="Firecracker"} 3
 mikrom_agent_vms_running{hypervisor="Firecracker"} 2
-mikrom_agent_vms_total{hypervisor="QemuMicrovm"} 1
-mikrom_agent_vms_running{hypervisor="QemuMicrovm"} 1
+mikrom_agent_vms_total{hypervisor="CloudHypervisor"} 1
+mikrom_agent_vms_running{hypervisor="CloudHypervisor"} 1
 ```
 
 ## Graceful Shutdown
@@ -100,11 +99,11 @@ KillSignal=SIGTERM
 - HTTP API over Unix socket
 - Default when hypervisor is `Unspecified` (0)
 
-### QEMU microvm
-- Full QEMU with `microvm` machine type
-- QMP control over Unix socket
+### Cloud Hypervisor
+- Modern VMM written in Rust
+- HTTP API over Unix socket
 - Supports snapshots, live migration, hot-plug, ballooning, serial console
-- Selected when hypervisor = 2 in `StartVmRequest`
+- Selected when hypervisor = 3 in `StartVmRequest`
 
 ## Troubleshooting
 
@@ -127,10 +126,7 @@ securityContext:
 Check the agent logs for backoff messages. If it says "circuit breaker open", the agent has failed to connect 10 times and is cooling down for 5 minutes. Verify `NATS_URL` and network connectivity.
 
 ### VM starts but health checks fail
-Check `GET /metrics` to see if the VM is in `Running` state. Check the serial console log at `<DATA_PATH>/qemu-<vm_id>.log` (QEMU) or `<DATA_PATH>/<vm_id>.stdout.log` (Firecracker).
-
-### QEMU stderr logs
-QEMU stderr is redirected to `<DATA_PATH>/qemu-<vm_id>.err.log` for debugging boot failures.
+Check `GET /metrics` to see if the VM is in `Running` state. Check the serial console log at `<DATA_PATH>/<vm_id>.stdout.log` (Firecracker) or `<DATA_PATH>/<vm_id>.log` (Cloud Hypervisor).
 
 ### Firecracker-specific issues
 

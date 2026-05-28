@@ -9,7 +9,6 @@ pub mod hypervisor;
 pub mod logger;
 pub mod metrics;
 pub(crate) mod network;
-pub mod qemu;
 pub mod server;
 pub mod subjects;
 pub mod wireguard;

@@ -31,9 +31,6 @@ pub struct AgentConfig {
 
     pub wireguard_pubkey: Option<String>,
 
-    #[serde(default = "default_qemu_enabled")]
-    pub qemu_enabled: bool,
-
     #[serde(default = "default_cloud_hypervisor_enabled")]
     pub cloud_hypervisor_enabled: bool,
 
@@ -69,7 +66,6 @@ impl Default for AgentConfig {
             agent_advertise_address: None,
             wireguard_port: Some(51820),
             wireguard_pubkey: None,
-            qemu_enabled: true,
             cloud_hypervisor_enabled: true,
             cloud_hypervisor_binary: PathBuf::from("/usr/bin/cloud-hypervisor"),
             cloud_hypervisor_kernel: PathBuf::from("/opt/cloud-hypervisor/vmlinux.bin"),
@@ -79,10 +75,6 @@ impl Default for AgentConfig {
             nats_flapping_session_secs: 30,
         }
     }
-}
-
-const fn default_qemu_enabled() -> bool {
-    true
 }
 
 const fn default_cloud_hypervisor_enabled() -> bool {
@@ -346,7 +338,6 @@ mod tests {
             agent_advertise_address: None,
             wireguard_port: None,
             wireguard_pubkey: None,
-            qemu_enabled: true,
             cloud_hypervisor_enabled: true,
             cloud_hypervisor_binary: PathBuf::from("/usr/bin/cloud-hypervisor"),
             cloud_hypervisor_kernel: PathBuf::from("/opt/cloud-hypervisor/vmlinux.bin"),

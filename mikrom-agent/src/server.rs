@@ -507,7 +507,6 @@ impl AgentServer {
     ) -> Option<&'a Arc<dyn VmHypervisor>> {
         let htype = match req.config.as_ref()?.hypervisor {
             0 | 1 => HypervisorType::Firecracker,
-            2 => HypervisorType::QemuMicrovm,
             3 => HypervisorType::CloudHypervisor,
             _ => return None,
         };
@@ -572,7 +571,6 @@ impl AgentServer {
         {
             let requested_hv = match req.hypervisor {
                 1 => Some(HypervisorType::Firecracker),
-                2 => Some(HypervisorType::QemuMicrovm),
                 3 => Some(HypervisorType::CloudHypervisor),
                 _ => None,
             };
@@ -1365,7 +1363,7 @@ mod tests {
     use super::*;
     use crate::firecracker::FirecrackerManager;
     use crate::hypervisor::{HypervisorType, VmHypervisor, VmInfo};
-    use crate::qemu::{QemuConfig, QemuManager};
+
     use async_nats::Message as NatsMessage;
     use futures::StreamExt;
     use mikrom_proto::agent::{CheckHealthRequest, CheckHealthResponse};
@@ -1707,27 +1705,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve_hypervisor_for_start_selects_qemu() {
-        let fc = FirecrackerManager::new().await;
-        let qemu = QemuManager::new("test-agent".into()).await;
-        let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
-        hvs.insert(HypervisorType::Firecracker, Arc::new(fc));
-        hvs.insert(HypervisorType::QemuMicrovm, Arc::new(qemu));
-        let req = mikrom_proto::agent::StartVmRequest {
-            vm_id: "vm-1".into(),
-            app_id: "app-1".into(),
-            image: "img".into(),
-            config: Some(mikrom_proto::agent::VmConfig {
-                hypervisor: 2,
-                ..Default::default()
-            }),
-        };
-        let hv = AgentServer::resolve_hypervisor_for_start(&req, &hvs);
-        assert!(hv.is_some());
-        assert_eq!(hv.unwrap().hypervisor_type(), HypervisorType::QemuMicrovm);
-    }
-
-    #[tokio::test]
     async fn test_resolve_hypervisor_for_start_defaults_to_firecracker() {
         let hvs = make_hypervisors().await;
         let req = mikrom_proto::agent::StartVmRequest {
@@ -1760,10 +1737,8 @@ mod tests {
     #[tokio::test]
     async fn test_find_hypervisor_for_vm_finds_on_firecracker() {
         let fc = FirecrackerManager::new().await;
-        let qemu = QemuManager::new("test-agent".into()).await;
         let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
         hvs.insert(HypervisorType::Firecracker, Arc::new(fc.clone()));
-        hvs.insert(HypervisorType::QemuMicrovm, Arc::new(qemu));
 
         let vm_id = VmId::new();
         let vm_id_copy = vm_id;
@@ -1790,73 +1765,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_find_hypervisor_for_vm_finds_on_qemu() {
-        let fc = FirecrackerManager::new().await;
-        let qemu = QemuManager::with_config(
-            "test-agent".into(),
-            QemuConfig {
-                binary: "/bin/sleep".into(),
-                kernel_path: "/dev/null".into(),
-                rootfs_path: "/dev/null".into(),
-                base_rootfs_path: "/dev/null".into(),
-                data_dir: std::env::temp_dir().join("qemu-test"),
-                qmp_timeout_secs: 1,
-                extra_args: vec!["3600".into()],
-                kernel_url: None,
-                rootfs_url: None,
-                image_cache_dir: std::env::temp_dir().join("qemu-image-cache-test"),
-                virtiofsd_binary: String::new(),
-                virtiofsd_socket_dir: std::env::temp_dir().join("qemu-virtiofsd-test"),
-                virtiofsd_shares: Vec::new(),
-            },
-        )
-        .await;
-        let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
-        hvs.insert(HypervisorType::Firecracker, Arc::new(fc));
-        hvs.insert(HypervisorType::QemuMicrovm, Arc::new(qemu.clone()));
-
-        let vm_id = VmId::new();
-        let app_id = AppId::new();
-        qemu.start_vm(vm_id, app_id, "img".into(), VmConfig::default())
-            .await
-            .unwrap();
-
-        let found = AgentServer::find_hypervisor_for_vm(&vm_id, &hvs).await;
-        assert!(found.is_some());
-        assert_eq!(
-            found.unwrap().hypervisor_type(),
-            HypervisorType::QemuMicrovm
-        );
-
-        // Cleanup
-        let _ = qemu.stop_vm(&vm_id).await;
-    }
-
-    #[tokio::test]
     async fn test_find_hypervisor_for_vm_not_found() {
         let fc = FirecrackerManager::new().await;
-        let qemu = QemuManager::with_config(
-            "test-agent".into(),
-            QemuConfig {
-                binary: "/bin/sleep".into(),
-                kernel_path: "/dev/null".into(),
-                rootfs_path: "/dev/null".into(),
-                base_rootfs_path: "/dev/null".into(),
-                data_dir: std::env::temp_dir().join("qemu-test"),
-                qmp_timeout_secs: 1,
-                extra_args: vec!["3600".into()],
-                kernel_url: None,
-                rootfs_url: None,
-                image_cache_dir: std::env::temp_dir().join("qemu-image-cache-test"),
-                virtiofsd_binary: String::new(),
-                virtiofsd_socket_dir: std::env::temp_dir().join("qemu-virtiofsd-test"),
-                virtiofsd_shares: Vec::new(),
-            },
-        )
-        .await;
         let mut hvs: HashMap<HypervisorType, Arc<dyn VmHypervisor>> = HashMap::new();
         hvs.insert(HypervisorType::Firecracker, Arc::new(fc));
-        hvs.insert(HypervisorType::QemuMicrovm, Arc::new(qemu));
 
         let ghost = VmId::new();
         let found = AgentServer::find_hypervisor_for_vm(&ghost, &hvs).await;

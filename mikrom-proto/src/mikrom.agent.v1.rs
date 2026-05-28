@@ -601,7 +601,6 @@ pub struct QueryBalloonResponse {
 pub enum HypervisorType {
     HypertypeUnspecified = 0,
     HypertypeFirecracker = 1,
-    HypertypeQemuMicrovm = 2,
     HypertypeCloudHypervisor = 3,
 }
 impl HypervisorType {
@@ -613,7 +612,6 @@ impl HypervisorType {
         match self {
             Self::HypertypeUnspecified => "HYPERTYPE_UNSPECIFIED",
             Self::HypertypeFirecracker => "HYPERTYPE_FIRECRACKER",
-            Self::HypertypeQemuMicrovm => "HYPERTYPE_QEMU_MICROVM",
             Self::HypertypeCloudHypervisor => "HYPERTYPE_CLOUD_HYPERVISOR",
         }
     }
@@ -622,7 +620,6 @@ impl HypervisorType {
         match value {
             "HYPERTYPE_UNSPECIFIED" => Some(Self::HypertypeUnspecified),
             "HYPERTYPE_FIRECRACKER" => Some(Self::HypertypeFirecracker),
-            "HYPERTYPE_QEMU_MICROVM" => Some(Self::HypertypeQemuMicrovm),
             "HYPERTYPE_CLOUD_HYPERVISOR" => Some(Self::HypertypeCloudHypervisor),
             _ => None,
         }
