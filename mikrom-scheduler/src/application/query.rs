@@ -75,10 +75,10 @@ impl AppQueryService {
             return job.config.hypervisor;
         }
         if let Some(ref host_id) = job.host_id
-            && let Ok(Some(worker)) = self.ctx.worker_repo.get_worker(host_id.as_ref()).await
-            && !worker.supported_hypervisors.is_empty()
+            && let Ok(Some(worker)) = self.ctx.worker_repo.get_worker(host_id).await
+            && let Some(&hypervisor) = worker.supported_hypervisors.first()
         {
-            return worker.supported_hypervisors[0];
+            return hypervisor;
         }
         crate::domain::job::HypervisorType::Firecracker
     }

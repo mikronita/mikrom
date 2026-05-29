@@ -109,7 +109,7 @@ impl Scheduler for NatsScheduler {
 pub fn hypervisor_name(code: i32) -> String {
     use mikrom_proto::scheduler::HypervisorType;
     match HypervisorType::try_from(code).unwrap_or(HypervisorType::HypertypeUnspecified) {
-        HypervisorType::HypertypeUnspecified => "unspecified",
+        HypervisorType::HypertypeUnspecified => "firecracker",
         HypervisorType::HypertypeFirecracker => "firecracker",
         HypervisorType::HypertypeCloudHypervisor => "cloud-hypervisor",
     }
