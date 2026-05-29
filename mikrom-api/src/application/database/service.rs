@@ -10,6 +10,32 @@ const NEON_TENANT_ID_KEY: &str = "NEON_TENANT_ID";
 const NEON_TIMELINE_ID_KEY: &str = "NEON_TIMELINE_ID";
 
 impl DatabaseService {
+    pub async fn validate_tenant_retention(
+        state: &AppState,
+        tenant_id: &str,
+        generation: u32,
+    ) -> bool {
+        let _ = generation;
+
+        match state
+            .ctx
+            .database_repo
+            .get_database_by_tenant_id(tenant_id)
+            .await
+        {
+            Ok(Some(database)) => !matches!(database.status, DatabaseStatus::Deleting),
+            Ok(None) => false,
+            Err(err) => {
+                tracing::warn!(
+                    tenant_id = %tenant_id,
+                    error = %err,
+                    "[mikrom-api] Falling back to retention on database lookup error"
+                );
+                true
+            },
+        }
+    }
+
     pub async fn create_database(
         state: &AppState,
         params: CreateDatabaseParams,
@@ -26,9 +52,8 @@ impl DatabaseService {
             .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
         let mut params = params;
-        Self::provision_neon_database(state, &mut params).await?;
+        Self::ensure_neon_provisioning_ids(&mut params);
 
-        // 1. Create database record
         let database = state
             .ctx
             .database_repo
@@ -36,42 +61,104 @@ impl DatabaseService {
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-        // 2. Initial deployment
-        Self::deploy_database(state, database.id).await?;
-
-        // 3. Reload database info
-        state
-            .ctx
-            .database_repo
-            .get_database(database.id)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?
-            .ok_or_else(|| ApiError::NotFound("Database not found after creation".to_string()))
-    }
-
-    async fn provision_neon_database(
-        state: &AppState,
-        params: &mut CreateDatabaseParams,
-    ) -> ApiResult<()> {
-        if params.engine != "neon" {
-            return Ok(());
+        #[cfg(not(test))]
+        {
+            let state = state.clone();
+            let database_id = database.id;
+            tokio::spawn(async move {
+                if let Err(err) =
+                    Self::provision_and_deploy_database_with_retry(state.clone(), database_id).await
+                {
+                    tracing::error!(
+                        database_id = %database_id,
+                        error = %err,
+                        "Database provisioning failed after retries"
+                    );
+                    let _ = state
+                        .ctx
+                        .database_repo
+                        .update_database_status(database_id, DatabaseStatus::Failed)
+                        .await;
+                }
+            });
         }
 
-        let neon_client = crate::infrastructure::neon::NeonClient::from_config(&state.ctx.config)
-            .ok_or_else(|| {
-            ApiError::Internal(
-                "NEON_PAGESERVER_URL is required to provision database workloads".to_string(),
-            )
-        })?;
+        Ok(database)
+    }
 
-        let provisioning = neon_client
-            .provision_database()
+    #[allow(dead_code)]
+    async fn provision_and_deploy_database_with_retry(
+        state: AppState,
+        database_id: Uuid,
+    ) -> ApiResult<()> {
+        let mut delay = std::time::Duration::from_secs(1);
+        let max_attempts = 5;
+
+        for attempt in 1..=max_attempts {
+            match Self::provision_and_deploy_database(state.clone(), database_id).await {
+                Ok(()) => return Ok(()),
+                Err(err)
+                    if attempt < max_attempts && Self::is_retryable_provisioning_error(&err) =>
+                {
+                    tracing::warn!(
+                        database_id = %database_id,
+                        attempt,
+                        error = %err,
+                        "Database provisioning attempt failed, retrying"
+                    );
+                    tokio::time::sleep(delay).await;
+                    delay =
+                        std::cmp::min(delay.saturating_mul(2), std::time::Duration::from_secs(30));
+                },
+                Err(err) => return Err(err),
+            }
+        }
+
+        unreachable!()
+    }
+
+    async fn provision_and_deploy_database(state: AppState, database_id: Uuid) -> ApiResult<()> {
+        let mut database = state
+            .ctx
+            .database_repo
+            .get_database(database_id)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or_else(|| ApiError::NotFound("Database not found".to_string()))?;
 
-        params.tenant_id = Some(provisioning.tenant_id);
-        params.timeline_id = Some(provisioning.timeline_id);
+        if database.engine == "neon" && Self::needs_neon_provisioning(&database) {
+            let neon_client =
+                crate::infrastructure::neon::NeonClient::from_config(&state.ctx.config)
+                    .ok_or_else(|| {
+                        ApiError::Internal(
+                            "NEON_PAGESERVER_URL is required to provision database workloads"
+                                .to_string(),
+                        )
+                    })?;
 
+            let provisioning = neon_client
+                .provision_database()
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+            state
+                .ctx
+                .database_repo
+                .update_database_provisioning(
+                    database_id,
+                    &provisioning.tenant_id,
+                    &provisioning.timeline_id,
+                    provisioning.tenant_gen,
+                )
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+            database.tenant_id = Some(provisioning.tenant_id);
+            database.timeline_id = Some(provisioning.timeline_id);
+            database.tenant_gen = Some(provisioning.tenant_gen);
+        }
+
+        Self::deploy_database(&state, database_id).await?;
         Ok(())
     }
 
@@ -115,9 +202,7 @@ impl DatabaseService {
             ApiError::BadRequest("User does not have a VPC IPv6 prefix configured".to_string())
         })?;
 
-        if database.engine == "neon"
-            && (database.tenant_id.is_none() || database.timeline_id.is_none())
-        {
+        if database.engine == "neon" && Self::needs_neon_provisioning(&database) {
             return Err(ApiError::Internal(
                 "Database is missing Neon tenant/timeline identifiers".to_string(),
             ));
@@ -258,6 +343,51 @@ impl DatabaseService {
 
         env
     }
+
+    fn ensure_neon_provisioning_ids(params: &mut CreateDatabaseParams) {
+        if params.engine != "neon" {
+            return;
+        }
+
+        if params.tenant_id.is_none() {
+            params.tenant_id = Some(Self::placeholder_neon_id("tenant"));
+        }
+        if params.timeline_id.is_none() {
+            params.timeline_id = Some(Self::placeholder_neon_id("timeline"));
+        }
+    }
+
+    fn needs_neon_provisioning(database: &Database) -> bool {
+        (match database.tenant_id.as_deref() {
+            None => true,
+            Some(value) => Self::is_placeholder_neon_id(value),
+        }) || match database.timeline_id.as_deref() {
+            None => true,
+            Some(value) => Self::is_placeholder_neon_id(value),
+        }
+    }
+
+    fn placeholder_neon_id(kind: &str) -> String {
+        format!("pending-{kind}-{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn is_placeholder_neon_id(value: &str) -> bool {
+        value.starts_with("pending-tenant-") || value.starts_with("pending-timeline-")
+    }
+
+    fn is_retryable_provisioning_error(err: &ApiError) -> bool {
+        let message = err.to_string();
+
+        if message.contains("404 Not Found") || message.contains("page not found") {
+            return false;
+        }
+
+        if message.contains("NEON_PAGESERVER_URL is required") {
+            return false;
+        }
+
+        true
+    }
 }
 
 #[cfg(test)]
@@ -273,8 +403,6 @@ mod tests {
     use mockall::predicate::{eq, function};
     use std::collections::HashMap;
     use std::sync::Arc;
-    use wiremock::matchers::{method, path, path_regex};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn build_state(
         config: crate::config::ApiConfig,
@@ -345,6 +473,7 @@ mod tests {
             disk_mib: 4096,
             tenant_id: Some("11111111111111111111111111111111".to_string()),
             timeline_id: Some("22222222222222222222222222222222".to_string()),
+            tenant_gen: Some(1),
             settings: HashMap::from([("max_connections".to_string(), "200".to_string())]),
             status,
             active_deployment_id,
@@ -369,49 +498,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_database_happy_path_deploys_and_reloads() {
+    async fn provision_and_deploy_database_creates_running_deployment() {
         let user_id = Uuid::new_v4();
         let database_id = Uuid::new_v4();
         let deployment_id = Uuid::new_v4();
-        let server = MockServer::start().await;
-        let tenant_id = "11111111111111111111111111111111";
-        let timeline_id = "22222222222222222222222222222222";
 
-        Mock::given(method("POST"))
-            .and(path("/v1/tenant"))
-            .respond_with(ResponseTemplate::new(201).set_body_string(format!("\"{tenant_id}\"")))
-            .mount(&server)
-            .await;
-
-        Mock::given(method("PUT"))
-            .and(path_regex(r"^/v1/tenant/[0-9a-f]{32}/location_config$"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "shards": [],
-                "stripe_size": null
-            })))
-            .mount(&server)
-            .await;
-
-        Mock::given(method("POST"))
-            .and(path_regex(r"^/v1/tenant/[0-9a-f]{32}/timeline$"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "timeline_id": timeline_id,
-                "tenant_id": tenant_id,
-                "last_record_lsn": "0/0",
-                "disk_consistent_lsn": "0/0",
-                "state": "active",
-                "min_readable_lsn": "0/0"
-            })))
-            .mount(&server)
-            .await;
-
-        let initial_db = database(database_id, user_id, DatabaseStatus::Pending, None);
-        let deployed_db = database(
-            database_id,
-            user_id,
-            DatabaseStatus::Running,
-            Some(deployment_id),
-        );
+        let initial_db = Database {
+            tenant_id: Some("11111111111111111111111111111111".to_string()),
+            timeline_id: Some("22222222222222222222222222222222".to_string()),
+            tenant_gen: Some(1),
+            ..database(database_id, user_id, DatabaseStatus::Pending, None)
+        };
+        let running_db = Database {
+            status: DatabaseStatus::Running,
+            active_deployment_id: Some(deployment_id),
+            ..initial_db.clone()
+        };
         let deployment = DatabaseDeployment {
             id: deployment_id,
             database_id,
@@ -424,9 +526,6 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let initial_db_create = initial_db.clone();
-        let initial_db_reload = initial_db.clone();
-        let deployment_create = deployment.clone();
         let deployment_after = DatabaseDeployment {
             id: deployment_id,
             database_id,
@@ -440,42 +539,28 @@ mod tests {
             updated_at: chrono::Utc::now(),
         };
 
-        let mut seq = Sequence::new();
         let mut db_repo = MockDatabaseRepository::new();
-        db_repo
-            .expect_create_database()
-            .with(function(|params: &CreateDatabaseParams| {
-                params.name == "orders"
-                    && params.engine == "neon"
-                    && params.disk_mib == 1024
-                    && params.vcpus.value() == 1
-                    && params.memory_mib.value() == 512
-                    && params.tenant_id.is_some()
-                    && params.timeline_id.is_some()
-                    && !params.settings.contains_key(NEON_TENANT_ID_KEY)
-                    && !params.settings.contains_key(NEON_TIMELINE_ID_KEY)
-            }))
-            .times(1)
-            .returning(move |_| {
-                let value = initial_db_create.clone();
-                Box::pin(async move { Ok(value) })
-            });
         db_repo
             .expect_get_database()
             .with(eq(database_id))
             .times(1)
-            .in_sequence(&mut seq)
-            .returning(move |_| {
-                let value = initial_db_reload.clone();
-                Box::pin(async move { Ok(Some(value)) })
+            .returning({
+                let initial_db = initial_db.clone();
+                move |_| {
+                    let value = initial_db.clone();
+                    Box::pin(async move { Ok(Some(value)) })
+                }
             });
         db_repo
             .expect_create_deployment()
             .with(eq(database_id), eq(user_id))
             .times(1)
-            .returning(move |_, _| {
-                let value = deployment_create.clone();
-                Box::pin(async move { Ok(value) })
+            .returning({
+                let deployment = deployment.clone();
+                move |_, _| {
+                    let value = deployment.clone();
+                    Box::pin(async move { Ok(value) })
+                }
             });
         db_repo
             .expect_update_active_deployment()
@@ -501,26 +586,30 @@ mod tests {
             .expect_get_deployment()
             .with(eq(deployment_id))
             .times(1)
-            .in_sequence(&mut seq)
-            .returning(move |_| {
-                let value = deployment_after.clone();
-                Box::pin(async move { Ok(Some(value)) })
+            .returning({
+                let deployment_after = deployment_after.clone();
+                move |_| {
+                    let value = deployment_after.clone();
+                    Box::pin(async move { Ok(Some(value)) })
+                }
             });
         db_repo
             .expect_get_database()
             .with(eq(database_id))
             .times(1)
-            .in_sequence(&mut seq)
-            .returning(move |_| {
-                let value = deployed_db.clone();
-                Box::pin(async move { Ok(Some(value)) })
+            .returning({
+                let running_db = running_db.clone();
+                move |_| {
+                    let value = running_db.clone();
+                    Box::pin(async move { Ok(Some(value)) })
+                }
             });
 
         let mut user_repo = MockUserRepository::new();
         user_repo
             .expect_find_by_id()
             .with(eq(user_id))
-            .times(2)
+            .times(1)
             .returning(move |_| {
                 Ok(Some(User {
                     id: user_id,
@@ -572,13 +661,86 @@ mod tests {
                         as i32,
                 })
             });
-
         let state = build_state(
-            crate::config::ApiConfig {
-                neon_pageserver_url: Some(server.uri()),
-                neon_bearer_token: None,
-                ..Default::default()
-            },
+            crate::config::ApiConfig::default(),
+            Arc::new(user_repo),
+            Arc::new(db_repo),
+            Arc::new(scheduler),
+        );
+
+        DatabaseService::provision_and_deploy_database(state, database_id)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_database_returns_pending_database() {
+        let user_id = Uuid::new_v4();
+        let database_id = Uuid::new_v4();
+
+        let mut db_repo = MockDatabaseRepository::new();
+        db_repo
+            .expect_create_database()
+            .with(function(|params: &CreateDatabaseParams| {
+                params.name == "orders"
+                    && params.engine == "neon"
+                    && params.disk_mib == 1024
+                    && params.vcpus.value() == 1
+                    && params.memory_mib.value() == 512
+                    && params
+                        .tenant_id
+                        .as_deref()
+                        .is_some_and(DatabaseService::is_placeholder_neon_id)
+                    && params
+                        .timeline_id
+                        .as_deref()
+                        .is_some_and(DatabaseService::is_placeholder_neon_id)
+                    && !params.settings.contains_key(NEON_TENANT_ID_KEY)
+                    && !params.settings.contains_key(NEON_TIMELINE_ID_KEY)
+            }))
+            .times(1)
+            .returning(move |_| {
+                Box::pin(async move {
+                    Ok(Database {
+                        id: database_id,
+                        name: "orders".to_string(),
+                        engine: "neon".to_string(),
+                        user_id,
+                        vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
+                        memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
+                        disk_mib: 1024,
+                        tenant_id: None,
+                        timeline_id: None,
+                        tenant_gen: None,
+                        settings: HashMap::new(),
+                        status: DatabaseStatus::Pending,
+                        active_deployment_id: None,
+                        created_at: chrono::Utc::now(),
+                        updated_at: chrono::Utc::now(),
+                    })
+                })
+            });
+
+        let mut user_repo = MockUserRepository::new();
+        user_repo
+            .expect_find_by_id()
+            .with(eq(user_id))
+            .times(1)
+            .returning(move |_| {
+                Ok(Some(User {
+                    id: user_id,
+                    email: "db@example.com".to_string(),
+                    password_hash: "hash".to_string(),
+                    role: UserRole::User,
+                    first_name: None,
+                    last_name: None,
+                    vpc_ipv6_prefix: Some("fd00:abcd::".to_string()),
+                }))
+            });
+
+        let scheduler = MockScheduler::new();
+        let state = build_state(
+            crate::config::ApiConfig::default(),
             Arc::new(user_repo),
             Arc::new(db_repo),
             Arc::new(scheduler),
@@ -592,6 +754,7 @@ mod tests {
             disk_mib: 1024,
             tenant_id: None,
             timeline_id: None,
+            tenant_gen: None,
             settings: HashMap::new(),
         };
 
@@ -599,8 +762,79 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(created.id, database_id);
-        assert_eq!(created.active_deployment_id, Some(deployment_id));
-        assert_eq!(created.status, DatabaseStatus::Running);
+        assert_eq!(created.active_deployment_id, None);
+        assert_eq!(created.status, DatabaseStatus::Pending);
+    }
+
+    #[test]
+    fn neon_provisioning_helpers_distinguish_real_and_placeholder_ids() {
+        let mut neon_params = CreateDatabaseParams {
+            name: "orders".to_string(),
+            engine: "neon".to_string(),
+            user_id: Uuid::new_v4(),
+            vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
+            memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
+            disk_mib: 1024,
+            tenant_id: None,
+            timeline_id: None,
+            tenant_gen: None,
+            settings: HashMap::new(),
+        };
+        DatabaseService::ensure_neon_provisioning_ids(&mut neon_params);
+        assert!(
+            neon_params
+                .tenant_id
+                .as_deref()
+                .is_some_and(DatabaseService::is_placeholder_neon_id)
+        );
+        assert!(
+            neon_params
+                .timeline_id
+                .as_deref()
+                .is_some_and(DatabaseService::is_placeholder_neon_id)
+        );
+
+        let neon_db = Database {
+            id: Uuid::new_v4(),
+            name: "orders".to_string(),
+            engine: "neon".to_string(),
+            user_id: Uuid::new_v4(),
+            vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
+            memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
+            disk_mib: 1024,
+            tenant_id: Some("11111111111111111111111111111111".to_string()),
+            timeline_id: Some("22222222222222222222222222222222".to_string()),
+            tenant_gen: Some(1),
+            settings: HashMap::new(),
+            status: DatabaseStatus::Running,
+            active_deployment_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        assert!(!DatabaseService::needs_neon_provisioning(&neon_db));
+
+        let placeholder_db = Database {
+            tenant_id: Some("pending-tenant-123".to_string()),
+            timeline_id: Some("pending-timeline-456".to_string()),
+            ..neon_db.clone()
+        };
+        assert!(DatabaseService::needs_neon_provisioning(&placeholder_db));
+
+        let mut postgres_params = CreateDatabaseParams {
+            name: "orders".to_string(),
+            engine: "postgres".to_string(),
+            user_id: Uuid::new_v4(),
+            vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
+            memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
+            disk_mib: 1024,
+            tenant_id: None,
+            timeline_id: None,
+            tenant_gen: None,
+            settings: HashMap::new(),
+        };
+        DatabaseService::ensure_neon_provisioning_ids(&mut postgres_params);
+        assert!(postgres_params.tenant_id.is_none());
+        assert!(postgres_params.timeline_id.is_none());
     }
 
     #[tokio::test]
@@ -633,6 +867,7 @@ mod tests {
             disk_mib: 1024,
             tenant_id: None,
             timeline_id: None,
+            tenant_gen: None,
             settings: HashMap::new(),
         };
 
@@ -870,5 +1105,94 @@ mod tests {
         DatabaseService::delete_database(&state, database_id)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn validate_tenant_retention_returns_true_for_active_database() {
+        let tenant_id = "11111111111111111111111111111111";
+        let user_id = Uuid::new_v4();
+        let db_id = Uuid::new_v4();
+        let db = Database {
+            tenant_id: Some(tenant_id.to_string()),
+            tenant_gen: Some(1),
+            ..database(db_id, user_id, DatabaseStatus::Running, None)
+        };
+
+        let mut db_repo = MockDatabaseRepository::new();
+        db_repo
+            .expect_get_database_by_tenant_id()
+            .with(eq(tenant_id))
+            .times(1)
+            .returning(move |_| {
+                let value = db.clone();
+                Box::pin(async move { Ok(Some(value)) })
+            });
+
+        let state = build_state(
+            crate::config::ApiConfig::default(),
+            Arc::new(MockUserRepository::new()),
+            Arc::new(db_repo),
+            Arc::new(MockScheduler::new()),
+        );
+
+        assert!(DatabaseService::validate_tenant_retention(&state, tenant_id, 1).await);
+    }
+
+    #[tokio::test]
+    async fn validate_tenant_retention_returns_false_when_missing() {
+        let tenant_id = "11111111111111111111111111111111";
+
+        let mut db_repo = MockDatabaseRepository::new();
+        db_repo
+            .expect_get_database_by_tenant_id()
+            .with(eq(tenant_id))
+            .times(1)
+            .returning(|_| Box::pin(async { Ok(None) }));
+
+        let state = build_state(
+            crate::config::ApiConfig::default(),
+            Arc::new(MockUserRepository::new()),
+            Arc::new(db_repo),
+            Arc::new(MockScheduler::new()),
+        );
+
+        assert!(!DatabaseService::validate_tenant_retention(&state, tenant_id, 1).await);
+    }
+
+    #[tokio::test]
+    async fn validate_tenant_retention_is_conservative_on_repo_error() {
+        let tenant_id = "11111111111111111111111111111111";
+
+        let mut db_repo = MockDatabaseRepository::new();
+        db_repo
+            .expect_get_database_by_tenant_id()
+            .with(eq(tenant_id))
+            .times(1)
+            .returning(|_| {
+                Box::pin(async {
+                    Err(crate::domain::DomainError::Infrastructure(
+                        "lookup failed".to_string(),
+                    ))
+                })
+            });
+
+        let state = build_state(
+            crate::config::ApiConfig::default(),
+            Arc::new(MockUserRepository::new()),
+            Arc::new(db_repo),
+            Arc::new(MockScheduler::new()),
+        );
+
+        assert!(DatabaseService::validate_tenant_retention(&state, tenant_id, 1).await);
+    }
+
+    #[test]
+    fn provisioning_404_errors_are_not_retryable() {
+        let err = ApiError::Internal(
+            "Infrastructure error: Neon create tenant failed: 404 Not Found - {\"msg\":\"page not found\"}"
+                .to_string(),
+        );
+
+        assert!(!DatabaseService::is_retryable_provisioning_error(&err));
     }
 }

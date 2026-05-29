@@ -4,6 +4,15 @@ use crate::domain::error::CliResult;
 use crate::domain::models::CreateDatabaseRequest;
 use crate::infrastructure::ui;
 
+fn create_database_success_message(name: &str, db: &crate::domain::models::DatabaseInfo) -> String {
+    format!(
+        "Database {} created successfully (ID: {}). Initial status: {}",
+        name,
+        db.id,
+        ui::status_label(&db.status)
+    )
+}
+
 pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> CliResult<()> {
     match cmd {
         DbCommands::List => {
@@ -76,10 +85,7 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
             };
 
             let db = ctx.client.create_database(req).await?;
-            ui::success(&format!(
-                "Database {} created successfully (ID: {})",
-                name, db.id
-            ));
+            ui::success(&create_database_success_message(&name, &db));
         },
         DbCommands::Delete { id, yes } => {
             if !yes {
@@ -178,6 +184,28 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn create_uses_returned_status_in_success_message() {
+        let db = DatabaseInfo {
+            id: "db-1".to_string(),
+            name: "orders".to_string(),
+            engine: "neon".to_string(),
+            status: "pending".to_string(),
+            vcpus: 1,
+            memory_mib: 512,
+            disk_mib: 1024,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        assert_eq!(
+            create_database_success_message("orders", &db),
+            format!(
+                "Database orders created successfully (ID: db-1). Initial status: {}",
+                ui::status_label("pending")
+            )
+        );
     }
 
     #[tokio::test]
