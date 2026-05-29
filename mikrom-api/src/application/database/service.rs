@@ -15,15 +15,16 @@ impl DatabaseService {
         tenant_id: &str,
         generation: u32,
     ) -> bool {
-        let _ = generation;
-
         match state
             .ctx
             .database_repo
             .get_database_by_tenant_id(tenant_id)
             .await
         {
-            Ok(Some(database)) => !matches!(database.status, DatabaseStatus::Deleting),
+            Ok(Some(database)) => {
+                !matches!(database.status, DatabaseStatus::Deleting)
+                    && database.tenant_gen.unwrap_or(1) == generation
+            },
             Ok(None) => false,
             Err(err) => {
                 tracing::warn!(
@@ -136,8 +137,9 @@ impl DatabaseService {
                         )
                     })?;
 
+            let (tenant_id, timeline_id) = Self::resolve_neon_provisioning_ids(&database);
             let provisioning = neon_client
-                .provision_database()
+                .provision_database_with_ids(tenant_id, timeline_id)
                 .await
                 .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -369,6 +371,23 @@ impl DatabaseService {
 
     fn placeholder_neon_id(kind: &str) -> String {
         format!("pending-{kind}-{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn resolve_neon_provisioning_ids(database: &Database) -> (String, String) {
+        let tenant_id = database
+            .tenant_id
+            .as_deref()
+            .and_then(|id| id.strip_prefix("pending-tenant-"))
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
+        let timeline_id = database
+            .timeline_id
+            .as_deref()
+            .and_then(|id| id.strip_prefix("pending-timeline-"))
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
+
+        (tenant_id, timeline_id)
     }
 
     fn is_placeholder_neon_id(value: &str) -> bool {
@@ -835,6 +854,63 @@ mod tests {
         DatabaseService::ensure_neon_provisioning_ids(&mut postgres_params);
         assert!(postgres_params.tenant_id.is_none());
         assert!(postgres_params.timeline_id.is_none());
+    }
+
+    #[test]
+    fn resolve_neon_provisioning_ids_reuses_placeholder_suffixes() {
+        let database = Database {
+            id: Uuid::new_v4(),
+            name: "orders".to_string(),
+            engine: "neon".to_string(),
+            user_id: Uuid::new_v4(),
+            vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
+            memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
+            disk_mib: 1024,
+            tenant_id: Some("pending-tenant-11111111111111111111111111111111".to_string()),
+            timeline_id: Some("pending-timeline-22222222222222222222222222222222".to_string()),
+            tenant_gen: Some(1),
+            settings: HashMap::new(),
+            status: DatabaseStatus::Pending,
+            active_deployment_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let (tenant_id, timeline_id) = DatabaseService::resolve_neon_provisioning_ids(&database);
+        assert_eq!(tenant_id, "11111111111111111111111111111111");
+        assert_eq!(timeline_id, "22222222222222222222222222222222");
+    }
+
+    #[tokio::test]
+    async fn validate_tenant_retention_requires_matching_generation() {
+        let tenant_id = "11111111111111111111111111111111";
+        let user_id = Uuid::new_v4();
+        let db_id = Uuid::new_v4();
+        let db = Database {
+            tenant_id: Some(tenant_id.to_string()),
+            tenant_gen: Some(3),
+            ..database(db_id, user_id, DatabaseStatus::Running, None)
+        };
+
+        let mut db_repo = MockDatabaseRepository::new();
+        db_repo
+            .expect_get_database_by_tenant_id()
+            .with(eq(tenant_id))
+            .times(2)
+            .returning(move |_| {
+                let value = db.clone();
+                Box::pin(async move { Ok(Some(value)) })
+            });
+
+        let state = build_state(
+            crate::config::ApiConfig::default(),
+            Arc::new(MockUserRepository::new()),
+            Arc::new(db_repo),
+            Arc::new(MockScheduler::new()),
+        );
+
+        assert!(!DatabaseService::validate_tenant_retention(&state, tenant_id, 1).await);
+        assert!(DatabaseService::validate_tenant_retention(&state, tenant_id, 3).await);
     }
 
     #[tokio::test]
