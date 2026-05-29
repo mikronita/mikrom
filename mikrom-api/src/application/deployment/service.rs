@@ -1187,6 +1187,7 @@ mod tests {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(user_repo),
             app_repo: Arc::new(app_repo),
+            database_repo: Arc::new(crate::domain::MockDatabaseRepository::new()),
             github_repo: Arc::new(crate::domain::github::MockGithubRepository::default()),
             volume_repo: Arc::new(volume_repo),
             scheduler: Arc::new(crate::domain::MockScheduler::new()),

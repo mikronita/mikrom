@@ -120,3 +120,35 @@ async fn test_v1_apps_routing() {
     );
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn test_v1_database_routes_are_registered() {
+    let app = create_app(build_state().await);
+
+    for (method, uri) in [
+        ("GET", "/v1/databases"),
+        ("POST", "/v1/databases"),
+        (
+            "DELETE",
+            "/v1/databases/00000000-0000-0000-0000-000000000000",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "{method} {uri} should not be 404"
+        );
+    }
+}

@@ -31,6 +31,7 @@ async fn test_route_reconciliation_on_startup() {
         user_repo: Arc::new(mikrom_api::infrastructure::db::PostgresUserRepository::new(
             pool.clone(),
         )),
+        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
         volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
         github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),

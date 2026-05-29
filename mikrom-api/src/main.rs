@@ -7,8 +7,8 @@ use mikrom_api::config::ApiConfig;
 use mikrom_api::create_app_with_rate_limits;
 use mikrom_api::infrastructure::db;
 use mikrom_api::infrastructure::db::{
-    PostgresAppRepository, PostgresGithubRepository, PostgresUserRepository,
-    PostgresVolumeRepository,
+    PostgresAppRepository, PostgresDatabaseRepository, PostgresGithubRepository,
+    PostgresUserRepository, PostgresVolumeRepository,
 };
 
 #[tokio::main]
@@ -34,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
         db_pool.clone(),
         config.master_key.clone(),
     ));
+    let database_repo = Arc::new(PostgresDatabaseRepository::new(db_pool.clone()));
     let github_repo = Arc::new(PostgresGithubRepository::new(db_pool.clone()));
     let volume_repo = Arc::new(PostgresVolumeRepository::new(db_pool.clone()));
 
@@ -48,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
     let ctx = ApiContext::new(
         user_repo.clone(),
         app_repo.clone(),
+        database_repo.clone(),
         github_repo.clone(),
         volume_repo.clone(),
         scheduler.clone(),
@@ -65,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
         ctx: ctx.clone(),
         user_repo,
         app_repo,
+        database_repo,
         github_repo,
         volume_repo,
         scheduler,

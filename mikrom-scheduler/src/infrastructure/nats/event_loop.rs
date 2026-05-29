@@ -151,6 +151,34 @@ impl NatsEventLoop {
                 queue_group.clone(),
             )
             .await?;
+
+        let mut deploy_db_sub = client
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_DEPLOY_DATABASE,
+                queue_group.clone(),
+            )
+            .await?;
+
+        let mut list_db_sub = client
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_LIST_DATABASES,
+                queue_group.clone(),
+            )
+            .await?;
+
+        let mut db_status_sub = client
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_GET_DATABASE_STATUS,
+                queue_group.clone(),
+            )
+            .await?;
+
+        let mut delete_db_sub = client
+            .queue_subscribe(
+                mikrom_proto::subjects::SCHEDULER_DELETE_DATABASE,
+                queue_group.clone(),
+            )
+            .await?;
         let mut status_sub = client
             .queue_subscribe(
                 mikrom_proto::subjects::SCHEDULER_GET_JOB,
@@ -285,6 +313,10 @@ impl NatsEventLoop {
                 Some(msg) = router_heartbeat_sub.next() => self.handle_router_heartbeat(msg).await,
                 Some(msg) = router_traffic_sub.next() => self.handle_router_traffic(msg).await,
                 Some(msg) = deploy_sub.next() => self.handle_deploy(msg).await,
+                Some(msg) = deploy_db_sub.next() => self.handle_deploy_database(msg).await,
+                Some(msg) = list_db_sub.next() => self.handle_list_databases(msg).await,
+                Some(msg) = db_status_sub.next() => self.handle_database_status(msg).await,
+                Some(msg) = delete_db_sub.next() => self.handle_delete_database(msg).await,
                 Some(msg) = status_sub.next() => self.handle_status(msg).await,
                 Some(msg) = list_sub.next() => self.handle_list_apps(msg).await,
                 Some(msg) = list_workers_sub.next() => self.handle_list_workers(msg).await,
@@ -646,6 +678,125 @@ impl NatsEventLoop {
                 },
                 |e| DeployResponse {
                     message: e.to_string(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        });
+    }
+
+    async fn handle_deploy_database(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::DeployDatabaseRequest,
+                mikrom_proto::scheduler::DeployDatabaseResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_DEPLOY_DATABASE,
+                "deploy-db-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.deploy_database(req).await }
+                },
+                |e| mikrom_proto::scheduler::DeployDatabaseResponse {
+                    message: e.to_string(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        });
+    }
+
+    async fn handle_delete_database(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::DeleteDatabaseRequest,
+                mikrom_proto::scheduler::DeleteDatabaseResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_DELETE_DATABASE,
+                "delete-db-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.delete_database(req).await }
+                },
+                |e| mikrom_proto::scheduler::DeleteDatabaseResponse {
+                    success: false,
+                    message: e.to_string(),
+                },
+            )
+            .await;
+        });
+    }
+
+    async fn handle_database_status(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::DatabaseStatusRequest,
+                mikrom_proto::scheduler::DatabaseStatusResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_GET_DATABASE_STATUS,
+                "db-status-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.get_database_status(req).await }
+                },
+                |e| mikrom_proto::scheduler::DatabaseStatusResponse {
+                    message: e.to_string(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        });
+    }
+
+    async fn handle_list_databases(&self, message: async_nats::Message) {
+        let server = self.server.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let handler_server = server.clone();
+            dispatch_request::<
+                mikrom_proto::scheduler::ListDatabasesRequest,
+                mikrom_proto::scheduler::ListDatabasesResponse,
+                _,
+                _,
+                anyhow::Error,
+            >(
+                server,
+                client,
+                message,
+                mikrom_proto::subjects::SCHEDULER_LIST_DATABASES,
+                "list-db-reply",
+                move |req| {
+                    let handler_server = handler_server.clone();
+                    async move { handler_server.list_databases(req).await }
+                },
+                |_e| mikrom_proto::scheduler::ListDatabasesResponse {
                     ..Default::default()
                 },
             )

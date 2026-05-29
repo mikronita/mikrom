@@ -467,4 +467,19 @@ impl ApiClient for ReqwestApiClient {
         self.request_no_body(reqwest::Method::DELETE, &format!("volumes/{}", volume_id))
             .await
     }
+
+    async fn list_databases(&self) -> CliResult<Vec<DatabaseInfo>> {
+        self.request::<Vec<DatabaseInfo>, ()>(reqwest::Method::GET, "databases", None)
+            .await
+    }
+
+    async fn create_database(&self, req: CreateDatabaseRequest) -> CliResult<DatabaseInfo> {
+        self.request(reqwest::Method::POST, "databases", Some(req))
+            .await
+    }
+
+    async fn delete_database(&self, db_id: &str) -> CliResult<()> {
+        self.request_no_body(reqwest::Method::DELETE, &format!("databases/{}", db_id))
+            .await
+    }
 }

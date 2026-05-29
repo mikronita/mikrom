@@ -440,6 +440,8 @@ pub struct AppConfig {
     pub ipv6_gateway: ::prost::alloc::string::String,
     #[prost(enumeration = "HypervisorType", tag = "13")]
     pub hypervisor: i32,
+    #[prost(enumeration = "WorkloadType", tag = "14")]
+    pub workload_type: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeployResponse {
@@ -792,6 +794,97 @@ pub struct QueryBalloonResponse {
     #[prost(uint32, tag = "4")]
     pub max_memory_mib: u32,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeployDatabaseRequest {
+    #[prost(string, tag = "1")]
+    pub database_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub database_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub rootfs_image: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "4")]
+    pub config: ::core::option::Option<AppConfig>,
+    #[prost(string, tag = "5")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub deployment_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub vpc_ipv6_prefix: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeployDatabaseResponse {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(enumeration = "DeployStatus", tag = "2")]
+    pub status: i32,
+    #[prost(string, tag = "3")]
+    pub host_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub vm_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(enumeration = "HypervisorType", tag = "6")]
+    pub hypervisor: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListDatabasesRequest {
+    #[prost(string, tag = "1")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListDatabasesResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub databases: ::prost::alloc::vec::Vec<DatabaseInfo>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DatabaseInfo {
+    #[prost(string, tag = "1")]
+    pub database_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub ipv6_address: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "5")]
+    pub vcpus: u32,
+    #[prost(uint32, tag = "6")]
+    pub memory_mib: u32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DatabaseStatusRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DatabaseStatusResponse {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(enumeration = "DeployStatus", tag = "2")]
+    pub status: i32,
+    #[prost(string, tag = "3")]
+    pub host_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub vm_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteDatabaseRequest {
+    #[prost(string, tag = "1")]
+    pub job_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteDatabaseResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum VmStatus {
@@ -858,6 +951,32 @@ impl HypervisorType {
             "HYPERTYPE_UNSPECIFIED" => Some(Self::HypertypeUnspecified),
             "HYPERTYPE_FIRECRACKER" => Some(Self::HypertypeFirecracker),
             "HYPERTYPE_CLOUD_HYPERVISOR" => Some(Self::HypertypeCloudHypervisor),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum WorkloadType {
+    App = 0,
+    Database = 1,
+}
+impl WorkloadType {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::App => "WORKLOAD_TYPE_APP",
+            Self::Database => "WORKLOAD_TYPE_DATABASE",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "WORKLOAD_TYPE_APP" => Some(Self::App),
+            "WORKLOAD_TYPE_DATABASE" => Some(Self::Database),
             _ => None,
         }
     }

@@ -21,6 +21,10 @@ pub enum SharedSubject {
     SchedulerUpdateAppScalingConfig,
     SchedulerCancelApp,
     SchedulerGetJob,
+    SchedulerDeployDatabase,
+    SchedulerListDatabases,
+    SchedulerGetDatabaseStatus,
+    SchedulerDeleteDatabase,
     BuilderBuild,
     BuilderGetStatus,
 }
@@ -46,6 +50,10 @@ impl SharedSubject {
             Self::SchedulerUpdateAppScalingConfig => "mikrom.scheduler.update_app_scaling_config",
             Self::SchedulerCancelApp => "mikrom.scheduler.cancel_app",
             Self::SchedulerGetJob => "mikrom.scheduler.get_job",
+            Self::SchedulerDeployDatabase => "mikrom.scheduler.database.deploy",
+            Self::SchedulerListDatabases => "mikrom.scheduler.database.list",
+            Self::SchedulerGetDatabaseStatus => "mikrom.scheduler.database.status",
+            Self::SchedulerDeleteDatabase => "mikrom.scheduler.database.delete",
             Self::BuilderBuild => "mikrom.builder.build",
             Self::BuilderGetStatus => "mikrom.builder.get_status",
         }
@@ -90,6 +98,10 @@ pub const SCHEDULER_UPDATE_APP_SCALING_CONFIG: &str =
     SharedSubject::SchedulerUpdateAppScalingConfig.as_str();
 pub const SCHEDULER_CANCEL_APP: &str = SharedSubject::SchedulerCancelApp.as_str();
 pub const SCHEDULER_GET_JOB: &str = SharedSubject::SchedulerGetJob.as_str();
+pub const SCHEDULER_DEPLOY_DATABASE: &str = SharedSubject::SchedulerDeployDatabase.as_str();
+pub const SCHEDULER_LIST_DATABASES: &str = SharedSubject::SchedulerListDatabases.as_str();
+pub const SCHEDULER_GET_DATABASE_STATUS: &str = SharedSubject::SchedulerGetDatabaseStatus.as_str();
+pub const SCHEDULER_DELETE_DATABASE: &str = SharedSubject::SchedulerDeleteDatabase.as_str();
 pub const BUILDER_BUILD: &str = SharedSubject::BuilderBuild.as_str();
 pub const BUILDER_GET_STATUS: &str = SharedSubject::BuilderGetStatus.as_str();
 

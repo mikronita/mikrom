@@ -43,6 +43,12 @@ pub struct AgentConfig {
     #[serde(default = "default_cloud_hypervisor_base_rootfs")]
     pub cloud_hypervisor_base_rootfs: PathBuf,
 
+    #[serde(default = "default_database_kernel")]
+    pub cloud_hypervisor_database_kernel: PathBuf,
+
+    #[serde(default = "default_database_base_rootfs")]
+    pub cloud_hypervisor_database_base_rootfs: PathBuf,
+
     #[serde(default = "default_http_port")]
     pub http_port: u16,
 
@@ -70,6 +76,8 @@ impl Default for AgentConfig {
             cloud_hypervisor_binary: PathBuf::from("/usr/bin/cloud-hypervisor"),
             cloud_hypervisor_kernel: PathBuf::from("/opt/cloud-hypervisor/vmlinux.bin"),
             cloud_hypervisor_base_rootfs: PathBuf::from("/opt/cloud-hypervisor/base-rootfs.ext4"),
+            cloud_hypervisor_database_kernel: PathBuf::from("/opt/neon/vmlinux.bin"),
+            cloud_hypervisor_database_base_rootfs: PathBuf::from("/opt/neon/base-rootfs.ext4"),
             http_port: 5002,
             max_vms_per_host: 0,
             nats_flapping_session_secs: 30,
@@ -91,6 +99,14 @@ fn default_cloud_hypervisor_kernel() -> PathBuf {
 
 fn default_cloud_hypervisor_base_rootfs() -> PathBuf {
     PathBuf::from("/opt/cloud-hypervisor/base-rootfs.ext4")
+}
+
+fn default_database_kernel() -> PathBuf {
+    PathBuf::from("/opt/neon/vmlinux.bin")
+}
+
+fn default_database_base_rootfs() -> PathBuf {
+    PathBuf::from("/opt/neon/base-rootfs.ext4")
 }
 
 const fn default_http_port() -> u16 {
@@ -342,6 +358,8 @@ mod tests {
             cloud_hypervisor_binary: PathBuf::from("/usr/bin/cloud-hypervisor"),
             cloud_hypervisor_kernel: PathBuf::from("/opt/cloud-hypervisor/vmlinux.bin"),
             cloud_hypervisor_base_rootfs: PathBuf::from("/opt/cloud-hypervisor/base-rootfs.ext4"),
+            cloud_hypervisor_database_kernel: PathBuf::from("/opt/neon/vmlinux.bin"),
+            cloud_hypervisor_database_base_rootfs: PathBuf::from("/opt/neon/base-rootfs.ext4"),
             http_port: 5002,
             max_vms_per_host: 0,
             nats_flapping_session_secs: default_nats_flapping_session_secs(),

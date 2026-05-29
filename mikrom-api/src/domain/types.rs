@@ -133,6 +133,18 @@ impl TryFrom<i64> for MemoryMb {
     }
 }
 
+impl TryFrom<u32> for MemoryMb {
+    type Error = TypeError;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        if value >= 128 {
+            Ok(Self(value))
+        } else {
+            Err(TypeError::InvalidMemory(value as i32))
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for MemoryMb {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -198,6 +210,18 @@ impl TryFrom<i64> for CpuCores {
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         if value >= 1 {
             Ok(Self(value as u32))
+        } else {
+            Err(TypeError::InvalidCpuCores(value as i32))
+        }
+    }
+}
+
+impl TryFrom<u32> for CpuCores {
+    type Error = TypeError;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        if value >= 1 {
+            Ok(Self(value))
         } else {
             Err(TypeError::InvalidCpuCores(value as i32))
         }

@@ -57,6 +57,7 @@ axum-test = "15"
 testcontainers = "0.27"
 testcontainers-modules = { version = "0.15", features = ["postgres"] }
 hyper = "1"
+wiremock = "0.6.5"
 mikrom-scheduler = { path = "../mikrom-scheduler" }
 mikrom-agent = { path = "../mikrom-agent" }
 
@@ -169,4 +170,9 @@ required-features = ["test-utils"]
 [[test]]
 name = "port_propagation_tests"
 path = "tests/port_propagation_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "database_repo_tests"
+path = "tests/database_repo_tests.rs"
 required-features = ["test-utils"]

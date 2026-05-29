@@ -2,8 +2,8 @@ use crate::AppState;
 use crate::application::ApiContext;
 use crate::application::vms::MeshStatus;
 use crate::domain::{
-    MockAppRepository, MockGithubRepository, MockScheduler, MockUserRepository,
-    MockVolumeRepository,
+    MockAppRepository, MockDatabaseRepository, MockGithubRepository, MockScheduler,
+    MockUserRepository, MockVolumeRepository,
 };
 use crate::infrastructure::nats::{MockNatsClient, TypedNatsClient};
 use sqlx::{Connection, Executor, PgConnection, PgPool, postgres::PgPoolOptions};
@@ -19,41 +19,41 @@ pub struct TestDb {
 
 impl TestDb {
     pub async fn new() -> Self {
+        Self::try_new()
+            .await
+            .expect("Failed to initialize test database")
+    }
+
+    pub async fn try_new() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
-        let test_url = env::var("TEST_DATABASE_URL")
-            .expect("TEST_DATABASE_URL must be set for integration tests");
+        let test_url = env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://mikrom:mikrom_password@localhost:5432/mikrom_test".to_string()
+        });
 
         let (server_url, base_db_name) = split_url(&test_url);
         // Use a unique name per test process to avoid conflicts during parallel execution
         let db_name = format!("{}_{}", base_db_name, uuid::Uuid::new_v4().simple());
         let maintenance_url = format!("{}/postgres", server_url);
 
-        let mut conn = PgConnection::connect(&maintenance_url)
-            .await
-            .expect("Failed to connect to maintenance database");
+        let mut conn = PgConnection::connect(&maintenance_url).await?;
 
         conn.execute(format!("CREATE DATABASE {}", db_name).as_str())
-            .await
-            .expect("Failed to create test database");
+            .await?;
 
         let pool_url = format!("{}/{}", server_url, db_name);
         let pool = PgPoolOptions::new()
             .max_connections(5)
             .connect(&pool_url)
-            .await
-            .expect("Failed to connect to test db");
+            .await?;
 
         // Run migrations
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await
-            .expect("Failed to run migrations");
+        sqlx::migrate!("./migrations").run(&pool).await?;
 
-        Self {
+        Ok(Self {
             pool,
             db_name,
             server_url,
-        }
+        })
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -111,6 +111,7 @@ pub fn create_test_app_state(db: PgPool) -> AppState {
 
     let user_repo = Arc::new(MockUserRepository::new());
     let app_repo = Arc::new(MockAppRepository::new());
+    let database_repo = Arc::new(MockDatabaseRepository::new());
     let github_repo = Arc::new(MockGithubRepository::new());
     let volume_repo = Arc::new(MockVolumeRepository::new());
     let scheduler = Arc::new(MockScheduler::new());
@@ -129,6 +130,7 @@ pub fn create_test_app_state(db: PgPool) -> AppState {
     let ctx = ApiContext {
         user_repo: user_repo.clone(),
         app_repo: app_repo.clone(),
+        database_repo: database_repo.clone(),
         github_repo: github_repo.clone(),
         volume_repo: volume_repo.clone(),
         scheduler: scheduler.clone(),
@@ -143,6 +145,7 @@ pub fn create_test_app_state(db: PgPool) -> AppState {
         ctx,
         user_repo,
         app_repo,
+        database_repo,
         github_repo,
         volume_repo,
         scheduler,

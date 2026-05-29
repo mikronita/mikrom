@@ -25,6 +25,18 @@ pub struct DockerToExt4Params<'a> {
     pub ipv6_addr: Option<String>,
     pub ipv6_gw: Option<String>,
     pub volumes: &'a [crate::hypervisor::Volume],
+    pub workload_type: i32,
+}
+
+pub struct DatabaseRootfsParams<'a> {
+    pub output_path: &'a Path,
+    pub base_rootfs_path: &'a Path,
+    pub port: u32,
+    pub ipv6_addr: Option<String>,
+    pub ipv6_gw: Option<String>,
+    pub env: &'a std::collections::HashMap<String, String>,
+    pub volumes: &'a [crate::hypervisor::Volume],
+    pub workload_type: i32,
 }
 
 impl ImageBuilder {
@@ -244,6 +256,10 @@ impl ImageBuilder {
             }
             env_map.insert("PATH".to_string(), path_parts.join(":"));
             env_map.insert("PORT".to_string(), params.port.to_string());
+            env_map.insert(
+                "NEON_PAGESERVER_IPV6".to_string(),
+                "fd00::deed:1d1c".to_string(),
+            );
             if let Some(addr) = &params.ipv6_addr {
                 env_map.insert("IPV6_ADDR".to_string(), addr.clone());
             }
@@ -265,7 +281,8 @@ impl ImageBuilder {
                 "workdir": "/app",
                 "entrypoint": app_entrypoint,
                 "cmd": app_cmd,
-                "volumes": volumes_json
+                "volumes": volumes_json,
+                "workload_type": workload_type_label(params.workload_type)
             });
 
             tokio::fs::write(
@@ -311,6 +328,155 @@ impl ImageBuilder {
                 None,
             )
             .await;
+
+        result
+    }
+
+    pub async fn database_to_ext4(&self, params: DatabaseRootfsParams<'_>) -> anyhow::Result<()> {
+        info!(
+            "Preparing database rootfs from {:?} to {:?} (port={}, volumes={})",
+            params.base_rootfs_path,
+            params.output_path,
+            params.port,
+            params.volumes.len()
+        );
+
+        let parent_dir = params.output_path.parent().unwrap_or(Path::new("/tmp"));
+        let mount_dir = parent_dir.join(format!("mnt-mikrom-build-{}", uuid::Uuid::new_v4()));
+
+        let result = async {
+            info!(
+                "Copying database base rootfs from {} to {:?}...",
+                params.base_rootfs_path.display(),
+                params.output_path
+            );
+            tokio::fs::copy(params.base_rootfs_path, params.output_path)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to copy database base rootfs from {}",
+                        params.base_rootfs_path.display()
+                    )
+                })?;
+
+            tokio::fs::create_dir_all(&mount_dir).await?;
+
+            let mount_dir_str = mount_dir.to_string_lossy();
+            info!("Mounting database image to {}...", mount_dir_str);
+            let status = Command::new("mount")
+                .arg("-o")
+                .arg("loop")
+                .arg(params.output_path)
+                .arg(&mount_dir)
+                .status()
+                .await?;
+
+            if !status.success() {
+                anyhow::bail!("Failed to mount database ext4 image");
+            }
+
+            info!("Setting up mikrom-init for database workload...");
+            let host_init_paths = [
+                "/usr/bin/mikrom-init",
+                "target/release/mikrom-init",
+                "../target/release/mikrom-init",
+                "target/x86_64-unknown-linux-musl/release/mikrom-init",
+                "../target/x86_64-unknown-linux-musl/release/mikrom-init",
+            ];
+
+            let dest_init_path = mount_dir.join("mikrom-init");
+            let mut found_init = false;
+            for path in &host_init_paths {
+                if tokio::fs::metadata(path).await.is_ok() {
+                    info!(path = %path, "Found mikrom-init binary, injecting...");
+                    tokio::fs::copy(path, &dest_init_path)
+                        .await
+                        .context("Failed to copy mikrom-init binary")?;
+                    found_init = true;
+                    break;
+                }
+            }
+
+            if !found_init {
+                anyhow::bail!(
+                    "CRITICAL: mikrom-init binary not found in any of the expected paths: {:?}. \
+                     Run 'make build-init' to generate it.",
+                    host_init_paths
+                );
+            }
+
+            tokio::fs::set_permissions(&dest_init_path, fs::Permissions::from_mode(0o755))
+                .await
+                .context("Failed to mark mikrom-init executable")?;
+
+            let etc_dir = mount_dir.join("etc/mikrom");
+            tokio::fs::create_dir_all(&etc_dir)
+                .await
+                .context("Failed to create /etc/mikrom in guest")?;
+
+            let mut env_map = params.env.clone();
+            env_map.insert("PORT".to_string(), params.port.to_string());
+            if let Some(addr) = &params.ipv6_addr {
+                env_map.insert("IPV6_ADDR".to_string(), addr.clone());
+            }
+            if let Some(gw) = &params.ipv6_gw {
+                env_map.insert("IPV6_GW".to_string(), gw.clone());
+            }
+            let neon_tenant_id = env_map
+                .get("NEON_TENANT_ID")
+                .cloned()
+                .context("NEON_TENANT_ID is required for database workloads")?;
+            let neon_timeline_id = env_map
+                .get("NEON_TIMELINE_ID")
+                .cloned()
+                .context("NEON_TIMELINE_ID is required for database workloads")?;
+            env_map.insert("NEON_TENANT_ID".to_string(), neon_tenant_id);
+            env_map.insert("NEON_TIMELINE_ID".to_string(), neon_timeline_id);
+
+            let mut volumes_json = Vec::new();
+            for (idx, vol) in params.volumes.iter().enumerate() {
+                volumes_json.push(serde_json::json!({
+                    "drive_id": vol.volume_id.replace('-', "_"),
+                    "mount_point": vol.mount_point,
+                    "index": idx + 1,
+                }));
+            }
+
+            let init_config = serde_json::json!({
+                "env": env_map,
+                "entrypoint": Vec::<String>::new(),
+                "cmd": Vec::<String>::new(),
+                "volumes": volumes_json,
+                "workload_type": workload_type_label(params.workload_type)
+            });
+
+            tokio::fs::write(
+                etc_dir.join("init.json"),
+                serde_json::to_string_pretty(&init_config)?,
+            )
+            .await
+            .context("Failed to write init.json")?;
+
+            info!("Successfully created database ext4 rootfs");
+            Ok::<(), anyhow::Error>(())
+        }
+        .await;
+
+        info!("Flushing and cleaning up database rootfs...");
+        let _ = tokio::task::spawn_blocking(|| unsafe { libc::sync() }).await;
+
+        if let Err(e) = unmount_path(&mount_dir, 0) {
+            tracing::error!(
+                "Failed to unmount {}; filesystem may be corrupted: {}",
+                mount_dir.to_string_lossy(),
+                e
+            );
+            let _ = unmount_path(&mount_dir, libc::MNT_DETACH);
+        }
+
+        if let Err(e) = tokio::fs::remove_dir(&mount_dir).await {
+            tracing::warn!("Failed to remove mount directory {:?}: {}", mount_dir, e);
+        }
 
         result
     }
@@ -688,6 +854,14 @@ impl ImageBuilder {
     }
 }
 
+fn workload_type_label(workload_type: i32) -> &'static str {
+    if workload_type == 1 {
+        "DATABASE"
+    } else {
+        "APP"
+    }
+}
+
 fn unmount_path(path: &Path, flags: libc::c_int) -> anyhow::Result<()> {
     let c_path = CString::new(path.as_os_str().as_bytes())
         .context("Failed to convert mount path to C string")?;
@@ -838,8 +1012,15 @@ mod tests {
                 ipv6_addr: None,
                 ipv6_gw: None,
                 volumes: &[],
+                workload_type: 0,
             })
             .await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_workload_type_label_maps_database() {
+        assert_eq!(workload_type_label(1), "DATABASE");
+        assert_eq!(workload_type_label(0), "APP");
     }
 }

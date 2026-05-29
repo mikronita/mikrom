@@ -6,8 +6,25 @@ use crate::domain::volume::{
 use crate::infrastructure::db::models::{DbAppVolume, DbVolume, DbVolumeSnapshot};
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use sqlx::FromRow;
 use sqlx::PgPool;
 use uuid::Uuid;
+
+#[derive(Debug, FromRow)]
+struct VolumeWithAttachmentsRow {
+    volume_id: Uuid,
+    user_id: Uuid,
+    volume_name: String,
+    size_mib: i32,
+    pool_name: String,
+    vol_created_at: DateTime<Utc>,
+    vol_updated_at: DateTime<Utc>,
+    app_id: Option<Uuid>,
+    mount_point: Option<String>,
+    access_mode: Option<i32>,
+    app_name: Option<String>,
+}
 
 pub struct PostgresVolumeRepository {
     pool: PgPool,
@@ -47,20 +64,20 @@ impl VolumeRepository for PostgresVolumeRepository {
         &self,
         user_id: Uuid,
     ) -> DomainResult<Vec<VolumeWithAttachments>> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query_as::<_, VolumeWithAttachmentsRow>(
             r#"
             SELECT 
                 v.id as volume_id, v.user_id, v.name as volume_name, v.size_mib, v.pool_name, v.created_at as vol_created_at, v.updated_at as vol_updated_at,
-                av.app_id as "app_id?", av.mount_point as "mount_point?", av.access_mode as "access_mode?",
-                a.name as "app_name?"
+                av.app_id as app_id, av.mount_point as mount_point, av.access_mode as access_mode,
+                a.name as app_name
             FROM volumes v
             LEFT JOIN app_volumes av ON v.id = av.volume_id
             LEFT JOIN apps a ON av.app_id = a.id
             WHERE v.user_id = $1
             ORDER BY v.created_at DESC
-            "#,
-            user_id
+            "#
         )
+        .bind(user_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -106,13 +123,12 @@ impl VolumeRepository for PostgresVolumeRepository {
     }
 
     async fn is_volume_attached(&self, volume_id: Uuid) -> DomainResult<bool> {
-        let row = sqlx::query!(
-            "SELECT count(*) FROM app_volumes WHERE volume_id = $1",
-            volume_id
-        )
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(row.count.unwrap_or(0) > 0)
+        let count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM app_volumes WHERE volume_id = $1")
+                .bind(volume_id)
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(count > 0)
     }
 
     async fn delete_volume(&self, volume_id: Uuid) -> DomainResult<bool> {

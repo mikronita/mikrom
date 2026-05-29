@@ -1,4 +1,5 @@
 pub mod app;
+pub mod database;
 pub mod error;
 pub mod github;
 pub mod nats;
@@ -11,6 +12,11 @@ pub mod worker;
 pub use app::{
     App, AppRepository, CreateAppParams, Deployment, GitMetadata, MockAppRepository, NewDeployment,
     SecurityRule, UpdateDeploymentParams,
+};
+#[cfg(any(test, feature = "test-utils"))]
+pub use database::MockDatabaseRepository;
+pub use database::{
+    CreateDatabaseParams, Database, DatabaseDeployment, DatabaseRepository, DatabaseStatus,
 };
 pub use error::{DomainError, DomainResult};
 pub use github::{GithubRepository, MockGithubRepository, UserGithubAccount};

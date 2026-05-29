@@ -792,6 +792,7 @@ mod tests {
     use crate::AppState;
     use crate::application::deployment::{AppScaleState, resolve_app_scale_state};
     use crate::auth::AuthUser;
+    use crate::domain::MockDatabaseRepository;
     use crate::domain::MockScheduler;
     use crate::domain::github::MockGithubRepository;
     use crate::domain::{
@@ -830,6 +831,7 @@ mod tests {
         AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo,
+            database_repo: Arc::new(MockDatabaseRepository::new()),
             app_repo,
             github_repo,
             volume_repo,

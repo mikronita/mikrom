@@ -19,9 +19,12 @@ pub use infrastructure::http::rate_limit;
 pub use infrastructure::nats;
 pub use infrastructure::scheduler::{NatsScheduler, Scheduler, status_name};
 
+#[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use domain::{AppRepository, GithubRepository, UserRepository, VolumeRepository};
+pub use domain::{
+    AppRepository, DatabaseRepository, GithubRepository, UserRepository, VolumeRepository,
+};
 pub use error::{ApiError, ApiResult};
 
 use crate::application::vms::MeshStatus;
@@ -33,6 +36,7 @@ pub struct AppState {
     pub ctx: crate::application::ApiContext,
     pub user_repo: Arc<dyn UserRepository>,
     pub app_repo: Arc<dyn AppRepository>,
+    pub database_repo: Arc<dyn DatabaseRepository>,
     pub github_repo: Arc<dyn GithubRepository>,
     pub volume_repo: Arc<dyn VolumeRepository>,
     pub scheduler: Arc<dyn Scheduler>,
@@ -65,6 +69,7 @@ impl Default for AppState {
         Self {
             user_repo: ctx.user_repo.clone(),
             app_repo: ctx.app_repo.clone(),
+            database_repo: ctx.database_repo.clone(),
             github_repo: ctx.github_repo.clone(),
             volume_repo: ctx.volume_repo.clone(),
             scheduler: ctx.scheduler.clone(),

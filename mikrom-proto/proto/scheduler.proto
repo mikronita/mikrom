@@ -53,6 +53,12 @@ service SchedulerService {
   rpc UpdateSecurityGroups(UpdateSecurityGroupsRequest) returns (UpdateSecurityGroupsResponse);
   rpc UpdateAppScalingConfig(UpdateAppScalingConfigRequest) returns (UpdateAppScalingConfigResponse);
 
+  // Database operations
+  rpc DeployDatabase(DeployDatabaseRequest) returns (DeployDatabaseResponse);
+  rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse);
+  rpc GetDatabaseStatus(DatabaseStatusRequest) returns (DatabaseStatusResponse);
+  rpc DeleteDatabase(DeleteDatabaseRequest) returns (DeleteDatabaseResponse);
+
   // Storage operations
   rpc CreateVolume(CreateVolumeRequest) returns (CreateVolumeResponse);
   rpc DeleteVolume(DeleteVolumeRequest) returns (DeleteVolumeResponse);
@@ -333,6 +339,11 @@ enum HypervisorType {
   HYPERTYPE_CLOUD_HYPERVISOR = 3;
 }
 
+enum WorkloadType {
+  WORKLOAD_TYPE_APP = 0;
+  WORKLOAD_TYPE_DATABASE = 1;
+}
+
 message Volume {
   string volume_id = 1;
   uint64 size_mib = 2;
@@ -360,6 +371,7 @@ message AppConfig {
   string ipv6_address = 11;
   string ipv6_gateway = 12;
   HypervisorType hypervisor = 13;
+  WorkloadType workload_type = 14;
 }
 
 
@@ -600,4 +612,63 @@ message QueryBalloonResponse {
   string message = 2;
   uint32 actual_memory_mib = 3;
   uint32 max_memory_mib = 4;
+}
+
+message DeployDatabaseRequest {
+  string database_id = 1;
+  string database_name = 2;
+  string rootfs_image = 3;
+  AppConfig config = 4;
+  string user_id = 5;
+  string deployment_id = 6;
+  string vpc_ipv6_prefix = 7;
+}
+
+message DeployDatabaseResponse {
+  string job_id = 1;
+  DeployStatus status = 2;
+  string host_id = 3;
+  string vm_id = 4;
+  string message = 5;
+  HypervisorType hypervisor = 6;
+}
+
+message ListDatabasesRequest {
+  string user_id = 1;
+}
+
+message ListDatabasesResponse {
+  repeated DatabaseInfo databases = 1;
+}
+
+message DatabaseInfo {
+  string database_id = 1;
+  string name = 2;
+  string status = 3;
+  string ipv6_address = 4;
+  uint32 vcpus = 5;
+  uint32 memory_mib = 6;
+}
+
+message DatabaseStatusRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message DatabaseStatusResponse {
+  string job_id = 1;
+  DeployStatus status = 2;
+  string host_id = 3;
+  string vm_id = 4;
+  string message = 5;
+}
+
+message DeleteDatabaseRequest {
+  string job_id = 1;
+  string user_id = 2;
+}
+
+message DeleteDatabaseResponse {
+  bool success = 1;
+  string message = 2;
 }

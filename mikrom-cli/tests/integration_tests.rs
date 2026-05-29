@@ -35,8 +35,15 @@ async fn test_client_register() {
             json!({ "email": "test@example.com", "password": "password" }),
         ))
         .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "message": "User created",
-            "user_id": "user-123"
+            "user": {
+                "id": "user-123",
+                "email": "test@example.com",
+                "role": "User",
+                "first_name": null,
+                "last_name": null,
+                "vpc_ipv6_prefix": "fd00:abcd::"
+            },
+            "token": "secret-token"
         })))
         .mount(&server)
         .await;
@@ -45,7 +52,8 @@ async fn test_client_register() {
         .register("test@example.com", "password")
         .await
         .unwrap();
-    assert_eq!(res.user_id, "user-123");
+    assert_eq!(res.user.id, "user-123");
+    assert_eq!(res.token, "secret-token");
 }
 
 #[tokio::test]
@@ -521,4 +529,94 @@ async fn test_client_error_handling_invalid_error_json() {
     // 500 is retryable; on the last attempt the response is returned,
     // and parsing the invalid JSON body yields this message
     assert!(err_msg.contains("Failed to parse error response"));
+}
+
+#[tokio::test]
+async fn test_client_list_databases() {
+    let server = MockServer::start().await;
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/v1/databases"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": "db-1",
+                "name": "orders",
+                "engine": "neon",
+                "status": "running",
+                "vcpus": 1,
+                "memory_mib": 512,
+                "disk_mib": 1024,
+                "created_at": "2026-01-01T00:00:00Z"
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let res = client.list_databases().await.unwrap();
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0].name, "orders");
+}
+
+#[tokio::test]
+async fn test_client_create_database() {
+    let server = MockServer::start().await;
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
+
+    Mock::given(method("POST"))
+        .and(path("/v1/databases"))
+        .and(body_json(json!({
+            "name": "orders",
+            "engine": "neon",
+            "vcpus": 2,
+            "memory_mib": 1024,
+            "disk_mib": 4096,
+            "settings": {
+                "max_connections": "200"
+            }
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": "db-1",
+            "name": "orders",
+            "engine": "neon",
+            "status": "pending",
+            "vcpus": 2,
+            "memory_mib": 1024,
+            "disk_mib": 4096,
+            "created_at": "2026-01-01T00:00:00Z"
+        })))
+        .mount(&server)
+        .await;
+
+    let res = client
+        .create_database(mikrom_cli::domain::models::CreateDatabaseRequest {
+            name: "orders".to_string(),
+            engine: "neon".to_string(),
+            vcpus: Some(2),
+            memory_mib: Some(1024),
+            disk_mib: Some(4096),
+            settings: Some(std::collections::HashMap::from([(
+                "max_connections".to_string(),
+                "200".to_string(),
+            )])),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(res.id, "db-1");
+    assert_eq!(res.status, "pending");
+}
+
+#[tokio::test]
+async fn test_client_delete_database() {
+    let server = MockServer::start().await;
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into())).unwrap();
+
+    Mock::given(method("DELETE"))
+        .and(path("/v1/databases/db-1"))
+        .respond_with(ResponseTemplate::new(204).set_body_string(""))
+        .mount(&server)
+        .await;
+
+    client.delete_database("db-1").await.unwrap();
 }

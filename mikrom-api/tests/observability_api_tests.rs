@@ -32,6 +32,7 @@ async fn setup_app(mock_app_repo: MockAppRepository) -> Option<(axum::Router, as
         ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
         app_repo: Arc::new(mock_app_repo),
+        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
         volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
         github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),

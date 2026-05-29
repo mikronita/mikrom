@@ -26,6 +26,7 @@ async fn create_test_state(
         ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
+        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
         volume_repo: Arc::new(volume_repo),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(MockScheduler::new()),

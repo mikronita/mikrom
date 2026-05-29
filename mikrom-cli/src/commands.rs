@@ -33,6 +33,9 @@ pub enum Commands {
     /// Persistent Storage Management
     #[command(subcommand)]
     Volume(VolumeCommands),
+    /// Database Management (Neon)
+    #[command(subcommand)]
+    Db(DbCommands),
     /// System Status
     #[command(subcommand)]
     System(SystemCommands),
@@ -277,4 +280,42 @@ pub enum ConfigCommands {
 pub enum SystemCommands {
     /// Check the health of all system services
     Health,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DbCommands {
+    /// List all databases
+    List,
+    /// Create a new database
+    Create {
+        #[arg(help = "Unique name for the database")]
+        name: String,
+        #[arg(long, short, default_value = "neon", help = "Database engine")]
+        engine: String,
+        #[arg(long, default_value = "1", help = "CPU cores (1-4)")]
+        vcpus: u32,
+        #[arg(
+            long,
+            short,
+            default_value = "512M",
+            help = "Memory (512M, 1G, 2G, 4G)"
+        )]
+        memory: String,
+        #[arg(long, short, default_value = "1024", help = "Disk size in MiB")]
+        disk: u32,
+        #[arg(long, short = 's', help = "Database settings (key=value)")]
+        settings: Vec<String>,
+    },
+    /// Delete a database
+    Delete {
+        #[arg(help = "Name or ID of the database")]
+        id: String,
+        #[arg(long, short, help = "Skip confirmation prompt")]
+        yes: bool,
+    },
+    /// Get details of a database
+    Info {
+        #[arg(help = "Name or ID of the database")]
+        id: String,
+    },
 }

@@ -42,8 +42,8 @@ async fn register(
         return Ok(());
     }
 
-    ui::success(&resp.message);
-    ui::label_value(ui::KEY, "User ID:", &resp.user_id);
+    ui::success("User created successfully.");
+    ui::label_value(ui::KEY, "User ID:", &resp.user.id);
     Ok(())
 }
 
@@ -183,8 +183,15 @@ mod tests {
         let mut mock = MockApiClient::new();
         mock.expect_register().times(1).returning(|_, _| {
             Ok(crate::domain::models::RegisterResponse {
-                message: "User created".to_string(),
-                user_id: "u1".to_string(),
+                user: crate::domain::models::RegisterUser {
+                    id: "u1".to_string(),
+                    email: "test@example.com".to_string(),
+                    role: Some("User".to_string()),
+                    first_name: None,
+                    last_name: None,
+                    vpc_ipv6_prefix: Some("fd00:abcd::".to_string()),
+                },
+                token: "t".to_string(),
             })
         });
         let ctx = test_ctx(mock);

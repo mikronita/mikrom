@@ -128,7 +128,9 @@ pub async fn update_profile(
 mod tests {
     use super::*;
     use crate::domain::github::MockGithubRepository;
-    use crate::domain::{MockAppRepository, MockUserRepository, MockVolumeRepository, User};
+    use crate::domain::{
+        MockAppRepository, MockDatabaseRepository, MockUserRepository, MockVolumeRepository, User,
+    };
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -159,6 +161,9 @@ mod tests {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(mock_repo),
             app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
             scheduler: Arc::new(crate::domain::MockScheduler::new()),
             nats,
             router_addr: "http://localhost:8080".to_string(),
@@ -175,8 +180,6 @@ mod tests {
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
-            github_repo: Arc::new(MockGithubRepository::default()),
-            volume_repo: Arc::new(MockVolumeRepository::new()),
             github_app_id: None,
             github_private_key: None,
             github_app_slug: None,
@@ -223,6 +226,9 @@ mod tests {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(mock_repo),
             app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
             scheduler: Arc::new(crate::domain::MockScheduler::new()),
             nats,
             router_addr: "http://localhost:8080".to_string(),
@@ -239,8 +245,6 @@ mod tests {
             acme_email: "admin@mikrom.spluca.org".to_string(),
             acme_staging: true,
             acme_check_interval: 3600,
-            github_repo: Arc::new(MockGithubRepository::default()),
-            volume_repo: Arc::new(MockVolumeRepository::new()),
             github_app_id: None,
             github_private_key: None,
             github_app_slug: None,

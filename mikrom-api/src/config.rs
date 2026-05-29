@@ -67,6 +67,8 @@ pub struct ApiConfig {
     pub github_private_key: Option<String>,
     pub github_app_slug: Option<String>,
     pub github_webhook_url_base: Option<String>,
+    pub neon_pageserver_url: Option<String>,
+    pub neon_bearer_token: Option<String>,
 }
 
 impl Default for ApiConfig {
@@ -107,6 +109,8 @@ impl Default for ApiConfig {
             github_private_key: None,
             github_app_slug: None,
             github_webhook_url_base: None,
+            neon_pageserver_url: None,
+            neon_bearer_token: None,
         }
     }
 }

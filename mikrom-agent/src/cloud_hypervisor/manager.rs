@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use mikrom_proto::id::{AppId, VmId};
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -39,6 +39,20 @@ impl CloudHypervisorManager {
     fn build_boot_args(&self, _config: &VmConfig) -> String {
         "console=ttyS0 earlyprintk=ttyS0 reboot=k panic=1 net.ifnames=0 nomodules rw root=/dev/vda init=/mikrom-init"
             .to_string()
+    }
+
+    fn workload_artifacts(&self, workload_type: i32) -> (&Path, &Path) {
+        if workload_type == mikrom_proto::scheduler::WorkloadType::Database as i32 {
+            (
+                self.config.cloud_hypervisor_database_kernel.as_path(),
+                self.config.cloud_hypervisor_database_base_rootfs.as_path(),
+            )
+        } else {
+            (
+                self.config.cloud_hypervisor_kernel.as_path(),
+                self.config.cloud_hypervisor_base_rootfs.as_path(),
+            )
+        }
     }
 
     fn get_vm_paths(&self, vm_id: &VmId) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
@@ -79,19 +93,43 @@ impl CloudHypervisorManager {
             .join(vm_id.to_string())
             .join("rootfs.ext4");
 
-        tracing::info!(vm_id = %vm_id, image = %image, "Preparing rootfs for Cloud Hypervisor");
-        self.builder
-            .docker_to_ext4(crate::builder::DockerToExt4Params {
-                image: &image,
-                output_path: &rootfs_path,
-                base_rootfs_path: &self.config.cloud_hypervisor_base_rootfs.to_string_lossy(),
-                port: config.port,
-                ipv6_addr: config.ipv6_address.clone(),
-                ipv6_gw: config.ipv6_gateway.clone(),
-                volumes: &config.volumes,
-            })
-            .await
-            .map_err(|e| HypervisorError::ProcessError(format!("Image builder failed: {e}")))?;
+        let (kernel_path, base_rootfs_path) = self.workload_artifacts(config.workload_type);
+        tracing::info!(
+            vm_id = %vm_id,
+            image = %image,
+            workload_type = config.workload_type,
+            base_rootfs = %base_rootfs_path.display(),
+            "Preparing rootfs for Cloud Hypervisor"
+        );
+
+        if config.workload_type == mikrom_proto::scheduler::WorkloadType::Database as i32 {
+            self.builder
+                .database_to_ext4(crate::builder::DatabaseRootfsParams {
+                    output_path: &rootfs_path,
+                    base_rootfs_path,
+                    port: config.port,
+                    ipv6_addr: config.ipv6_address.clone(),
+                    ipv6_gw: config.ipv6_gateway.clone(),
+                    env: &config.env,
+                    volumes: &config.volumes,
+                    workload_type: config.workload_type,
+                })
+                .await
+        } else {
+            self.builder
+                .docker_to_ext4(crate::builder::DockerToExt4Params {
+                    image: &image,
+                    output_path: &rootfs_path,
+                    base_rootfs_path: &base_rootfs_path.to_string_lossy(),
+                    port: config.port,
+                    ipv6_addr: config.ipv6_address.clone(),
+                    ipv6_gw: config.ipv6_gateway.clone(),
+                    volumes: &config.volumes,
+                    workload_type: config.workload_type,
+                })
+                .await
+        }
+        .map_err(|e| HypervisorError::ProcessError(format!("Image builder failed: {e}")))?;
 
         disks.push(ch_config::DiskConfig {
             path: rootfs_path.to_string_lossy().to_string(),
@@ -153,11 +191,7 @@ impl CloudHypervisorManager {
                 size: config.memory_mib * 1024 * 1024,
             },
             payload: ch_config::PayloadConfig {
-                kernel: self
-                    .config
-                    .cloud_hypervisor_kernel
-                    .to_string_lossy()
-                    .to_string(),
+                kernel: kernel_path.to_string_lossy().to_string(),
                 cmdline: Some(self.build_boot_args(&config)),
                 ..Default::default()
             },
@@ -738,6 +772,45 @@ impl VmHypervisor for CloudHypervisorManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn workload_artifacts_select_neon_for_database() {
+        let mgr = CloudHypervisorManager {
+            config: AgentConfig {
+                nats_url: "nats://localhost:4222".to_string(),
+                host_id: "host-1".to_string(),
+                use_tls: false,
+                bridge_ip: "10.0.0.1/8".to_string(),
+                certs_dir: "/certs/agent".to_string(),
+                data_path: PathBuf::from("/tmp"),
+                agent_hostname: None,
+                agent_advertise_address: None,
+                wireguard_port: None,
+                wireguard_pubkey: None,
+                cloud_hypervisor_enabled: true,
+                cloud_hypervisor_binary: PathBuf::from("/usr/bin/cloud-hypervisor"),
+                cloud_hypervisor_kernel: PathBuf::from("/opt/cloud-hypervisor/vmlinux.bin"),
+                cloud_hypervisor_base_rootfs: PathBuf::from(
+                    "/opt/cloud-hypervisor/base-rootfs.ext4",
+                ),
+                cloud_hypervisor_database_kernel: PathBuf::from("/opt/neon/vmlinux.bin"),
+                cloud_hypervisor_database_base_rootfs: PathBuf::from("/opt/neon/base-rootfs.ext4"),
+                http_port: 5002,
+                max_vms_per_host: 0,
+                nats_flapping_session_secs: 30,
+            },
+            active_vms: Arc::new(DashMap::new()),
+            vms: Arc::new(DashMap::new()),
+            builder: Arc::new(crate::builder::ImageBuilder),
+            nats_client: Arc::new(RwLock::new(None)),
+        };
+
+        let (kernel, rootfs) =
+            mgr.workload_artifacts(mikrom_proto::scheduler::WorkloadType::Database as i32);
+        assert_eq!(kernel, Path::new("/opt/neon/vmlinux.bin"));
+        assert_eq!(rootfs, Path::new("/opt/neon/base-rootfs.ext4"));
+    }
 
     #[test]
     fn test_persisted_ch_vm_serialization() {

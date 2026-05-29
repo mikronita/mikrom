@@ -103,6 +103,40 @@ impl Scheduler for NatsScheduler {
             .await?;
         Ok(res)
     }
+
+    async fn deploy_database(
+        &self,
+        req: mikrom_proto::scheduler::DeployDatabaseRequest,
+    ) -> DomainResult<mikrom_proto::scheduler::DeployDatabaseResponse> {
+        let res: mikrom_proto::scheduler::DeployDatabaseResponse = self
+            .nats
+            .with_timeout(std::time::Duration::from_secs(10))
+            .request(mikrom_proto::subjects::SCHEDULER_DEPLOY_DATABASE, req)
+            .await?;
+        Ok(res)
+    }
+
+    async fn get_database_status(
+        &self,
+        job_id: String,
+        user_id: String,
+    ) -> DomainResult<mikrom_proto::scheduler::DatabaseStatusResponse> {
+        let req = mikrom_proto::scheduler::DatabaseStatusRequest { job_id, user_id };
+        let res: mikrom_proto::scheduler::DatabaseStatusResponse = self
+            .nats
+            .request(mikrom_proto::subjects::SCHEDULER_GET_DATABASE_STATUS, req)
+            .await?;
+        Ok(res)
+    }
+
+    async fn delete_database(&self, job_id: String, user_id: String) -> DomainResult<bool> {
+        let req = mikrom_proto::scheduler::DeleteDatabaseRequest { job_id, user_id };
+        let res: mikrom_proto::scheduler::DeleteDatabaseResponse = self
+            .nats
+            .request(mikrom_proto::subjects::SCHEDULER_DELETE_DATABASE, req)
+            .await?;
+        Ok(res.success)
+    }
 }
 
 #[must_use]

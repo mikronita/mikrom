@@ -49,6 +49,7 @@ pub struct VmConfig {
     pub netmask: Option<String>,
     pub volumes: Vec<Volume>,
     pub health_check_path: String,
+    pub workload_type: i32,
 }
 
 #[derive(Clone, Debug)]

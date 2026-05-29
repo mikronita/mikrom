@@ -23,4 +23,16 @@ pub trait Scheduler: Send + Sync {
         req: mikrom_proto::scheduler::UpdateAppScalingConfigRequest,
     ) -> DomainResult<bool>;
     async fn list_workers(&self) -> DomainResult<ListWorkersResponse>;
+
+    // Database operations
+    async fn deploy_database(
+        &self,
+        req: mikrom_proto::scheduler::DeployDatabaseRequest,
+    ) -> DomainResult<mikrom_proto::scheduler::DeployDatabaseResponse>;
+    async fn get_database_status(
+        &self,
+        job_id: String,
+        user_id: String,
+    ) -> DomainResult<mikrom_proto::scheduler::DatabaseStatusResponse>;
+    async fn delete_database(&self, job_id: String, user_id: String) -> DomainResult<bool>;
 }

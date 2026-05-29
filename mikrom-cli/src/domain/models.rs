@@ -10,8 +10,18 @@ pub struct HealthResponse {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RegisterResponse {
-    pub message: String,
-    pub user_id: String,
+    pub user: RegisterUser,
+    pub token: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct RegisterUser {
+    pub id: String,
+    pub email: String,
+    pub role: Option<String>,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub vpc_ipv6_prefix: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -150,4 +160,26 @@ pub struct VolumeSnapshot {
     pub volume_id: String,
     pub name: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DatabaseInfo {
+    pub id: String,
+    pub name: String,
+    pub engine: String,
+    pub status: String,
+    pub vcpus: u32,
+    pub memory_mib: u32,
+    pub disk_mib: u32,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct CreateDatabaseRequest {
+    pub name: String,
+    pub engine: String,
+    pub vcpus: Option<u32>,
+    pub memory_mib: Option<u32>,
+    pub disk_mib: Option<u32>,
+    pub settings: Option<HashMap<String, String>>,
 }
