@@ -69,12 +69,8 @@ impl DatabaseService {
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-        params
-            .settings
-            .insert(NEON_TENANT_ID_KEY.to_string(), provisioning.tenant_id);
-        params
-            .settings
-            .insert(NEON_TIMELINE_ID_KEY.to_string(), provisioning.timeline_id);
+        params.tenant_id = Some(provisioning.tenant_id);
+        params.timeline_id = Some(provisioning.timeline_id);
 
         Ok(())
     }
@@ -119,6 +115,14 @@ impl DatabaseService {
             ApiError::BadRequest("User does not have a VPC IPv6 prefix configured".to_string())
         })?;
 
+        if database.engine == "neon"
+            && (database.tenant_id.is_none() || database.timeline_id.is_none())
+        {
+            return Err(ApiError::Internal(
+                "Database is missing Neon tenant/timeline identifiers".to_string(),
+            ));
+        }
+
         // 4. Send deploy request to scheduler
         let nats_req = mikrom_proto::scheduler::DeployDatabaseRequest {
             database_id: database.id.to_string(),
@@ -132,7 +136,7 @@ impl DatabaseService {
                 memory_mib: database.memory_mib.value(),
                 disk_mib: database.disk_mib,
                 port: 5432,
-                env: database.settings.clone(),
+                env: Self::database_env(&database),
                 volumes: vec![],
                 health_check_path: "/".to_string(),
                 ipv6_address: "".to_string(),
@@ -235,6 +239,19 @@ impl DatabaseService {
 
         Ok(())
     }
+
+    fn database_env(database: &Database) -> std::collections::HashMap<String, String> {
+        let mut env = database.settings.clone();
+
+        if let Some(tenant_id) = &database.tenant_id {
+            env.insert(NEON_TENANT_ID_KEY.to_string(), tenant_id.clone());
+        }
+        if let Some(timeline_id) = &database.timeline_id {
+            env.insert(NEON_TIMELINE_ID_KEY.to_string(), timeline_id.clone());
+        }
+
+        env
+    }
 }
 
 #[cfg(test)]
@@ -320,6 +337,8 @@ mod tests {
             vcpus: crate::domain::types::CpuCores::try_from(2).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(1024).unwrap(),
             disk_mib: 4096,
+            tenant_id: Some("11111111111111111111111111111111".to_string()),
+            timeline_id: Some("22222222222222222222222222222222".to_string()),
             settings: HashMap::from([("max_connections".to_string(), "200".to_string())]),
             status,
             active_deployment_id,
@@ -425,8 +444,10 @@ mod tests {
                     && params.disk_mib == 1024
                     && params.vcpus.value() == 1
                     && params.memory_mib.value() == 512
-                    && params.settings.contains_key(NEON_TENANT_ID_KEY)
-                    && params.settings.contains_key(NEON_TIMELINE_ID_KEY)
+                    && params.tenant_id.is_some()
+                    && params.timeline_id.is_some()
+                    && !params.settings.contains_key(NEON_TENANT_ID_KEY)
+                    && !params.settings.contains_key(NEON_TIMELINE_ID_KEY)
             }))
             .times(1)
             .returning(move |_| {
@@ -521,6 +542,14 @@ mod tests {
                                 cfg.workload_type
                                     == mikrom_proto::scheduler::WorkloadType::Database as i32
                                     && cfg.port == 5432
+                                    && cfg
+                                        .env
+                                        .get(NEON_TENANT_ID_KEY)
+                                        .is_some_and(|v| v == "11111111111111111111111111111111")
+                                    && cfg
+                                        .env
+                                        .get(NEON_TIMELINE_ID_KEY)
+                                        .is_some_and(|v| v == "22222222222222222222222222222222")
                             })
                             .unwrap_or(false)
                 },
@@ -555,6 +584,8 @@ mod tests {
             vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
             disk_mib: 1024,
+            tenant_id: None,
+            timeline_id: None,
             settings: HashMap::new(),
         };
 
@@ -594,6 +625,8 @@ mod tests {
             vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
             disk_mib: 1024,
+            tenant_id: None,
+            timeline_id: None,
             settings: HashMap::new(),
         };
 

@@ -38,6 +38,8 @@ async fn test_postgres_database_repository_crud_and_deployments() {
         vcpus: mikrom_api::domain::types::CpuCores::try_from(2).unwrap(),
         memory_mib: mikrom_api::domain::types::MemoryMb::try_from(1024).unwrap(),
         disk_mib: 4096,
+        tenant_id: Some("11111111111111111111111111111111".to_string()),
+        timeline_id: Some("22222222222222222222222222222222".to_string()),
         settings: HashMap::from([
             ("max_connections".to_string(), "200".to_string()),
             ("shared_buffers".to_string(), "256MB".to_string()),
@@ -49,6 +51,14 @@ async fn test_postgres_database_repository_crud_and_deployments() {
     assert_eq!(created.engine, "neon");
     assert_eq!(created.user_id, user_id);
     assert_eq!(created.status, DatabaseStatus::Pending);
+    assert_eq!(
+        created.tenant_id.as_deref(),
+        Some("11111111111111111111111111111111")
+    );
+    assert_eq!(
+        created.timeline_id.as_deref(),
+        Some("22222222222222222222222222222222")
+    );
     assert_eq!(created.settings.get("max_connections").unwrap(), "200");
 
     let by_name = repo
