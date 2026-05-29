@@ -255,6 +255,8 @@ pub struct DbDatabase {
     pub vcpus: i32,
     pub memory_mib: i32,
     pub disk_mib: i32,
+    pub tenant_id: Option<String>,
+    pub timeline_id: Option<String>,
     pub settings: serde_json::Value,
     pub status: String,
     pub active_deployment_id: Option<Uuid>,
@@ -274,6 +276,8 @@ impl From<DbDatabase> for crate::domain::Database {
             memory_mib: crate::domain::types::MemoryMb::try_from(db.memory_mib as u32)
                 .expect("Invalid memory_mib"),
             disk_mib: db.disk_mib as u32,
+            tenant_id: db.tenant_id,
+            timeline_id: db.timeline_id,
             settings: serde_json::from_value(db.settings).unwrap_or_default(),
             status: crate::domain::DatabaseStatus::from(db.status),
             active_deployment_id: db.active_deployment_id,
@@ -333,6 +337,8 @@ mod tests {
             vcpus: 2,
             memory_mib: 1024,
             disk_mib: 4096,
+            tenant_id: Some("11111111111111111111111111111111".to_string()),
+            timeline_id: Some("22222222222222222222222222222222".to_string()),
             settings: serde_json::json!({"max_connections": "200"}),
             status: "running".to_string(),
             active_deployment_id: Some(Uuid::new_v4()),
@@ -344,6 +350,14 @@ mod tests {
         assert_eq!(domain.vcpus, CpuCores::try_from(2).unwrap());
         assert_eq!(domain.memory_mib, MemoryMb::try_from(1024).unwrap());
         assert_eq!(domain.status, DatabaseStatus::Running);
+        assert_eq!(
+            domain.tenant_id.as_deref(),
+            Some("11111111111111111111111111111111")
+        );
+        assert_eq!(
+            domain.timeline_id.as_deref(),
+            Some("22222222222222222222222222222222")
+        );
         assert_eq!(
             domain.settings,
             HashMap::from([("max_connections".to_string(), "200".to_string())])

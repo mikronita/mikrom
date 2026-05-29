@@ -11,6 +11,8 @@ pub struct Database {
     pub vcpus: CpuCores,
     pub memory_mib: MemoryMb,
     pub disk_mib: u32,
+    pub tenant_id: Option<String>,
+    pub timeline_id: Option<String>,
     pub settings: std::collections::HashMap<String, String>,
     pub status: DatabaseStatus,
     pub active_deployment_id: Option<Uuid>,
@@ -60,6 +62,8 @@ pub struct CreateDatabaseParams {
     pub vcpus: CpuCores,
     pub memory_mib: MemoryMb,
     pub disk_mib: u32,
+    pub tenant_id: Option<String>,
+    pub timeline_id: Option<String>,
     pub settings: std::collections::HashMap<String, String>,
 }
 
@@ -155,6 +159,8 @@ mod tests {
             vcpus: CpuCores::try_from(2).unwrap(),
             memory_mib: MemoryMb::try_from(1024).unwrap(),
             disk_mib: 4096,
+            tenant_id: Some("11111111111111111111111111111111".to_string()),
+            timeline_id: Some("22222222222222222222222222222222".to_string()),
             settings: HashMap::from([
                 ("max_connections".to_string(), "100".to_string()),
                 ("shared_buffers".to_string(), "256MB".to_string()),

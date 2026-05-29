@@ -22,8 +22,10 @@ impl DatabaseRepository for PostgresDatabaseRepository {
     async fn create_database(&self, params: CreateDatabaseParams) -> DomainResult<Database> {
         let db = sqlx::query_as::<_, DbDatabase>(
             r#"
-            INSERT INTO databases (name, engine, user_id, vcpus, memory_mib, disk_mib, settings)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO databases (
+                name, engine, user_id, vcpus, memory_mib, disk_mib, tenant_id, timeline_id, settings
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
             "#,
         )
@@ -33,6 +35,8 @@ impl DatabaseRepository for PostgresDatabaseRepository {
         .bind(params.vcpus.value() as i32)
         .bind(params.memory_mib.value() as i32)
         .bind(params.disk_mib as i32)
+        .bind(params.tenant_id)
+        .bind(params.timeline_id)
         .bind(serde_json::to_value(params.settings).unwrap_or_default())
         .fetch_one(&self.pool)
         .await
