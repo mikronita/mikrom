@@ -58,6 +58,11 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
             for s in settings {
                 if let Some((key, value)) = s.split_once('=') {
                     settings_map.insert(key.to_string(), value.to_string());
+                } else {
+                    return Err(crate::domain::error::CliError::Validation(format!(
+                        "Invalid setting format '{}'. Expected key=value",
+                        s
+                    )));
                 }
             }
 
@@ -195,6 +200,32 @@ mod tests {
 
         match err {
             CliError::Validation(message) => assert!(message.contains("Memory")),
+            other => panic!("expected validation error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn create_rejects_settings_without_equals_sign() {
+        let ctx = test_ctx(MockApiClient::new());
+        let err = handle(
+            &ctx,
+            DbCommands::Create {
+                name: "orders".to_string(),
+                engine: "neon".to_string(),
+                vcpus: 1,
+                memory: "1G".to_string(),
+                disk: 1024,
+                settings: vec!["max_connections".to_string()],
+            },
+            OutputFormat::Json,
+        )
+        .await
+        .unwrap_err();
+
+        match err {
+            CliError::Validation(message) => {
+                assert!(message.contains("Invalid setting format"))
+            },
             other => panic!("expected validation error, got {other:?}"),
         }
     }

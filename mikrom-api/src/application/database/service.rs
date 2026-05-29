@@ -217,16 +217,22 @@ impl DatabaseService {
             .ok_or_else(|| ApiError::NotFound("Database not found".to_string()))?;
 
         // 1. Tell scheduler to delete if there is an active deployment
-        if let Some(deployment_id) = database.active_deployment_id
-            && let Ok(Some(deployment)) =
-                state.ctx.database_repo.get_deployment(deployment_id).await
-            && let Some(job_id) = deployment.job_id
-        {
-            state
-                .scheduler
-                .delete_database(job_id, database.user_id.to_string())
+        if let Some(deployment_id) = database.active_deployment_id {
+            let deployment = state
+                .ctx
+                .database_repo
+                .get_deployment(deployment_id)
                 .await
-                .ok();
+                .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+            let job_id = deployment.and_then(|deployment| deployment.job_id);
+            if let Some(job_id) = job_id {
+                state
+                    .scheduler
+                    .delete_database(job_id, database.user_id.to_string())
+                    .await
+                    .ok();
+            }
         }
 
         // 2. Delete from database
