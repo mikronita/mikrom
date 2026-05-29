@@ -361,6 +361,8 @@ pub struct VmConfig {
     pub ipv6_gateway: ::prost::alloc::string::String,
     #[prost(enumeration = "HypervisorType", tag = "14")]
     pub hypervisor: i32,
+    #[prost(enumeration = "WorkloadType", tag = "15")]
+    pub workload_type: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StartVmResponse {
@@ -621,6 +623,32 @@ impl HypervisorType {
             "HYPERTYPE_UNSPECIFIED" => Some(Self::HypertypeUnspecified),
             "HYPERTYPE_FIRECRACKER" => Some(Self::HypertypeFirecracker),
             "HYPERTYPE_CLOUD_HYPERVISOR" => Some(Self::HypertypeCloudHypervisor),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum WorkloadType {
+    App = 0,
+    Database = 1,
+}
+impl WorkloadType {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::App => "WORKLOAD_TYPE_APP",
+            Self::Database => "WORKLOAD_TYPE_DATABASE",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "WORKLOAD_TYPE_APP" => Some(Self::App),
+            "WORKLOAD_TYPE_DATABASE" => Some(Self::Database),
             _ => None,
         }
     }

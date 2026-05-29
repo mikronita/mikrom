@@ -2,6 +2,7 @@ pub mod app;
 pub mod auth;
 pub mod config_cmd;
 pub mod context;
+pub mod database;
 pub mod deployment;
 pub mod dispatcher;
 pub mod ports;

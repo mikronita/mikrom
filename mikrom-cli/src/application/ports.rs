@@ -67,4 +67,8 @@ pub trait ApiClient: Send + Sync {
     ) -> CliResult<VolumeSnapshot>;
     async fn restore_volume_snapshot(&self, volume_id: &str, snapshot_name: &str) -> CliResult<()>;
     async fn delete_volume(&self, volume_id: &str) -> CliResult<()>;
+
+    async fn list_databases(&self) -> CliResult<Vec<DatabaseInfo>>;
+    async fn create_database(&self, req: CreateDatabaseRequest) -> CliResult<DatabaseInfo>;
+    async fn delete_database(&self, db_id: &str) -> CliResult<()>;
 }

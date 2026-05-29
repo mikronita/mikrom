@@ -12,6 +12,7 @@ use tokio::time::{Duration, Instant};
 
 const CONFIG_PATH: &str = "/etc/mikrom/init.json";
 const FALLBACK_SHELL: &str = "/bin/sh";
+const DEFAULT_NEON_PAGESERVER_IPV6: &str = "fd00::deed:1d1c";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct VolumeConfig {
@@ -20,17 +21,28 @@ struct VolumeConfig {
     pub index: Option<usize>,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum WorkloadType {
+    #[default]
+    App,
+    Database,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct InitConfig {
     #[serde(default)]
     env: HashMap<String, String>,
     #[serde(default = "default_workdir")]
     workdir: String,
+    #[serde(default)]
     entrypoint: Vec<String>,
     #[serde(default)]
     cmd: Vec<String>,
     #[serde(default)]
     volumes: Vec<VolumeConfig>,
+    #[serde(default)]
+    workload_type: WorkloadType,
 }
 
 fn default_workdir() -> String {
@@ -70,37 +82,152 @@ async fn main() -> Result<()> {
         eprintln!("[mikrom-init] Warning: Failed to start background services: {e}");
     }
 
-    println!(
-        "[mikrom-init] Starting application: {:?}",
-        config.entrypoint
-    );
+    match config.workload_type {
+        WorkloadType::App => {
+            if config.entrypoint.is_empty() && config.cmd.is_empty() {
+                eprintln!("[mikrom-init] Error: No entrypoint or cmd provided for app");
+                fallback_to_shell();
+            }
 
-    let port = config
-        .env
-        .get("PORT")
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(8080);
+            println!(
+                "[mikrom-init] Starting application: {:?}",
+                config.entrypoint
+            );
 
-    let mut child = spawn_application(config)?;
+            let port = config
+                .env
+                .get("PORT")
+                .and_then(|value| value.parse::<u16>().ok())
+                .unwrap_or(8080);
 
-    if let Err(e) = wait_for_port_ready(port, &mut child).await {
-        eprintln!("[mikrom-init] Application never became ready: {e}");
-        fallback_to_shell();
-    }
+            let mut child = spawn_application(config)?;
 
-    // Marker to let mikrom-agent know that subsequent logs are from the application
-    println!("__MIKROM_APP_START__");
+            if let Err(e) = wait_for_port_ready(port, &mut child).await {
+                eprintln!("[mikrom-init] Application never became ready: {e}");
+                fallback_to_shell();
+            }
 
-    match child.wait().await {
-        Ok(status) => {
-            eprintln!("[mikrom-init] Application exited with status: {status}");
+            // Marker to let mikrom-agent know that subsequent logs are from the application
+            println!("__MIKROM_APP_START__");
+
+            match child.wait().await {
+                Ok(status) => {
+                    eprintln!("[mikrom-init] Application exited with status: {status}");
+                },
+                Err(e) => {
+                    eprintln!("[mikrom-init] Failed while waiting for application exit: {e}");
+                },
+            }
         },
-        Err(e) => {
-            eprintln!("[mikrom-init] Failed while waiting for application exit: {e}");
+        WorkloadType::Database => {
+            println!("[mikrom-init] Starting database (Neon Compute Node)...");
+            if let Err(e) = run_database(config).await {
+                eprintln!("[mikrom-init] Database error: {e}");
+                fallback_to_shell();
+            }
         },
     }
 
     fallback_to_shell();
+}
+
+async fn run_database(config: InitConfig) -> Result<()> {
+    // Neon compute node specific setup
+    // Persistence is handled by the external pageserver
+
+    println!("[mikrom-init] Preparing Neon Compute Node...");
+
+    // 2. Prepare ephemeral data directory
+    if let Err(e) = fs::create_dir_all("/tmp/pgdata") {
+        eprintln!("[mikrom-init] Warning: Failed to create /tmp/pgdata: {e}");
+    }
+
+    // 3. Prepare Postgres command
+    let mut cmd: tokio::process::Command = build_database_command(&config)?.into();
+
+    println!("[mikrom-init] Launching Postgres...");
+    let mut child = cmd.spawn().context("Critical failure launching Postgres")?;
+
+    // 4. Wait for PostgreSQL to be ready (port 5432)
+    if let Err(e) = wait_for_port_ready(5432, &mut child).await {
+        eprintln!("[mikrom-init] Database never became ready: {e}");
+        return Err(e);
+    }
+
+    // Marker for mikrom-agent
+    println!("__MIKROM_DB_START__");
+
+    // 5. Supervisor loop
+    match child.wait().await {
+        Ok(status) => {
+            println!(
+                "[mikrom-init] Postgres exited with status: {}. Environment may need restart.",
+                status
+            );
+            Ok(())
+        },
+        Err(e) => {
+            eprintln!("[mikrom-init] Error supervising Postgres: {e}");
+            Err(e.into())
+        },
+    }
+}
+
+fn build_database_command(config: &InitConfig) -> Result<Command> {
+    // 1. Validate required environment variables
+    let tenant_id = config
+        .env
+        .get("NEON_TENANT_ID")
+        .context("NEON_TENANT_ID is required for database workload")?;
+    let timeline_id = config
+        .env
+        .get("NEON_TIMELINE_ID")
+        .context("NEON_TIMELINE_ID is required for database workload")?;
+    let pageserver_ipv6 = config
+        .env
+        .get("NEON_PAGESERVER_IPV6")
+        .map(String::as_str)
+        .unwrap_or(DEFAULT_NEON_PAGESERVER_IPV6);
+
+    println!(
+        "[mikrom-init] Tenant: {}, Timeline: {}",
+        tenant_id, timeline_id
+    );
+
+    let mut cmd = Command::new("/usr/local/postgresql/bin/postgres");
+
+    // Inject mandatory library paths discovered via ldd
+    cmd.env(
+        "LD_LIBRARY_PATH",
+        "/usr/local/postgresql/lib:/lib:/usr/lib/x86_64-linux-gnu",
+    );
+
+    // Neon surgical arguments
+    cmd.args([
+        "-D",
+        "/tmp/pgdata", // Ephemeral directory in VM RAM
+        "-c",
+        "shared_preload_libraries=neon",
+        "-c",
+        &format!("neon.pageserver_connstr=[{}]:6400", pageserver_ipv6),
+        "-c",
+        &format!("neon.safekeeper_connstrs=[{}]:5454", pageserver_ipv6),
+        "-c",
+        &format!("neon.tenant_id={}", tenant_id),
+        "-c",
+        &format!("neon.timeline_id={}", timeline_id),
+        "-c",
+        "listen_addresses=*", // Allow Pingora proxy to connect
+    ]);
+
+    // Forward any other environment variables
+    for (key, val) in &config.env {
+        if key != "LD_LIBRARY_PATH" {
+            cmd.env(key, val);
+        }
+    }
+
+    Ok(cmd)
 }
 
 fn setup_mounts() -> Result<()> {
@@ -287,20 +414,48 @@ async fn setup_networking(config: &InitConfig) -> Result<()> {
                 gw, link_name
             );
 
-            handle
-                .route()
-                .add()
-                .v6()
-                .destination_prefix(std::net::Ipv6Addr::UNSPECIFIED, 0)
-                .gateway(gw)
-                .output_interface(link_index)
-                .execute()
-                .await
-                .map_err(|e| anyhow!("Failed to add IPv6 gateway: {e}"))?;
+            add_ipv6_route(&handle, link_index, std::net::Ipv6Addr::UNSPECIFIED, 0, gw).await?;
+        }
+
+        if config.workload_type == WorkloadType::Database {
+            let pageserver_ipv6 = config
+                .env
+                .get("NEON_PAGESERVER_IPV6")
+                .map(String::as_str)
+                .unwrap_or(DEFAULT_NEON_PAGESERVER_IPV6)
+                .parse::<std::net::Ipv6Addr>()?;
+
+            if let Some(ipv6_gw_str) = config.env.get("IPV6_GW") {
+                let gw = ipv6_gw_str.parse::<std::net::Ipv6Addr>()?;
+                println!(
+                    "[mikrom-init] Adding explicit route to Neon pageserver {} via {}",
+                    pageserver_ipv6, link_name
+                );
+                add_ipv6_route(&handle, link_index, pageserver_ipv6, 128, gw).await?;
+            }
         }
     }
 
     Ok(())
+}
+
+async fn add_ipv6_route(
+    handle: &rtnetlink::Handle,
+    link_index: u32,
+    destination: std::net::Ipv6Addr,
+    prefix: u8,
+    gateway: std::net::Ipv6Addr,
+) -> Result<()> {
+    handle
+        .route()
+        .add()
+        .v6()
+        .destination_prefix(destination, prefix)
+        .gateway(gateway)
+        .output_interface(link_index)
+        .execute()
+        .await
+        .map_err(|e| anyhow!("Failed to add IPv6 route {destination}/{prefix}: {e}"))
 }
 
 fn load_config(path: &str) -> Result<InitConfig> {
@@ -648,6 +803,21 @@ mod tests {
     }
 
     #[test]
+    fn test_config_deserializes_database_workload() {
+        let json = r#"{
+            "env": {
+                "NEON_TENANT_ID": "tenant-1",
+                "NEON_TIMELINE_ID": "timeline-1",
+                "PATH": "/usr/local/bin"
+            },
+            "entrypoint": ["postgres"],
+            "workload_type": "DATABASE"
+        }"#;
+        let config: InitConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.workload_type, WorkloadType::Database);
+    }
+
+    #[test]
     fn test_build_command_entrypoint() {
         let temp_dir = tempfile::tempdir().unwrap();
         let config = InitConfig {
@@ -660,6 +830,7 @@ mod tests {
             entrypoint: vec!["/bin/sh".to_string(), "-c".to_string()],
             cmd: vec!["echo hello".to_string()],
             volumes: vec![],
+            workload_type: WorkloadType::App,
         };
         let user = RunAsUser {
             uid: 1000,
@@ -724,6 +895,7 @@ mod tests {
                 "echo hello".to_string(),
             ],
             volumes: vec![],
+            workload_type: WorkloadType::App,
         };
         let user = RunAsUser {
             uid: 1000,
@@ -739,6 +911,54 @@ mod tests {
             .map(|arg| arg.to_string_lossy().to_string())
             .collect();
         assert_eq!(args, vec!["-c", "echo hello"]);
+    }
+
+    #[test]
+    fn test_build_database_command_includes_neon_args() {
+        let config = InitConfig {
+            env: HashMap::from([
+                ("NEON_TENANT_ID".to_string(), "tenant-1".to_string()),
+                ("NEON_TIMELINE_ID".to_string(), "timeline-1".to_string()),
+                ("LD_LIBRARY_PATH".to_string(), "/opt/custom".to_string()),
+                ("EXTRA".to_string(), "value".to_string()),
+            ]),
+            workdir: "/app".to_string(),
+            entrypoint: vec![],
+            cmd: vec![],
+            volumes: vec![],
+            workload_type: WorkloadType::Database,
+        };
+
+        let cmd = build_database_command(&config).unwrap();
+        assert_eq!(cmd.get_program(), "/usr/local/postgresql/bin/postgres");
+
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+        assert!(args.contains(&"shared_preload_libraries=neon".to_string()));
+        assert!(args.contains(&"neon.tenant_id=tenant-1".to_string()));
+        assert!(args.contains(&"neon.timeline_id=timeline-1".to_string()));
+
+        let envs: HashMap<_, _> = cmd
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().to_string(),
+                    value.map(|v| v.to_string_lossy().to_string()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            envs.get("LD_LIBRARY_PATH")
+                .and_then(|value| value.clone())
+                .unwrap(),
+            "/usr/local/postgresql/lib:/lib:/usr/lib/x86_64-linux-gnu"
+        );
+        assert_eq!(
+            envs.get("EXTRA").and_then(|value| value.clone()).unwrap(),
+            "value"
+        );
     }
 
     #[test]

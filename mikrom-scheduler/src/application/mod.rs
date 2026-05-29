@@ -163,9 +163,9 @@ pub struct AppService {
     pub context: Arc<AppContext>,
     pub queries: AppQueryService,
     pub heartbeats: HeartbeatService,
-    router_restore: RouterRestoreService,
-    lifecycle: JobLifecycleService,
-    scaling: ScalingService,
+    pub router_restore: RouterRestoreService,
+    pub lifecycle: JobLifecycleService,
+    pub scaling: ScalingService,
 }
 
 impl AppService {

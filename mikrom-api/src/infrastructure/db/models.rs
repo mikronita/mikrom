@@ -245,3 +245,130 @@ impl From<DbVolumeSnapshot> for crate::domain::volume::VolumeSnapshot {
         }
     }
 }
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct DbDatabase {
+    pub id: Uuid,
+    pub name: String,
+    pub engine: String,
+    pub user_id: Uuid,
+    pub vcpus: i32,
+    pub memory_mib: i32,
+    pub disk_mib: i32,
+    pub settings: serde_json::Value,
+    pub status: String,
+    pub active_deployment_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<DbDatabase> for crate::domain::Database {
+    fn from(db: DbDatabase) -> Self {
+        Self {
+            id: db.id,
+            name: db.name,
+            engine: db.engine,
+            user_id: db.user_id,
+            vcpus: crate::domain::types::CpuCores::try_from(db.vcpus as u32)
+                .expect("Invalid vcpus"),
+            memory_mib: crate::domain::types::MemoryMb::try_from(db.memory_mib as u32)
+                .expect("Invalid memory_mib"),
+            disk_mib: db.disk_mib as u32,
+            settings: serde_json::from_value(db.settings).unwrap_or_default(),
+            status: crate::domain::DatabaseStatus::from(db.status),
+            active_deployment_id: db.active_deployment_id,
+            created_at: db.created_at,
+            updated_at: db.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct DbDatabaseDeployment {
+    pub id: Uuid,
+    pub database_id: Uuid,
+    pub user_id: Uuid,
+    pub job_id: Option<String>,
+    pub status: String,
+    pub host_id: Option<String>,
+    pub vm_id: Option<String>,
+    pub ipv6_address: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<DbDatabaseDeployment> for crate::domain::DatabaseDeployment {
+    fn from(db: DbDatabaseDeployment) -> Self {
+        Self {
+            id: db.id,
+            database_id: db.database_id,
+            user_id: db.user_id,
+            job_id: db.job_id,
+            status: db.status,
+            host_id: db.host_id,
+            vm_id: db.vm_id,
+            ipv6_address: db.ipv6_address,
+            created_at: db.created_at,
+            updated_at: db.updated_at,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{
+        DatabaseStatus,
+        types::{CpuCores, MemoryMb},
+    };
+    use std::collections::HashMap;
+
+    #[test]
+    fn db_database_converts_to_domain_database() {
+        let db = DbDatabase {
+            id: Uuid::new_v4(),
+            name: "orders".to_string(),
+            engine: "neon".to_string(),
+            user_id: Uuid::new_v4(),
+            vcpus: 2,
+            memory_mib: 1024,
+            disk_mib: 4096,
+            settings: serde_json::json!({"max_connections": "200"}),
+            status: "running".to_string(),
+            active_deployment_id: Some(Uuid::new_v4()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let domain: crate::domain::Database = db.into();
+        assert_eq!(domain.vcpus, CpuCores::try_from(2).unwrap());
+        assert_eq!(domain.memory_mib, MemoryMb::try_from(1024).unwrap());
+        assert_eq!(domain.status, DatabaseStatus::Running);
+        assert_eq!(
+            domain.settings,
+            HashMap::from([("max_connections".to_string(), "200".to_string())])
+        );
+    }
+
+    #[test]
+    fn db_database_deployment_converts_to_domain_deployment() {
+        let db = DbDatabaseDeployment {
+            id: Uuid::new_v4(),
+            database_id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            job_id: Some("job-1".to_string()),
+            status: "RUNNING".to_string(),
+            host_id: Some("host-1".to_string()),
+            vm_id: Some("vm-1".to_string()),
+            ipv6_address: Some("fd00::1".to_string()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let domain: crate::domain::DatabaseDeployment = db.into();
+        assert_eq!(domain.job_id.as_deref(), Some("job-1"));
+        assert_eq!(domain.host_id.as_deref(), Some("host-1"));
+        assert_eq!(domain.vm_id.as_deref(), Some("vm-1"));
+        assert_eq!(domain.ipv6_address.as_deref(), Some("fd00::1"));
+    }
+}

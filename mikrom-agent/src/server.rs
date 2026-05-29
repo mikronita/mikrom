@@ -1021,6 +1021,7 @@ impl AgentServer {
                     access_mode: v.access_mode,
                 })
                 .collect();
+            vm_config.workload_type = c.workload_type;
         }
         vm_config
     }

@@ -69,6 +69,8 @@ impl SchedulerServer {
                 health_check_path: c.health_check_path,
                 hypervisor: crate::domain::job::HypervisorType::from_i32(c.hypervisor)
                     .unwrap_or_default(),
+                workload_type: crate::domain::job::WorkloadType::from_i32(c.workload_type)
+                    .unwrap_or_default(),
             })
             .unwrap_or_default();
 
@@ -106,6 +108,161 @@ impl SchedulerServer {
                 })
             },
         }
+    }
+
+    #[tracing::instrument(skip(self, req), fields(database_id = %req.database_id))]
+    pub async fn deploy_database(
+        &self,
+        req: mikrom_proto::scheduler::DeployDatabaseRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::DeployDatabaseResponse> {
+        let config = req
+            .config
+            .map(|c| VmConfig {
+                vcpus: c.vcpus,
+                memory_mib: u64::from(c.memory_mib),
+                disk_mib: u64::from(c.disk_mib),
+                port: c.port,
+                env: c.env,
+                ipv6_address: Some(c.ipv6_address),
+                ipv6_gateway: Some(c.ipv6_gateway),
+                volumes: c
+                    .volumes
+                    .iter()
+                    .map(|v| Volume {
+                        volume_id: crate::domain::VolumeId::from(v.volume_id.clone().to_string()),
+                        size_mib: v.size_mib,
+                        read_only: v.read_only,
+                        pool_name: v.pool_name.clone(),
+                        mount_point: v.mount_point.clone(),
+                        access_mode: match v.access_mode {
+                            1 => crate::domain::job::AccessMode::ReadWriteMany,
+                            2 => crate::domain::job::AccessMode::ReadOnlyMany,
+                            _ => crate::domain::job::AccessMode::ReadWriteOnce,
+                        },
+                    })
+                    .collect(),
+                health_check_path: c.health_check_path,
+                hypervisor: crate::domain::job::HypervisorType::from_i32(c.hypervisor)
+                    .unwrap_or_default(),
+                workload_type: crate::domain::job::WorkloadType::from_i32(c.workload_type)
+                    .unwrap_or_default(),
+            })
+            .unwrap_or_default();
+
+        let strategy = crate::domain::worker::SchedulingStrategy::LeastLoaded;
+
+        // Reuse DeploymentService for now, as it's generic enough for VmConfig
+        match self
+            .app_service
+            .deployment
+            .deploy_app(crate::application::deployment::DeployAppParams {
+                app_id: req.database_id.clone(),
+                app_name: req.database_name,
+                image: req.rootfs_image,
+                user_id: req.user_id,
+                deployment_id: req.deployment_id,
+                vpc_ipv6_prefix: req.vpc_ipv6_prefix,
+                config,
+                strategy,
+            })
+            .await
+        {
+            Ok(job) => Ok(mikrom_proto::scheduler::DeployDatabaseResponse {
+                job_id: job.job_id.to_string(),
+                status: mikrom_proto::scheduler::DeployStatus::Running as i32,
+                host_id: job.host_id.unwrap_or_default().to_string(),
+                vm_id: job.vm_id.unwrap_or_default().to_string(),
+                message: "Database deployment successful".to_string(),
+                hypervisor: job.config.hypervisor as i32,
+            }),
+            Err(e) => {
+                tracing::error!(
+                    "Database deployment failed for database {}: {}",
+                    req.database_id,
+                    e
+                );
+                Ok(mikrom_proto::scheduler::DeployDatabaseResponse {
+                    status: mikrom_proto::scheduler::DeployStatus::Failed as i32,
+                    message: format!("Database deployment failed: {}", e),
+                    ..Default::default()
+                })
+            },
+        }
+    }
+
+    pub async fn get_database_status(
+        &self,
+        req: mikrom_proto::scheduler::DatabaseStatusRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::DatabaseStatusResponse> {
+        match self
+            .app_service
+            .queries
+            .get_app_status(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(job) => Ok(mikrom_proto::scheduler::DatabaseStatusResponse {
+                job_id: job.job_id.to_string(),
+                status: match job.status {
+                    crate::domain::job::JobStatus::Pending => {
+                        mikrom_proto::scheduler::DeployStatus::Pending as i32
+                    },
+                    crate::domain::job::JobStatus::Scheduled => {
+                        mikrom_proto::scheduler::DeployStatus::Scheduled as i32
+                    },
+                    crate::domain::job::JobStatus::Running => {
+                        mikrom_proto::scheduler::DeployStatus::Running as i32
+                    },
+                    crate::domain::job::JobStatus::Failed => {
+                        mikrom_proto::scheduler::DeployStatus::Failed as i32
+                    },
+                    crate::domain::job::JobStatus::Cancelled => {
+                        mikrom_proto::scheduler::DeployStatus::Cancelled as i32
+                    },
+                    crate::domain::job::JobStatus::Paused => {
+                        mikrom_proto::scheduler::DeployStatus::Paused as i32
+                    },
+                    crate::domain::job::JobStatus::Stopped => {
+                        mikrom_proto::scheduler::DeployStatus::Cancelled as i32
+                    },
+                },
+                host_id: job.host_id.unwrap_or_default().to_string(),
+                vm_id: job.vm_id.unwrap_or_default().to_string(),
+                message: "".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::DatabaseStatusResponse {
+                message: e.to_string(),
+                ..Default::default()
+            }),
+        }
+    }
+
+    pub async fn delete_database(
+        &self,
+        req: mikrom_proto::scheduler::DeleteDatabaseRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::DeleteDatabaseResponse> {
+        match self
+            .app_service
+            .lifecycle
+            .delete_app(&req.job_id, &req.user_id)
+            .await
+        {
+            Ok(_) => Ok(mikrom_proto::scheduler::DeleteDatabaseResponse {
+                success: true,
+                message: "Database deleted".to_string(),
+            }),
+            Err(e) => Ok(mikrom_proto::scheduler::DeleteDatabaseResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    pub async fn list_databases(
+        &self,
+        _req: mikrom_proto::scheduler::ListDatabasesRequest,
+    ) -> anyhow::Result<mikrom_proto::scheduler::ListDatabasesResponse> {
+        // Implementation for listing databases (requires repository support)
+        Ok(mikrom_proto::scheduler::ListDatabasesResponse::default())
     }
 
     pub async fn get_app_status(
@@ -985,8 +1142,11 @@ mod tests {
     use super::*;
     use crate::application::{AppService, SchedulerRuntimeConfig};
     use crate::domain::AppConfig;
-    use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository};
-    use mockall::predicate::function;
+    use crate::domain::job::{HypervisorType, JobStatus, VmConfig};
+    use crate::domain::worker::{
+        HostMetrics, MockAgentClient, MockJobRepository, MockWorkerRepository, Worker, WorkerStatus,
+    };
+    use mockall::predicate::{eq, function};
     use std::sync::Arc;
 
     async fn connect_nats_or_skip() -> Option<async_nats::Client> {
@@ -1055,5 +1215,267 @@ mod tests {
             .unwrap();
 
         assert!(response.success);
+    }
+
+    #[tokio::test]
+    async fn test_deploy_database_propagates_workload_type_to_agent() {
+        let Some(nats_client) = connect_nats_or_skip().await else {
+            return;
+        };
+
+        let runtime = SchedulerRuntimeConfig {
+            router_idle_timeout_secs: 900,
+            worker_stale_threshold_secs: 60,
+            restore_retry_backoff_secs: 3600,
+        };
+
+        let mut job_repo = MockJobRepository::new();
+        job_repo
+            .expect_list_jobs()
+            .with(
+                mockall::predicate::always(),
+                mockall::predicate::always(),
+                mockall::predicate::always(),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(vec![]));
+        job_repo.expect_add_job().times(1).returning(|_| Ok(()));
+        job_repo
+            .expect_start_job()
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut worker_repo = MockWorkerRepository::new();
+        worker_repo
+            .expect_get_available_workers()
+            .with(eq(30))
+            .times(1)
+            .returning(|_| {
+                Ok(vec![Worker {
+                    host_id: "host-1".into(),
+                    hostname: "worker-1".to_string(),
+                    advertise_address: "127.0.0.1".to_string(),
+                    wireguard_pubkey: None,
+                    wireguard_ip: None,
+                    wireguard_port: None,
+                    metrics: Some(HostMetrics {
+                        cpu_usage: 10.0,
+                        ram_used_bytes: 1_000_000,
+                        ram_total_bytes: 8_000_000_000,
+                        disk_used_bytes: 1_000_000,
+                        disk_total_bytes: 16_000_000_000,
+                        apps_count: 0,
+                        load_avg_1: 0.0,
+                        load_avg_5: 0.0,
+                        load_avg_15: 0.0,
+                        timestamp: 0,
+                        vms: Default::default(),
+                    }),
+                    registered_at: 0,
+                    last_heartbeat: 0,
+                    status: WorkerStatus::Online,
+                    supported_hypervisors: vec![HypervisorType::CloudHypervisor],
+                }])
+            });
+
+        let mut agent_client = MockAgentClient::new();
+        agent_client
+            .expect_start_vm()
+            .with(
+                eq("host-1"),
+                eq("db-1"),
+                eq("local:/opt/neon"),
+                function(|vm_id: &str| !vm_id.is_empty()),
+                function(|config: &VmConfig| {
+                    config.workload_type == crate::domain::job::WorkloadType::Database
+                }),
+            )
+            .times(1)
+            .returning(|_, _, _, _, _| Ok(()));
+
+        let service = AppService::new(
+            Arc::new(job_repo),
+            Arc::new(crate::domain::app::MockAppRepository::new()),
+            Arc::new(worker_repo),
+            Arc::new(agent_client),
+            nats_client,
+            sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+            runtime,
+        );
+        let server = SchedulerServer::new(Arc::new(service), None);
+
+        let response = server
+            .deploy_database(mikrom_proto::scheduler::DeployDatabaseRequest {
+                database_id: "db-1".to_string(),
+                database_name: "orders".to_string(),
+                rootfs_image: "local:/opt/neon".to_string(),
+                user_id: "user-1".to_string(),
+                deployment_id: "dep-1".to_string(),
+                vpc_ipv6_prefix: "fd00:abcd::".to_string(),
+                config: Some(mikrom_proto::scheduler::AppConfig {
+                    vcpus: 2,
+                    memory_mib: 1024,
+                    disk_mib: 4096,
+                    port: 5432,
+                    env: Default::default(),
+                    volumes: vec![],
+                    health_check_path: "/".to_string(),
+                    ipv6_address: "".to_string(),
+                    ipv6_gateway: "".to_string(),
+                    hypervisor: mikrom_proto::scheduler::HypervisorType::HypertypeCloudHypervisor
+                        as i32,
+                    workload_type: mikrom_proto::scheduler::WorkloadType::Database as i32,
+                }),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status,
+            mikrom_proto::scheduler::DeployStatus::Running as i32
+        );
+        assert_eq!(response.message, "Database deployment successful");
+    }
+
+    #[tokio::test]
+    async fn test_get_database_status_maps_running_job() {
+        let Some(nats_client) = connect_nats_or_skip().await else {
+            return;
+        };
+
+        let runtime = SchedulerRuntimeConfig {
+            router_idle_timeout_secs: 900,
+            worker_stale_threshold_secs: 60,
+            restore_retry_backoff_secs: 3600,
+        };
+
+        let mut job_repo = MockJobRepository::new();
+        job_repo
+            .expect_get_job()
+            .with(eq("job-1"))
+            .times(1)
+            .returning(|_| {
+                Ok(Some(crate::domain::Job {
+                    job_id: "job-1".into(),
+                    app_id: "db-1".into(),
+                    app_name: "orders".to_string(),
+                    image: "local:/opt/neon".to_string(),
+                    user_id: "user-1".into(),
+                    status: JobStatus::Running,
+                    host_id: Some("host-1".into()),
+                    vm_id: Some("vm-1".into()),
+                    scheduled_at: Some(1),
+                    started_at: Some(2),
+                    stopped_at: None,
+                    error_message: None,
+                    created_at: 1,
+                    deployment_id: Some("dep-1".into()),
+                    config: VmConfig {
+                        hypervisor: HypervisorType::Firecracker,
+                        ..VmConfig::default()
+                    },
+                }))
+            });
+
+        let service = AppService::new(
+            Arc::new(job_repo),
+            Arc::new(crate::domain::app::MockAppRepository::new()),
+            Arc::new(MockWorkerRepository::new()),
+            Arc::new(MockAgentClient::new()),
+            nats_client,
+            sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+            runtime,
+        );
+        let server = SchedulerServer::new(Arc::new(service), None);
+
+        let response = server
+            .get_database_status(mikrom_proto::scheduler::DatabaseStatusRequest {
+                job_id: "job-1".to_string(),
+                user_id: "user-1".to_string(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status,
+            mikrom_proto::scheduler::DeployStatus::Running as i32
+        );
+        assert_eq!(response.host_id, "host-1");
+        assert_eq!(response.vm_id, "vm-1");
+    }
+
+    #[tokio::test]
+    async fn test_delete_database_delegates_to_lifecycle() {
+        let Some(nats_client) = connect_nats_or_skip().await else {
+            return;
+        };
+
+        let runtime = SchedulerRuntimeConfig {
+            router_idle_timeout_secs: 900,
+            worker_stale_threshold_secs: 60,
+            restore_retry_backoff_secs: 3600,
+        };
+
+        let mut job_repo = MockJobRepository::new();
+        job_repo
+            .expect_get_job()
+            .with(eq("job-1"))
+            .times(1)
+            .returning(|_| {
+                Ok(Some(crate::domain::Job {
+                    job_id: "job-1".into(),
+                    app_id: "db-1".into(),
+                    app_name: "orders".to_string(),
+                    image: "local:/opt/neon".to_string(),
+                    user_id: "user-1".into(),
+                    status: JobStatus::Running,
+                    host_id: Some("host-1".into()),
+                    vm_id: Some("vm-1".into()),
+                    scheduled_at: Some(1),
+                    started_at: Some(2),
+                    stopped_at: None,
+                    error_message: None,
+                    created_at: 1,
+                    deployment_id: Some("dep-1".into()),
+                    config: VmConfig {
+                        hypervisor: HypervisorType::Firecracker,
+                        ..VmConfig::default()
+                    },
+                }))
+            });
+        job_repo
+            .expect_remove_job()
+            .with(eq("job-1"))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let mut agent_client = MockAgentClient::new();
+        agent_client
+            .expect_delete_vm()
+            .with(eq("host-1"), eq("vm-1"), eq(HypervisorType::Firecracker))
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let service = AppService::new(
+            Arc::new(job_repo),
+            Arc::new(crate::domain::app::MockAppRepository::new()),
+            Arc::new(MockWorkerRepository::new()),
+            Arc::new(agent_client),
+            nats_client,
+            sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+            runtime,
+        );
+        let server = SchedulerServer::new(Arc::new(service), None);
+
+        let response = server
+            .delete_database(mikrom_proto::scheduler::DeleteDatabaseRequest {
+                job_id: "job-1".to_string(),
+                user_id: "user-1".to_string(),
+            })
+            .await
+            .unwrap();
+
+        assert!(response.success);
+        assert_eq!(response.message, "Database deleted");
     }
 }

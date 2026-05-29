@@ -497,6 +497,7 @@ mod tests {
     use super::*;
     use crate::domain::App;
     use crate::domain::MockAppRepository;
+    use crate::domain::MockDatabaseRepository;
     use crate::domain::MockScheduler;
     use crate::domain::user::MockUserRepository;
     use crate::nats::MockNatsClient;
@@ -507,6 +508,7 @@ mod tests {
         AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(MockUserRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
             app_repo: Arc::new(MockAppRepository::new()),
             github_repo: Arc::new(crate::domain::github::MockGithubRepository::default()),
             volume_repo: Arc::new(crate::domain::MockVolumeRepository::new()),
@@ -581,6 +583,7 @@ mod tests {
         let state = AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(MockUserRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
             app_repo: Arc::new(app_repo),
             github_repo: Arc::new(crate::domain::github::MockGithubRepository::default()),
             volume_repo: Arc::new(crate::domain::MockVolumeRepository::new()),

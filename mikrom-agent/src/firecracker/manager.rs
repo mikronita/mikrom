@@ -643,6 +643,7 @@ impl FirecrackerManager {
                     ipv6_addr: config.ipv6_address.clone(),
                     ipv6_gw: config.ipv6_gateway.clone(),
                     volumes: &config.volumes,
+                    workload_type: config.workload_type,
                 })
                 .await
                 .map_err(|e| HypervisorError::ProcessError(format!("Image builder failed: {e}")))?;
@@ -1097,6 +1098,7 @@ mod tests {
             health_check_path: "/".to_string(),
             ipv6_address: None,
             ipv6_gateway: None,
+            workload_type: 0,
         }
     }
 

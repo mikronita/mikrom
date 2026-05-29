@@ -1,7 +1,10 @@
 use crate::config::ApiConfig;
+#[cfg(any(test, feature = "test-utils"))]
+use crate::domain::MockDatabaseRepository;
 use crate::domain::{
-    AppRepository, GithubRepository, MockAppRepository, MockGithubRepository, MockScheduler,
-    MockUserRepository, MockVolumeRepository, Scheduler, UserRepository, VolumeRepository,
+    AppRepository, DatabaseRepository, GithubRepository, MockAppRepository, MockGithubRepository,
+    MockScheduler, MockUserRepository, MockVolumeRepository, Scheduler, UserRepository,
+    VolumeRepository,
 };
 use crate::nats::TypedNatsClient;
 use std::sync::Arc;
@@ -16,6 +19,7 @@ use std::sync::Arc;
 pub struct ApiContext {
     pub user_repo: Arc<dyn UserRepository>,
     pub app_repo: Arc<dyn AppRepository>,
+    pub database_repo: Arc<dyn DatabaseRepository>,
     pub github_repo: Arc<dyn GithubRepository>,
     pub volume_repo: Arc<dyn VolumeRepository>,
     pub scheduler: Arc<dyn Scheduler>,
@@ -34,6 +38,12 @@ impl Default for ApiContext {
         Self {
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(MockAppRepository::new()),
+            #[cfg(any(test, feature = "test-utils"))]
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            #[cfg(not(any(test, feature = "test-utils")))]
+            database_repo: panic!(
+                "Default ApiContext cannot be created without database_repo in non-test mode"
+            ),
             github_repo: Arc::new(MockGithubRepository::new()),
             volume_repo: Arc::new(MockVolumeRepository::new()),
             scheduler: Arc::new(MockScheduler::new()),
@@ -51,6 +61,7 @@ impl ApiContext {
     pub fn new(
         user_repo: Arc<dyn UserRepository>,
         app_repo: Arc<dyn AppRepository>,
+        database_repo: Arc<dyn DatabaseRepository>,
         github_repo: Arc<dyn GithubRepository>,
         volume_repo: Arc<dyn VolumeRepository>,
         scheduler: Arc<dyn Scheduler>,
@@ -63,6 +74,7 @@ impl ApiContext {
         Self {
             user_repo,
             app_repo,
+            database_repo,
             github_repo,
             volume_repo,
             scheduler,

@@ -267,7 +267,9 @@ impl DeploymentOrchestrator {
 mod tests {
     use super::*;
     use crate::domain::github::MockGithubRepository;
-    use crate::domain::{Deployment, MockAppRepository, MockUserRepository};
+    use crate::domain::{
+        Deployment, MockAppRepository, MockDatabaseRepository, MockUserRepository,
+    };
     use mockall::predicate::{eq, function};
     use std::sync::Arc;
     use uuid::Uuid;
@@ -332,6 +334,7 @@ mod tests {
 
         let ctx = crate::application::ApiContext {
             user_repo: user_repo.clone(),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
             app_repo: app_repo.clone(),
             github_repo: github_repo.clone(),
             volume_repo: volume_repo.clone(),
@@ -346,6 +349,7 @@ mod tests {
         let state = AppState {
             ctx,
             user_repo,
+            database_repo: Arc::new(MockDatabaseRepository::new()),
             app_repo,
             github_repo,
             volume_repo,
@@ -439,6 +443,7 @@ mod tests {
         let state = AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(MockUserRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
             app_repo: Arc::new(mock_app_repo),
             github_repo: Arc::new(MockGithubRepository::default()),
             volume_repo: Arc::new(crate::domain::MockVolumeRepository::new()),
@@ -518,6 +523,7 @@ mod tests {
 
         let ctx = crate::application::ApiContext {
             user_repo: user_repo.clone(),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
             app_repo: app_repo.clone(),
             github_repo: github_repo.clone(),
             volume_repo: volume_repo.clone(),
@@ -532,6 +538,7 @@ mod tests {
         let state = AppState {
             ctx,
             user_repo,
+            database_repo: Arc::new(MockDatabaseRepository::new()),
             app_repo,
             github_repo,
             volume_repo,
@@ -627,6 +634,7 @@ mod tests {
         let state = AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(MockUserRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
             app_repo: Arc::new(mock_app_repo),
             github_repo: Arc::new(MockGithubRepository::default()),
             volume_repo: Arc::new(crate::domain::MockVolumeRepository::new()),

@@ -93,7 +93,8 @@ async fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use mikrom_cli::commands::{
-        AppCommands, AuthCommands, ConfigCommands, DeploymentCommands, OutputFormat, SystemCommands,
+        AppCommands, AuthCommands, ConfigCommands, DbCommands, DeploymentCommands, OutputFormat,
+        SystemCommands,
     };
 
     #[test]
@@ -599,6 +600,50 @@ mod tests {
                 assert!(yes);
             },
             _ => panic!("expected deployment delete with yes"),
+        }
+    }
+
+    #[test]
+    fn test_cli_db_list_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "db", "list"]).unwrap();
+        match cli.command {
+            Commands::Db(DbCommands::List) => {},
+            _ => panic!("expected db list"),
+        }
+    }
+
+    #[test]
+    fn test_cli_db_create_parses_defaults() {
+        let cli = Cli::try_parse_from(["mikrom", "db", "create", "orders"]).unwrap();
+        match cli.command {
+            Commands::Db(DbCommands::Create {
+                name,
+                engine,
+                vcpus,
+                memory,
+                disk,
+                settings,
+            }) => {
+                assert_eq!(name, "orders");
+                assert_eq!(engine, "neon");
+                assert_eq!(vcpus, 1);
+                assert_eq!(memory, "512M");
+                assert_eq!(disk, 1024);
+                assert!(settings.is_empty());
+            },
+            _ => panic!("expected db create"),
+        }
+    }
+
+    #[test]
+    fn test_cli_db_delete_parses_yes_flag() {
+        let cli = Cli::try_parse_from(["mikrom", "db", "delete", "db-1", "--yes"]).unwrap();
+        match cli.command {
+            Commands::Db(DbCommands::Delete { id, yes }) => {
+                assert_eq!(id, "db-1");
+                assert!(yes);
+            },
+            _ => panic!("expected db delete"),
         }
     }
 }

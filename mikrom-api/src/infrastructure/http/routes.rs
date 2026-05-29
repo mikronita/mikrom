@@ -299,6 +299,15 @@ pub fn create_app_with_rate_limits(
             &format!("{}/snapshots/{{snapshot_id}}", crate::API_V1),
             delete(crate::application::volumes::delete_snapshot_handler),
         )
+        .route(
+            &format!("{}/databases", crate::API_V1),
+            post(crate::infrastructure::http::handlers::database::create_database)
+                .get(crate::infrastructure::http::handlers::database::list_databases),
+        )
+        .route(
+            &format!("{}/databases/{{id}}", crate::API_V1),
+            delete(crate::infrastructure::http::handlers::database::delete_database),
+        )
         .finish_api(&mut api);
 
     let protected_routes_layered = protected_routes.route_layer(middleware::from_fn_with_state(

@@ -119,6 +119,7 @@ impl AgentClient for NatsAgentClient {
             ipv6_address: config.ipv6_address.clone().unwrap_or_default(),
             ipv6_gateway: config.ipv6_gateway.clone().unwrap_or_default(),
             hypervisor: config.hypervisor as i32, // HypervisorType enum discriminant matches proto
+            workload_type: config.workload_type as i32,
         };
 
         self.send_command(

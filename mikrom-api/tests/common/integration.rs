@@ -59,6 +59,7 @@ pub async fn create_integration_app(pool: PgPool, jwt_secret: &str) -> Option<ax
         ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(user_repo),
         app_repo: Arc::new(app_repo),
+        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
         volume_repo: Arc::new(mock_volume_repo),
         github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
         scheduler: Arc::new(mock_scheduler),

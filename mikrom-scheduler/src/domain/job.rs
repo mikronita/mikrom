@@ -82,6 +82,24 @@ impl HypervisorType {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Copy, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WorkloadType {
+    #[default]
+    App = 0,
+    Database = 1,
+}
+
+impl WorkloadType {
+    pub fn from_i32(v: i32) -> Option<Self> {
+        match v {
+            0 => Some(Self::App),
+            1 => Some(Self::Database),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmConfig {
     pub vcpus: u32,
@@ -94,6 +112,7 @@ pub struct VmConfig {
     pub volumes: Vec<Volume>,
     pub health_check_path: String,
     pub hypervisor: HypervisorType,
+    pub workload_type: WorkloadType,
 }
 
 impl Default for VmConfig {
@@ -109,6 +128,7 @@ impl Default for VmConfig {
             volumes: vec![],
             health_check_path: "/".to_string(),
             hypervisor: HypervisorType::default(),
+            workload_type: WorkloadType::default(),
         }
     }
 }

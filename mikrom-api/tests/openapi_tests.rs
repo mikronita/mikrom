@@ -2,12 +2,14 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use serde_json::Value;
 use tower::ServiceExt;
 
 use mikrom_api::AppState;
 use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::{
-    MockAppRepository, MockGithubRepository, MockUserRepository, MockVolumeRepository,
+    MockAppRepository, MockDatabaseRepository, MockGithubRepository, MockUserRepository,
+    MockVolumeRepository,
 };
 use mikrom_api::nats::{NatsClient, TypedNatsClient};
 
@@ -36,6 +38,7 @@ async fn build_state() -> AppState {
         ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(MockUserRepository::new()),
         app_repo: Arc::new(MockAppRepository::new()),
+        database_repo: Arc::new(MockDatabaseRepository::new()),
         volume_repo: Arc::new(MockVolumeRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(MockScheduler::new()),
@@ -94,4 +97,31 @@ async fn test_swagger_ui_endpoint() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_database_paths_are_documented() {
+    let state = build_state().await;
+    let app = mikrom_api::create_app(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/api-docs/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let spec: Value = serde_json::from_slice(&body).unwrap();
+    let paths = spec["paths"].as_object().expect("openapi paths");
+
+    assert!(paths.contains_key("/v1/databases"));
+    assert!(paths.contains_key("/v1/databases/{id}"));
 }

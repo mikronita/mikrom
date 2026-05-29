@@ -104,8 +104,8 @@ mod tests {
     use super::*;
     use crate::AppState;
     use crate::domain::{
-        MockAppRepository, MockGithubRepository, MockScheduler, MockUserRepository,
-        MockVolumeRepository, UserRole,
+        MockAppRepository, MockDatabaseRepository, MockGithubRepository, MockScheduler,
+        MockUserRepository, MockVolumeRepository, UserRole,
     };
     use axum::http::Request;
     use std::sync::Arc;
@@ -122,6 +122,7 @@ mod tests {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(MockUserRepository::new()),
             app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
             github_repo: Arc::new(MockGithubRepository::new()),
             volume_repo: Arc::new(MockVolumeRepository::new()),
             scheduler: Arc::new(MockScheduler::new()),

@@ -9,7 +9,9 @@ use axum::{
 use mikrom_api::NatsScheduler;
 use mikrom_api::application::vms::MeshStatus;
 use mikrom_api::create_app;
-use mikrom_api::domain::{AppRepository, MockGithubRepository, MockVolumeRepository};
+use mikrom_api::domain::{
+    AppRepository, MockDatabaseRepository, MockGithubRepository, MockVolumeRepository,
+};
 use mikrom_api::domain::{CpuCores, MemoryMb, Port};
 use mikrom_api::infrastructure::db::{PostgresAppRepository, PostgresUserRepository};
 use mikrom_api::test_utils::TestDb as ApiTestDb;
@@ -678,6 +680,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         ctx: mikrom_api::application::ApiContext::default(),
         user_repo,
         app_repo: api_app_repo.clone(),
+        database_repo: Arc::new(MockDatabaseRepository::new()),
         volume_repo: Arc::new(MockVolumeRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
         scheduler: Arc::new(NatsScheduler::new(mikrom_api::nats::TypedNatsClient::new(
@@ -832,6 +835,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
             volumes: vec![],
             health_check_path: "/".to_string(),
             hypervisor: mikrom_scheduler::domain::job::HypervisorType::Firecracker,
+            workload_type: mikrom_scheduler::domain::job::WorkloadType::App,
         },
         UserId::from(app_record.user_id.to_string()),
         Some(DeploymentId::from(deployment.id.to_string())),
