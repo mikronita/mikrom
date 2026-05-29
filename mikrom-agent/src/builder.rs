@@ -11,6 +11,10 @@ use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tokio::process::Command;
 use tracing::info;
 
@@ -59,6 +63,8 @@ impl ImageBuilder {
         let parent_dir = params.output_path.parent().unwrap_or(Path::new("/tmp"));
         let container_name = format!("mikrom-build-{}", uuid::Uuid::new_v4());
         let mount_dir = parent_dir.join(format!("mnt-{container_name}"));
+        let mounted = Arc::new(AtomicBool::new(false));
+        let mounted_clone = Arc::clone(&mounted);
 
         let result = async {
             // 0. Pull the source image
@@ -148,6 +154,7 @@ impl ImageBuilder {
             if !status.success() {
                 anyhow::bail!("Failed to mount ext4 image");
             }
+            mounted_clone.store(true, Ordering::SeqCst);
 
             // Copy the user app payload and the Railpack runtime shim/runtime binary.
             Self::copy_container_directory(&container_name, &mount_dir, &app_workdir, "app")
@@ -256,10 +263,6 @@ impl ImageBuilder {
             }
             env_map.insert("PATH".to_string(), path_parts.join(":"));
             env_map.insert("PORT".to_string(), params.port.to_string());
-            env_map.insert(
-                "NEON_PAGESERVER_IPV6".to_string(),
-                "fd00::deed:1d1c".to_string(),
-            );
             if let Some(addr) = &params.ipv6_addr {
                 env_map.insert("IPV6_ADDR".to_string(), addr.clone());
             }
@@ -303,13 +306,18 @@ impl ImageBuilder {
         // so run it in a blocking task.
         let _ = tokio::task::spawn_blocking(|| unsafe { libc::sync() }).await;
 
-        if let Err(e) = unmount_path(&mount_dir, 0) {
-            tracing::error!(
-                "Failed to unmount {}; filesystem may be corrupted: {}",
-                mount_dir.to_string_lossy(),
-                e
-            );
-            let _ = unmount_path(&mount_dir, libc::MNT_DETACH);
+        if mounted.load(Ordering::SeqCst) {
+            match unmount_path(&mount_dir, 0) {
+                Ok(()) => {},
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to unmount {}; filesystem may be corrupted: {}",
+                        mount_dir.to_string_lossy(),
+                        e
+                    );
+                    let _ = unmount_path(&mount_dir, libc::MNT_DETACH);
+                },
+            }
         }
 
         if let Err(e) = tokio::fs::remove_dir(&mount_dir).await {
@@ -343,6 +351,8 @@ impl ImageBuilder {
 
         let parent_dir = params.output_path.parent().unwrap_or(Path::new("/tmp"));
         let mount_dir = parent_dir.join(format!("mnt-mikrom-build-{}", uuid::Uuid::new_v4()));
+        let mounted = Arc::new(AtomicBool::new(false));
+        let mounted_clone = Arc::clone(&mounted);
 
         let result = async {
             info!(
@@ -374,6 +384,7 @@ impl ImageBuilder {
             if !status.success() {
                 anyhow::bail!("Failed to mount database ext4 image");
             }
+            mounted_clone.store(true, Ordering::SeqCst);
 
             info!("Setting up mikrom-init for database workload...");
             let host_init_paths = [
@@ -465,13 +476,18 @@ impl ImageBuilder {
         info!("Flushing and cleaning up database rootfs...");
         let _ = tokio::task::spawn_blocking(|| unsafe { libc::sync() }).await;
 
-        if let Err(e) = unmount_path(&mount_dir, 0) {
-            tracing::error!(
-                "Failed to unmount {}; filesystem may be corrupted: {}",
-                mount_dir.to_string_lossy(),
-                e
-            );
-            let _ = unmount_path(&mount_dir, libc::MNT_DETACH);
+        if mounted.load(Ordering::SeqCst) {
+            match unmount_path(&mount_dir, 0) {
+                Ok(()) => {},
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to unmount {}; filesystem may be corrupted: {}",
+                        mount_dir.to_string_lossy(),
+                        e
+                    );
+                    let _ = unmount_path(&mount_dir, libc::MNT_DETACH);
+                },
+            }
         }
 
         if let Err(e) = tokio::fs::remove_dir(&mount_dir).await {
