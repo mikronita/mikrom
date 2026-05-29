@@ -127,13 +127,15 @@ impl NeonClient {
     }
 
     async fn create_timeline(&self, tenant_id: &str, timeline_id: &str) -> DomainResult<()> {
+        let clean_tenant_id = tenant_id.replace('-', "");
+        let clean_timeline_id = timeline_id.replace('-', "");
         let response = self
             .request(
                 reqwest::Method::POST,
-                &format!("/v1/tenant/{tenant_id}/timeline"),
+                &format!("/v1/tenant/{clean_tenant_id}/timeline"),
             )
             .json(&serde_json::json!({
-                "new_timeline_id": timeline_id,
+                "new_timeline_id": clean_timeline_id,
                 "pg_version": 16
             }))
             .send()
@@ -258,6 +260,8 @@ mod tests {
         let token = "jwt-token";
         let tenant_id = "11111111-1111-1111-1111-111111111111";
         let clean_tenant_id = "11111111111111111111111111111111";
+        let timeline_id = "22222222-2222-2222-2222-222222222222";
+        let clean_timeline_id = "22222222222222222222222222222222";
 
         Mock::given(method("PUT"))
             .and(path(format!(
@@ -277,15 +281,15 @@ mod tests {
             .await;
 
         Mock::given(method("POST"))
-            .and(path(format!("/v1/tenant/{tenant_id}/timeline")))
+            .and(path(format!("/v1/tenant/{clean_tenant_id}/timeline")))
             .and(header("authorization", format!("Bearer {token}")))
             .and(body_json(serde_json::json!({
-                "new_timeline_id": "22222222-2222-2222-2222-222222222222",
+                "new_timeline_id": clean_timeline_id,
                 "pg_version": 16
             })))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "timeline_id": "22222222-2222-2222-2222-222222222222",
-                "tenant_id": tenant_id,
+                "timeline_id": clean_timeline_id,
+                "tenant_id": clean_tenant_id,
                 "last_record_lsn": "0/0",
                 "disk_consistent_lsn": "0/0",
                 "state": "active",
@@ -296,18 +300,12 @@ mod tests {
 
         let client = NeonClient::new(server.uri(), Some(token.to_string()));
         let provisioning = client
-            .provision_database_with_ids(
-                tenant_id.to_string(),
-                "22222222-2222-2222-2222-222222222222".to_string(),
-            )
+            .provision_database_with_ids(tenant_id.to_string(), timeline_id.to_string())
             .await
             .unwrap();
 
         assert_eq!(provisioning.tenant_id, tenant_id);
-        assert_eq!(
-            provisioning.timeline_id,
-            "22222222-2222-2222-2222-222222222222"
-        );
+        assert_eq!(provisioning.timeline_id, timeline_id);
         assert_eq!(provisioning.tenant_gen, 1);
     }
 }

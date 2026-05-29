@@ -2,6 +2,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::response::sse::{Event, Sse};
 use futures::Stream;
+use futures::future::join_all;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::Duration;
@@ -190,27 +191,30 @@ pub async fn validate(
     State(state): State<crate::AppState>,
     Json(payload): Json<DeletionValidateRequest>,
 ) -> Json<DeletionValidateResponse> {
-    let mut validated_items = Vec::with_capacity(payload.tenants.len());
+    let validated_items = join_all(payload.tenants.into_iter().map(|tenant| {
+        let state = state.clone();
 
-    for tenant in payload.tenants {
-        info!(
-            tenant_id = %tenant.id,
-            generation = tenant.r#gen,
-            "[mikrom-api] Pageserver validando retención"
-        );
+        async move {
+            info!(
+                tenant_id = %tenant.id,
+                generation = tenant.r#gen,
+                "[mikrom-api] Pageserver validando retención"
+            );
 
-        let valid = crate::application::database::DatabaseService::validate_tenant_retention(
-            &state,
-            &tenant.id,
-            tenant.r#gen,
-        )
-        .await;
+            let valid = crate::application::database::DatabaseService::validate_tenant_retention(
+                &state,
+                &tenant.id,
+                tenant.r#gen,
+            )
+            .await;
 
-        validated_items.push(ValidateResponseTenant {
-            id: tenant.id,
-            valid,
-        });
-    }
+            ValidateResponseTenant {
+                id: tenant.id,
+                valid,
+            }
+        }
+    }))
+    .await;
 
     Json(DeletionValidateResponse {
         tenants: validated_items,
