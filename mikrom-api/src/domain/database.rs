@@ -13,6 +13,7 @@ pub struct Database {
     pub disk_mib: u32,
     pub tenant_id: Option<String>,
     pub timeline_id: Option<String>,
+    pub tenant_gen: Option<u32>,
     pub settings: std::collections::HashMap<String, String>,
     pub status: DatabaseStatus,
     pub active_deployment_id: Option<Uuid>,
@@ -64,6 +65,7 @@ pub struct CreateDatabaseParams {
     pub disk_mib: u32,
     pub tenant_id: Option<String>,
     pub timeline_id: Option<String>,
+    pub tenant_gen: Option<u32>,
     pub settings: std::collections::HashMap<String, String>,
 }
 
@@ -75,6 +77,11 @@ pub trait DatabaseRepository: Send + Sync {
         params: CreateDatabaseParams,
     ) -> crate::domain::DomainResult<Database>;
     async fn get_database(&self, id: Uuid) -> crate::domain::DomainResult<Option<Database>>;
+    async fn get_database_by_tenant_id(
+        &self,
+        tenant_id: &str,
+    ) -> crate::domain::DomainResult<Option<Database>>;
+    async fn list_databases(&self) -> crate::domain::DomainResult<Vec<Database>>;
     async fn get_database_by_name(
         &self,
         user_id: Uuid,
@@ -89,6 +96,13 @@ pub trait DatabaseRepository: Send + Sync {
         &self,
         id: Uuid,
         status: DatabaseStatus,
+    ) -> crate::domain::DomainResult<()>;
+    async fn update_database_provisioning(
+        &self,
+        id: Uuid,
+        tenant_id: &str,
+        timeline_id: &str,
+        tenant_gen: u32,
     ) -> crate::domain::DomainResult<()>;
     async fn update_active_deployment(
         &self,
@@ -161,6 +175,7 @@ mod tests {
             disk_mib: 4096,
             tenant_id: Some("11111111111111111111111111111111".to_string()),
             timeline_id: Some("22222222222222222222222222222222".to_string()),
+            tenant_gen: Some(1),
             settings: HashMap::from([
                 ("max_connections".to_string(), "100".to_string()),
                 ("shared_buffers".to_string(), "256MB".to_string()),

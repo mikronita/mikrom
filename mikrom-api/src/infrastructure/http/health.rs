@@ -5,6 +5,7 @@ use futures::Stream;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::Duration;
+use tracing::info;
 
 use crate::error::{ApiResult, SseResponse};
 
@@ -13,6 +14,41 @@ pub struct HealthResponse {
     pub status: String,
     pub version: String,
     pub services: HashMap<String, String>,
+}
+
+#[derive(serde::Serialize, rovo::schemars::JsonSchema)]
+pub struct ReAttachResponse {
+    pub tenants: Vec<ReAttachResponseTenant>,
+}
+
+#[derive(serde::Serialize, rovo::schemars::JsonSchema)]
+pub struct ReAttachResponseTenant {
+    pub id: String,
+    #[serde(rename = "gen")]
+    pub r#gen: u32,
+}
+
+#[derive(serde::Serialize, rovo::schemars::JsonSchema)]
+pub struct DeletionValidateResponse {
+    pub tenants: Vec<ValidateResponseTenant>,
+}
+
+#[derive(serde::Deserialize, Debug, rovo::schemars::JsonSchema)]
+pub struct DeletionValidateRequest {
+    pub tenants: Vec<ValidateRequestTenant>,
+}
+
+#[derive(serde::Deserialize, Debug, rovo::schemars::JsonSchema)]
+pub struct ValidateRequestTenant {
+    pub id: String,
+    #[serde(rename = "gen")]
+    pub r#gen: u32,
+}
+
+#[derive(serde::Serialize, rovo::schemars::JsonSchema)]
+pub struct ValidateResponseTenant {
+    pub id: String,
+    pub valid: bool,
 }
 
 async fn get_system_health(state: &crate::AppState) -> HashMap<String, String> {
@@ -104,6 +140,80 @@ pub async fn health(State(state): State<crate::AppState>) -> Json<HealthResponse
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         services,
+    })
+}
+
+#[rovo::rovo]
+pub async fn re_attach(
+    State(state): State<crate::AppState>,
+) -> crate::error::ApiResult<Json<ReAttachResponse>> {
+    let databases = state
+        .ctx
+        .database_repo
+        .list_databases()
+        .await
+        .map_err(|e| crate::error::ApiError::Internal(e.to_string()))?;
+
+    let tenants = databases
+        .into_iter()
+        .filter_map(|database| {
+            let tenant_id = database.tenant_id?;
+            let timeline_id = database.timeline_id?;
+
+            if database.engine != "neon" {
+                return None;
+            }
+
+            if matches!(
+                database.status,
+                crate::domain::DatabaseStatus::Failed | crate::domain::DatabaseStatus::Deleting
+            ) {
+                return None;
+            }
+
+            if tenant_id.starts_with("pending-") || timeline_id.starts_with("pending-") {
+                return None;
+            }
+
+            Some(ReAttachResponseTenant {
+                id: tenant_id,
+                r#gen: database.tenant_gen.unwrap_or(1),
+            })
+        })
+        .collect();
+
+    Ok(Json(ReAttachResponse { tenants }))
+}
+
+#[rovo::rovo]
+pub async fn validate(
+    State(state): State<crate::AppState>,
+    Json(payload): Json<DeletionValidateRequest>,
+) -> Json<DeletionValidateResponse> {
+    let mut validated_items = Vec::with_capacity(payload.tenants.len());
+
+    for tenant in payload.tenants {
+        info!(
+            tenant_id = %tenant.id,
+            generation = tenant.r#gen,
+            "[mikrom-api] Pageserver validando retención"
+        );
+
+        let valid = crate::application::database::DatabaseService::validate_tenant_retention(
+            &state,
+            &tenant.id,
+            tenant.r#gen,
+        )
+        .await;
+
+        validated_items.push(ValidateResponseTenant {
+            id: tenant.id,
+            valid,
+        });
+    }
+
+    Json(DeletionValidateResponse {
+        tenants: validated_items,
     })
 }
 

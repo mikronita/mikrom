@@ -23,10 +23,10 @@ impl DatabaseRepository for PostgresDatabaseRepository {
         let db = sqlx::query_as::<_, DbDatabase>(
             r#"
             INSERT INTO databases (
-                name, engine, user_id, vcpus, memory_mib, disk_mib, tenant_id, timeline_id, settings
+                name, engine, user_id, vcpus, memory_mib, disk_mib, tenant_id, timeline_id, tenant_gen, settings
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING *
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id, name, engine, user_id, vcpus, memory_mib, disk_mib, tenant_id, timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at
             "#,
         )
         .bind(params.name)
@@ -37,6 +37,7 @@ impl DatabaseRepository for PostgresDatabaseRepository {
         .bind(params.disk_mib as i32)
         .bind(params.tenant_id)
         .bind(params.timeline_id)
+        .bind(params.tenant_gen.map(|value| value as i32))
         .bind(serde_json::to_value(params.settings).unwrap_or_default())
         .fetch_one(&self.pool)
         .await
@@ -46,7 +47,9 @@ impl DatabaseRepository for PostgresDatabaseRepository {
     }
 
     async fn get_database(&self, id: Uuid) -> DomainResult<Option<Database>> {
-        let db = sqlx::query_as::<_, DbDatabase>("SELECT * FROM databases WHERE id = $1")
+        let db = sqlx::query_as::<_, DbDatabase>(
+            "SELECT id, name, engine, user_id, vcpus, memory_mib, disk_mib, tenant_id, timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE id = $1",
+        )
             .bind(id)
             .fetch_optional(&self.pool)
             .await
@@ -55,13 +58,33 @@ impl DatabaseRepository for PostgresDatabaseRepository {
         Ok(db.map(|d| d.into()))
     }
 
+    async fn get_database_by_tenant_id(&self, tenant_id: &str) -> DomainResult<Option<Database>> {
+        let db =
+            sqlx::query_as::<_, DbDatabase>("SELECT id, name, engine, user_id, vcpus, memory_mib, disk_mib, tenant_id, timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE tenant_id = $1 LIMIT 1")
+                .bind(tenant_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+
+        Ok(db.map(|d| d.into()))
+    }
+
+    async fn list_databases(&self) -> DomainResult<Vec<Database>> {
+        let dbs = sqlx::query_as::<_, DbDatabase>("SELECT id, name, engine, user_id, vcpus, memory_mib, disk_mib, tenant_id, timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases ORDER BY created_at")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+
+        Ok(dbs.into_iter().map(|d| d.into()).collect())
+    }
+
     async fn get_database_by_name(
         &self,
         user_id: Uuid,
         name: &str,
     ) -> DomainResult<Option<Database>> {
         let db = sqlx::query_as::<_, DbDatabase>(
-            "SELECT * FROM databases WHERE user_id = $1 AND name = $2",
+            "SELECT id, name, engine, user_id, vcpus, memory_mib, disk_mib, tenant_id, timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE user_id = $1 AND name = $2",
         )
         .bind(user_id)
         .bind(name)
@@ -73,7 +96,7 @@ impl DatabaseRepository for PostgresDatabaseRepository {
     }
 
     async fn list_databases_by_user(&self, user_id: Uuid) -> DomainResult<Vec<Database>> {
-        let dbs = sqlx::query_as::<_, DbDatabase>("SELECT * FROM databases WHERE user_id = $1")
+        let dbs = sqlx::query_as::<_, DbDatabase>("SELECT id, name, engine, user_id, vcpus, memory_mib, disk_mib, tenant_id, timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE user_id = $1")
             .bind(user_id)
             .fetch_all(&self.pool)
             .await
@@ -110,6 +133,31 @@ impl DatabaseRepository for PostgresDatabaseRepository {
         Ok(())
     }
 
+    async fn update_database_provisioning(
+        &self,
+        id: Uuid,
+        tenant_id: &str,
+        timeline_id: &str,
+        tenant_gen: u32,
+    ) -> DomainResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE databases
+            SET tenant_id = $1, timeline_id = $2, tenant_gen = $3, updated_at = NOW()
+            WHERE id = $4
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(timeline_id)
+        .bind(tenant_gen as i32)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+
+        Ok(())
+    }
+
     async fn update_active_deployment(&self, db_id: Uuid, deployment_id: Uuid) -> DomainResult<()> {
         sqlx::query(
             "UPDATE databases SET active_deployment_id = $1, updated_at = NOW() WHERE id = $2",
@@ -132,7 +180,7 @@ impl DatabaseRepository for PostgresDatabaseRepository {
             r#"
             INSERT INTO database_deployments (database_id, user_id, status)
             VALUES ($1, $2, 'PENDING')
-            RETURNING *
+            RETURNING id, database_id, user_id, job_id, status, host_id, vm_id, ipv6_address, created_at, updated_at
             "#,
         )
         .bind(db_id)
@@ -146,7 +194,7 @@ impl DatabaseRepository for PostgresDatabaseRepository {
 
     async fn get_deployment(&self, id: Uuid) -> DomainResult<Option<DatabaseDeployment>> {
         let deployment = sqlx::query_as::<_, DbDatabaseDeployment>(
-            "SELECT * FROM database_deployments WHERE id = $1",
+            "SELECT id, database_id, user_id, job_id, status, host_id, vm_id, ipv6_address, created_at, updated_at FROM database_deployments WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)

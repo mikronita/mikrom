@@ -40,6 +40,7 @@ async fn test_postgres_database_repository_crud_and_deployments() {
         disk_mib: 4096,
         tenant_id: Some("11111111111111111111111111111111".to_string()),
         timeline_id: Some("22222222222222222222222222222222".to_string()),
+        tenant_gen: Some(1),
         settings: HashMap::from([
             ("max_connections".to_string(), "200".to_string()),
             ("shared_buffers".to_string(), "256MB".to_string()),
@@ -59,6 +60,7 @@ async fn test_postgres_database_repository_crud_and_deployments() {
         created.timeline_id.as_deref(),
         Some("22222222222222222222222222222222")
     );
+    assert_eq!(created.tenant_gen, Some(1));
     assert_eq!(created.settings.get("max_connections").unwrap(), "200");
 
     let by_name = repo
@@ -67,6 +69,17 @@ async fn test_postgres_database_repository_crud_and_deployments() {
         .unwrap()
         .expect("database by name");
     assert_eq!(by_name.id, created.id);
+
+    let by_tenant = repo
+        .get_database_by_tenant_id("11111111111111111111111111111111")
+        .await
+        .unwrap()
+        .expect("database by tenant id");
+    assert_eq!(by_tenant.id, created.id);
+
+    let all_databases = repo.list_databases().await.unwrap();
+    assert_eq!(all_databases.len(), 1);
+    assert_eq!(all_databases[0].id, created.id);
 
     let listed = repo.list_databases_by_user(user_id).await.unwrap();
     assert_eq!(listed.len(), 1);

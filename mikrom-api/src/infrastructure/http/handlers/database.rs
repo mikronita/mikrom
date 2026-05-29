@@ -51,6 +51,7 @@ pub async fn create_database(
         disk_mib: payload.disk_mib.unwrap_or(1024),
         tenant_id: None,
         timeline_id: None,
+        tenant_gen: None,
         settings: payload.settings.unwrap_or_default(),
     };
 

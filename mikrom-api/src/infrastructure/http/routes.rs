@@ -46,6 +46,14 @@ pub fn create_app_with_rate_limits(
             &format!("{}/health/stream", crate::API_V1),
             get(crate::infrastructure::http::health::health_stream),
         )
+        .route(
+            "/re-attach",
+            post(crate::infrastructure::http::health::re_attach),
+        )
+        .route(
+            "/validate",
+            post(crate::infrastructure::http::health::validate),
+        )
         .finish_api(&mut api);
 
     let protected_routes = Router::new()
