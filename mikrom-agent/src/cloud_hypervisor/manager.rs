@@ -27,6 +27,8 @@ const DATABASE_CONFIGURE_PORT: u32 = 3080;
 const NEON_CONFIGURE_TOKEN_ENV: &str = "NEON_CONFIGURE_TOKEN";
 const MIKROM_DATABASE_CONFIGURE_TOKEN_ENV: &str = "MIKROM_DATABASE_CONFIGURE_TOKEN";
 const NEON_PAGESERVER_IPV6_ENV: &str = "NEON_PAGESERVER_IPV6";
+const NEON_SAFEKEEPERS_GENERATION_ENV: &str = "NEON_SAFEKEEPERS_GENERATION";
+const NEON_SAFEKEEPER_CONNSTRS_ENV: &str = "NEON_SAFEKEEPER_CONNSTRS";
 const DEFAULT_NEON_PAGESERVER_IPV6: &str = "fd00::deed:1d1c";
 const DATABASE_CONFIGURE_RETRY_WINDOW: Duration = Duration::from_secs(60);
 const DATABASE_CONFIGURE_RETRY_WINDOW_ENV: &str = "MIKROM_DATABASE_CONFIGURE_WINDOW_SECS";
@@ -94,6 +96,17 @@ impl CloudHypervisorManager {
             )
         })?;
         let pageserver_ipv6 = self.database_pageserver_ipv6(config);
+        let pageserver_host = Self::neon_host_alias("neon-pageserver", pageserver_ipv6);
+        let safekeeper_connstrings = Self::normalize_neon_safekeeper_connstrings(
+            config.env.get(NEON_SAFEKEEPER_CONNSTRS_ENV),
+            "neon-safekeeper",
+            &pageserver_host,
+        );
+        let safekeepers_generation = config
+            .env
+            .get(NEON_SAFEKEEPERS_GENERATION_ENV)
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .unwrap_or(1);
         let cluster_id = config
             .env
             .get("MIKROM_DATABASE_ID")
@@ -115,8 +128,9 @@ impl CloudHypervisorManager {
             },
             "tenant_id": tenant_id,
             "timeline_id": timeline_id,
-            "pageserver_connstring": format!("postgres://no_user@[{pageserver_ipv6}]:6400"),
-            "safekeeper_connstrings": [format!("[{pageserver_ipv6}]:5454")],
+            "pageserver_connstring": format!("host={pageserver_host} port=6400"),
+            "safekeeper_connstrings": safekeeper_connstrings,
+            "safekeepers_generation": safekeepers_generation,
             "mode": "Primary",
             "skip_pg_catalog_updates": true,
             "reconfigure_concurrency": 1,
@@ -133,6 +147,79 @@ impl CloudHypervisorManager {
                     .unwrap_or_else(|| json!({"keys": []})),
             },
         }))
+    }
+
+    fn neon_host_alias(prefix: &str, value: &str) -> String {
+        let sanitized: String = value
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() {
+                    ch.to_ascii_lowercase()
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        format!("{prefix}-{sanitized}")
+    }
+
+    fn normalize_neon_safekeeper_connstrings(
+        raw: Option<&String>,
+        alias_prefix: &str,
+        default_alias: &str,
+    ) -> Vec<String> {
+        let mut entries = Vec::new();
+
+        if let Some(raw) = raw {
+            for entry in raw
+                .split(',')
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+            {
+                if let Some(normalized) =
+                    Self::normalize_neon_safekeeper_connstr(entry, alias_prefix)
+                {
+                    entries.push(normalized);
+                }
+            }
+        }
+
+        if entries.is_empty() {
+            entries.push(format!("{default_alias}:5454"));
+        }
+
+        entries
+    }
+
+    fn normalize_neon_safekeeper_connstr(value: &str, alias_prefix: &str) -> Option<String> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        if trimmed.contains('=') {
+            return Some(trimmed.to_string());
+        }
+
+        let (host, port) = if let Some(host) = trimmed.strip_prefix('[') {
+            let (host, rest) = host.split_once(']')?;
+            let port = rest.strip_prefix(':')?.trim();
+            (host, port)
+        } else {
+            let (host, port) = trimmed.rsplit_once(':')?;
+            (host, port)
+        };
+
+        if host.is_empty() || port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+
+        if host.contains(':') {
+            let alias = Self::neon_host_alias(alias_prefix, host);
+            return Some(format!("{alias}:{port}"));
+        }
+
+        Some(format!("{host}:{port}"))
     }
 
     fn database_configure_token<'a>(&self, config: &'a VmConfig) -> Option<&'a str> {
@@ -199,10 +286,7 @@ impl CloudHypervisorManager {
                         body = %body,
                         "Database configure endpoint returned non-success status"
                     );
-                    if status.is_client_error()
-                        && status != reqwest::StatusCode::REQUEST_TIMEOUT
-                        && status != reqwest::StatusCode::TOO_MANY_REQUESTS
-                    {
+                    if Self::is_fatal_database_configure_status(status) {
                         return Err(HypervisorError::ProcessError(format!(
                             "Database configure failed with client error {status}: {body}"
                         )));
@@ -245,6 +329,17 @@ impl CloudHypervisorManager {
             "Failed to configure database VM after {:?}: {url}",
             Self::database_configure_retry_window()
         )))
+    }
+
+    fn is_fatal_database_configure_status(status: reqwest::StatusCode) -> bool {
+        if status == reqwest::StatusCode::REQUEST_TIMEOUT
+            || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            || status == reqwest::StatusCode::PRECONDITION_FAILED
+        {
+            return false;
+        }
+
+        status.is_client_error()
     }
 
     fn database_configure_retry_window() -> Duration {
@@ -1120,6 +1215,8 @@ mod tests {
         let spec = mgr
             .build_database_configure_spec(&VmId::new(), &config)
             .unwrap();
+        let expected_pageserver_host =
+            CloudHypervisorManager::neon_host_alias("neon-pageserver", "fd00::deed:1d1c");
 
         assert_eq!(spec["spec"]["format_version"], 1.0);
         assert_eq!(spec["spec"]["cluster"]["cluster_id"], "db-789");
@@ -1128,12 +1225,13 @@ mod tests {
         assert_eq!(spec["spec"]["mode"], "Primary");
         assert_eq!(
             spec["spec"]["pageserver_connstring"],
-            "postgres://no_user@[fd00::deed:1d1c]:6400"
+            format!("host={expected_pageserver_host} port=6400")
         );
         assert_eq!(
             spec["spec"]["safekeeper_connstrings"],
-            serde_json::json!(["[fd00::deed:1d1c]:5454"])
+            serde_json::json!([format!("{expected_pageserver_host}:5454")])
         );
+        assert_eq!(spec["spec"]["safekeepers_generation"], serde_json::json!(1));
         assert!(spec["spec"]["timestamp"].as_str().unwrap().len() > 10);
         assert!(spec["spec"]["operation_uuid"].as_str().unwrap().len() > 10);
         assert_eq!(
@@ -1168,5 +1266,21 @@ mod tests {
             CloudHypervisorManager::parse_database_configure_retry_window(Some("0")),
             Duration::from_secs(60)
         );
+    }
+
+    #[test]
+    fn database_configure_status_412_is_retryable() {
+        assert!(!CloudHypervisorManager::is_fatal_database_configure_status(
+            reqwest::StatusCode::PRECONDITION_FAILED
+        ));
+        assert!(!CloudHypervisorManager::is_fatal_database_configure_status(
+            reqwest::StatusCode::REQUEST_TIMEOUT
+        ));
+        assert!(!CloudHypervisorManager::is_fatal_database_configure_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS
+        ));
+        assert!(CloudHypervisorManager::is_fatal_database_configure_status(
+            reqwest::StatusCode::BAD_REQUEST
+        ));
     }
 }

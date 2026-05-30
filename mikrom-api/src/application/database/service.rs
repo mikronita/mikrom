@@ -15,6 +15,8 @@ const MIKROM_DATABASE_ID_KEY: &str = "MIKROM_DATABASE_ID";
 const NEON_JWKS_JSON_KEY: &str = "NEON_JWKS_JSON";
 #[cfg(test)]
 const NEON_JWKS_PATH_KEY: &str = "NEON_JWKS_PATH";
+const NEON_PAGESERVER_IPV6_KEY: &str = "NEON_PAGESERVER_IPV6";
+const NEON_SAFEKEEPERS_GENERATION_KEY: &str = "NEON_SAFEKEEPERS_GENERATION";
 const NEON_INSTANCE_ID_KEY: &str = "NEON_INSTANCE_ID";
 const NEON_SAFEKEEPER_CONNSTRS_KEY: &str = "NEON_SAFEKEEPER_CONNSTRS";
 const MIKROM_NEON_DEV_MODE_KEY: &str = "MIKROM_NEON_DEV_MODE";
@@ -160,9 +162,10 @@ impl DatabaseService {
         if database.engine == "neon" && Self::needs_neon_provisioning(&database) {
             let neon_client =
                 crate::infrastructure::neon::NeonClient::from_config(&state.ctx.config)
+                    .map_err(|e| ApiError::Internal(e.to_string()))?
                     .ok_or_else(|| {
                         ApiError::Internal(
-                            "NEON_PAGESERVER_URL is required to provision database workloads"
+                            "NEON_PAGESERVER_URL and NEON_SAFEKEEPER_HTTP_URL are required to provision database workloads"
                                 .to_string(),
                         )
                     })?;
@@ -403,6 +406,16 @@ impl DatabaseService {
             env.entry(NEON_INSTANCE_ID_KEY.to_string())
                 .or_insert_with(|| value.clone());
         }
+        env.entry(NEON_SAFEKEEPERS_GENERATION_KEY.to_string())
+            .or_insert_with(|| database.tenant_gen.unwrap_or(1).to_string());
+        if let Some(value) = config
+            .neon_pageserver_url
+            .as_ref()
+            .and_then(|value| Self::extract_neon_host(value))
+        {
+            env.entry(NEON_PAGESERVER_IPV6_KEY.to_string())
+                .or_insert(value);
+        }
         if let Some(value) = config
             .neon_safekeeper_connstrs
             .as_ref()
@@ -443,6 +456,23 @@ impl DatabaseService {
         }
 
         Ok(env)
+    }
+
+    fn extract_neon_host(value: &str) -> Option<String> {
+        let authority = value
+            .split_once("://")
+            .map(|(_, rest)| rest)
+            .unwrap_or(value);
+        let authority = authority.split('/').next().unwrap_or(authority);
+        let authority = authority.rsplit('@').next().unwrap_or(authority);
+
+        if let Some(start) = authority.find('[') {
+            let remainder = &authority[start + 1..];
+            let end = remainder.find(']')?;
+            return Some(remainder[..end].to_string());
+        }
+
+        authority.split(':').next().map(|host| host.to_string())
     }
 
     fn generate_neon_configure_token(
@@ -1054,6 +1084,9 @@ mod tests {
             neon_jwks_json: Some("{\"keys\":[]}".to_string()),
             neon_jwks_path: Some("/etc/mikrom/jwks.json".to_string()),
             neon_instance_id: Some("compute-node-1".to_string()),
+            neon_pageserver_url: Some("http://[fd40:b90d:fc5f:1ae0::1]:9898".to_string()),
+            neon_safekeeper_connstrs: Some("[fd40:b90d:fc5f:1ae0::1]:5454".to_string()),
+            neon_safekeeper_token: Some("token-123".to_string()),
             mikrom_neon_dev_mode: Some(false),
             neon_configure_token: Some("token-123".to_string()),
             ..Default::default()
@@ -1077,6 +1110,18 @@ mod tests {
         assert_eq!(
             env.get(NEON_INSTANCE_ID_KEY),
             Some(&"compute-node-1".to_string())
+        );
+        assert_eq!(
+            env.get(NEON_SAFEKEEPERS_GENERATION_KEY),
+            Some(&"1".to_string())
+        );
+        assert_eq!(
+            env.get(NEON_SAFEKEEPER_CONNSTRS_KEY),
+            Some(&"[fd40:b90d:fc5f:1ae0::1]:5454".to_string())
+        );
+        assert_eq!(
+            env.get(NEON_PAGESERVER_IPV6_KEY),
+            Some(&"fd40:b90d:fc5f:1ae0::1".to_string())
         );
         assert_eq!(
             env.get(MIKROM_NEON_DEV_MODE_KEY),
