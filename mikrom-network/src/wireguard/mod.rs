@@ -90,14 +90,13 @@ impl WireGuardManager {
         private_key: &str,
         host_id: &str,
     ) -> Result<(), NetworkError> {
-        // 1. Check if update is actually needed
+        // 1. Check if update is actually needed (peek only)
         {
-            let mut last_peers = self.last_peers.lock();
+            let last_peers = self.last_peers.lock();
             if last_peers.as_ref().is_some_and(|last| last == peers) {
                 debug!("Skipping redundant WireGuard peer update (list matches)");
                 return Ok(());
             }
-            *last_peers = Some(peers.to_vec());
         }
 
         let own_ip = helpers::derive_host_ipv6(host_id);
@@ -146,6 +145,12 @@ impl WireGuardManager {
             .await?;
 
         self.sync_routes(&route_targets).await?;
+
+        // 5. Success - update cache
+        {
+            let mut last_peers = self.last_peers.lock();
+            *last_peers = Some(peers.to_vec());
+        }
 
         debug!(
             "WireGuard mesh updated with {} peers via netlink",

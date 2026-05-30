@@ -137,7 +137,21 @@ impl ControlPlane {
         }
 
         for (host, (targets, _ts)) in route_targets {
-            let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice())?;
+            let mut normalized_targets = Vec::new();
+            let mut use_tls = false;
+
+            for target in &targets {
+                if target.starts_with("https://") {
+                    use_tls = true;
+                    normalized_targets.push(target.strip_prefix("https://").unwrap().to_string());
+                } else if target.starts_with("http://") {
+                    normalized_targets.push(target.strip_prefix("http://").unwrap().to_string());
+                } else {
+                    normalized_targets.push(target.clone());
+                }
+            }
+
+            let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(normalized_targets.as_slice())?;
             let mut hc = TcpHealthCheck::default();
             hc.consecutive_success = 1;
             hc.consecutive_failure = 2;
@@ -148,9 +162,9 @@ impl ControlPlane {
                 host.clone(),
                 Route {
                     host: host.clone(),
-                    targets,
+                    targets: normalized_targets,
                     lb: Arc::new(lb),
-                    use_tls: false,
+                    use_tls,
                     tls_alternative_cn: tls_alternative_cn_for_host(&host),
                 },
             );
