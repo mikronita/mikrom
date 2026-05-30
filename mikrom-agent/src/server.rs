@@ -187,15 +187,25 @@ impl AgentServer {
                         },
                         Err(e) => {
                             consecutive_failures += 1;
-                            let backoff = (2u64.pow(consecutive_failures)).min(max_backoff_secs);
-                            error!(error = %e, backoff_secs = backoff, "Failed to connect to NATS; retrying");
+                            // Clamp exponent to prevent overflow before power calculation
+                            let exponent = consecutive_failures.min(10);
+                            let backoff = (2u64.pow(exponent)).min(max_backoff_secs);
+                            error!(
+                                error = %e,
+                                backoff_secs = backoff,
+                                "Failed to connect to NATS; retrying"
+                            );
                             tokio::time::sleep(Duration::from_secs(backoff)).await;
                             continue;
                         },
                     }
                 }
 
-                let client = nats_client.as_ref().unwrap().clone();
+                let client = match nats_client.as_ref() {
+                    Some(c) => c.clone(),
+                    None => continue,
+                };
+
                 let mut cmd_handle = self_clone.start_command_listener(client.clone());
                 let mut health_check_handle =
                     self_clone.start_health_check_listener(client.clone());
