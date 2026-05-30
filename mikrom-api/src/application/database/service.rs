@@ -807,10 +807,6 @@ mod tests {
                                         .is_some_and(|v| v == &database_id.to_string())
                                     && cfg
                                         .env
-                                        .get(MIKROM_DATABASE_ID_KEY)
-                                        .is_some_and(|v| v == &database_id.to_string())
-                                    && cfg
-                                        .env
                                         .get(NEON_TENANT_ID_KEY)
                                         .is_some_and(|v| v == "11111111111111111111111111111111")
                                     && cfg

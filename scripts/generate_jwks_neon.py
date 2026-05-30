@@ -4,26 +4,13 @@ import base64
 import json
 import subprocess
 
-pub = subprocess.check_output([
-    "openssl", "pkey", "-pubin",
+modulus_out = subprocess.check_output([
+    "openssl", "rsa",
+    "-pubin",
     "-in", "/etc/mikrom/neon-auth/public.pem",
-    "-text", "-noout"
-], text=True)
-
-# Extract modulus and exponent from the OpenSSL text output
-lines = [line.strip() for line in pub.splitlines()]
-modulus_hex = []
-capture = False
-for line in lines:
-    if line.startswith("Modulus:"):
-        capture = True
-        continue
-    if capture:
-        if line.startswith("Exponent:"):
-            exponent = 65537
-            break
-        modulus_hex.append(line.replace(":", "").replace(" ", ""))
-modulus_hex = "".join(modulus_hex)
+    "-modulus", "-noout"
+], text=True).strip()
+modulus_hex = modulus_out.split("=", 1)[1]
 if modulus_hex.startswith("00"):
     modulus_hex = modulus_hex[2:]
 

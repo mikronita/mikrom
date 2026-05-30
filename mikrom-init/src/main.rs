@@ -147,10 +147,11 @@ async fn run_database(config: InitConfig) -> Result<()> {
 
     // 2. Prepare ephemeral data directory.
     // Neon's compute_ctl expects to manage /tmp/pgdata itself as the unprivileged user.
-    if let Err(e) = fs::remove_dir_all("/tmp/pgdata")
-        && e.kind() != std::io::ErrorKind::NotFound
-    {
-        eprintln!("[mikrom-init] Warning: Failed to clean /tmp/pgdata: {e}");
+    match fs::remove_dir_all("/tmp/pgdata") {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            eprintln!("[mikrom-init] Warning: Failed to clean /tmp/pgdata: {e}");
+        },
+        _ => {},
     }
 
     // 3. Prepare Postgres command

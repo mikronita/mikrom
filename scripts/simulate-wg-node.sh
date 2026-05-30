@@ -83,12 +83,8 @@ if [ "$(id -u)" -eq 0 ]; then
     WG_CMD=(wg)
     IP_CMD=(ip)
 else
-    if ! sudo -v; then
-        echo "Error: sudo credentials are required to manage $WG_INTERFACE."
-        exit 1
-    fi
-    WG_CMD=(sudo wg)
-    IP_CMD=(sudo ip)
+    echo "Error: This script must be run as root or with sudo."
+    exit 1
 fi
 
 wg_exec() {
