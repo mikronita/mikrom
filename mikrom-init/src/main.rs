@@ -17,7 +17,10 @@ const DATABASE_ID_ENV: &str = "MIKROM_DATABASE_ID";
 const NEON_JWKS_JSON_ENV: &str = "NEON_JWKS_JSON";
 const NEON_JWKS_PATH_ENV: &str = "NEON_JWKS_PATH";
 const NEON_INSTANCE_ID_ENV: &str = "NEON_INSTANCE_ID";
+const NEON_SAFEKEEPER_CONNSTRS_ENV: &str = "NEON_SAFEKEEPER_CONNSTRS";
 const NEON_DEV_MODE_ENV: &str = "MIKROM_NEON_DEV_MODE";
+const TRACE_FILE_OPS_ENV: &str = "MIKROM_INIT_TRACE_FILES";
+const STRACE_BINARIES: &[&str] = &["/usr/bin/strace", "/bin/strace"];
 
 #[derive(Debug, Serialize, Deserialize)]
 struct VolumeConfig {
@@ -142,19 +145,25 @@ async fn run_database(config: InitConfig) -> Result<()> {
 
     println!("[mikrom-init] Preparing Neon Compute Node...");
 
-    // 2. Prepare ephemeral data directory
-    if let Err(e) = fs::create_dir_all("/tmp/pgdata") {
-        eprintln!("[mikrom-init] Warning: Failed to create /tmp/pgdata: {e}");
+    // 2. Prepare ephemeral data directory.
+    // Neon's compute_ctl expects to manage /tmp/pgdata itself as the unprivileged user.
+    if let Err(e) = fs::remove_dir_all("/tmp/pgdata")
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!("[mikrom-init] Warning: Failed to clean /tmp/pgdata: {e}");
     }
 
     // 3. Prepare Postgres command
     let mut cmd: tokio::process::Command = build_database_command(&config)?.into();
+
+    dump_pgdata_state("/tmp");
 
     println!("[mikrom-init] Launching Postgres...");
     let mut child = cmd.spawn().context("Critical failure launching Postgres")?;
 
     // 4. Wait for PostgreSQL to be ready (port 5432)
     if let Err(e) = wait_for_port_ready(5432, &mut child).await {
+        dump_pgdata_state("/tmp/pgdata");
         eprintln!("[mikrom-init] Database never became ready: {e}");
         return Err(e);
     }
@@ -172,8 +181,53 @@ async fn run_database(config: InitConfig) -> Result<()> {
             Ok(())
         },
         Err(e) => {
+            dump_pgdata_state("/tmp/pgdata");
             eprintln!("[mikrom-init] Error supervising Postgres: {e}");
             Err(e.into())
+        },
+    }
+}
+
+fn dump_pgdata_state(path: &str) {
+    println!("[mikrom-init] Inspecting {path} after database failure...");
+    match std::fs::read_dir(path) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                let file_type = match entry.file_type() {
+                    Ok(ft) => {
+                        if ft.is_dir() {
+                            "dir"
+                        } else if ft.is_symlink() {
+                            "symlink"
+                        } else if ft.is_file() {
+                            "file"
+                        } else {
+                            "other"
+                        }
+                    },
+                    Err(_) => "unknown",
+                };
+                let target = if file_type == "symlink" {
+                    std::fs::read_link(&entry_path)
+                        .ok()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "<unreadable>".to_string())
+                } else {
+                    String::new()
+                };
+                if target.is_empty() {
+                    println!("[mikrom-init]   {} ({file_type})", entry_path.display());
+                } else {
+                    println!(
+                        "[mikrom-init]   {} ({file_type} -> {target})",
+                        entry_path.display()
+                    );
+                }
+            }
+        },
+        Err(err) => {
+            println!("[mikrom-init]   unable to read {path}: {err}");
         },
     }
 }
@@ -198,6 +252,20 @@ fn build_database_command_with_user(config: &InitConfig, user: &RunAsUser) -> Re
         .get("NEON_PAGESERVER_IPV6")
         .map(String::as_str)
         .unwrap_or(DEFAULT_NEON_PAGESERVER_IPV6);
+    let safekeeper_connstrs = config
+        .env
+        .get(NEON_SAFEKEEPER_CONNSTRS_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .split(',')
+                .map(|entry| entry.trim().to_string())
+                .filter(|entry| !entry.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|entries| !entries.is_empty())
+        .unwrap_or_else(|| vec![format!("[{}]:5454", pageserver_ipv6)]);
     let compute_id = config
         .env
         .get(DATABASE_ID_ENV)
@@ -208,7 +276,36 @@ fn build_database_command_with_user(config: &InitConfig, user: &RunAsUser) -> Re
         tenant_id, timeline_id
     );
 
-    let mut cmd = Command::new("/usr/local/bin/compute_ctl");
+    let trace_file_ops = config
+        .env
+        .get(TRACE_FILE_OPS_ENV)
+        .map(|value| parse_bool_flag(value))
+        .transpose()?
+        .unwrap_or(false);
+
+    let mut cmd = if trace_file_ops {
+        if let Some(strace_bin) = STRACE_BINARIES.iter().find(|path| Path::new(path).exists()) {
+            let mut traced_cmd = Command::new(strace_bin);
+            traced_cmd.args([
+                "-f",
+                "-e",
+                "trace=file",
+                "-s",
+                "256",
+                "-o",
+                "/tmp/compute_ctl.strace",
+                "/usr/local/bin/compute_ctl",
+            ]);
+            traced_cmd
+        } else {
+            eprintln!(
+                "[mikrom-init] Warning: MIKROM_INIT_TRACE_FILES is set, but strace is not installed; launching compute_ctl directly"
+            );
+            Command::new("/usr/local/bin/compute_ctl")
+        }
+    } else {
+        Command::new("/usr/local/bin/compute_ctl")
+    };
 
     // Inject mandatory library paths discovered via ldd
     cmd.env(
@@ -227,7 +324,7 @@ fn build_database_command_with_user(config: &InitConfig, user: &RunAsUser) -> Re
             "mode": "Primary"
         },
         "pageserver_connstr": format!("[{}]:6400", pageserver_ipv6),
-        "safekeeper_connstrs": [format!("[{}]:5454", pageserver_ipv6)],
+        "safekeeper_connstrs": safekeeper_connstrs,
         "jwks": resolve_neon_jwks(&config.env)?,
     });
 
@@ -288,7 +385,11 @@ fn build_database_command_with_user(config: &InitConfig, user: &RunAsUser) -> Re
     );
     cmd.env(
         "NEON_SAFEKEEPER_CONNSTRS",
-        format!("[{}]:5454", pageserver_ipv6),
+        config
+            .env
+            .get(NEON_SAFEKEEPER_CONNSTRS_ENV)
+            .cloned()
+            .unwrap_or_else(|| format!("[{}]:5454", pageserver_ipv6)),
     );
 
     cmd.uid(user.uid);
@@ -1127,6 +1228,117 @@ mod tests {
                 .unwrap(),
             "[fd00::deed:1d1c]:5454"
         );
+    }
+
+    #[test]
+    fn test_build_database_command_wraps_strace_when_enabled() {
+        let config = InitConfig {
+            env: HashMap::from([
+                (DATABASE_ID_ENV.to_string(), "db-123".to_string()),
+                ("NEON_TENANT_ID".to_string(), "tenant-1".to_string()),
+                ("NEON_TIMELINE_ID".to_string(), "timeline-1".to_string()),
+                (TRACE_FILE_OPS_ENV.to_string(), "true".to_string()),
+                (NEON_DEV_MODE_ENV.to_string(), "false".to_string()),
+            ]),
+            workdir: "/app".to_string(),
+            entrypoint: vec![],
+            cmd: vec![],
+            volumes: vec![],
+            workload_type: WorkloadType::Database,
+        };
+
+        let user = RunAsUser {
+            uid: 1000,
+            gid: 1000,
+            dir: "/home/mikrom".to_string(),
+            name: "mikrom".to_string(),
+        };
+
+        let cmd = build_database_command_with_user(&config, &user).unwrap();
+        if STRACE_BINARIES.iter().any(|path| Path::new(path).exists()) {
+            assert!(
+                STRACE_BINARIES
+                    .iter()
+                    .any(|path| Path::new(path).exists() && cmd.get_program() == Path::new(path))
+            );
+        } else {
+            assert_eq!(cmd.get_program(), "/usr/local/bin/compute_ctl");
+        }
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+        if STRACE_BINARIES.iter().any(|path| Path::new(path).exists()) {
+            assert_eq!(
+                args,
+                vec![
+                    "-f",
+                    "-e",
+                    "trace=file",
+                    "-s",
+                    "256",
+                    "-o",
+                    "/tmp/compute_ctl.strace",
+                    "/usr/local/bin/compute_ctl",
+                    "--pgbin",
+                    "/usr/local/postgresql/bin/postgres",
+                    "--pgdata",
+                    "/tmp/pgdata",
+                    "--compute-id",
+                    "db-123",
+                    "--connstr",
+                    "postgresql://cloud_admin@localhost:6400/tenant-1?options=-c%20neon.timeline_id=timeline-1",
+                    "--config",
+                    "/tmp/compute_config.json",
+                ]
+            );
+        } else {
+            assert_eq!(
+                args,
+                vec![
+                    "--pgbin",
+                    "/usr/local/postgresql/bin/postgres",
+                    "--pgdata",
+                    "/tmp/pgdata",
+                    "--compute-id",
+                    "db-123",
+                    "--connstr",
+                    "postgresql://cloud_admin@localhost:6400/tenant-1?options=-c%20neon.timeline_id=timeline-1",
+                    "--config",
+                    "/tmp/compute_config.json",
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_database_command_falls_back_without_strace() {
+        let config = InitConfig {
+            env: HashMap::from([
+                (DATABASE_ID_ENV.to_string(), "db-123".to_string()),
+                ("NEON_TENANT_ID".to_string(), "tenant-1".to_string()),
+                ("NEON_TIMELINE_ID".to_string(), "timeline-1".to_string()),
+                (TRACE_FILE_OPS_ENV.to_string(), "true".to_string()),
+                (NEON_DEV_MODE_ENV.to_string(), "false".to_string()),
+            ]),
+            workdir: "/app".to_string(),
+            entrypoint: vec![],
+            cmd: vec![],
+            volumes: vec![],
+            workload_type: WorkloadType::Database,
+        };
+
+        let user = RunAsUser {
+            uid: 1000,
+            gid: 1000,
+            dir: "/home/mikrom".to_string(),
+            name: "mikrom".to_string(),
+        };
+
+        let cmd = build_database_command_with_user(&config, &user).unwrap();
+        if STRACE_BINARIES.iter().all(|path| !Path::new(path).exists()) {
+            assert_eq!(cmd.get_program(), "/usr/local/bin/compute_ctl");
+        }
     }
 
     #[test]

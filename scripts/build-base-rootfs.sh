@@ -81,7 +81,7 @@ mount -o bind /dev/pts "${ROOTFS_DIR}/dev/pts"
 # Preparar claves SSH maestras para inyección
 SSH_KEYS_FILE="${WORK_DIR}/ssh-master-keys.txt"
 if [ -n "$SSH_PUBLIC_KEYS" ]; then
-  echo "$SSH_PUBLIC_KEYS" > "$SSH_KEYS_FILE"
+  echo "$SSH_PUBLIC_KEYS" >"$SSH_KEYS_FILE"
 else
   touch "$SSH_KEYS_FILE"
 fi
@@ -114,7 +114,6 @@ apt-get install -y --no-install-recommends \
     dnsutils \
     net-tools \
     vim-tiny \
-    nano \
     less \
     procps \
     coreutils \
@@ -122,7 +121,8 @@ apt-get install -y --no-install-recommends \
     bash \
     locales \
     tzdata \
-    sudo
+    sudo \
+    strace
 
 # Configurar locale
 echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
