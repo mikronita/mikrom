@@ -298,6 +298,14 @@ impl AgentConfig {
             Some(key_str)
         }
     }
+
+    pub fn get_supported_hypervisors(&self) -> Vec<i32> {
+        let mut supported = vec![1]; // Firecracker is always supported for now
+        if self.cloud_hypervisor_enabled {
+            supported.push(3);
+        }
+        supported
+    }
 }
 
 fn host_id_path(data_path: &Path) -> PathBuf {

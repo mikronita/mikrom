@@ -28,6 +28,13 @@ deb-agent: build-init ceph-libs ## Build Debian package for mikrom-agent
 	cd mikrom-agent && $(CEPH_ENV) cargo deb --no-build
 	@echo "✅ Debian package built in: target/debian/"
 
+.PHONY: deb-network
+deb-network: ## Build Debian package for mikrom-network
+	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
+	cargo build --release -p mikrom-network
+	cd mikrom-network && cargo deb --no-build
+	@echo "✅ Debian package built in: target/debian/"
+
 .PHONY: deb-router
 deb-router: ## Build Debian package for mikrom-router (Rust/Pingora)
 	cd mikrom-router && ./package.sh
