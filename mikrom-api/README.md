@@ -74,7 +74,9 @@ Mikrom uses PostgreSQL to track the state of the cluster:
 | `RATE_LIMIT_CLEANUP_INTERVAL_SECS` | `60` | How often the in-memory store scans for stale buckets |
 | `RATE_LIMIT_TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` or `X-Real-IP` for client identity |
 | `NEON_PAGESERVER_URL` | - | Pageserver base URL for Neon database provisioning |
+| `NEON_SAFEKEEPER_HTTP_URL` | - | Safekeeper management API URL used to register timelines |
 | `NEON_BEARER_TOKEN` | - | Bearer token used when talking to the pageserver |
+| `NEON_SAFEKEEPER_TOKEN` | - | Bearer token with `SafekeeperData` scope used to register safekeeper timelines |
 | `NEON_JWKS_JSON` | - | Inline JWKS JSON injected into database VMs |
 | `NEON_JWKS_PATH` | - | Path on the API host to a JWKS JSON file that will be read and injected into database VMs |
 | `NEON_INSTANCE_ID` | - | Stable compute instance ID written into the VM config |

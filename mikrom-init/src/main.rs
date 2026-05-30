@@ -17,6 +17,7 @@ const DATABASE_ID_ENV: &str = "MIKROM_DATABASE_ID";
 const NEON_JWKS_JSON_ENV: &str = "NEON_JWKS_JSON";
 const NEON_JWKS_PATH_ENV: &str = "NEON_JWKS_PATH";
 const NEON_INSTANCE_ID_ENV: &str = "NEON_INSTANCE_ID";
+const NEON_SAFEKEEPERS_GENERATION_ENV: &str = "NEON_SAFEKEEPERS_GENERATION";
 const NEON_SAFEKEEPER_CONNSTRS_ENV: &str = "NEON_SAFEKEEPER_CONNSTRS";
 const NEON_DEV_MODE_ENV: &str = "MIKROM_NEON_DEV_MODE";
 const TRACE_FILE_OPS_ENV: &str = "MIKROM_INIT_TRACE_FILES";
@@ -253,20 +254,14 @@ fn build_database_command_with_user(config: &InitConfig, user: &RunAsUser) -> Re
         .get("NEON_PAGESERVER_IPV6")
         .map(String::as_str)
         .unwrap_or(DEFAULT_NEON_PAGESERVER_IPV6);
-    let safekeeper_connstrs = config
-        .env
-        .get(NEON_SAFEKEEPER_CONNSTRS_ENV)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(|value| {
-            value
-                .split(',')
-                .map(|entry| entry.trim().to_string())
-                .filter(|entry| !entry.is_empty())
-                .collect::<Vec<_>>()
-        })
-        .filter(|entries| !entries.is_empty())
-        .unwrap_or_else(|| vec![format!("[{}]:5454", pageserver_ipv6)]);
+    let pageserver_host = neon_host_alias("neon-pageserver", pageserver_ipv6);
+    ensure_etc_hosts_entry(&pageserver_host, pageserver_ipv6)?;
+
+    let safekeeper_connstrs = normalize_neon_safekeeper_connstrings(
+        config.env.get(NEON_SAFEKEEPER_CONNSTRS_ENV),
+        "neon-safekeeper",
+        &pageserver_host,
+    )?;
     let compute_id = config
         .env
         .get(DATABASE_ID_ENV)
@@ -324,10 +319,17 @@ fn build_database_command_with_user(config: &InitConfig, user: &RunAsUser) -> Re
             "timeline_id": timeline_id,
             "mode": "Primary"
         },
-        "pageserver_connstr": format!("[{}]:6400", pageserver_ipv6),
+        "pageserver_connstr": format!("host={pageserver_host} port=6400"),
         "safekeeper_connstrs": safekeeper_connstrs,
         "jwks": resolve_neon_jwks(&config.env)?,
     });
+
+    let safekeepers_generation = config
+        .env
+        .get(NEON_SAFEKEEPERS_GENERATION_ENV)
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .unwrap_or(1);
+    compute_ctl_config["safekeepers_generation"] = serde_json::json!(safekeepers_generation);
 
     if let Some(instance_id) = config
         .env
@@ -382,16 +384,13 @@ fn build_database_command_with_user(config: &InitConfig, user: &RunAsUser) -> Re
     }
     cmd.env(
         "NEON_PAGESERVER_CONNSTR",
-        format!("[{}]:6400", pageserver_ipv6),
+        format!("host={pageserver_host} port=6400"),
     );
     cmd.env(
-        "NEON_SAFEKEEPER_CONNSTRS",
-        config
-            .env
-            .get(NEON_SAFEKEEPER_CONNSTRS_ENV)
-            .cloned()
-            .unwrap_or_else(|| format!("[{}]:5454", pageserver_ipv6)),
+        "NEON_SAFEKEEPERS_GENERATION",
+        safekeepers_generation.to_string(),
     );
+    cmd.env("NEON_SAFEKEEPER_CONNSTRS", safekeeper_connstrs.join(","));
 
     cmd.uid(user.uid);
     cmd.gid(user.gid);
@@ -428,6 +427,113 @@ fn parse_bool_flag(value: &str) -> Result<bool> {
             "Invalid boolean value for MIKROM_NEON_DEV_MODE: {other}"
         )),
     }
+}
+
+fn neon_host_alias(prefix: &str, value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("{prefix}-{sanitized}")
+}
+
+fn ensure_etc_hosts_entry(hostname: &str, ipv6: &str) -> Result<()> {
+    let hosts_path = Path::new("/etc/hosts");
+    let existing = fs::read_to_string(hosts_path).unwrap_or_default();
+    if existing
+        .lines()
+        .any(|line| line.split_whitespace().any(|part| part == hostname))
+    {
+        return Ok(());
+    }
+
+    let file = match fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(hosts_path)
+    {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return Ok(()),
+        Err(err) => {
+            return Err(err).with_context(|| format!("Failed to open {}", hosts_path.display()));
+        },
+    };
+    let mut file = file;
+    use std::io::Write as _;
+    writeln!(file, "{ipv6} {hostname}")
+        .with_context(|| format!("Failed to append {} to {}", hostname, hosts_path.display()))?;
+    Ok(())
+}
+
+fn normalize_neon_safekeeper_connstrings(
+    raw: Option<&String>,
+    alias_prefix: &str,
+    default_alias: &str,
+) -> Result<Vec<String>> {
+    let mut entries = Vec::new();
+
+    if let Some(raw) = raw {
+        for entry in raw
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+        {
+            if let Some((normalized, mapping)) =
+                normalize_neon_safekeeper_connstr(entry, alias_prefix)
+            {
+                if let Some((hostname, ipv6)) = mapping {
+                    ensure_etc_hosts_entry(&hostname, &ipv6)?;
+                }
+                entries.push(normalized);
+            }
+        }
+    }
+
+    if entries.is_empty() {
+        entries.push(format!("{default_alias}:5454"));
+    }
+
+    Ok(entries)
+}
+
+fn normalize_neon_safekeeper_connstr(
+    value: &str,
+    alias_prefix: &str,
+) -> Option<(String, Option<(String, String)>)> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if trimmed.contains('=') {
+        return Some((trimmed.to_string(), None));
+    }
+
+    let (host, port) = if let Some(host) = trimmed.strip_prefix('[') {
+        let (host, rest) = host.split_once(']')?;
+        let port = rest.strip_prefix(':')?.trim();
+        (host, port)
+    } else {
+        let (host, port) = trimmed.rsplit_once(':')?;
+        (host, port)
+    };
+
+    if host.is_empty() || port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    if host.contains(':') {
+        let alias = neon_host_alias(alias_prefix, host);
+        return Some((format!("{alias}:{port}"), Some((alias, host.to_string()))));
+    }
+
+    Some((format!("{host}:{port}"), None))
 }
 
 fn setup_mounts() -> Result<()> {
@@ -1173,13 +1279,19 @@ mod tests {
             "timeline-1"
         );
         assert_eq!(parsed["compute_ctl_config"]["cluster"]["mode"], "Primary");
+        let expected_pageserver_host =
+            neon_host_alias("neon-pageserver", DEFAULT_NEON_PAGESERVER_IPV6);
         assert_eq!(
             parsed["compute_ctl_config"]["pageserver_connstr"],
-            "[fd00::deed:1d1c]:6400"
+            format!("host={expected_pageserver_host} port=6400")
         );
         assert_eq!(
             parsed["compute_ctl_config"]["safekeeper_connstrs"],
-            serde_json::json!(["[fd00::deed:1d1c]:5454"])
+            serde_json::json!([format!("{expected_pageserver_host}:5454")])
+        );
+        assert_eq!(
+            parsed["compute_ctl_config"]["safekeepers_generation"],
+            serde_json::json!(1)
         );
         assert_eq!(
             parsed["compute_ctl_config"]["jwks"]["keys"],
@@ -1221,13 +1333,19 @@ mod tests {
             envs.get("NEON_PAGESERVER_CONNSTR")
                 .and_then(|value| value.clone())
                 .unwrap(),
-            "[fd00::deed:1d1c]:6400"
+            format!("host={expected_pageserver_host} port=6400")
         );
         assert_eq!(
             envs.get("NEON_SAFEKEEPER_CONNSTRS")
                 .and_then(|value| value.clone())
                 .unwrap(),
-            "[fd00::deed:1d1c]:5454"
+            format!("{expected_pageserver_host}:5454")
+        );
+        assert_eq!(
+            envs.get("NEON_SAFEKEEPERS_GENERATION")
+                .and_then(|value| value.clone())
+                .unwrap(),
+            "1"
         );
     }
 

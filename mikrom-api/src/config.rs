@@ -68,7 +68,9 @@ pub struct ApiConfig {
     pub github_app_slug: Option<String>,
     pub github_webhook_url_base: Option<String>,
     pub neon_pageserver_url: Option<String>,
+    pub neon_safekeeper_http_url: Option<String>,
     pub neon_bearer_token: Option<String>,
+    pub neon_safekeeper_token: Option<String>,
     #[serde(default)]
     pub neon_jwks_json: Option<String>,
     #[serde(default)]
@@ -128,7 +130,9 @@ impl Default for ApiConfig {
             github_app_slug: None,
             github_webhook_url_base: None,
             neon_pageserver_url: None,
+            neon_safekeeper_http_url: None,
             neon_bearer_token: None,
+            neon_safekeeper_token: None,
             neon_jwks_json: None,
             neon_jwks_path: None,
             neon_instance_id: None,
