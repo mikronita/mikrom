@@ -49,6 +49,24 @@ hex = "0.4.3"
 tower = { version = "0.5", features = ["util"], optional = true }
 uuid = { version = "1", features = ["v4", "serde"], optional = true }
 
+[package.metadata.deb]
+maintainer = "Antonio Pardo <apardo@spluca.org>"
+copyright = "2026, Mikrom Team"
+license-file = ["../LICENSE", "0"]
+extended-description = """\
+High-performance dynamic ingress router for Mikrom based on Pingora.
+Includes dynamic routing via NATS/PostgreSQL and automatic TLS management.
+"""
+section = "admin"
+priority = "optional"
+depends = "libc6, libssl3, wireguard-tools"
+assets = [
+    ["target/release/mikrom-router", "/usr/bin/mikrom-router", "755"],
+    ["debian/lib/systemd/system/mikrom-router.service", "/lib/systemd/system/mikrom-router.service", "644"],
+    ["debian/etc/mikrom/router.env", "/etc/mikrom/router.env", "640"],
+]
+systemd-units = { unit-name = "mikrom-router" }
+
 [features]
 default = []
 integration-tests = []

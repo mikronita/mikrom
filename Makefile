@@ -36,8 +36,11 @@ deb-network: ## Build Debian package for mikrom-network
 	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: deb-router
-deb-router: ## Build Debian package for mikrom-router (Rust/Pingora)
-	cd mikrom-router && ./package.sh
+deb-router: ## Build Debian package for mikrom-router
+	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
+	cargo build --release -p mikrom-router
+	cd mikrom-router && cargo deb --no-build
+	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: fmt
 fmt: ## Format Rust code
