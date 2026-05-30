@@ -23,9 +23,9 @@ impl DatabaseRepository for PostgresDatabaseRepository {
         let db = sqlx::query_as::<_, DbDatabase>(
             r#"
             INSERT INTO databases (
-                name, engine, user_id, vcpus, memory_mib, disk_mib, tenant_id, timeline_id, tenant_gen, settings
+                name, engine, user_id, vcpus, memory_mib, disk_mib, status, tenant_id, timeline_id, tenant_gen, settings
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9, $10)
             RETURNING id, name, engine, user_id, vcpus, memory_mib, disk_mib, tenant_id, timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at
             "#,
         )

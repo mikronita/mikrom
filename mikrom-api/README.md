@@ -73,6 +73,15 @@ Mikrom uses PostgreSQL to track the state of the cluster:
 | `RATE_LIMIT_ENTRY_TTL_SECS` | `900` | Idle time before rate-limit buckets are evicted |
 | `RATE_LIMIT_CLEANUP_INTERVAL_SECS` | `60` | How often the in-memory store scans for stale buckets |
 | `RATE_LIMIT_TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` or `X-Real-IP` for client identity |
+| `NEON_PAGESERVER_URL` | - | Pageserver base URL for Neon database provisioning |
+| `NEON_BEARER_TOKEN` | - | Bearer token used when talking to the pageserver |
+| `NEON_JWKS_JSON` | - | Inline JWKS JSON injected into database VMs |
+| `NEON_JWKS_PATH` | - | Path on the API host to a JWKS JSON file that will be read and injected into database VMs |
+| `NEON_INSTANCE_ID` | - | Stable compute instance ID written into the VM config |
+| `MIKROM_NEON_DEV_MODE` | `true` | If `false`, `mikrom-init` omits `--dev` for database VMs |
+| `NEON_CONFIGURE_PRIVATE_KEY_PEM` | - | Inline RSA private key used by `mikrom-api` to mint the configure JWT |
+| `NEON_CONFIGURE_PRIVATE_KEY_PATH` | - | RSA private key path used by `mikrom-api` to mint the configure JWT |
+| `NEON_CONFIGURE_TOKEN` | - | Optional override token if you want to supply a prebuilt JWT |
 
 ### Recommended profiles
 

@@ -60,6 +60,7 @@ hyper = "1"
 wiremock = "0.6.5"
 mikrom-scheduler = { path = "../mikrom-scheduler" }
 mikrom-agent = { path = "../mikrom-agent" }
+tempfile = "3.27"
 
 [[test]]
 name = "integration_auth_tests"

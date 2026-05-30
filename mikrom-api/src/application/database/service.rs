@@ -1,6 +1,9 @@
 use crate::AppState;
 use crate::domain::{CreateDatabaseParams, Database, DatabaseDeployment, DatabaseStatus};
 use crate::error::{ApiError, ApiResult};
+use chrono::{Duration, Utc};
+use jsonwebtoken::{EncodingKey, Header};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub struct DatabaseService;
@@ -8,6 +11,31 @@ pub struct DatabaseService;
 const DATABASE_ROOTFS_IMAGE: &str = "local:/opt/neon";
 const NEON_TENANT_ID_KEY: &str = "NEON_TENANT_ID";
 const NEON_TIMELINE_ID_KEY: &str = "NEON_TIMELINE_ID";
+const MIKROM_DATABASE_ID_KEY: &str = "MIKROM_DATABASE_ID";
+const NEON_JWKS_JSON_KEY: &str = "NEON_JWKS_JSON";
+#[cfg(test)]
+const NEON_JWKS_PATH_KEY: &str = "NEON_JWKS_PATH";
+const NEON_INSTANCE_ID_KEY: &str = "NEON_INSTANCE_ID";
+const MIKROM_NEON_DEV_MODE_KEY: &str = "MIKROM_NEON_DEV_MODE";
+const NEON_CONFIGURE_TOKEN_KEY: &str = "NEON_CONFIGURE_TOKEN";
+const MIKROM_DATABASE_CONFIGURE_TOKEN_KEY: &str = "MIKROM_DATABASE_CONFIGURE_TOKEN";
+const NEON_CONFIGURE_TOKEN_KID: &str = "mikrom-neon-key";
+const NEON_CONFIGURE_TOKEN_ISSUER: &str = "mikrom-api";
+const NEON_CONFIGURE_TOKEN_SUBJECT: &str = "mikrom-api";
+const NEON_CONFIGURE_TOKEN_AUDIENCE: &str = "compute_ctl";
+const NEON_CONFIGURE_TOKEN_SCOPE: &str = "compute_ctl:admin";
+const NEON_CONFIGURE_TOKEN_TTL_SECS: i64 = 300;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NeonConfigureClaims {
+    iss: String,
+    sub: String,
+    aud: Vec<String>,
+    iat: i64,
+    exp: i64,
+    compute_id: String,
+    scope: String,
+}
 
 impl DatabaseService {
     pub async fn validate_tenant_retention(
@@ -223,7 +251,7 @@ impl DatabaseService {
                 memory_mib: database.memory_mib.value(),
                 disk_mib: database.disk_mib,
                 port: 5432,
-                env: Self::database_env(&database),
+                env: Self::database_env(&database, &state.ctx.config)?,
                 volumes: vec![],
                 health_check_path: "/".to_string(),
                 ipv6_address: "".to_string(),
@@ -333,8 +361,12 @@ impl DatabaseService {
         Ok(())
     }
 
-    fn database_env(database: &Database) -> std::collections::HashMap<String, String> {
+    fn database_env(
+        database: &Database,
+        config: &crate::config::ApiConfig,
+    ) -> ApiResult<std::collections::HashMap<String, String>> {
         let mut env = database.settings.clone();
+        env.insert(MIKROM_DATABASE_ID_KEY.to_string(), database.id.to_string());
 
         if let Some(tenant_id) = &database.tenant_id {
             env.insert(NEON_TENANT_ID_KEY.to_string(), tenant_id.clone());
@@ -343,7 +375,102 @@ impl DatabaseService {
             env.insert(NEON_TIMELINE_ID_KEY.to_string(), timeline_id.clone());
         }
 
-        env
+        if let Some(value) = config
+            .neon_jwks_json
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            env.entry(NEON_JWKS_JSON_KEY.to_string())
+                .or_insert_with(|| value.clone());
+        } else if let Some(path) = config
+            .neon_jwks_path
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            let jwks_json = std::fs::read_to_string(path).map_err(|e| {
+                ApiError::Internal(format!("Failed to read NEON JWKS from {}: {}", path, e))
+            })?;
+            env.entry(NEON_JWKS_JSON_KEY.to_string())
+                .or_insert(jwks_json);
+        }
+        if let Some(value) = config
+            .neon_instance_id
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            env.entry(NEON_INSTANCE_ID_KEY.to_string())
+                .or_insert_with(|| value.clone());
+        }
+        if let Some(value) = config.mikrom_neon_dev_mode {
+            env.entry(MIKROM_NEON_DEV_MODE_KEY.to_string())
+                .or_insert_with(|| value.to_string());
+        }
+        if let Some(value) = config
+            .neon_configure_token
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            env.entry(NEON_CONFIGURE_TOKEN_KEY.to_string())
+                .or_insert_with(|| value.clone());
+            env.entry(MIKROM_DATABASE_CONFIGURE_TOKEN_KEY.to_string())
+                .or_insert_with(|| value.clone());
+            return Ok(env);
+        }
+
+        if let Some(token) = Self::generate_neon_configure_token(database, config)? {
+            env.entry(NEON_CONFIGURE_TOKEN_KEY.to_string())
+                .or_insert(token.clone());
+            env.entry(MIKROM_DATABASE_CONFIGURE_TOKEN_KEY.to_string())
+                .or_insert(token);
+        }
+
+        Ok(env)
+    }
+
+    fn generate_neon_configure_token(
+        database: &Database,
+        config: &crate::config::ApiConfig,
+    ) -> ApiResult<Option<String>> {
+        let private_key = match (
+            config.neon_configure_private_key_pem.as_ref(),
+            config.neon_configure_private_key_path.as_ref(),
+        ) {
+            (Some(pem), _) if !pem.trim().is_empty() => pem.trim().replace("\\n", "\n"),
+            (None, Some(path)) if !path.trim().is_empty() => std::fs::read_to_string(path)
+                .map_err(|e| {
+                    ApiError::Internal(format!(
+                        "Failed to read NEON configure private key from {}: {}",
+                        path, e
+                    ))
+                })?
+                .trim()
+                .replace("\\n", "\n"),
+            _ => return Ok(None),
+        };
+
+        let now = Utc::now();
+        let claims = NeonConfigureClaims {
+            iss: NEON_CONFIGURE_TOKEN_ISSUER.to_string(),
+            sub: NEON_CONFIGURE_TOKEN_SUBJECT.to_string(),
+            aud: vec![NEON_CONFIGURE_TOKEN_AUDIENCE.to_string()],
+            iat: (now - Duration::seconds(30)).timestamp(),
+            exp: (now + Duration::seconds(NEON_CONFIGURE_TOKEN_TTL_SECS)).timestamp(),
+            compute_id: database.id.to_string(),
+            scope: NEON_CONFIGURE_TOKEN_SCOPE.to_string(),
+        };
+
+        let key = EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|e| {
+            ApiError::Internal(format!("Invalid NEON configure private key: {}", e))
+        })?;
+
+        let mut header = Header::new(jsonwebtoken::Algorithm::RS256);
+        header.kid = Some(NEON_CONFIGURE_TOKEN_KID.to_string());
+
+        let token = jsonwebtoken::encode(&header, &claims, &key).map_err(|e| {
+            ApiError::Internal(format!("Failed to encode NEON configure JWT: {}", e))
+        })?;
+
+        Ok(Some(token))
     }
 
     fn ensure_neon_provisioning_ids(params: &mut CreateDatabaseParams) {
@@ -658,6 +785,14 @@ mod tests {
                                     && cfg.port == 5432
                                     && cfg
                                         .env
+                                        .get(MIKROM_DATABASE_ID_KEY)
+                                        .is_some_and(|v| v == &database_id.to_string())
+                                    && cfg
+                                        .env
+                                        .get(MIKROM_DATABASE_ID_KEY)
+                                        .is_some_and(|v| v == &database_id.to_string())
+                                    && cfg
+                                        .env
                                         .get(NEON_TENANT_ID_KEY)
                                         .is_some_and(|v| v == "11111111111111111111111111111111")
                                     && cfg
@@ -879,6 +1014,123 @@ mod tests {
         let (tenant_id, timeline_id) = DatabaseService::resolve_neon_provisioning_ids(&database);
         assert_eq!(tenant_id, "11111111111111111111111111111111");
         assert_eq!(timeline_id, "22222222222222222222222222222222");
+    }
+
+    #[test]
+    fn database_env_includes_neon_runtime_settings_from_api_config() {
+        let database = Database {
+            id: Uuid::new_v4(),
+            name: "orders".to_string(),
+            engine: "neon".to_string(),
+            user_id: Uuid::new_v4(),
+            vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
+            memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
+            disk_mib: 1024,
+            tenant_id: Some("tenant-123".to_string()),
+            timeline_id: Some("timeline-456".to_string()),
+            tenant_gen: Some(1),
+            settings: HashMap::from([("max_connections".to_string(), "200".to_string())]),
+            status: DatabaseStatus::Pending,
+            active_deployment_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let config = crate::config::ApiConfig {
+            neon_jwks_json: Some("{\"keys\":[]}".to_string()),
+            neon_jwks_path: Some("/etc/mikrom/jwks.json".to_string()),
+            neon_instance_id: Some("compute-node-1".to_string()),
+            mikrom_neon_dev_mode: Some(false),
+            neon_configure_token: Some("token-123".to_string()),
+            ..Default::default()
+        };
+
+        let env = DatabaseService::database_env(&database, &config).unwrap();
+        assert_eq!(
+            env.get(MIKROM_DATABASE_ID_KEY),
+            Some(&database.id.to_string())
+        );
+        assert_eq!(env.get(NEON_TENANT_ID_KEY), Some(&"tenant-123".to_string()));
+        assert_eq!(
+            env.get(NEON_TIMELINE_ID_KEY),
+            Some(&"timeline-456".to_string())
+        );
+        assert_eq!(
+            env.get(NEON_JWKS_JSON_KEY),
+            Some(&"{\"keys\":[]}".to_string())
+        );
+        assert!(!env.contains_key(NEON_JWKS_PATH_KEY));
+        assert_eq!(
+            env.get(NEON_INSTANCE_ID_KEY),
+            Some(&"compute-node-1".to_string())
+        );
+        assert_eq!(
+            env.get(MIKROM_NEON_DEV_MODE_KEY),
+            Some(&"false".to_string())
+        );
+        assert_eq!(
+            env.get(NEON_CONFIGURE_TOKEN_KEY),
+            Some(&"token-123".to_string())
+        );
+        assert_eq!(
+            env.get(MIKROM_DATABASE_CONFIGURE_TOKEN_KEY),
+            Some(&"token-123".to_string())
+        );
+        assert_eq!(env.get("max_connections"), Some(&"200".to_string()));
+    }
+
+    #[test]
+    fn database_env_reads_jwks_path_and_injects_inline_json() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let jwks_path = temp_dir.path().join("jwks.json");
+        std::fs::write(&jwks_path, r#"{"keys":[{"kid":"mikrom-neon-key"}]}"#).unwrap();
+
+        let database = Database {
+            id: Uuid::new_v4(),
+            name: "orders".to_string(),
+            engine: "neon".to_string(),
+            user_id: Uuid::new_v4(),
+            vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
+            memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
+            disk_mib: 1024,
+            tenant_id: Some("tenant-123".to_string()),
+            timeline_id: Some("timeline-456".to_string()),
+            tenant_gen: Some(1),
+            settings: HashMap::new(),
+            status: DatabaseStatus::Pending,
+            active_deployment_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let config = crate::config::ApiConfig {
+            neon_jwks_path: Some(jwks_path.to_string_lossy().to_string()),
+            ..Default::default()
+        };
+
+        let env = DatabaseService::database_env(&database, &config).unwrap();
+        assert_eq!(
+            env.get(NEON_JWKS_JSON_KEY),
+            Some(&r#"{"keys":[{"kid":"mikrom-neon-key"}]}"#.to_string())
+        );
+        assert!(!env.contains_key(NEON_JWKS_PATH_KEY));
+    }
+
+    #[test]
+    fn neon_configure_claims_use_expected_scope_literal() {
+        let claims = NeonConfigureClaims {
+            iss: NEON_CONFIGURE_TOKEN_ISSUER.to_string(),
+            sub: NEON_CONFIGURE_TOKEN_SUBJECT.to_string(),
+            aud: vec![NEON_CONFIGURE_TOKEN_AUDIENCE.to_string()],
+            iat: 1,
+            exp: 2,
+            compute_id: "compute-1".to_string(),
+            scope: NEON_CONFIGURE_TOKEN_SCOPE.to_string(),
+        };
+
+        let value = serde_json::to_value(&claims).unwrap();
+        assert_eq!(value["scope"], NEON_CONFIGURE_TOKEN_SCOPE);
+        assert_eq!(value["aud"], serde_json::json!(["compute_ctl"]));
     }
 
     #[tokio::test]

@@ -13,6 +13,11 @@ use tokio::time::{Duration, Instant};
 const CONFIG_PATH: &str = "/etc/mikrom/init.json";
 const FALLBACK_SHELL: &str = "/bin/sh";
 const DEFAULT_NEON_PAGESERVER_IPV6: &str = "fd00::deed:1d1c";
+const DATABASE_ID_ENV: &str = "MIKROM_DATABASE_ID";
+const NEON_JWKS_JSON_ENV: &str = "NEON_JWKS_JSON";
+const NEON_JWKS_PATH_ENV: &str = "NEON_JWKS_PATH";
+const NEON_INSTANCE_ID_ENV: &str = "NEON_INSTANCE_ID";
+const NEON_DEV_MODE_ENV: &str = "MIKROM_NEON_DEV_MODE";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct VolumeConfig {
@@ -174,6 +179,11 @@ async fn run_database(config: InitConfig) -> Result<()> {
 }
 
 fn build_database_command(config: &InitConfig) -> Result<Command> {
+    let user = resolve_run_as_user()?;
+    build_database_command_with_user(config, &user)
+}
+
+fn build_database_command_with_user(config: &InitConfig, user: &RunAsUser) -> Result<Command> {
     // 1. Validate required environment variables
     let tenant_id = config
         .env
@@ -188,37 +198,83 @@ fn build_database_command(config: &InitConfig) -> Result<Command> {
         .get("NEON_PAGESERVER_IPV6")
         .map(String::as_str)
         .unwrap_or(DEFAULT_NEON_PAGESERVER_IPV6);
+    let compute_id = config
+        .env
+        .get(DATABASE_ID_ENV)
+        .context("MIKROM_DATABASE_ID is required for database workload")?;
 
     println!(
         "[mikrom-init] Tenant: {}, Timeline: {}",
         tenant_id, timeline_id
     );
 
-    let mut cmd = Command::new("/usr/local/postgresql/bin/postgres");
+    let mut cmd = Command::new("/usr/local/bin/compute_ctl");
 
     // Inject mandatory library paths discovered via ldd
     cmd.env(
         "LD_LIBRARY_PATH",
         "/usr/local/postgresql/lib:/lib:/usr/lib/x86_64-linux-gnu",
     );
+    cmd.env("HOME", &user.dir);
+    cmd.env("USER", &user.name);
+    cmd.env("LOGNAME", &user.name);
 
-    // Neon surgical arguments
+    let mut compute_ctl_config = serde_json::json!({
+        "cluster": {
+            "cluster_id": compute_id,
+            "tenant_id": tenant_id,
+            "timeline_id": timeline_id,
+            "mode": "Primary"
+        },
+        "pageserver_connstr": format!("[{}]:6400", pageserver_ipv6),
+        "safekeeper_connstrs": [format!("[{}]:5454", pageserver_ipv6)],
+        "jwks": resolve_neon_jwks(&config.env)?,
+    });
+
+    if let Some(instance_id) = config
+        .env
+        .get(NEON_INSTANCE_ID_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        compute_ctl_config["instance_id"] = serde_json::json!(instance_id);
+    }
+
+    let compute_config = serde_json::json!({
+        "compute_ctl_config": compute_ctl_config
+    });
+    let config_file_path = "/tmp/compute_config.json";
+    std::fs::write(config_file_path, compute_config.to_string())
+        .context("Failed to write compute_config.json inside microVM")?;
+
+    // Neon compute_ctl arguments.
+    let dummy_connstr = format!(
+        "postgresql://cloud_admin@localhost:6400/{}?options=-c%20neon.timeline_id={}",
+        tenant_id, timeline_id
+    );
+
     cmd.args([
-        "-D",
+        "--pgbin",
+        "/usr/local/postgresql/bin/postgres",
+        "--pgdata",
         "/tmp/pgdata", // Ephemeral directory in VM RAM
-        "-c",
-        "shared_preload_libraries=neon",
-        "-c",
-        &format!("neon.pageserver_connstr=[{}]:6400", pageserver_ipv6),
-        "-c",
-        &format!("neon.safekeeper_connstrs=[{}]:5454", pageserver_ipv6),
-        "-c",
-        &format!("neon.tenant_id={}", tenant_id),
-        "-c",
-        &format!("neon.timeline_id={}", timeline_id),
-        "-c",
-        "listen_addresses=*", // Allow Pingora proxy to connect
+        "--compute-id",
+        compute_id,
+        "--connstr",
+        &dummy_connstr,
+        "--config",
+        config_file_path,
     ]);
+
+    let dev_mode = config
+        .env
+        .get(NEON_DEV_MODE_ENV)
+        .map(|value| parse_bool_flag(value))
+        .transpose()?
+        .unwrap_or(true);
+    if dev_mode {
+        cmd.arg("--dev");
+    }
 
     // Forward any other environment variables
     for (key, val) in &config.env {
@@ -226,8 +282,50 @@ fn build_database_command(config: &InitConfig) -> Result<Command> {
             cmd.env(key, val);
         }
     }
+    cmd.env(
+        "NEON_PAGESERVER_CONNSTR",
+        format!("[{}]:6400", pageserver_ipv6),
+    );
+    cmd.env(
+        "NEON_SAFEKEEPER_CONNSTRS",
+        format!("[{}]:5454", pageserver_ipv6),
+    );
+
+    cmd.uid(user.uid);
+    cmd.gid(user.gid);
 
     Ok(cmd)
+}
+
+fn resolve_neon_jwks(env: &HashMap<String, String>) -> Result<serde_json::Value> {
+    let raw_jwks = if let Some(path) = env.get(NEON_JWKS_PATH_ENV) {
+        fs::read_to_string(path).with_context(|| format!("Failed to read JWKS file at {path}"))?
+    } else if let Some(raw) = env.get(NEON_JWKS_JSON_ENV) {
+        raw.clone()
+    } else {
+        return Ok(serde_json::json!({ "keys": [] }));
+    };
+
+    let jwks: serde_json::Value = serde_json::from_str(&raw_jwks)
+        .with_context(|| "Failed to parse JWKS JSON from configuration")?;
+
+    match jwks {
+        serde_json::Value::Object(_) => Ok(jwks),
+        serde_json::Value::Array(keys) => Ok(serde_json::json!({ "keys": keys })),
+        _ => Err(anyhow::anyhow!(
+            "JWKS configuration must be a JSON object or an array of JWK entries"
+        )),
+    }
+}
+
+fn parse_bool_flag(value: &str) -> Result<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        other => Err(anyhow::anyhow!(
+            "Invalid boolean value for MIKROM_NEON_DEV_MODE: {other}"
+        )),
+    }
 }
 
 fn setup_mounts() -> Result<()> {
@@ -917,6 +1015,7 @@ mod tests {
     fn test_build_database_command_includes_neon_args() {
         let config = InitConfig {
             env: HashMap::from([
+                (DATABASE_ID_ENV.to_string(), "db-123".to_string()),
                 ("NEON_TENANT_ID".to_string(), "tenant-1".to_string()),
                 ("NEON_TIMELINE_ID".to_string(), "timeline-1".to_string()),
                 ("LD_LIBRARY_PATH".to_string(), "/opt/custom".to_string()),
@@ -929,16 +1028,61 @@ mod tests {
             workload_type: WorkloadType::Database,
         };
 
-        let cmd = build_database_command(&config).unwrap();
-        assert_eq!(cmd.get_program(), "/usr/local/postgresql/bin/postgres");
+        let user = RunAsUser {
+            uid: 1000,
+            gid: 1000,
+            dir: "/home/mikrom".to_string(),
+            name: "mikrom".to_string(),
+        };
+
+        let cmd = build_database_command_with_user(&config, &user).unwrap();
+        assert_eq!(cmd.get_program(), "/usr/local/bin/compute_ctl");
 
         let args: Vec<_> = cmd
             .get_args()
             .map(|arg| arg.to_string_lossy().to_string())
             .collect();
-        assert!(args.contains(&"shared_preload_libraries=neon".to_string()));
-        assert!(args.contains(&"neon.tenant_id=tenant-1".to_string()));
-        assert!(args.contains(&"neon.timeline_id=timeline-1".to_string()));
+        assert_eq!(args[0], "--pgbin");
+        assert_eq!(args[1], "/usr/local/postgresql/bin/postgres");
+        assert_eq!(args[2], "--pgdata");
+        assert_eq!(args[3], "/tmp/pgdata");
+        assert_eq!(args[4], "--compute-id");
+        assert_eq!(args[5], "db-123");
+        assert_eq!(args[6], "--connstr");
+        assert_eq!(
+            args[7],
+            "postgresql://cloud_admin@localhost:6400/tenant-1?options=-c%20neon.timeline_id=timeline-1"
+        );
+        assert_eq!(args[8], "--config");
+        assert_eq!(args[9], "/tmp/compute_config.json");
+
+        let config_contents = std::fs::read_to_string("/tmp/compute_config.json").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&config_contents).unwrap();
+        assert_eq!(
+            parsed["compute_ctl_config"]["cluster"]["cluster_id"],
+            "db-123"
+        );
+        assert_eq!(
+            parsed["compute_ctl_config"]["cluster"]["tenant_id"],
+            "tenant-1"
+        );
+        assert_eq!(
+            parsed["compute_ctl_config"]["cluster"]["timeline_id"],
+            "timeline-1"
+        );
+        assert_eq!(parsed["compute_ctl_config"]["cluster"]["mode"], "Primary");
+        assert_eq!(
+            parsed["compute_ctl_config"]["pageserver_connstr"],
+            "[fd00::deed:1d1c]:6400"
+        );
+        assert_eq!(
+            parsed["compute_ctl_config"]["safekeeper_connstrs"],
+            serde_json::json!(["[fd00::deed:1d1c]:5454"])
+        );
+        assert_eq!(
+            parsed["compute_ctl_config"]["jwks"]["keys"],
+            serde_json::json!([])
+        );
 
         let envs: HashMap<_, _> = cmd
             .get_envs()
@@ -956,8 +1100,32 @@ mod tests {
             "/usr/local/postgresql/lib:/lib:/usr/lib/x86_64-linux-gnu"
         );
         assert_eq!(
+            envs.get("HOME").and_then(|value| value.clone()).unwrap(),
+            "/home/mikrom"
+        );
+        assert_eq!(
+            envs.get("USER").and_then(|value| value.clone()).unwrap(),
+            "mikrom"
+        );
+        assert_eq!(
+            envs.get("LOGNAME").and_then(|value| value.clone()).unwrap(),
+            "mikrom"
+        );
+        assert_eq!(
             envs.get("EXTRA").and_then(|value| value.clone()).unwrap(),
             "value"
+        );
+        assert_eq!(
+            envs.get("NEON_PAGESERVER_CONNSTR")
+                .and_then(|value| value.clone())
+                .unwrap(),
+            "[fd00::deed:1d1c]:6400"
+        );
+        assert_eq!(
+            envs.get("NEON_SAFEKEEPER_CONNSTRS")
+                .and_then(|value| value.clone())
+                .unwrap(),
+            "[fd00::deed:1d1c]:5454"
         );
     }
 
@@ -1031,5 +1199,41 @@ mod tests {
         assert!(hosts.contains("127.0.0.1 localhost"));
         assert!(hosts.contains("::1 localhost ip6-localhost ip6-loopback"));
         assert!(hosts.contains("127.0.1.1 localhost"));
+    }
+
+    #[test]
+    fn test_resolve_neon_jwks_supports_inline_json_and_arrays() {
+        let object_jwks = serde_json::json!({
+            "keys": [
+                {
+                    "kty": "OKP",
+                    "crv": "Ed25519",
+                    "x": "abc",
+                    "kid": "kid-1"
+                }
+            ]
+        });
+        let env = HashMap::from([(NEON_JWKS_JSON_ENV.to_string(), object_jwks.to_string())]);
+        assert_eq!(resolve_neon_jwks(&env).unwrap(), object_jwks);
+
+        let array_jwks = serde_json::json!([{
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "def",
+            "kid": "kid-2"
+        }]);
+        let env = HashMap::from([(NEON_JWKS_JSON_ENV.to_string(), array_jwks.to_string())]);
+        assert_eq!(
+            resolve_neon_jwks(&env).unwrap(),
+            serde_json::json!({ "keys": array_jwks })
+        );
+    }
+
+    #[test]
+    fn test_parse_bool_flag_accepts_expected_values() {
+        assert!(parse_bool_flag("true").unwrap());
+        assert!(parse_bool_flag("1").unwrap());
+        assert!(!parse_bool_flag("false").unwrap());
+        assert!(!parse_bool_flag("0").unwrap());
     }
 }

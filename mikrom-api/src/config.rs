@@ -69,6 +69,20 @@ pub struct ApiConfig {
     pub github_webhook_url_base: Option<String>,
     pub neon_pageserver_url: Option<String>,
     pub neon_bearer_token: Option<String>,
+    #[serde(default)]
+    pub neon_jwks_json: Option<String>,
+    #[serde(default)]
+    pub neon_jwks_path: Option<String>,
+    #[serde(default)]
+    pub neon_instance_id: Option<String>,
+    #[serde(default)]
+    pub mikrom_neon_dev_mode: Option<bool>,
+    #[serde(default)]
+    pub neon_configure_token: Option<String>,
+    #[serde(default)]
+    pub neon_configure_private_key_pem: Option<String>,
+    #[serde(default)]
+    pub neon_configure_private_key_path: Option<String>,
 }
 
 impl Default for ApiConfig {
@@ -111,6 +125,13 @@ impl Default for ApiConfig {
             github_webhook_url_base: None,
             neon_pageserver_url: None,
             neon_bearer_token: None,
+            neon_jwks_json: None,
+            neon_jwks_path: None,
+            neon_instance_id: None,
+            mikrom_neon_dev_mode: None,
+            neon_configure_token: None,
+            neon_configure_private_key_pem: None,
+            neon_configure_private_key_path: None,
         }
     }
 }
