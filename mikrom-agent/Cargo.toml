@@ -20,6 +20,7 @@ hostname = "0.4"
 envy.workspace = true
 
 mikrom-proto = { version = "0.3.0", path = "../mikrom-proto", features = ["telemetry"] }
+mikrom-network = { path = "../mikrom-network" }
 dotenvy = "0.15"
 anyhow.workspace = true
 async-nats.workspace = true

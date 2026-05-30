@@ -15,6 +15,7 @@ http = "1.4"
 envy.workspace = true
 mikrom-api = { path = "../mikrom-api", optional = true }
 mikrom-proto = { version = "0.3.0", path = "../mikrom-proto" }
+mikrom-network = { path = "../mikrom-network" }
 mikrom-scheduler = { path = "../mikrom-scheduler", optional = true }
 openssl = "0.10.80"
 rustls = { version = "0.23", features = ["ring"], optional = true }

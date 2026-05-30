@@ -191,6 +191,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrayref"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
+
+[[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -746,6 +752,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake3"
+version = "1.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0aa83c34e62843d924f905e0f5c866eb1dd6545fc4d719e803d9ba6030371fce"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures 0.3.0",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1120,6 +1140,12 @@ name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "cookie"
@@ -2892,6 +2918,7 @@ dependencies = [
  "librados-sys",
  "librbd-sys",
  "mikrom-agent-ebpf-common",
+ "mikrom-network",
  "mikrom-proto",
  "neli",
  "netlink-packet-route",
@@ -3052,6 +3079,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "mikrom-network"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "base64",
+ "blake3",
+ "futures",
+ "hex",
+ "libc",
+ "mikrom-proto",
+ "neli",
+ "netlink-packet-route",
+ "parking_lot",
+ "prost 0.13.5",
+ "rand 0.8.6",
+ "rtnetlink",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "x25519-dalek",
+ "zeroize",
+]
+
+[[package]]
 name = "mikrom-proto"
 version = "0.3.0"
 dependencies = [
@@ -3103,6 +3159,7 @@ dependencies = [
  "http 1.4.1",
  "libc",
  "mikrom-api",
+ "mikrom-network",
  "mikrom-proto",
  "mikrom-scheduler",
  "neli",

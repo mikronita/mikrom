@@ -11,7 +11,6 @@ pub mod metrics;
 pub(crate) mod network;
 pub mod server;
 pub mod subjects;
-pub mod wireguard;
 
 pub use builder::ImageBuilder;
 pub use firecracker::FirecrackerManager;

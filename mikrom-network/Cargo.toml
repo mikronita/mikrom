@@ -1,0 +1,52 @@
+[package]
+name = "mikrom-network"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { workspace = true, features = ["net", "rt", "time", "signal"] }
+tracing = "0.1"
+thiserror = "2"
+parking_lot = "0.12"
+async-trait = "0.1"
+futures = "0.3"
+anyhow = { workspace = true } # keeping for some internal conversions if needed, but mainly using thiserror
+async-nats = { workspace = true }
+prost = "0.13"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+mikrom-proto = { path = "../mikrom-proto" }
+
+x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+rtnetlink = "0.14"
+netlink-packet-route = "0.19"
+neli = { version = "0.7.4", features = ["async"] }
+libc = "0.2"
+
+base64 = "0.22.1"
+hex = "0.4.3"
+rand = "0.8"
+blake3 = "1.5"
+zeroize = { version = "1.8", features = ["derive"] }
+
+[package.metadata.deb]
+maintainer = "Antonio Pardo <apardo@spluca.org>"
+copyright = "2026, Mikrom Team"
+license-file = ["../LICENSE", "0"]
+extended-description = """\
+Mikrom Network is a library and core networking utility for the Mikrom mesh network.
+It manages WireGuard interfaces and route synchronization via NATS.
+"""
+section = "admin"
+priority = "optional"
+depends = "libc6, libssl3, wireguard-tools"
+assets = [
+    ["target/release/mikrom-network", "/usr/bin/mikrom-network", "755"],
+    ["debian/mikrom-network.service", "/lib/systemd/system/mikrom-network.service", "644"],
+    ["debian/network.env", "/etc/mikrom/network.env", "640"],
+]
+systemd-units = { unit-name = "mikrom-network" }
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"

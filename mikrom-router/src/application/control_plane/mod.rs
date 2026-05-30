@@ -11,8 +11,7 @@ use crate::app::runtime;
 use crate::domain::health::RouterHealth;
 use crate::domain::state::{Certificate, Route, State};
 use crate::domain::subjects as router_subjects;
-use crate::infrastructure::persistence::state_manager::{StateManager, StateVersions};
-use crate::infrastructure::wireguard::WireGuardManager;
+use crate::infrastructure::persistence::state_manager::StateManager;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -66,11 +65,6 @@ fn tls_alternative_cn_for_host(host: &str) -> Option<String> {
     }
 }
 
-struct LoadedState {
-    state: State,
-    versions: StateVersions,
-}
-
 pub struct ControlPlane {
     db_url: DatabaseUrl,
     nats_url: NatsUrl,
@@ -82,7 +76,7 @@ pub struct ControlPlane {
     router_id: RouterId,
     advertise_address: String,
     data_dir: String,
-    wg_manager: Arc<WireGuardManager>,
+    wg_manager: Arc<mikrom_network::WireGuardManager>,
     wg_port: u16,
 }
 
@@ -112,221 +106,108 @@ impl ControlPlane {
             router_id,
             advertise_address,
             data_dir,
-            wg_manager: Arc::new(WireGuardManager::new("wg-mikrom").with_listen_port(wg_port)),
+            wg_manager: Arc::new(
+                mikrom_network::WireGuardManager::new("wg-mikrom").with_listen_port(wg_port),
+            ),
             wg_port,
         }
     }
 
     async fn sync_full_state(&self, db: &PgPool) -> Result<()> {
-        info!("Performing full state sync from database...");
-        let (current_state, current_versions) = self.state_manager.snapshot().await;
-        info!(
-            routes = current_state.routes.len(),
-            acme_tokens = current_state.acme_tokens.len(),
-            certificates = current_state.certificates.len(),
-            route_versions = current_versions.route_versions.len(),
-            acme_versions = current_versions.acme_versions.len(),
-            certificate_versions = current_versions.certificate_versions.len(),
-            "Current version snapshot before reconciliation"
-        );
+        info!("Control Plane: Syncing full state from database...");
 
-        let snapshot = self.load_full_state(db).await?;
+        let mut state = State::default();
 
-        info!(
-            routes = snapshot.state.routes.len(),
-            acme_tokens = snapshot.state.acme_tokens.len(),
-            certificates = snapshot.state.certificates.len(),
-            route_versions = snapshot.versions.route_versions.len(),
-            acme_versions = snapshot.versions.acme_versions.len(),
-            certificate_versions = snapshot.versions.certificate_versions.len(),
-            "Applying full state sync"
-        );
-        self.state_manager
-            .replace_state(snapshot.state, snapshot.versions)
-            .await?;
-        info!("State sync complete.");
-
-        Ok(())
-    }
-
-    async fn load_full_state(&self, db: &PgPool) -> Result<LoadedState> {
-        let (routes, route_versions) = self.load_routes(db).await?;
-        let (acme_tokens, acme_versions) = self.load_acme_tokens(db).await?;
-        let (certificates, certificate_versions) = self.load_certificates(db).await?;
-
-        Ok(LoadedState {
-            state: State {
-                routes,
-                acme_tokens,
-                certificates,
-            },
-            versions: StateVersions {
-                route_versions,
-                acme_versions,
-                certificate_versions,
-            },
-        })
-    }
-
-    async fn load_routes(
-        &self,
-        db: &PgPool,
-    ) -> Result<(HashMap<String, Route>, HashMap<String, i64>)> {
-        let route_rows = sqlx::query(
-            "SELECT hostname, target_url, EXTRACT(EPOCH FROM updated_at)::BIGINT AS updated_at FROM routes",
+        // 1. Load routes
+        let routes_rows = sqlx::query(
+            "SELECT hostname, target_url, EXTRACT(EPOCH FROM updated_at)::BIGINT as ts FROM routes",
         )
         .fetch_all(db)
         .await?;
 
-        let mut route_targets: HashMap<String, (Vec<String>, bool)> = HashMap::new();
-        let mut route_versions: HashMap<String, i64> = HashMap::new();
-        for row in route_rows {
+        let mut route_targets: HashMap<String, (Vec<String>, i64)> = HashMap::new();
+        for row in routes_rows {
             use sqlx::Row;
-            let host: String = row.get("hostname");
-            let target: String = row.get("target_url");
-            let updated_at: i64 = row.get("updated_at");
-
-            let use_tls = target.starts_with("https://");
-            let target = target
-                .strip_prefix("https://")
-                .or_else(|| target.strip_prefix("http://"))
-                .unwrap_or(&target)
-                .to_string();
-
-            let entry = route_targets.entry(host.clone()).or_default();
-            entry.0.push(target);
-            entry.1 |= use_tls;
-            route_versions
-                .entry(host)
-                .and_modify(|current| *current = (*current).max(updated_at))
-                .or_insert(updated_at);
+            let hostname: String = row.get("hostname");
+            let target_url: String = row.get("target_url");
+            let ts: i64 = row.get("ts");
+            let entry = route_targets.entry(hostname).or_insert((Vec::new(), ts));
+            entry.0.push(target_url);
+            entry.1 = entry.1.max(ts);
         }
 
-        let mut routes: HashMap<String, Route> = HashMap::new();
-        for (host, (targets, use_tls)) in route_targets {
-            let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice())
-                .context("Failed to create load balancer from targets")?;
-
+        for (host, (targets, _ts)) in route_targets {
+            let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice())?;
             let mut hc = TcpHealthCheck::default();
             hc.consecutive_success = 1;
             hc.consecutive_failure = 2;
-
             lb.set_health_check(Box::new(hc));
-            lb.health_check_frequency = Some(std::time::Duration::from_millis(250));
-            let tls_alternative_cn = tls_alternative_cn_for_host(&host);
+            lb.health_check_frequency = Some(Duration::from_millis(250));
 
-            routes.insert(
+            state.routes.insert(
                 host.clone(),
                 Route {
-                    host,
+                    host: host.clone(),
                     targets,
                     lb: Arc::new(lb),
-                    use_tls,
-                    tls_alternative_cn,
+                    use_tls: false,
+                    tls_alternative_cn: tls_alternative_cn_for_host(&host),
                 },
             );
         }
 
-        Ok((routes, route_versions))
-    }
-
-    async fn load_acme_tokens(
-        &self,
-        db: &PgPool,
-    ) -> Result<(HashMap<String, String>, HashMap<String, i64>)> {
-        let acme_rows = sqlx::query(
-            "SELECT token, key_auth, EXTRACT(EPOCH FROM updated_at)::BIGINT AS updated_at FROM acme_challenges",
-        )
+        // 2. Load ACME tokens
+        let acme_rows = sqlx::query("SELECT token, key_auth FROM acme_challenges")
             .fetch_all(db)
             .await?;
-
-        let mut acme_tokens = HashMap::new();
-        let mut acme_versions = HashMap::new();
         for row in acme_rows {
             use sqlx::Row;
-            let token: String = row.get("token");
-            let key_auth: String = row.get("key_auth");
-            let updated_at: i64 = row.get("updated_at");
-            acme_tokens.insert(token.clone(), key_auth);
-            acme_versions.insert(token, updated_at);
+            state
+                .acme_tokens
+                .insert(row.get("token"), row.get("key_auth"));
         }
 
-        Ok((acme_tokens, acme_versions))
-    }
-
-    async fn load_certificates(
-        &self,
-        db: &PgPool,
-    ) -> Result<(HashMap<String, Certificate>, HashMap<String, i64>)> {
-        let cert_rows = sqlx::query(
-            "SELECT hostname, cert_chain, private_key, EXTRACT(EPOCH FROM updated_at)::BIGINT AS updated_at FROM tls_certificates",
-        )
-        .fetch_all(db)
-        .await?;
-
-        let mut certificates = HashMap::new();
-        let mut certificate_versions = HashMap::new();
+        // 3. Load Certificates
+        let cert_rows =
+            sqlx::query("SELECT hostname, cert_chain, private_key FROM tls_certificates")
+                .fetch_all(db)
+                .await?;
         for row in cert_rows {
             use sqlx::Row;
-            let domain: String = row.get("hostname");
-            let cert_pem: String = row.get("cert_chain");
-            let encrypted_key: String = row.get("private_key");
-            let updated_at: i64 = row.get("updated_at");
-
-            let key_pem = match crate::infrastructure::crypto::decrypt(
-                &encrypted_key,
-                self.master_key.as_str(),
-            ) {
-                Ok(key) => key,
-                Err(e) => {
-                    error!("Control Plane: Failed to decrypt private key for {domain}: {e}");
-                    encrypted_key
+            let hostname: String = row.get("hostname");
+            let cert_chain: String = row.get("cert_chain");
+            let private_key: String = row.get("private_key");
+            match crate::infrastructure::crypto::decrypt(&private_key, self.master_key.as_str()) {
+                Ok(key_pem) => {
+                    state.certificates.insert(
+                        hostname,
+                        Certificate {
+                            cert_pem: cert_chain,
+                            key_pem,
+                            parsed_chain: Vec::new(),
+                            parsed_key: None,
+                        },
+                    );
                 },
-            };
-
-            certificates.insert(
-                domain.clone(),
-                Certificate {
-                    cert_pem,
-                    key_pem,
-                    parsed_chain: Vec::new(),
-                    parsed_key: None,
-                },
-            );
-
-            certificate_versions.insert(domain, updated_at);
+                Err(e) => error!(
+                    "Control Plane: Failed to decrypt certificate for {}: {}",
+                    hostname, e
+                ),
+            }
         }
 
-        Ok((certificates, certificate_versions))
-    }
-
-    async fn set_proc_sysctl(&self, key: &str, value: &str) -> Result<()> {
-        let path = format!("/proc/sys/{key}");
-        tokio::fs::write(&path, value)
-            .await
-            .with_context(|| format!("Failed to write sysctl {key}={value} at {path}"))?;
+        self.state_manager.update_state(state).await?;
         Ok(())
     }
 }
 
 #[async_trait]
 impl BackgroundService for ControlPlane {
-    async fn start(&self, mut shutdown: ShutdownWatch) {
-        runtime::init_tracing_once("control-plane");
+    async fn start(&self, mut _shutdown: ShutdownWatch) {
+        info!("Control Plane: Starting...");
 
-        // 0. Enable IPv6 forwarding (essential for WireGuard 6PN routing)
-        if let Err(e) = self
-            .set_proc_sysctl("net/ipv6/conf/all/forwarding", "1")
-            .await
-        {
-            error!("Control Plane: Failed to enable IPv6 forwarding: {e}");
-        }
-
-        // Connect to database
-        let db = runtime::connect_with_backoff(
-            "Control Plane database",
-            Duration::from_secs(5),
-            || async {
+        let db =
+            runtime::connect_with_backoff("Control Plane DB", Duration::from_secs(5), || async {
                 let pool = PgPool::connect(self.db_url.as_str())
                     .await
                     .with_context(|| {
@@ -337,9 +218,8 @@ impl BackgroundService for ControlPlane {
                     .await
                     .context("Database migration failed")?;
                 Ok(pool)
-            },
-        )
-        .await;
+            })
+            .await;
         info!("Control Plane: Connected to database and migrated.");
 
         let nats =
@@ -355,7 +235,12 @@ impl BackgroundService for ControlPlane {
         info!("Control Plane: Connected to NATS.");
 
         // 0. Initialize WireGuard
-        let priv_key = match self.wg_manager.load_or_generate_key(&self.data_dir).await {
+        let priv_key = match mikrom_network::KeyManager::load_or_generate_key(
+            &self.data_dir,
+            &mikrom_network::FileWireGuardKeyStore,
+        )
+        .await
+        {
             Ok(k) => k,
             Err(e) => {
                 error!("Control Plane: Failed to load/generate WireGuard key: {e}");
@@ -363,7 +248,7 @@ impl BackgroundService for ControlPlane {
                 return;
             },
         };
-        let pub_key = match self.wg_manager.get_public_key(&priv_key) {
+        let pub_key = match mikrom_network::KeyManager::get_public_key(&priv_key) {
             Ok(k) => k,
             Err(e) => {
                 error!("Control Plane: Failed to get WireGuard public key: {e}");
@@ -449,37 +334,61 @@ impl BackgroundService for ControlPlane {
                         .await;
                     }
                 }
-                // Router updates (routes, certs, acme)
-                msg = router_sub.next() => {
-                    if let Some(msg) = msg {
-                        handlers::process_router_message(self, msg, &db, &nats, &tx).await;
-                    }
-                }
-                // Mesh updates (peers)
-                msg = mesh_sub.next() => {
-                    if let Some(msg) = msg {
-                        handlers::process_mesh_message(self, msg, &priv_key).await;
-                    }
-                }
-                Some(()) = rx.recv() => {
+
+                // Internal trigger for state sync
+                _ = rx.recv() => {
                     pending = true;
                 }
-                _ = interval.tick() => {
-                    if pending {
-                        if let Err(e) = self.sync_full_state(&db).await {
-                            error!("Control Plane: Failed to sync state after NATS update: {e}");
-                        } else {
-                            self.health.clear_startup_error();
-                            self.health.mark_control_plane_synced();
-                        }
-                        pending = false;
+
+                // Batching state syncs
+                _ = interval.tick(), if pending => {
+                    if let Err(e) = self.sync_full_state(&db).await {
+                        error!("Control Plane: State sync failed: {e}");
                     }
+                    pending = false;
                 }
-                _ = shutdown.changed() => {
+
+                // NATS Router Updates
+                Some(msg) = router_sub.next() => {
+                    let tx_clone = tx.clone();
+                    let self_clone = self.clone();
+                    let nats_clone = nats.clone();
+                    let db_clone = db.clone();
+                    tokio::spawn(async move {
+                        handlers::process_router_message(&self_clone, msg, &db_clone, &nats_clone, &tx_clone).await;
+                    });
+                }
+
+                // NATS Mesh Updates
+                Some(msg) = mesh_sub.next() => {
+                    handlers::process_mesh_message(self, msg, &priv_key).await;
+                }
+
+                // Shutdown
+                _ = _shutdown.changed() => {
                     info!("Control Plane: Shutting down...");
                     break;
                 }
             }
+        }
+    }
+}
+
+impl Clone for ControlPlane {
+    fn clone(&self) -> Self {
+        Self {
+            db_url: self.db_url.clone(),
+            nats_url: self.nats_url.clone(),
+            nats_use_tls: self.nats_use_tls,
+            nats_certs_dir: self.nats_certs_dir.clone(),
+            master_key: self.master_key.clone(),
+            state_manager: self.state_manager.clone(),
+            health: self.health.clone(),
+            router_id: self.router_id.clone(),
+            advertise_address: self.advertise_address.clone(),
+            data_dir: self.data_dir.clone(),
+            wg_manager: self.wg_manager.clone(),
+            wg_port: self.wg_port,
         }
     }
 }
