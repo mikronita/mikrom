@@ -1543,7 +1543,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cleanup_all_stale_resources_removes_failed_vm_artifacts() {
+    async fn test_cleanup_all_stale_resources_keeps_failed_vm_artifacts() {
         let mut mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         let data_dir = temp_data_dir("gc-failed");
         tokio::fs::create_dir_all(&data_dir).await.unwrap();
@@ -1576,9 +1576,36 @@ mod tests {
 
         mgr.cleanup_all_stale_resources().await;
 
-        assert!(tokio::fs::metadata(&failed_rootfs).await.is_err());
-        assert!(tokio::fs::metadata(&failed_socket).await.is_err());
-        assert!(tokio::fs::metadata(&failed_metrics).await.is_err());
+        assert!(tokio::fs::metadata(&failed_rootfs).await.is_ok());
+        assert!(tokio::fs::metadata(&failed_socket).await.is_ok());
+        assert!(tokio::fs::metadata(&failed_metrics).await.is_ok());
+
+        let _ = tokio::fs::remove_dir_all(&data_dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_all_stale_resources_removes_orphan_artifacts() {
+        let mut mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
+        let data_dir = temp_data_dir("gc-orphan");
+        tokio::fs::create_dir_all(&data_dir).await.unwrap();
+        mgr.fc_config.data_dir = data_dir.to_string_lossy().to_string();
+
+        let orphan_vm_id = VmId::new();
+        let prefix = format!("fc-{}-", mgr.agent_id);
+
+        let orphan_rootfs = data_dir.join(format!("{prefix}{orphan_vm_id}-rootfs.ext4"));
+        let orphan_socket = data_dir.join(format!("{prefix}{orphan_vm_id}.sock"));
+        let orphan_metrics = data_dir.join(format!("{prefix}{orphan_vm_id}-metrics.json"));
+
+        tokio::fs::write(&orphan_rootfs, b"orphan").await.unwrap();
+        tokio::fs::write(&orphan_socket, b"orphan").await.unwrap();
+        tokio::fs::write(&orphan_metrics, b"orphan").await.unwrap();
+
+        mgr.cleanup_all_stale_resources().await;
+
+        assert!(tokio::fs::metadata(&orphan_rootfs).await.is_err());
+        assert!(tokio::fs::metadata(&orphan_socket).await.is_err());
+        assert!(tokio::fs::metadata(&orphan_metrics).await.is_err());
 
         let _ = tokio::fs::remove_dir_all(&data_dir).await;
     }

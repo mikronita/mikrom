@@ -7,10 +7,13 @@ use crate::hypervisor::{HypervisorError, VmConfig, VmDetailedInfo, VmInfo, VmSta
 use async_trait::async_trait;
 use dashmap::DashMap;
 use mikrom_proto::id::{AppId, VmId};
+use serde_json::json;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 pub struct CloudHypervisorManager {
     pub(crate) config: AgentConfig,
@@ -19,6 +22,10 @@ pub struct CloudHypervisorManager {
     builder: Arc<crate::builder::ImageBuilder>,
     nats_client: Arc<RwLock<Option<async_nats::Client>>>,
 }
+
+const DATABASE_CONFIGURE_PORT: u32 = 3080;
+const NEON_CONFIGURE_TOKEN_ENV: &str = "NEON_CONFIGURE_TOKEN";
+const MIKROM_DATABASE_CONFIGURE_TOKEN_ENV: &str = "MIKROM_DATABASE_CONFIGURE_TOKEN";
 
 impl CloudHypervisorManager {
     pub async fn new(config: AgentConfig) -> Self {
@@ -53,6 +60,137 @@ impl CloudHypervisorManager {
                 self.config.cloud_hypervisor_base_rootfs.as_path(),
             )
         }
+    }
+
+    fn build_database_configure_url(ipv6: &str) -> String {
+        format!("http://[{ipv6}]:{DATABASE_CONFIGURE_PORT}/configure")
+    }
+
+    fn build_database_configure_spec(
+        &self,
+        vm_id: &VmId,
+        config: &VmConfig,
+    ) -> Result<serde_json::Value, HypervisorError> {
+        let tenant_id = config.env.get("NEON_TENANT_ID").cloned().ok_or_else(|| {
+            HypervisorError::ProcessError(
+                "NEON_TENANT_ID is required for database workloads".to_string(),
+            )
+        })?;
+        let timeline_id = config.env.get("NEON_TIMELINE_ID").cloned().ok_or_else(|| {
+            HypervisorError::ProcessError(
+                "NEON_TIMELINE_ID is required for database workloads".to_string(),
+            )
+        })?;
+        let cluster_id = config
+            .env
+            .get("MIKROM_DATABASE_ID")
+            .cloned()
+            .unwrap_or_else(|| vm_id.to_string());
+
+        Ok(json!({
+            "format_version": 1,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "operation_id": Uuid::new_v4().to_string(),
+            "cluster": {
+                "cluster_id": cluster_id,
+                "tenant_id": tenant_id,
+                "timeline_id": timeline_id,
+                "mode": "Primary",
+            },
+        }))
+    }
+
+    fn database_configure_token<'a>(&self, config: &'a VmConfig) -> Option<&'a str> {
+        config
+            .env
+            .get(NEON_CONFIGURE_TOKEN_ENV)
+            .or_else(|| config.env.get(MIKROM_DATABASE_CONFIGURE_TOKEN_ENV))
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+    }
+
+    async fn configure_database_vm(
+        &self,
+        vm_id: &VmId,
+        config: &VmConfig,
+    ) -> Result<(), HypervisorError> {
+        if config.workload_type != mikrom_proto::scheduler::WorkloadType::Database as i32 {
+            return Ok(());
+        }
+
+        let ipv6 = config.ipv6_address.as_deref().ok_or_else(|| {
+            HypervisorError::ProcessError("Database VM is missing IPv6 address".to_string())
+        })?;
+        let url = Self::build_database_configure_url(ipv6);
+        let spec = self.build_database_configure_spec(vm_id, config)?;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|e| {
+                HypervisorError::ProcessError(format!("Failed to build configure client: {e}"))
+            })?;
+
+        let mut delay = Duration::from_millis(250);
+        let max_attempts = 20;
+        let bearer_token = self.database_configure_token(config);
+
+        for attempt in 1..=max_attempts {
+            let mut request = client.post(&url).json(&spec);
+            if let Some(token) = bearer_token {
+                request = request.bearer_auth(token);
+            }
+
+            match tokio::time::timeout(Duration::from_secs(6), request.send()).await {
+                Ok(Ok(resp)) if resp.status().is_success() => {
+                    tracing::info!(
+                        vm_id = %vm_id,
+                        url = %url,
+                        attempt,
+                        "Configured Cloud Hypervisor database workload"
+                    );
+                    return Ok(());
+                },
+                Ok(Ok(resp)) => {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    tracing::warn!(
+                        vm_id = %vm_id,
+                        url = %url,
+                        attempt,
+                        status = %status,
+                        body = %body,
+                        "Database configure endpoint returned non-success status"
+                    );
+                },
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        vm_id = %vm_id,
+                        url = %url,
+                        attempt,
+                        error = %e,
+                        "Database configure request failed"
+                    );
+                },
+                Err(_) => {
+                    tracing::warn!(
+                        vm_id = %vm_id,
+                        url = %url,
+                        attempt,
+                        "Database configure request timed out"
+                    );
+                },
+            }
+
+            if attempt < max_attempts {
+                tokio::time::sleep(delay).await;
+                delay = std::cmp::min(delay.saturating_mul(2), Duration::from_secs(5));
+            }
+        }
+
+        Err(HypervisorError::ProcessError(format!(
+            "Failed to configure database VM after {max_attempts} attempts: {url}"
+        )))
     }
 
     fn get_vm_paths(&self, vm_id: &VmId) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
@@ -207,7 +345,7 @@ impl CloudHypervisorManager {
             disks: Some(disks),
             net: Some(vec![ch_config::NetConfig {
                 id: Some("net0".to_string()),
-                tap: tap_name,
+                tap: tap_name.clone(),
                 num_queues: Some(2),
                 offload_tso: Some(false),
                 offload_ufo: Some(false),
@@ -265,6 +403,19 @@ impl CloudHypervisorManager {
                     return Err(e);
                 }
             },
+        }
+
+        if config.workload_type == mikrom_proto::scheduler::WorkloadType::Database as i32
+            && let Err(e) = self.configure_database_vm(&vm_id, &config).await
+        {
+            tracing::error!(
+                vm_id = %vm_id,
+                error = %e,
+                "Failed to configure Cloud Hypervisor database workload"
+            );
+            let _ = proc.kill().await;
+            self.cleanup_tap(&tap_name).await;
+            return Err(e);
         }
 
         let proc_arc = Arc::new(RwLock::new(proc));
@@ -836,5 +987,77 @@ mod tests {
         assert_eq!(decoded.pid, 1234);
         assert_eq!(decoded.ipv6, Some("fd40::1".to_string()));
         assert_eq!(decoded.gw6, Some("fe80::1".to_string()));
+    }
+
+    #[test]
+    fn database_configure_helpers_use_persisted_ids_and_ipv6_port() {
+        let mgr = CloudHypervisorManager {
+            config: AgentConfig {
+                nats_url: "nats://localhost:4222".to_string(),
+                host_id: "host-1".to_string(),
+                use_tls: false,
+                bridge_ip: "10.0.0.1/8".to_string(),
+                certs_dir: "/certs/agent".to_string(),
+                data_path: PathBuf::from("/tmp"),
+                agent_hostname: None,
+                agent_advertise_address: None,
+                wireguard_port: None,
+                wireguard_pubkey: None,
+                cloud_hypervisor_enabled: true,
+                cloud_hypervisor_binary: PathBuf::from("/usr/bin/cloud-hypervisor"),
+                cloud_hypervisor_kernel: PathBuf::from("/opt/cloud-hypervisor/vmlinux.bin"),
+                cloud_hypervisor_base_rootfs: PathBuf::from(
+                    "/opt/cloud-hypervisor/base-rootfs.ext4",
+                ),
+                cloud_hypervisor_database_kernel: PathBuf::from("/opt/neon/vmlinux.bin"),
+                cloud_hypervisor_database_base_rootfs: PathBuf::from("/opt/neon/base-rootfs.ext4"),
+                http_port: 5002,
+                max_vms_per_host: 0,
+                nats_flapping_session_secs: 30,
+            },
+            active_vms: Arc::new(DashMap::new()),
+            vms: Arc::new(DashMap::new()),
+            builder: Arc::new(crate::builder::ImageBuilder),
+            nats_client: Arc::new(RwLock::new(None)),
+        };
+
+        let url = CloudHypervisorManager::build_database_configure_url("fd40:b90d:fc5f:1ae0::1");
+        assert_eq!(url, "http://[fd40:b90d:fc5f:1ae0::1]:3080/configure");
+
+        let mut env = std::collections::HashMap::new();
+        env.insert("NEON_TENANT_ID".to_string(), "tenant-123".to_string());
+        env.insert("NEON_TIMELINE_ID".to_string(), "timeline-456".to_string());
+        env.insert("MIKROM_DATABASE_ID".to_string(), "db-789".to_string());
+
+        let config = VmConfig {
+            env,
+            ipv6_address: Some("fd40:b90d:fc5f:1ae0::1".to_string()),
+            workload_type: mikrom_proto::scheduler::WorkloadType::Database as i32,
+            ..Default::default()
+        };
+
+        let spec = mgr
+            .build_database_configure_spec(&VmId::new(), &config)
+            .unwrap();
+
+        assert_eq!(spec["format_version"], 1);
+        assert_eq!(spec["cluster"]["cluster_id"], "db-789");
+        assert_eq!(spec["cluster"]["tenant_id"], "tenant-123");
+        assert_eq!(spec["cluster"]["timeline_id"], "timeline-456");
+        assert_eq!(spec["cluster"]["mode"], "Primary");
+        assert!(spec["timestamp"].as_str().unwrap().len() > 10);
+        assert!(spec["operation_id"].as_str().unwrap().len() > 10);
+
+        assert_eq!(mgr.database_configure_token(&config), None);
+
+        let mut config_with_token = config.clone();
+        config_with_token.env.insert(
+            NEON_CONFIGURE_TOKEN_ENV.to_string(),
+            "  token-123  ".to_string(),
+        );
+        assert_eq!(
+            mgr.database_configure_token(&config_with_token),
+            Some("token-123")
+        );
     }
 }

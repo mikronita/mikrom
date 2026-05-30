@@ -242,15 +242,14 @@ impl crate::firecracker::FirecrackerManager {
         );
         let prefix = format!("fc-{}-", self.agent_id);
 
+        // Keep every VM still present in memory, regardless of status.
+        // Cleanup should remove only true filesystem orphans, not artifacts
+        // that belong to VMs the agent still knows about after a restart.
         let active_vm_ids: std::collections::HashSet<VmId> = {
             let processes = self.processes.lock().await;
             let vms = self.vms.read().await;
             let mut ids: std::collections::HashSet<VmId> = processes.keys().cloned().collect();
-            for (id, vm) in vms.iter() {
-                if !matches!(vm.status, VmStatus::Stopped | VmStatus::Failed) {
-                    ids.insert(*id);
-                }
-            }
+            ids.extend(vms.keys().copied());
             ids
         };
 
