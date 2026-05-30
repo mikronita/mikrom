@@ -16,13 +16,15 @@ const NEON_JWKS_JSON_KEY: &str = "NEON_JWKS_JSON";
 #[cfg(test)]
 const NEON_JWKS_PATH_KEY: &str = "NEON_JWKS_PATH";
 const NEON_INSTANCE_ID_KEY: &str = "NEON_INSTANCE_ID";
+const NEON_SAFEKEEPER_CONNSTRS_KEY: &str = "NEON_SAFEKEEPER_CONNSTRS";
 const MIKROM_NEON_DEV_MODE_KEY: &str = "MIKROM_NEON_DEV_MODE";
+const MIKROM_INIT_TRACE_FILES_KEY: &str = "MIKROM_INIT_TRACE_FILES";
 const NEON_CONFIGURE_TOKEN_KEY: &str = "NEON_CONFIGURE_TOKEN";
 const MIKROM_DATABASE_CONFIGURE_TOKEN_KEY: &str = "MIKROM_DATABASE_CONFIGURE_TOKEN";
 const NEON_CONFIGURE_TOKEN_KID: &str = "mikrom-neon-key";
 const NEON_CONFIGURE_TOKEN_ISSUER: &str = "mikrom-api";
 const NEON_CONFIGURE_TOKEN_SUBJECT: &str = "mikrom-api";
-const NEON_CONFIGURE_TOKEN_AUDIENCE: &str = "compute_ctl";
+const NEON_CONFIGURE_TOKEN_AUDIENCE: &str = "compute";
 const NEON_CONFIGURE_TOKEN_SCOPE: &str = "compute_ctl:admin";
 const NEON_CONFIGURE_TOKEN_TTL_SECS: i64 = 300;
 
@@ -401,9 +403,25 @@ impl DatabaseService {
             env.entry(NEON_INSTANCE_ID_KEY.to_string())
                 .or_insert_with(|| value.clone());
         }
+        if let Some(value) = config
+            .neon_safekeeper_connstrs
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            env.entry(NEON_SAFEKEEPER_CONNSTRS_KEY.to_string())
+                .or_insert_with(|| value.clone());
+        }
         if let Some(value) = config.mikrom_neon_dev_mode {
             env.entry(MIKROM_NEON_DEV_MODE_KEY.to_string())
                 .or_insert_with(|| value.to_string());
+        }
+        if let Some(value) = config
+            .mikrom_init_trace_files
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            env.entry(MIKROM_INIT_TRACE_FILES_KEY.to_string())
+                .or_insert_with(|| value.clone());
         }
         if let Some(value) = config
             .neon_configure_token
@@ -1130,7 +1148,7 @@ mod tests {
 
         let value = serde_json::to_value(&claims).unwrap();
         assert_eq!(value["scope"], NEON_CONFIGURE_TOKEN_SCOPE);
-        assert_eq!(value["aud"], serde_json::json!(["compute_ctl"]));
+        assert_eq!(value["aud"], serde_json::json!(["compute"]));
     }
 
     #[tokio::test]

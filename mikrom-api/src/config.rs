@@ -76,7 +76,11 @@ pub struct ApiConfig {
     #[serde(default)]
     pub neon_instance_id: Option<String>,
     #[serde(default)]
+    pub neon_safekeeper_connstrs: Option<String>,
+    #[serde(default)]
     pub mikrom_neon_dev_mode: Option<bool>,
+    #[serde(default)]
+    pub mikrom_init_trace_files: Option<String>,
     #[serde(default)]
     pub neon_configure_token: Option<String>,
     #[serde(default)]
@@ -128,7 +132,9 @@ impl Default for ApiConfig {
             neon_jwks_json: None,
             neon_jwks_path: None,
             neon_instance_id: None,
+            neon_safekeeper_connstrs: None,
             mikrom_neon_dev_mode: None,
+            mikrom_init_trace_files: None,
             neon_configure_token: None,
             neon_configure_private_key_pem: None,
             neon_configure_private_key_path: None,

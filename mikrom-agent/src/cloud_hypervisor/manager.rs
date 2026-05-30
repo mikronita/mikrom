@@ -26,6 +26,10 @@ pub struct CloudHypervisorManager {
 const DATABASE_CONFIGURE_PORT: u32 = 3080;
 const NEON_CONFIGURE_TOKEN_ENV: &str = "NEON_CONFIGURE_TOKEN";
 const MIKROM_DATABASE_CONFIGURE_TOKEN_ENV: &str = "MIKROM_DATABASE_CONFIGURE_TOKEN";
+const NEON_PAGESERVER_IPV6_ENV: &str = "NEON_PAGESERVER_IPV6";
+const DEFAULT_NEON_PAGESERVER_IPV6: &str = "fd00::deed:1d1c";
+const DATABASE_CONFIGURE_RETRY_WINDOW: Duration = Duration::from_secs(60);
+const DATABASE_CONFIGURE_RETRY_WINDOW_ENV: &str = "MIKROM_DATABASE_CONFIGURE_WINDOW_SECS";
 
 impl CloudHypervisorManager {
     pub async fn new(config: AgentConfig) -> Self {
@@ -66,6 +70,14 @@ impl CloudHypervisorManager {
         format!("http://[{ipv6}]:{DATABASE_CONFIGURE_PORT}/configure")
     }
 
+    fn database_pageserver_ipv6<'a>(&self, config: &'a VmConfig) -> &'a str {
+        config
+            .env
+            .get(NEON_PAGESERVER_IPV6_ENV)
+            .map(String::as_str)
+            .unwrap_or(DEFAULT_NEON_PAGESERVER_IPV6)
+    }
+
     fn build_database_configure_spec(
         &self,
         vm_id: &VmId,
@@ -81,21 +93,44 @@ impl CloudHypervisorManager {
                 "NEON_TIMELINE_ID is required for database workloads".to_string(),
             )
         })?;
+        let pageserver_ipv6 = self.database_pageserver_ipv6(config);
         let cluster_id = config
             .env
             .get("MIKROM_DATABASE_ID")
             .cloned()
             .unwrap_or_else(|| vm_id.to_string());
 
-        Ok(json!({
-            "format_version": 1,
+        let spec = json!({
+            "format_version": 1.0,
             "timestamp": chrono::Utc::now().to_rfc3339(),
-            "operation_id": Uuid::new_v4().to_string(),
+            "operation_uuid": Uuid::new_v4().to_string(),
             "cluster": {
                 "cluster_id": cluster_id,
-                "tenant_id": tenant_id,
-                "timeline_id": timeline_id,
-                "mode": "Primary",
+                "name": null,
+                "state": null,
+                "roles": [],
+                "databases": [],
+                "postgresql_conf": "shared_preload_libraries='neon'",
+                "settings": null,
+            },
+            "tenant_id": tenant_id,
+            "timeline_id": timeline_id,
+            "pageserver_connstring": format!("postgres://no_user@[{pageserver_ipv6}]:6400"),
+            "safekeeper_connstrings": [format!("[{pageserver_ipv6}]:5454")],
+            "mode": "Primary",
+            "skip_pg_catalog_updates": true,
+            "reconfigure_concurrency": 1,
+            "suspend_timeout_seconds": -1,
+        });
+
+        Ok(json!({
+            "spec": spec,
+            "compute_ctl_config": {
+                "jwks": config
+                    .env
+                    .get("NEON_JWKS_JSON")
+                    .map(|value| serde_json::from_str::<serde_json::Value>(value).unwrap_or_else(|_| json!({"keys": []})))
+                    .unwrap_or_else(|| json!({"keys": []})),
             },
         }))
     }
@@ -132,10 +167,11 @@ impl CloudHypervisorManager {
             })?;
 
         let mut delay = Duration::from_millis(250);
-        let max_attempts = 20;
+        let deadline = tokio::time::Instant::now() + Self::database_configure_retry_window();
         let bearer_token = self.database_configure_token(config);
 
-        for attempt in 1..=max_attempts {
+        let mut attempt = 1;
+        while tokio::time::Instant::now() < deadline {
             let mut request = client.post(&url).json(&spec);
             if let Some(token) = bearer_token {
                 request = request.bearer_auth(token);
@@ -182,15 +218,37 @@ impl CloudHypervisorManager {
                 },
             }
 
-            if attempt < max_attempts {
-                tokio::time::sleep(delay).await;
-                delay = std::cmp::min(delay.saturating_mul(2), Duration::from_secs(5));
+            if tokio::time::Instant::now() >= deadline {
+                break;
             }
+
+            if tokio::time::Instant::now() + delay > deadline {
+                tokio::time::sleep_until(deadline).await;
+            } else {
+                tokio::time::sleep(delay).await;
+            }
+
+            delay = std::cmp::min(delay.saturating_mul(2), Duration::from_secs(5));
+            attempt += 1;
         }
 
         Err(HypervisorError::ProcessError(format!(
-            "Failed to configure database VM after {max_attempts} attempts: {url}"
+            "Failed to configure database VM after {:?}: {url}",
+            Self::database_configure_retry_window()
         )))
+    }
+
+    fn database_configure_retry_window() -> Duration {
+        let value = std::env::var(DATABASE_CONFIGURE_RETRY_WINDOW_ENV).ok();
+        Self::parse_database_configure_retry_window(value.as_deref())
+    }
+
+    fn parse_database_configure_retry_window(value: Option<&str>) -> Duration {
+        value
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .filter(|secs| *secs > 0)
+            .map(Duration::from_secs)
+            .unwrap_or(DATABASE_CONFIGURE_RETRY_WINDOW)
     }
 
     fn get_vm_paths(&self, vm_id: &VmId) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
@@ -1040,13 +1098,25 @@ mod tests {
             .build_database_configure_spec(&VmId::new(), &config)
             .unwrap();
 
-        assert_eq!(spec["format_version"], 1);
-        assert_eq!(spec["cluster"]["cluster_id"], "db-789");
-        assert_eq!(spec["cluster"]["tenant_id"], "tenant-123");
-        assert_eq!(spec["cluster"]["timeline_id"], "timeline-456");
-        assert_eq!(spec["cluster"]["mode"], "Primary");
-        assert!(spec["timestamp"].as_str().unwrap().len() > 10);
-        assert!(spec["operation_id"].as_str().unwrap().len() > 10);
+        assert_eq!(spec["spec"]["format_version"], 1.0);
+        assert_eq!(spec["spec"]["cluster"]["cluster_id"], "db-789");
+        assert_eq!(spec["spec"]["tenant_id"], "tenant-123");
+        assert_eq!(spec["spec"]["timeline_id"], "timeline-456");
+        assert_eq!(spec["spec"]["mode"], "Primary");
+        assert_eq!(
+            spec["spec"]["pageserver_connstring"],
+            "postgres://no_user@[fd00::deed:1d1c]:6400"
+        );
+        assert_eq!(
+            spec["spec"]["safekeeper_connstrings"],
+            serde_json::json!(["[fd00::deed:1d1c]:5454"])
+        );
+        assert!(spec["spec"]["timestamp"].as_str().unwrap().len() > 10);
+        assert!(spec["spec"]["operation_uuid"].as_str().unwrap().len() > 10);
+        assert_eq!(
+            spec["compute_ctl_config"]["jwks"],
+            serde_json::json!({"keys": []})
+        );
 
         assert_eq!(mgr.database_configure_token(&config), None);
 
@@ -1058,6 +1128,22 @@ mod tests {
         assert_eq!(
             mgr.database_configure_token(&config_with_token),
             Some("token-123")
+        );
+    }
+
+    #[test]
+    fn database_configure_retry_window_defaults_and_parses_env_value() {
+        assert_eq!(
+            CloudHypervisorManager::parse_database_configure_retry_window(None),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            CloudHypervisorManager::parse_database_configure_retry_window(Some("120")),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            CloudHypervisorManager::parse_database_configure_retry_window(Some("0")),
+            Duration::from_secs(60)
         );
     }
 }
