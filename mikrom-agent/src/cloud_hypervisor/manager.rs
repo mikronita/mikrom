@@ -145,6 +145,7 @@ impl CloudHypervisorManager {
             .filter(|token| !token.is_empty())
     }
 
+    #[allow(clippy::collapsible_if)]
     async fn configure_database_vm(
         &self,
         vm_id: &VmId,
@@ -198,6 +199,14 @@ impl CloudHypervisorManager {
                         body = %body,
                         "Database configure endpoint returned non-success status"
                     );
+                    if status.is_client_error()
+                        && status != reqwest::StatusCode::REQUEST_TIMEOUT
+                        && status != reqwest::StatusCode::TOO_MANY_REQUESTS
+                    {
+                        return Err(HypervisorError::ProcessError(format!(
+                            "Database configure failed with client error {status}: {body}"
+                        )));
+                    }
                 },
                 Ok(Err(e)) => {
                     tracing::warn!(
@@ -463,17 +472,20 @@ impl CloudHypervisorManager {
             },
         }
 
-        if config.workload_type == mikrom_proto::scheduler::WorkloadType::Database as i32
-            && let Err(e) = self.configure_database_vm(&vm_id, &config).await
-        {
-            tracing::error!(
-                vm_id = %vm_id,
-                error = %e,
-                "Failed to configure Cloud Hypervisor database workload"
-            );
-            let _ = proc.kill().await;
-            self.cleanup_tap(&tap_name).await;
-            return Err(e);
+        if config.workload_type == mikrom_proto::scheduler::WorkloadType::Database as i32 {
+            match self.configure_database_vm(&vm_id, &config).await {
+                Ok(()) => {},
+                Err(e) => {
+                    tracing::error!(
+                        vm_id = %vm_id,
+                        error = %e,
+                        "Failed to configure Cloud Hypervisor database workload"
+                    );
+                    let _ = proc.kill().await;
+                    self.cleanup_tap(&tap_name).await;
+                    return Err(e);
+                },
+            }
         }
 
         let proc_arc = Arc::new(RwLock::new(proc));
@@ -623,6 +635,7 @@ impl VmHypervisor for CloudHypervisorManager {
         &self.config.host_id
     }
 
+    #[allow(clippy::collapsible_if)]
     async fn start_vm(
         &self,
         vm_id: VmId,
@@ -705,6 +718,7 @@ impl VmHypervisor for CloudHypervisorManager {
         Err(HypervisorError::UnsupportedOperation("resume".to_string()))
     }
 
+    #[allow(clippy::single_match, clippy::collapsible_if)]
     async fn delete_vm(&self, vm_id: &VmId) -> Result<(), HypervisorError> {
         // 1. Best-effort stop
         let _ = self.stop_vm(vm_id).await;
@@ -733,16 +747,21 @@ impl VmHypervisor for CloudHypervisorManager {
         let path = self.config.data_path.join("vms").join(vm_id.to_string());
         let state_path = path.join("state.json");
 
-        if state_path.exists()
-            && let Ok(state_str) = tokio::fs::read_to_string(&state_path).await
-            && let Ok(state) = serde_json::from_str::<PersistedChVm>(&state_str)
-        {
-            let pid = state.pid;
-            if self.is_pid_alive(pid) {
-                tracing::info!(vm_id = %vm_id, pid = pid, "Killing orphaned Cloud Hypervisor process via PID");
-                let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                let _ = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        if state_path.exists() {
+            match tokio::fs::read_to_string(&state_path).await {
+                Ok(state_str) => match serde_json::from_str::<PersistedChVm>(&state_str) {
+                    Ok(state) => {
+                        let pid = state.pid;
+                        if self.is_pid_alive(pid) {
+                            tracing::info!(vm_id = %vm_id, pid = pid, "Killing orphaned Cloud Hypervisor process via PID");
+                            let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            let _ = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+                        }
+                    },
+                    Err(_) => {},
+                },
+                Err(_) => {},
             }
         }
 
@@ -762,22 +781,26 @@ impl VmHypervisor for CloudHypervisorManager {
         Err(HypervisorError::UnsupportedOperation("restart".to_string()))
     }
 
+    #[allow(clippy::single_match, clippy::collapsible_if)]
     async fn get_vm_info(&self, vm_id: &VmId) -> Option<VmInfo> {
         let mut info = self.vms.get(vm_id)?.clone();
 
         let socket_path = self.get_vm_paths(vm_id).0;
         let socket_str = socket_path.to_string_lossy().to_string();
 
-        if let Ok(resp_body) = ch_request("GET", &socket_str, "/api/v1/vm.info", None).await
-            && let Ok(ch_info) = serde_json::from_str::<ch_config::VmInfoResponse>(&resp_body)
-        {
-            info.status = match ch_info.state.as_str() {
-                "Created" => VmStatus::Starting,
-                "Running" => VmStatus::Running,
-                "Paused" => VmStatus::Paused,
-                "Shutdown" => VmStatus::Stopped,
-                _ => VmStatus::Failed,
-            };
+        if let Ok(resp_body) = ch_request("GET", &socket_str, "/api/v1/vm.info", None).await {
+            match serde_json::from_str::<ch_config::VmInfoResponse>(&resp_body) {
+                Ok(ch_info) => {
+                    info.status = match ch_info.state.as_str() {
+                        "Created" => VmStatus::Starting,
+                        "Running" => VmStatus::Running,
+                        "Paused" => VmStatus::Paused,
+                        "Shutdown" => VmStatus::Stopped,
+                        _ => VmStatus::Failed,
+                    };
+                },
+                Err(_) => {},
+            }
         }
 
         Some(info)
