@@ -1,11 +1,14 @@
 target
 .idea
-mikrom-router.deb
 .env
 *.log
 .codex
+.antigravitycli
 .claude
 .gemini
 .zig-cache
 zig-out
 neon
+mikrom-app/coverage
+mikrom-app/playwright-report
+mikrom-app/test-results

@@ -103,7 +103,10 @@ test-all-crates: ceph-libs ## Run unit tests for all crates
 	$(CEPH_ENV) cargo nextest run -p mikrom-builder && \
 	$(CEPH_ENV) cargo nextest run -p mikrom-api --features test-utils && \
 	$(CEPH_ENV) cargo nextest run -p mikrom-init && \
-	$(CEPH_ENV) cargo nextest run -p mikrom-router
+	$(CEPH_ENV) cargo nextest run -p mikrom-router && \
+	$(CEPH_ENV) cargo nextest run -p mikrom-cli && \
+	$(CEPH_ENV) cargo nextest run -p mikrom-dns && \
+	$(CEPH_ENV) cargo nextest run -p mikrom-network
 
 .PHONY: test-all
 test-all: test-all-crates test-integration ## Run unit + integration tests
@@ -171,6 +174,30 @@ app-install: ## Install mikrom-app dependencies
 .PHONY: app-build
 app-build: ## Build mikrom-app for production
 	cd mikrom-app && pnpm build
+
+.PHONY: app-check
+app-check: ## Run mikrom-app type and Svelte checks
+	cd mikrom-app && pnpm check
+
+.PHONY: app-test
+app-test: ## Run mikrom-app tests in watch mode
+	cd mikrom-app && pnpm test
+
+.PHONY: app-test-unit
+app-test-unit: ## Run mikrom-app unit tests
+	cd mikrom-app && pnpm test:unit
+
+.PHONY: app-test-watch
+app-test-watch: ## Run mikrom-app unit tests in watch mode
+	cd mikrom-app && pnpm test:watch
+
+.PHONY: app-test-coverage
+app-test-coverage: ## Run mikrom-app tests with coverage
+	cd mikrom-app && pnpm test:coverage
+
+.PHONY: app-test-e2e
+app-test-e2e: ## Run mikrom-app Playwright e2e tests
+	cd mikrom-app && pnpm test:e2e
 
 .PHONY: app-lint
 app-lint: ## Lint mikrom-app

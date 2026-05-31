@@ -26,7 +26,7 @@
 
   const volumeId = $page.params.volumeId;
   let volume: Volume | AttachedVolume | VolumeWithAttachments | undefined;
-  let attachments: VolumeAttachmentInfo[] = [];
+  let attachments: VolumeAttachmentInfo[];
 
   $: volume = $volumesStore.find((v) => v.id === volumeId);
   $: attachments = volume && "attachments" in volume ? (volume.attachments as VolumeAttachmentInfo[]) : [];
