@@ -63,34 +63,92 @@ impl DnsSyncService {
 pub async fn run_nats_subscriber(store: DnsRecordStore) -> Result<()> {
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
-    info!(%nats_url, "Connecting to NATS...");
-    let client = async_nats::connect(nats_url).await?;
-
-    let job_updates_subject = mikrom_proto::subjects::SCHEDULER_JOB_UPDATES;
-    let mut job_subscriber = client.subscribe(job_updates_subject.to_string()).await?;
-
-    let worker_heartbeat_subject = mikrom_proto::subjects::SCHEDULER_WORKER_HEARTBEAT;
-    let mut worker_subscriber = client
-        .subscribe(worker_heartbeat_subject.to_string())
-        .await?;
-
     let sync_service = DnsSyncService::new(store.clone());
+    let mut backoff = std::time::Duration::from_secs(1);
 
     loop {
-        tokio::select! {
-            Some(message) = job_subscriber.next() => {
-                if let Ok(info) = AppInfo::decode(&message.payload[..]) && sync_service.handle_app_info(info) {
-                    metrics::set_active_records(store.active_records());
+        info!(%nats_url, "Connecting to NATS...");
+        let client = match async_nats::connect(nats_url.clone()).await {
+            Ok(client) => client,
+            Err(err) => {
+                tracing::warn!(error = %err, "Failed to connect to NATS, retrying");
+                tokio::time::sleep(backoff).await;
+                backoff = std::cmp::min(
+                    backoff.saturating_mul(2),
+                    std::time::Duration::from_secs(30),
+                );
+                continue;
+            },
+        };
+
+        let job_updates_subject = mikrom_proto::subjects::SCHEDULER_JOB_UPDATES;
+        let mut job_subscriber = match client.subscribe(job_updates_subject.to_string()).await {
+            Ok(subscriber) => subscriber,
+            Err(err) => {
+                tracing::warn!(error = %err, "Failed to subscribe to job updates, retrying");
+                tokio::time::sleep(backoff).await;
+                backoff = std::cmp::min(
+                    backoff.saturating_mul(2),
+                    std::time::Duration::from_secs(30),
+                );
+                continue;
+            },
+        };
+
+        let worker_heartbeat_subject = mikrom_proto::subjects::SCHEDULER_WORKER_HEARTBEAT;
+        let mut worker_subscriber = match client
+            .subscribe(worker_heartbeat_subject.to_string())
+            .await
+        {
+            Ok(subscriber) => subscriber,
+            Err(err) => {
+                tracing::warn!(error = %err, "Failed to subscribe to worker heartbeats, retrying");
+                tokio::time::sleep(backoff).await;
+                backoff = std::cmp::min(
+                    backoff.saturating_mul(2),
+                    std::time::Duration::from_secs(30),
+                );
+                continue;
+            },
+        };
+
+        backoff = std::time::Duration::from_secs(1);
+        let reconnect = loop {
+            tokio::select! {
+                message = job_subscriber.next() => {
+                    match message {
+                        Some(message) => {
+                            if let Ok(info) = AppInfo::decode(&message.payload[..]) && sync_service.handle_app_info(info) {
+                                metrics::set_active_records(store.active_records());
+                            }
+                        }
+                        None => {
+                            break true;
+                        }
+                    }
+                }
+                message = worker_subscriber.next() => {
+                    match message {
+                        Some(message) => {
+                            if let Ok(heartbeat) = WorkerHeartbeat::decode(&message.payload[..]) && sync_service.handle_worker_heartbeat(heartbeat) {
+                                metrics::set_active_records(store.active_records());
+                            }
+                        }
+                        None => {
+                            break true;
+                        }
+                    }
                 }
             }
-            Some(message) = worker_subscriber.next() => {
-                if let Ok(heartbeat) = WorkerHeartbeat::decode(&message.payload[..]) && sync_service.handle_worker_heartbeat(heartbeat) {
-                    metrics::set_active_records(store.active_records());
-                }
-            }
-            else => break,
+        };
+
+        if reconnect {
+            tracing::warn!("NATS subscriber stream ended, reconnecting");
+            tokio::time::sleep(backoff).await;
+            backoff = std::cmp::min(
+                backoff.saturating_mul(2),
+                std::time::Duration::from_secs(30),
+            );
         }
     }
-
-    Ok(())
 }

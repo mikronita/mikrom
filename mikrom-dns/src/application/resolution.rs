@@ -18,6 +18,11 @@ use crate::domain::{MikromZone, TokenBucket, USER_RECORD_TTL, extract_record_key
 use hickory_server::proto::op::ResponseCode;
 use hickory_server::proto::rr::{Name, RecordType};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+const RATE_LIMIT_ENTRY_TTL: Duration = Duration::from_mins(15);
+const RATE_LIMIT_CLEANUP_INTERVAL: Duration = Duration::from_mins(1);
 
 pub enum ResolutionDecision {
     Empty(ResponseCode),
@@ -37,6 +42,7 @@ pub struct DnsResolutionService {
     upstream_dns: Vec<SocketAddr>,
     allowed_subnets: Vec<ipnet::IpNet>,
     rate_limit_map: dashmap::DashMap<IpAddr, TokenBucket>,
+    last_rate_limit_cleanup: Mutex<Instant>,
     rate_limit_qps: f64,
     rate_limit_burst: f64,
 }
@@ -62,8 +68,21 @@ impl DnsResolutionService {
             upstream_dns,
             allowed_subnets,
             rate_limit_map: dashmap::DashMap::new(),
+            last_rate_limit_cleanup: Mutex::new(Instant::now()),
             rate_limit_qps,
             rate_limit_burst,
+        }
+    }
+
+    fn prune_rate_limit_entries(&self) {
+        if let Ok(mut last_cleanup) = self.last_rate_limit_cleanup.lock() {
+            if last_cleanup.elapsed() < RATE_LIMIT_CLEANUP_INTERVAL {
+                return;
+            }
+
+            self.rate_limit_map
+                .retain(|_, bucket| !bucket.is_stale(RATE_LIMIT_ENTRY_TTL));
+            *last_cleanup = Instant::now();
         }
     }
 
@@ -96,6 +115,7 @@ impl DnsResolutionService {
             };
         }
         drop(bucket);
+        self.prune_rate_limit_entries();
 
         let zone = MikromZone::from_name(name);
         if query_type == RecordType::AAAA {

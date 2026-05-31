@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::application::tenant::resolve_tenant_owner_user_id;
 use crate::domain::{CreateDatabaseParams, Database, DatabaseDeployment, DatabaseStatus};
 use crate::error::{ApiError, ApiResult};
 use chrono::{Duration, Utc};
@@ -40,22 +41,6 @@ struct NeonConfigureClaims {
 }
 
 impl DatabaseService {
-    async fn resolve_tenant_owner_user_id(state: &AppState, tenant_id: Uuid) -> ApiResult<Uuid> {
-        let members = state
-            .ctx
-            .tenant_repo
-            .get_members(tenant_id)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-        members
-            .iter()
-            .find(|member| member.role == "admin")
-            .or_else(|| members.first())
-            .map(|member| member.user_id)
-            .ok_or_else(|| ApiError::NotFound("Tenant has no members".to_string()))
-    }
-
     pub async fn validate_tenant_retention(
         state: &AppState,
         tenant_id: &str,
@@ -221,7 +206,7 @@ impl DatabaseService {
             .map_err(|e| ApiError::Internal(e.to_string()))?
             .ok_or_else(|| ApiError::NotFound("Database not found".to_string()))?;
 
-        let owner_user_id = Self::resolve_tenant_owner_user_id(state, database.tenant_id).await?;
+        let owner_user_id = resolve_tenant_owner_user_id(state, database.tenant_id).await?;
 
         // 1. Create deployment record
         let deployment = state

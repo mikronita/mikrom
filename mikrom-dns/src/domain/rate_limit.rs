@@ -13,7 +13,7 @@
     clippy::unused_async
 )]
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub struct TokenBucket {
     tokens: f64,
@@ -40,6 +40,10 @@ impl TokenBucket {
         } else {
             false
         }
+    }
+
+    pub fn is_stale(&self, stale_after: Duration) -> bool {
+        self.last_update.elapsed() >= stale_after
     }
 }
 

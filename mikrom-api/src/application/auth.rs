@@ -25,6 +25,10 @@ pub struct AuthResult {
 }
 
 impl AuthService {
+    fn generate_unique_tenant_slug() -> String {
+        Tenant::generate_slug()
+    }
+
     pub async fn register(state: &AppState, params: RegisterParams) -> ApiResult<AuthResult> {
         // Check if user already exists
         let count = state
@@ -61,13 +65,31 @@ impl AuthService {
             .map_err(|e| ApiError::Internal(e.to_string()))?
             .ok_or_else(|| ApiError::Internal("User not found after creation".into()))?;
 
-        // Create default project (tenant)
-        let slug = Tenant::generate_slug();
-        let tenant = state
-            .tenant_repo
-            .create("Default Project".to_string(), slug)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        // Create default project (tenant), retrying slug generation on collision.
+        let tenant = {
+            const MAX_TENANT_CREATE_ATTEMPTS: usize = 5;
+
+            let mut last_error = None;
+            let mut attempt = 0;
+            loop {
+                attempt += 1;
+                let slug = Self::generate_unique_tenant_slug();
+                match state
+                    .tenant_repo
+                    .create("Default Project".to_string(), slug)
+                    .await
+                {
+                    Ok(tenant) => break tenant,
+                    Err(err) if attempt < MAX_TENANT_CREATE_ATTEMPTS => {
+                        last_error = Some(err);
+                    },
+                    Err(err) => {
+                        let error = last_error.unwrap_or(err);
+                        return Err(ApiError::Internal(error.to_string()));
+                    },
+                }
+            }
+        };
 
         state
             .tenant_repo

@@ -1,6 +1,7 @@
 use super::worker::{BuildTask, start_build_polling};
 use super::workflow::DeploymentPromotionWorkflow;
 use crate::AppState;
+use crate::application::tenant::resolve_tenant_owner_user_id;
 use crate::domain::types::{CpuCores, MemoryMb, Port};
 use crate::domain::{App, Deployment, UpdateDeploymentParams, VolumeAccessMode};
 use crate::error::{ApiError, ApiResult};
@@ -55,22 +56,6 @@ pub struct ScaleAppParams {
 }
 
 impl DeploymentService {
-    async fn resolve_tenant_owner_user_id(state: &AppState, tenant_id: Uuid) -> ApiResult<Uuid> {
-        let members = state
-            .ctx
-            .tenant_repo
-            .get_members(tenant_id)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-        members
-            .iter()
-            .find(|member| member.role == "admin")
-            .or_else(|| members.first())
-            .map(|member| member.user_id)
-            .ok_or_else(|| ApiError::NotFound("Tenant has no members".to_string()))
-    }
-
     fn parse_usize_env(value: Option<String>, default: usize) -> usize {
         value
             .and_then(|value| value.parse::<usize>().ok())
@@ -104,7 +89,7 @@ impl DeploymentService {
         params: crate::domain::CreateAppParams,
     ) -> ApiResult<App> {
         let tenant_id = params.tenant_id;
-        let owner_user_id = Self::resolve_tenant_owner_user_id(state, tenant_id).await?;
+        let owner_user_id = resolve_tenant_owner_user_id(state, tenant_id).await?;
         let user = state
             .user_repo
             .find_by_id(owner_user_id)
@@ -528,7 +513,7 @@ impl DeploymentService {
 
     pub async fn scale_app(state: &AppState, app: &App, params: ScaleAppParams) -> ApiResult<()> {
         let user_uuid = app.tenant_id;
-        let owner_user_id = Self::resolve_tenant_owner_user_id(state, user_uuid).await?;
+        let owner_user_id = resolve_tenant_owner_user_id(state, user_uuid).await?;
         let user = state
             .user_repo
             .find_by_id(owner_user_id)
@@ -772,7 +757,7 @@ impl DeploymentService {
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-        let owner_user_id = Self::resolve_tenant_owner_user_id(state, app.tenant_id).await?;
+        let owner_user_id = resolve_tenant_owner_user_id(state, app.tenant_id).await?;
         let user = state
             .user_repo
             .find_by_id(owner_user_id)

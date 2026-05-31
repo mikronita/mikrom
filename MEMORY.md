@@ -5,3 +5,4 @@
   ```bash
   gh api repos/<owner>/<repo>/pulls/<pr_number>/comments --paginate
   ```
+- Never run `git commit` with `--no-verify` unless the user explicitly asks for it.

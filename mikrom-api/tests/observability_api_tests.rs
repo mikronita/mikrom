@@ -21,9 +21,32 @@ fn build_state(app: App) -> AppState {
     user_repo.expect_find_by_email().returning(|_| Ok(None));
 
     let mut app_repo = MockAppRepository::new();
+    let app_for_repo = app.clone();
     app_repo
         .expect_get_app_by_name()
-        .returning(move |_| Ok(Some(app.clone())));
+        .returning(move |_| Ok(Some(app_for_repo.clone())));
+
+    let tenant = mikrom_api::domain::Tenant {
+        id: app.tenant_id,
+        tenant_id: "tenant".to_string(),
+        name: "Test Tenant".to_string(),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    let tenant_slug = tenant.tenant_id.clone();
+    let tenant_id = tenant.id;
+
+    let mut tenant_repo = MockTenantRepository::new();
+    tenant_repo.expect_find_by_slug().returning(move |slug| {
+        if slug == tenant_slug {
+            Ok(Some(tenant.clone()))
+        } else {
+            Ok(None)
+        }
+    });
+    tenant_repo
+        .expect_is_member()
+        .returning(move |_, user_id| Ok(user_id == tenant_id));
 
     let mut state = AppState::default();
     state.jwt_secret = "test-secret".to_string();
@@ -36,7 +59,7 @@ fn build_state(app: App) -> AppState {
     state.ctx.database_repo = state.database_repo.clone();
     state.volume_repo = Arc::new(MockVolumeRepository::new());
     state.ctx.volume_repo = state.volume_repo.clone();
-    state.tenant_repo = Arc::new(MockTenantRepository::new());
+    state.tenant_repo = Arc::new(tenant_repo);
     state.ctx.tenant_repo = state.tenant_repo.clone();
     let mut scheduler = MockScheduler::new();
     scheduler
@@ -73,6 +96,7 @@ async fn logs_stream_route_is_exposed() {
             Request::builder()
                 .method("GET")
                 .uri("/v1/apps/observed-app/logs/stream")
+                .header("x-mikrom-tenant-id", "tenant")
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
                 .unwrap(),
@@ -113,6 +137,7 @@ async fn logs_stream_route_rejects_foreign_tenant() {
             Request::builder()
                 .method("GET")
                 .uri("/v1/apps/observed-app/logs/stream")
+                .header("x-mikrom-tenant-id", "tenant")
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
                 .unwrap(),
@@ -174,6 +199,7 @@ async fn metrics_stream_route_is_exposed() {
             Request::builder()
                 .method("GET")
                 .uri("/v1/apps/observed-app/metrics/stream")
+                .header("x-mikrom-tenant-id", "tenant")
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
                 .unwrap(),
@@ -214,6 +240,7 @@ async fn metrics_stream_route_rejects_foreign_tenant() {
             Request::builder()
                 .method("GET")
                 .uri("/v1/apps/observed-app/metrics/stream")
+                .header("x-mikrom-tenant-id", "tenant")
                 .header("Authorization", format!("Bearer {}", token))
                 .body(Body::empty())
                 .unwrap(),

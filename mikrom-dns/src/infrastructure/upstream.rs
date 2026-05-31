@@ -18,7 +18,7 @@ use hickory_server::proto::op::{Message, MessageType, OpCode, Query, ResponseCod
 use hickory_server::proto::rr::{DNSClass, Name, RecordType};
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, UdpSocket};
 use tokio::time::{Duration, timeout};
 use tracing::info;
 
@@ -68,6 +68,50 @@ impl UpstreamDnsForwarder {
             .to_vec()
             .context("failed to encode upstream DNS request")?;
 
+        match self.query_via_udp(upstream, &request_bytes).await {
+            Ok(message) if !message.metadata.truncation => {
+                return Ok(Self::normalize_response(message));
+            },
+            Ok(_) | Err(_) => {},
+        }
+
+        self.query_via_tcp(upstream, &request_bytes).await
+    }
+
+    async fn query_via_udp(&self, upstream: SocketAddr, request_bytes: &[u8]) -> Result<Message> {
+        let bind_addr = if upstream.is_ipv6() {
+            "[::]:0"
+        } else {
+            "0.0.0.0:0"
+        };
+        let socket = timeout(Duration::from_secs(5), UdpSocket::bind(bind_addr))
+            .await
+            .context("timeout binding UDP socket")?
+            .context("failed to bind UDP socket")?;
+
+        timeout(
+            Duration::from_secs(5),
+            socket.send_to(request_bytes, upstream),
+        )
+        .await
+        .context("timeout sending upstream UDP request")?
+        .context("failed to send upstream UDP request")?;
+
+        let mut response_buf = vec![0u8; 4096];
+        let (response_len, _) =
+            timeout(Duration::from_secs(5), socket.recv_from(&mut response_buf))
+                .await
+                .context("timeout reading upstream UDP response")?
+                .context("failed to read upstream UDP response")?;
+
+        response_buf.truncate(response_len);
+        let message =
+            Message::from_vec(&response_buf).context("failed to decode upstream UDP response")?;
+
+        Ok(message)
+    }
+
+    async fn query_via_tcp(&self, upstream: SocketAddr, request_bytes: &[u8]) -> Result<Message> {
         let mut stream = timeout(Duration::from_secs(5), TcpStream::connect(upstream))
             .await
             .context("timeout connecting to upstream DNS")?
@@ -101,12 +145,16 @@ impl UpstreamDnsForwarder {
             .context("timeout reading upstream response body")?
             .context("failed to read upstream response body")?;
 
-        let mut message =
+        let message =
             Message::from_vec(&response_buf).context("failed to decode upstream DNS response")?;
+        Ok(Self::normalize_response(message))
+    }
+
+    fn normalize_response(mut message: Message) -> Message {
         if message.metadata.response_code == ResponseCode::NotImp {
             message.metadata.response_code = ResponseCode::NoError;
         }
 
-        Ok(message)
+        message
     }
 }
