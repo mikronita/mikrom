@@ -69,6 +69,31 @@ impl TenantRepository for PostgresTenantRepository {
         Ok(db_tenants.into_iter().map(Into::into).collect())
     }
 
+    async fn update(&self, tenant_id: Uuid, name: String) -> DomainResult<Tenant> {
+        let db_tenant = sqlx::query_as::<_, DbTenant>(
+            r#"
+            UPDATE tenants
+            SET name = $2, updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, tenant_id, name, created_at, updated_at
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(name)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(db_tenant.into())
+    }
+
+    async fn delete(&self, tenant_id: Uuid) -> DomainResult<bool> {
+        let result = sqlx::query("DELETE FROM tenants WHERE id = $1")
+            .bind(tenant_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn add_member(&self, tenant_id: Uuid, user_id: Uuid, role: &str) -> DomainResult<()> {
         sqlx::query("INSERT INTO tenant_members (tenant_id, user_id, role) VALUES ($1, $2, $3)")
             .bind(tenant_id)
@@ -160,5 +185,14 @@ mod tests {
         // 6. List by user
         let user_tenants = repo.list_by_user(user_id).await.unwrap();
         assert!(user_tenants.iter().any(|t| t.id == tenant.id));
+
+        // 7. Update tenant name
+        let updated = repo.update(tenant.id, "Project Beta".into()).await.unwrap();
+        assert_eq!(updated.name, "Project Beta");
+        assert_eq!(updated.tenant_id, tenant.tenant_id);
+
+        // 8. Delete tenant
+        let deleted = repo.delete(tenant.id).await.unwrap();
+        assert!(deleted);
     }
 }

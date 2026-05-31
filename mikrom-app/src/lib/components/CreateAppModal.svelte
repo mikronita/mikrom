@@ -17,6 +17,7 @@
   import { createApp, getGithubInstallUrl, listGithubRepos, type GithubRepo, type CreateAppRequest } from "$lib/api";
   import { getToken } from "$lib/auth";
   import { toast } from "$lib/toast";
+  import { activeProjectSlugStore, activeProjectStore } from "$lib/stores/projects";
 
   export let open = false;
   export let onClose: (() => void) | undefined = undefined;
@@ -69,6 +70,11 @@
       return;
     }
 
+    if (!$activeProjectSlugStore) {
+      toast.error("Select a project before creating an app");
+      return;
+    }
+
     const payload: CreateAppRequest =
       activeTab === "github" && selectedRepo
         ? {
@@ -102,6 +108,22 @@
   <form class="flex flex-col gap-6 pt-2" on:submit|preventDefault={handleSubmit}>
     <Field label="App Name" forId="app_name">
       <Input id="app_name" bind:value={name} placeholder="my-cool-project" required />
+    </Field>
+
+    <Field
+      label="Project scope"
+      description="This application will be created in the currently active project."
+    >
+      <div class="rounded-md border border-border bg-muted/30 px-3 py-2">
+        <div class="text-sm font-medium">
+          {$activeProjectStore?.name || $activeProjectSlugStore || "No active project"}
+        </div>
+        {#if $activeProjectStore?.tenant_id || $activeProjectSlugStore}
+          <div class="text-xs text-muted-foreground">
+            {$activeProjectStore?.tenant_id || $activeProjectSlugStore}
+          </div>
+        {/if}
+      </div>
     </Field>
 
     <div class="grid w-full grid-cols-2 rounded-md border border-border bg-muted p-1">
@@ -164,7 +186,7 @@
 
     <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
       <Button variant="outline" type="button" onclick={close}>Cancel</Button>
-      <Button type="submit" disabled={activeTab === "github" && !selectedRepoId}>Create App</Button>
+      <Button type="submit" disabled={!$activeProjectSlugStore || (activeTab === "github" && !selectedRepoId)}>Create App</Button>
     </div>
   </form>
 </Modal>

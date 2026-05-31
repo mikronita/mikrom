@@ -5,6 +5,7 @@ import { listProjects, type ProjectInfo } from "$lib/api";
 import { getToken } from "$lib/auth";
 
 const ACTIVE_PROJECT_COOKIE = "mikrom_active_project";
+const ACTIVE_PROJECT_STORAGE_KEY = "mikrom_active_project";
 
 function readCookie(name: string) {
   if (!browser) return null;
@@ -16,6 +17,31 @@ function readCookie(name: string) {
   return entry ? decodeURIComponent(entry.split("=").slice(1).join("=")) : null;
 }
 
+function readLocalStorage(name: string) {
+  if (!browser) return null;
+
+  try {
+    return localStorage.getItem(name);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalStorage(name: string, value: string | null) {
+  if (!browser) return;
+
+  try {
+    if (!value) {
+      localStorage.removeItem(name);
+      return;
+    }
+
+    localStorage.setItem(name, value);
+  } catch {
+    // Ignore cache failures and rely on cookies instead.
+  }
+}
+
 function writeCookie(name: string, value: string | null) {
   if (!browser) return;
 
@@ -25,6 +51,10 @@ function writeCookie(name: string, value: string | null) {
   }
 
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${60 * 60 * 24 * 30}; samesite=lax`;
+}
+
+function readPersistedActiveProjectSlug() {
+  return readCookie(ACTIVE_PROJECT_COOKIE) ?? readLocalStorage(ACTIVE_PROJECT_STORAGE_KEY);
 }
 
 export const projectsStore = writable<ProjectInfo[]>([]);
@@ -52,6 +82,7 @@ function emitProjectChange(slug: string | null) {
 export function setActiveProjectSlug(slug: string | null) {
   activeProjectSlugStore.set(slug);
   writeCookie(ACTIVE_PROJECT_COOKIE, slug);
+  writeLocalStorage(ACTIVE_PROJECT_STORAGE_KEY, slug);
   emitProjectChange(slug);
 }
 
@@ -100,7 +131,7 @@ export async function refreshProjects() {
 
 export function useProjectBootstrap() {
   onMount(() => {
-    activeProjectSlugStore.set(readCookie(ACTIVE_PROJECT_COOKIE));
+    activeProjectSlugStore.set(readPersistedActiveProjectSlug());
     void refreshProjects();
 
     const handleAuthChange = () => {

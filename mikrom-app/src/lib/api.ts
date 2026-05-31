@@ -46,9 +46,14 @@ export interface ProjectInfo {
   tenant_id: string;
   name: string;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface CreateProjectRequest {
+  name: string;
+}
+
+export interface UpdateProjectRequest {
   name: string;
 }
 
@@ -188,6 +193,7 @@ export interface AppInfo {
   mem_threshold: number;
   scale_state: AppScaleState;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface ScaleAppRequest {
@@ -468,9 +474,58 @@ export async function createProject(token: string, data: CreateProjectRequest) {
       },
       body: JSON.stringify(data),
     });
+    if (response.status === 401) logout();
     const result = await parseJson<ProjectInfo>(response);
     if (!response.ok) return { error: getErrorMessage(result, "Failed to create project") };
     return { data: result as ProjectInfo };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function getProject(token: string, tenantId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/projects/${encodeURIComponent(tenantId)}`, {
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<ProjectInfo>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch project") };
+    return { data: result as ProjectInfo };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function updateProject(token: string, tenantId: string, data: UpdateProjectRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/projects/${encodeURIComponent(tenantId)}`, {
+      method: "PATCH",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<ProjectInfo>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to update project") };
+    return { data: result as ProjectInfo };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function deleteProject(token: string, tenantId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/projects/${encodeURIComponent(tenantId)}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    if (response.status === 204) {
+      return { data: true };
+    }
+    const result = await parseJson<ApiError>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to delete project") };
+    return { data: true };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Network error" };
   }

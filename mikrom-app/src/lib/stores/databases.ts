@@ -10,6 +10,7 @@ export interface Database {
   storage_gb: number;
   connection_string: string;
   created_at: string;
+  updated_at: string;
 }
 
 const mockDatabases: Database[] = [
@@ -23,6 +24,7 @@ const mockDatabases: Database[] = [
     storage_gb: 50,
     connection_string: "postgresql://mikrom:password@prod-db.mikrom.internal:5432/mikrom",
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(), // 7 days ago
+    updated_at: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
   },
   {
     id: "db-2",
@@ -34,19 +36,21 @@ const mockDatabases: Database[] = [
     storage_gb: 10,
     connection_string: "postgresql://mikrom:password@staging-db.mikrom.internal:5432/mikrom",
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(), // 2 days ago
+    updated_at: new Date(Date.now() - 1000 * 60 * 60 * 12).toISOString(),
   }
 ];
 
 export const databasesStore = writable<Database[]>(mockDatabases);
 export const databasesLoading = writable<boolean>(false);
 
-export function addDatabase(db: Omit<Database, "id" | "status" | "connection_string" | "created_at">) {
+export function addDatabase(db: Omit<Database, "id" | "status" | "connection_string" | "created_at" | "updated_at">) {
   const newDb: Database = {
     ...db,
     id: `db-${Math.random().toString(36).substr(2, 9)}`,
     status: "Provisioning",
     connection_string: `postgresql://mikrom:password@${db.name}.mikrom.internal:5432/mikrom`,
     created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   };
 
   databasesStore.update(dbs => [newDb, ...dbs]);
@@ -66,5 +70,5 @@ export function deleteDatabase(id: string) {
 }
 
 export function updateDatabaseStatus(id: string, status: Database["status"]) {
-  databasesStore.update(dbs => dbs.map(db => db.id === id ? { ...db, status } : db));
+  databasesStore.update(dbs => dbs.map(db => db.id === id ? { ...db, status, updated_at: new Date().toISOString() } : db));
 }

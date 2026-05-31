@@ -70,6 +70,7 @@ export async function mockControlPlaneApi(
   page: Page,
   options: MockControlPlaneApiOptions = {},
 ) {
+  let projectsState = [...projects];
   let securityRulesState = [...securityRules];
   let appsState = [...apps];
 
@@ -94,7 +95,83 @@ export async function mockControlPlaneApi(
     }
 
     if (pathname === `${apiBase}/projects` && method === "GET") {
-      await route.fulfill(jsonResponse(projects));
+      await route.fulfill(jsonResponse(projectsState));
+      return;
+    }
+
+    if (pathname === `${apiBase}/projects` && method === "POST") {
+      const payload = request.postDataJSON() as { name?: string } | undefined;
+      const nextIndex = projectsState.length + 1;
+      const tenant_id = `proj${String(nextIndex).padStart(2, "0")}`;
+      const createdProject = {
+        id: `project-${nextIndex}`,
+        tenant_id,
+        name: payload?.name ?? `Project ${nextIndex}`,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      projectsState = [createdProject, ...projectsState];
+      await route.fulfill(jsonResponse(createdProject, 201));
+      return;
+    }
+
+    if (pathname.startsWith(`${apiBase}/projects/`)) {
+      const tenantSlug = decodeURIComponent(pathname.slice(`${apiBase}/projects/`.length));
+
+      if (method === "GET") {
+        const project = projectsState.find((entry) => entry.tenant_id === tenantSlug);
+        if (!project) {
+          await route.fulfill(jsonResponse({ error: "Tenant not found", status: 404 }, 404));
+          return;
+        }
+
+        await route.fulfill(jsonResponse(project));
+        return;
+      }
+
+      if (method === "PATCH") {
+        const payload = request.postDataJSON() as { name?: string } | undefined;
+        const projectIndex = projectsState.findIndex((entry) => entry.tenant_id === tenantSlug);
+        if (projectIndex === -1) {
+          await route.fulfill(jsonResponse({ error: "Tenant not found", status: 404 }, 404));
+          return;
+        }
+
+        const updatedProject = {
+          ...projectsState[projectIndex],
+          name: payload?.name ?? projectsState[projectIndex].name,
+          updated_at: new Date().toISOString(),
+        };
+        projectsState[projectIndex] = updatedProject;
+        await route.fulfill(jsonResponse(updatedProject));
+        return;
+      }
+
+      if (method === "DELETE") {
+        const project = projectsState.find((entry) => entry.tenant_id === tenantSlug);
+        if (!project) {
+          await route.fulfill(jsonResponse({ error: "Tenant not found", status: 404 }, 404));
+          return;
+        }
+
+        if (tenantSlug === "acme" && appsState.length > 0) {
+          await route.fulfill(
+            jsonResponse(
+              {
+                error: "This project still has apps, databases or volumes. Remove them first.",
+                status: 409,
+              },
+              409
+            )
+          );
+          return;
+        }
+
+        projectsState = projectsState.filter((entry) => entry.tenant_id !== tenantSlug);
+        await route.fulfill({ status: 204 });
+        return;
+      }
+
       return;
     }
 
@@ -103,8 +180,49 @@ export async function mockControlPlaneApi(
       return;
     }
 
-    if (pathname === `${apiBase}/apps/starter/deployments` && method === "GET") {
-      await route.fulfill(jsonResponse(appDeployments));
+    if (pathname === `${apiBase}/apps` && method === "POST") {
+      const payload = request.postDataJSON() as
+        | {
+            name?: string;
+            git_url?: string;
+            github_installation_id?: number;
+            github_repo_id?: number;
+            github_repo_full_name?: string;
+          }
+        | undefined;
+      const nextIndex = appsState.length + 1;
+      const createdApp = {
+        id: `app-${nextIndex}`,
+        name: payload?.name ?? `app-${nextIndex}`,
+        git_url: payload?.git_url ?? "https://github.com/mikrom/new-app",
+        port: 3000,
+        hostname: null,
+        github_webhook_secret: null,
+        github_installation_id: payload?.github_installation_id,
+        github_repo_id: payload?.github_repo_id,
+        github_repo_full_name: payload?.github_repo_full_name,
+        active_deployment_id: null,
+        desired_replicas: 1,
+        min_replicas: 1,
+        max_replicas: 1,
+        autoscaling_enabled: false,
+        cpu_threshold: 80,
+        mem_threshold: 80,
+        scale_state: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      appsState = [createdApp, ...appsState];
+      await route.fulfill(jsonResponse(createdApp, 201));
+      return;
+    }
+
+    if (pathname.startsWith(`${apiBase}/apps/`) && pathname.endsWith("/deployments") && method === "GET") {
+      const appName = decodeURIComponent(
+        pathname.slice(`${apiBase}/apps/`.length, -"/deployments".length),
+      );
+      const app = appsState.find((entry) => entry.name === appName);
+      await route.fulfill(jsonResponse(app ? appDeployments.filter((deployment) => deployment.app_id === app.id) : []));
       return;
     }
 
@@ -126,7 +244,7 @@ export async function mockControlPlaneApi(
       return;
     }
 
-    if (pathname === `${apiBase}/apps/starter/secret` && method === "GET") {
+    if (pathname.startsWith(`${apiBase}/apps/`) && pathname.endsWith("/secret") && method === "GET") {
       await route.fulfill(
         jsonResponse({
           github_webhook_secret: options.githubWebhookSecret ?? "secret-123",
@@ -138,11 +256,6 @@ export async function mockControlPlaneApi(
     if (pathname === `${apiBase}/apps/starter` && method === "DELETE") {
       appsState = appsState.filter((app) => app.name !== "starter");
       await route.fulfill(jsonResponse({ success: true }));
-      return;
-    }
-
-    if (pathname === `${apiBase}/apps` && method === "POST") {
-      await route.fulfill(jsonResponse({ id: "app-2" }));
       return;
     }
 
@@ -191,8 +304,12 @@ export async function mockControlPlaneApi(
       return;
     }
 
-    if (pathname === `${apiBase}/apps/starter/security-groups` && method === "GET") {
-      await route.fulfill(jsonResponse(securityRulesState));
+    if (pathname.startsWith(`${apiBase}/apps/`) && pathname.endsWith("/security-groups") && method === "GET") {
+      const appName = decodeURIComponent(
+        pathname.slice(`${apiBase}/apps/`.length, -"/security-groups".length),
+      );
+      const app = appsState.find((entry) => entry.name === appName);
+      await route.fulfill(jsonResponse(app && app.name === "starter" ? securityRulesState : []));
       return;
     }
 

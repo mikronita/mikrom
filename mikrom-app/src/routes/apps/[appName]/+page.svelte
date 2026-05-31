@@ -4,13 +4,12 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import {
+    ArrowLeft,
     ArrowDownToLine,
     ArrowUpFromLine,
     Boxes,
     Cpu,
-    ExternalLink,
     GitBranch,
-    Globe2,
     Loader2,
     MemoryStick,
     Rocket,
@@ -61,6 +60,8 @@
   import { toast } from "$lib/toast";
   import { appsStore, refreshApps } from "$lib/stores/apps";
   import { vmsStore, vmsLoading } from "$lib/stores/vms";
+  import { formatDate } from "$lib/utils";
+  import { Separator } from "$lib/components";
 
   type MetricsSnapshot = {
     time: string;
@@ -553,6 +554,14 @@
   ];
   $: showLivePerformance =
     appScaleState !== "scaled_to_zero" && runningReplicaCount > 0;
+  $: statusBadgeLabel =
+    appScaleState === "scaled_to_zero"
+      ? "Scaled to zero"
+      : runningReplicaCount > 0
+        ? "Running"
+        : "Idle";
+  $: replicaSummary = app ? formatReplicaSummary(app) : "--";
+  $: appUpdatedAt = app?.updated_at || app?.created_at ? formatDate(app?.updated_at || app?.created_at || new Date()) : null;
 
   $: if (appScaleState === "scaled_to_zero" || runningReplicaCount === 0) {
     liveMetrics = null;
@@ -562,80 +571,129 @@
 </script>
 
 <DashboardLayout>
-  <div class="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-    <div class="flex items-center gap-4">
-      <div
-        class="flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground"
-      >
-        <Boxes />
-      </div>
-      <div>
-        <div class="flex flex-wrap items-center gap-3">
-          <h1 class="text-2xl font-semibold tracking-tight">
-            {app?.name || appName}.apps.mikrom.spluca.org
-          </h1>
+  <div class="flex flex-col gap-6">
+    <div class="rounded-2xl border border-border bg-card p-5 shadow-sm md:p-6">
+      <div class="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+        <div class="flex min-w-0 flex-1 gap-4">
+          <div
+            class="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border bg-background text-foreground"
+          >
+            <Boxes />
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-3">
+              <h1 class="truncate text-3xl font-semibold tracking-tight">
+                {app?.name || appName}
+              </h1>
+              <Badge variant="secondary" class="uppercase">
+                {statusBadgeLabel}
+              </Badge>
+              {#if app?.hostname}
+                <Badge variant="outline" class="truncate">
+                  {app.hostname}
+                </Badge>
+              {/if}
+            </div>
+            <p class="mt-2 max-w-3xl text-sm text-muted-foreground">
+              Manage {app?.name || "application"} deployments and monitor production
+              instances from a single place.
+            </p>
+            <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              <span class="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5">
+                <span class="font-mono">{app?.git_url || "No repository linked"}</span>
+              </span>
+              <span class="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5">
+                <span>Updated {appUpdatedAt || "--"}</span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            href={`https://${app?.name || appName}.apps.mikrom.spluca.org`}
-            target="_blank"
-            rel="noreferrer"
-            class="shrink-0"
+            href="/apps"
           >
-            <Globe2 class="size-4" />
-            <span class="hidden sm:inline">Visit site</span>
-            <ExternalLink class="size-4" />
+            <ArrowLeft class="size-4" />
+            Back
+          </Button>
+          <Button
+            size="sm"
+            onclick={() => (showDeployModal = true)}
+            disabled={!app}
+          >
+            Deploy Now
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onclick={() => (showScaleModal = true)}
+          >
+            <Scale class="size-4" />
+            Scaling
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onclick={() => (showWebhookModal = true)}
+          >
+            <Cog class="size-4" />
+            Auto-deploy
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onclick={() => (showDeleteAppDialog = true)}
+            disabled={deletingApp}
+          >
+            {#if deletingApp}
+              <Loader2 class="size-4 animate-spin" />
+            {:else}
+              <Trash2 class="size-4" />
+            {/if}
+            Delete App
           </Button>
         </div>
-        <p class="mt-1 text-sm text-muted-foreground">
-          Manage {app?.name || "application"} deployments and monitor production
-          instances.
-        </p>
+      </div>
+
+      <Separator class="my-6" />
+
+      <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Card size="sm" class="border-border/70 bg-background/70 shadow-none">
+          <CardContent class="flex flex-col gap-1">
+            <span class="text-xs text-muted-foreground">Current deployment</span>
+            <span class="text-2xl font-semibold">{active?.status || "No active deployment"}</span>
+            <span class="text-xs text-muted-foreground">Prod or preview target</span>
+          </CardContent>
+        </Card>
+        <Card size="sm" class="border-border/70 bg-background/70 shadow-none">
+          <CardContent class="flex flex-col gap-1">
+            <span class="text-xs text-muted-foreground">Replicas</span>
+            <span class="text-2xl font-semibold">{replicaSummary}</span>
+            <span class="text-xs text-muted-foreground">Running microVMs</span>
+          </CardContent>
+        </Card>
+        <Card size="sm" class="border-border/70 bg-background/70 shadow-none">
+          <CardContent class="flex flex-col gap-1">
+            <span class="text-xs text-muted-foreground">Repository</span>
+            <span class="truncate text-xl font-semibold">{app?.git_url || "No repository"}</span>
+            <span class="text-xs text-muted-foreground">Source of the current build</span>
+          </CardContent>
+        </Card>
+        <Card size="sm" class="border-border/70 bg-background/70 shadow-none">
+          <CardContent class="flex flex-col gap-1">
+            <span class="text-xs text-muted-foreground">Updated</span>
+            <span class="text-2xl font-semibold">{appUpdatedAt || "--"}</span>
+            <span class="text-xs text-muted-foreground">Latest app metadata change</span>
+          </CardContent>
+        </Card>
       </div>
     </div>
-    <div class="flex items-center gap-2">
-      <Button
-        size="sm"
-        onclick={() => (showDeployModal = true)}
-        disabled={!app}
-      >
-        Deploy Now
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        onclick={() => (showScaleModal = true)}
-      >
-        <Scale class="size-4" />
-        Scaling
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        onclick={() => (showWebhookModal = true)}
-      >
-        <Cog class="size-4" />
-        Auto-deploy
-      </Button>
-      <Button
-        size="sm"
-        variant="destructive"
-        onclick={() => (showDeleteAppDialog = true)}
-        disabled={deletingApp}
-      >
-        {#if deletingApp}
-          <Loader2 class="size-4 animate-spin" />
-        {:else}
-          <Trash2 class="size-4" />
-        {/if}
-        Delete App
-      </Button>
-    </div>
-  </div>
 
-  <section class="space-y-4">
-    <div class="flex items-center justify-between">
-      <h2 class="text-lg font-bold tracking-tight">Deployment History</h2>
+    <section class="flex flex-col gap-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-bold tracking-tight">Deployment History</h2>
     </div>
     <Card class="overflow-hidden">
       <div class="overflow-x-auto">
@@ -795,9 +853,7 @@
   </section>
 
   {#if showLivePerformance}
-    <div
-      class="space-y-6 animate-in fade-in duration-500 border-t border-border pt-6"
-    >
+    <div class="flex animate-in fade-in duration-500 flex-col gap-6 border-t border-border pt-6">
       <h2 class="text-lg font-bold tracking-tight">Live Performance</h2>
 
       {#if !liveMetrics}
@@ -806,7 +862,7 @@
             <Skeleton class="h-6 w-44" />
             <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {#each Array.from({ length: 4 }) as _}
-                <div class="rounded-md border bg-background/80 p-3 shadow-xs">
+                <div class="rounded-2xl border border-border/70 bg-background/80 p-4 shadow-xs">
                   <Skeleton class="h-4 w-24" />
                   <div class="mt-3 flex flex-col gap-2">
                     <Skeleton class="h-6 w-20" />
@@ -834,9 +890,7 @@
               </div>
               <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 {#each metricCards as metric}
-                  <div
-                    class="min-w-36 rounded-md border bg-background/80 p-3 shadow-xs"
-                  >
+                  <div class="min-w-36 rounded-2xl border border-border/70 bg-background/80 p-4 shadow-xs">
                     <div
                       class="flex items-center gap-2 text-xs font-medium text-muted-foreground"
                     >
@@ -865,6 +919,7 @@
       {/if}
     </div>
   {/if}
+  </div>
 
   {#if showWebhookModal}
     <Modal
@@ -873,7 +928,7 @@
       width="max-w-[600px]"
       onclose={() => (showWebhookModal = false)}
     >
-      <div class="space-y-6 pt-4">
+      <div class="flex flex-col gap-6 pt-4">
         <div class="flex items-start gap-3">
           <Info class="mt-0.5 size-6 shrink-0 text-indigo-500" />
           <div>
@@ -888,8 +943,8 @@
           </div>
         </div>
 
-        <div class="space-y-4 pt-2">
-          <div class="space-y-1.5">
+        <div class="flex flex-col gap-4 pt-2">
+          <div class="flex flex-col gap-1.5">
             <p
               class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
             >
@@ -913,7 +968,7 @@
             </div>
           </div>
 
-          <div class="space-y-1.5">
+          <div class="flex flex-col gap-1.5">
             <p
               class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
             >
@@ -948,11 +1003,10 @@
           </div>
         </div>
 
-        <div class="rounded-md border border-border bg-muted/50 p-4">
-          <h4 class="mb-2 text-xs font-bold">Instructions:</h4>
-          <ol
-            class="list-inside list-decimal space-y-2 text-xs text-muted-foreground"
-          >
+        <Card size="sm" class="border-border/70 bg-muted/50 shadow-none">
+          <CardContent class="flex flex-col gap-2">
+            <h4 class="text-xs font-bold uppercase tracking-wide">Instructions</h4>
+            <ol class="flex list-inside list-decimal flex-col gap-2 text-xs text-muted-foreground">
             <li>Go to your repository on GitHub.</li>
             <li>
               Click on <span class="font-medium text-foreground">Settings</span>
@@ -976,8 +1030,9 @@
               Click <span class="font-medium text-foreground">Add webhook</span>
               at the bottom.
             </li>
-          </ol>
-        </div>
+            </ol>
+          </CardContent>
+        </Card>
       </div>
     </Modal>
   {/if}

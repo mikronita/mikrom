@@ -21,6 +21,7 @@ export const projects = [
     tenant_id: "acme",
     name: "Acme",
     created_at: "2026-05-01T10:00:00.000Z",
+    updated_at: "2026-05-01T10:00:00.000Z",
   },
 ];
 
@@ -40,6 +41,7 @@ export const apps = [
     mem_threshold: 80,
     scale_state: "active",
     created_at: "2026-05-02T10:00:00.000Z",
+    updated_at: "2026-05-04T10:00:00.000Z",
   },
 ];
 

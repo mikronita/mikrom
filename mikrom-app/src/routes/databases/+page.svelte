@@ -7,16 +7,21 @@
     CardDescription,
     CardContent,
     Badge,
+    ButtonGroup,
     Button,
+    Input,
     CardSkeleton,
     EmptyState,
   } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import CreateDatabaseModal from "$lib/components/CreateDatabaseModal.svelte";
   import { formatDate } from "$lib/utils";
+  import { matchesSearch } from "$lib/search";
   import { databasesStore, databasesLoading } from "$lib/stores/databases";
 
   let showCreate = false;
+  let query = "";
+  let statusFilter: "all" | "running" | "provisioning" | "deleting" | "stopped" = "all";
 
   function getStatusBadgeClass(status: string) {
     switch (status) {
@@ -30,6 +35,13 @@
         return "border-transparent bg-muted/70 text-muted-foreground";
     }
   }
+
+  $: filteredDatabases = [...$databasesStore]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .filter((db) => {
+      const matchesStatus = statusFilter === "all" || db.status.toLowerCase() === statusFilter;
+      return matchesStatus && matchesSearch([db.name, db.version, db.status], query);
+    });
 </script>
 
 <svelte:head>
@@ -54,6 +66,21 @@
       </Button>
     </div>
 
+    <Card size="sm" class="overflow-hidden">
+      <CardContent class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div class="min-w-0 flex-1">
+          <Input bind:value={query} placeholder="Search by database name, version or status" />
+        </div>
+        <ButtonGroup class="w-full md:w-auto">
+          <Button size="sm" variant={statusFilter === "all" ? "secondary" : "outline"} onclick={() => (statusFilter = "all")}>All</Button>
+          <Button size="sm" variant={statusFilter === "running" ? "secondary" : "outline"} onclick={() => (statusFilter = "running")}>Running</Button>
+          <Button size="sm" variant={statusFilter === "provisioning" ? "secondary" : "outline"} onclick={() => (statusFilter = "provisioning")}>Provisioning</Button>
+          <Button size="sm" variant={statusFilter === "deleting" ? "secondary" : "outline"} onclick={() => (statusFilter = "deleting")}>Deleting</Button>
+          <Button size="sm" variant={statusFilter === "stopped" ? "secondary" : "outline"} onclick={() => (statusFilter = "stopped")}>Stopped</Button>
+        </ButtonGroup>
+      </CardContent>
+    </Card>
+
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {#if $databasesLoading && $databasesStore.length === 0}
         {#each Array.from({ length: 6 }) as _}
@@ -64,12 +91,18 @@
             footerPills={["w-20", "w-24"]}
           />
         {/each}
-      {:else if $databasesStore.length === 0}
+      {:else if filteredDatabases.length === 0}
         <div class="col-span-full">
           <EmptyState class="py-16">
             <DatabaseIcon class="size-10 text-muted-foreground" />
-            <h2 class="text-xl font-semibold">No databases found</h2>
-            <p class="max-w-md text-sm text-muted-foreground">Provision your first PostgreSQL instance to get started.</p>
+            <h2 class="text-xl font-semibold">
+              {query || statusFilter !== "all" ? "No matching databases" : "No databases found"}
+            </h2>
+            <p class="max-w-md text-sm text-muted-foreground">
+              {query || statusFilter !== "all"
+                ? "Try a different search term or clear the filters."
+                : "Provision your first PostgreSQL instance to get started."}
+            </p>
             <Button size="sm" onclick={() => (showCreate = true)}>
               <Plus class="size-4" />
               Create your first database
@@ -77,9 +110,9 @@
           </EmptyState>
         </div>
       {:else}
-        {#each [...$databasesStore].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) as db}
+        {#each filteredDatabases as db}
           <a class="block" href={`/databases/${encodeURIComponent(db.name)}`}>
-            <Card class="h-full overflow-hidden transition-colors hover:bg-muted/30">
+            <Card size="sm">
               <CardHeader>
                 <div class="flex items-start gap-4">
                   <div class="flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
@@ -98,11 +131,17 @@
                 </div>
               </CardHeader>
               <CardContent class="flex flex-col gap-4">
-                <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-                  <span class="inline-flex items-center gap-1.5">
-                    <Calendar class="size-4" />
-                    Created {formatDate(db.created_at)}
-                  </span>
+                <div class="flex flex-col gap-2 text-xs text-muted-foreground">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <span class="inline-flex items-center gap-1.5">
+                      <Calendar class="size-4" />
+                      Created {formatDate(db.created_at)}
+                    </span>
+                    <span class="inline-flex items-center gap-1.5">
+                      <Calendar class="size-4" />
+                      Updated {formatDate(db.updated_at || db.created_at)}
+                    </span>
+                  </div>
                   <div class="flex flex-wrap items-center gap-2">
                     <Badge variant="outline" class="gap-1.5">
                       <Cpu class="size-3" />

@@ -14,7 +14,8 @@ test.describe("detail pages", () => {
 
     await page.goto("/apps/starter");
 
-    await expect(page.getByRole("heading", { name: /starter\.apps\.mikrom\.spluca\.org/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "starter" })).toBeVisible();
+    await expect(page.getByText("Updated May 4, 2026", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Deployment History" })).toBeVisible();
     await expect(page.getByText("Initial stable release")).toBeVisible();
     await expect(page.getByText("Production", { exact: true })).toBeVisible();
@@ -85,7 +86,7 @@ test.describe("detail pages", () => {
     await deleteDialog.getByRole("button", { name: "Delete Database", exact: true }).click();
 
     await expect(page).toHaveURL("/databases");
-    await expect(page.getByText("Deleting")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Deleting" })).toBeVisible();
     await expect(page.getByRole("link", { name: /prod-db/i })).toHaveCount(0, { timeout: 6000 });
   });
 

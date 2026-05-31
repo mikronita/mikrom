@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { page } from "$app/stores";
   import { Bell, PanelLeft } from "lucide-svelte";
   import AuthGuard from "$lib/components/AuthGuard.svelte";
@@ -13,15 +14,25 @@
 
   const segmentName = (segment: string) => decodeURIComponent(segment).replace(/^\w/, (c) => c.toUpperCase());
   const breadcrumbHref = (index: number) => `/${pathParts.slice(0, index + 1).map(encodeURIComponent).join("/")}`;
+  const SIDEBAR_COOKIE_NAME = "sidebar_state";
+  const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
   let pathParts: string[] = [];
-  let sidebarCollapsed = false;
+  let sidebarCollapsed = $page.data.sidebarCollapsed ?? false;
   $: pathParts = $page.url.pathname.split("/").filter(Boolean);
 
-  function toggleSidebar() {
-    sidebarCollapsed = !sidebarCollapsed;
-    document.cookie = `sidebar_state=${sidebarCollapsed}; path=/; max-age=${60 * 60 * 24 * 7}`;
+  function persistSidebarState(nextCollapsed: boolean) {
+    sidebarCollapsed = nextCollapsed;
+    document.cookie = `${SIDEBAR_COOKIE_NAME}=${nextCollapsed}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
+    window.localStorage.setItem(SIDEBAR_COOKIE_NAME, String(nextCollapsed));
   }
+
+  onMount(() => {
+    const persisted = window.localStorage.getItem(SIDEBAR_COOKIE_NAME);
+    if (persisted === "true" || persisted === "false") {
+      sidebarCollapsed = persisted === "true";
+    }
+  });
 </script>
 
 <AuthGuard>
@@ -45,7 +56,7 @@
           class="flex size-9 items-center justify-center rounded-md hover:bg-muted"
           aria-label="Toggle Sidebar"
           title="Toggle Sidebar"
-          on:click={toggleSidebar}
+          on:click={() => persistSidebarState(!sidebarCollapsed)}
         >
           <PanelLeft class="size-4" />
         </button>

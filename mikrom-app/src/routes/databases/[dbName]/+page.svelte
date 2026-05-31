@@ -129,12 +129,12 @@
 
       <div class="grid gap-4 md:grid-cols-3">
         {#each [
-          { label: "6PN address", value: `fd00::${db.id.split('-')[1]}`, description: "Internal IPv6 for peer connectivity.", icon: Globe2, valueClass: "break-all font-mono text-lg" },
-          { label: "Storage used", value: `${Math.round(db.storage_gb * 0.15)} GB`, description: `Using 15% of your ${db.storage_gb} GB quota.`, icon: HardDrive, valueClass: "text-3xl" },
-          { label: "Active links", value: mockConnectedApps.length, description: "MicroVMs with active 6PN routes to this DB.", icon: Network, valueClass: "text-3xl" },
+          { label: "6PN address", value: `fd00::${db.id.split('-')[1]}`, description: "Internal IPv6 for peer connectivity.", icon: Globe2, valueClass: "break-all font-mono text-xl" },
+          { label: "Storage used", value: `${Math.round(db.storage_gb * 0.15)} GB`, description: `Using 15% of your ${db.storage_gb} GB quota.`, icon: HardDrive, valueClass: "text-2xl" },
+          { label: "Active links", value: mockConnectedApps.length, description: "MicroVMs with active 6PN routes to this DB.", icon: Network, valueClass: "text-2xl" },
         ] as card}
-          <Card>
-            <CardHeader class="flex flex-row items-start justify-between gap-4 pb-3">
+          <Card size="sm">
+            <CardHeader class="flex flex-row items-start justify-between gap-4">
               <div class="flex flex-col gap-1">
                 <CardDescription>{card.label}</CardDescription>
                 <CardTitle class={card.valueClass}>{card.value}</CardTitle>
@@ -143,7 +143,7 @@
                 <svelte:component this={card.icon} class="size-5" />
               </div>
             </CardHeader>
-            <CardContent class="pt-0">
+            <CardContent>
               <p class="text-sm text-muted-foreground">{card.description}</p>
             </CardContent>
           </Card>
@@ -304,14 +304,14 @@
                       <Cpu class="size-3" />
                       vCPU
                     </div>
-                    <span class="text-lg font-semibold">{db.vcpus} Cores</span>
+                    <span class="text-2xl font-semibold">{db.vcpus} Cores</span>
                   </div>
                   <div class="flex flex-col gap-1">
                     <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                       <HardDrive class="size-3" />
                       Storage
                     </div>
-                    <span class="text-lg font-semibold">{db.storage_gb} GB</span>
+                    <span class="text-2xl font-semibold">{db.storage_gb} GB</span>
                   </div>
                 </div>
                 <div class="flex flex-col gap-1">
@@ -319,7 +319,7 @@
                     <DatabaseIcon class="size-3" />
                     Memory
                   </div>
-                  <span class="text-lg font-semibold">{db.memory_mib / 1024} GB RAM</span>
+                  <span class="text-2xl font-semibold">{db.memory_mib / 1024} GB RAM</span>
                 </div>
               </CardContent>
             </Card>
@@ -350,7 +350,7 @@
           <CardContent>
              <EmptyState class="py-12">
               <LockKeyhole class="size-10 text-muted-foreground" />
-              <h3 class="text-xl font-semibold">Mesh Security</h3>
+              <h3 class="text-lg font-semibold">Mesh Security</h3>
               <p class="max-w-md text-sm text-muted-foreground">By default, all applications in your VPC can connect to this database via port 5432.</p>
               <Button variant="outline" size="sm" class="mt-4" disabled>
                 Configure Custom Rules (Soon)

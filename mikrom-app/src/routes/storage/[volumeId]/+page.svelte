@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from "$app/stores";
   import { 
+    ArrowLeft,
     HardDrive, 
     Database, 
     History, 
@@ -18,9 +19,16 @@
     CardDescription,
     CardContent,
     Button,
+    ButtonGroup,
+    Badge,
     EmptyState,
+    Separator,
+    Field,
+    FieldGroup,
+    Input,
   } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
+  import { formatDate } from "$lib/utils";
   import type { AttachedVolume, Volume, VolumeAttachmentInfo, VolumeWithAttachments } from "$lib/api";
   import { volumesStore } from "$lib/stores/volumes";
 
@@ -30,6 +38,11 @@
 
   $: volume = $volumesStore.find((v) => v.id === volumeId);
   $: attachments = volume && "attachments" in volume ? (volume.attachments as VolumeAttachmentInfo[]) : [];
+  $: attachmentCount = attachments.length;
+  $: isAttached = attachmentCount > 0;
+  $: volumeStatusLabel = isAttached ? "Attached" : "Available";
+  $: volumeUpdatedAt = "updated_at" in (volume || {}) ? (volume as AttachedVolume | VolumeWithAttachments).updated_at : volume?.created_at || "";
+  $: volumePoolName = volume && "pool_name" in volume ? volume.pool_name : "ceph-rbd-ssd";
 
   let activeTab: "overview" | "snapshots" | "settings" = "overview";
 </script>
@@ -41,107 +54,167 @@
 <DashboardLayout>
   {#if !volume}
     <div class="flex flex-col items-center justify-center py-20">
-      <EmptyState>
+      <EmptyState class="max-w-md">
         <HardDrive class="size-10 text-muted-foreground" />
         <h2 class="text-xl font-semibold">Volume not found</h2>
-        <p class="text-sm text-muted-foreground">The volume you are looking for does not exist or has been deleted.</p>
+        <p class="text-sm text-muted-foreground">
+          The volume you are looking for does not exist or has been deleted.
+        </p>
         <Button href="/storage" variant="outline" class="mt-4">
+          <ArrowLeft class="size-4" />
           Back to Storage
         </Button>
       </EmptyState>
     </div>
   {:else}
     <div class="flex flex-col gap-6">
-      <div class="flex flex-col gap-4">
-        <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div class="flex items-center gap-4">
-            <div class="flex size-12 items-center justify-center rounded-lg border border-border bg-background text-foreground">
+      <div class="rounded-2xl border border-border bg-card p-5 shadow-sm md:p-6">
+        <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+          <div class="flex min-w-0 flex-1 gap-4">
+            <div class="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border bg-background text-foreground">
               <HardDrive class="size-6" />
             </div>
-            <div class="flex flex-col">
-              <h1 class="text-3xl font-bold tracking-tight">{volume.name}</h1>
-              <div class="flex items-center gap-2 text-sm text-muted-foreground">
-                <span class="font-mono">{volume.id}</span>
-                <span>•</span>
-                <span>{volume.size_mib} MiB</span>
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-3">
+                <h1 class="truncate text-3xl font-semibold tracking-tight">{volume.name}</h1>
+                <Badge variant={isAttached ? "secondary" : "outline"} class="uppercase">
+                  {volumeStatusLabel}
+                </Badge>
+              </div>
+              <p class="mt-2 max-w-3xl text-sm text-muted-foreground">
+                Persistent block storage for application data and snapshots.
+              </p>
+              <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                <span class="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5">
+                  <span class="font-mono">{volume.id}</span>
+                </span>
+                <span class="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5">
+                  <span>{volume.size_mib} MiB</span>
+                </span>
+                <span class="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5">
+                  <span>Updated {formatDate(volumeUpdatedAt || volume.created_at)}</span>
+                </span>
               </div>
             </div>
           </div>
-          <div class="flex items-center gap-2">
+
+          <div class="flex flex-wrap items-center gap-2">
+            <Button href="/storage" variant="outline" size="sm">
+              <ArrowLeft class="size-4" />
+              Back
+            </Button>
             <Button variant="outline" size="sm">
-              <Camera class="mr-2 size-4" />
+              <Camera class="size-4" />
               Take Snapshot
             </Button>
             <Button variant="destructive-soft" size="sm">
-              <Trash2 class="mr-2 size-4" />
+              <Trash2 class="size-4" />
               Delete
             </Button>
           </div>
         </div>
+
+        <Separator class="my-6" />
+
+        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Card size="sm" class="border-border/70 bg-background/70 shadow-none">
+            <CardContent class="flex flex-col gap-1">
+              <span class="text-xs text-muted-foreground">Capacity</span>
+              <span class="text-2xl font-semibold">{volume.size_mib} MiB</span>
+              <span class="text-xs text-muted-foreground">Provisioned size</span>
+            </CardContent>
+          </Card>
+          <Card size="sm" class="border-border/70 bg-background/70 shadow-none">
+            <CardContent class="flex flex-col gap-1">
+              <span class="text-xs text-muted-foreground">Attachments</span>
+              <span class="text-2xl font-semibold">{attachmentCount}</span>
+              <span class="text-xs text-muted-foreground">Applications using this volume</span>
+            </CardContent>
+          </Card>
+          <Card size="sm" class="border-border/70 bg-background/70 shadow-none">
+            <CardContent class="flex flex-col gap-1">
+              <span class="text-xs text-muted-foreground">Storage pool</span>
+              <span class="text-xl font-semibold">{volumePoolName}</span>
+              <span class="text-xs text-muted-foreground">Ceph RBD backend</span>
+            </CardContent>
+          </Card>
+          <Card size="sm" class="border-border/70 bg-background/70 shadow-none">
+            <CardContent class="flex flex-col gap-1">
+              <span class="text-xs text-muted-foreground">Last updated</span>
+              <span class="text-xl font-semibold">{formatDate(volumeUpdatedAt || volume.created_at)}</span>
+              <span class="text-xs text-muted-foreground">Activity and metadata changes</span>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      <div class="flex border-b border-border">
-        <button 
-          class={`px-4 py-2 text-sm font-medium transition-colors hover:text-foreground ${activeTab === "overview" ? "border-b-2 border-primary text-foreground" : "text-muted-foreground"}`}
+      <ButtonGroup class="w-full flex-wrap">
+        <Button
+          variant={activeTab === "overview" ? "secondary" : "outline"}
           onclick={() => (activeTab = "overview")}
         >
           Overview
-        </button>
-        <button 
-          class={`px-4 py-2 text-sm font-medium transition-colors hover:text-foreground ${activeTab === "snapshots" ? "border-b-2 border-primary text-foreground" : "text-muted-foreground"}`}
+        </Button>
+        <Button
+          variant={activeTab === "snapshots" ? "secondary" : "outline"}
           onclick={() => (activeTab = "snapshots")}
         >
           Snapshots
-        </button>
-        <button 
-          class={`px-4 py-2 text-sm font-medium transition-colors hover:text-foreground ${activeTab === "settings" ? "border-b-2 border-primary text-foreground" : "text-muted-foreground"}`}
+        </Button>
+        <Button
+          variant={activeTab === "settings" ? "secondary" : "outline"}
           onclick={() => (activeTab = "settings")}
         >
           Settings
-        </button>
-      </div>
+        </Button>
+      </ButtonGroup>
 
       {#if activeTab === "overview"}
         <div class="grid gap-6 md:grid-cols-3">
-          <Card class="md:col-span-2">
+          <Card class="overflow-hidden md:col-span-2">
             <CardHeader>
               <CardTitle>Volume Details</CardTitle>
               <CardDescription>General information about this persistent volume.</CardDescription>
             </CardHeader>
             <CardContent class="grid gap-6">
               <div class="grid gap-4 sm:grid-cols-2">
-                <div class="flex flex-col gap-1">
-                  <span class="text-xs font-medium text-muted-foreground">Status</span>
-                  <div class="flex items-center gap-2">
-                    <div class="size-2 rounded-full bg-status-online"></div>
-                    <span class="text-sm font-medium">Ready</span>
+                <div class="rounded-2xl border border-border/70 bg-background/60 p-4">
+                  <p class="text-xs text-muted-foreground">Status</p>
+                  <div class="mt-2 flex items-center gap-2">
+                    <span class="size-2 rounded-full bg-status-online"></span>
+                    <span class="text-sm font-medium">{volumeStatusLabel}</span>
                   </div>
                 </div>
-                <div class="flex flex-col gap-1">
-                  <span class="text-xs font-medium text-muted-foreground">Size</span>
-                  <span class="text-sm font-medium">{volume.size_mib} MiB</span>
+                <div class="rounded-2xl border border-border/70 bg-background/60 p-4">
+                  <p class="text-xs text-muted-foreground">Type</p>
+                  <div class="mt-2 flex items-center gap-2 text-sm font-medium">
+                    <Zap class="size-4 text-amber-500" />
+                    Ceph RBD
+                  </div>
                 </div>
-                <div class="flex flex-col gap-1">
-                  <span class="text-xs font-medium text-muted-foreground">Type</span>
-                  <span class="text-sm font-medium text-foreground flex items-center gap-1.5">
-                    <Zap class="size-3 text-amber-500" />
-                    Ceph RBD (NVMe)
-                  </span>
+                <div class="rounded-2xl border border-border/70 bg-background/60 p-4">
+                  <p class="text-xs text-muted-foreground">Replication</p>
+                  <p class="mt-2 text-sm font-medium">3x replicated</p>
                 </div>
-                <div class="flex flex-col gap-1">
-                  <span class="text-xs font-medium text-muted-foreground">Replication</span>
-                  <span class="text-sm font-medium">3x Replicated</span>
+                <div class="rounded-2xl border border-border/70 bg-background/60 p-4">
+                  <p class="text-xs text-muted-foreground">Updated</p>
+                  <p class="mt-2 text-sm font-medium">{formatDate(volumeUpdatedAt || volume.created_at)}</p>
                 </div>
               </div>
-              
-              <div class="border-t border-border pt-6">
-                <h3 class="mb-4 text-sm font-semibold">Current Attachments</h3>
+
+              <Separator />
+
+              <div class="flex items-center justify-between gap-3">
+                <h3 class="text-sm font-semibold">Current Attachments</h3>
+                <Badge variant="outline">{attachmentCount} total</Badge>
+              </div>
+              <div class="grid gap-3">
                 <div class="grid gap-3">
                   {#if attachments.length > 0}
                     {#each attachments as attachment}
-                      <div class="flex items-center justify-between rounded-md border border-border p-3">
+                      <div class="flex items-center justify-between rounded-2xl border border-border/70 bg-background/70 p-4">
                         <div class="flex items-center gap-3">
-                          <div class="flex size-8 items-center justify-center rounded bg-muted">
+                          <div class="flex size-9 items-center justify-center rounded-lg border border-border bg-background">
                             <Server class="size-4" />
                           </div>
                           <div class="flex flex-col">
@@ -155,13 +228,15 @@
                       </div>
                     {/each}
                   {:else}
-                    <div class="flex flex-col items-center justify-center rounded-md border border-dashed border-border py-8">
+                    <EmptyState class="border border-dashed border-border py-10">
                       <Link class="mb-2 size-6 text-muted-foreground/50" />
-                      <p class="text-xs text-muted-foreground">This volume is not attached to any application.</p>
+                      <p class="text-xs text-muted-foreground">
+                        This volume is not attached to any application.
+                      </p>
                       <Button variant="outline" size="sm" class="mt-3">
                         Attach to Application
                       </Button>
-                    </div>
+                    </EmptyState>
                   {/if}
                 </div>
               </div>
@@ -169,9 +244,9 @@
           </Card>
 
           <div class="flex flex-col gap-6">
-            <Card>
+            <Card class="overflow-hidden">
               <CardHeader>
-                <CardTitle class="text-sm">Storage Pool</CardTitle>
+                <CardTitle class="text-base">Storage Pool</CardTitle>
               </CardHeader>
               <CardContent>
                 <div class="flex items-center gap-3">
@@ -186,12 +261,12 @@
               </CardContent>
             </Card>
 
-            <Card>
+            <Card class="overflow-hidden">
               <CardHeader>
-                <CardTitle class="text-sm">Usage Stats</CardTitle>
+                <CardTitle class="text-base">Usage Stats</CardTitle>
               </CardHeader>
               <CardContent class="grid gap-4">
-                <div class="space-y-2">
+                <div class="flex flex-col gap-2">
                   <div class="flex items-center justify-between text-xs">
                     <span class="text-muted-foreground">Provisioned</span>
                     <span class="font-medium">{volume.size_mib} MiB</span>
@@ -213,50 +288,49 @@
           </div>
         </div>
       {:else if activeTab === "snapshots"}
-        <Card>
+        <Card class="overflow-hidden">
           <CardHeader>
-            <CardTitle>Snapshot History</CardTitle>
+            <CardTitle class="text-base">Snapshot History</CardTitle>
             <CardDescription>Recover data or clone this volume from a point in time.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div class="flex flex-col items-center justify-center py-12">
+            <EmptyState class="py-12">
               <History class="mb-4 size-10 text-muted-foreground/30" />
               <p class="text-sm text-muted-foreground">No snapshots available for this volume.</p>
               <Button variant="outline" class="mt-4">
                 <Camera class="mr-2 size-4" />
                 Create first snapshot
               </Button>
-            </div>
+            </EmptyState>
           </CardContent>
         </Card>
       {:else if activeTab === "settings"}
-        <Card>
+        <Card class="overflow-hidden">
           <CardHeader>
-            <CardTitle>Volume Settings</CardTitle>
+            <CardTitle class="text-base">Volume Settings</CardTitle>
             <CardDescription>Configure volume parameters and management.</CardDescription>
           </CardHeader>
           <CardContent class="grid gap-6">
-            <div class="grid gap-2">
-              <label for="vol-name" class="text-sm font-medium">Volume Name</label>
-              <div class="flex gap-2">
-                <input id="vol-name" value={volume.name} class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
-                <Button size="sm">Update</Button>
-              </div>
-            </div>
-            
-            <div class="border-t border-border pt-6">
-              <h3 class="text-sm font-semibold text-destructive">Danger Zone</h3>
-              <p class="mb-4 text-xs text-muted-foreground">Irreversible actions for this volume.</p>
-              <div class="flex flex-col gap-3 rounded-md border border-destructive/20 bg-destructive/5 p-4">
-                <div class="flex items-center justify-between">
-                  <div class="flex flex-col gap-0.5">
-                    <span class="text-sm font-semibold">Delete Volume</span>
-                    <span class="text-xs text-muted-foreground">This will permanently delete all data.</span>
-                  </div>
-                  <Button variant="destructive" size="sm">Delete Volume</Button>
+            <FieldGroup>
+              <Field label="Volume Name" forId="vol-name" description="Update the user-facing name without changing the storage identity.">
+                <div class="flex gap-2">
+                  <Input id="vol-name" value={volume.name} />
+                  <Button size="sm">Update</Button>
                 </div>
-              </div>
-            </div>
+              </Field>
+            </FieldGroup>
+
+            <Separator />
+
+            <Card size="sm" class="border-destructive/20 bg-destructive/5 shadow-none">
+              <CardContent class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="flex flex-col gap-0.5">
+                  <span class="text-sm font-semibold text-destructive">Danger Zone</span>
+                  <span class="text-xs text-muted-foreground">Irreversible actions for this volume.</span>
+                </div>
+                <Button variant="destructive" size="sm">Delete Volume</Button>
+              </CardContent>
+            </Card>
           </CardContent>
         </Card>
       {/if}
