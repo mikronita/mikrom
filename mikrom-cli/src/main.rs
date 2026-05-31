@@ -75,9 +75,9 @@ async fn main() -> anyhow::Result<()> {
 
     let api_url = cfg.api_url().to_string();
     let token = cfg.token.clone();
-    let tenant_id = cfg.active_tenant_id().cloned();
+    let active_project_slug = cfg.active_project_slug().cloned();
 
-    let client = Arc::new(ReqwestApiClient::new(api_url, token, tenant_id)?);
+    let client = Arc::new(ReqwestApiClient::new(api_url, token, active_project_slug)?);
     let ctx = CliContext::new(Arc::new(cfg.clone()), client);
 
     if let Err(e) = dispatch(&ctx, cli.command, &mut cfg, cli.output).await {

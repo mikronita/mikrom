@@ -64,7 +64,7 @@
     volume_id: "", 
     app_id: "", 
     mount_point: "/data", 
-    access_mode: 0 
+    access_mode: "0" 
   };
 
   async function loadVolumes(appName: string) {
@@ -113,7 +113,7 @@
     const result = await attachVolume(token, attachParams.app_id, {
       volume_id: attachParams.volume_id,
       mount_point: attachParams.mount_point,
-      access_mode: attachParams.access_mode
+      access_mode: Number(attachParams.access_mode)
     });
 
     if (result.error) return toast.error(result.error);

@@ -8,11 +8,20 @@ pub struct Config {
     #[serde(default)]
     pub token: Option<String>,
     #[serde(default)]
+    #[serde(rename = "active_project_slug", alias = "active_tenant_id")]
     pub active_tenant_id: Option<String>,
 }
 
 impl Config {
     fn path() -> Option<PathBuf> {
+        if let Ok(path) = std::env::var("MIKROM_CONFIG_PATH") {
+            return Some(PathBuf::from(path));
+        }
+
+        if cfg!(test) {
+            return Some(std::env::temp_dir().join("mikrom").join("config.toml"));
+        }
+
         dirs::config_dir().map(|d| d.join("mikrom").join("config.toml"))
     }
 
@@ -28,6 +37,9 @@ impl Config {
             }
             if env_config.token.is_some() {
                 config.token = env_config.token;
+            }
+            if env_config.active_tenant_id.is_some() {
+                config.active_tenant_id = env_config.active_tenant_id;
             }
         }
 
@@ -66,12 +78,20 @@ impl Config {
         self.api_url.as_deref().unwrap_or("http://localhost:5001")
     }
 
-    pub fn active_tenant_id(&self) -> Option<&String> {
+    pub fn active_project_slug(&self) -> Option<&String> {
         self.active_tenant_id.as_ref()
     }
 
+    pub fn set_active_project_slug(&mut self, project_slug: String) {
+        self.active_tenant_id = Some(project_slug);
+    }
+
+    pub fn active_tenant_id(&self) -> Option<&String> {
+        self.active_project_slug()
+    }
+
     pub fn set_active_tenant_id(&mut self, tenant_id: String) {
-        self.active_tenant_id = Some(tenant_id);
+        self.set_active_project_slug(tenant_id);
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -160,6 +180,29 @@ mod tests {
         let loaded = Config::load_from(&path);
         assert_eq!(loaded.api_url, original.api_url);
         assert_eq!(loaded.token, original.token);
+    }
+
+    #[test]
+    fn test_load_from_legacy_active_tenant_id_alias() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        std::fs::write(&path, r#"active_tenant_id = "abc123""#).unwrap();
+        let cfg = Config::load_from(&path);
+        assert_eq!(cfg.active_project_slug(), Some(&"abc123".to_string()));
+    }
+
+    #[test]
+    fn test_save_serializes_active_project_slug() {
+        let dir = TempDir::new().unwrap();
+        let path = temp_path(&dir);
+        let cfg = Config {
+            api_url: None,
+            token: None,
+            active_tenant_id: Some("abc123".to_string()),
+        };
+        cfg.save_to(&path).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("active_project_slug = \"abc123\""));
     }
 
     #[test]

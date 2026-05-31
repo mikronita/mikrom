@@ -21,10 +21,15 @@
     EmptyState,
   } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
+  import type { AttachedVolume, Volume, VolumeAttachmentInfo, VolumeWithAttachments } from "$lib/api";
   import { volumesStore } from "$lib/stores/volumes";
 
   const volumeId = $page.params.volumeId;
-  $: volume = $volumesStore.find(v => v.id === volumeId);
+  let volume: Volume | AttachedVolume | VolumeWithAttachments | undefined;
+  let attachments: VolumeAttachmentInfo[] = [];
+
+  $: volume = $volumesStore.find((v) => v.id === volumeId);
+  $: attachments = volume && "attachments" in volume ? (volume.attachments as VolumeAttachmentInfo[]) : [];
 
   let activeTab: "overview" | "snapshots" | "settings" = "overview";
 </script>
@@ -132,8 +137,8 @@
               <div class="border-t border-border pt-6">
                 <h3 class="mb-4 text-sm font-semibold">Current Attachments</h3>
                 <div class="grid gap-3">
-                  {#if "attachments" in volume && volume.attachments.length > 0}
-                    {#each volume.attachments as attachment}
+                  {#if attachments.length > 0}
+                    {#each attachments as attachment}
                       <div class="flex items-center justify-between rounded-md border border-border p-3">
                         <div class="flex items-center gap-3">
                           <div class="flex size-8 items-center justify-center rounded bg-muted">

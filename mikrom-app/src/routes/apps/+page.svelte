@@ -67,7 +67,7 @@
           </div>
           <h1 class="text-3xl font-semibold tracking-tight">Applications</h1>
         </div>
-        <p class="max-w-2xl text-sm text-muted-foreground">Manage your Git-based projects and deployments.</p>
+        <p class="max-w-2xl text-sm text-muted-foreground">Manage the Git-based applications in your active project.</p>
       </div>
       <Button onclick={() => (showCreate = true)}>
         <Plus class="size-4" />
@@ -113,7 +113,7 @@
                     <div class="flex min-w-0 items-center gap-2">
                       <CardTitle class="truncate text-base">{app.name}</CardTitle>
                     </div>
-                    <CardDescription>Application workspace</CardDescription>
+                    <CardDescription>Application scope</CardDescription>
                   </div>
                   <Badge variant="outline" class={`shrink-0 gap-1.5 uppercase ${getScaleStateBadgeClass(effectiveScaleState)}`}>
                     <Radio class="size-3" />

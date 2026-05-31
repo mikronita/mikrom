@@ -6,6 +6,12 @@ export const appsStore = writable<AppInfo[]>([]);
 export const appsLoading = writable<boolean>(false);
 export const appsError = writable<string>("");
 
+export function clearApps() {
+  appsStore.set([]);
+  appsLoading.set(false);
+  appsError.set("");
+}
+
 export async function refreshApps() {
   const token = getToken();
   if (!token) return;

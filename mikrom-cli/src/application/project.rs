@@ -16,11 +16,11 @@ pub async fn handle(
             if format == OutputFormat::Json {
                 println!("{}", serde_json::to_string_pretty(&projects).unwrap());
             } else {
-                let current_tenant = cfg.active_tenant_id();
+                let current_project = cfg.active_project_slug();
                 let table_data: Vec<Vec<String>> = projects
                     .into_iter()
                     .map(|p| {
-                        let active_marker = if Some(&p.tenant_id) == current_tenant {
+                        let active_marker = if Some(&p.tenant_id) == current_project {
                             "*"
                         } else {
                             ""
@@ -28,11 +28,7 @@ pub async fn handle(
                         vec![active_marker.to_string(), p.name, p.tenant_id, p.id]
                     })
                     .collect();
-                ui::table(
-                    "Projects",
-                    &["", "NAME", "ID (6-char)", "UUID"],
-                    &table_data,
-                );
+                ui::table("Projects", &["", "NAME", "SLUG", "UUID"], &table_data);
             }
         },
         ProjectCommands::Create { name } => {
@@ -47,7 +43,7 @@ pub async fn handle(
             ));
         },
         ProjectCommands::Switch { tenant_id } => {
-            cfg.set_active_tenant_id(tenant_id.clone());
+            cfg.set_active_project_slug(tenant_id.clone());
             cfg.save()
                 .map_err(|e| crate::domain::error::CliError::Io(std::io::Error::other(e)))?;
             ui::success(&format!("Switched to project: {}", tenant_id));

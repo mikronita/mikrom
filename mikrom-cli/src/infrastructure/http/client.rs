@@ -9,7 +9,7 @@ pub struct ReqwestApiClient {
     http: reqwest::Client,
     base_url: String,
     token: Option<String>,
-    tenant_id: Option<String>,
+    active_project_slug: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -21,7 +21,7 @@ impl ReqwestApiClient {
     pub fn new(
         base_url: String,
         token: Option<String>,
-        tenant_id: Option<String>,
+        active_project_slug: Option<String>,
     ) -> CliResult<Self> {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
@@ -31,7 +31,7 @@ impl ReqwestApiClient {
             http,
             base_url,
             token,
-            tenant_id,
+            active_project_slug,
         })
     }
 
@@ -115,8 +115,8 @@ impl ReqwestApiClient {
             builder = builder.bearer_auth(token);
         }
 
-        if let Some(tenant) = &self.tenant_id {
-            builder = builder.header("x-mikrom-tenant-id", tenant);
+        if let Some(project_slug) = &self.active_project_slug {
+            builder = builder.header("x-mikrom-tenant-id", project_slug);
         }
 
         if let Some(body) = body {

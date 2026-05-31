@@ -98,7 +98,7 @@
   }
 </script>
 
-<Modal bind:open title="Create New Application" description="Add a Git-backed project to your workspace." width="max-w-[425px]" onclose={close}>
+<Modal bind:open title="Create New Application" description="Add a Git-backed project to the active project." width="max-w-[425px]" onclose={close}>
   <form class="flex flex-col gap-6 pt-2" on:submit|preventDefault={handleSubmit}>
     <Field label="App Name" forId="app_name">
       <Input id="app_name" bind:value={name} placeholder="my-cool-project" required />

@@ -21,7 +21,8 @@ fn show(cfg: &Config, output: OutputFormat) -> CliResult<()> {
     if output == OutputFormat::Json {
         print_json(&serde_json::json!({
             "api_url": cfg.api_url(),
-            "token_configured": cfg.token.is_some()
+            "token_configured": cfg.token.is_some(),
+            "active_project_slug": cfg.active_project_slug(),
         }));
         return Ok(());
     }
@@ -32,6 +33,12 @@ fn show(cfg: &Config, output: OutputFormat) -> CliResult<()> {
         &["Key", "Value"],
         &[
             vec!["API URL".to_string(), cfg.api_url().to_string()],
+            vec![
+                "Active project".to_string(),
+                cfg.active_project_slug()
+                    .cloned()
+                    .unwrap_or_else(|| "Not set".to_string()),
+            ],
             vec![
                 "Token".to_string(),
                 if cfg.token.is_some() {
@@ -58,6 +65,24 @@ async fn set(cfg: &mut Config, key: &str, value: &str, output: OutputFormat) -> 
             ui::step(
                 ui::SUCCESS,
                 &format!("API URL updated to {}", ui::cyan_label(value)),
+            );
+        },
+        "active-project"
+        | "active_project"
+        | "active-project-slug"
+        | "active_project_slug"
+        | "active-tenant-id"
+        | "active_tenant_id" => {
+            cfg.set_active_project_slug(value.to_string());
+            cfg.save()
+                .map_err(|e| crate::domain::error::CliError::Config(e.to_string()))?;
+            if output == OutputFormat::Json {
+                print_json(&serde_json::json!({ "updated": true, "active_project_slug": value }));
+                return Ok(());
+            }
+            ui::step(
+                ui::SUCCESS,
+                &format!("Active project updated to {}", ui::cyan_label(value)),
             );
         },
         _ => {

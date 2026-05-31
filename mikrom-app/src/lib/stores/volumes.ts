@@ -7,6 +7,16 @@ export const snapshotsStore = writable<VolumeSnapshot[]>([]);
 export const volumesLoading = writable<boolean>(false);
 export const snapshotsLoading = writable<boolean>(false);
 
+export function clearVolumes() {
+  volumesStore.set([]);
+  volumesLoading.set(false);
+}
+
+export function clearSnapshots() {
+  snapshotsStore.set([]);
+  snapshotsLoading.set(false);
+}
+
 export async function refreshVolumes(appId?: string) {
   const token = getToken();
   if (!token) return;

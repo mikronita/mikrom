@@ -105,12 +105,13 @@ impl AppRepository for PostgresAppRepository {
         let mem_threshold = params.mem_threshold.unwrap_or(80.0);
 
         let result = sqlx::query_as::<_, DbApp>(
-            "INSERT INTO apps (name, git_url, port, hostname, tenant_id, github_webhook_secret, github_installation_id, github_repo_id, github_repo_full_name, health_check_path, drain_timeout, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *"
+            "INSERT INTO apps (name, git_url, port, hostname, user_id, tenant_id, github_webhook_secret, github_installation_id, github_repo_id, github_repo_full_name, health_check_path, drain_timeout, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING *"
         )
         .bind(&params.name)
         .bind(&params.git_url)
         .bind(i32::from(params.port))
         .bind(&params.hostname)
+        .bind(params.user_id)
         .bind(params.tenant_id)
         .bind(encrypted_secret)
         .bind(params.github_installation_id)
@@ -546,6 +547,7 @@ mod tests {
                 git_url: git_url.to_string(),
                 port: crate::domain::types::Port::new(80).unwrap(),
                 hostname: None,
+                user_id: tenant_id,
                 tenant_id,
                 github_webhook_secret: None,
                 github_installation_id: None,
@@ -642,6 +644,7 @@ mod tests {
                 git_url: "git".to_string(),
                 port: crate::domain::types::Port::new(8080).unwrap(),
                 hostname: None,
+                user_id: tenant_id,
                 tenant_id,
                 github_webhook_secret: None,
                 github_installation_id: None,
