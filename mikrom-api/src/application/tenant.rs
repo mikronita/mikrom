@@ -84,29 +84,38 @@ pub(crate) async fn tenant_has_dependent_resources(
     state: &AppState,
     tenant_id: Uuid,
 ) -> ApiResult<bool> {
-    let has_apps = !state
+    if !state
         .ctx
         .app_repo
         .list_apps_by_tenant(Some(tenant_id))
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
-        .is_empty();
+        .is_empty()
+    {
+        return Ok(true);
+    }
 
-    let has_databases = !state
+    if !state
         .ctx
         .database_repo
         .list_databases_by_tenant(tenant_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
-        .is_empty();
+        .is_empty()
+    {
+        return Ok(true);
+    }
 
-    let has_volumes = !state
+    if !state
         .ctx
         .volume_repo
         .list_volumes_by_tenant(tenant_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
-        .is_empty();
+        .is_empty()
+    {
+        return Ok(true);
+    }
 
-    Ok(has_apps || has_databases || has_volumes)
+    Ok(false)
 }
