@@ -444,7 +444,10 @@ fn neon_host_alias(prefix: &str, value: &str) -> String {
 }
 
 fn ensure_etc_hosts_entry(hostname: &str, ipv6: &str) -> Result<()> {
-    let hosts_path = Path::new("/etc/hosts");
+    append_hosts_entry(Path::new("/etc/hosts"), hostname, ipv6)
+}
+
+fn append_hosts_entry(hosts_path: &Path, hostname: &str, ipv6: &str) -> Result<()> {
     let existing = fs::read_to_string(hosts_path).unwrap_or_default();
     if existing
         .lines()
@@ -466,6 +469,10 @@ fn ensure_etc_hosts_entry(hostname: &str, ipv6: &str) -> Result<()> {
     };
     let mut file = file;
     use std::io::Write as _;
+    if !existing.is_empty() && !existing.ends_with('\n') {
+        writeln!(file)
+            .with_context(|| format!("Failed to append newline to {}", hosts_path.display()))?;
+    }
     writeln!(file, "{ipv6} {hostname}")
         .with_context(|| format!("Failed to append {} to {}", hostname, hosts_path.display()))?;
     Ok(())
@@ -520,6 +527,9 @@ fn normalize_neon_safekeeper_connstr(
         let port = rest.strip_prefix(':')?.trim();
         (host, port)
     } else {
+        if trimmed.chars().filter(|&c| c == ':').count() > 1 {
+            return None;
+        }
         let (host, port) = trimmed.rsplit_once(':')?;
         (host, port)
     };
@@ -1530,6 +1540,29 @@ mod tests {
         assert!(hosts.contains("127.0.0.1 localhost"));
         assert!(hosts.contains("::1 localhost ip6-localhost ip6-loopback"));
         assert!(hosts.contains("127.0.1.1 localhost"));
+    }
+
+    #[test]
+    fn test_append_hosts_entry_inserts_newline_before_appending() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let hosts_path = temp_dir.path().join("hosts");
+        std::fs::write(&hosts_path, "127.0.0.1 localhost").unwrap();
+
+        append_hosts_entry(&hosts_path, "neon-pageserver", "fd00::1").unwrap();
+
+        let contents = std::fs::read_to_string(&hosts_path).unwrap();
+        assert_eq!(
+            contents,
+            "127.0.0.1 localhost\nfd00::1 neon-pageserver\n"
+        );
+    }
+
+    #[test]
+    fn test_normalize_neon_safekeeper_connstr_rejects_unbracketed_ipv6_without_port() {
+        assert_eq!(
+            normalize_neon_safekeeper_connstr("fd40:b90d:fc5f:1ae0::1", "neon-safekeeper"),
+            None
+        );
     }
 
     #[test]

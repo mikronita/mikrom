@@ -206,6 +206,9 @@ impl CloudHypervisorManager {
             let port = rest.strip_prefix(':')?.trim();
             (host, port)
         } else {
+            if trimmed.chars().filter(|&c| c == ':').count() > 1 {
+                return None;
+            }
             let (host, port) = trimmed.rsplit_once(':')?;
             (host, port)
         };
@@ -1282,5 +1285,16 @@ mod tests {
         assert!(CloudHypervisorManager::is_fatal_database_configure_status(
             reqwest::StatusCode::BAD_REQUEST
         ));
+    }
+
+    #[test]
+    fn normalize_neon_safekeeper_connstr_rejects_unbracketed_ipv6_without_port() {
+        assert_eq!(
+            CloudHypervisorManager::normalize_neon_safekeeper_connstr(
+                "fd40:b90d:fc5f:1ae0::1",
+                "neon-safekeeper",
+            ),
+            None
+        );
     }
 }
