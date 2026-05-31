@@ -58,7 +58,7 @@ test.describe("detail pages", () => {
     await deleteDialog.getByRole("button", { name: "Delete App", exact: true }).click();
     await deleteRequest;
 
-    await expect(page).toHaveURL("http://127.0.0.1:4173/apps");
+    await expect(page).toHaveURL("/apps");
     await expect(page.getByText("starter")).toHaveCount(0);
   });
 
@@ -84,7 +84,7 @@ test.describe("detail pages", () => {
     await expect(deleteDialog).toBeVisible();
     await deleteDialog.getByRole("button", { name: "Delete Database", exact: true }).click();
 
-    await expect(page).toHaveURL("http://127.0.0.1:4173/databases");
+    await expect(page).toHaveURL("/databases");
     await expect(page.getByText("Deleting")).toBeVisible();
     await expect(page.getByRole("link", { name: /prod-db/i })).toHaveCount(0, { timeout: 6000 });
   });

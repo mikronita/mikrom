@@ -17,7 +17,7 @@ test.describe("authentication", () => {
     await page.evaluate((token) => localStorage.setItem("mikrom_token", token), authToken);
     await page.goto("/");
 
-    await expect(page).toHaveURL("http://127.0.0.1:4173/");
+    await expect(page).toHaveURL("/");
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
   });
 
