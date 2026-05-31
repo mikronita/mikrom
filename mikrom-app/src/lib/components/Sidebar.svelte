@@ -44,7 +44,7 @@
     if (!$profile) return "";
     if ($profile.first_name && $profile.last_name)
       return `${$profile.first_name} ${$profile.last_name}`;
-    return $profile.email.split("@")[0] || "User";
+    return $profile.email?.split("@")[0] || "User";
   }
 
   function persistCollapsedState(nextCollapsed: boolean) {
