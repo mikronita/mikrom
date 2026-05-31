@@ -1,46 +1,46 @@
-mod common;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use mikrom_api::AppState;
 use mikrom_api::create_app;
-use mikrom_api::domain::MockUserRepository;
-use mikrom_api::infrastructure::db::PostgresAppRepository;
-use mikrom_api::test_utils::{TestDb, create_test_app_state};
+use mikrom_api::domain::MockScheduler;
+use mikrom_api::nats::{NatsClient, TypedNatsClient};
 use std::sync::Arc;
 use tower::ServiceExt;
 
-#[tokio::test]
-async fn test_api_versioning_enforcement() {
-    let db = TestDb::new().await;
-    let db_pool = db.pool().clone();
-    let app_repo = Arc::new(PostgresAppRepository::new(
-        db_pool.clone(),
-        "key".to_string(),
-    ));
+struct OfflineNats;
 
-    let Some(nats_client) = common::get_nats_client_or_skip().await else {
-        return;
-    };
+#[async_trait::async_trait]
+impl NatsClient for OfflineNats {
+    async fn request_raw(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+        Err(anyhow::anyhow!("offline"))
+    }
 
-    let mut state = create_test_app_state(db_pool.clone());
-    state.app_repo = app_repo.clone();
-    state.user_repo = Arc::new(MockUserRepository::new());
-    state.nats = mikrom_api::nats::TypedNatsClient::new(nats_client);
-    state.jwt_secret = "test".to_string();
-    state.master_key = "test".to_string();
+    async fn publish_raw(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<()> {
+        Ok(())
+    }
 
-    // Update ctx as well
-    state.ctx.app_repo = app_repo;
-    state.ctx.user_repo = state.user_repo.clone();
+    async fn subscribe_raw(&self, _subject: String) -> anyhow::Result<async_nats::Subscriber> {
+        Err(anyhow::anyhow!("offline"))
+    }
+}
+
+#[allow(clippy::field_reassign_with_default)]
+fn build_state() -> AppState {
+    let mut state = AppState::default();
+    state.nats = TypedNatsClient::new_custom(Arc::new(OfflineNats));
     state.ctx.nats = state.nats.clone();
-    state.ctx.jwt_secret = state.jwt_secret.clone();
-    state.ctx.master_key = state.master_key.clone();
+    state.scheduler = Arc::new(MockScheduler::new());
+    state.ctx.scheduler = state.scheduler.clone();
+    state
+}
 
-    let app = create_app(state);
+#[tokio::test]
+async fn api_routes_are_versioned_under_v1() {
+    let app = create_app(build_state());
 
-    // 1. Verify /v1/health works
-    let resp_v1 = app
+    let v1_health = app
         .clone()
         .oneshot(
             Request::builder()
@@ -50,10 +50,9 @@ async fn test_api_versioning_enforcement() {
         )
         .await
         .unwrap();
-    assert_eq!(resp_v1.status(), StatusCode::OK);
+    assert_eq!(v1_health.status(), StatusCode::OK);
 
-    // 2. Verify legacy /health fails (404)
-    let resp_legacy = app
+    let legacy_health = app
         .clone()
         .oneshot(
             Request::builder()
@@ -63,10 +62,39 @@ async fn test_api_versioning_enforcement() {
         )
         .await
         .unwrap();
-    assert_eq!(resp_legacy.status(), StatusCode::NOT_FOUND);
+    assert_eq!(legacy_health.status(), StatusCode::NOT_FOUND);
 
-    // 3. Verify /v1/auth/login exists (returns 405 or 400 instead of 404 because it's POST)
-    let resp_auth_v1 = app
+    let v1_health_stream = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/health/stream")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(v1_health_stream.status(), StatusCode::OK);
+    assert_eq!(
+        v1_health_stream.headers()["content-type"],
+        "text/event-stream"
+    );
+
+    let legacy_health_stream = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/health/stream")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(legacy_health_stream.status(), StatusCode::NOT_FOUND);
+
+    let v1_login = app
         .clone()
         .oneshot(
             Request::builder()
@@ -77,11 +105,9 @@ async fn test_api_versioning_enforcement() {
         )
         .await
         .unwrap();
-    assert_ne!(resp_auth_v1.status(), StatusCode::NOT_FOUND);
+    assert_eq!(v1_login.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
 
-    // 4. Verify legacy /auth/login fails (404)
-    let resp_auth_legacy = app
-        .clone()
+    let legacy_login = app
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -91,5 +117,5 @@ async fn test_api_versioning_enforcement() {
         )
         .await
         .unwrap();
-    assert_eq!(resp_auth_legacy.status(), StatusCode::NOT_FOUND);
+    assert_eq!(legacy_login.status(), StatusCode::NOT_FOUND);
 }

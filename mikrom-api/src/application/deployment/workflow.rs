@@ -9,7 +9,7 @@ impl DeploymentPromotionWorkflow {
         app: App,
         deployment: Deployment,
         inner: mikrom_proto::scheduler::DeployResponse,
-        user_id: String,
+        tenant_id: String,
         cleanup_on_failure: bool,
         _guard: crate::DeploymentFlowGuard,
     ) {
@@ -61,7 +61,7 @@ impl DeploymentPromotionWorkflow {
 
                     let health_req = mikrom_proto::scheduler::CheckHealthRequest {
                         job_id: inner.job_id.clone(),
-                        user_id: user_id.clone(),
+                        tenant_id: tenant_id.clone(),
                     };
 
                     match state
@@ -190,7 +190,7 @@ impl DeploymentPromotionWorkflow {
                     .scale_app(
                         app_after_promotion.id.to_string(),
                         app_after_promotion.desired_replicas as u32,
-                        app_after_promotion.user_id.to_string(),
+                        app_after_promotion.tenant_id.to_string(),
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("Post-promotion scaling failed: {}", e))?;

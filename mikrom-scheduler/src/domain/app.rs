@@ -1,10 +1,10 @@
-use crate::domain::{AppId, UserId};
+use crate::domain::{AppId, TenantId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub id: AppId,
-    pub user_id: UserId,
+    pub tenant_id: TenantId,
     pub vpc_ipv6_prefix: String,
     pub hostname: String,
     pub desired_replicas: u32,
@@ -22,7 +22,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             id: AppId::default(),
-            user_id: UserId::default(),
+            tenant_id: TenantId::default(),
             vpc_ipv6_prefix: String::new(),
             hostname: String::new(),
             desired_replicas: 0,
@@ -65,7 +65,7 @@ mod tests {
     fn test_app_config_roundtrip_preserves_restore_backoff_field() {
         let config = AppConfig {
             id: AppId::from("app-1"),
-            user_id: UserId::from("user-1"),
+            tenant_id: TenantId::from("user-1"),
             vpc_ipv6_prefix: "fd00::".to_string(),
             hostname: "app.example.com".to_string(),
             desired_replicas: 2,

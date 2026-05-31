@@ -82,6 +82,6 @@ id_type!(AppId);
 id_type!(DeploymentId);
 id_type!(JobId);
 id_type!(VolumeId);
-id_type!(UserId);
+id_type!(TenantId);
 id_type!(HostId);
 id_type!(VmId);

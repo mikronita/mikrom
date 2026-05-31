@@ -5,7 +5,7 @@ members = [
     "mikrom-agent",
     "mikrom-api",
     "mikrom-cli", "mikrom-builder", "mikrom-init"
-, "mikrom-agent-ebpf-common", "mikrom-agent-ebpf", "mikrom-router", "mikrom-network"]
+, "mikrom-agent-ebpf-common", "mikrom-agent-ebpf", "mikrom-router", "mikrom-network", "mikrom-dns"]
 resolver = "2"
 
 [workspace.dependencies]

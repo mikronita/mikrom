@@ -58,6 +58,7 @@ pub async fn create_integration_app(pool: PgPool, jwt_secret: &str) -> Option<ax
     let state = AppState {
         ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(user_repo),
+        tenant_repo: Arc::new(mikrom_api::domain::MockTenantRepository::new()),
         app_repo: Arc::new(app_repo),
         database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
         volume_repo: Arc::new(mock_volume_repo),

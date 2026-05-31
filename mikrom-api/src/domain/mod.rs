@@ -4,6 +4,7 @@ pub mod error;
 pub mod github;
 pub mod nats;
 pub mod scheduler;
+pub mod tenant;
 pub mod types;
 pub mod user;
 pub mod volume;
@@ -13,7 +14,6 @@ pub use app::{
     App, AppRepository, CreateAppParams, Deployment, GitMetadata, MockAppRepository, NewDeployment,
     SecurityRule, UpdateDeploymentParams,
 };
-#[cfg(any(test, feature = "test-utils"))]
 pub use database::MockDatabaseRepository;
 pub use database::{
     CreateDatabaseParams, Database, DatabaseDeployment, DatabaseRepository, DatabaseStatus,
@@ -22,6 +22,7 @@ pub use error::{DomainError, DomainResult};
 pub use github::{GithubRepository, MockGithubRepository, UserGithubAccount};
 pub use nats::NatsClient;
 pub use scheduler::{MockScheduler, Scheduler};
+pub use tenant::{MockTenantRepository, Tenant, TenantMember, TenantRepository};
 pub use types::{CpuCores, MemoryMb, Port, TypeError};
 pub use user::{MockUserRepository, NewUser, User, UserRepository, UserRole};
 pub use volume::{

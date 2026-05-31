@@ -1,0 +1,47 @@
+[package]
+name = "mikrom-dns"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { workspace = true }
+hickory-server = "0.26"
+hickory-proto = "0.26"
+dashmap = { workspace = true }
+async-trait = "0.1"
+async-nats = { workspace = true }
+mikrom-proto = { path = "../mikrom-proto" }
+prost = "0.13"
+futures = "0.3"
+prometheus = "0.13"
+axum = "0.7"
+lazy_static = "1.4"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = { workspace = true }
+ipnet = "2.9"
+
+[lints]
+workspace = true
+
+[lib]
+name = "mikrom_dns"
+path = "src/lib.rs"
+
+[package.metadata.deb]
+maintainer = "Antonio Pardo <apardo@spluca.org>"
+copyright = "2026, Mikrom Team"
+license-file = ["../LICENSE", "0"]
+extended-description = """\
+Mikrom DNS provides dynamic internal name resolution for the Mikrom platform.
+It serves control plane, worker mesh, and user resource zones.
+"""
+section = "admin"
+priority = "optional"
+depends = "libc6"
+assets = [
+    ["target/release/mikrom-dns", "/usr/bin/mikrom-dns", "755"],
+    ["debian/lib/systemd/system/mikrom-dns.service", "/lib/systemd/system/mikrom-dns.service", "644"],
+    ["debian/etc/mikrom/dns.env", "/etc/mikrom/dns.env", "640"],
+]
+systemd-units = { unit-name = "mikrom-dns" }

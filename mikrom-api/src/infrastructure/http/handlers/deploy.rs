@@ -5,11 +5,11 @@ use crate::application::deployment::{
     resolve_app_scale_state_from_running_count, resolve_deployment_hypervisor,
     resolve_deployment_memory_mib, resolve_deployment_vcpus,
 };
-use crate::auth::AuthUser;
 use crate::domain::CreateAppParams;
 use crate::domain::Deployment;
 use crate::domain::types::{CpuCores, MemoryMb, Port};
 use crate::error::{ApiError, ApiResult};
+use crate::infrastructure::auth::extractor::{AuthUser, TenantContext};
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::{
     Json,
@@ -50,21 +50,31 @@ pub struct AppSecretResponse {
 
 #[rovo::rovo]
 pub async fn get_app_handler(
-    auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<Json<AppResponse>> {
-    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(
+        &state,
+        &app_name,
+        &tenant_ctx.tenant.id.to_string(),
+    )
+    .await?;
     Ok(Json(build_app_response(&state, &app).await))
 }
 
 #[rovo::rovo]
 pub async fn get_app_secret_handler(
-    auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<Json<AppSecretResponse>> {
-    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(
+        &state,
+        &app_name,
+        &tenant_ctx.tenant.id.to_string(),
+    )
+    .await?;
 
     Ok(Json(AppSecretResponse {
         github_webhook_secret: app.github_webhook_secret,
@@ -96,7 +106,7 @@ pub struct ManualDeployRequest {
 
 #[rovo::rovo]
 pub async fn create_app_handler(
-    auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Json(payload): Json<CreateAppRequest>,
 ) -> ApiResult<(StatusCode, Json<AppResponse>)> {
@@ -129,8 +139,7 @@ pub async fn create_app_handler(
         payload.name.to_lowercase().replace(' ', "-")
     );
 
-    let user_id =
-        Uuid::parse_str(&auth.user_id).map_err(|_| ApiError::Auth("Invalid user ID".into()))?;
+    let tenant_id = tenant_ctx.tenant.id;
     let webhook_secret = Alphanumeric.sample_string(&mut rand::rng(), 32);
 
     if payload.github_installation_id.is_some()
@@ -149,7 +158,7 @@ pub async fn create_app_handler(
             git_url: payload.git_url,
             port,
             hostname: Some(hostname),
-            user_id,
+            tenant_id,
             github_webhook_secret: Some(webhook_secret.clone()),
             github_installation_id: payload.github_installation_id,
             github_repo_id: payload.github_repo_id,
@@ -175,14 +184,13 @@ pub async fn create_app_handler(
 
 #[rovo::rovo]
 pub async fn list_apps_handler(
-    auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<AppResponse>>> {
-    let user_id =
-        uuid::Uuid::parse_str(&auth.user_id).map_err(|e| ApiError::Internal(e.to_string()))?;
+    let tenant_id = tenant_ctx.tenant.id;
     let apps = state
         .app_repo
-        .list_apps_by_user(Some(user_id))
+        .list_apps_by_tenant(Some(tenant_id))
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let now = chrono::Utc::now().timestamp();
@@ -190,7 +198,7 @@ pub async fn list_apps_handler(
     let running_counts = match state
         .scheduler
         .list_apps(mikrom_proto::scheduler::ListAppsRequest {
-            user_id: user_id.to_string(),
+            tenant_id: tenant_id.to_string(),
             status: Some(mikrom_proto::scheduler::DeployStatus::Running as i32),
         })
         .await
@@ -257,11 +265,11 @@ pub async fn delete_app_handler(
 
     let cleanup_state = state.clone();
     let app_id = app.id.to_string();
-    let user_id = app.user_id.to_string();
+    let tenant_id = app.tenant_id.to_string();
     tokio::spawn(async move {
         if let Err(e) = cleanup_state
             .scheduler
-            .delete_all_by_app(app_id.clone(), user_id.clone())
+            .delete_all_by_app(app_id.clone(), tenant_id.clone())
             .await
         {
             tracing::error!(
@@ -274,7 +282,8 @@ pub async fn delete_app_handler(
 
     state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::AppDeleted,
-        user_id: Some(app.user_id),
+        tenant_id: Some(app.tenant_id),
+        user_id: None,
         app_id: Some(app.id),
         app_name: Some(app.name),
         deployment_id: app.active_deployment_id,
@@ -355,7 +364,7 @@ pub async fn scale_app_handler(
             .scale_app(
                 updated_app.id.to_string(),
                 updated_app.desired_replicas as u32,
-                updated_app.user_id.to_string(),
+                updated_app.tenant_id.to_string(),
             )
             .await?;
     }
@@ -365,7 +374,7 @@ pub async fn scale_app_handler(
         .scheduler
         .update_app_scaling_config(mikrom_proto::scheduler::UpdateAppScalingConfigRequest {
             app_id: updated_app.id.to_string(),
-            user_id: updated_app.user_id.to_string(),
+            tenant_id: updated_app.tenant_id.to_string(),
             min_replicas: updated_app.min_replicas as u32,
             max_replicas: updated_app.max_replicas as u32,
             autoscaling_enabled: updated_app.autoscaling_enabled,
@@ -506,7 +515,7 @@ pub async fn activate_deployment_handler(
 
         let nats_req = AppStatusRequest {
             job_id,
-            user_id: auth.user_id.clone(),
+            tenant_id: auth.user_id.clone(),
         };
 
         match state
@@ -661,7 +670,7 @@ pub async fn deploy_app(
 
     let app = match state.app_repo.get_app_by_name(&payload.app_name).await? {
         Some(app) => {
-            if app.user_id.to_string() != auth.user_id {
+            if app.tenant_id.to_string() != auth.user_id {
                 return Err(ApiError::Forbidden);
             }
             app
@@ -673,7 +682,7 @@ pub async fn deploy_app(
                     .map_err(|e| ApiError::Internal(e.to_string()))?;
 
                 let create_params = crate::domain::CreateAppParams {
-                    user_id: user_uuid,
+                    tenant_id: user_uuid,
                     name: payload.app_name.clone(),
                     git_url,
                     port: payload.port.unwrap_or_else(|| Port::new(8080).unwrap()),
@@ -692,7 +701,7 @@ pub async fn deploy_app(
         .app_repo
         .create_deployment(crate::domain::NewDeployment::from_handler(
             app.id,
-            auth.user_id.clone(),
+            app.tenant_id.to_string(),
             vcpus,
             memory_mib,
             disk_mib as i64,
@@ -831,6 +840,7 @@ mod tests {
         AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo,
+            tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
             database_repo: Arc::new(MockDatabaseRepository::new()),
             app_repo,
             github_repo,
@@ -890,7 +900,7 @@ mod tests {
                 Ok(Some(crate::domain::Deployment {
                     id: deployment_id,
                     app_id,
-                    user_id: Uuid::new_v4(),
+                    tenant_id: Uuid::new_v4(),
                     build_id: None,
                     image_tag: None,
                     job_id: Some("job-1".to_string()),
@@ -956,7 +966,7 @@ mod tests {
 
         let app = crate::domain::App {
             id: Uuid::new_v4(),
-            user_id,
+            tenant_id: user_id,
             name: "test-app".to_string(),
             ..crate::domain::App::default()
         };
@@ -1023,7 +1033,7 @@ mod tests {
 
         let shared_app = Arc::new(std::sync::Mutex::new(crate::domain::App {
             id: app_id,
-            user_id,
+            tenant_id: user_id,
             name: "test-app".to_string(),
             hostname: Some("test-app.apps.mikrom.spluca.org".to_string()),
             desired_replicas: 1,
@@ -1119,15 +1129,10 @@ mod tests {
         let mut state = create_test_state().await;
         let user_id = Uuid::new_v4();
         let app_id = Uuid::new_v4();
-        let auth = AuthUser {
-            user_id: user_id.to_string(),
-            email: "test@example.com".to_string(),
-            role: crate::domain::UserRole::User,
-        };
 
         let app = crate::domain::App {
             id: app_id,
-            user_id,
+            tenant_id: user_id,
             name: "test-app".to_string(),
             git_url: "https://github.com/test/repo".to_string(),
             port: crate::domain::types::Port::new(8080).unwrap(),
@@ -1147,7 +1152,18 @@ mod tests {
             .returning(move |_| Ok(Some(app.clone())));
         state.app_repo = Arc::new(mock_app_repo);
 
-        let result = __get_app_handler_impl(auth, State(state), Path("test-app".to_string())).await;
+        let tenant_ctx = crate::infrastructure::auth::extractor::TenantContext {
+            tenant: crate::domain::Tenant {
+                id: user_id,
+                tenant_id: user_id.to_string().chars().take(6).collect(),
+                name: "test".to_string(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            },
+        };
+
+        let result =
+            __get_app_handler_impl(tenant_ctx, State(state), Path("test-app".to_string())).await;
 
         let response = result.expect("should return app");
         assert_eq!(response.0.name, "test-app");
@@ -1158,11 +1174,6 @@ mod tests {
     async fn get_app_handler_returns_not_found_when_missing() {
         let mut state = create_test_state().await;
         let user_id = Uuid::new_v4();
-        let auth = AuthUser {
-            user_id: user_id.to_string(),
-            email: "test@example.com".to_string(),
-            role: UserRole::User,
-        };
 
         let mut mock_app_repo = MockAppRepository::new();
         mock_app_repo
@@ -1172,8 +1183,18 @@ mod tests {
             .returning(|_| Ok(None));
         state.app_repo = Arc::new(mock_app_repo);
 
+        let tenant_ctx = crate::infrastructure::auth::extractor::TenantContext {
+            tenant: crate::domain::Tenant {
+                id: user_id,
+                tenant_id: user_id.to_string().chars().take(6).collect(),
+                name: "test".to_string(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            },
+        };
+
         let result =
-            __get_app_handler_impl(auth, State(state), Path("missing-app".to_string())).await;
+            __get_app_handler_impl(tenant_ctx, State(state), Path("missing-app".to_string())).await;
 
         match result {
             Err(ApiError::NotFound(msg)) => assert!(msg.contains("not found")),

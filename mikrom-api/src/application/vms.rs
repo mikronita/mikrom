@@ -177,7 +177,7 @@ pub struct BalloonQueryResult {
 impl VmService {
     pub async fn validate_app_deployment(
         state: &AppState,
-        user_id: &str,
+        tenant_id: &str,
         app_name: &str,
         job_id: &str,
     ) -> ApiResult<(App, Deployment)> {
@@ -188,7 +188,7 @@ impl VmService {
             .map_err(|e| ApiError::Internal(e.to_string()))?
             .ok_or(ApiError::NotFound("Application not found".into()))?;
 
-        if app.user_id.to_string() != user_id {
+        if app.tenant_id.to_string() != tenant_id {
             return Err(ApiError::Forbidden);
         }
 
@@ -340,13 +340,13 @@ impl VmService {
 
     pub async fn create_snapshot(
         state: &AppState,
-        user_id: String,
+        tenant_id: String,
         job_id: String,
         snapshot_name: String,
     ) -> ApiResult<(bool, String)> {
         let nats_req = mikrom_proto::scheduler::VmSnapshotCreateRequest {
             job_id,
-            user_id,
+            tenant_id,
             snapshot_name,
         };
         let resp: mikrom_proto::scheduler::VmSnapshotCreateResponse = state
@@ -359,13 +359,13 @@ impl VmService {
 
     pub async fn restore_snapshot(
         state: &AppState,
-        user_id: String,
+        tenant_id: String,
         job_id: String,
         snapshot_name: String,
     ) -> ApiResult<(bool, String)> {
         let nats_req = mikrom_proto::scheduler::VmSnapshotRestoreRequest {
             job_id,
-            user_id,
+            tenant_id,
             snapshot_name,
         };
         let resp: mikrom_proto::scheduler::VmSnapshotRestoreResponse = state
@@ -378,13 +378,13 @@ impl VmService {
 
     pub async fn delete_snapshot(
         state: &AppState,
-        user_id: String,
+        tenant_id: String,
         job_id: String,
         snapshot_name: String,
     ) -> ApiResult<(bool, String)> {
         let nats_req = mikrom_proto::scheduler::VmSnapshotDeleteRequest {
             job_id,
-            user_id,
+            tenant_id,
             snapshot_name,
         };
         let resp: mikrom_proto::scheduler::VmSnapshotDeleteResponse = state
@@ -397,10 +397,10 @@ impl VmService {
 
     pub async fn list_snapshots(
         state: &AppState,
-        user_id: String,
+        tenant_id: String,
         job_id: String,
     ) -> ApiResult<(bool, String, Vec<VmSnapshot>)> {
-        let nats_req = mikrom_proto::scheduler::VmSnapshotListRequest { job_id, user_id };
+        let nats_req = mikrom_proto::scheduler::VmSnapshotListRequest { job_id, tenant_id };
         let resp: mikrom_proto::scheduler::VmSnapshotListResponse = state
             .nats
             .request("mikrom.scheduler.vm_snapshot_list", nats_req)
@@ -424,7 +424,7 @@ impl VmService {
 
     pub async fn attach_volume(
         state: &AppState,
-        user_id: String,
+        tenant_id: String,
         job_id: String,
         volume_id: String,
         mount_point: String,
@@ -432,7 +432,7 @@ impl VmService {
     ) -> ApiResult<(bool, String)> {
         let nats_req = mikrom_proto::scheduler::AttachVolumeRequest {
             job_id,
-            user_id,
+            tenant_id,
             volume_id,
             mount_point,
             read_only,
@@ -447,13 +447,13 @@ impl VmService {
 
     pub async fn detach_volume(
         state: &AppState,
-        user_id: String,
+        tenant_id: String,
         job_id: String,
         volume_id: String,
     ) -> ApiResult<(bool, String)> {
         let nats_req = mikrom_proto::scheduler::DetachVolumeRequest {
             job_id,
-            user_id,
+            tenant_id,
             volume_id,
         };
         let resp: mikrom_proto::scheduler::DetachVolumeResponse = state
@@ -466,14 +466,14 @@ impl VmService {
 
     pub async fn start_migration(
         state: &AppState,
-        user_id: String,
+        tenant_id: String,
         job_id: String,
         target_host: String,
         target_uri: String,
     ) -> ApiResult<(bool, String)> {
         let nats_req = mikrom_proto::scheduler::StartMigrationRequest {
             job_id,
-            user_id,
+            tenant_id,
             target_host,
             target_uri,
         };
@@ -487,10 +487,10 @@ impl VmService {
 
     pub async fn cancel_migration(
         state: &AppState,
-        user_id: String,
+        tenant_id: String,
         job_id: String,
     ) -> ApiResult<(bool, String)> {
-        let nats_req = mikrom_proto::scheduler::CancelMigrationRequest { job_id, user_id };
+        let nats_req = mikrom_proto::scheduler::CancelMigrationRequest { job_id, tenant_id };
         let resp: mikrom_proto::scheduler::CancelMigrationResponse = state
             .nats
             .request("mikrom.scheduler.cancel_migration", nats_req)
@@ -501,10 +501,10 @@ impl VmService {
 
     pub async fn query_migration(
         state: &AppState,
-        user_id: String,
+        tenant_id: String,
         job_id: String,
     ) -> ApiResult<(bool, String, String)> {
-        let nats_req = mikrom_proto::scheduler::QueryMigrationRequest { job_id, user_id };
+        let nats_req = mikrom_proto::scheduler::QueryMigrationRequest { job_id, tenant_id };
         let resp: mikrom_proto::scheduler::QueryMigrationResponse = state
             .nats
             .request("mikrom.scheduler.query_migration", nats_req)
@@ -515,13 +515,13 @@ impl VmService {
 
     pub async fn set_balloon(
         state: &AppState,
-        user_id: String,
+        tenant_id: String,
         job_id: String,
         target_memory_mib: u32,
     ) -> ApiResult<(bool, String)> {
         let nats_req = mikrom_proto::scheduler::SetBalloonRequest {
             job_id,
-            user_id,
+            tenant_id,
             target_memory_mib,
         };
         let resp: mikrom_proto::scheduler::SetBalloonResponse = state
@@ -534,10 +534,10 @@ impl VmService {
 
     pub async fn query_balloon(
         state: &AppState,
-        user_id: String,
+        tenant_id: String,
         job_id: String,
     ) -> ApiResult<(bool, String, u32, u32)> {
-        let nats_req = mikrom_proto::scheduler::QueryBalloonRequest { job_id, user_id };
+        let nats_req = mikrom_proto::scheduler::QueryBalloonRequest { job_id, tenant_id };
         let resp: mikrom_proto::scheduler::QueryBalloonResponse = state
             .nats
             .request("mikrom.scheduler.query_balloon", nats_req)

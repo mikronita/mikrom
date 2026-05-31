@@ -20,7 +20,7 @@ pub struct UpdateSecurityGroupsRequest {
     #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "3")]
     pub rules: ::prost::alloc::vec::Vec<FirewallRule>,
 }
@@ -157,7 +157,7 @@ pub struct CheckHealthRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CheckHealthResponse {
@@ -169,7 +169,7 @@ pub struct CheckHealthResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct WatchAppsRequest {
     #[prost(string, tag = "1")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct WatchAppsResponse {
@@ -237,7 +237,7 @@ pub struct ScaleAppRequest {
     #[prost(uint32, tag = "2")]
     pub desired_replicas: u32,
     #[prost(string, tag = "3")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ScaleAppResponse {
@@ -251,7 +251,7 @@ pub struct PauseRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PauseResponse {
@@ -265,7 +265,7 @@ pub struct ResumeRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ResumeResponse {
@@ -279,7 +279,7 @@ pub struct GetLogsRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(bool, tag = "3")]
     pub follow: bool,
 }
@@ -295,7 +295,7 @@ pub struct DeleteAppRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteAppResponse {
@@ -309,7 +309,7 @@ pub struct DeleteAllByAppRequest {
     #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteAllByAppResponse {
@@ -394,7 +394,7 @@ pub struct DeployRequest {
     #[prost(message, optional, tag = "4")]
     pub config: ::core::option::Option<AppConfig>,
     #[prost(string, tag = "5")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "6")]
     pub deployment_id: ::prost::alloc::string::String,
     #[prost(string, tag = "7")]
@@ -463,7 +463,7 @@ pub struct AppStatusRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppStatusResponse {
@@ -501,7 +501,7 @@ pub struct CancelRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CancelResponse {
@@ -513,7 +513,7 @@ pub struct CancelResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListAppsRequest {
     #[prost(string, tag = "1")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(enumeration = "DeployStatus", optional, tag = "2")]
     pub status: ::core::option::Option<i32>,
 }
@@ -543,7 +543,7 @@ pub struct AppInfo {
     #[prost(uint64, tag = "9")]
     pub ram_used_bytes: u64,
     #[prost(string, tag = "10")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "11")]
     pub deployment_id: ::prost::alloc::string::String,
     #[prost(string, tag = "12")]
@@ -560,7 +560,7 @@ pub struct UpdateAppScalingConfigRequest {
     #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(uint32, tag = "3")]
     pub min_replicas: u32,
     #[prost(uint32, tag = "4")]
@@ -595,7 +595,7 @@ pub struct VmSnapshotCreateRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub snapshot_name: ::prost::alloc::string::String,
 }
@@ -611,7 +611,7 @@ pub struct VmSnapshotRestoreRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub snapshot_name: ::prost::alloc::string::String,
 }
@@ -627,7 +627,7 @@ pub struct VmSnapshotDeleteRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub snapshot_name: ::prost::alloc::string::String,
 }
@@ -643,7 +643,7 @@ pub struct VmSnapshotListRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct VmSnapshotInfo {
@@ -673,7 +673,7 @@ pub struct AttachVolumeRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub volume_id: ::prost::alloc::string::String,
     #[prost(string, tag = "4")]
@@ -693,7 +693,7 @@ pub struct DetachVolumeRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub volume_id: ::prost::alloc::string::String,
 }
@@ -710,7 +710,7 @@ pub struct StartMigrationRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub target_host: ::prost::alloc::string::String,
     #[prost(string, tag = "4")]
@@ -728,7 +728,7 @@ pub struct CancelMigrationRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CancelMigrationResponse {
@@ -742,7 +742,7 @@ pub struct QueryMigrationRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct QueryMigrationResponse {
@@ -765,7 +765,7 @@ pub struct SetBalloonRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(uint32, tag = "3")]
     pub target_memory_mib: u32,
 }
@@ -781,7 +781,7 @@ pub struct QueryBalloonRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct QueryBalloonResponse {
@@ -805,7 +805,7 @@ pub struct DeployDatabaseRequest {
     #[prost(message, optional, tag = "4")]
     pub config: ::core::option::Option<AppConfig>,
     #[prost(string, tag = "5")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "6")]
     pub deployment_id: ::prost::alloc::string::String,
     #[prost(string, tag = "7")]
@@ -829,7 +829,7 @@ pub struct DeployDatabaseResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListDatabasesRequest {
     #[prost(string, tag = "1")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListDatabasesResponse {
@@ -856,7 +856,7 @@ pub struct DatabaseStatusRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DatabaseStatusResponse {
@@ -876,7 +876,7 @@ pub struct DeleteDatabaseRequest {
     #[prost(string, tag = "1")]
     pub job_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub user_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteDatabaseResponse {

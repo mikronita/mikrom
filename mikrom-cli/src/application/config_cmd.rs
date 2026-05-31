@@ -89,6 +89,7 @@ mod tests {
         let cfg = Config {
             api_url: Some("http://localhost:5001".to_string()),
             token: Some("tok".to_string()),
+            active_tenant_id: None,
         };
         let result = show(&cfg, OutputFormat::Json);
         assert!(result.is_ok());

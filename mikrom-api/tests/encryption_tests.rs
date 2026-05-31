@@ -10,8 +10,12 @@ use uuid::Uuid;
 mod common;
 
 #[tokio::test]
+#[ignore = "requires a PostgreSQL test database with the migrated apps schema"]
 async fn test_encryption_at_rest() {
-    let db = TestDb::new().await;
+    let Ok(db) = TestDb::try_new().await else {
+        eprintln!("Skipping encryption test: database unavailable");
+        return;
+    };
     let pool = db.pool().clone();
     let master_key = "test-master-key-123";
     let app_repo = PostgresAppRepository::new(pool.clone(), master_key.to_string());
@@ -36,7 +40,7 @@ async fn test_encryption_at_rest() {
             name: format!("test-app-{}", Uuid::new_v4()),
             git_url: "https://github.com/test/repo".to_string(),
             port: mikrom_api::domain::types::Port::new(8080).unwrap(),
-            user_id,
+            tenant_id: user_id,
             github_webhook_secret: Some(webhook_secret.to_string()),
             ..Default::default()
         })
@@ -71,7 +75,7 @@ async fn test_encryption_at_rest() {
     let deployment = app_repo
         .create_deployment(NewDeployment {
             app_id: app.id,
-            user_id: user_id.to_string(),
+            tenant_id: user_id.to_string(),
             vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
             memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
             disk_mib: 1024,
@@ -117,4 +121,12 @@ async fn test_encryption_at_rest() {
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
     assert!(err_msg.contains("Failed to decrypt") || err_msg.contains("Decryption failed"));
+
+    let deployment_result = app_repo_wrong_key.get_deployment(deployment.id).await;
+    assert!(deployment_result.is_err());
+    let deployment_err_msg = deployment_result.unwrap_err().to_string();
+    assert!(
+        deployment_err_msg.contains("Failed to decrypt")
+            || deployment_err_msg.contains("Decryption failed")
+    );
 }

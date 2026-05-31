@@ -15,8 +15,8 @@ impl NatsScheduler {
 
 #[async_trait::async_trait]
 impl Scheduler for NatsScheduler {
-    async fn pause_app(&self, job_id: String, user_id: String) -> DomainResult<bool> {
-        let req = mikrom_proto::scheduler::PauseRequest { job_id, user_id };
+    async fn pause_app(&self, job_id: String, tenant_id: String) -> DomainResult<bool> {
+        let req = mikrom_proto::scheduler::PauseRequest { job_id, tenant_id };
         let res: mikrom_proto::scheduler::PauseResponse = self
             .nats
             .request(mikrom_proto::subjects::SCHEDULER_PAUSE_APP, req)
@@ -24,8 +24,8 @@ impl Scheduler for NatsScheduler {
         Ok(res.success)
     }
 
-    async fn resume_app(&self, job_id: String, user_id: String) -> DomainResult<bool> {
-        let req = mikrom_proto::scheduler::ResumeRequest { job_id, user_id };
+    async fn resume_app(&self, job_id: String, tenant_id: String) -> DomainResult<bool> {
+        let req = mikrom_proto::scheduler::ResumeRequest { job_id, tenant_id };
         let res: mikrom_proto::scheduler::ResumeResponse = self
             .nats
             .request(mikrom_proto::subjects::SCHEDULER_RESUME_APP, req)
@@ -33,8 +33,8 @@ impl Scheduler for NatsScheduler {
         Ok(res.success)
     }
 
-    async fn delete_app(&self, job_id: String, user_id: String) -> DomainResult<bool> {
-        let req = mikrom_proto::scheduler::DeleteAppRequest { job_id, user_id };
+    async fn delete_app(&self, job_id: String, tenant_id: String) -> DomainResult<bool> {
+        let req = mikrom_proto::scheduler::DeleteAppRequest { job_id, tenant_id };
         let res: mikrom_proto::scheduler::DeleteAppResponse = self
             .nats
             .request(mikrom_proto::subjects::SCHEDULER_DELETE_APP, req)
@@ -42,8 +42,8 @@ impl Scheduler for NatsScheduler {
         Ok(res.success)
     }
 
-    async fn delete_all_by_app(&self, app_id: String, user_id: String) -> DomainResult<bool> {
-        let req = mikrom_proto::scheduler::DeleteAllByAppRequest { app_id, user_id };
+    async fn delete_all_by_app(&self, app_id: String, tenant_id: String) -> DomainResult<bool> {
+        let req = mikrom_proto::scheduler::DeleteAllByAppRequest { app_id, tenant_id };
         let res: mikrom_proto::scheduler::DeleteAllByAppResponse = self
             .nats
             .with_timeout(std::time::Duration::from_secs(15))
@@ -56,12 +56,12 @@ impl Scheduler for NatsScheduler {
         &self,
         app_id: String,
         desired_replicas: u32,
-        user_id: String,
+        tenant_id: String,
     ) -> DomainResult<bool> {
         let req = mikrom_proto::scheduler::ScaleAppRequest {
             app_id,
             desired_replicas,
-            user_id,
+            tenant_id,
         };
         let res: mikrom_proto::scheduler::ScaleAppResponse = self
             .nats
@@ -119,9 +119,9 @@ impl Scheduler for NatsScheduler {
     async fn get_database_status(
         &self,
         job_id: String,
-        user_id: String,
+        tenant_id: String,
     ) -> DomainResult<mikrom_proto::scheduler::DatabaseStatusResponse> {
-        let req = mikrom_proto::scheduler::DatabaseStatusRequest { job_id, user_id };
+        let req = mikrom_proto::scheduler::DatabaseStatusRequest { job_id, tenant_id };
         let res: mikrom_proto::scheduler::DatabaseStatusResponse = self
             .nats
             .request(mikrom_proto::subjects::SCHEDULER_GET_DATABASE_STATUS, req)
@@ -129,8 +129,8 @@ impl Scheduler for NatsScheduler {
         Ok(res)
     }
 
-    async fn delete_database(&self, job_id: String, user_id: String) -> DomainResult<bool> {
-        let req = mikrom_proto::scheduler::DeleteDatabaseRequest { job_id, user_id };
+    async fn delete_database(&self, job_id: String, tenant_id: String) -> DomainResult<bool> {
+        let req = mikrom_proto::scheduler::DeleteDatabaseRequest { job_id, tenant_id };
         let res: mikrom_proto::scheduler::DeleteDatabaseResponse = self
             .nats
             .request(mikrom_proto::subjects::SCHEDULER_DELETE_DATABASE, req)

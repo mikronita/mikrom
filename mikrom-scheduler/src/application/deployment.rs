@@ -15,7 +15,7 @@ pub struct DeployAppParams {
     pub app_id: String,
     pub app_name: String,
     pub image: String,
-    pub user_id: String,
+    pub tenant_id: String,
     pub deployment_id: String,
     pub vpc_ipv6_prefix: String,
     pub config: VmConfig,
@@ -47,7 +47,7 @@ impl DeploymentService {
                     params.app_name,
                     params.image.clone(),
                     config,
-                    params.user_id.clone().into(),
+                    params.tenant_id.clone().into(),
                     Some(params.deployment_id.clone().into()),
                 );
                 job.schedule(host_id.to_string(), vm_id.to_string());

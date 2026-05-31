@@ -1,0 +1,17 @@
+[Unit]
+Description=Mikrom DNS Resolver
+After=network.target nats.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/mikrom/dns.env
+ExecStart=/usr/bin/mikrom-dns
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

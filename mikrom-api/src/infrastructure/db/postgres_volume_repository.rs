@@ -14,7 +14,7 @@ use uuid::Uuid;
 #[derive(Debug, FromRow)]
 struct VolumeWithAttachmentsRow {
     volume_id: Uuid,
-    user_id: Uuid,
+    tenant_id: Uuid,
     volume_name: String,
     size_mib: i32,
     pool_name: String,
@@ -40,9 +40,9 @@ impl PostgresVolumeRepository {
 impl VolumeRepository for PostgresVolumeRepository {
     async fn create_volume(&self, params: CreateVolumeParams) -> DomainResult<Volume> {
         let db_volume = sqlx::query_as::<_, DbVolume>(
-            "INSERT INTO volumes (user_id, name, size_mib, pool_name) VALUES ($1, $2, $3, $4) RETURNING *"
+            "INSERT INTO volumes (tenant_id, name, size_mib, pool_name) VALUES ($1, $2, $3, $4) RETURNING *"
         )
-        .bind(params.user_id)
+        .bind(params.tenant_id)
         .bind(params.name)
         .bind(params.size_mib)
         .bind(params.pool_name)
@@ -60,24 +60,24 @@ impl VolumeRepository for PostgresVolumeRepository {
         Ok(db_volume.map(|v| v.into()))
     }
 
-    async fn list_volumes_by_user(
+    async fn list_volumes_by_tenant(
         &self,
-        user_id: Uuid,
+        tenant_id: Uuid,
     ) -> DomainResult<Vec<VolumeWithAttachments>> {
         let rows = sqlx::query_as::<_, VolumeWithAttachmentsRow>(
             r#"
             SELECT 
-                v.id as volume_id, v.user_id, v.name as volume_name, v.size_mib, v.pool_name, v.created_at as vol_created_at, v.updated_at as vol_updated_at,
+                v.id as volume_id, v.tenant_id, v.name as volume_name, v.size_mib, v.pool_name, v.created_at as vol_created_at, v.updated_at as vol_updated_at,
                 av.app_id as app_id, av.mount_point as mount_point, av.access_mode as access_mode,
                 a.name as app_name
             FROM volumes v
             LEFT JOIN app_volumes av ON v.id = av.volume_id
             LEFT JOIN apps a ON av.app_id = a.id
-            WHERE v.user_id = $1
+            WHERE v.tenant_id = $1
             ORDER BY v.created_at DESC
             "#
         )
-        .bind(user_id)
+        .bind(tenant_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -91,7 +91,7 @@ impl VolumeRepository for PostgresVolumeRepository {
                 VolumeWithAttachments {
                     volume: Volume {
                         id: row.volume_id,
-                        user_id: row.user_id,
+                        tenant_id: row.tenant_id,
                         name: row.volume_name.clone(),
                         size_mib: row.size_mib,
                         pool_name: row.pool_name.clone(),
@@ -174,7 +174,7 @@ impl VolumeRepository for PostgresVolumeRepository {
         let rows = sqlx::query(
             r#"
             SELECT 
-                v.id, v.user_id, v.name, v.size_mib, v.pool_name, v.created_at, v.updated_at,
+                v.id, v.tenant_id, v.name, v.size_mib, v.pool_name, v.created_at, v.updated_at,
                 av.mount_point, av.access_mode
             FROM volumes v
             JOIN app_volumes av ON v.id = av.volume_id
@@ -192,7 +192,7 @@ impl VolumeRepository for PostgresVolumeRepository {
                 AttachedVolume {
                     volume: Volume {
                         id: row.get("id"),
-                        user_id: row.get("user_id"),
+                        tenant_id: row.get("tenant_id"),
                         name: row.get("name"),
                         size_mib: row.get("size_mib"),
                         pool_name: row.get("pool_name"),
@@ -210,10 +210,10 @@ impl VolumeRepository for PostgresVolumeRepository {
 
     async fn create_snapshot(&self, params: CreateSnapshotParams) -> DomainResult<VolumeSnapshot> {
         let db_snapshot = sqlx::query_as::<_, DbVolumeSnapshot>(
-            "INSERT INTO volume_snapshots (volume_id, user_id, name) VALUES ($1, $2, $3) RETURNING *"
+            "INSERT INTO volume_snapshots (volume_id, tenant_id, name) VALUES ($1, $2, $3) RETURNING *"
         )
         .bind(params.volume_id)
-        .bind(params.user_id)
+        .bind(params.tenant_id)
         .bind(params.name)
         .fetch_one(&self.pool)
         .await?;

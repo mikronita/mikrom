@@ -46,7 +46,7 @@ impl RouterRestoreService {
                 let current_count = self
                     .ctx
                     .job_repo
-                    .list_jobs(Some(&app.user_id), Some(&app.id), None)
+                    .list_jobs(Some(&app.tenant_id), Some(&app.id), None)
                     .await?
                     .into_iter()
                     .filter(|job| {
@@ -81,7 +81,7 @@ impl RouterRestoreService {
 
                     if let Err(e) = self
                         .scaling
-                        .scale_app(&app.id, app.desired_replicas, &app.user_id)
+                        .scale_app(&app.id, app.desired_replicas, &app.tenant_id)
                         .await
                     {
                         tracing::error!(

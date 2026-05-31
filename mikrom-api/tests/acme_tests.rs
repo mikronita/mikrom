@@ -5,10 +5,25 @@ use prost::Message;
 use tokio::time::{Duration, sleep};
 use tokio_stream::StreamExt;
 
+async fn connect_nats_or_skip() -> Option<async_nats::Client> {
+    let nats_url =
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".into());
+    match async_nats::connect(&nats_url).await {
+        Ok(client) => Some(client),
+        Err(err) => {
+            eprintln!("Skipping ACME test: failed to connect to NATS: {err}");
+            None
+        },
+    }
+}
+
 #[tokio::test]
 async fn test_acme_account_persistence() {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let db = TestDb::new().await;
+    let Ok(db) = TestDb::try_new().await else {
+        eprintln!("Skipping ACME test: database unavailable");
+        return;
+    };
     let pool = db.pool().clone();
 
     let email = "test-persistence@mikrom.spluca.org";
@@ -41,15 +56,16 @@ async fn test_acme_account_persistence() {
 
 #[tokio::test]
 async fn test_acme_worker_iteration_skips_if_no_domains() {
-    let db = TestDb::new().await;
+    let Ok(db) = TestDb::try_new().await else {
+        eprintln!("Skipping ACME test: database unavailable");
+        return;
+    };
     let pool = db.pool().clone();
 
     // Connecting to a local NATS for testing
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".into());
-    let nats_client = async_nats::connect(&nats_url)
-        .await
-        .expect("Failed to connect to test NATS");
+    let Some(nats_client) = connect_nats_or_skip().await else {
+        return;
+    };
 
     // Run iteration - should finish quickly as there are no apps
     let result = mikrom_api::acme::run_acme_iteration(
@@ -69,18 +85,19 @@ async fn test_acme_worker_iteration_skips_if_no_domains() {
 #[tokio::test]
 async fn test_router_handles_nats_updates() {
     // This test verifies that mikrom-router correctly updates its DB when receiving NATS messages
-    let db = TestDb::new().await;
+    let Ok(db) = TestDb::try_new().await else {
+        eprintln!("Skipping ACME test: database unavailable");
+        return;
+    };
     let pool = db.pool().clone();
 
     // 1. Setup router tables (simulating migrations)
     sqlx::query("CREATE TABLE IF NOT EXISTS tls_certificates (hostname VARCHAR PRIMARY KEY, cert_chain TEXT NOT NULL, private_key TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE IF NOT EXISTS acme_challenges (token VARCHAR PRIMARY KEY, key_auth TEXT NOT NULL, hostname VARCHAR NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").execute(&pool).await.unwrap();
 
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".into());
-    let nats_client = async_nats::connect(&nats_url)
-        .await
-        .expect("Failed to connect to test NATS");
+    let Some(nats_client) = connect_nats_or_skip().await else {
+        return;
+    };
 
     // 2. Simulate Router NATS listener (simplified version of main.rs logic)
     let db_clone = pool.clone();

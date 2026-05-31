@@ -5,7 +5,7 @@ mod common_utils;
 mod tests {
     use super::common_utils;
     use mikrom_scheduler::domain::{
-        AppId, HostId, Job, JobId, JobRepository, UserId, VmConfig, Worker, WorkerRepository,
+        AppId, HostId, Job, JobId, JobRepository, TenantId, VmConfig, Worker, WorkerRepository,
     };
     use mikrom_scheduler::infrastructure::db::{PgJobRepository, PgWorkerRepository};
 
@@ -46,7 +46,7 @@ mod tests {
             "test-app".to_string(),
             "alpine:latest".to_string(),
             VmConfig::default(),
-            UserId::from("user-1".to_string()),
+            TenantId::from("tenant-1".to_string()),
             None,
         );
         job_repo.add_job(job).await.unwrap();
@@ -82,7 +82,7 @@ mod tests {
                 "test-app".to_string(),
                 "alpine".to_string(),
                 VmConfig::default(),
-                UserId::from("user-1".to_string()),
+                TenantId::from("tenant-1".to_string()),
                 None,
             );
             job_repo.add_job(job).await.unwrap();
@@ -95,7 +95,7 @@ mod tests {
             "other-app".to_string(),
             "alpine".to_string(),
             VmConfig::default(),
-            UserId::from("user-1".to_string()),
+            TenantId::from("tenant-1".to_string()),
             None,
         );
         job_repo.add_job(other_job).await.unwrap();

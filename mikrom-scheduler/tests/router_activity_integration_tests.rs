@@ -6,7 +6,7 @@ use mikrom_proto::subjects;
 use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
 use mikrom_scheduler::domain::{
     AgentClient, AppConfig, AppId, AppRepository, DeploymentId, DomainResult, HostId,
-    HypervisorType, Job, JobId, JobRepository, JobStatus, UserId, VmConfig, VmId, Worker,
+    HypervisorType, Job, JobId, JobRepository, JobStatus, TenantId, VmConfig, VmId, Worker,
     WorkerRepository,
 };
 use mikrom_scheduler::infrastructure::db::{PgAppRepository, PgJobRepository, PgWorkerRepository};
@@ -183,7 +183,7 @@ impl JobRepository for InMemoryJobRepo {
         Ok(jobs
             .iter()
             .filter(|job| {
-                (user_id.is_none() || Some(job.user_id.as_ref()) == user_id)
+                (user_id.is_none() || Some(job.tenant_id.as_ref()) == user_id)
                     && (app_id.is_none() || Some(job.app_id.as_ref()) == app_id)
                     && (status.is_none() || Some(job.status) == status)
             })
@@ -393,7 +393,7 @@ async fn test_router_traffic_restores_paused_deployment() {
     let app_repo = InMemoryAppRepo {
         app: Arc::new(Mutex::new(AppConfig {
             id: AppId::from(app_id.clone()),
-            user_id: UserId::from(user_id.clone()),
+            tenant_id: TenantId::from(user_id.clone()),
             vpc_ipv6_prefix: "fd00::".to_string(),
             hostname: hostname.clone(),
             desired_replicas: 1,
@@ -413,7 +413,7 @@ async fn test_router_traffic_restores_paused_deployment() {
         app_id: AppId::from(app_id.clone()),
         app_name: "restore-app".to_string(),
         image: "test-image".to_string(),
-        user_id: UserId::from(user_id.clone()),
+        tenant_id: TenantId::from(user_id.clone()),
         status: JobStatus::Paused,
         host_id: Some(HostId::from("host-1".to_string())),
         vm_id: Some(VmId::from("vm-1".to_string())),
@@ -554,7 +554,7 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
 
     let app_config = AppConfig {
         id: AppId::from(app_id.clone()),
-        user_id: UserId::from(user_id.clone()),
+        tenant_id: TenantId::from(user_id.clone()),
         vpc_ipv6_prefix: "fd00::".to_string(),
         hostname: hostname.clone(),
         desired_replicas: 1,
@@ -592,7 +592,7 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
         "restore-app".to_string(),
         "test-image".to_string(),
         VmConfig::default(),
-        UserId::from(user_id.clone()),
+        TenantId::from(user_id.clone()),
         Some(DeploymentId::from("dep-1".to_string())),
     );
     job.status = JobStatus::Paused;
@@ -687,7 +687,7 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
     let app_repo = InMemoryAppRepoWithUpdateCounter {
         app: Arc::new(Mutex::new(AppConfig {
             id: AppId::from(app_id.clone()),
-            user_id: UserId::from(user_id.clone()),
+            tenant_id: TenantId::from(user_id.clone()),
             vpc_ipv6_prefix: "fd00::".to_string(),
             hostname: hostname.clone(),
             desired_replicas: 1,
@@ -710,7 +710,7 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
             "race-app".to_string(),
             "race-image".to_string(),
             VmConfig::default(),
-            UserId::from(user_id.clone()),
+            TenantId::from(user_id.clone()),
             Some(DeploymentId::from("dep-race".to_string())),
         );
         job.status = JobStatus::Paused;

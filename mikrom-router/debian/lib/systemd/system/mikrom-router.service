@@ -1,6 +1,7 @@
 [Unit]
 Description=Mikrom Pingora Router
 After=network.target nats.service postgresql.service
+Wants=network.target
 
 [Service]
 Type=simple
@@ -11,6 +12,7 @@ ExecStart=/usr/bin/mikrom-router
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target

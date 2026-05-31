@@ -98,15 +98,15 @@ pub async fn create_volume_handler(
     State(state): State<crate::AppState>,
     Json(req): Json<CreateVolumeRequest>,
 ) -> ApiResult<(StatusCode, Json<Volume>)> {
-    let user_id = Uuid::parse_str(&auth.user_id)
+    let tenant_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?;
 
-    let pool_name = format!("user_{}_volumes", user_id.to_string().replace('-', "_"));
+    let pool_name = format!("user_{}_volumes", tenant_id.to_string().replace('-', "_"));
 
     let volume = state
         .volume_repo
         .create_volume(CreateVolumeParams {
-            user_id,
+            tenant_id,
             name: req.name,
             size_mib: req.size_mib,
             pool_name: pool_name.clone(),
@@ -135,7 +135,8 @@ pub async fn create_volume_handler(
     // Emit workspace event
     if let Err(e) = state.workspace_events.send(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
-        user_id: Some(user_id),
+        user_id: None,
+        tenant_id: Some(tenant_id),
         app_id: None,
         app_name: None,
         deployment_id: None,
@@ -160,7 +161,7 @@ pub async fn list_volumes_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.user_id.to_string() != auth.user_id {
+    if app.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -173,9 +174,9 @@ pub async fn list_all_volumes_handler(
     auth: crate::auth::AuthUser,
     State(state): State<crate::AppState>,
 ) -> ApiResult<Json<Vec<VolumeWithAttachments>>> {
-    let user_id = uuid::Uuid::parse_str(&auth.user_id)
+    let tenant_id = uuid::Uuid::parse_str(&auth.user_id)
         .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?;
-    let volumes = state.volume_repo.list_volumes_by_user(user_id).await?;
+    let volumes = state.volume_repo.list_volumes_by_tenant(tenant_id).await?;
     Ok(Json(volumes))
 }
 
@@ -192,7 +193,7 @@ pub async fn attach_volume_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.user_id.to_string() != auth.user_id {
+    if app.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -202,7 +203,7 @@ pub async fn attach_volume_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if volume.user_id != app.user_id {
+    if volume.tenant_id != app.tenant_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -219,7 +220,10 @@ pub async fn attach_volume_handler(
         )));
     }
 
-    let user_volumes = state.volume_repo.list_volumes_by_user(app.user_id).await?;
+    let user_volumes = state
+        .volume_repo
+        .list_volumes_by_tenant(app.tenant_id)
+        .await?;
     let target_volume = user_volumes
         .into_iter()
         .find(|entry| entry.volume.id == req.volume_id)
@@ -261,7 +265,8 @@ pub async fn attach_volume_handler(
     // Emit workspace event
     if let Err(e) = state.workspace_events.send(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
-        user_id: Some(app.user_id),
+        user_id: None,
+        tenant_id: Some(app.tenant_id),
         app_id: Some(app.id),
         app_name: Some(app.name),
         deployment_id: None,
@@ -286,7 +291,7 @@ pub async fn detach_volume_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.user_id.to_string() != auth.user_id {
+    if app.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -302,7 +307,8 @@ pub async fn detach_volume_handler(
     // Emit workspace event
     if let Err(e) = state.workspace_events.send(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
-        user_id: Some(app.user_id),
+        user_id: None,
+        tenant_id: Some(app.tenant_id),
         app_id: Some(app.id),
         app_name: Some(app.name),
         deployment_id: None,
@@ -327,7 +333,7 @@ pub async fn list_snapshots_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if volume.user_id.to_string() != auth.user_id {
+    if volume.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -351,7 +357,7 @@ pub async fn create_snapshot_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if volume.user_id.to_string() != auth.user_id {
+    if volume.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -359,7 +365,7 @@ pub async fn create_snapshot_handler(
         .volume_repo
         .create_snapshot(CreateSnapshotParams {
             volume_id,
-            user_id: volume.user_id,
+            tenant_id: volume.tenant_id,
             name: req.name.clone(),
         })
         .await?;
@@ -385,7 +391,8 @@ pub async fn create_snapshot_handler(
 
     if let Err(e) = state.workspace_events.send(WorkspaceEvent {
         kind: WorkspaceEventKind::SnapshotChanged,
-        user_id: Some(volume.user_id),
+        user_id: None,
+        tenant_id: Some(volume.tenant_id),
         app_id: None,
         app_name: None,
         deployment_id: None,
@@ -410,7 +417,7 @@ pub async fn delete_volume_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if volume.user_id.to_string() != auth.user_id {
+    if volume.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -460,7 +467,8 @@ pub async fn delete_volume_handler(
     // Emit workspace event
     if let Err(e) = state.workspace_events.send(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
-        user_id: Some(volume.user_id),
+        user_id: None,
+        tenant_id: Some(volume.tenant_id),
         app_id: None,
         app_name: None,
         deployment_id: None,
@@ -485,7 +493,7 @@ pub async fn delete_snapshot_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Snapshot not found".to_string()))?;
 
-    if snapshot.user_id.to_string() != auth.user_id {
+    if snapshot.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -518,7 +526,8 @@ pub async fn delete_snapshot_handler(
 
     if let Err(e) = state.workspace_events.send(WorkspaceEvent {
         kind: WorkspaceEventKind::SnapshotChanged,
-        user_id: Some(snapshot.user_id),
+        user_id: None,
+        tenant_id: Some(snapshot.tenant_id),
         app_id: None,
         app_name: None,
         deployment_id: None,
@@ -544,7 +553,7 @@ pub async fn restore_snapshot_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if volume.user_id.to_string() != auth.user_id {
+    if volume.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -583,20 +592,20 @@ pub async fn clone_volume_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if volume.user_id.to_string() != auth.user_id {
+    if volume.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
-    let user_id = Uuid::parse_str(&auth.user_id)
+    let tenant_id = Uuid::parse_str(&auth.user_id)
         .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?;
 
-    let pool_name = format!("user_{}_volumes", user_id.to_string().replace('-', "_"));
+    let pool_name = format!("user_{}_volumes", tenant_id.to_string().replace('-', "_"));
 
     // Create the record for the new cloned volume
     let new_volume = state
         .volume_repo
         .create_volume(CreateVolumeParams {
-            user_id,
+            tenant_id,
             name: req.name.clone(),
             size_mib: volume.size_mib,
             pool_name: pool_name.clone(),
@@ -628,7 +637,8 @@ pub async fn clone_volume_handler(
     // Emit workspace event
     if let Err(e) = state.workspace_events.send(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
-        user_id: Some(user_id),
+        user_id: None,
+        tenant_id: Some(tenant_id),
         app_id: None,
         app_name: None,
         deployment_id: None,
@@ -650,7 +660,7 @@ mod tests {
         let volumes = vec![AttachedVolume {
             volume: Volume {
                 id: Uuid::new_v4(),
-                user_id: Uuid::new_v4(),
+                tenant_id: Uuid::new_v4(),
                 name: "vol-a".to_string(),
                 size_mib: 1024,
                 pool_name: "pool-a".to_string(),

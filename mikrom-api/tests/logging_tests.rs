@@ -50,6 +50,23 @@ impl tracing::field::Visit for IpVisitor {
     }
 }
 
+fn build_logged_router() -> Router {
+    Router::new().route("/", get(|| async { "ok" })).layer(
+        TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+            let remote_addr = request
+                .extensions()
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|ci| ci.0.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+
+            info_span!(
+                "request",
+                client_ip = %remote_addr,
+            )
+        }),
+    )
+}
+
 #[tokio::test]
 async fn test_client_ip_logging() {
     use tracing_subscriber::prelude::*;
@@ -62,7 +79,6 @@ async fn test_client_ip_logging() {
     let subscriber = tracing_subscriber::registry().with(layer);
     let _guard = tracing::subscriber::set_default(subscriber);
 
-    // Test with actual IP
     let addr: SocketAddr = "1.2.3.4:5678".parse().unwrap();
     let req = Request::builder()
         .uri("/")
@@ -70,46 +86,39 @@ async fn test_client_ip_logging() {
         .body(Body::empty())
         .unwrap();
 
-    let app = Router::new().route("/", get(|| async { "ok" })).layer(
-        TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
-            let remote_addr = request
-                .extensions()
-                .get::<ConnectInfo<SocketAddr>>()
-                .map(|ci| ci.0.to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-
-            info_span!(
-                "request",
-                client_ip = %remote_addr,
-            )
-        }),
-    );
-
-    app.oneshot(req).await.unwrap();
+    build_logged_router().oneshot(req).await.unwrap();
 
     let ip = captured_ip.lock().unwrap().take();
     assert_eq!(ip, Some("1.2.3.4:5678".to_string()));
 
-    // Test with unknown IP
     let req_unknown = Request::builder().uri("/").body(Body::empty()).unwrap();
-
-    let app_unknown = Router::new().route("/", get(|| async { "ok" })).layer(
-        TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
-            let remote_addr = request
-                .extensions()
-                .get::<ConnectInfo<SocketAddr>>()
-                .map(|ci| ci.0.to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-
-            info_span!(
-                "request",
-                client_ip = %remote_addr,
-            )
-        }),
-    );
-
-    app_unknown.oneshot(req_unknown).await.unwrap();
+    build_logged_router().oneshot(req_unknown).await.unwrap();
 
     let ip_unknown = captured_ip.lock().unwrap().take();
     assert_eq!(ip_unknown, Some("unknown".to_string()));
+}
+
+#[tokio::test]
+async fn test_client_ip_logging_supports_ipv6() {
+    use tracing_subscriber::prelude::*;
+
+    let captured_ip = Arc::new(Mutex::new(None));
+    let layer = FieldCaptureLayer {
+        captured_ip: captured_ip.clone(),
+    };
+
+    let subscriber = tracing_subscriber::registry().with(layer);
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let addr: SocketAddr = "[2001:db8::1]:443".parse().unwrap();
+    let req = Request::builder()
+        .uri("/")
+        .extension(ConnectInfo(addr))
+        .body(Body::empty())
+        .unwrap();
+
+    build_logged_router().oneshot(req).await.unwrap();
+
+    let ip = captured_ip.lock().unwrap().take();
+    assert_eq!(ip, Some("[2001:db8::1]:443".to_string()));
 }

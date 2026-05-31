@@ -7,12 +7,12 @@ pub struct Database {
     pub id: Uuid,
     pub name: String,
     pub engine: String,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid, // Mikrom Project ID
     pub vcpus: CpuCores,
     pub memory_mib: MemoryMb,
     pub disk_mib: u32,
-    pub tenant_id: Option<String>,
-    pub timeline_id: Option<String>,
+    pub neon_tenant_id: Option<String>,
+    pub neon_timeline_id: Option<String>,
     pub tenant_gen: Option<u32>,
     pub settings: std::collections::HashMap<String, String>,
     pub status: DatabaseStatus,
@@ -46,7 +46,7 @@ impl From<String> for DatabaseStatus {
 pub struct DatabaseDeployment {
     pub id: Uuid,
     pub database_id: Uuid,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub job_id: Option<String>,
     pub status: String,
     pub host_id: Option<String>,
@@ -59,37 +59,37 @@ pub struct DatabaseDeployment {
 pub struct CreateDatabaseParams {
     pub name: String,
     pub engine: String,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub vcpus: CpuCores,
     pub memory_mib: MemoryMb,
     pub disk_mib: u32,
-    pub tenant_id: Option<String>,
-    pub timeline_id: Option<String>,
+    pub neon_tenant_id: Option<String>,
+    pub neon_timeline_id: Option<String>,
     pub tenant_gen: Option<u32>,
     pub settings: std::collections::HashMap<String, String>,
 }
 
+#[mockall::automock]
 #[async_trait::async_trait]
-#[cfg_attr(any(test, feature = "test-utils"), mockall::automock)]
 pub trait DatabaseRepository: Send + Sync {
     async fn create_database(
         &self,
         params: CreateDatabaseParams,
     ) -> crate::domain::DomainResult<Database>;
     async fn get_database(&self, id: Uuid) -> crate::domain::DomainResult<Option<Database>>;
-    async fn get_database_by_tenant_id(
+    async fn get_database_by_neon_tenant_id(
         &self,
-        tenant_id: &str,
+        neon_tenant_id: &str,
     ) -> crate::domain::DomainResult<Option<Database>>;
     async fn list_databases(&self) -> crate::domain::DomainResult<Vec<Database>>;
     async fn get_database_by_name(
         &self,
-        user_id: Uuid,
+        tenant_id: Uuid,
         name: &str,
     ) -> crate::domain::DomainResult<Option<Database>>;
-    async fn list_databases_by_user(
+    async fn list_databases_by_tenant(
         &self,
-        user_id: Uuid,
+        tenant_id: Uuid,
     ) -> crate::domain::DomainResult<Vec<Database>>;
     async fn delete_database(&self, id: Uuid) -> crate::domain::DomainResult<()>;
     async fn update_database_status(
@@ -100,8 +100,8 @@ pub trait DatabaseRepository: Send + Sync {
     async fn update_database_provisioning(
         &self,
         id: Uuid,
-        tenant_id: &str,
-        timeline_id: &str,
+        neon_tenant_id: &str,
+        neon_timeline_id: &str,
         tenant_gen: u32,
     ) -> crate::domain::DomainResult<()>;
     async fn update_active_deployment(
@@ -114,7 +114,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn create_deployment(
         &self,
         db_id: Uuid,
-        user_id: Uuid,
+        tenant_id: Uuid,
     ) -> crate::domain::DomainResult<DatabaseDeployment>;
     async fn get_deployment(
         &self,
@@ -169,12 +169,12 @@ mod tests {
             id: Uuid::new_v4(),
             name: "db-1".to_string(),
             engine: "neon".to_string(),
-            user_id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
             vcpus: CpuCores::try_from(2).unwrap(),
             memory_mib: MemoryMb::try_from(1024).unwrap(),
             disk_mib: 4096,
-            tenant_id: Some("11111111111111111111111111111111".to_string()),
-            timeline_id: Some("22222222222222222222222222222222".to_string()),
+            neon_tenant_id: Some("11111111111111111111111111111111".to_string()),
+            neon_timeline_id: Some("22222222222222222222222222222222".to_string()),
             tenant_gen: Some(1),
             settings: HashMap::from([
                 ("max_connections".to_string(), "100".to_string()),

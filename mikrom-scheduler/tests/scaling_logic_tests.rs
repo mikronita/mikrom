@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
 use mikrom_scheduler::domain::{
     AgentClient, AppConfig, AppId, AppRepository, DeploymentId, DomainResult, HostId,
-    HypervisorType, Job, JobId, JobRepository, JobStatus, UserId, VmConfig, VmId, Worker,
+    HypervisorType, Job, JobId, JobRepository, JobStatus, TenantId, VmConfig, VmId, Worker,
     WorkerRepository,
 };
 use std::sync::Arc;
@@ -321,7 +321,7 @@ async fn test_reconcile_scale_up_from_zero_manual() {
     let app_id = "app-1";
     let app_config = AppConfig {
         id: AppId::from(app_id.to_string()),
-        user_id: UserId::from("user-1".to_string()),
+        tenant_id: TenantId::from("tenant-1".to_string()),
         vpc_ipv6_prefix: "fd00::".to_string(),
         hostname: "app1.example.com".to_string(),
         desired_replicas: 1,
@@ -378,7 +378,7 @@ async fn test_reconcile_scale_up_from_zero_with_traffic() {
     let now = chrono::Utc::now().timestamp();
     let app_config = AppConfig {
         id: AppId::from(app_id.to_string()),
-        user_id: UserId::from("user-1".to_string()),
+        tenant_id: TenantId::from("tenant-1".to_string()),
         vpc_ipv6_prefix: "fd00::".to_string(),
         hostname: "app1.example.com".to_string(),
         desired_replicas: 1,
@@ -397,7 +397,7 @@ async fn test_reconcile_scale_up_from_zero_with_traffic() {
         app_id: AppId::from(app_id.to_string()),
         app_name: "app1".to_string(),
         image: "img".to_string(),
-        user_id: UserId::from("user-1".to_string()),
+        tenant_id: TenantId::from("tenant-1".to_string()),
         status: JobStatus::Paused,
         host_id: Some(HostId::from("host-1".to_string())),
         vm_id: Some(VmId::from("vm-1".to_string())),
@@ -457,7 +457,7 @@ async fn test_reconcile_skips_restore_during_backoff() {
     let now = chrono::Utc::now().timestamp();
     let app_config = AppConfig {
         id: AppId::from(app_id.to_string()),
-        user_id: UserId::from("user-1".to_string()),
+        tenant_id: TenantId::from("tenant-1".to_string()),
         vpc_ipv6_prefix: "fd00::".to_string(),
         hostname: "app1.example.com".to_string(),
         desired_replicas: 1,
@@ -476,7 +476,7 @@ async fn test_reconcile_skips_restore_during_backoff() {
         app_id: AppId::from(app_id.to_string()),
         app_name: "app1".to_string(),
         image: "img".to_string(),
-        user_id: UserId::from("user-1".to_string()),
+        tenant_id: TenantId::from("tenant-1".to_string()),
         status: JobStatus::Paused,
         host_id: Some(HostId::from("host-1".to_string())),
         vm_id: Some(VmId::from("vm-1".to_string())),

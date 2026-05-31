@@ -83,7 +83,7 @@ impl SchedulerServer {
                 app_id: req.app_id.clone(),
                 app_name: req.app_name,
                 image: req.image,
-                user_id: req.user_id,
+                tenant_id: req.tenant_id,
                 deployment_id: req.deployment_id,
                 vpc_ipv6_prefix: req.vpc_ipv6_prefix,
                 config,
@@ -159,7 +159,7 @@ impl SchedulerServer {
                 app_id: req.database_id.clone(),
                 app_name: req.database_name,
                 image: req.rootfs_image,
-                user_id: req.user_id,
+                tenant_id: req.tenant_id,
                 deployment_id: req.deployment_id,
                 vpc_ipv6_prefix: req.vpc_ipv6_prefix,
                 config,
@@ -197,7 +197,7 @@ impl SchedulerServer {
         match self
             .app_service
             .queries
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(job) => Ok(mikrom_proto::scheduler::DatabaseStatusResponse {
@@ -243,7 +243,7 @@ impl SchedulerServer {
         match self
             .app_service
             .lifecycle
-            .delete_app(&req.job_id, &req.user_id)
+            .delete_app(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(_) => Ok(mikrom_proto::scheduler::DeleteDatabaseResponse {
@@ -272,7 +272,7 @@ impl SchedulerServer {
         match self
             .app_service
             .queries
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(job) => {
@@ -306,7 +306,7 @@ impl SchedulerServer {
         let apps = self
             .app_service
             .queries
-            .list_apps(&req.user_id, status_filter)
+            .list_apps(&req.tenant_id, status_filter)
             .await
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         Ok(ListAppsResponse { apps })
@@ -314,7 +314,9 @@ impl SchedulerServer {
 
     pub async fn pause_app(&self, req: PauseRequest) -> anyhow::Result<PauseResponse> {
         Ok(Self::map_result(
-            self.app_service.pause_app(&req.job_id, &req.user_id).await,
+            self.app_service
+                .pause_app(&req.job_id, &req.tenant_id)
+                .await,
             |_| PauseResponse {
                 success: true,
                 message: "Paused".to_string(),
@@ -328,7 +330,9 @@ impl SchedulerServer {
 
     pub async fn resume_app(&self, req: ResumeRequest) -> anyhow::Result<ResumeResponse> {
         Ok(Self::map_result(
-            self.app_service.resume_app(&req.job_id, &req.user_id).await,
+            self.app_service
+                .resume_app(&req.job_id, &req.tenant_id)
+                .await,
             |_| ResumeResponse {
                 success: true,
                 message: "Resumed".to_string(),
@@ -359,7 +363,9 @@ impl SchedulerServer {
 
     pub async fn delete_app(&self, req: DeleteAppRequest) -> anyhow::Result<DeleteAppResponse> {
         Ok(Self::map_result(
-            self.app_service.delete_app(&req.job_id, &req.user_id).await,
+            self.app_service
+                .delete_app(&req.job_id, &req.tenant_id)
+                .await,
             |_| DeleteAppResponse {
                 success: true,
                 message: "Deleted".to_string(),
@@ -377,7 +383,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<DeleteAllByAppResponse> {
         Ok(Self::map_result(
             self.app_service
-                .delete_all_by_app(&req.app_id, &req.user_id)
+                .delete_all_by_app(&req.app_id, &req.tenant_id)
                 .await,
             |_| DeleteAllByAppResponse {
                 success: true,
@@ -396,7 +402,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::ScaleAppResponse> {
         Ok(Self::map_result(
             self.app_service
-                .scale_app(&req.app_id, req.desired_replicas, &req.user_id)
+                .scale_app(&req.app_id, req.desired_replicas, &req.tenant_id)
                 .await,
             |_| mikrom_proto::scheduler::ScaleAppResponse {
                 success: true,
@@ -421,7 +427,7 @@ impl SchedulerServer {
                 .app_repo
                 .update_app_config(crate::domain::AppConfig {
                     id: req.app_id.into(),
-                    user_id: req.user_id.into(),
+                    tenant_id: req.tenant_id.into(),
                     vpc_ipv6_prefix: req.vpc_ipv6_prefix,
                     hostname: req.hostname,
                     desired_replicas: req.desired_replicas,
@@ -466,7 +472,7 @@ impl SchedulerServer {
         match self
             .app_service
             .queries
-            .check_health(&req.job_id, &req.user_id)
+            .check_health(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(is_healthy) => Ok(mikrom_proto::scheduler::CheckHealthResponse {
@@ -647,7 +653,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::VmSnapshotCreateResponse> {
         let job = match self
             .app_service
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(j) => j,
@@ -687,7 +693,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::VmSnapshotRestoreResponse> {
         let job = match self
             .app_service
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(j) => j,
@@ -727,7 +733,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::VmSnapshotDeleteResponse> {
         let job = match self
             .app_service
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(j) => j,
@@ -767,7 +773,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::VmSnapshotListResponse> {
         let job = match self
             .app_service
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(j) => j,
@@ -823,7 +829,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::AttachVolumeResponse> {
         let job = match self
             .app_service
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(j) => j,
@@ -869,7 +875,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::DetachVolumeResponse> {
         let job = match self
             .app_service
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(j) => j,
@@ -909,7 +915,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::StartMigrationResponse> {
         let job = match self
             .app_service
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(j) => j,
@@ -949,7 +955,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::CancelMigrationResponse> {
         let job = match self
             .app_service
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(j) => j,
@@ -989,7 +995,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::QueryMigrationResponse> {
         let job = match self
             .app_service
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(j) => j,
@@ -1045,7 +1051,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::SetBalloonResponse> {
         let job = match self
             .app_service
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(j) => j,
@@ -1085,7 +1091,7 @@ impl SchedulerServer {
     ) -> anyhow::Result<mikrom_proto::scheduler::QueryBalloonResponse> {
         let job = match self
             .app_service
-            .get_app_status(&req.job_id, &req.user_id)
+            .get_app_status(&req.job_id, &req.tenant_id)
             .await
         {
             Ok(j) => j,
@@ -1176,7 +1182,7 @@ mod tests {
             .expect_update_app_config()
             .with(function(|cfg: &AppConfig| {
                 cfg.id == "app-1".into()
-                    && cfg.user_id == "user-1".into()
+                    && cfg.tenant_id == "user-1".into()
                     && cfg.hostname == "app.example.com"
                     && cfg.last_router_traffic_at == 123
                     && cfg.last_scaled_to_zero_at == 456
@@ -1199,7 +1205,7 @@ mod tests {
         let response = server
             .update_app_scaling_config(UpdateAppScalingConfigRequest {
                 app_id: "app-1".to_string(),
-                user_id: "user-1".to_string(),
+                tenant_id: "user-1".to_string(),
                 vpc_ipv6_prefix: "fd00::".to_string(),
                 hostname: "app.example.com".to_string(),
                 desired_replicas: 2,
@@ -1309,7 +1315,7 @@ mod tests {
                 database_id: "db-1".to_string(),
                 database_name: "orders".to_string(),
                 rootfs_image: "local:/opt/neon".to_string(),
-                user_id: "user-1".to_string(),
+                tenant_id: "user-1".to_string(),
                 deployment_id: "dep-1".to_string(),
                 vpc_ipv6_prefix: "fd00:abcd::".to_string(),
                 config: Some(mikrom_proto::scheduler::AppConfig {
@@ -1360,7 +1366,7 @@ mod tests {
                     app_id: "db-1".into(),
                     app_name: "orders".to_string(),
                     image: "local:/opt/neon".to_string(),
-                    user_id: "user-1".into(),
+                    tenant_id: "user-1".into(),
                     status: JobStatus::Running,
                     host_id: Some("host-1".into()),
                     vm_id: Some("vm-1".into()),
@@ -1391,7 +1397,7 @@ mod tests {
         let response = server
             .get_database_status(mikrom_proto::scheduler::DatabaseStatusRequest {
                 job_id: "job-1".to_string(),
-                user_id: "user-1".to_string(),
+                tenant_id: "user-1".to_string(),
             })
             .await
             .unwrap();
@@ -1427,7 +1433,7 @@ mod tests {
                     app_id: "db-1".into(),
                     app_name: "orders".to_string(),
                     image: "local:/opt/neon".to_string(),
-                    user_id: "user-1".into(),
+                    tenant_id: "user-1".into(),
                     status: JobStatus::Running,
                     host_id: Some("host-1".into()),
                     vm_id: Some("vm-1".into()),
@@ -1470,7 +1476,7 @@ mod tests {
         let response = server
             .delete_database(mikrom_proto::scheduler::DeleteDatabaseRequest {
                 job_id: "job-1".to_string(),
-                user_id: "user-1".to_string(),
+                tenant_id: "user-1".to_string(),
             })
             .await
             .unwrap();

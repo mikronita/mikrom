@@ -1,0 +1,9 @@
+Package: mikrom-network
+Version: 0.1.0
+Section: admin
+Priority: optional
+Architecture: amd64
+Maintainer: Antonio Pardo <apardo@spluca.org>
+Depends: libc6, libssl3, wireguard-tools
+Description: Mikrom Network provides WireGuard mesh management for the Mikrom platform.
+ It synchronizes routes and worker state via NATS.

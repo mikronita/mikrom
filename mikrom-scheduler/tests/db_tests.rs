@@ -5,7 +5,7 @@ mod common_utils;
 mod tests {
     use super::common_utils;
     use mikrom_scheduler::domain::{
-        AppConfig, AppId, AppRepository, Job, JobId, JobRepository, UserId, VmConfig,
+        AppConfig, AppId, AppRepository, Job, JobId, JobRepository, TenantId, VmConfig,
     };
     use mikrom_scheduler::infrastructure::db::PgAppRepository;
     use mikrom_scheduler::infrastructure::db::PgJobRepository;
@@ -47,7 +47,7 @@ mod tests {
 
         let config = AppConfig {
             id: AppId::from("app-1".to_string()),
-            user_id: UserId::from("user-1".to_string()),
+            tenant_id: TenantId::from("tenant-1".to_string()),
             vpc_ipv6_prefix: "fd00:1234::".to_string(),
             hostname: "db-test.example.com".to_string(),
             desired_replicas: 2,
@@ -76,7 +76,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(by_hostname.id, AppId::from("app-1".to_string()));
-        assert_eq!(by_hostname.user_id, UserId::from("user-1".to_string()));
+        assert_eq!(
+            by_hostname.tenant_id,
+            TenantId::from("tenant-1".to_string())
+        );
         assert_eq!(by_hostname.vpc_ipv6_prefix, "fd00:1234::");
         assert_eq!(by_hostname.desired_replicas, 2);
         assert!(by_hostname.autoscaling_enabled);
@@ -96,7 +99,7 @@ mod tests {
 
         let app = AppConfig {
             id: AppId::from("app-delete".to_string()),
-            user_id: UserId::from("user-delete".to_string()),
+            tenant_id: TenantId::from("tenant-delete".to_string()),
             vpc_ipv6_prefix: "fd00:abcd::".to_string(),
             hostname: "delete.example.com".to_string(),
             desired_replicas: 1,
@@ -118,7 +121,7 @@ mod tests {
             "delete-app".to_string(),
             "nginx:latest".to_string(),
             VmConfig::default(),
-            app.user_id.clone(),
+            app.tenant_id.clone(),
             None,
         );
         job_repo.add_job(job).await.unwrap();

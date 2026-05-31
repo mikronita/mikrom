@@ -10,7 +10,8 @@ use mikrom_api::NatsScheduler;
 use mikrom_api::application::vms::MeshStatus;
 use mikrom_api::create_app;
 use mikrom_api::domain::{
-    AppRepository, MockDatabaseRepository, MockGithubRepository, MockVolumeRepository,
+    AppRepository, MockDatabaseRepository, MockGithubRepository, MockTenantRepository,
+    MockVolumeRepository,
 };
 use mikrom_api::domain::{CpuCores, MemoryMb, Port};
 use mikrom_api::infrastructure::db::{PostgresAppRepository, PostgresUserRepository};
@@ -23,7 +24,7 @@ use mikrom_router::domain::state::{Route, State};
 use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
 use mikrom_scheduler::domain::{
     AgentClient, AppConfig, AppId, AppRepository as _, DeploymentId, DomainResult, HostId, Job,
-    JobId, JobRepository as _, JobStatus, UserId, VmConfig, VmId,
+    JobId, JobRepository as _, JobStatus, TenantId, VmConfig, VmId,
 };
 use mikrom_scheduler::infrastructure::db::{PgJobRepository, PgWorkerRepository};
 use mikrom_scheduler::infrastructure::nats::NatsEventLoop;
@@ -679,6 +680,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
     let api_state = mikrom_api::AppState {
         ctx: mikrom_api::application::ApiContext::default(),
         user_repo,
+        tenant_repo: Arc::new(MockTenantRepository::new()),
         app_repo: api_app_repo.clone(),
         database_repo: Arc::new(MockDatabaseRepository::new()),
         volume_repo: Arc::new(MockVolumeRepository::new()),
@@ -785,7 +787,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
     scheduler_app_repo
         .upsert(AppConfig {
             id: AppId::from(app_record.id.to_string()),
-            user_id: UserId::from(app_record.user_id.to_string()),
+            tenant_id: TenantId::from(app_record.tenant_id.to_string()),
             vpc_ipv6_prefix: String::new(),
             hostname: hostname.clone(),
             desired_replicas: 1,
@@ -803,7 +805,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
     let deployment = api_app_repo
         .create_deployment(mikrom_api::domain::NewDeployment {
             app_id: app_record.id,
-            user_id: app_record.user_id.to_string(),
+            tenant_id: app_record.tenant_id.to_string(),
             vcpus: CpuCores::new(1).unwrap(),
             memory_mib: MemoryMb::new(128).unwrap(),
             disk_mib: 512,
@@ -837,7 +839,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
             hypervisor: mikrom_scheduler::domain::job::HypervisorType::Firecracker,
             workload_type: mikrom_scheduler::domain::job::WorkloadType::App,
         },
-        UserId::from(app_record.user_id.to_string()),
+        TenantId::from(app_record.tenant_id.to_string()),
         Some(DeploymentId::from(deployment.id.to_string())),
     );
     job.status = JobStatus::Running;
@@ -898,7 +900,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
     scheduler_app_repo
         .update_app_config(AppConfig {
             id: AppId::from(app_record.id.to_string()),
-            user_id: UserId::from(app_record.user_id.to_string()),
+            tenant_id: TenantId::from(app_record.tenant_id.to_string()),
             vpc_ipv6_prefix: String::new(),
             hostname: hostname.clone(),
             desired_replicas: 1,

@@ -34,16 +34,16 @@ maintainer = "Antonio Pardo <apardo@spluca.org>"
 copyright = "2026, Mikrom Team"
 license-file = ["../LICENSE", "0"]
 extended-description = """\
-Mikrom Network is a library and core networking utility for the Mikrom mesh network.
-It manages WireGuard interfaces and route synchronization via NATS.
+Mikrom Network provides WireGuard mesh management for the Mikrom platform.
+It synchronizes routes and worker state via NATS.
 """
 section = "admin"
 priority = "optional"
 depends = "libc6, libssl3, wireguard-tools"
 assets = [
     ["target/release/mikrom-network", "/usr/bin/mikrom-network", "755"],
-    ["debian/mikrom-network.service", "/lib/systemd/system/mikrom-network.service", "644"],
-    ["debian/network.env", "/etc/mikrom/network.env", "640"],
+    ["debian/lib/systemd/system/mikrom-network.service", "/lib/systemd/system/mikrom-network.service", "644"],
+    ["debian/etc/mikrom/network.env", "/etc/mikrom/network.env", "640"],
 ]
 systemd-units = { unit-name = "mikrom-network" }
 

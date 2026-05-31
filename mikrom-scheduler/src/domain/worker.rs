@@ -240,7 +240,7 @@ pub trait JobRepository: Send + Sync {
     async fn remove_jobs_by_app(&self, app_id: &str) -> DomainResult<()>;
     async fn list_jobs<'a>(
         &self,
-        user_id: Option<&'a str>,
+        tenant_id: Option<&'a str>,
         app_id: Option<&'a str>,
         status: Option<JobStatus>,
     ) -> DomainResult<Vec<Job>>;

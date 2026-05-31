@@ -128,6 +128,7 @@ pub async fn github_callback(
     state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::GithubAccountsChanged,
         user_id: Some(user_id),
+        tenant_id: None,
         app_id: None,
         app_name: None,
         deployment_id: None,

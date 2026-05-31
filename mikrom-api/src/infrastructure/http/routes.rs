@@ -85,6 +85,11 @@ pub fn create_app_with_rate_limits(
             get(crate::infrastructure::http::handlers::github::list_accounts),
         )
         .route(
+            &format!("{}/projects", crate::API_V1),
+            get(crate::infrastructure::http::handlers::projects::list_projects)
+                .post(crate::infrastructure::http::handlers::projects::create_project),
+        )
+        .route(
             &format!("{}/apps", crate::API_V1),
             post(crate::infrastructure::http::handlers::deploy::create_app_handler)
                 .get(crate::infrastructure::http::handlers::deploy::list_apps_handler),

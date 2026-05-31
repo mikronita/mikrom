@@ -32,7 +32,7 @@ impl ScalingService {
         &self,
         app_id: &str,
         desired_replicas: u32,
-        user_id: &str,
+        tenant_id: &str,
     ) -> DomainResult<()> {
         let telemetry = self.ctx.telemetry.clone();
         telemetry
@@ -40,7 +40,7 @@ impl ScalingService {
         let jobs = self
             .ctx
             .job_repo
-            .list_jobs(Some(user_id), None, None)
+            .list_jobs(Some(tenant_id), None, None)
             .await?;
         let active_jobs: Vec<_> = jobs
             .into_iter()
@@ -55,7 +55,7 @@ impl ScalingService {
         let paused_jobs: Vec<_> = self
             .ctx
             .job_repo
-            .list_jobs(Some(user_id), Some(app_id), None)
+            .list_jobs(Some(tenant_id), Some(app_id), None)
             .await?
             .into_iter()
             .filter(|j| j.status == JobStatus::Paused)
@@ -78,7 +78,7 @@ impl ScalingService {
 
                 for job in resume_candidates.iter().take(to_add as usize) {
                     if job.host_id.is_some() && job.vm_id.is_some() {
-                        match self.lifecycle.resume_app(&job.job_id, user_id).await {
+                        match self.lifecycle.resume_app(&job.job_id, tenant_id).await {
                             Ok(true) => {
                                 resumed += 1;
                             },
@@ -107,7 +107,7 @@ impl ScalingService {
                 let mut all_jobs = self
                     .ctx
                     .job_repo
-                    .list_jobs(Some(user_id), Some(app_id), None)
+                    .list_jobs(Some(tenant_id), Some(app_id), None)
                     .await?;
                 all_jobs.sort_by_key(|b| std::cmp::Reverse(b.created_at));
                 template_job = all_jobs.into_iter().next();
@@ -128,7 +128,7 @@ impl ScalingService {
                 let app_id = template_job.app_id.to_string();
                 let app_name = template_job.app_name.clone();
                 let image = template_job.image.clone();
-                let user_id = template_job.user_id.to_string();
+                let tenant_id = template_job.tenant_id.to_string();
                 let deployment_id = template_job
                     .deployment_id
                     .clone()
@@ -143,7 +143,7 @@ impl ScalingService {
                             app_id,
                             app_name,
                             image,
-                            user_id,
+                            tenant_id,
                             deployment_id,
                             vpc_ipv6_prefix: vpc_prefix,
                             config,
@@ -185,12 +185,12 @@ impl ScalingService {
             for job in jobs_to_kill.iter().take(to_remove as usize) {
                 if desired_replicas == 0 {
                     if job.host_id.is_some() && job.vm_id.is_some() {
-                        self.lifecycle.pause_app(&job.job_id, user_id).await?;
+                        self.lifecycle.pause_app(&job.job_id, tenant_id).await?;
                     } else {
-                        self.lifecycle.delete_app(&job.job_id, user_id).await?;
+                        self.lifecycle.delete_app(&job.job_id, tenant_id).await?;
                     }
                 } else {
-                    self.lifecycle.delete_app(&job.job_id, user_id).await?;
+                    self.lifecycle.delete_app(&job.job_id, tenant_id).await?;
                 }
             }
         }
@@ -265,7 +265,7 @@ impl ScalingService {
                     let vm_metrics = job
                         .host_id
                         .as_ref()
-                        .and_then(|h| job.vm_id.as_ref().map(|v| (h, v)))
+                        .zip(job.vm_id.as_ref())
                         .and_then(|(h, _v)| worker_map.get(h.as_ref()))
                         .and_then(|w| w.metrics.as_ref())
                         .and_then(|m| m.vms.get(job.vm_id.as_ref().unwrap().as_ref()));
@@ -379,7 +379,7 @@ impl ScalingService {
             )
             .await;
 
-            if let Err(e) = self.scale_app(&app.id, 0, &app.user_id).await {
+            if let Err(e) = self.scale_app(&app.id, 0, &app.tenant_id).await {
                 tracing::error!(
                     app_id = %app.id,
                     error = %e,
@@ -439,7 +439,7 @@ impl ScalingService {
             );
 
             if let Err(e) = self
-                .scale_app(&app.id, app.desired_replicas, &app.user_id)
+                .scale_app(&app.id, app.desired_replicas, &app.tenant_id)
                 .await
             {
                 tracing::error!(
@@ -464,7 +464,7 @@ impl ScalingService {
         if app.min_replicas > 0 {
             tracing::info!(app_id = %app.id, "Scaling up to min_replicas");
             if let Err(e) = self
-                .scale_app(&app.id, app.min_replicas, &app.user_id)
+                .scale_app(&app.id, app.min_replicas, &app.tenant_id)
                 .await
             {
                 tracing::error!("Failed to scale app {} to min: {}", app.id, e);
@@ -520,7 +520,7 @@ impl ScalingService {
                     );
                 }
 
-                if let Err(e) = self.scale_app(&app.id, desired, &app.user_id).await {
+                if let Err(e) = self.scale_app(&app.id, desired, &app.tenant_id).await {
                     tracing::error!(
                         app_id = %app.id,
                         desired = %desired,
@@ -554,7 +554,7 @@ impl ScalingService {
                 "Reconciling manual scaling"
             );
             if let Err(e) = self
-                .scale_app(&app.id, app.desired_replicas, &app.user_id)
+                .scale_app(&app.id, app.desired_replicas, &app.tenant_id)
                 .await
             {
                 tracing::error!("Failed to reconcile app {}: {}", app.id, e);

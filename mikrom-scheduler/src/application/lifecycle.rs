@@ -12,7 +12,7 @@ impl JobLifecycleService {
         Self { ctx }
     }
 
-    pub async fn get_app_status(&self, job_id: &str, user_id: &str) -> DomainResult<Job> {
+    pub async fn get_app_status(&self, job_id: &str, tenant_id: &str) -> DomainResult<Job> {
         let telemetry = self.ctx.telemetry.clone();
         telemetry
             .observe_result("lifecycle", "get_app_status", async {
@@ -23,7 +23,7 @@ impl JobLifecycleService {
                     .await?
                     .ok_or_else(|| DomainError::JobNotFound(job_id.to_string()))?;
 
-                if job.user_id != user_id.into() && user_id != "system" {
+                if job.tenant_id != tenant_id.into() && tenant_id != "system" {
                     return Err(DomainError::Unauthorized(
                         "You do not own this job".to_string(),
                     ));
@@ -34,11 +34,11 @@ impl JobLifecycleService {
             .await
     }
 
-    pub async fn pause_app(&self, job_id: &str, user_id: &str) -> DomainResult<()> {
+    pub async fn pause_app(&self, job_id: &str, tenant_id: &str) -> DomainResult<()> {
         let telemetry = self.ctx.telemetry.clone();
         telemetry
             .observe_result("lifecycle", "pause_app", async {
-                let job = self.get_app_status(job_id, user_id).await?;
+                let job = self.get_app_status(job_id, tenant_id).await?;
 
                 if matches!(job.status, JobStatus::Paused | JobStatus::Stopped) {
                     tracing::info!(
@@ -49,7 +49,7 @@ impl JobLifecycleService {
                     return Ok(());
                 }
 
-                if user_id != "system"
+                if tenant_id != "system"
                     && let Ok(Some(app)) = self.ctx.app_repo.get_app_config(&job.app_id).await
                 {
                     let now = chrono::Utc::now().timestamp();
@@ -103,11 +103,11 @@ impl JobLifecycleService {
             .await
     }
 
-    pub async fn resume_app(&self, job_id: &str, user_id: &str) -> DomainResult<bool> {
+    pub async fn resume_app(&self, job_id: &str, tenant_id: &str) -> DomainResult<bool> {
         let telemetry = self.ctx.telemetry.clone();
         telemetry
             .observe_result("lifecycle", "resume_app", async {
-                let job = self.get_app_status(job_id, user_id).await?;
+                let job = self.get_app_status(job_id, tenant_id).await?;
 
                 let Some(host_id) = job.host_id.as_ref() else {
                     return Ok(false);
@@ -204,11 +204,11 @@ impl JobLifecycleService {
             .await
     }
 
-    pub async fn delete_app(&self, job_id: &str, user_id: &str) -> DomainResult<()> {
+    pub async fn delete_app(&self, job_id: &str, tenant_id: &str) -> DomainResult<()> {
         let telemetry = self.ctx.telemetry.clone();
         telemetry
             .observe_result("lifecycle", "delete_app", async {
-                let job = self.get_app_status(job_id, user_id).await?;
+                let job = self.get_app_status(job_id, tenant_id).await?;
 
                 if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id)
                     && let Err(e) = self.ctx.agent_client.delete_vm(host_id, vm_id, job.config.hypervisor).await
@@ -268,14 +268,14 @@ impl JobLifecycleService {
             .await
     }
 
-    pub async fn delete_all_by_app(&self, app_id: &str, user_id: &str) -> DomainResult<()> {
+    pub async fn delete_all_by_app(&self, app_id: &str, tenant_id: &str) -> DomainResult<()> {
         let telemetry = self.ctx.telemetry.clone();
         telemetry
             .observe_result("lifecycle", "delete_all_by_app", async {
                 let jobs = self
                     .ctx
                     .job_repo
-                    .list_jobs(Some(user_id), None, None)
+                    .list_jobs(Some(tenant_id), None, None)
                     .await?;
                 let app_jobs: Vec<_> = jobs
                     .into_iter()

@@ -54,8 +54,9 @@ maintainer = "Antonio Pardo <apardo@spluca.org>"
 copyright = "2026, Mikrom Team"
 license-file = ["../LICENSE", "0"]
 extended-description = """\
-High-performance dynamic ingress router for Mikrom based on Pingora.
-Includes dynamic routing via NATS/PostgreSQL and automatic TLS management.
+Mikrom Router provides high-performance ingress routing for the Mikrom platform
+using Pingora. It integrates dynamic routing via NATS/PostgreSQL and automatic
+TLS management.
 """
 section = "admin"
 priority = "optional"

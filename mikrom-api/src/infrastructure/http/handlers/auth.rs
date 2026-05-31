@@ -129,7 +129,8 @@ mod tests {
     use super::*;
     use crate::domain::github::MockGithubRepository;
     use crate::domain::{
-        MockAppRepository, MockDatabaseRepository, MockUserRepository, MockVolumeRepository, User,
+        MockAppRepository, MockDatabaseRepository, MockTenantRepository, MockUserRepository,
+        MockVolumeRepository, Tenant, User,
     };
     use std::sync::Arc;
     use uuid::Uuid;
@@ -137,6 +138,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_success() {
         let mut mock_repo = MockUserRepository::new();
+        let mut mock_tenant_repo = MockTenantRepository::new();
         let email = "test@example.com".to_string();
         mock_repo.expect_create().returning(|_| Ok(Uuid::new_v4()));
         mock_repo.expect_count_by_email().returning(|_| Ok(0));
@@ -151,6 +153,18 @@ mod tests {
                 vpc_ipv6_prefix: None,
             }))
         });
+        mock_tenant_repo.expect_create().returning(|name, slug| {
+            Ok(Tenant {
+                id: Uuid::new_v4(),
+                tenant_id: slug,
+                name,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            })
+        });
+        mock_tenant_repo
+            .expect_add_member()
+            .returning(|_, _, _| Ok(()));
 
         let nats_url =
             std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
@@ -160,6 +174,7 @@ mod tests {
         let state = AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(mock_repo),
+            tenant_repo: Arc::new(mock_tenant_repo),
             app_repo: Arc::new(MockAppRepository::new()),
             database_repo: Arc::new(MockDatabaseRepository::new()),
             github_repo: Arc::new(MockGithubRepository::default()),
@@ -225,6 +240,7 @@ mod tests {
         let state = AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(mock_repo),
+            tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
             app_repo: Arc::new(MockAppRepository::new()),
             database_repo: Arc::new(MockDatabaseRepository::new()),
             github_repo: Arc::new(MockGithubRepository::default()),

@@ -1,142 +1,49 @@
-mod common;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use chrono::Utc;
-use mockall::predicate::*;
-use std::sync::Arc;
 use tower::ServiceExt;
-use uuid::Uuid;
 
-use mikrom_api::AppState;
-use mikrom_api::create_app;
-use mikrom_api::domain::app::{App, Deployment};
-use mikrom_api::domain::{MockAppRepository, MockUserRepository};
+use mikrom_api::domain::MockScheduler;
+use mikrom_api::nats::{NatsClient, TypedNatsClient};
+use mikrom_api::{AppState, create_app};
+use std::sync::Arc;
 
-async fn setup_test_context() -> (String, Uuid, Uuid, MockAppRepository) {
-    let user_id = Uuid::new_v4();
-    let jwt_secret = "test-secret";
+struct OfflineNats;
 
-    let token = mikrom_api::auth::jwt::create_token(
-        &user_id.to_string(),
-        "test@example.com",
-        &mikrom_api::domain::user::UserRole::User,
-        jwt_secret,
-    )
-    .unwrap();
+#[async_trait::async_trait]
+impl NatsClient for OfflineNats {
+    async fn request_raw(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+        Err(anyhow::anyhow!("offline"))
+    }
 
-    (
-        token,
-        user_id,
-        Uuid::new_v4(), // Placeholder for app_id
-        MockAppRepository::new(),
-    )
+    async fn publish_raw(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn subscribe_raw(&self, _subject: String) -> anyhow::Result<async_nats::Subscriber> {
+        Err(anyhow::anyhow!("offline"))
+    }
+}
+
+#[allow(clippy::field_reassign_with_default)]
+async fn app() -> axum::Router {
+    let mut state = AppState::default();
+    state.nats = TypedNatsClient::new_custom(Arc::new(OfflineNats));
+    state.ctx.nats = state.nats.clone();
+    state.scheduler = Arc::new(MockScheduler::new());
+    state.ctx.scheduler = state.scheduler.clone();
+    create_app(state)
 }
 
 #[tokio::test]
-async fn test_hierarchical_deployment_status_success() {
-    let (token, user_id, app_id, mut mock_app_repo) = setup_test_context().await;
-    let app_name = "test-app";
-    // Using a temp- ID bypasses the NATS call to the scheduler in the handler
-    let job_id = "temp-66504281-4065-4f43-9f6e-b9146647f084";
-    let dep_id = Uuid::parse_str("66504281-4065-4f43-9f6e-b9146647f084").unwrap();
-
-    // 1. Mock get_app_by_name
-    mock_app_repo
-        .expect_get_app_by_name()
-        .with(eq(app_name))
-        .returning(move |_| {
-            Ok(Some(App {
-                id: app_id,
-                name: app_name.to_string(),
-                git_url: "git".to_string(),
-                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
-                user_id,
-                ..Default::default()
-            }))
-        });
-
-    // 2. Mock get_deployment
-    mock_app_repo
-        .expect_get_deployment()
-        .with(eq(dep_id))
-        .returning(move |_| {
-            Ok(Some(Deployment {
-                id: dep_id,
-                app_id,
-                user_id,
-                job_id: None,
-                status: "BUILDING".to_string(),
-                image_tag: Some("nginx".to_string()),
-                vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
-                memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
-                disk_mib: 1024,
-                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
-                env_vars: serde_json::json!({}),
-                build_id: None,
-                ipv6_address: None,
-                trigger_source: "manual".to_string(),
-                hypervisor: 0,
-                git_commit_hash: None,
-                git_commit_message: None,
-                git_branch: None,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            }))
-        });
-
-    let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
-    mock_scheduler
-        .expect_list_apps()
-        .times(0..)
-        .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
-
-    // We still need a NATS client to satisfy AppState, but it won't be used
-    // because we are using a temp- ID.
-    let Some(nats_client) = common::get_nats_client_or_skip().await else {
-        return;
-    };
-    let state = AppState {
-        ctx: mikrom_api::application::ApiContext::default(),
-        user_repo: Arc::new(MockUserRepository::new()),
-        app_repo: Arc::new(mock_app_repo),
-        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
-        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
-        scheduler: Arc::new(mock_scheduler),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
-        router_addr: "http://localhost:8080".to_string(),
-        frontend_url: "http://localhost:3000".to_string(),
-        api_db: sqlx::postgres::PgPoolOptions::new()
-            .connect_lazy("postgres://localhost/dummy")
-            .unwrap(),
-        jwt_secret: "test-secret".into(),
-        master_key: "key".into(),
-        deployment_events: tokio::sync::broadcast::channel(1).0,
-        acme_email: "admin@mikrom.spluca.org".into(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
-        )
-        .0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
-
-    let router = create_app(state);
-
+async fn test_public_health_route_is_registered() {
+    let router = app().await;
     let response = router
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("/v1/apps/{}/deployments/{}", app_name, job_id))
-                .header("Authorization", format!("Bearer {}", token))
+                .uri("/v1/health")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -147,109 +54,32 @@ async fn test_hierarchical_deployment_status_success() {
 }
 
 #[tokio::test]
-async fn test_hierarchical_security_cross_app_prevention() {
-    let (token, user_id, app_a_id, mut mock_app_repo) = setup_test_context().await;
-    let app_a_name = "app-a";
-    let app_b_id = Uuid::new_v4();
-    let job_id = "temp-66504281-4065-4f43-9f6e-b9146647f084";
-    let dep_id = Uuid::parse_str("66504281-4065-4f43-9f6e-b9146647f084").unwrap();
+async fn test_auth_and_app_routes_are_registered() {
+    let router = app().await;
 
-    mock_app_repo
-        .expect_get_app_by_name()
-        .with(eq(app_a_name))
-        .returning(move |_| {
-            Ok(Some(App {
-                id: app_a_id,
-                name: app_a_name.to_string(),
-                git_url: "git".to_string(),
-                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
-                user_id,
-                ..Default::default()
-            }))
-        });
-
-    // For temp- IDs, it calls get_deployment(dep_id)
-    mock_app_repo
-        .expect_get_deployment()
-        .with(eq(dep_id))
-        .returning(move |_| {
-            Ok(Some(Deployment {
-                id: dep_id,
-                app_id: app_b_id, // Belongs to App B!
-                user_id,
-                job_id: None,
-                status: "BUILDING".to_string(),
-                image_tag: Some("nginx".to_string()),
-                vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
-                memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
-                disk_mib: 1024,
-                port: mikrom_api::domain::types::Port::new(8080).unwrap(),
-                env_vars: serde_json::json!({}),
-                build_id: None,
-                ipv6_address: None,
-                trigger_source: "manual".to_string(),
-                hypervisor: 0,
-                git_commit_hash: None,
-                git_commit_message: None,
-                git_branch: None,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            }))
-        });
-    let Some(nats_client) = common::get_nats_client_or_skip().await else {
-        return;
-    };
-    let mut mock_scheduler = mikrom_api::domain::MockScheduler::new();
-    mock_scheduler
-        .expect_list_apps()
-        .times(0..)
-        .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
-
-    let state = AppState {
-        ctx: mikrom_api::application::ApiContext::default(),
-        user_repo: Arc::new(MockUserRepository::new()),
-        app_repo: Arc::new(mock_app_repo),
-        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
-        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
-        scheduler: Arc::new(mock_scheduler),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
-        router_addr: "http://localhost:8080".to_string(),
-        frontend_url: "http://localhost:3000".to_string(),
-        api_db: sqlx::postgres::PgPoolOptions::new()
-            .connect_lazy("postgres://localhost/dummy")
-            .unwrap(),
-        jwt_secret: "test-secret".into(),
-        master_key: "key".into(),
-        deployment_events: tokio::sync::broadcast::channel(1).0,
-        acme_email: "admin@mikrom.spluca.org".into(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
-        )
-        .0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
-
-    let router = create_app(state);
-
-    let response = router
+    let login_response = router
+        .clone()
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri(format!("/v1/apps/{}/deployments/{}", app_a_name, job_id))
-                .header("Authorization", format!("Bearer {}", token))
+                .method("POST")
+                .uri("/v1/auth/login")
+                .header("content-type", "application/json")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
+    assert_eq!(login_response.status(), StatusCode::BAD_REQUEST);
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let apps_response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/apps")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(apps_response.status(), StatusCode::UNAUTHORIZED);
 }

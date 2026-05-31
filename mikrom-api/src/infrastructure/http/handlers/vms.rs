@@ -31,7 +31,7 @@ pub async fn app_logs_stream_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.user_id.to_string() != auth.user_id {
+    if app.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -83,7 +83,7 @@ pub async fn app_metrics_stream_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.user_id.to_string() != auth.user_id {
+    if app.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -158,7 +158,11 @@ async fn load_watch_deployments_cache(
         return cache;
     };
 
-    let apps = match state.app_repo.list_apps_by_user(Some(auth_user_uuid)).await {
+    let apps = match state
+        .app_repo
+        .list_apps_by_tenant(Some(auth_user_uuid))
+        .await
+    {
         Ok(apps) => apps,
         Err(err) => {
             tracing::warn!(
@@ -225,7 +229,7 @@ pub async fn list_active_deployments(
     use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
 
     let nats_req = ListAppsRequest {
-        user_id: auth.user_id.clone(),
+        tenant_id: auth.user_id.clone(),
         status: None, // We'll filter for RUNNING status
     };
 
@@ -340,7 +344,7 @@ pub async fn watch_deployments(
             .request::<ListAppsRequest, ListAppsResponse>(
                 "mikrom.scheduler.list_apps",
                 ListAppsRequest {
-                    user_id: auth_user_id.clone(),
+                    tenant_id: auth_user_id.clone(),
                     status: None,
                 },
             )
@@ -399,7 +403,7 @@ pub async fn watch_deployments(
                     use mikrom_proto::scheduler::AppInfo;
                     use prost::Message;
 
-                    if let Some(job) = AppInfo::decode(&msg.payload[..]).ok().filter(|job| job.user_id == auth_user_id)
+                    if let Some(job) = AppInfo::decode(&msg.payload[..]).ok().filter(|job| job.tenant_id == auth_user_id)
                         && let Some(cached) = deployment_cache.get(&job.app_id)
                         && let Some(deployment) = cached.deployments.get(&job.deployment_id)
                     {
@@ -486,7 +490,7 @@ pub async fn watch_deployments(
                         .request::<ListAppsRequest, ListAppsResponse>(
                             "mikrom.scheduler.list_apps",
                             ListAppsRequest {
-                                user_id: auth_user_id.clone(),
+                                tenant_id: auth_user_id.clone(),
                                 status: None,
                             },
                         )
@@ -591,7 +595,7 @@ pub async fn get_deployment_status(
 
     let nats_req = AppStatusRequest {
         job_id: job_id.clone(),
-        user_id: auth.user_id.clone(),
+        tenant_id: auth.user_id.clone(),
     };
 
     let inner: AppStatusResponse = state
@@ -654,7 +658,7 @@ pub async fn get_deployment_logs(
 
     let nats_req = AppStatusRequest {
         job_id: job_id.clone(),
-        user_id: auth.user_id.clone(),
+        tenant_id: auth.user_id.clone(),
     };
 
     let inner: AppStatusResponse = state
@@ -841,7 +845,7 @@ pub async fn list_security_rules_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.user_id.to_string() != auth.user_id {
+    if app.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -862,7 +866,7 @@ pub async fn create_security_rule_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.user_id.to_string() != auth.user_id {
+    if app.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -880,7 +884,7 @@ pub async fn create_security_rule_handler(
     // Notify scheduler to apply rules to active VMs
     let nats_req = mikrom_proto::scheduler::UpdateSecurityGroupsRequest {
         app_id: app.id.to_string(),
-        user_id: auth.user_id.clone(),
+        tenant_id: auth.user_id.clone(),
         rules: Vec::new(), // Rules will be fetched by scheduler from DB
     };
 
@@ -891,7 +895,8 @@ pub async fn create_security_rule_handler(
 
     state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::SecurityRulesChanged,
-        user_id: Some(app.user_id),
+        user_id: None,
+        tenant_id: Some(app.tenant_id),
         app_id: Some(app.id),
         app_name: Some(app.name),
         deployment_id: None,
@@ -914,7 +919,7 @@ pub async fn delete_security_rule_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.user_id.to_string() != auth.user_id {
+    if app.tenant_id.to_string() != auth.user_id {
         return Err(ApiError::Forbidden);
     }
 
@@ -926,7 +931,7 @@ pub async fn delete_security_rule_handler(
     // Notify scheduler to apply rules to active VMs
     let nats_req = mikrom_proto::scheduler::UpdateSecurityGroupsRequest {
         app_id: app.id.to_string(),
-        user_id: auth.user_id.clone(),
+        tenant_id: auth.user_id.clone(),
         rules: Vec::new(),
     };
 
@@ -937,7 +942,8 @@ pub async fn delete_security_rule_handler(
 
     state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::SecurityRulesChanged,
-        user_id: Some(app.user_id),
+        user_id: None,
+        tenant_id: Some(app.tenant_id),
         app_id: Some(app.id),
         app_name: Some(app.name),
         deployment_id: None,

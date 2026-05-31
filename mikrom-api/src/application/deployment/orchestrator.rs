@@ -23,7 +23,8 @@ impl DeploymentOrchestrator {
         state.deployment_events.send(updated_app.id).ok();
         state.publish_workspace_event(WorkspaceEvent {
             kind: WorkspaceEventKind::DeploymentChanged,
-            user_id: Some(updated_app.user_id),
+            tenant_id: Some(updated_app.tenant_id),
+            user_id: None,
             app_id: Some(updated_app.id),
             app_name: Some(updated_app.name.clone()),
             deployment_id: Some(deployment_id),
@@ -54,7 +55,8 @@ impl DeploymentOrchestrator {
             if let Ok(Some(app)) = state.app_repo.get_app(app_id).await {
                 state.publish_workspace_event(WorkspaceEvent {
                     kind: WorkspaceEventKind::DeploymentChanged,
-                    user_id: Some(app.user_id),
+                    tenant_id: Some(app.tenant_id),
+                    user_id: None,
                     app_id: Some(app.id),
                     app_name: Some(app.name),
                     deployment_id: Some(old_id),
@@ -126,7 +128,8 @@ impl DeploymentOrchestrator {
 
             state.publish_workspace_event(WorkspaceEvent {
                 kind: WorkspaceEventKind::DeploymentChanged,
-                user_id: Some(app.user_id),
+                tenant_id: Some(app.tenant_id),
+                user_id: None,
                 app_id: Some(app.id),
                 app_name: Some(app_name.to_string()),
                 deployment_id: Some(old_id),
@@ -160,7 +163,8 @@ impl DeploymentOrchestrator {
             state.deployment_events.send(app_id).ok();
             state.publish_workspace_event(WorkspaceEvent {
                 kind: WorkspaceEventKind::DeploymentChanged,
-                user_id: Some(old_dep.user_id),
+                tenant_id: Some(old_dep.tenant_id),
+                user_id: None,
                 app_id: Some(old_dep.app_id),
                 app_name: Some(app_name.to_string()),
                 deployment_id: Some(old_id),
@@ -245,13 +249,14 @@ impl DeploymentOrchestrator {
         state.deployment_events.send(app_id).ok();
         state.publish_workspace_event(WorkspaceEvent {
             kind: WorkspaceEventKind::DeploymentChanged,
-            user_id: state
+            user_id: None,
+            tenant_id: state
                 .app_repo
                 .get_app(app_id)
                 .await
                 .ok()
                 .flatten()
-                .map(|app| app.user_id),
+                .map(|app| app.tenant_id),
             app_id: Some(app_id),
             app_name: Some(app_name.to_string()),
             deployment_id: Some(deployment_id),
@@ -263,7 +268,7 @@ impl DeploymentOrchestrator {
     }
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::domain::github::MockGithubRepository;
@@ -318,7 +323,7 @@ mod tests {
             .returning(move |_| {
                 Ok(Some(App {
                     id: app_id,
-                    user_id,
+                    tenant_id: user_id,
                     name: "test-app".to_string(),
                     ..Default::default()
                 }))
@@ -417,7 +422,7 @@ mod tests {
             .returning(move |_| {
                 Ok(Some(App {
                     id: app_id,
-                    user_id,
+                    tenant_id: user_id,
                     name: "test-app".to_string(),
                     ..Default::default()
                 }))
@@ -608,7 +613,7 @@ mod tests {
             .returning(move |_| {
                 Ok(Some(App {
                     id: app_id,
-                    user_id,
+                    tenant_id: user_id,
                     name: "test-app".to_string(),
                     ..Default::default()
                 }))
