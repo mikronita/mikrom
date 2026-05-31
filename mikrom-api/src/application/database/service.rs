@@ -472,6 +472,10 @@ impl DatabaseService {
             return Some(remainder[..end].to_string());
         }
 
+        if authority.chars().filter(|&c| c == ':').count() > 1 {
+            return Some(authority.to_string());
+        }
+
         authority.split(':').next().map(|host| host.to_string())
     }
 
@@ -1190,6 +1194,14 @@ mod tests {
         let value = serde_json::to_value(&claims).unwrap();
         assert_eq!(value["scope"], NEON_CONFIGURE_TOKEN_SCOPE);
         assert_eq!(value["aud"], serde_json::json!(["compute"]));
+    }
+
+    #[test]
+    fn extract_neon_host_preserves_unbracketed_ipv6_authority() {
+        assert_eq!(
+            DatabaseService::extract_neon_host("http://fd40:b90d:fc5f:1ae0::1:9898"),
+            Some("fd40:b90d:fc5f:1ae0::1:9898".to_string())
+        );
     }
 
     #[tokio::test]
