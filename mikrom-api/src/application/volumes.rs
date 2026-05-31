@@ -3,6 +3,7 @@ use crate::domain::{
     VolumeSnapshot, VolumeWithAttachments,
 };
 use crate::error::{ApiError, ApiResult};
+use crate::infrastructure::auth::extractor::TenantContext;
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::{
     Json,
@@ -94,12 +95,11 @@ pub struct CloneVolumeRequest {
 
 #[rovo::rovo]
 pub async fn create_volume_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Json(req): Json<CreateVolumeRequest>,
 ) -> ApiResult<(StatusCode, Json<Volume>)> {
-    let tenant_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?;
+    let tenant_id = tenant_ctx.tenant.id;
 
     let pool_name = format!("user_{}_volumes", tenant_id.to_string().replace('-', "_"));
 
@@ -151,7 +151,7 @@ pub async fn create_volume_handler(
 
 #[rovo::rovo]
 pub async fn list_volumes_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(app_id): Path<Uuid>,
 ) -> ApiResult<Json<Vec<AttachedVolume>>> {
@@ -161,7 +161,7 @@ pub async fn list_volumes_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.tenant_id.to_string() != auth.user_id {
+    if app.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -171,18 +171,17 @@ pub async fn list_volumes_handler(
 
 #[rovo::rovo]
 pub async fn list_all_volumes_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
 ) -> ApiResult<Json<Vec<VolumeWithAttachments>>> {
-    let tenant_id = uuid::Uuid::parse_str(&auth.user_id)
-        .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?;
+    let tenant_id = tenant_ctx.tenant.id;
     let volumes = state.volume_repo.list_volumes_by_tenant(tenant_id).await?;
     Ok(Json(volumes))
 }
 
 #[rovo::rovo]
 pub async fn attach_volume_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(app_id): Path<Uuid>,
     Json(req): Json<AttachVolumeRequest>,
@@ -193,7 +192,7 @@ pub async fn attach_volume_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.tenant_id.to_string() != auth.user_id {
+    if app.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -281,7 +280,7 @@ pub async fn attach_volume_handler(
 
 #[rovo::rovo]
 pub async fn detach_volume_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_id, volume_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<StatusCode> {
@@ -291,7 +290,7 @@ pub async fn detach_volume_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.tenant_id.to_string() != auth.user_id {
+    if app.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -323,7 +322,7 @@ pub async fn detach_volume_handler(
 
 #[rovo::rovo]
 pub async fn list_snapshots_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(volume_id): Path<Uuid>,
 ) -> ApiResult<Json<Vec<VolumeSnapshot>>> {
@@ -333,7 +332,7 @@ pub async fn list_snapshots_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if volume.tenant_id.to_string() != auth.user_id {
+    if volume.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -346,7 +345,7 @@ pub async fn list_snapshots_handler(
 
 #[rovo::rovo]
 pub async fn create_snapshot_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(volume_id): Path<Uuid>,
     Json(req): Json<CreateSnapshotRequest>,
@@ -357,7 +356,7 @@ pub async fn create_snapshot_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if volume.tenant_id.to_string() != auth.user_id {
+    if volume.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -407,7 +406,7 @@ pub async fn create_snapshot_handler(
 
 #[rovo::rovo]
 pub async fn delete_volume_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(volume_id): Path<Uuid>,
 ) -> ApiResult<StatusCode> {
@@ -417,7 +416,7 @@ pub async fn delete_volume_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if volume.tenant_id.to_string() != auth.user_id {
+    if volume.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -483,7 +482,7 @@ pub async fn delete_volume_handler(
 
 #[rovo::rovo]
 pub async fn delete_snapshot_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(snapshot_id): Path<Uuid>,
 ) -> ApiResult<StatusCode> {
@@ -493,7 +492,7 @@ pub async fn delete_snapshot_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Snapshot not found".to_string()))?;
 
-    if snapshot.tenant_id.to_string() != auth.user_id {
+    if snapshot.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -542,7 +541,7 @@ pub async fn delete_snapshot_handler(
 
 #[rovo::rovo]
 pub async fn restore_snapshot_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(volume_id): Path<Uuid>,
     Json(req): Json<RestoreSnapshotRequest>,
@@ -553,7 +552,7 @@ pub async fn restore_snapshot_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if volume.tenant_id.to_string() != auth.user_id {
+    if volume.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -581,7 +580,7 @@ pub async fn restore_snapshot_handler(
 
 #[rovo::rovo]
 pub async fn clone_volume_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(volume_id): Path<Uuid>,
     Json(req): Json<CloneVolumeRequest>,
@@ -592,12 +591,11 @@ pub async fn clone_volume_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("Volume not found".to_string()))?;
 
-    if volume.tenant_id.to_string() != auth.user_id {
+    if volume.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
-    let tenant_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| ApiError::Internal("Invalid user id".to_string()))?;
+    let tenant_id = tenant_ctx.tenant.id;
 
     let pool_name = format!("user_{}_volumes", tenant_id.to_string().replace('-', "_"));
 

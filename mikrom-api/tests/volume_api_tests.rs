@@ -6,6 +6,7 @@ use mikrom_api::AppState;
 use mikrom_api::application::vms::MeshStatus;
 use mikrom_api::auth::jwt::create_token;
 use mikrom_api::create_app;
+use mikrom_api::domain::Tenant;
 use mikrom_api::domain::app::App;
 use mikrom_api::domain::github::MockGithubRepository;
 use mikrom_api::domain::types::Port;
@@ -130,11 +131,31 @@ fn build_state(
     let app_repo = Arc::new(app_repo);
     let user_repo = Arc::new(user_repo);
     let volume_repo = Arc::new(volume_repo);
+    let tenant = Tenant {
+        id: tenant_id,
+        tenant_id: "tenant".to_string(),
+        name: "Test Tenant".to_string(),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    let tenant_slug = tenant.tenant_id.clone();
+    let tenant_id_for_membership = tenant.id;
+    let mut tenant_repo = MockTenantRepository::new();
+    tenant_repo.expect_find_by_slug().returning(move |slug| {
+        if slug == tenant_slug {
+            Ok(Some(tenant.clone()))
+        } else {
+            Ok(None)
+        }
+    });
+    tenant_repo
+        .expect_is_member()
+        .returning(move |_, user_id| Ok(user_id == tenant_id_for_membership));
 
     let state = AppState {
         ctx: mikrom_api::application::ApiContext::default(),
         user_repo: user_repo.clone(),
-        tenant_repo: Arc::new(MockTenantRepository::new()),
+        tenant_repo: Arc::new(tenant_repo),
         app_repo: app_repo.clone(),
         database_repo: Arc::new(MockDatabaseRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
@@ -209,6 +230,7 @@ async fn create_volume_handler_creates_volume_for_tenant() {
             Request::builder()
                 .method("POST")
                 .uri("/v1/volumes")
+                .header("x-mikrom-tenant-id", "tenant")
                 .header("Authorization", auth_header(&token))
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -286,6 +308,7 @@ async fn create_snapshot_handler_creates_snapshot_for_volume() {
             Request::builder()
                 .method("POST")
                 .uri(format!("/v1/volumes/{volume_id}/snapshots"))
+                .header("x-mikrom-tenant-id", "tenant")
                 .header("Authorization", auth_header(&token))
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -354,6 +377,7 @@ async fn list_snapshots_handler_returns_snapshots() {
             Request::builder()
                 .method("GET")
                 .uri(format!("/v1/volumes/{volume_id}/snapshots"))
+                .header("x-mikrom-tenant-id", "tenant")
                 .header("Authorization", auth_header(&token))
                 .body(Body::empty())
                 .unwrap(),
@@ -406,6 +430,7 @@ async fn list_snapshots_handler_rejects_other_tenant() {
             Request::builder()
                 .method("GET")
                 .uri(format!("/v1/volumes/{volume_id}/snapshots"))
+                .header("x-mikrom-tenant-id", "tenant")
                 .header("Authorization", auth_header(&token))
                 .body(Body::empty())
                 .unwrap(),

@@ -7,6 +7,7 @@ use crate::application::vms::{
 use crate::domain::Deployment;
 use crate::domain::types::Port;
 use crate::error::{ApiError, ApiResult, SseResponse};
+use crate::infrastructure::auth::extractor::TenantContext;
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::{
     Json,
@@ -20,7 +21,7 @@ use std::convert::Infallible;
 
 #[rovo::rovo]
 pub async fn app_logs_stream_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
@@ -31,7 +32,7 @@ pub async fn app_logs_stream_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.tenant_id.to_string() != auth.user_id {
+    if app.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -72,7 +73,7 @@ pub async fn app_logs_stream_handler(
 
 #[rovo::rovo]
 pub async fn app_metrics_stream_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
@@ -83,7 +84,7 @@ pub async fn app_metrics_stream_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.tenant_id.to_string() != auth.user_id {
+    if app.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -220,16 +221,16 @@ async fn load_watch_deployments_cache(
 }
 
 #[rovo::rovo]
-#[tracing::instrument(skip(state, auth))]
+#[tracing::instrument(skip(state, tenant_ctx))]
 pub async fn list_active_deployments(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
 ) -> ApiResult<Json<Vec<LiveDeploymentInfo>>> {
     // 1. Get all running jobs from scheduler via NATS
     use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
 
     let nats_req = ListAppsRequest {
-        tenant_id: auth.user_id.clone(),
+        tenant_id: tenant_ctx.tenant.id.to_string(),
         status: None, // We'll filter for RUNNING status
     };
 
@@ -252,15 +253,11 @@ pub async fn list_active_deployments(
 
     // Optimization: Fetch all deployments for the user once to enrich the scheduler list
     let mut user_deployments = std::collections::HashMap::new();
-    if let (Ok(_user_uuid), Ok(deps)) = (
-        uuid::Uuid::parse_str(&auth.user_id),
-        state
-            .app_repo
-            .list_deployments_by_user(Some(
-                uuid::Uuid::parse_str(&auth.user_id).unwrap_or_default(),
-            ))
-            .await,
-    ) {
+    if let Ok(deps) = state
+        .app_repo
+        .list_deployments_by_user(Some(tenant_ctx.tenant.id))
+        .await
+    {
         for dep in deps {
             user_deployments.insert(dep.id.to_string(), dep);
         }
@@ -314,9 +311,9 @@ pub async fn list_active_deployments(
 }
 
 #[rovo::rovo]
-#[tracing::instrument(skip(state, auth))]
+#[tracing::instrument(skip(state, tenant_ctx))]
 pub async fn watch_deployments(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
 ) -> ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     let nats_sub = state
@@ -326,15 +323,15 @@ pub async fn watch_deployments(
         .map_err(|e| ApiError::Internal(format!("Failed to subscribe to job updates: {}", e)))?;
 
     let local_rx = state.deployment_events.subscribe();
-    let auth_user_id = auth.user_id.clone();
+    let tenant_id = tenant_ctx.tenant.id.to_string();
     let state_clone = state.clone();
-    let auth_user_uuid = uuid::Uuid::parse_str(&auth_user_id).ok();
+    let tenant_uuid = Some(tenant_ctx.tenant.id);
 
     let stream = async_stream::stream! {
         let mut nats_stream = nats_sub;
         let mut local_stream = tokio_stream::wrappers::BroadcastStream::new(local_rx);
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
-        let mut deployment_cache = load_watch_deployments_cache(&state_clone, auth_user_uuid).await;
+        let mut deployment_cache = load_watch_deployments_cache(&state_clone, tenant_uuid).await;
 
         use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
 
@@ -342,12 +339,12 @@ pub async fn watch_deployments(
             .nats
             .with_timeout(std::time::Duration::from_secs(2))
             .request::<ListAppsRequest, ListAppsResponse>(
-                "mikrom.scheduler.list_apps",
-                ListAppsRequest {
-                    tenant_id: auth_user_id.clone(),
-                    status: None,
-                },
-            )
+                    "mikrom.scheduler.list_apps",
+                    ListAppsRequest {
+                        tenant_id: tenant_id.clone(),
+                        status: None,
+                    },
+                )
             .await
             .ok()
             .map(|response| response.apps)
@@ -403,7 +400,7 @@ pub async fn watch_deployments(
                     use mikrom_proto::scheduler::AppInfo;
                     use prost::Message;
 
-                    if let Some(job) = AppInfo::decode(&msg.payload[..]).ok().filter(|job| job.tenant_id == auth_user_id)
+                    if let Some(job) = AppInfo::decode(&msg.payload[..]).ok().filter(|job| job.tenant_id == tenant_id)
                         && let Some(cached) = deployment_cache.get(&job.app_id)
                         && let Some(deployment) = cached.deployments.get(&job.deployment_id)
                     {
@@ -444,7 +441,7 @@ pub async fn watch_deployments(
                 },
                 res = local_stream.next() => {
                     if let Some(Ok(_app_id)) = res {
-                        deployment_cache = load_watch_deployments_cache(&state_clone, auth_user_uuid).await;
+                        deployment_cache = load_watch_deployments_cache(&state_clone, tenant_uuid).await;
 
                         for cached in deployment_cache.values() {
                             for dep in cached.deployments.values() {
@@ -480,7 +477,7 @@ pub async fn watch_deployments(
                     }
                 },
                 _ = interval.tick() => {
-                    deployment_cache = load_watch_deployments_cache(&state_clone, auth_user_uuid).await;
+                    deployment_cache = load_watch_deployments_cache(&state_clone, tenant_uuid).await;
 
                     use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
 
@@ -490,7 +487,7 @@ pub async fn watch_deployments(
                         .request::<ListAppsRequest, ListAppsResponse>(
                             "mikrom.scheduler.list_apps",
                             ListAppsRequest {
-                                tenant_id: auth_user_id.clone(),
+                                tenant_id: tenant_id.clone(),
                                 status: None,
                             },
                         )
@@ -555,14 +552,19 @@ pub async fn watch_deployments(
 #[rovo::rovo]
 #[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn get_deployment_status(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<LiveDeploymentStatus>> {
     use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse};
 
-    let (app, dep) =
-        VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let (app, dep) = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
 
     // If it's a temporary ID from BUILDING/SCHEDULED phase
     if job_id.starts_with("temp-") {
@@ -595,7 +597,7 @@ pub async fn get_deployment_status(
 
     let nats_req = AppStatusRequest {
         job_id: job_id.clone(),
-        tenant_id: auth.user_id.clone(),
+        tenant_id: tenant_ctx.tenant.id.to_string(),
     };
 
     let inner: AppStatusResponse = state
@@ -646,19 +648,25 @@ pub async fn get_deployment_status(
 
 #[rovo::rovo]
 pub async fn get_deployment_logs(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     // 1. Validate app ownership and deployment connection
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
 
     // 2. Get VM ID from scheduler via NATS
     use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse};
 
     let nats_req = AppStatusRequest {
         job_id: job_id.clone(),
-        tenant_id: auth.user_id.clone(),
+        tenant_id: tenant_ctx.tenant.id.to_string(),
     };
 
     let inner: AppStatusResponse = state
@@ -700,16 +708,26 @@ use crate::application::deployment::DeploymentService;
 #[rovo::rovo]
 #[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn pause_deployment(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Validate app ownership and deployment connection
-    let (app, deployment) =
-        VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let (app, deployment) = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
 
-    let success =
-        DeploymentService::pause_deployment(&state, &app, &deployment, auth.user_id).await?;
+    let success = DeploymentService::pause_deployment(
+        &state,
+        &app,
+        &deployment,
+        tenant_ctx.tenant.id.to_string(),
+    )
+    .await?;
 
     if success {
         Ok(Json(
@@ -723,16 +741,26 @@ pub async fn pause_deployment(
 #[rovo::rovo]
 #[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn resume_deployment(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Validate app ownership and deployment connection
-    let (app, deployment) =
-        VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let (app, deployment) = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
 
-    let success =
-        DeploymentService::resume_deployment(&state, &app, &deployment, auth.user_id).await?;
+    let success = DeploymentService::resume_deployment(
+        &state,
+        &app,
+        &deployment,
+        tenant_ctx.tenant.id.to_string(),
+    )
+    .await?;
 
     if success {
         Ok(Json(
@@ -746,16 +774,26 @@ pub async fn resume_deployment(
 #[rovo::rovo]
 #[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn stop_deployment(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Validate app ownership and deployment connection
-    let (app, deployment) =
-        VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let (app, deployment) = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
 
-    let (success, message) =
-        DeploymentService::stop_deployment(&state, &app, &deployment, auth.user_id).await?;
+    let (success, message) = DeploymentService::stop_deployment(
+        &state,
+        &app,
+        &deployment,
+        tenant_ctx.tenant.id.to_string(),
+    )
+    .await?;
 
     if success {
         Ok(Json(
@@ -769,13 +807,18 @@ pub async fn stop_deployment(
 #[rovo::rovo]
 #[tracing::instrument(skip(state), fields(app_name = %app_name, job_id = %job_id))]
 pub async fn delete_deployment_record(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Validate app ownership and deployment connection
-    let (app, _) =
-        VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let (app, _) = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
 
     DeploymentService::delete_deployment_record(&state, &app, job_id).await?;
 
@@ -835,7 +878,7 @@ pub struct CreateSecurityRuleRequest {
 
 #[rovo::rovo]
 pub async fn list_security_rules_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<Json<Vec<crate::domain::SecurityRule>>> {
@@ -845,7 +888,7 @@ pub async fn list_security_rules_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.tenant_id.to_string() != auth.user_id {
+    if app.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -855,7 +898,7 @@ pub async fn list_security_rules_handler(
 
 #[rovo::rovo]
 pub async fn create_security_rule_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path(app_name): Path<String>,
     Json(payload): Json<CreateSecurityRuleRequest>,
@@ -866,7 +909,7 @@ pub async fn create_security_rule_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.tenant_id.to_string() != auth.user_id {
+    if app.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -884,7 +927,7 @@ pub async fn create_security_rule_handler(
     // Notify scheduler to apply rules to active VMs
     let nats_req = mikrom_proto::scheduler::UpdateSecurityGroupsRequest {
         app_id: app.id.to_string(),
-        tenant_id: auth.user_id.clone(),
+        tenant_id: tenant_ctx.tenant.id.to_string(),
         rules: Vec::new(), // Rules will be fetched by scheduler from DB
     };
 
@@ -909,7 +952,7 @@ pub async fn create_security_rule_handler(
 
 #[rovo::rovo]
 pub async fn delete_security_rule_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, rule_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
@@ -919,7 +962,7 @@ pub async fn delete_security_rule_handler(
         .await?
         .ok_or_else(|| ApiError::NotFound("App not found".to_string()))?;
 
-    if app.tenant_id.to_string() != auth.user_id {
+    if app.tenant_id != tenant_ctx.tenant.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -931,7 +974,7 @@ pub async fn delete_security_rule_handler(
     // Notify scheduler to apply rules to active VMs
     let nats_req = mikrom_proto::scheduler::UpdateSecurityGroupsRequest {
         app_id: app.id.to_string(),
-        tenant_id: auth.user_id.clone(),
+        tenant_id: tenant_ctx.tenant.id.to_string(),
         rules: Vec::new(),
     };
 
@@ -982,14 +1025,25 @@ pub struct BalloonSetRequest {
 
 #[rovo::rovo]
 pub async fn vm_snapshot_create_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
     Json(payload): Json<SnapshotNameRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
-    let (success, message) =
-        VmService::create_snapshot(&state, auth.user_id, job_id, payload.snapshot_name).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
+    let (success, message) = VmService::create_snapshot(
+        &state,
+        tenant_ctx.tenant.id.to_string(),
+        job_id,
+        payload.snapshot_name,
+    )
+    .await?;
     Ok(Json(serde_json::json!({
         "success": success,
         "message": message,
@@ -998,13 +1052,24 @@ pub async fn vm_snapshot_create_handler(
 
 #[rovo::rovo]
 pub async fn vm_snapshot_restore_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id, snapshot_name)): Path<(String, String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
-    let (success, message) =
-        VmService::restore_snapshot(&state, auth.user_id, job_id, snapshot_name).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
+    let (success, message) = VmService::restore_snapshot(
+        &state,
+        tenant_ctx.tenant.id.to_string(),
+        job_id,
+        snapshot_name,
+    )
+    .await?;
     Ok(Json(serde_json::json!({
         "success": success,
         "message": message,
@@ -1013,13 +1078,24 @@ pub async fn vm_snapshot_restore_handler(
 
 #[rovo::rovo]
 pub async fn vm_snapshot_delete_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id, snapshot_name)): Path<(String, String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
-    let (success, message) =
-        VmService::delete_snapshot(&state, auth.user_id, job_id, snapshot_name).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
+    let (success, message) = VmService::delete_snapshot(
+        &state,
+        tenant_ctx.tenant.id.to_string(),
+        job_id,
+        snapshot_name,
+    )
+    .await?;
     Ok(Json(serde_json::json!({
         "success": success,
         "message": message,
@@ -1028,13 +1104,19 @@ pub async fn vm_snapshot_delete_handler(
 
 #[rovo::rovo]
 pub async fn vm_snapshot_list_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
     let (success, message, snapshots) =
-        VmService::list_snapshots(&state, auth.user_id, job_id).await?;
+        VmService::list_snapshots(&state, tenant_ctx.tenant.id.to_string(), job_id).await?;
 
     let snapshots_json: Vec<serde_json::Value> = snapshots
         .into_iter()
@@ -1058,15 +1140,21 @@ pub async fn vm_snapshot_list_handler(
 
 #[rovo::rovo]
 pub async fn attach_volume_runtime_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
     Json(payload): Json<AttachVolumeRuntimeRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
     let (success, message) = VmService::attach_volume(
         &state,
-        auth.user_id,
+        tenant_ctx.tenant.id.to_string(),
         job_id,
         payload.volume_id,
         payload.mount_point,
@@ -1081,19 +1169,30 @@ pub async fn attach_volume_runtime_handler(
 
 #[rovo::rovo]
 pub async fn detach_volume_runtime_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
     Json(payload): Json<serde_json::Value>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
     let volume_id = payload
         .get("volume_id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| ApiError::BadRequest("volume_id is required".to_string()))?;
 
-    let (success, message) =
-        VmService::detach_volume(&state, auth.user_id, job_id, volume_id.to_string()).await?;
+    let (success, message) = VmService::detach_volume(
+        &state,
+        tenant_ctx.tenant.id.to_string(),
+        job_id,
+        volume_id.to_string(),
+    )
+    .await?;
 
     Ok(Json(serde_json::json!({
         "success": success,
@@ -1103,15 +1202,21 @@ pub async fn detach_volume_runtime_handler(
 
 #[rovo::rovo]
 pub async fn start_migration_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
     Json(payload): Json<MigrationStartRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
     let (success, message) = VmService::start_migration(
         &state,
-        auth.user_id,
+        tenant_ctx.tenant.id.to_string(),
         job_id,
         payload.target_host,
         payload.target_uri,
@@ -1125,12 +1230,19 @@ pub async fn start_migration_handler(
 
 #[rovo::rovo]
 pub async fn cancel_migration_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
-    let (success, message) = VmService::cancel_migration(&state, auth.user_id, job_id).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
+    let (success, message) =
+        VmService::cancel_migration(&state, tenant_ctx.tenant.id.to_string(), job_id).await?;
     Ok(Json(serde_json::json!({
         "success": success,
         "message": message,
@@ -1139,13 +1251,19 @@ pub async fn cancel_migration_handler(
 
 #[rovo::rovo]
 pub async fn query_migration_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
     let (success, message, status) =
-        VmService::query_migration(&state, auth.user_id, job_id).await?;
+        VmService::query_migration(&state, tenant_ctx.tenant.id.to_string(), job_id).await?;
     Ok(Json(serde_json::json!({
         "success": success,
         "message": message,
@@ -1155,14 +1273,25 @@ pub async fn query_migration_handler(
 
 #[rovo::rovo]
 pub async fn set_balloon_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
     Json(payload): Json<BalloonSetRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
-    let (success, message) =
-        VmService::set_balloon(&state, auth.user_id, job_id, payload.target_memory_mib).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
+    let (success, message) = VmService::set_balloon(
+        &state,
+        tenant_ctx.tenant.id.to_string(),
+        job_id,
+        payload.target_memory_mib,
+    )
+    .await?;
     Ok(Json(serde_json::json!({
         "success": success,
         "message": message,
@@ -1171,13 +1300,19 @@ pub async fn set_balloon_handler(
 
 #[rovo::rovo]
 pub async fn query_balloon_handler(
-    auth: crate::auth::AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<crate::AppState>,
     Path((app_name, job_id)): Path<(String, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = VmService::validate_app_deployment(&state, &auth.user_id, &app_name, &job_id).await?;
+    let _ = VmService::validate_app_deployment(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        &job_id,
+    )
+    .await?;
     let (success, message, actual, max) =
-        VmService::query_balloon(&state, auth.user_id, job_id).await?;
+        VmService::query_balloon(&state, tenant_ctx.tenant.id.to_string(), job_id).await?;
     Ok(Json(serde_json::json!({
         "success": success,
         "message": message,
