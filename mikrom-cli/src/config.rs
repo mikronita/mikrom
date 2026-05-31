@@ -18,10 +18,6 @@ impl Config {
             return Some(PathBuf::from(path));
         }
 
-        if cfg!(test) {
-            return Some(std::env::temp_dir().join("mikrom").join("config.toml"));
-        }
-
         dirs::config_dir().map(|d| d.join("mikrom").join("config.toml"))
     }
 

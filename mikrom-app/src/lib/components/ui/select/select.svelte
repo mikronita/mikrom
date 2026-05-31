@@ -10,19 +10,13 @@
 		...restProps
   	}: {
   		open?: boolean;
-  		value?: string | string[] | undefined;
+  		value?: any;
   		type?: "single" | "multiple";
   		children?: Snippet;
   		[key: string]: unknown;
   	} = $props();
 </script>
 
-{#if type === "multiple"}
-	<SelectPrimitive.Root bind:open bind:value={value as string[] | undefined} {type} {...restProps}>
-		{@render children?.()}
-	</SelectPrimitive.Root>
-{:else}
-	<SelectPrimitive.Root bind:open bind:value={value as string | undefined} {type} {...restProps}>
-		{@render children?.()}
-	</SelectPrimitive.Root>
-{/if}
+<SelectPrimitive.Root bind:open bind:value {type} {...restProps}>
+	{@render children?.()}
+</SelectPrimitive.Root>

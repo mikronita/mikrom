@@ -21,6 +21,7 @@
   import { getToken } from "$lib/auth";
   import { toast } from "$lib/toast";
   import {
+    beginProjectSwitch,
     activeProjectStore,
     projectsError,
     projectsLoading,
@@ -68,6 +69,7 @@
 
       toast.success(`Project ${result.data.name} created`);
       projectName = "";
+      beginProjectSwitch();
       setActiveProjectSlug(result.data.tenant_id);
       await goto("/", {
         replaceState: true,
@@ -82,6 +84,7 @@
 
   function switchProject(slug: string) {
     if (slug === $activeProjectStore?.tenant_id) return;
+    beginProjectSwitch();
     setActiveProjectSlug(slug);
     void goto("/", {
       replaceState: true,

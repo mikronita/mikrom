@@ -35,25 +35,12 @@ function joinUrl(base: string, path = "") {
   return normalizedPath ? `${normalizedBase}/${normalizedPath}` : normalizedBase;
 }
 
-function readCookie(header: string | null, name: string) {
-  if (!header) return null;
-
-  for (const part of header.split(";")) {
-    const [rawKey, ...rawValue] = part.trim().split("=");
-    if (rawKey === name) {
-      return decodeURIComponent(rawValue.join("="));
-    }
-  }
-
-  return null;
-}
-
 export async function proxyApiRequest(event: RequestEvent, path = "") {
   const upstreamUrl = new URL(joinUrl(getUpstreamBaseUrl(), `v1/${path}`));
   upstreamUrl.search = event.url.search;
 
   const headers = new Headers(event.request.headers);
-  const tenantId = readCookie(event.request.headers.get("cookie"), "mikrom_active_project");
+  const tenantId = event.cookies.get("mikrom_active_project");
   for (const header of HOP_BY_HOP_REQUEST_HEADERS) {
     headers.delete(header);
   }

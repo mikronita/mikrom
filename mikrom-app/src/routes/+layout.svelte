@@ -50,7 +50,7 @@
 
 <slot />
 {#if $projectSwitchingStore}
-  <div class="pointer-events-none fixed inset-0 z-50 overflow-hidden" transition:fade={{ duration: 140 }}>
+  <div class="pointer-events-auto fixed inset-0 z-50 overflow-hidden" transition:fade={{ duration: 140 }}>
     <div class="absolute inset-0 bg-background/80 backdrop-blur-sm"></div>
     <div class="absolute -left-24 top-12 size-72 rounded-full bg-status-info/10 blur-3xl"></div>
     <div class="absolute -right-20 bottom-10 size-80 rounded-full bg-status-warning/10 blur-3xl"></div>
