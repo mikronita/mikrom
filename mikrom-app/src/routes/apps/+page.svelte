@@ -9,17 +9,22 @@
     CardDescription, 
     CardContent, 
     Badge, 
+    ButtonGroup,
     Button, 
+    Input,
     EmptyState, 
     CardSkeleton 
   } from "$lib/components";
   import CreateAppModal from "$lib/components/CreateAppModal.svelte";
   import { formatDate } from "$lib/utils";
+  import { matchesSearch } from "$lib/search";
   import { vmsStore } from "$lib/stores/vms";
   import { appsStore, appsLoading, appsError, refreshApps } from "$lib/stores/apps";
   import { toast } from "$lib/toast";
 
   let showCreate = false;
+  let query = "";
+  let statusFilter: "all" | "active" | "paused" | "idle" = "all";
 
   onMount(async () => {
     if ($appsStore.length === 0) {
@@ -51,6 +56,21 @@
     }
     return "border-transparent bg-status-info/10 text-status-info";
   }
+
+  function getAppCardState(scaleState: string, hasRunningReplicas: boolean) {
+    if (hasRunningReplicas) return "active";
+    if (scaleState === "scaled_to_zero") return "paused";
+    return "idle";
+  }
+
+  $: filteredApps = [...$appsStore]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .filter((app) => {
+      const appVms = $vmsStore.filter((vm) => (vm.app_id === app.id || vm.app_name === app.name) && vm.status.toLowerCase() === "running");
+      const effectiveScaleState = app.scale_state || (appVms.length > 0 ? "active" : "scaled_to_zero");
+      const cardState = getAppCardState(effectiveScaleState, appVms.length > 0);
+      return (statusFilter === "all" || cardState === statusFilter) && matchesSearch([app.name, app.hostname, app.git_url], query);
+    });
 </script>
 
 <svelte:head>
@@ -75,6 +95,20 @@
       </Button>
     </div>
 
+    <Card size="sm" class="overflow-hidden">
+      <CardContent class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div class="min-w-0 flex-1">
+          <Input bind:value={query} placeholder="Search by app name, hostname or repository" />
+        </div>
+        <ButtonGroup class="w-full md:w-auto">
+          <Button size="sm" variant={statusFilter === "all" ? "secondary" : "outline"} onclick={() => (statusFilter = "all")}>All</Button>
+          <Button size="sm" variant={statusFilter === "active" ? "secondary" : "outline"} onclick={() => (statusFilter = "active")}>Active</Button>
+          <Button size="sm" variant={statusFilter === "paused" ? "secondary" : "outline"} onclick={() => (statusFilter = "paused")}>Paused</Button>
+          <Button size="sm" variant={statusFilter === "idle" ? "secondary" : "outline"} onclick={() => (statusFilter = "idle")}>Idle</Button>
+        </ButtonGroup>
+      </CardContent>
+    </Card>
+
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
     {#if $appsLoading && $appsStore.length === 0}
       {#each Array.from({ length: 6 }) as _}
@@ -85,12 +119,18 @@
           footerPills={["w-20", "w-24"]}
         />
       {/each}
-      {:else if $appsStore.length === 0}
+      {:else if filteredApps.length === 0}
         <div class="col-span-full">
           <EmptyState class="py-16">
             <FolderPlus class="size-10 text-muted-foreground" />
-            <h2 class="text-xl font-semibold">No applications found</h2>
-            <p class="max-w-md text-sm text-muted-foreground">Get started by connecting your first repository.</p>
+            <h2 class="text-xl font-semibold">
+              {query || statusFilter !== "all" ? "No matching applications" : "No applications found"}
+            </h2>
+            <p class="max-w-md text-sm text-muted-foreground">
+              {query || statusFilter !== "all"
+                ? "Try a different search term or clear the status filter."
+                : "Get started by connecting your first repository."}
+            </p>
             <Button size="sm" onclick={() => (showCreate = true)}>
               <Plus class="size-4" />
               Connect your first repository
@@ -98,12 +138,12 @@
           </EmptyState>
         </div>
       {:else}
-        {#each [...$appsStore].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) as app}
+        {#each filteredApps as app}
           {@const resources = getAppResources(app.id, app.name)}
           {@const effectiveScaleState = app.scale_state || (resources.count > 0 ? "active" : "scaled_to_zero")}
           {@const hasRunningReplicas = resources.count > 0}
           <a class="block" href={`/apps/${encodeURIComponent(app.name)}`}>
-            <Card class="h-full overflow-hidden transition-colors hover:bg-muted/30">
+            <Card size="sm">
               <CardHeader>
                 <div class="flex items-start gap-4">
                   <div class="flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
@@ -122,11 +162,17 @@
                 </div>
               </CardHeader>
               <CardContent class="flex flex-col gap-4">
-                <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-                  <span class="inline-flex items-center gap-1.5">
-                    <Calendar class="size-4" />
-                    Created {formatDate(app.created_at)}
-                  </span>
+                <div class="flex flex-col gap-2 text-xs text-muted-foreground">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <span class="inline-flex items-center gap-1.5">
+                      <Calendar class="size-4" />
+                      Created {formatDate(app.created_at)}
+                    </span>
+                    <span class="inline-flex items-center gap-1.5">
+                      <Calendar class="size-4" />
+                      Updated {formatDate(app.updated_at || app.created_at)}
+                    </span>
+                  </div>
                   <div class="flex flex-wrap items-center gap-2">
                     {#if hasRunningReplicas}
                       <Badge variant="outline" class="gap-1.5">

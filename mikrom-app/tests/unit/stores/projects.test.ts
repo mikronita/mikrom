@@ -71,4 +71,21 @@ describe("projects store", () => {
     expect(get(projectsError)).toBe("project service unavailable");
     expect(get(projectsLoading)).toBe(false);
   });
+
+  it("persists the active project in cookie and localStorage", () => {
+    setActiveProjectSlug("beta");
+
+    expect(get(activeProjectSlugStore)).toBe("beta");
+    expect(document.cookie).toContain("mikrom_active_project=beta");
+    expect(localStorage.getItem("mikrom_active_project")).toBe("beta");
+  });
+
+  it("clears the persisted active project when reset", () => {
+    setActiveProjectSlug("beta");
+    setActiveProjectSlug(null);
+
+    expect(get(activeProjectSlugStore)).toBeNull();
+    expect(document.cookie).toContain("mikrom_active_project=");
+    expect(localStorage.getItem("mikrom_active_project")).toBeNull();
+  });
 });

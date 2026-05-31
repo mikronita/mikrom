@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { Boxes, Plus, ArrowRight } from "lucide-svelte";
+  import { Boxes, Pencil, Plus, ArrowRight, Trash2 } from "lucide-svelte";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import {
+    AlertDialog,
     Badge,
     Button,
     Card,
@@ -15,14 +16,21 @@
     Field,
     FieldGroup,
     Input,
+    Modal,
     Skeleton,
   } from "$lib/components";
-  import { createProject, type ProjectInfo } from "$lib/api";
+  import {
+    createProject,
+    deleteProject,
+    updateProject,
+    type ProjectInfo,
+  } from "$lib/api";
   import { getToken } from "$lib/auth";
   import { toast } from "$lib/toast";
   import {
-    beginProjectSwitch,
+    activeProjectSlugStore,
     activeProjectStore,
+    beginProjectSwitch,
     projectsError,
     projectsLoading,
     projectsStore,
@@ -30,13 +38,25 @@
     setActiveProjectSlug,
   } from "$lib/stores/projects";
   import { cn, formatDate } from "$lib/utils";
+  import { matchesSearch } from "$lib/search";
 
   let projectName = "";
   let creating = false;
+  let renameOpen = false;
+  let deleteOpen = false;
+  let renameSaving = false;
+  let deleteSaving = false;
+  let renameTarget: ProjectInfo | null = null;
+  let deleteTarget: ProjectInfo | null = null;
+  let renameName = "";
+  let query = "";
   let sortedProjects: ProjectInfo[];
 
   $: sortedProjects = [...$projectsStore].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+  $: filteredProjects = sortedProjects.filter((project) =>
+    matchesSearch([project.name, project.tenant_id], query)
   );
 
   onMount(() => {
@@ -44,6 +64,29 @@
       void refreshProjects();
     }
   });
+
+  function switchProject(slug: string) {
+    if (slug === $activeProjectSlugStore) return;
+    beginProjectSwitch();
+    setActiveProjectSlug(slug);
+    void goto("/", {
+      replaceState: true,
+      invalidateAll: true,
+      noScroll: true,
+      keepFocus: true,
+    });
+  }
+
+  function openRename(project: ProjectInfo) {
+    renameTarget = project;
+    renameName = project.name;
+    renameOpen = true;
+  }
+
+  function openDelete(project: ProjectInfo) {
+    deleteTarget = project;
+    deleteOpen = true;
+  }
 
   async function handleCreateProject(event: SubmitEvent) {
     event.preventDefault();
@@ -82,16 +125,64 @@
     }
   }
 
-  function switchProject(slug: string) {
-    if (slug === $activeProjectStore?.tenant_id) return;
-    beginProjectSwitch();
-    setActiveProjectSlug(slug);
-    void goto("/", {
-      replaceState: true,
-      invalidateAll: true,
-      noScroll: true,
-      keepFocus: true,
-    });
+  async function handleRenameProject(event: SubmitEvent) {
+    event.preventDefault();
+    if (!renameTarget) return;
+
+    const token = getToken();
+    if (!token) {
+      toast.error("You must be logged in to rename a project");
+      return;
+    }
+
+    const name = renameName.trim();
+    if (!name) {
+      toast.error("Project name is required");
+      return;
+    }
+
+    renameSaving = true;
+    try {
+      const result = await updateProject(token, renameTarget.tenant_id, { name });
+      if (result.error || !result.data) {
+        toast.error(result.error || "Failed to update project");
+        return;
+      }
+
+      toast.success(`Project renamed to ${result.data.name}`);
+      renameOpen = false;
+      renameTarget = null;
+      renameName = "";
+      await refreshProjects();
+    } finally {
+      renameSaving = false;
+    }
+  }
+
+  async function handleDeleteProject() {
+    if (!deleteTarget) return;
+
+    const token = getToken();
+    if (!token) {
+      toast.error("You must be logged in to delete a project");
+      return;
+    }
+
+    deleteSaving = true;
+    try {
+      const result = await deleteProject(token, deleteTarget.tenant_id);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+
+      toast.success(`Project ${deleteTarget.name} deleted`);
+      deleteOpen = false;
+      deleteTarget = null;
+      await refreshProjects();
+    } finally {
+      deleteSaving = false;
+    }
   }
 </script>
 
@@ -110,15 +201,19 @@
           <h1 class="text-3xl font-semibold tracking-tight">Projects</h1>
         </div>
         <p class="max-w-2xl text-sm text-muted-foreground">
-          Projects are the tenant boundary in Mikrom. Create one here, then switch into it to manage apps, storage and networking.
+          Manage the tenant boundary that scopes apps, storage and databases in Mikrom.
         </p>
       </div>
       {#if $activeProjectStore}
-        <div class="flex items-center gap-2">
-          <Badge variant="secondary">Active: {$activeProjectStore.name}</Badge>
-        </div>
+        <Badge variant="secondary">Active: {$activeProjectStore.name}</Badge>
       {/if}
     </div>
+
+    <Card size="sm" class="overflow-hidden">
+      <CardContent>
+        <Input bind:value={query} placeholder="Search by project name or slug" />
+      </CardContent>
+    </Card>
 
     <div class="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
       <Card class="overflow-hidden">
@@ -151,7 +246,7 @@
                 Creating a project keeps you on the current account and switches you into the new project after creation.
               </p>
               <Button type="submit" disabled={creating}>
-                <Plus class="size-4" />
+                <Plus data-icon="inline-start" />
                 {creating ? "Creating..." : "Create project"}
               </Button>
             </div>
@@ -163,17 +258,19 @@
         <CardHeader>
           <CardTitle>Project list</CardTitle>
           <CardDescription>
-            Switch between projects or review their tenant slugs.
+            Switch, rename or delete projects. Delete is only allowed when the project has no apps, databases or volumes.
           </CardDescription>
         </CardHeader>
         <CardContent class="flex flex-col gap-4">
           {#if $projectsLoading && $projectsStore.length === 0}
             <div class="grid gap-3">
               {#each Array.from({ length: 3 }) as _}
-                <div class="rounded-xl border border-border bg-background/60 p-4">
-                  <Skeleton class="mb-3 h-4 w-40" />
-                  <Skeleton class="h-3 w-28" />
-                </div>
+                <Card size="sm" class="overflow-hidden border-border/70 bg-background/60 shadow-none">
+                  <CardContent class="flex flex-col gap-3">
+                    <Skeleton class="h-4 w-40" />
+                    <Skeleton class="h-3 w-28" />
+                  </CardContent>
+                </Card>
               {/each}
             </div>
           {:else if $projectsError}
@@ -185,50 +282,62 @@
                 Retry
               </Button>
             </EmptyState>
-          {:else if sortedProjects.length === 0}
+          {:else if filteredProjects.length === 0}
             <EmptyState class="py-12">
               <Boxes class="size-10 text-muted-foreground" />
-              <h2 class="text-xl font-semibold">No projects yet</h2>
+              <h2 class="text-xl font-semibold">{query ? "No matching projects" : "No projects yet"}</h2>
               <p class="max-w-md text-sm text-muted-foreground">
-                Create your first project to start isolating apps and resources.
+                {query
+                  ? "Try a different search term or clear the search box."
+                  : "Create your first project to start isolating apps and resources."}
               </p>
             </EmptyState>
           {:else}
             <div class="grid gap-3">
-              {#each sortedProjects as project}
-                <div
+              {#each filteredProjects as project}
+                <Card
+                  data-project-slug={project.tenant_id}
                   class={cn(
-                    "rounded-xl border bg-background/70 p-4 transition-colors",
+                    "transition-colors",
                     project.tenant_id === $activeProjectStore?.tenant_id
                       ? "border-border/80 bg-muted/35"
                       : "border-border/70 hover:bg-muted/20"
                   )}
                 >
-                  <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <CardContent class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                     <div class="min-w-0 flex-1">
                       <div class="flex flex-wrap items-center gap-2">
-                        <h3 class="truncate text-sm font-semibold">{project.name}</h3>
+                        <h3 class="truncate text-base font-semibold">{project.name}</h3>
                         {#if project.tenant_id === $activeProjectStore?.tenant_id}
                           <Badge variant="secondary">Active</Badge>
                         {/if}
                       </div>
                       <p class="mt-1 truncate text-xs text-muted-foreground">Slug: {project.tenant_id}</p>
                       <p class="mt-1 text-xs text-muted-foreground">Created {formatDate(project.created_at)}</p>
+                      <p class="mt-1 text-xs text-muted-foreground">Updated {formatDate(project.updated_at || project.created_at)}</p>
                     </div>
 
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                       <Button
                         size="sm"
                         variant={project.tenant_id === $activeProjectStore?.tenant_id ? "secondary" : "outline"}
                         disabled={project.tenant_id === $activeProjectStore?.tenant_id}
                         onclick={() => switchProject(project.tenant_id)}
                       >
-                        <ArrowRight class="size-4" />
+                        <ArrowRight data-icon="inline-start" />
                         Switch
                       </Button>
+                      <Button size="sm" variant="outline" onclick={() => openRename(project)}>
+                        <Pencil data-icon="inline-start" />
+                        Rename
+                      </Button>
+                      <Button size="sm" variant="destructive" onclick={() => openDelete(project)}>
+                        <Trash2 data-icon="inline-start" />
+                        Delete
+                      </Button>
                     </div>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               {/each}
             </div>
           {/if}
@@ -245,8 +354,10 @@
       </CardHeader>
       <CardContent class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div class="min-w-0">
-          <p class="text-sm font-medium">{ $activeProjectStore?.name || "No active project" }</p>
-          <p class="truncate text-xs text-muted-foreground">{ $activeProjectStore?.tenant_id || "Select or create a project to continue" }</p>
+          <p class="text-sm font-medium">{$activeProjectStore?.name || "No active project"}</p>
+          <p class="truncate text-xs text-muted-foreground">
+            {$activeProjectStore?.tenant_id || "Select or create a project to continue"}
+          </p>
         </div>
         <Button variant="secondary" onclick={() => goto("/")}>
           Go to dashboard
@@ -255,3 +366,46 @@
     </Card>
   </div>
 </DashboardLayout>
+
+<Modal
+  bind:open={renameOpen}
+  title="Rename project"
+  description={renameTarget ? `Update the display name for ${renameTarget.tenant_id}.` : ""}
+  width="max-w-md"
+  onclose={() => {
+    renameTarget = null;
+    renameName = "";
+  }}
+>
+  <form class="flex flex-col gap-5" on:submit|preventDefault={handleRenameProject}>
+    <FieldGroup>
+      <Field label="Project name" forId="rename_project_name">
+        <Input id="rename_project_name" bind:value={renameName} autocomplete="off" required />
+      </Field>
+    </FieldGroup>
+
+    <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <Button variant="outline" type="button" onclick={() => (renameOpen = false)}>Cancel</Button>
+      <Button type="submit" disabled={renameSaving}>
+        {renameSaving ? "Saving..." : "Save changes"}
+      </Button>
+    </div>
+  </form>
+</Modal>
+
+<AlertDialog
+  bind:open={deleteOpen}
+  title="Delete project?"
+  description={
+    deleteTarget
+      ? `This will delete ${deleteTarget.name}. The API will block the operation if the project still has apps, databases or volumes.`
+      : ""
+  }
+  confirmLabel={deleteSaving ? "Deleting..." : "Delete project"}
+  confirmVariant="destructive"
+  loading={deleteSaving}
+  onconfirm={handleDeleteProject}
+  onclose={() => {
+    deleteTarget = null;
+  }}
+/>

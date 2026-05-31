@@ -61,17 +61,8 @@
     </div>
 
     <Card class="w-full max-w-md">
-      <div class="flex flex-col items-center gap-2.5 border-b border-border px-5 py-5 text-center">
-        <div class="mb-2 flex justify-center">
-          <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
-            <Box class="size-4" />
-          </div>
-        </div>
-        <div class="text-2xl font-semibold tracking-tight">Welcome back</div>
-        <div class="text-sm text-muted-foreground">Enter your credentials to access your dashboard</div>
-      </div>
-      <div class="p-5">
-        <form class="flex flex-col gap-4" on:submit|preventDefault={handleSubmit}>
+      <div class="p-7">
+        <form class="flex flex-col gap-5" on:submit|preventDefault={handleSubmit}>
           <Field label="Email address" forId="email">
             <Input id="email" type="email" bind:value={email} placeholder="name@example.com" required disabled={loading} />
           </Field>

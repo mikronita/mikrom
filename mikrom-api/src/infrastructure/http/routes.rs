@@ -90,6 +90,12 @@ pub fn create_app_with_rate_limits(
                 .post(crate::infrastructure::http::handlers::projects::create_project),
         )
         .route(
+            &format!("{}/projects/{{tenant_id}}", crate::API_V1),
+            get(crate::infrastructure::http::handlers::projects::get_project)
+                .patch(crate::infrastructure::http::handlers::projects::update_project)
+                .delete(crate::infrastructure::http::handlers::projects::delete_project),
+        )
+        .route(
             &format!("{}/apps", crate::API_V1),
             post(crate::infrastructure::http::handlers::deploy::create_app_handler)
                 .get(crate::infrastructure::http::handlers::deploy::list_apps_handler),

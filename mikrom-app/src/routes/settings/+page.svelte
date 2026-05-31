@@ -119,22 +119,26 @@
       </div>
     </div>
 
-    <div class="grid h-auto w-full grid-cols-2 gap-1 overflow-hidden rounded-md border border-border bg-muted p-1 sm:grid-cols-3 xl:grid-cols-6">
-      {#each settingsTabs as tab}
-        <button
-          class={`flex min-h-10 items-center justify-start gap-2 rounded-md px-3 text-sm transition-colors sm:justify-center ${
-            activeTab === tab.value ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-          }`}
-          on:click={() => (activeTab = tab.value)}
-        >
-          <svelte:component this={tab.icon} class="size-4 shrink-0" />
-          <span class="truncate">{tab.label}</span>
-        </button>
-      {/each}
+    <div class="border-b border-border">
+      <div class="grid h-auto w-full grid-cols-2 gap-0.5 sm:grid-cols-3 xl:grid-cols-6">
+        {#each settingsTabs as tab}
+          <button
+            class={`flex items-center justify-start gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors sm:justify-center ${
+              activeTab === tab.value
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            on:click={() => (activeTab = tab.value)}
+          >
+            <svelte:component this={tab.icon} class="size-4 shrink-0" />
+            <span class="truncate">{tab.label}</span>
+          </button>
+        {/each}
+      </div>
     </div>
 
     {#if activeTab === "profile"}
-      <Card class="overflow-hidden">
+      <Card size="sm">
         <CardHeader>
           <CardTitle>Profile</CardTitle>
           <CardDescription>Update the public name and contact details for your account.</CardDescription>
@@ -213,13 +217,13 @@
       </Card>
     {:else if activeTab === "security"}
       <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
-        <Card class="overflow-hidden">
+        <Card size="sm">
           <CardHeader>
             <CardTitle>Change password</CardTitle>
             <CardDescription>Use a strong password that you do not use anywhere else.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div class="max-w-md space-y-4">
+            <div class="flex max-w-md flex-col gap-4">
               <Field label="Current password">
                 <Input type="password" />
               </Field>
@@ -233,8 +237,8 @@
           </CardFooter>
         </Card>
 
-        <div class="space-y-4">
-          <Card class="overflow-hidden">
+        <div class="flex flex-col gap-4">
+          <Card size="sm">
             <CardHeader class="flex flex-row items-start justify-between gap-4">
               <div class="flex flex-col gap-1.5">
                 <CardTitle>Two-factor authentication</CardTitle>
@@ -250,7 +254,7 @@
             </CardFooter>
           </Card>
 
-          <Card class="overflow-hidden">
+          <Card size="sm">
             <CardHeader>
               <CardTitle class="text-destructive">Danger zone</CardTitle>
               <CardDescription>Once you delete your account, there is no going back. Please be certain.</CardDescription>
@@ -265,7 +269,7 @@
         </div>
       </div>
     {:else if activeTab === "api"}
-      <Card class="overflow-hidden">
+      <Card size="sm">
         <CardHeader class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div class="flex flex-col gap-1.5">
             <CardTitle>Personal access tokens</CardTitle>
@@ -278,18 +282,22 @@
         </CardHeader>
         <CardContent>
           <div class="flex flex-col gap-4">
-            <div class="flex flex-col gap-4 rounded-md border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div class="flex items-center gap-4">
-                <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
-                  <CheckCircle2 class="size-4" />
+            <Card size="sm" class="overflow-hidden">
+              <CardContent>
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div class="flex items-center gap-4">
+                    <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+                      <CheckCircle2 class="size-4" />
+                    </div>
+                    <div class="min-w-0">
+                      <p class="truncate font-mono text-sm font-semibold">mikrom_pk_live_****************</p>
+                      <p class="text-xs text-muted-foreground">Last used 2 hours ago - Created April 12, 2026</p>
+                    </div>
+                  </div>
+                  <Button variant="destructive" size="sm">Revoke</Button>
                 </div>
-                <div class="min-w-0">
-                  <p class="truncate font-mono text-sm font-semibold">mikrom_pk_live_****************</p>
-                  <p class="text-xs text-muted-foreground">Last used 2 hours ago - Created April 12, 2026</p>
-                </div>
-              </div>
-              <Button variant="destructive" size="sm">Revoke</Button>
-            </div>
+              </CardContent>
+            </Card>
           </div>
         </CardContent>
       </Card>
@@ -308,15 +316,15 @@
           </CardHeader>
           <CardContent class="pt-6">
             <div class="grid gap-3 sm:grid-cols-3">
-              <div class="rounded-md border bg-background p-4">
+              <div class="rounded-2xl border border-border/70 bg-background/70 p-5">
                 <p class="text-2xl font-semibold">4</p>
                 <p class="text-sm text-muted-foreground">Active apps</p>
               </div>
-              <div class="rounded-md border bg-background p-4">
+              <div class="rounded-2xl border border-border/70 bg-background/70 p-5">
                 <p class="text-2xl font-semibold">120 GB</p>
                 <p class="text-sm text-muted-foreground">Bandwidth</p>
               </div>
-              <div class="rounded-md border bg-background p-4">
+              <div class="rounded-2xl border border-border/70 bg-background/70 p-5">
                 <p class="text-2xl font-semibold">24/7</p>
                 <p class="text-sm text-muted-foreground">Support</p>
               </div>
@@ -334,31 +342,35 @@
             <CardDescription>Manage the card used for renewals and invoices.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div class="flex items-center gap-4 rounded-md border bg-muted/30 p-4">
-              <div class="flex h-8 w-12 shrink-0 items-center justify-center rounded-md border bg-background text-xs font-semibold italic text-muted-foreground">
-                VISA
-              </div>
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-semibold">Visa ending in 4242</p>
-                <p class="text-xs text-muted-foreground">Expires 12/28</p>
-              </div>
-              <Button variant="outline" size="sm">Edit</Button>
-            </div>
+            <Card size="sm" class="overflow-hidden">
+              <CardContent>
+                <div class="flex items-center gap-4">
+                  <div class="flex h-8 w-12 shrink-0 items-center justify-center rounded-md border bg-background text-xs font-semibold italic text-muted-foreground">
+                    VISA
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-semibold">Visa ending in 4242</p>
+                    <p class="text-xs text-muted-foreground">Expires 12/28</p>
+                  </div>
+                  <Button variant="outline" size="sm">Edit</Button>
+                </div>
+              </CardContent>
+            </Card>
           </CardContent>
         </Card>
       </div>
     {:else if activeTab === "integrations"}
-      <Card class="overflow-hidden">
+      <Card size="sm">
         <CardHeader>
           <CardTitle>Integrations</CardTitle>
           <CardDescription>Connect source control providers and external services.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div class="space-y-1.5">
+          <div class="flex flex-col gap-1.5">
             <p class="text-sm font-medium">Source control</p>
             <p class="text-sm text-muted-foreground">Connect your GitHub account to deploy private repositories.</p>
 
-            <div class="mt-4 space-y-4">
+            <div class="mt-4 flex flex-col gap-4">
               {#if loadingGithub}
                 <div class="flex flex-col gap-4">
                   <CardSkeleton
@@ -380,20 +392,24 @@
                 </div>
               {:else if githubAccounts.length > 0}
                 {#each githubAccounts as account}
-                  <div class="flex flex-col gap-4 rounded-md border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div class="flex items-center gap-4">
-                      <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
-                        <Github class="size-4" />
+                  <Card size="sm" class="overflow-hidden">
+                    <CardContent>
+                      <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div class="flex items-center gap-4">
+                          <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+                            <Github class="size-4" />
+                          </div>
+                          <div class="min-w-0">
+                            <p class="truncate text-sm font-semibold">@{account.github_username}</p>
+                            <p class="text-xs text-muted-foreground">Connected on {new Date(account.created_at).toLocaleDateString()}</p>
+                          </div>
+                        </div>
+                        <Button variant="outline" size="sm" href={`https://github.com/settings/installations/${account.installation_id}`} target="_blank" rel="noreferrer">
+                          Configure
+                        </Button>
                       </div>
-                      <div class="min-w-0">
-                        <p class="truncate text-sm font-semibold">@{account.github_username}</p>
-                        <p class="text-xs text-muted-foreground">Connected on {new Date(account.created_at).toLocaleDateString()}</p>
-                      </div>
-                    </div>
-                    <Button variant="outline" size="sm" href={`https://github.com/settings/installations/${account.installation_id}`} target="_blank" rel="noreferrer">
-                      Configure
-                    </Button>
-                  </div>
+                    </CardContent>
+                  </Card>
                 {/each}
                 <div>
                   <Button variant="outline" size="sm" onclick={connectGithub}>
@@ -402,45 +418,57 @@
                   </Button>
                 </div>
               {:else}
-                <div class="flex flex-col gap-4 rounded-md border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div class="flex items-center gap-4">
-                    <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
-                      <Github class="size-4" />
+                <Card size="sm" class="overflow-hidden">
+                  <CardContent>
+                    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div class="flex items-center gap-4">
+                        <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+                          <Github class="size-4" />
+                        </div>
+                        <div class="min-w-0">
+                          <p class="text-sm font-semibold">GitHub app integration</p>
+                          <p class="text-xs text-muted-foreground">Deploy from any repository you have access to.</p>
+                        </div>
+                      </div>
+                      <Button size="sm" onclick={connectGithub}>Connect GitHub</Button>
                     </div>
-                    <div class="min-w-0">
-                      <p class="text-sm font-semibold">GitHub app integration</p>
-                      <p class="text-xs text-muted-foreground">Deploy from any repository you have access to.</p>
-                    </div>
-                  </div>
-                  <Button size="sm" onclick={connectGithub}>Connect GitHub</Button>
-                </div>
+                  </CardContent>
+                </Card>
               {/if}
             </div>
           </div>
         </CardContent>
       </Card>
     {:else if activeTab === "notifications"}
-      <Card class="overflow-hidden">
+      <Card size="sm">
         <CardHeader>
           <CardTitle>Notifications</CardTitle>
           <CardDescription>Choose what updates you want to receive via email.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div class="space-y-4">
-            <div class="flex items-start justify-between gap-4 rounded-md border bg-muted/30 p-4">
-              <div class="space-y-1">
-                <div class="text-base font-medium">Deployment status</div>
-                <p class="text-sm text-muted-foreground">Receive an email when your deployments finish or fail.</p>
-              </div>
-              <Switch bind:checked={emailNotifications} aria-label="Toggle deployment status notifications" />
-            </div>
-            <div class="flex items-start justify-between gap-4 rounded-md border bg-muted/30 p-4">
-              <div class="space-y-1">
-                <div class="text-base font-medium">Marketing emails</div>
-                <p class="text-sm text-muted-foreground">New features, tips and weekly summaries.</p>
-              </div>
-              <Switch bind:checked={marketingEmails} aria-label="Toggle marketing emails" />
-            </div>
+          <div class="flex flex-col gap-4">
+            <Card size="sm" class="overflow-hidden">
+              <CardContent>
+                <div class="flex items-start justify-between gap-4">
+                  <div class="flex flex-col gap-1">
+                    <div class="text-base font-medium">Deployment status</div>
+                    <p class="text-sm text-muted-foreground">Receive an email when your deployments finish or fail.</p>
+                  </div>
+                  <Switch bind:checked={emailNotifications} aria-label="Toggle deployment status notifications" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card size="sm" class="overflow-hidden">
+              <CardContent>
+                <div class="flex items-start justify-between gap-4">
+                  <div class="flex flex-col gap-1">
+                    <div class="text-base font-medium">Marketing emails</div>
+                    <p class="text-sm text-muted-foreground">New features, tips and weekly summaries.</p>
+                  </div>
+                  <Switch bind:checked={marketingEmails} aria-label="Toggle marketing emails" />
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </CardContent>
       </Card>

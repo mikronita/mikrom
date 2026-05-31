@@ -16,8 +16,8 @@
   } = $props();
 </script>
 
-<div class={cn("overflow-hidden rounded-lg border bg-card shadow-xs", classAttr)} {...rest}>
-  <div class={compact ? "p-3" : "p-5"}>
+<div class={cn("overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xs", classAttr)} {...rest}>
+  <div class={compact ? "p-5" : "p-7"}>
     <div class="flex items-start gap-4">
       {#if showIcon}
         <Skeleton class={cn("shrink-0", iconClassName)} />
@@ -32,7 +32,7 @@
     </div>
 
     {#if footerPills.length > 0 || footerLineClassName}
-      <div class="mt-4 flex flex-col gap-3">
+      <div class="mt-5 flex flex-col gap-3">
         {#if footerLineClassName}
           <Skeleton class={cn("h-4", footerLineClassName)} />
         {/if}

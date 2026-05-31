@@ -75,9 +75,9 @@
           <LoaderCircle class="mt-1 size-5 animate-spin text-muted-foreground" />
         </div>
 
-        <div class="mt-5 rounded-xl border border-border/60 bg-background/70 p-4">
+        <div class="mt-5 rounded-2xl border border-border/70 bg-card/95 p-5 shadow-sm">
           <div class="flex items-center gap-3">
-            <div class="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-card text-foreground">
+            <div class="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
               <LoaderCircle class="size-4 animate-spin text-muted-foreground" />
             </div>
             <div class="min-w-0">
@@ -85,7 +85,7 @@
               <p class="text-xs text-muted-foreground">Apps, VMs, storage and networking are being rehydrated.</p>
             </div>
           </div>
-        <div class="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div class="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">
             <div class="h-full w-2/3 rounded-full bg-gradient-to-r from-foreground/40 via-foreground to-foreground/40 animate-pulse"></div>
           </div>
         </div>

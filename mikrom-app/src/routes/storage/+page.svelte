@@ -30,6 +30,7 @@
   } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import { formatDate } from "$lib/utils";
+  import { matchesSearch } from "$lib/search";
 
   import { getToken } from "$lib/auth";
   import {
@@ -45,12 +46,14 @@
   import { toast } from "$lib/toast";
   import { appsStore, refreshApps } from "$lib/stores/apps";
   import { volumesStore, snapshotsStore, volumesLoading, snapshotsLoading, refreshVolumes, refreshSnapshots } from "$lib/stores/volumes";
+  import type { AttachedVolume, VolumeWithAttachments } from "$lib/api";
 
   let selectedApp = "";
   let _selectedAppId = "";
   let showCreateVolume = false;
   let showAttachVolume = false;
   let showCloneModal = false;
+  let query = "";
   let volumeForSnapshots = "";
   let volumeToDelete: Volume | null = null;
   let snapshotToDelete: VolumeSnapshot | null = null;
@@ -186,6 +189,26 @@
   function formatSize(size: number) {
     return size >= 1024 ? `${(size / 1024).toFixed(1)} GiB` : `${size} MiB`;
   }
+
+  function getVolumeSearchValues(volume: Volume | AttachedVolume | VolumeWithAttachments) {
+    const values = [volume.name];
+
+    if ("pool_name" in volume) {
+      values.push(volume.pool_name);
+    }
+
+    if ("attachments" in volume) {
+      values.push(
+        ...volume.attachments.flatMap((attachment) => [attachment.app_name, attachment.mount_point])
+      );
+    }
+
+    return values;
+  }
+
+  $: filteredVolumes = [...$volumesStore]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .filter((volume) => matchesSearch(getVolumeSearchValues(volume), query));
 </script>
 
 <svelte:head>
@@ -210,6 +233,14 @@
       </Button>
     </div>
 
+    <Card size="sm" class="overflow-hidden">
+      <CardContent class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div class="min-w-0 flex-1">
+          <Input bind:value={query} placeholder="Search by volume name, app or mount point" />
+        </div>
+      </CardContent>
+    </Card>
+
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {#if $volumesLoading && $volumesStore.length === 0}
         {#each Array.from({ length: 6 }) as _}
@@ -220,12 +251,16 @@
             footerPills={["w-20", "w-24"]}
           />
         {/each}
-      {:else if $volumesStore.length === 0}
+      {:else if filteredVolumes.length === 0}
         <div class="col-span-full">
           <EmptyState class="py-16">
             <HardDrive class="size-10 text-muted-foreground" />
-            <h2 class="text-xl font-semibold">No volumes found</h2>
-            <p class="max-w-md text-sm text-muted-foreground">You don't have any persistent volumes yet.</p>
+            <h2 class="text-xl font-semibold">{query ? "No matching volumes" : "No volumes found"}</h2>
+            <p class="max-w-md text-sm text-muted-foreground">
+              {query
+                ? "Try another search term or clear the search box."
+                : "You don't have any persistent volumes yet."}
+            </p>
             <Button size="sm" onclick={() => (showCreateVolume = true)}>
               <Plus class="size-4" />
               Create your first volume
@@ -233,9 +268,9 @@
           </EmptyState>
         </div>
       {:else}
-        {#each [...$volumesStore].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) as volume (volume.id)}
+        {#each filteredVolumes as volume (volume.id)}
           <a href={`/storage/${volume.id}`} class="block">
-            <Card class="h-full overflow-hidden transition-colors hover:bg-muted/30">
+            <Card size="sm">
               <CardHeader>
                 <div class="flex items-start gap-4">
                   <div class="flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
@@ -253,6 +288,10 @@
                   <span class="inline-flex items-center gap-1.5">
                     <Calendar class="size-4" />
                     Created {formatDate(volume.created_at)}
+                  </span>
+                  <span class="inline-flex items-center gap-1.5">
+                    <Calendar class="size-4" />
+                    Updated {formatDate(volume.updated_at)}
                   </span>
                   <div class="flex flex-wrap items-center gap-2">
                     <Badge variant="outline" class="gap-1.5">

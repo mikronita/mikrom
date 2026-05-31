@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import CreateAppModal from "$lib/components/CreateAppModal.svelte";
+import { setActiveProjectSlug } from "$lib/stores/projects";
 
 const mocks = vi.hoisted(() => ({
   createApp: vi.fn(),
@@ -13,6 +14,10 @@ const mocks = vi.hoisted(() => ({
   loading: vi.fn(),
   dismiss: vi.fn(),
 }));
+
+beforeEach(() => {
+  setActiveProjectSlug(null);
+});
 
 vi.mock("$lib/api", () => ({
   createApp: mocks.createApp,
@@ -44,6 +49,7 @@ describe("CreateAppModal", () => {
     mocks.getToken.mockReturnValue("token");
     mocks.listGithubRepos.mockResolvedValue({ data: [] });
     mocks.createApp.mockResolvedValue({ data: {} });
+    setActiveProjectSlug("acme");
 
     render(CreateAppModal, {
       props: {

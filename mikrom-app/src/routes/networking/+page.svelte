@@ -164,51 +164,62 @@
 
 <DashboardLayout>
   <div class="flex flex-col gap-6">
-    <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-      <div class="flex flex-col gap-2">
-        <div class="flex items-center gap-3">
-          <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+    <div class="rounded-2xl border border-border bg-card p-5 shadow-sm md:p-6">
+      <div class="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+        <div class="flex min-w-0 flex-1 gap-4">
+          <div class="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border bg-background text-foreground">
             <Network />
           </div>
-          <h1 class="text-3xl font-semibold tracking-tight">Networking</h1>
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-3">
+              <h1 class="text-3xl font-semibold tracking-tight">Networking</h1>
+              <Badge variant="outline" class="w-fit gap-2 border-transparent bg-status-info/10 px-3 py-1.5 text-status-info">
+                <LockKeyhole class="size-4" />
+                WireGuard mesh
+              </Badge>
+            </div>
+            <p class="mt-2 max-w-3xl text-sm text-muted-foreground">
+              Monitor the private 6PN mesh, workload addresses and application security rules.
+            </p>
+          </div>
         </div>
-        <p class="max-w-2xl text-sm text-muted-foreground">Monitor the private 6PN mesh, workload addresses and application security rules.</p>
+        <div class="flex flex-wrap items-center gap-2">
+          <Badge variant="outline" class="border-transparent bg-status-info/10 text-status-info">
+            {runningDeployments.length} active workloads
+          </Badge>
+        </div>
       </div>
-      <Badge variant="outline" class="w-fit gap-2 px-3 py-1.5 border-transparent bg-status-info/10 text-status-info">
-        <LockKeyhole class="size-4" />
-        WireGuard mesh
-      </Badge>
-    </div>
 
-    <div class="grid gap-4 md:grid-cols-3">
-      {#each [
-        { label: "VPC prefix", value: $profile?.vpc_ipv6_prefix || "Not assigned", description: "Private IPv6 /40 prefix reserved for your applications.", icon: Globe2, loading: !$profile, valueClass: "break-all font-mono text-lg" },
-        { label: "Active peers", value: (mesh?.total_workers ?? 0) + runningDeployments.length, description: "Total nodes and microVMs participating in the mesh.", icon: Server, loading: !mesh || loading, valueClass: "text-3xl" },
-        { label: "Running workloads", value: runningDeployments.length, description: "MicroVMs currently reachable through 6PN.", icon: Boxes, loading: loading, valueClass: "text-3xl" },
-      ] as card}
-        <Card>
-          <CardHeader class="flex flex-row items-start justify-between gap-4 pb-3">
-            <div class="flex flex-col gap-1">
-              <CardDescription>{card.label}</CardDescription>
-              {#if card.loading}
-                <Skeleton class={`mt-1 h-8 ${card.valueClass.includes("break-all") ? "w-32" : "w-24"}`} />
-              {:else}
-                <CardTitle class={card.valueClass}>{card.value}</CardTitle>
-              {/if}
-            </div>
-            <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
-              <svelte:component this={card.icon} class="size-5" />
-            </div>
-          </CardHeader>
-          <CardContent class="pt-0">
-            <p class="text-sm text-muted-foreground">{card.description}</p>
-          </CardContent>
-        </Card>
-      {/each}
+      <div class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {#each [
+          { label: "VPC prefix", value: $profile?.vpc_ipv6_prefix || "Not assigned", description: "Private IPv6 /40 prefix reserved for your applications.", icon: Globe2, loading: !$profile, valueClass: "break-all font-mono text-xl" },
+          { label: "Active peers", value: (mesh?.total_workers ?? 0) + runningDeployments.length, description: "Total nodes and microVMs participating in the mesh.", icon: Server, loading: !mesh || loading, valueClass: "text-2xl" },
+          { label: "Running workloads", value: runningDeployments.length, description: "MicroVMs currently reachable through 6PN.", icon: Boxes, loading: loading, valueClass: "text-2xl" },
+        ] as card}
+          <Card size="sm" class="border-border/70 bg-background/70 shadow-none">
+            <CardHeader class="flex flex-row items-start justify-between gap-4">
+              <div class="flex flex-col gap-1">
+                <CardDescription>{card.label}</CardDescription>
+                {#if card.loading}
+                  <Skeleton class={`mt-1 h-8 ${card.valueClass.includes("break-all") ? "w-32" : "w-24"}`} />
+                {:else}
+                  <CardTitle class={card.valueClass}>{card.value}</CardTitle>
+                {/if}
+              </div>
+              <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+                <svelte:component this={card.icon} class="size-5" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p class="text-sm text-muted-foreground">{card.description}</p>
+            </CardContent>
+          </Card>
+        {/each}
+      </div>
     </div>
 
     <div class="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(24rem,0.85fr)]">
-      <Card class="h-fit">
+      <Card class="h-fit overflow-hidden">
         <CardHeader class="border-b border-border bg-muted/20">
           <div class="flex items-center justify-between gap-4">
             <div class="grid gap-1">
@@ -279,7 +290,7 @@
         </Table>
       </Card>
 
-      <Card>
+      <Card class="overflow-hidden">
         <CardHeader class="border-b border-border bg-muted/20">
           <div class="flex flex-col gap-4">
             <div class="grid gap-1">
@@ -333,11 +344,11 @@
               <p class="text-sm text-muted-foreground">Create the first firewall rule for this application.</p>
             </EmptyState>
           {:else}
-            <div class="space-y-2">
+            <div class="flex flex-col gap-2">
               {#each $securityRulesStore as item}
-                <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/20 p-3">
+                <div class="flex items-center justify-between gap-4 rounded-2xl border border-border/70 bg-muted/20 p-4">
                   <div>
-                    <div class="font-medium">{item.protocol.toUpperCase()} {formatPortRange(item)}</div>
+                    <div class="text-sm font-semibold">{item.protocol.toUpperCase()} {formatPortRange(item)}</div>
                     <div class="text-xs text-muted-foreground">Priority {item.priority}</div>
                   </div>
                   <div class="flex items-center gap-2">
@@ -357,7 +368,7 @@
 
   {#if showRuleModal}
     <Modal bind:open={showRuleModal} title="Add security rule" description={`Create a firewall rule for ${selectedApp}.`}>
-      <div class="space-y-4">
+      <div class="flex flex-col gap-4">
         <Field label="Protocol">
           <Select bind:value={rule.protocol}>
             <SelectTrigger>

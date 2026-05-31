@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { page } from "$app/stores";
+  import { fade } from "svelte/transition";
   import {
     Boxes,
     AppWindow,
@@ -28,9 +29,8 @@
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/apps", label: "Applications", icon: AppWindow },
     { href: "/databases", label: "Databases", icon: Database },
-    { href: "/networking", label: "Networking", icon: Network },
     { href: "/storage", label: "Storage", icon: HardDrive },
-    { href: "/settings", label: "Settings", icon: Settings },
+    { href: "/networking", label: "Networking", icon: Network },
   ];
 
   function initials() {
@@ -104,7 +104,7 @@
             href="/"
             class={cn(
               "flex h-10 w-full items-center rounded-md px-2 transition-colors hover:bg-muted",
-              collapsed ? "justify-center gap-0" : "gap-3"
+              collapsed ? "justify-center gap-0" : "gap-3",
             )}
           >
             <div
@@ -113,14 +113,20 @@
               <Boxes />
             </div>
             {#if !collapsed}
-              <div class="flex flex-col overflow-hidden">
-                <span
-                  class="whitespace-nowrap text-sm font-semibold leading-none"
-                  >Mikrom</span
-                >
-                <span class="mt-1 text-xs text-muted-foreground"
-                  >Cloud Platform</span
-                >
+              <div
+                class="flex flex-col overflow-hidden transition-[max-width,opacity,transform] duration-200 ease-out max-w-[8rem] opacity-100 translate-x-0"
+                transition:fade={{ duration: 120 }}
+              >
+                <span class="whitespace-nowrap text-sm font-semibold leading-none">Mikrom</span>
+                <span class="mt-1 whitespace-nowrap text-xs text-muted-foreground">Cloud Platform</span>
+              </div>
+            {:else}
+              <div
+                class="flex flex-col overflow-hidden max-w-0 opacity-0 -translate-x-1 transition-[max-width,opacity,transform] duration-200 ease-out"
+                aria-hidden="true"
+              >
+                <span class="whitespace-nowrap text-sm font-semibold leading-none">Mikrom</span>
+                <span class="mt-1 whitespace-nowrap text-xs text-muted-foreground">Cloud Platform</span>
               </div>
             {/if}
           </a>
@@ -128,7 +134,10 @@
 
         <div class="flex-1 overflow-y-auto p-2">
           {#if !collapsed}
-            <div class="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <div
+              class="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              transition:fade={{ duration: 120 }}
+            >
               Navigation
             </div>
           {/if}
@@ -150,12 +159,15 @@
                             : pathname.startsWith(item.href)
                               ? "bg-muted text-foreground"
                               : "text-foreground",
-                          collapsed ? "justify-center" : "gap-2"
+                          collapsed ? "justify-center" : "gap-2",
                         )}
                       >
-                        <svelte:component this={item.icon} class="size-4 shrink-0" />
+                        <svelte:component
+                          this={item.icon}
+                          class="size-4 shrink-0"
+                        />
                         {#if !collapsed}
-                          <span class="truncate">{item.label}</span>
+                          <span class="truncate" transition:fade={{ duration: 120 }}>{item.label}</span>
                         {/if}
                       </a>
                     {/snippet}
@@ -180,7 +192,7 @@
                   {...props}
                   class={cn(
                     "flex h-12 w-full items-center rounded-md p-2 text-left text-sm outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted data-[state=open]:text-foreground",
-                    collapsed ? "justify-center gap-0" : "gap-3"
+                    collapsed ? "justify-center gap-0" : "gap-3",
                   )}
                   aria-label="User menu"
                 >
@@ -192,30 +204,37 @@
                     </AvatarFallback>
                   </Avatar>
                   {#if !collapsed}
-                    <div class="grid flex-1 text-left text-sm leading-tight">
+                    <div class="grid flex-1 text-left text-sm leading-tight" transition:fade={{ duration: 120 }}>
                       <span class="truncate font-medium">{displayName()}</span>
-                      <span class="truncate text-xs text-muted-foreground"
-                        >{$profile?.email || ""}</span
-                      >
+                      <span class="truncate text-xs text-muted-foreground">{$profile?.email || ""}</span>
                     </div>
-                    <ChevronsUpDown
-                      class="ml-auto size-4 shrink-0 text-muted-foreground"
-                    />
+                    <ChevronsUpDown class="ml-auto size-4 shrink-0 text-muted-foreground" />
                   {/if}
                 </button>
               {/snippet}
             </DropdownMenu.Trigger>
-            <DropdownMenu.Content class="w-56" side="right" align="end" sideOffset={8}>
+            <DropdownMenu.Content
+              class="w-56"
+              side="right"
+              align="end"
+              sideOffset={8}
+            >
               <DropdownMenu.Label class="font-normal">
-                <div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
+                <div
+                  class="flex items-center gap-2 px-1 py-1.5 text-left text-sm"
+                >
                   <Avatar class="size-8 rounded-md">
-                    <AvatarFallback class="rounded-md text-xs font-medium text-foreground">
+                    <AvatarFallback
+                      class="rounded-md text-xs font-medium text-foreground"
+                    >
                       {initials()}
                     </AvatarFallback>
                   </Avatar>
                   <div class="grid flex-1 text-left text-sm leading-tight">
                     <span class="truncate font-semibold">{displayName()}</span>
-                    <span class="truncate text-xs text-muted-foreground">{$profile?.email || ""}</span>
+                    <span class="truncate text-xs text-muted-foreground"
+                      >{$profile?.email || ""}</span
+                    >
                   </div>
                 </div>
               </DropdownMenu.Label>
@@ -223,7 +242,11 @@
               <DropdownMenu.Group>
                 <DropdownMenu.Item>
                   {#snippet child({ props })}
-                    <a href="/settings" {...props} class="flex w-full items-center">
+                    <a
+                      href="/settings"
+                      {...props}
+                      class="flex w-full items-center"
+                    >
                       <Settings class="mr-2 size-4" />
                       <span>Settings</span>
                     </a>
@@ -231,7 +254,10 @@
                 </DropdownMenu.Item>
               </DropdownMenu.Group>
               <DropdownMenu.Separator />
-              <DropdownMenu.Item onSelect={() => logout()} class="text-destructive">
+              <DropdownMenu.Item
+                onSelect={() => logout()}
+                class="text-destructive"
+              >
                 <LogOut class="mr-2 size-4" />
                 <span>Sign out</span>
               </DropdownMenu.Item>

@@ -23,6 +23,6 @@ test.describe("databases", () => {
 
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
     await expect(page.getByRole("link", { name: /analytics.*PostgreSQL 16/i })).toBeVisible();
-    await expect(page.getByText("Provisioning")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Provisioning" })).toBeVisible();
   });
 });

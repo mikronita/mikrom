@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { ChevronsUpDown, Check, Folder } from "lucide-svelte";
+  import { fade } from "svelte/transition";
   import {
     beginProjectSwitch,
     activeProjectStore,
@@ -54,7 +55,7 @@
             <Folder class="size-4 transition-transform duration-200 group-data-[state=open]:scale-105" />
           </div>
           {#if !collapsed || compact}
-            <div class="grid flex-1 text-left leading-tight">
+            <div class="grid flex-1 text-left leading-tight" transition:fade={{ duration: 120 }}>
               {#if !compact}
                 <span class="truncate text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Project</span>
               {/if}
