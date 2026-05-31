@@ -449,6 +449,7 @@
         return;
       }
       toast.success(`Application ${app.name} deleted`);
+      await refreshApps();
       goto("/apps");
     } finally {
       deletingApp = false;

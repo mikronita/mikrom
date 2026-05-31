@@ -33,7 +33,7 @@
 
   let projectName = "";
   let creating = false;
-  let sortedProjects: ProjectInfo[] = [];
+  let sortedProjects: ProjectInfo[];
 
   $: sortedProjects = [...$projectsStore].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()

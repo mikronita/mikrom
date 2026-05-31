@@ -4,19 +4,17 @@
 
 	let {
 		open = $bindable(false),
-		value = $bindable(),
-		type = "single",
+		value = $bindable(""),
 		children,
 		...restProps
   	}: {
   		open?: boolean;
-  		value?: any;
-  		type?: "single" | "multiple";
+  		value?: string | undefined;
   		children?: Snippet;
   		[key: string]: unknown;
   	} = $props();
 </script>
 
-<SelectPrimitive.Root bind:open bind:value {type} {...restProps}>
+<SelectPrimitive.Root bind:open bind:value type="single" {...restProps}>
 	{@render children?.()}
 </SelectPrimitive.Root>
