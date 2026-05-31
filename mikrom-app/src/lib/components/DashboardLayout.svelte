@@ -1,12 +1,15 @@
 <script lang="ts">
   import { page } from "$app/stores";
-  import { Bell, PanelLeft, Search } from "lucide-svelte";
+  import { Bell, PanelLeft } from "lucide-svelte";
   import AuthGuard from "$lib/components/AuthGuard.svelte";
+  import ProjectSwitcher from "$lib/components/ProjectSwitcher.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
   import { useProfileBootstrap } from "$lib/stores/profile";
+  import { useProjectBootstrap } from "$lib/stores/projects";
 
   useProfileBootstrap();
+  useProjectBootstrap();
 
   const segmentName = (segment: string) => decodeURIComponent(segment).replace(/^\w/, (c) => c.toUpperCase());
   const breadcrumbHref = (index: number) => `/${pathParts.slice(0, index + 1).map(encodeURIComponent).join("/")}`;
@@ -25,6 +28,17 @@
   <div class="flex min-h-screen bg-background">
     <Sidebar bind:collapsed={sidebarCollapsed} />
     <div class="flex min-w-0 flex-1 flex-col">
+      <header class="sticky top-0 z-10 flex flex-col gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:hidden">
+        <div class="flex items-center gap-2">
+          <a href="/" class="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-card text-foreground">
+            <span class="text-sm font-semibold">M</span>
+          </a>
+          <div class="min-w-0 flex-1"></div>
+          <ThemeToggle />
+        </div>
+        <ProjectSwitcher compact className="w-full" />
+      </header>
+
       <header class="sticky top-0 z-10 hidden h-14 shrink-0 items-center gap-3 border-b border-border bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:flex md:px-4">
         <button
           type="button"
@@ -52,11 +66,8 @@
             {/each}
           {/if}
         </div>
-        <div class="hidden w-72 lg:block">
-          <div class="flex h-9 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm text-muted-foreground">
-            <Search class="size-4" />
-            <span>Search or jump to...</span>
-          </div>
+        <div class="hidden lg:block">
+          <ProjectSwitcher compact className="min-w-[220px]" />
         </div>
         <button class="flex size-9 items-center justify-center rounded-md hover:bg-muted" aria-label="Notifications" type="button">
           <Bell class="size-4" />

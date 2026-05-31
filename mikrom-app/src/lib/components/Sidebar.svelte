@@ -3,6 +3,7 @@
   import { page } from "$app/stores";
   import {
     Boxes,
+    AppWindow,
     Database,
     ChevronsUpDown,
     HardDrive,
@@ -25,7 +26,7 @@
 
   const nav = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/apps", label: "Applications", icon: Boxes },
+    { href: "/apps", label: "Applications", icon: AppWindow },
     { href: "/databases", label: "Databases", icon: Database },
     { href: "/networking", label: "Networking", icon: Network },
     { href: "/storage", label: "Storage", icon: HardDrive },
@@ -127,10 +128,8 @@
 
         <div class="flex-1 overflow-y-auto p-2">
           {#if !collapsed}
-            <div
-              class="px-2 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-            >
-              Workspace
+            <div class="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Navigation
             </div>
           {/if}
           <nav class="flex flex-col gap-1">

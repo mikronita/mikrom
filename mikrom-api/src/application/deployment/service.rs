@@ -96,7 +96,13 @@ impl DeploymentService {
             .await?
             .ok_or_else(|| ApiError::NotFound("User not found".into()))?;
 
-        let app = state.app_repo.create_app(params).await?;
+        let app = state
+            .app_repo
+            .create_app(crate::domain::CreateAppParams {
+                user_id: owner_user_id,
+                ..params
+            })
+            .await?;
 
         state.publish_workspace_event(WorkspaceEvent {
             kind: WorkspaceEventKind::AppCreated,

@@ -106,11 +106,13 @@ pub struct ManualDeployRequest {
 
 #[rovo::rovo]
 pub async fn create_app_handler(
+    auth: AuthUser,
     tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Json(payload): Json<CreateAppRequest>,
 ) -> ApiResult<(StatusCode, Json<AppResponse>)> {
     let port = payload.port.unwrap_or_else(|| Port::new(8080).unwrap());
+    let user_id = Uuid::parse_str(&auth.user_id).map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Force scale-to-zero by default (min_replicas = 0)
     let min = 0;
@@ -158,6 +160,7 @@ pub async fn create_app_handler(
             git_url: payload.git_url,
             port,
             hostname: Some(hostname),
+            user_id,
             tenant_id,
             github_webhook_secret: Some(webhook_secret.clone()),
             github_installation_id: payload.github_installation_id,
@@ -682,6 +685,7 @@ pub async fn deploy_app(
                     .map_err(|e| ApiError::Internal(e.to_string()))?;
 
                 let create_params = crate::domain::CreateAppParams {
+                    user_id: user_uuid,
                     tenant_id: user_uuid,
                     name: payload.app_name.clone(),
                     git_url,

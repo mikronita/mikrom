@@ -57,7 +57,7 @@
       </div>
       <div class="flex flex-col gap-1">
         <h1 class="text-2xl font-semibold tracking-tight">Create your Mikrom account</h1>
-        <p class="text-sm text-muted-foreground">Set up access to deploy and manage your applications.</p>
+        <p class="text-sm text-muted-foreground">Set up access to deploy and manage your applications across projects.</p>
       </div>
     </div>
 

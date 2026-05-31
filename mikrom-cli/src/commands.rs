@@ -36,7 +36,7 @@ pub enum Commands {
     /// Database Management (Neon)
     #[command(subcommand)]
     Db(DbCommands),
-    /// Project/Tenant Management
+    /// Project Management
     #[command(subcommand)]
     Project(ProjectCommands),
     /// System Status
@@ -270,7 +270,7 @@ pub enum DeploymentCommands {
 pub enum ConfigCommands {
     /// Display current CLI settings
     Show,
-    /// Set a configuration value (e.g., api-url)
+    /// Set a configuration value (e.g., api-url, active-project)
     Set {
         #[arg(help = "The configuration key (e.g., api-url)")]
         key: String,
@@ -335,7 +335,7 @@ pub enum ProjectCommands {
     },
     /// Switch current CLI context to a different project
     Switch {
-        /// 6-char Project ID
+        /// 6-char project slug
         #[arg(index = 1)]
         tenant_id: String,
     },

@@ -41,6 +41,17 @@ export interface UserProfile {
   vpc_ipv6_prefix: string | null;
 }
 
+export interface ProjectInfo {
+  id: string;
+  tenant_id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface CreateProjectRequest {
+  name: string;
+}
+
 export interface UpdateProfileRequest {
   first_name: string | null;
   last_name: string | null;
@@ -430,6 +441,33 @@ export async function getMeshStatus(token: string): Promise<{ data?: MeshStatus;
     const result = await parseJson<MeshStatus>(response);
     if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch mesh status") };
     return { data: result as MeshStatus };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listProjects(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/projects`, { headers: authHeaders(token) });
+    if (response.status === 401) logout();
+    const result = await parseJson<ProjectInfo[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch projects") };
+    return { data: result as ProjectInfo[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function createProject(token: string, data: CreateProjectRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/projects`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<ProjectInfo>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create project") };
+    return { data: result as ProjectInfo };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Network error" };
   }

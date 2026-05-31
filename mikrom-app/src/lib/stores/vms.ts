@@ -14,6 +14,11 @@ export function getCurrentVms() {
   return currentVms;
 }
 
+export function clearVms() {
+  vmsStore.set([]);
+  vmsLoading.set(false);
+}
+
 export async function refreshVms() {
   const token = getToken();
   if (!token) return;
@@ -31,7 +36,7 @@ export async function refreshVms() {
 
 let sseCleanup: (() => void) | null = null;
 
-export function initVmsSSE() {
+export function initVmsSSE(options: { seed?: boolean } = {}) {
   const token = getToken();
   if (!token) {
     stopVmsSSE();
@@ -40,8 +45,10 @@ export function initVmsSSE() {
 
   if (sseCleanup) return;
 
-  // Seed the store once so the UI can render immediately, then keep it live via SSE.
-  void refreshVms();
+  if (options.seed ?? true) {
+    // Seed the store once so the UI can render immediately, then keep it live via SSE.
+    void refreshVms();
+  }
 
   sseCleanup = watchVmsSSE(token, (updatedVm) => {
     vmsStore.update((current) => {

@@ -5,6 +5,11 @@ import { getToken } from "$lib/auth";
 export const securityRulesStore = writable<SecurityRule[]>([]);
 export const securityRulesLoading = writable<boolean>(false);
 
+export function clearSecurityRules() {
+  securityRulesStore.set([]);
+  securityRulesLoading.set(false);
+}
+
 export async function refreshSecurityRules(appName: string) {
   const token = getToken();
   if (!token || !appName) return;

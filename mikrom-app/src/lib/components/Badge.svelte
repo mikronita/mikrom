@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Badge as BadgeRoot } from "./ui/badge/index.js";
+  import type { BadgeVariant } from "./ui/badge/index.js";
   import { cn } from "$lib/utils";
 
   let {
@@ -8,7 +9,7 @@
     children,
     ...rest
   }: {
-    variant?: string;
+    variant?: BadgeVariant;
     class?: string;
     children?: import("svelte").Snippet;
     [key: string]: unknown;

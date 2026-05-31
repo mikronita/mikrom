@@ -19,7 +19,7 @@ Mikrom stores its configuration in `~/.config/mikrom/config.toml`. Use the follo
 - `mikrom auth register`: Create a new Mikrom account.
 - `mikrom auth login`: Authenticate and save your JWT token.
 - `mikrom auth whoami`: Check your current identity.
-- `mikrom config show`: View active CLI settings.
+- `mikrom config show`: View active CLI settings, including the current project.
 
 ## Output formats
 
@@ -68,7 +68,10 @@ mikrom -o json system health
 | `mikrom system health` | Check the health of all system services. |
 | `mikrom system watch` | Stream system health updates in real-time. |
 | `mikrom config show` | View active CLI settings. |
-| `mikrom config set` | Set a configuration value (e.g., api-url). |
+| `mikrom config set` | Set a configuration value (e.g., `api-url`, `active-project`). |
+| `mikrom project list` | List the projects you can access. |
+| `mikrom project create` | Create a new project. |
+| `mikrom project switch` | Switch the active project used by subsequent commands. |
 
 ## Advanced Usage
 
@@ -77,6 +80,14 @@ You can point the CLI at a specific Mikrom cluster with the config command:
 
 ```bash
 mikrom config set api-url https://mikrom.production.es
+```
+
+### Switch projects
+`mikrom project switch` updates the active project stored in `~/.config/mikrom/config.toml` and scopes future requests to that project:
+
+```bash
+mikrom project list
+mikrom project switch abc123
 ```
 
 ### Scripting & Automation

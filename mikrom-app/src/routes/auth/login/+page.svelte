@@ -56,7 +56,7 @@
       </div>
       <div class="flex flex-col gap-1">
         <h1 class="text-2xl font-semibold tracking-tight">Sign in to Mikrom</h1>
-        <p class="text-sm text-muted-foreground">Use your account to manage applications and microVMs.</p>
+        <p class="text-sm text-muted-foreground">Use your account to manage applications and microVMs across projects.</p>
       </div>
     </div>
 
@@ -107,7 +107,7 @@
     </Card>
 
     <p class="max-w-sm text-center text-xs leading-5 text-muted-foreground">
-      Protected by your workspace credentials. By continuing, you agree to Mikrom&apos;s terms and privacy policy.
+      Protected by your project credentials. By continuing, you agree to Mikrom&apos;s terms and privacy policy.
     </p>
   </div>
 </div>

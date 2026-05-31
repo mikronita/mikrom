@@ -46,6 +46,7 @@ async fn deployment_metadata_roundtrip_persists_git_fields() {
             name: "metadata-app".to_string(),
             git_url: "https://github.com/test/repo".to_string(),
             port: mikrom_api::domain::types::Port::new(80).unwrap(),
+            user_id,
             tenant_id: tenant.id,
             ..Default::default()
         })

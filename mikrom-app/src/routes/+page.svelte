@@ -174,7 +174,7 @@
           </div>
         </CardHeader>
         <CardContent class="pt-0">
-          <p class="text-sm text-muted-foreground">Git projects in the workspace</p>
+          <p class="text-sm text-muted-foreground">Git projects in the active project</p>
         </CardContent>
       </Card>
 
@@ -234,7 +234,7 @@
             <div class="flex items-center justify-between gap-4">
               <div class="grid gap-1">
                 <CardTitle>Recent Applications</CardTitle>
-                <CardDescription>Latest projects and their runtime state.</CardDescription>
+                <CardDescription>Latest applications and their runtime state.</CardDescription>
               </div>
               <Button variant="outline" size="sm" href="/apps">
                 View all
