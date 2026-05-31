@@ -22,6 +22,6 @@ test.describe("applications", () => {
     await page.getByRole("button", { name: "Create App" }).click();
 
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
-    await expect(page).toHaveURL("http://127.0.0.1:4173/apps");
+    await expect(page).toHaveURL("/apps");
   });
 });

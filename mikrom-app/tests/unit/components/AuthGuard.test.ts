@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/svelte";
 import AuthGuard from "$lib/components/AuthGuard.svelte";
+import AuthGuardFixture from "./AuthGuardFixture.svelte";
 
 const mocks = vi.hoisted(() => ({
   goto: vi.fn(),
@@ -32,16 +33,14 @@ describe("AuthGuard", () => {
     expect(screen.queryByText("Protected content")).toBeNull();
   });
 
-  it("renders protected content for authenticated users", () => {
+  it("renders protected content for authenticated users", async () => {
     mocks.isAuthenticated.mockReturnValue(true);
 
-    render(AuthGuard, {
-      props: {
-        children: () => "Protected content",
-      },
-    });
+    render(AuthGuardFixture);
 
     expect(mocks.goto).not.toHaveBeenCalled();
-    expect(screen.queryByText("Protected content")).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByText("Protected content")).toBeTruthy();
+    });
   });
 });
