@@ -462,7 +462,10 @@ export async function createProject(token: string, data: CreateProjectRequest) {
   try {
     const response = await fetch(`${API_PROXY_BASE}/projects`, {
       method: "POST",
-      headers: authHeaders(token),
+      headers: {
+        ...authHeaders(token),
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(data),
     });
     const result = await parseJson<ProjectInfo>(response);
