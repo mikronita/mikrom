@@ -86,7 +86,7 @@ pub(super) async fn publish_job_update_best_effort(
         status: job.status as i32,
         host_id: job.host_id.clone().unwrap_or_default().to_string(),
         vm_id: job.vm_id.clone().unwrap_or_default().to_string(),
-        user_id: job.user_id.to_string(),
+        tenant_id: job.tenant_id.to_string(),
         deployment_id: job.deployment_id.clone().unwrap_or_default().to_string(),
         ipv6_address: job.config.ipv6_address.clone().unwrap_or_default(),
         ..Default::default()
@@ -225,34 +225,34 @@ impl AppService {
         self.heartbeats.cleanup_stale_workers().await
     }
 
-    pub async fn get_app_status(&self, job_id: &str, user_id: &str) -> DomainResult<Job> {
-        self.queries.get_app_status(job_id, user_id).await
+    pub async fn get_app_status(&self, job_id: &str, tenant_id: &str) -> DomainResult<Job> {
+        self.queries.get_app_status(job_id, tenant_id).await
     }
 
-    pub async fn pause_app(&self, job_id: &str, user_id: &str) -> DomainResult<()> {
-        self.lifecycle.pause_app(job_id, user_id).await
+    pub async fn pause_app(&self, job_id: &str, tenant_id: &str) -> DomainResult<()> {
+        self.lifecycle.pause_app(job_id, tenant_id).await
     }
 
-    pub async fn resume_app(&self, job_id: &str, user_id: &str) -> DomainResult<bool> {
-        self.lifecycle.resume_app(job_id, user_id).await
+    pub async fn resume_app(&self, job_id: &str, tenant_id: &str) -> DomainResult<bool> {
+        self.lifecycle.resume_app(job_id, tenant_id).await
     }
 
-    pub async fn delete_app(&self, job_id: &str, user_id: &str) -> DomainResult<()> {
-        self.lifecycle.delete_app(job_id, user_id).await
+    pub async fn delete_app(&self, job_id: &str, tenant_id: &str) -> DomainResult<()> {
+        self.lifecycle.delete_app(job_id, tenant_id).await
     }
 
-    pub async fn delete_all_by_app(&self, app_id: &str, user_id: &str) -> DomainResult<()> {
-        self.lifecycle.delete_all_by_app(app_id, user_id).await
+    pub async fn delete_all_by_app(&self, app_id: &str, tenant_id: &str) -> DomainResult<()> {
+        self.lifecycle.delete_all_by_app(app_id, tenant_id).await
     }
 
     pub async fn scale_app(
         &self,
         app_id: &str,
         desired_replicas: u32,
-        user_id: &str,
+        tenant_id: &str,
     ) -> DomainResult<()> {
         self.scaling
-            .scale_app(app_id, desired_replicas, user_id)
+            .scale_app(app_id, desired_replicas, tenant_id)
             .await
     }
 
@@ -280,8 +280,8 @@ impl AppService {
         self.pick_any_healthy_worker().await
     }
 
-    pub async fn check_health(&self, job_id: &str, user_id: &str) -> DomainResult<bool> {
-        self.queries.check_health(job_id, user_id).await
+    pub async fn check_health(&self, job_id: &str, tenant_id: &str) -> DomainResult<bool> {
+        self.queries.check_health(job_id, tenant_id).await
     }
 
     pub async fn update_security_groups(
@@ -735,7 +735,7 @@ mod tests {
             "app1".to_string(),
             "img".to_string(),
             VmConfig::default(),
-            crate::domain::UserId::from("user-1".to_string()),
+            crate::domain::TenantId::from("tenant-1".to_string()),
             None,
         );
         job.schedule("host-1".to_string(), "vm-1".to_string());
@@ -761,7 +761,7 @@ mod tests {
             test_runtime(),
         );
 
-        let res = service.check_health("job-1", "user-1").await.unwrap();
+        let res = service.check_health("job-1", "tenant-1").await.unwrap();
         assert!(res);
     }
 
@@ -772,7 +772,7 @@ mod tests {
             "app1".to_string(),
             "img".to_string(),
             VmConfig::default(),
-            crate::domain::UserId::from("user-1".to_string()),
+            crate::domain::TenantId::from("tenant-1".to_string()),
             None,
         );
         job.schedule("host-1".to_string(), "vm-1".to_string());
@@ -821,7 +821,7 @@ mod tests {
             test_runtime(),
         );
 
-        service.pause_app("job-1", "user-1").await.unwrap();
+        service.pause_app("job-1", "tenant-1").await.unwrap();
     }
 
     #[tokio::test]
@@ -869,7 +869,7 @@ mod tests {
             test_runtime(),
         );
 
-        service.pause_app("job-1", "user-1").await.unwrap();
+        service.pause_app("job-1", "tenant-1").await.unwrap();
     }
 
     #[tokio::test]
@@ -956,7 +956,10 @@ mod tests {
             test_runtime(),
         );
 
-        service.delete_all_by_app("app-1", "user-1").await.unwrap();
+        service
+            .delete_all_by_app("app-1", "tenant-1")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1001,7 +1004,7 @@ mod tests {
         );
 
         service
-            .delete_all_by_app("app-1", "user-1")
+            .delete_all_by_app("app-1", "tenant-1")
             .await
             .expect("cleanup should succeed even if agent fails");
     }
@@ -1055,7 +1058,7 @@ mod tests {
             test_runtime(),
         );
 
-        let resumed = service.resume_app("job-1", "user-1").await.unwrap();
+        let resumed = service.resume_app("job-1", "tenant-1").await.unwrap();
 
         assert!(!resumed);
     }
@@ -1129,7 +1132,7 @@ mod tests {
             test_runtime(),
         );
 
-        let err = service.resume_app("job-1", "user-1").await.unwrap_err();
+        let err = service.resume_app("job-1", "tenant-1").await.unwrap_err();
         assert!(matches!(err, DomainError::Infrastructure(_)));
     }
 
@@ -1225,7 +1228,7 @@ mod tests {
                 app_id: "app-1".to_string(),
                 app_name: "app".to_string(),
                 image: "image:latest".to_string(),
-                user_id: "user-1".to_string(),
+                tenant_id: "tenant-1".to_string(),
                 deployment_id: "dep-1".to_string(),
                 vpc_ipv6_prefix: "fd00::".to_string(),
                 config: VmConfig::default(),
@@ -1282,7 +1285,7 @@ mod tests {
             test_runtime(),
         );
 
-        let err = service.delete_app("job-1", "user-1").await.unwrap_err();
+        let err = service.delete_app("job-1", "tenant-1").await.unwrap_err();
         assert!(matches!(err, DomainError::Infrastructure(_)));
     }
 
@@ -1290,7 +1293,7 @@ mod tests {
     fn autoscaling_target_scales_down_when_usage_is_below_hysteresis_band() {
         let app = AppConfig {
             id: crate::domain::AppId::from("app-1".to_string()),
-            user_id: crate::domain::UserId::from("user-1".to_string()),
+            tenant_id: crate::domain::TenantId::from("tenant-1".to_string()),
             vpc_ipv6_prefix: "fd00::".to_string(),
             desired_replicas: 3,
             min_replicas: 1,
@@ -1313,7 +1316,7 @@ mod tests {
     fn autoscaling_target_holds_size_inside_hysteresis_band() {
         let app = AppConfig {
             id: crate::domain::AppId::from("app-1".to_string()),
-            user_id: crate::domain::UserId::from("user-1".to_string()),
+            tenant_id: crate::domain::TenantId::from("tenant-1".to_string()),
             vpc_ipv6_prefix: "fd00::".to_string(),
             desired_replicas: 3,
             min_replicas: 1,
@@ -1336,7 +1339,7 @@ mod tests {
     fn autoscaling_target_keeps_current_size_when_usage_matches_threshold() {
         let app = AppConfig {
             id: crate::domain::AppId::from("app-1".to_string()),
-            user_id: crate::domain::UserId::from("user-1".to_string()),
+            tenant_id: crate::domain::TenantId::from("tenant-1".to_string()),
             vpc_ipv6_prefix: "fd00::".to_string(),
             desired_replicas: 2,
             min_replicas: 1,

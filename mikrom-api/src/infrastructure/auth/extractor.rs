@@ -3,12 +3,70 @@ use axum::{
     extract::{FromRef, FromRequestParts},
     http::{HeaderMap, Uri, request::Parts},
 };
+use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub struct AuthUser {
     pub user_id: String,
     pub email: String,
     pub role: crate::domain::UserRole,
+}
+
+#[derive(Clone, Debug)]
+pub struct TenantContext {
+    pub tenant: crate::domain::Tenant,
+}
+
+impl<S> FromRequestParts<S> for TenantContext
+where
+    S: Send + Sync,
+    crate::AppState: FromRef<S>,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let auth_user = AuthUser::from_request_parts(parts, state).await?;
+        let state = crate::AppState::from_ref(state);
+
+        let tenant_slug = parts
+            .headers
+            .get("x-mikrom-tenant-id")
+            .and_then(|h| h.to_str().ok())
+            .ok_or_else(|| ApiError::BadRequest("Missing x-mikrom-tenant-id header".into()))?;
+
+        let tenant = state
+            .tenant_repo
+            .find_by_slug(tenant_slug)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or_else(|| ApiError::NotFound("Tenant not found".into()))?;
+
+        let user_id = Uuid::parse_str(&auth_user.user_id)
+            .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
+
+        let is_member = state
+            .tenant_repo
+            .is_member(tenant.id, user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        if !is_member {
+            return Err(ApiError::Forbidden);
+        }
+
+        Ok(TenantContext { tenant })
+    }
+}
+
+impl rovo::aide::OperationInput for TenantContext {
+    fn operation_input(
+        _ctx: &mut rovo::aide::generate::GenContext,
+        operation: &mut rovo::aide::openapi::Operation,
+    ) {
+        operation.security.push(indexmap::indexmap! {
+            "jwt".to_string() => vec![]
+        });
+    }
 }
 
 impl<S> FromRequestParts<S> for AuthUser
@@ -121,6 +179,7 @@ mod tests {
         let state = AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(MockUserRepository::new()),
+            tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
             app_repo: Arc::new(MockAppRepository::new()),
             database_repo: Arc::new(MockDatabaseRepository::new()),
             github_repo: Arc::new(MockGithubRepository::new()),

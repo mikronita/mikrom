@@ -2,199 +2,161 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use mikrom_api::AppState;
 use mikrom_api::auth::jwt::create_token;
 use mikrom_api::create_app;
-use mikrom_api::domain::MockAppRepository;
 use mikrom_api::domain::user::{MockUserRepository, UserRole};
+use mikrom_api::domain::{
+    MockAppRepository, MockDatabaseRepository, MockScheduler, MockTenantRepository,
+    MockVolumeRepository,
+};
 use mikrom_api::workspace::{WorkspaceEvent, WorkspaceEventKind};
+use mikrom_api::{AppState, nats::TypedNatsClient};
 use std::sync::Arc;
+use tokio::time::{Duration, timeout};
 use tokio_stream::StreamExt;
-use tower::Service;
+use tower::ServiceExt;
 use uuid::Uuid;
 
 const JWT_SECRET: &str = "test-secret";
 
-async fn setup_app() -> (
-    axum::Router,
+struct DummyNats;
+
+#[async_trait::async_trait]
+impl mikrom_api::nats::NatsClient for DummyNats {
+    async fn request_raw(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+        Err(anyhow::anyhow!("unexpected NATS request"))
+    }
+
+    async fn publish_raw(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn subscribe_raw(&self, _subject: String) -> anyhow::Result<async_nats::Subscriber> {
+        Err(anyhow::anyhow!("unexpected NATS subscribe"))
+    }
+}
+
+#[allow(clippy::field_reassign_with_default)]
+fn build_state() -> (
+    AppState,
     tokio::sync::broadcast::Sender<WorkspaceEvent>,
     Uuid,
 ) {
-    let mock_user_repo = MockUserRepository::new();
-    let mock_app_repo = MockAppRepository::new();
-    let (workspace_events, _) = tokio::sync::broadcast::channel(100);
+    let mut state = AppState::default();
+    state.jwt_secret = JWT_SECRET.to_string();
+    state.ctx.jwt_secret = state.jwt_secret.clone();
+    state.master_key = "test-master-key".to_string();
+    state.ctx.master_key = state.master_key.clone();
+    state.user_repo = Arc::new(MockUserRepository::new());
+    state.ctx.user_repo = state.user_repo.clone();
+    state.tenant_repo = Arc::new(MockTenantRepository::new());
+    state.ctx.tenant_repo = state.tenant_repo.clone();
+    state.app_repo = Arc::new(MockAppRepository::new());
+    state.ctx.app_repo = state.app_repo.clone();
+    state.database_repo = Arc::new(MockDatabaseRepository::new());
+    state.ctx.database_repo = state.database_repo.clone();
+    state.volume_repo = Arc::new(MockVolumeRepository::new());
+    state.ctx.volume_repo = state.volume_repo.clone();
+    state.scheduler = Arc::new(MockScheduler::new());
+    state.ctx.scheduler = state.scheduler.clone();
+    state.nats = TypedNatsClient::new_custom(Arc::new(DummyNats));
+    state.ctx.nats = state.nats.clone();
+
     let user_id = Uuid::new_v4();
+    let (workspace_events, _) = tokio::sync::broadcast::channel(16);
+    state.workspace_events = workspace_events.clone();
 
-    struct DummyNats;
-    #[async_trait::async_trait]
-    impl mikrom_api::nats::NatsClient for DummyNats {
-        async fn request_raw(&self, _s: String, _p: Vec<u8>) -> anyhow::Result<Vec<u8>> {
-            Err(anyhow::anyhow!("NATS not implemented in this test"))
-        }
-        async fn publish_raw(&self, _s: String, _p: Vec<u8>) -> anyhow::Result<()> {
-            Ok(())
-        }
-        async fn subscribe_raw(&self, _s: String) -> anyhow::Result<async_nats::Subscriber> {
-            Err(anyhow::anyhow!("NATS not implemented in this test"))
-        }
-    }
-    let nats_client = mikrom_api::nats::TypedNatsClient::new_custom(Arc::new(DummyNats));
+    (state, workspace_events, user_id)
+}
 
-    let state = AppState {
-        ctx: mikrom_api::application::ApiContext::default(),
-        user_repo: Arc::new(mock_user_repo),
-        app_repo: Arc::new(mock_app_repo),
-        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
-        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
-        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
-        nats: nats_client,
-        router_addr: "http://localhost:8080".to_string(),
-        frontend_url: "http://localhost:3000".to_string(),
-        api_db: sqlx::postgres::PgPoolOptions::new()
-            .connect_lazy("postgres://localhost/dummy")
-            .unwrap(),
-        jwt_secret: JWT_SECRET.into(),
-        master_key: "key".into(),
-        deployment_events: tokio::sync::broadcast::channel(1).0,
-        acme_email: "admin@mikrom.spluca.org".into(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: workspace_events.clone(),
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
+#[tokio::test]
+async fn workspace_stream_emits_matching_tenant_events() {
+    let (state, tx, user_id) = build_state();
+    let token = create_token(
+        &user_id.to_string(),
+        "test@example.com",
+        &UserRole::User,
+        JWT_SECRET,
+    )
+    .unwrap();
+
+    let app = create_app(state);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/workspace/events")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
         )
-        .0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
-
-    (create_app(state), workspace_events, user_id)
-}
-
-#[tokio::test]
-async fn test_workspace_events_stream() {
-    let (mut router, tx, user_id) = setup_app().await;
-    let token = create_token(
-        &user_id.to_string(),
-        "test@test.com",
-        &UserRole::User,
-        JWT_SECRET,
-    )
-    .unwrap();
-
-    let req = Request::builder()
-        .method("GET")
-        .uri("/v1/workspace/events")
-        .header("Authorization", format!("Bearer {}", token))
-        .body(Body::empty())
+        .await
         .unwrap();
 
-    let response = router.call(req).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-
     let mut body_stream = response.into_body().into_data_stream();
 
-    // Trigger an event
     tx.send(WorkspaceEvent {
         kind: WorkspaceEventKind::AppCreated,
         user_id: Some(user_id),
+        tenant_id: Some(user_id),
         app_id: Some(Uuid::new_v4()),
-        app_name: Some("test-app".to_string()),
+        app_name: Some("tenant-app".to_string()),
         deployment_id: None,
         volume_id: None,
         resource_id: None,
     })
     .unwrap();
 
-    // Receive update
     let chunk = body_stream.next().await.unwrap().unwrap();
     let chunk_str = String::from_utf8_lossy(&chunk);
     assert!(chunk_str.contains("app_created"));
-    assert!(chunk_str.contains("test-app"));
+    assert!(chunk_str.contains("tenant-app"));
 }
 
 #[tokio::test]
-async fn test_workspace_events_volume_changed() {
-    let (mut router, tx, user_id) = setup_app().await;
+async fn workspace_stream_ignores_other_tenant_events() {
+    let (state, tx, user_id) = build_state();
+    let other_tenant_id = Uuid::new_v4();
     let token = create_token(
         &user_id.to_string(),
-        "test@test.com",
+        "test@example.com",
         &UserRole::User,
         JWT_SECRET,
     )
     .unwrap();
 
-    let req = Request::builder()
-        .method("GET")
-        .uri("/v1/workspace/events")
-        .header("Authorization", format!("Bearer {}", token))
-        .body(Body::empty())
+    let app = create_app(state);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/workspace/events")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
         .unwrap();
 
-    let response = router.call(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
     let mut body_stream = response.into_body().into_data_stream();
 
-    // Trigger volume changed event
-    let volume_id = Uuid::new_v4();
-    tx.send(WorkspaceEvent {
-        kind: WorkspaceEventKind::VolumeChanged,
-        user_id: Some(user_id),
-        app_id: Some(Uuid::new_v4()),
-        app_name: None,
-        deployment_id: None,
-        volume_id: Some(volume_id),
-        resource_id: Some(volume_id.to_string()),
-    })
-    .unwrap();
-
-    // Receive update
-    let chunk = body_stream.next().await.unwrap().unwrap();
-    let chunk_str = String::from_utf8_lossy(&chunk);
-    assert!(chunk_str.contains("volume_changed"));
-    assert!(chunk_str.contains(&volume_id.to_string()));
-}
-
-#[tokio::test]
-async fn test_workspace_events_app_created() {
-    let (mut router, tx, user_id) = setup_app().await;
-    let token = create_token(
-        &user_id.to_string(),
-        "test@test.com",
-        &UserRole::User,
-        JWT_SECRET,
-    )
-    .unwrap();
-
-    let req = Request::builder()
-        .method("GET")
-        .uri("/v1/workspace/events")
-        .header("Authorization", format!("Bearer {}", token))
-        .body(Body::empty())
-        .unwrap();
-
-    let response = router.call(req).await.unwrap();
-    let mut body_stream = response.into_body().into_data_stream();
-
-    // Trigger app created event
-    let app_id = Uuid::new_v4();
     tx.send(WorkspaceEvent {
         kind: WorkspaceEventKind::AppCreated,
-        user_id: Some(user_id),
-        app_id: Some(app_id),
-        app_name: Some("new-app".to_string()),
+        user_id: Some(other_tenant_id),
+        tenant_id: Some(other_tenant_id),
+        app_id: Some(Uuid::new_v4()),
+        app_name: Some("foreign-app".to_string()),
         deployment_id: None,
         volume_id: None,
         resource_id: None,
     })
     .unwrap();
 
-    // Receive update
-    let chunk = body_stream.next().await.unwrap().unwrap();
-    let chunk_str = String::from_utf8_lossy(&chunk);
-    assert!(chunk_str.contains("app_created"));
-    assert!(chunk_str.contains("new-app"));
+    let next_event = timeout(Duration::from_millis(150), body_stream.next()).await;
+    assert!(
+        next_event.is_err(),
+        "foreign tenant event should be filtered out"
+    );
 }

@@ -5,12 +5,11 @@ Wants=network.target
 
 [Service]
 Type=simple
+User=root
 EnvironmentFile=/etc/mikrom/network.env
 ExecStart=/usr/bin/mikrom-network
 Restart=always
 RestartSec=5
-User=root
-# CAP_NET_ADMIN is required for WireGuard and Routing management
 CapabilityBoundingSet=CAP_NET_ADMIN
 AmbientCapabilities=CAP_NET_ADMIN
 NoNewPrivileges=true

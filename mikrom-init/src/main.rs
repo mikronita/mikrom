@@ -1551,10 +1551,7 @@ mod tests {
         append_hosts_entry(&hosts_path, "neon-pageserver", "fd00::1").unwrap();
 
         let contents = std::fs::read_to_string(&hosts_path).unwrap();
-        assert_eq!(
-            contents,
-            "127.0.0.1 localhost\nfd00::1 neon-pageserver\n"
-        );
+        assert_eq!(contents, "127.0.0.1 localhost\nfd00::1 neon-pageserver\n");
     }
 
     #[test]

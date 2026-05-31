@@ -43,7 +43,7 @@ impl TryFrom<i32> for VolumeAccessMode {
 #[derive(Debug, Serialize, Deserialize, Clone, rovo::schemars::JsonSchema)]
 pub struct Volume {
     pub id: Uuid,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub name: String,
     pub size_mib: i32,
     #[serde(skip_serializing)]
@@ -88,14 +88,14 @@ pub struct VolumeWithAttachments {
 pub struct VolumeSnapshot {
     pub id: Uuid,
     pub volume_id: Uuid,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub name: String,
     pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug)]
 pub struct CreateVolumeParams {
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub name: String,
     pub size_mib: i32,
     pub pool_name: String,
@@ -104,7 +104,7 @@ pub struct CreateVolumeParams {
 #[derive(Debug)]
 pub struct CreateSnapshotParams {
     pub volume_id: Uuid,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub name: String,
 }
 
@@ -113,8 +113,10 @@ pub struct CreateSnapshotParams {
 pub trait VolumeRepository: Send + Sync {
     async fn create_volume(&self, params: CreateVolumeParams) -> DomainResult<Volume>;
     async fn get_volume(&self, volume_id: Uuid) -> DomainResult<Option<Volume>>;
-    async fn list_volumes_by_user(&self, user_id: Uuid)
-    -> DomainResult<Vec<VolumeWithAttachments>>;
+    async fn list_volumes_by_tenant(
+        &self,
+        tenant_id: Uuid,
+    ) -> DomainResult<Vec<VolumeWithAttachments>>;
     async fn delete_volume(&self, volume_id: Uuid) -> DomainResult<bool>;
 
     async fn attach_volume_to_app(

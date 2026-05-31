@@ -34,7 +34,7 @@ pub async fn start_ip_sync_task(state: AppState) {
                 if let Some(job_id) = &dep.job_id {
                     let nats_req = AppStatusRequest {
                         job_id: job_id.clone(),
-                        user_id: dep.user_id.to_string(),
+                        tenant_id: dep.tenant_id.to_string(),
                     };
 
                     if let Ok(inner) = state
@@ -167,7 +167,8 @@ async fn sync_deployment_state(
         if let Some(app) = active_app {
             state.publish_workspace_event(WorkspaceEvent {
                 kind: WorkspaceEventKind::DeploymentChanged,
-                user_id: Some(app.user_id),
+                user_id: None,
+                tenant_id: Some(app.tenant_id),
                 app_id: Some(app.id),
                 app_name: Some(app.name.clone()),
                 deployment_id: Some(dep.id),

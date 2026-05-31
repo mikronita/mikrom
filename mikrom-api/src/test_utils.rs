@@ -129,6 +129,7 @@ pub fn create_test_app_state(db: PgPool) -> AppState {
 
     let ctx = ApiContext {
         user_repo: user_repo.clone(),
+        tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
         app_repo: app_repo.clone(),
         database_repo: database_repo.clone(),
         github_repo: github_repo.clone(),
@@ -144,6 +145,7 @@ pub fn create_test_app_state(db: PgPool) -> AppState {
     AppState {
         ctx,
         user_repo,
+        tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
         app_repo,
         database_repo,
         github_repo,

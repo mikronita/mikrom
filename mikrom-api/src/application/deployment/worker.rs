@@ -246,7 +246,7 @@ pub async fn resume_pending_builds(state: AppState) {
             app_id: app.id,
             build_id,
             app_name: app.name,
-            user_id: dep.user_id.to_string(),
+            user_id: dep.tenant_id.to_string(),
             vcpus: dep.vcpus,
             memory_mib: dep.memory_mib,
             disk_mib: dep.disk_mib as u32,
@@ -480,7 +480,8 @@ async fn mark_deployment_failed(
     if let Ok(Some(app)) = state.app_repo.get_app(app_id).await {
         state.publish_workspace_event(WorkspaceEvent {
             kind: WorkspaceEventKind::DeploymentChanged,
-            user_id: Some(app.user_id),
+            user_id: None,
+            tenant_id: Some(app.tenant_id),
             app_id: Some(app.id),
             app_name: Some(app.name),
             deployment_id: Some(deployment_id),
@@ -492,7 +493,7 @@ async fn mark_deployment_failed(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::domain::App;

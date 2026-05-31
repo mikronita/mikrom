@@ -19,11 +19,11 @@ pub use infrastructure::http::rate_limit;
 pub use infrastructure::nats;
 pub use infrastructure::scheduler::{NatsScheduler, Scheduler, status_name};
 
-#[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
 pub use domain::{
-    AppRepository, DatabaseRepository, GithubRepository, UserRepository, VolumeRepository,
+    AppRepository, DatabaseRepository, GithubRepository, TenantRepository, UserRepository,
+    VolumeRepository,
 };
 pub use error::{ApiError, ApiResult};
 
@@ -35,6 +35,7 @@ pub use workspace::{WorkspaceEvent, WorkspaceEventKind};
 pub struct AppState {
     pub ctx: crate::application::ApiContext,
     pub user_repo: Arc<dyn UserRepository>,
+    pub tenant_repo: Arc<dyn TenantRepository>,
     pub app_repo: Arc<dyn AppRepository>,
     pub database_repo: Arc<dyn DatabaseRepository>,
     pub github_repo: Arc<dyn GithubRepository>,
@@ -68,6 +69,7 @@ impl Default for AppState {
 
         Self {
             user_repo: ctx.user_repo.clone(),
+            tenant_repo: ctx.tenant_repo.clone(),
             app_repo: ctx.app_repo.clone(),
             database_repo: ctx.database_repo.clone(),
             github_repo: ctx.github_repo.clone(),
@@ -133,7 +135,7 @@ impl AppState {
         let jobs = self
             .scheduler
             .list_apps(mikrom_proto::scheduler::ListAppsRequest {
-                user_id: app.user_id.to_string(),
+                tenant_id: app.tenant_id.to_string(),
                 status: Some(mikrom_proto::scheduler::DeployStatus::Running as i32),
             })
             .await
@@ -178,21 +180,37 @@ impl AppState {
         }
 
         if has_targets {
-            let Some(user) = self.user_repo.find_by_id(app.user_id).await.ok().flatten() else {
-                return Ok(());
+            // NOTE: vpc_ipv6_prefix is currently associated with a User.
+            // For now, we attempt to find the first member of the tenant to retrieve the prefix.
+            // Future improvement: Move vpc_ipv6_prefix to the Tenant (Project) model.
+            let members = self
+                .tenant_repo
+                .get_members(app.tenant_id)
+                .await
+                .unwrap_or_default();
+            let vpc_ipv6_prefix = if let Some(first_member) = members.first() {
+                self.user_repo
+                    .find_by_id(first_member.user_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|u| u.vpc_ipv6_prefix)
+                    .unwrap_or_default()
+            } else {
+                String::new()
             };
 
             if let Err(err) = self
                 .scheduler
                 .update_app_scaling_config(mikrom_proto::scheduler::UpdateAppScalingConfigRequest {
                     app_id: app.id.to_string(),
-                    user_id: app.user_id.to_string(),
+                    tenant_id: app.tenant_id.to_string(),
                     min_replicas: app.min_replicas as u32,
                     max_replicas: app.max_replicas as u32,
                     autoscaling_enabled: app.autoscaling_enabled,
                     cpu_threshold: app.cpu_threshold,
                     mem_threshold: app.mem_threshold,
-                    vpc_ipv6_prefix: user.vpc_ipv6_prefix.unwrap_or_default(),
+                    vpc_ipv6_prefix,
                     desired_replicas: app.desired_replicas as u32,
                     hostname: app.hostname.clone().unwrap_or_default(),
                     last_router_traffic_at: chrono::Utc::now().timestamp(),
@@ -213,7 +231,7 @@ impl AppState {
 
     pub async fn reconcile_routes(&self) -> anyhow::Result<()> {
         tracing::info!("Starting route reconciliation with router...");
-        let apps = self.app_repo.list_apps_by_user(None).await?;
+        let apps = self.app_repo.list_apps_by_tenant(None).await?;
         let mut count = 0;
 
         for app in apps {

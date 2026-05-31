@@ -1,5 +1,5 @@
 use crate::AppState;
-use crate::domain::{NewUser, User};
+use crate::domain::{NewUser, Tenant, User};
 use crate::error::{ApiError, ApiResult};
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use uuid::Uuid;
@@ -60,6 +60,20 @@ impl AuthService {
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?
             .ok_or_else(|| ApiError::Internal("User not found after creation".into()))?;
+
+        // Create default project (tenant)
+        let slug = Tenant::generate_slug();
+        let tenant = state
+            .tenant_repo
+            .create("Default Project".to_string(), slug)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        state
+            .tenant_repo
+            .add_member(tenant.id, user.id, "admin")
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
 
         // Generate JWT
         let token = crate::infrastructure::auth::jwt::create_token(
@@ -125,6 +139,7 @@ impl AuthService {
         state.publish_workspace_event(WorkspaceEvent {
             kind: WorkspaceEventKind::ProfileUpdated,
             user_id: Some(params.user_id),
+            tenant_id: None,
             app_id: None,
             app_name: None,
             deployment_id: None,

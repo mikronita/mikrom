@@ -27,6 +27,7 @@ pub enum WorkspaceEventKind {
 pub struct WorkspaceEvent {
     pub kind: WorkspaceEventKind,
     pub user_id: Option<Uuid>,
+    pub tenant_id: Option<Uuid>,
     pub app_id: Option<Uuid>,
     pub app_name: Option<String>,
     pub deployment_id: Option<Uuid>,
@@ -47,7 +48,8 @@ pub async fn workspace_events_stream(
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    if (event.user_id.is_none() || event.user_id == Some(auth_user_id))
+                    if (event.tenant_id.is_none() || event.tenant_id == Some(auth_user_id))
+                        && (event.user_id.is_none() || event.user_id == Some(auth_user_id))
                         && let Ok(data) = serde_json::to_string(&event)
                     {
                         yield Ok(Event::default().data(data));
@@ -57,6 +59,7 @@ pub async fn workspace_events_stream(
                     let refresh_event = WorkspaceEvent {
                         kind: WorkspaceEventKind::Refresh,
                         user_id: Some(auth_user_id),
+                        tenant_id: Some(auth_user_id),
                         app_id: None,
                         app_name: None,
                         deployment_id: None,

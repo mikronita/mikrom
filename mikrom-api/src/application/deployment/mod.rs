@@ -68,7 +68,7 @@ pub async fn resolve_app_scale_state(
     let jobs = state
         .scheduler
         .list_apps(mikrom_proto::scheduler::ListAppsRequest {
-            user_id: app.user_id.to_string(),
+            tenant_id: app.tenant_id.to_string(),
             status: Some(mikrom_proto::scheduler::DeployStatus::Running as i32),
         })
         .await;

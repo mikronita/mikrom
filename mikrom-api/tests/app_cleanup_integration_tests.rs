@@ -5,14 +5,16 @@ use axum::{
 use futures::StreamExt;
 use mockall::predicate::*;
 use std::sync::Arc;
+use tokio::time::{Duration, timeout};
 use tower::ServiceExt;
 use uuid::Uuid;
 
 use mikrom_api::AppState;
 use mikrom_api::create_app;
-use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::app::App;
-use mikrom_api::domain::{MockAppRepository, MockUserRepository};
+use mikrom_api::domain::{
+    MockAppRepository, MockScheduler, MockTenantRepository, MockUserRepository,
+};
 
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     let nats_url =
@@ -33,16 +35,17 @@ async fn connect_nats_or_skip() -> Option<async_nats::Client> {
 #[tokio::test]
 async fn test_delete_app_triggers_bulk_cleanup() {
     let mock_user_repo = MockUserRepository::new();
+    let mock_tenant_repo = MockTenantRepository::new();
     let mut mock_app_repo = MockAppRepository::new();
     let mut mock_scheduler = MockScheduler::new();
 
-    let user_id = Uuid::new_v4();
+    let tenant_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
     let app_name = "cleanup-test-app";
     let jwt_secret = "test-secret";
 
     let token = mikrom_api::auth::jwt::create_token(
-        &user_id.to_string(),
+        &tenant_id.to_string(),
         "test@example.com",
         &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
@@ -55,7 +58,7 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         git_url: "git".to_string(),
         port: mikrom_api::domain::types::Port::new(8080).unwrap(),
         hostname: Some("test.example.com".to_string()),
-        user_id,
+        tenant_id,
         ..Default::default()
     };
 
@@ -76,12 +79,12 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         .times(1)
         .returning(|_| Ok(()));
 
-    // CRITICAL: Verify that delete_all_by_app is called on the scheduler
     mock_scheduler
         .expect_delete_all_by_app()
-        .with(eq(app_id.to_string()), eq(user_id.to_string()))
+        .with(eq(app_id.to_string()), eq(tenant_id.to_string()))
         .times(1)
         .returning(|_, _| Ok(true));
+
     let nats_responder = nats_client.clone();
     let mut route_sub = nats_responder
         .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
@@ -114,21 +117,29 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         .expect_list_volumes_by_app()
         .returning(|_| Ok(vec![]));
 
+    let (workspace_events, mut workspace_rx) = tokio::sync::broadcast::channel(100);
+
     let state = AppState {
         ctx: mikrom_api::application::ApiContext::default(),
         user_repo: Arc::new(mock_user_repo),
+        tenant_repo: Arc::new(mock_tenant_repo),
         app_repo: Arc::new(mock_app_repo),
         database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
-        volume_repo: Arc::new(mock_volume_repo),
         github_repo: Arc::new(mikrom_api::domain::github::MockGithubRepository::default()),
+        volume_repo: Arc::new(mock_volume_repo),
         scheduler: Arc::new(mock_scheduler),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
         router_addr: "http://localhost:8080".to_string(),
         frontend_url: "http://localhost:3000".to_string(),
+        api_db: sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
         jwt_secret: jwt_secret.into(),
         master_key: "key".into(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        api_db: sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
+        workspace_events: workspace_events.clone(),
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
         acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
@@ -136,11 +147,6 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
-        )
-        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
@@ -159,4 +165,16 @@ async fn test_delete_app_triggers_bulk_cleanup() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let event = timeout(Duration::from_millis(250), workspace_rx.recv())
+        .await
+        .expect("workspace event should be emitted")
+        .unwrap();
+    assert!(matches!(
+        event.kind,
+        mikrom_api::workspace::WorkspaceEventKind::AppDeleted
+    ));
+    assert_eq!(event.tenant_id, Some(tenant_id));
+    assert_eq!(event.app_id, Some(app_id));
+    assert_eq!(event.app_name.as_deref(), Some(app_name));
 }

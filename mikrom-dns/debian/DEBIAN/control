@@ -1,0 +1,9 @@
+Package: mikrom-dns
+Version: 0.1.0
+Section: admin
+Priority: optional
+Architecture: amd64
+Maintainer: Antonio Pardo <apardo@spluca.org>
+Depends: libc6
+Description: Mikrom DNS provides dynamic internal name resolution for the Mikrom platform.
+ It serves control plane, worker mesh, and user resource zones.

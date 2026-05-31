@@ -1,10 +1,9 @@
 use crate::config::ApiConfig;
-#[cfg(any(test, feature = "test-utils"))]
 use crate::domain::MockDatabaseRepository;
 use crate::domain::{
     AppRepository, DatabaseRepository, GithubRepository, MockAppRepository, MockGithubRepository,
-    MockScheduler, MockUserRepository, MockVolumeRepository, Scheduler, UserRepository,
-    VolumeRepository,
+    MockScheduler, MockTenantRepository, MockUserRepository, MockVolumeRepository, Scheduler,
+    TenantRepository, UserRepository, VolumeRepository,
 };
 use crate::nats::TypedNatsClient;
 use std::sync::Arc;
@@ -18,6 +17,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct ApiContext {
     pub user_repo: Arc<dyn UserRepository>,
+    pub tenant_repo: Arc<dyn TenantRepository>,
     pub app_repo: Arc<dyn AppRepository>,
     pub database_repo: Arc<dyn DatabaseRepository>,
     pub github_repo: Arc<dyn GithubRepository>,
@@ -35,15 +35,12 @@ impl Default for ApiContext {
         let config = ApiConfig::default();
         let jwt_secret = config.jwt_secret.clone();
         let master_key = config.master_key.clone();
+
         Self {
             user_repo: Arc::new(MockUserRepository::new()),
+            tenant_repo: Arc::new(MockTenantRepository::new()),
             app_repo: Arc::new(MockAppRepository::new()),
-            #[cfg(any(test, feature = "test-utils"))]
             database_repo: Arc::new(MockDatabaseRepository::new()),
-            #[cfg(not(any(test, feature = "test-utils")))]
-            database_repo: panic!(
-                "Default ApiContext cannot be created without database_repo in non-test mode"
-            ),
             github_repo: Arc::new(MockGithubRepository::new()),
             volume_repo: Arc::new(MockVolumeRepository::new()),
             scheduler: Arc::new(MockScheduler::new()),
@@ -60,6 +57,7 @@ impl ApiContext {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         user_repo: Arc<dyn UserRepository>,
+        tenant_repo: Arc<dyn TenantRepository>,
         app_repo: Arc<dyn AppRepository>,
         database_repo: Arc<dyn DatabaseRepository>,
         github_repo: Arc<dyn GithubRepository>,
@@ -73,6 +71,7 @@ impl ApiContext {
         let master_key = config.master_key.clone();
         Self {
             user_repo,
+            tenant_repo,
             app_repo,
             database_repo,
             github_repo,

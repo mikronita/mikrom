@@ -32,7 +32,7 @@ fn deploy_database_request_roundtrip_keeps_workload_type() {
         database_id: "db-1".to_string(),
         database_name: "orders".to_string(),
         rootfs_image: "local:/opt/neon".to_string(),
-        user_id: "user-1".to_string(),
+        tenant_id: "tenant-1".to_string(),
         deployment_id: "dep-1".to_string(),
         vpc_ipv6_prefix: "fd00:abcd::".to_string(),
         config: Some(AppConfig {
@@ -64,11 +64,11 @@ fn deploy_database_request_roundtrip_keeps_workload_type() {
 fn database_status_and_delete_requests_roundtrip() {
     let status = DatabaseStatusRequest {
         job_id: "job-1".to_string(),
-        user_id: "user-1".to_string(),
+        tenant_id: "tenant-1".to_string(),
     };
     let delete = DeleteDatabaseRequest {
         job_id: "job-1".to_string(),
-        user_id: "user-1".to_string(),
+        tenant_id: "tenant-1".to_string(),
     };
 
     let status_bytes = status.encode_to_vec();
@@ -78,7 +78,7 @@ fn database_status_and_delete_requests_roundtrip() {
     let decoded_delete = DeleteDatabaseRequest::decode(&delete_bytes[..]).unwrap();
 
     assert_eq!(decoded_status.job_id, "job-1");
-    assert_eq!(decoded_status.user_id, "user-1");
+    assert_eq!(decoded_status.tenant_id, "tenant-1");
     assert_eq!(decoded_delete.job_id, "job-1");
-    assert_eq!(decoded_delete.user_id, "user-1");
+    assert_eq!(decoded_delete.tenant_id, "tenant-1");
 }

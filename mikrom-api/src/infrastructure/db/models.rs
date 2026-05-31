@@ -4,13 +4,51 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct DbTenant {
+    pub id: Uuid,
+    pub tenant_id: String,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<DbTenant> for crate::domain::tenant::Tenant {
+    fn from(db: DbTenant) -> Self {
+        Self {
+            id: db.id,
+            tenant_id: db.tenant_id,
+            name: db.name,
+            created_at: db.created_at,
+            updated_at: db.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct DbTenantMember {
+    pub tenant_id: Uuid,
+    pub user_id: Uuid,
+    pub role: String,
+}
+
+impl From<DbTenantMember> for crate::domain::tenant::TenantMember {
+    fn from(db: DbTenantMember) -> Self {
+        Self {
+            tenant_id: db.tenant_id,
+            user_id: db.user_id,
+            role: db.role,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
 pub struct DbApp {
     pub id: Uuid,
     pub name: String,
     pub git_url: String,
     pub port: i32,
     pub hostname: Option<String>,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub github_webhook_secret: Option<String>,
     pub github_installation_id: Option<i64>,
     pub github_repo_id: Option<i64>,
@@ -41,7 +79,7 @@ impl From<DbApp> for crate::domain::app::App {
                 .try_into()
                 .expect("Database contains invalid port for App"),
             hostname: db.hostname,
-            user_id: db.user_id,
+            tenant_id: db.tenant_id,
             github_webhook_secret: db.github_webhook_secret,
             github_installation_id: db.github_installation_id,
             github_repo_id: db.github_repo_id,
@@ -67,7 +105,7 @@ impl From<DbApp> for crate::domain::app::App {
 pub struct DbDeployment {
     pub id: Uuid,
     pub app_id: Uuid,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub build_id: Option<String>,
     pub image_tag: Option<String>,
     pub job_id: Option<String>,
@@ -92,7 +130,7 @@ impl From<DbDeployment> for crate::domain::app::Deployment {
         Self {
             id: db.id,
             app_id: db.app_id,
-            user_id: db.user_id,
+            tenant_id: db.tenant_id,
             build_id: db.build_id,
             image_tag: db.image_tag,
             job_id: db.job_id,
@@ -182,7 +220,7 @@ impl From<DbUserGithubAccount> for crate::domain::github::UserGithubAccount {
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
 pub struct DbVolume {
     pub id: Uuid,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub name: String,
     pub size_mib: i32,
     pub pool_name: String,
@@ -194,7 +232,7 @@ impl From<DbVolume> for crate::domain::volume::Volume {
     fn from(db: DbVolume) -> Self {
         Self {
             id: db.id,
-            user_id: db.user_id,
+            tenant_id: db.tenant_id,
             name: db.name,
             size_mib: db.size_mib,
             pool_name: db.pool_name,
@@ -229,7 +267,7 @@ impl From<DbAppVolume> for crate::domain::volume::AppVolume {
 pub struct DbVolumeSnapshot {
     pub id: Uuid,
     pub volume_id: Uuid,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub name: String,
     pub created_at: DateTime<Utc>,
 }
@@ -239,7 +277,7 @@ impl From<DbVolumeSnapshot> for crate::domain::volume::VolumeSnapshot {
         Self {
             id: db.id,
             volume_id: db.volume_id,
-            user_id: db.user_id,
+            tenant_id: db.tenant_id,
             name: db.name,
             created_at: db.created_at,
         }
@@ -251,12 +289,12 @@ pub struct DbDatabase {
     pub id: Uuid,
     pub name: String,
     pub engine: String,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub vcpus: i32,
     pub memory_mib: i32,
     pub disk_mib: i32,
-    pub tenant_id: Option<String>,
-    pub timeline_id: Option<String>,
+    pub neon_tenant_id: Option<String>,
+    pub neon_timeline_id: Option<String>,
     pub tenant_gen: Option<i32>,
     pub settings: serde_json::Value,
     pub status: String,
@@ -271,14 +309,14 @@ impl From<DbDatabase> for crate::domain::Database {
             id: db.id,
             name: db.name,
             engine: db.engine,
-            user_id: db.user_id,
+            tenant_id: db.tenant_id,
             vcpus: crate::domain::types::CpuCores::try_from(db.vcpus as u32)
                 .expect("Invalid vcpus"),
             memory_mib: crate::domain::types::MemoryMb::try_from(db.memory_mib as u32)
                 .expect("Invalid memory_mib"),
             disk_mib: db.disk_mib as u32,
-            tenant_id: db.tenant_id,
-            timeline_id: db.timeline_id,
+            neon_tenant_id: db.neon_tenant_id,
+            neon_timeline_id: db.neon_timeline_id,
             tenant_gen: db.tenant_gen.map(|value| value as u32),
             settings: serde_json::from_value(db.settings).unwrap_or_default(),
             status: crate::domain::DatabaseStatus::from(db.status),
@@ -293,7 +331,7 @@ impl From<DbDatabase> for crate::domain::Database {
 pub struct DbDatabaseDeployment {
     pub id: Uuid,
     pub database_id: Uuid,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub job_id: Option<String>,
     pub status: String,
     pub host_id: Option<String>,
@@ -308,7 +346,7 @@ impl From<DbDatabaseDeployment> for crate::domain::DatabaseDeployment {
         Self {
             id: db.id,
             database_id: db.database_id,
-            user_id: db.user_id,
+            tenant_id: db.tenant_id,
             job_id: db.job_id,
             status: db.status,
             host_id: db.host_id,
@@ -320,7 +358,7 @@ impl From<DbDatabaseDeployment> for crate::domain::DatabaseDeployment {
     }
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::domain::{

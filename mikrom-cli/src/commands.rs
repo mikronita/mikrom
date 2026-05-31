@@ -36,6 +36,9 @@ pub enum Commands {
     /// Database Management (Neon)
     #[command(subcommand)]
     Db(DbCommands),
+    /// Project/Tenant Management
+    #[command(subcommand)]
+    Project(ProjectCommands),
     /// System Status
     #[command(subcommand)]
     System(SystemCommands),
@@ -317,5 +320,23 @@ pub enum DbCommands {
     Info {
         #[arg(help = "Name or ID of the database")]
         id: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum ProjectCommands {
+    /// List all projects you have access to
+    List,
+    /// Create a new project
+    Create {
+        /// Display name for the project
+        #[arg(long, short)]
+        name: String,
+    },
+    /// Switch current CLI context to a different project
+    Switch {
+        /// 6-char Project ID
+        #[arg(index = 1)]
+        tenant_id: String,
     },
 }

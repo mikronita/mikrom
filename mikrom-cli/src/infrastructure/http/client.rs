@@ -9,6 +9,7 @@ pub struct ReqwestApiClient {
     http: reqwest::Client,
     base_url: String,
     token: Option<String>,
+    tenant_id: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -17,7 +18,11 @@ struct ErrorResponse {
 }
 
 impl ReqwestApiClient {
-    pub fn new(base_url: String, token: Option<String>) -> CliResult<Self> {
+    pub fn new(
+        base_url: String,
+        token: Option<String>,
+        tenant_id: Option<String>,
+    ) -> CliResult<Self> {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
@@ -26,6 +31,7 @@ impl ReqwestApiClient {
             http,
             base_url,
             token,
+            tenant_id,
         })
     }
 
@@ -107,6 +113,10 @@ impl ReqwestApiClient {
 
         if let Some(token) = &self.token {
             builder = builder.bearer_auth(token);
+        }
+
+        if let Some(tenant) = &self.tenant_id {
+            builder = builder.header("x-mikrom-tenant-id", tenant);
         }
 
         if let Some(body) = body {
@@ -481,5 +491,19 @@ impl ApiClient for ReqwestApiClient {
     async fn delete_database(&self, db_id: &str) -> CliResult<()> {
         self.request_no_body(reqwest::Method::DELETE, &format!("databases/{}", db_id))
             .await
+    }
+
+    async fn list_projects(&self) -> CliResult<Vec<ProjectInfo>> {
+        self.request(reqwest::Method::GET, "projects", None::<()>)
+            .await
+    }
+
+    async fn create_project(&self, name: &str) -> CliResult<ProjectInfo> {
+        self.request(
+            reqwest::Method::POST,
+            "projects",
+            Some(serde_json::json!({ "name": name })),
+        )
+        .await
     }
 }

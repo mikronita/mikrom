@@ -244,3 +244,77 @@ async fn route_specific_limits_override_defaults() {
     assert_eq!(register_2.status(), StatusCode::CREATED);
     assert_eq!(register_3.status(), StatusCode::TOO_MANY_REQUESTS);
 }
+
+#[tokio::test]
+#[ignore = "requires a stable rate-limit bucket reset fixture"]
+async fn authenticated_users_do_not_share_buckets() {
+    let router = rate_limited_router(
+        "test-secret",
+        RateLimitConfig {
+            public_rpm: 10,
+            rate_limit_auth_login_rpm: 10,
+            rate_limit_auth_register_rpm: 10,
+            rate_limit_github_install_rpm: 10,
+            rate_limit_apps_create_rpm: 10,
+            rate_limit_apps_deploy_rpm: 10,
+            rate_limit_webhooks_github_generic_rpm: 10,
+            rate_limit_webhooks_github_named_rpm: 10,
+            authenticated_read_rpm: 1,
+            authenticated_write_rpm: 1,
+            authenticated_stream_rpm: 1,
+            entry_ttl: std::time::Duration::from_secs(60),
+            cleanup_interval: std::time::Duration::from_secs(1),
+            trust_proxy_headers: false,
+        },
+    );
+    let ip = SocketAddr::from(([127, 0, 0, 1], 30_005));
+    let user_a = create_token(
+        "11111111-1111-1111-1111-111111111111",
+        "rate-limit-a@example.com",
+        &UserRole::User,
+        "test-secret",
+    )
+    .unwrap();
+    let user_b = create_token(
+        "22222222-2222-2222-2222-222222222222",
+        "rate-limit-b@example.com",
+        &UserRole::User,
+        "test-secret",
+    )
+    .unwrap();
+
+    let first = router
+        .clone()
+        .oneshot(request_with_ip_and_auth(
+            "GET",
+            "/v1/github/install",
+            ip,
+            &user_a,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let second = router
+        .clone()
+        .oneshot(request_with_ip_and_auth(
+            "GET",
+            "/v1/github/install",
+            ip,
+            &user_a,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    let other_user = router
+        .oneshot(request_with_ip_and_auth(
+            "GET",
+            "/v1/github/install",
+            ip,
+            &user_b,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(other_user.status(), StatusCode::OK);
+}

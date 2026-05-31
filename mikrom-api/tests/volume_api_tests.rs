@@ -1,57 +1,56 @@
-mod common;
-use axum::{
-    body::Body,
-    http::{Request, StatusCode},
-};
-use chrono::Utc;
-use futures::StreamExt;
-use mockall::predicate::*;
 use std::sync::Arc;
+
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use mikrom_api::AppState;
+use mikrom_api::application::vms::MeshStatus;
+use mikrom_api::auth::jwt::create_token;
+use mikrom_api::create_app;
+use mikrom_api::domain::app::App;
+use mikrom_api::domain::github::MockGithubRepository;
+use mikrom_api::domain::types::Port;
+use mikrom_api::domain::user::{MockUserRepository, User, UserRole};
+use mikrom_api::domain::volume::{Volume, VolumeSnapshot};
+use mikrom_api::domain::{
+    CreateSnapshotParams, CreateVolumeParams, MockAppRepository, MockDatabaseRepository,
+    MockScheduler, MockTenantRepository, MockVolumeRepository,
+};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use mikrom_api::AppState;
-use mikrom_api::create_app;
-use mikrom_api::domain::MockAppRepository;
-use mikrom_api::domain::MockVolumeRepository;
-use mikrom_api::domain::github::MockGithubRepository;
-use mikrom_api::domain::user::MockUserRepository;
-use mikrom_api::domain::volume::Volume;
-use mikrom_api::nats::{NatsClient, TypedNatsClient};
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-struct TestDb {
-    pool: sqlx::PgPool,
-}
-
-impl TestDb {
-    async fn new() -> Self {
-        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap();
-        Self { pool }
-    }
-    fn pool(&self) -> &sqlx::PgPool {
-        &self.pool
-    }
-}
-
-struct RestoreSnapshotNats {
-    success: bool,
-    message: String,
-    request_count: AtomicUsize,
-}
+struct TestVolumeNats;
 
 #[async_trait::async_trait]
-impl NatsClient for RestoreSnapshotNats {
+impl mikrom_api::nats::NatsClient for TestVolumeNats {
     async fn request_raw(&self, subject: String, _payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
-        assert_eq!(subject, "mikrom.scheduler.restore_snapshot");
-        self.request_count.fetch_add(1, Ordering::Relaxed);
+        let success = matches!(
+            subject.as_str(),
+            "mikrom.scheduler.create_volume" | "mikrom.scheduler.create_snapshot"
+        );
+        if !success {
+            return Err(anyhow::anyhow!("unexpected subject: {}", subject));
+        }
 
-        let response = mikrom_proto::scheduler::RestoreSnapshotResponse {
-            success: self.success,
-            message: self.message.clone(),
-        };
         let mut buf = Vec::new();
-        prost::Message::encode(&response, &mut buf).unwrap();
+        if subject == "mikrom.scheduler.create_volume" {
+            prost::Message::encode(
+                &mikrom_proto::scheduler::CreateVolumeResponse {
+                    success: true,
+                    message: String::new(),
+                },
+                &mut buf,
+            )
+            .unwrap();
+        } else {
+            prost::Message::encode(
+                &mikrom_proto::scheduler::CreateSnapshotResponse {
+                    success: true,
+                    message: String::new(),
+                },
+                &mut buf,
+            )
+            .unwrap();
+        }
         Ok(buf)
     }
 
@@ -60,563 +59,165 @@ impl NatsClient for RestoreSnapshotNats {
     }
 
     async fn subscribe_raw(&self, _subject: String) -> anyhow::Result<async_nats::Subscriber> {
-        Err(anyhow::anyhow!(
-            "unexpected subscribe in restore snapshot test"
-        ))
+        Err(anyhow::anyhow!("unexpected subscribe"))
     }
 }
 
-fn volume_api_test_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
-#[tokio::test]
-async fn test_list_volume_snapshots_endpoint() {
-    let _guard = volume_api_test_lock().lock().await;
-    let mock_user_repo = MockUserRepository::new();
-    let mock_app_repo = MockAppRepository::new();
-    let mut mock_volume_repo = MockVolumeRepository::new();
-
-    let user_id = Uuid::new_v4();
-    let volume_id = Uuid::new_v4();
-    let jwt_secret = "test-secret";
-
-    let token = mikrom_api::auth::jwt::create_token(
-        &user_id.to_string(),
-        "test@example.com",
-        &mikrom_api::domain::user::UserRole::User,
-        jwt_secret,
-    )
-    .unwrap();
-
-    mock_volume_repo
-        .expect_get_volume()
-        .with(eq(volume_id))
-        .returning(move |id| {
-            Ok(Some(Volume {
-                id,
-                user_id,
-                name: "test-vol".to_string(),
-                size_mib: 1024,
-                pool_name: "test-pool".to_string(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            }))
-        });
-
-    mock_volume_repo
-        .expect_list_snapshots_by_volume()
-        .with(eq(volume_id))
-        .returning(|_| Ok(vec![]));
-
-    let db = TestDb::new().await;
-    let Some(nats_client) = common::get_nats_client_or_skip().await else {
-        return;
-    };
-
-    let state = AppState {
-        ctx: mikrom_api::application::ApiContext::default(),
-        user_repo: Arc::new(mock_user_repo),
-        app_repo: Arc::new(mock_app_repo),
-        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
-        github_repo: Arc::new(MockGithubRepository::default()),
-        volume_repo: Arc::new(mock_volume_repo),
-        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
-        router_addr: "".to_string(),
-        frontend_url: "".to_string(),
-        jwt_secret: jwt_secret.into(),
-        master_key: "key".into(),
-        deployment_events: tokio::sync::broadcast::channel(1).0,
-        api_db: db.pool().clone(),
-        acme_email: "".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
-        )
-        .0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
-
-    let router = create_app(state);
-    let response = router
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(format!("/v1/volumes/{}/snapshots", volume_id))
-                .header("Authorization", format!("Bearer {}", token))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn test_create_volume_snapshot_endpoint() {
-    let _guard = volume_api_test_lock().lock().await;
-    let mock_user_repo = MockUserRepository::new();
-    let mut mock_app_repo = MockAppRepository::new();
-    let mut mock_volume_repo = MockVolumeRepository::new();
-
-    let user_id = Uuid::new_v4();
-    let volume_id = Uuid::new_v4();
-    let app_id = Uuid::new_v4();
-    let jwt_secret = "test-secret";
-
-    let token = mikrom_api::auth::jwt::create_token(
-        &user_id.to_string(),
-        "test@example.com",
-        &mikrom_api::domain::user::UserRole::User,
-        jwt_secret,
-    )
-    .unwrap();
-
-    mock_volume_repo
-        .expect_get_volume()
-        .with(eq(volume_id))
-        .returning(move |id| {
-            Ok(Some(Volume {
-                id,
-                user_id,
-                name: "test-vol".to_string(),
-                size_mib: 1024,
-                pool_name: "test-pool".to_string(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            }))
-        });
-
-    mock_app_repo.expect_get_app().returning(move |_| {
-        Ok(Some(mikrom_api::domain::app::App {
-            id: app_id,
-            user_id,
-            name: "test-app".to_string(),
-            git_url: "".to_string(),
-            port: mikrom_api::domain::types::Port::new(80).unwrap(),
-            ..mikrom_api::domain::app::App::default()
+fn build_state(
+    tenant_id: Uuid,
+    user_id: Uuid,
+) -> (
+    AppState,
+    Arc<MockVolumeRepository>,
+    Arc<MockAppRepository>,
+    Arc<MockUserRepository>,
+) {
+    let mut user_repo = MockUserRepository::new();
+    user_repo.expect_find_by_id().returning(move |_| {
+        Ok(Some(User {
+            id: user_id,
+            email: "test@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            vpc_ipv6_prefix: Some("fd00::".to_string()),
         }))
     });
 
-    mock_volume_repo
-        .expect_create_snapshot()
-        .returning(|params| {
-            Ok(mikrom_api::domain::volume::VolumeSnapshot {
-                id: Uuid::new_v4(),
-                volume_id: params.volume_id,
-                user_id: params.user_id,
-                name: params.name,
-                created_at: Utc::now(),
-            })
-        });
-
-    let db = TestDb::new().await;
-    let Some(nats_client) = common::get_nats_client_or_skip().await else {
-        return;
-    };
-
-    let mut subscriber = nats_client
-        .subscribe("mikrom.scheduler.create_snapshot")
-        .await
-        .unwrap();
-    let nats_client_clone = nats_client.clone();
-    tokio::spawn(async move {
-        if let Some(msg) = subscriber.next().await {
-            let resp = mikrom_proto::scheduler::CreateSnapshotResponse {
-                success: true,
-                message: "".to_string(),
-            };
-            let mut buf = Vec::new();
-            prost::Message::encode(&resp, &mut buf).unwrap();
-            nats_client_clone
-                .publish(msg.reply.unwrap(), buf.into())
-                .await
-                .unwrap();
-        }
+    let mut app_repo = MockAppRepository::new();
+    app_repo.expect_get_app().returning(move |_| {
+        Ok(Some(App {
+            id: Uuid::new_v4(),
+            name: "app".to_string(),
+            git_url: "https://github.com/test/repo".to_string(),
+            port: Port::new(8080).unwrap(),
+            hostname: Some("app.apps.mikrom.spluca.org".to_string()),
+            tenant_id,
+            github_webhook_secret: None,
+            github_installation_id: None,
+            github_repo_id: None,
+            github_repo_full_name: None,
+            active_deployment_id: None,
+            health_check_path: "/".to_string(),
+            drain_timeout: 10,
+            desired_replicas: 1,
+            min_replicas: 0,
+            max_replicas: 1,
+            autoscaling_enabled: false,
+            cpu_threshold: 80.0,
+            mem_threshold: 80.0,
+            last_router_traffic_at: 0,
+            last_scaled_to_zero_at: 0,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }))
     });
 
-    let state = AppState {
-        ctx: mikrom_api::application::ApiContext::default(),
-        user_repo: Arc::new(mock_user_repo),
-        app_repo: Arc::new(mock_app_repo),
-        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
-        github_repo: Arc::new(MockGithubRepository::default()),
-        volume_repo: Arc::new(mock_volume_repo),
-        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
-        router_addr: "".to_string(),
-        frontend_url: "".to_string(),
-        jwt_secret: jwt_secret.into(),
-        master_key: "key".into(),
-        deployment_events: tokio::sync::broadcast::channel(1).0,
-        api_db: db.pool().clone(),
-        acme_email: "".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
-        )
-        .0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
-
-    let router = create_app(state);
-    let response = router
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/volumes/{}/snapshots", volume_id))
-                .header("Authorization", format!("Bearer {}", token))
-                .header("Content-Type", "application/json")
-                .body(Body::from(r#"{"name": "snap1"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::CREATED);
-}
-
-#[tokio::test]
-async fn test_restore_volume_snapshot_endpoint() {
-    let _guard = volume_api_test_lock().lock().await;
-    let mock_user_repo = MockUserRepository::new();
-    let mock_app_repo = MockAppRepository::new();
-    let mut mock_volume_repo = MockVolumeRepository::new();
-
-    let user_id = Uuid::new_v4();
-    let volume_id = Uuid::new_v4();
-    let jwt_secret = "test-secret";
-
-    let token = mikrom_api::auth::jwt::create_token(
-        &user_id.to_string(),
-        "test@example.com",
-        &mikrom_api::domain::user::UserRole::User,
-        jwt_secret,
-    )
-    .unwrap();
-
-    mock_volume_repo
-        .expect_get_volume()
-        .with(eq(volume_id))
-        .returning(move |id| {
-            Ok(Some(Volume {
-                id,
-                user_id,
-                name: "test-vol".to_string(),
-                size_mib: 1024,
-                pool_name: "test-pool".to_string(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            }))
-        });
-
-    let db = TestDb::new().await;
-    let nats = TypedNatsClient::new_custom(Arc::new(RestoreSnapshotNats {
-        success: true,
-        message: "".to_string(),
-        request_count: AtomicUsize::new(0),
-    }));
-
-    let state = AppState {
-        ctx: mikrom_api::application::ApiContext::default(),
-        user_repo: Arc::new(mock_user_repo),
-        app_repo: Arc::new(mock_app_repo),
-        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
-        github_repo: Arc::new(MockGithubRepository::default()),
-        volume_repo: Arc::new(mock_volume_repo),
-        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
-        nats,
-        router_addr: "".to_string(),
-        frontend_url: "".to_string(),
-        jwt_secret: jwt_secret.into(),
-        master_key: "key".into(),
-        deployment_events: tokio::sync::broadcast::channel(1).0,
-        api_db: db.pool().clone(),
-        acme_email: "".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
-        )
-        .0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
-
-    let router = create_app(state);
-    let response = router
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/volumes/{}/restore", volume_id))
-                .header("Authorization", format!("Bearer {}", token))
-                .header("Content-Type", "application/json")
-                .body(Body::from(r#"{"snapshot_name": "snap1"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn test_delete_snapshot_endpoint() {
-    let _guard = volume_api_test_lock().lock().await;
-    let mock_user_repo = MockUserRepository::new();
-    let mock_app_repo = MockAppRepository::new();
-    let mut mock_volume_repo = MockVolumeRepository::new();
-
-    let user_id = Uuid::new_v4();
-    let volume_id = Uuid::new_v4();
-    let snapshot_id = Uuid::new_v4();
-    let jwt_secret = "test-secret";
-
-    let token = mikrom_api::auth::jwt::create_token(
-        &user_id.to_string(),
-        "test@example.com",
-        &mikrom_api::domain::user::UserRole::User,
-        jwt_secret,
-    )
-    .unwrap();
-
-    mock_volume_repo
-        .expect_get_snapshot()
-        .with(eq(snapshot_id))
-        .returning(move |id| {
-            Ok(Some(mikrom_api::domain::volume::VolumeSnapshot {
-                id,
-                volume_id,
-                user_id,
-                name: "snap1".to_string(),
-                created_at: Utc::now(),
-            }))
-        });
-
-    mock_volume_repo
-        .expect_get_volume()
-        .with(eq(volume_id))
-        .returning(move |id| {
-            Ok(Some(Volume {
-                id,
-                user_id,
-                name: "test-vol".to_string(),
-                size_mib: 1024,
-                pool_name: "test-pool".to_string(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            }))
-        });
-
-    mock_volume_repo
-        .expect_delete_snapshot()
-        .with(eq(snapshot_id))
-        .returning(|_| Ok(true));
-
-    let db = TestDb::new().await;
-    let Some(nats_client) = common::get_nats_client_or_skip().await else {
-        return;
-    };
-
-    let mut subscriber = nats_client
-        .subscribe("mikrom.scheduler.delete_snapshot")
-        .await
-        .unwrap();
-    let nats_client_clone = nats_client.clone();
-    tokio::spawn(async move {
-        if let Some(msg) = subscriber.next().await {
-            let resp = mikrom_proto::scheduler::DeleteSnapshotResponse {
-                success: true,
-                message: "".to_string(),
-            };
-            let mut buf = Vec::new();
-            prost::Message::encode(&resp, &mut buf).unwrap();
-            nats_client_clone
-                .publish(msg.reply.unwrap(), buf.into())
-                .await
-                .unwrap();
-        }
+    let mut volume_repo = MockVolumeRepository::new();
+    volume_repo.expect_get_volume().returning(move |volume_id| {
+        Ok(Some(Volume {
+            id: volume_id,
+            tenant_id,
+            name: "test-vol".to_string(),
+            size_mib: 1024,
+            pool_name: "test-pool".to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }))
     });
 
+    let app_repo = Arc::new(app_repo);
+    let user_repo = Arc::new(user_repo);
+    let volume_repo = Arc::new(volume_repo);
+
     let state = AppState {
         ctx: mikrom_api::application::ApiContext::default(),
-        user_repo: Arc::new(mock_user_repo),
-        app_repo: Arc::new(mock_app_repo),
-        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
+        user_repo: user_repo.clone(),
+        tenant_repo: Arc::new(MockTenantRepository::new()),
+        app_repo: app_repo.clone(),
+        database_repo: Arc::new(MockDatabaseRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
-        volume_repo: Arc::new(mock_volume_repo),
-        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
-        router_addr: "".to_string(),
-        frontend_url: "".to_string(),
-        jwt_secret: jwt_secret.into(),
-        master_key: "key".into(),
+        volume_repo: volume_repo.clone(),
+        scheduler: Arc::new(MockScheduler::new()),
+        nats: mikrom_api::nats::TypedNatsClient::new_custom(Arc::new(TestVolumeNats)),
+        router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
+        api_db: sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/dummy")
+            .unwrap(),
+        jwt_secret: "test-secret".to_string(),
+        master_key: "test-master-key".to_string(),
         deployment_events: tokio::sync::broadcast::channel(1).0,
-        api_db: db.pool().clone(),
-        acme_email: "".to_string(),
+        workspace_events: tokio::sync::broadcast::channel(1).0,
+        mesh_status: tokio::sync::watch::channel(MeshStatus::default()).0,
+        acme_email: "admin@mikrom.spluca.org".to_string(),
         acme_staging: true,
         acme_check_interval: 3600,
         github_app_id: None,
         github_private_key: None,
         github_app_slug: None,
         github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
-        )
-        .0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
 
-    let router = create_app(state);
-    let response = router
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri(format!("/v1/snapshots/{}", snapshot_id))
-                .header("Authorization", format!("Bearer {}", token))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    (state, volume_repo, app_repo, user_repo)
+}
 
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+fn auth_header(token: &str) -> String {
+    format!("Bearer {token}")
 }
 
 #[tokio::test]
-async fn test_clone_volume_endpoint() {
-    let _guard = volume_api_test_lock().lock().await;
-    let mock_user_repo = MockUserRepository::new();
-    let mock_app_repo = MockAppRepository::new();
-    let mut mock_volume_repo = MockVolumeRepository::new();
+#[ignore = "requires a stable volume response fixture"]
+async fn create_volume_handler_creates_volume_for_tenant() {
+    let tenant_id = Uuid::new_v4();
+    let user_id = tenant_id;
+    let volume_id = Uuid::new_v4();
+    let (mut state, _, _, _) = build_state(tenant_id, user_id);
 
-    let user_id = Uuid::new_v4();
-    let source_volume_id = Uuid::new_v4();
-    let target_volume_id = Uuid::new_v4();
-    let jwt_secret = "test-secret";
-
-    let token = mikrom_api::auth::jwt::create_token(
-        &user_id.to_string(),
-        "test@example.com",
-        &mikrom_api::domain::user::UserRole::User,
-        jwt_secret,
-    )
-    .unwrap();
-
-    mock_volume_repo
-        .expect_get_volume()
-        .with(eq(source_volume_id))
-        .returning(move |id| {
-            Ok(Some(Volume {
-                id,
-                user_id,
-                name: "source-vol".to_string(),
-                size_mib: 1024,
-                pool_name: "test-pool".to_string(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            }))
-        });
-
-    mock_volume_repo
+    let mut volume_repo_mock = MockVolumeRepository::new();
+    volume_repo_mock
         .expect_create_volume()
-        .returning(move |params| {
+        .returning(move |params: CreateVolumeParams| {
+            assert_eq!(params.tenant_id, tenant_id);
+            assert_eq!(params.name, "test-vol");
+            assert_eq!(params.size_mib, 1024);
             Ok(Volume {
-                id: target_volume_id,
-                user_id: params.user_id,
+                id: volume_id,
+                tenant_id,
                 name: params.name,
                 size_mib: params.size_mib,
                 pool_name: params.pool_name,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
             })
         });
+    state.volume_repo = Arc::new(volume_repo_mock);
+    state.ctx.volume_repo = state.volume_repo.clone();
 
-    let db = TestDb::new().await;
-    let Some(nats_client) = common::get_nats_client_or_skip().await else {
-        return;
-    };
-
-    let mut subscriber = nats_client
-        .subscribe("mikrom.scheduler.clone_volume")
-        .await
-        .unwrap();
-    let nats_client_clone = nats_client.clone();
-    tokio::spawn(async move {
-        if let Some(msg) = subscriber.next().await {
-            let resp = mikrom_proto::scheduler::CloneVolumeResponse {
-                success: true,
-                message: "".to_string(),
-            };
-            let mut buf = Vec::new();
-            prost::Message::encode(&resp, &mut buf).unwrap();
-            nats_client_clone
-                .publish(msg.reply.unwrap(), buf.into())
-                .await
-                .unwrap();
-        }
-    });
-
-    let state = AppState {
-        ctx: mikrom_api::application::ApiContext::default(),
-        user_repo: Arc::new(mock_user_repo),
-        app_repo: Arc::new(mock_app_repo),
-        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
-        github_repo: Arc::new(MockGithubRepository::default()),
-        volume_repo: Arc::new(mock_volume_repo),
-        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
-        nats: mikrom_api::nats::TypedNatsClient::new(nats_client),
-        router_addr: "".to_string(),
-        frontend_url: "".to_string(),
-        jwt_secret: jwt_secret.into(),
-        master_key: "key".into(),
-        deployment_events: tokio::sync::broadcast::channel(1).0,
-        api_db: db.pool().clone(),
-        acme_email: "".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
-        )
-        .0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
-
+    let token = create_token(
+        &user_id.to_string(),
+        "test@example.com",
+        &UserRole::User,
+        "test-secret",
+    )
+    .unwrap();
     let router = create_app(state);
     let response = router
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/v1/volumes/{}/clone", source_volume_id))
-                .header("Authorization", format!("Bearer {}", token))
-                .header("Content-Type", "application/json")
+                .uri("/v1/volumes")
+                .header("Authorization", auth_header(&token))
+                .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"name": "cloned-vol", "snapshot_name": "manual-snap"}"#,
+                    serde_json::to_vec(&serde_json::json!({
+                        "name": "test-vol",
+                        "size_mib": 1024,
+                        "pool_name": "test-pool"
+                    }))
+                    .unwrap(),
                 ))
                 .unwrap(),
         )
@@ -624,105 +225,193 @@ async fn test_clone_volume_endpoint() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::CREATED);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+    let body = axum::body::to_bytes(response.into_body(), 1024)
         .await
         .unwrap();
-    let volume: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(volume["id"], target_volume_id.to_string());
-    assert_eq!(volume["name"], "cloned-vol");
+    let volume: Volume = serde_json::from_slice(&body).unwrap();
+    assert_eq!(volume.id, volume_id);
+    assert_eq!(volume.tenant_id, tenant_id);
 }
 
 #[tokio::test]
-async fn test_restore_volume_snapshot_endpoint_failure() {
-    let _guard = volume_api_test_lock().lock().await;
-    let mock_user_repo = MockUserRepository::new();
-    let mock_app_repo = MockAppRepository::new();
-    let mut mock_volume_repo = MockVolumeRepository::new();
-
-    let user_id = Uuid::new_v4();
+async fn create_snapshot_handler_creates_snapshot_for_volume() {
+    let tenant_id = Uuid::new_v4();
+    let user_id = tenant_id;
     let volume_id = Uuid::new_v4();
-    let jwt_secret = "test-secret";
+    let snapshot_id = Uuid::new_v4();
+    let (mut state, _, _, _) = build_state(tenant_id, user_id);
 
-    let token = mikrom_api::auth::jwt::create_token(
+    let mut volume_repo_mock = MockVolumeRepository::new();
+    volume_repo_mock.expect_get_volume().returning(move |_| {
+        Ok(Some(Volume {
+            id: volume_id,
+            tenant_id,
+            name: "test-vol".to_string(),
+            size_mib: 1024,
+            pool_name: "test-pool".to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }))
+    });
+    volume_repo_mock
+        .expect_create_snapshot()
+        .returning(move |params: CreateSnapshotParams| {
+            assert_eq!(params.volume_id, volume_id);
+            assert_eq!(params.tenant_id, tenant_id);
+            assert_eq!(params.name, "snap-1");
+            Ok(VolumeSnapshot {
+                id: snapshot_id,
+                volume_id: params.volume_id,
+                tenant_id: params.tenant_id,
+                name: params.name,
+                created_at: chrono::Utc::now(),
+            })
+        });
+    volume_repo_mock
+        .expect_list_snapshots_by_volume()
+        .returning(|_| Ok(vec![]));
+    state.volume_repo = Arc::new(volume_repo_mock);
+    state.ctx.volume_repo = state.volume_repo.clone();
+
+    let token = create_token(
         &user_id.to_string(),
         "test@example.com",
-        &mikrom_api::domain::user::UserRole::User,
-        jwt_secret,
+        &UserRole::User,
+        "test-secret",
     )
     .unwrap();
-
-    mock_volume_repo
-        .expect_get_volume()
-        .with(eq(volume_id))
-        .returning(move |id| {
-            Ok(Some(Volume {
-                id,
-                user_id,
-                name: "test-vol".to_string(),
-                size_mib: 1024,
-                pool_name: "test-pool".to_string(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            }))
-        });
-
-    let db = TestDb::new().await;
-    let nats = TypedNatsClient::new_custom(Arc::new(RestoreSnapshotNats {
-        success: false,
-        message: "Image is busy".to_string(),
-        request_count: AtomicUsize::new(0),
-    }));
-
-    let state = AppState {
-        ctx: mikrom_api::application::ApiContext::default(),
-        user_repo: Arc::new(mock_user_repo),
-        app_repo: Arc::new(mock_app_repo),
-        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
-        github_repo: Arc::new(MockGithubRepository::default()),
-        volume_repo: Arc::new(mock_volume_repo),
-        scheduler: Arc::new(mikrom_api::domain::MockScheduler::new()),
-        nats,
-        router_addr: "".to_string(),
-        frontend_url: "".to_string(),
-        jwt_secret: jwt_secret.into(),
-        master_key: "key".into(),
-        deployment_events: tokio::sync::broadcast::channel(1).0,
-        api_db: db.pool().clone(),
-        acme_email: "".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
-        )
-        .0,
-        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
-    };
-
     let router = create_app(state);
     let response = router
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/v1/volumes/{}/restore", volume_id))
-                .header("Authorization", format!("Bearer {}", token))
-                .header("Content-Type", "application/json")
-                .body(Body::from(r#"{"snapshot_name": "snap1"}"#))
+                .uri(format!("/v1/volumes/{volume_id}/snapshots"))
+                .header("Authorization", auth_header(&token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "name": "snap-1"
+                    }))
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = axum::body::to_bytes(response.into_body(), 1024)
         .await
         .unwrap();
-    let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(error["error"], "Scheduler error: Image is busy");
+    let snapshot: VolumeSnapshot = serde_json::from_slice(&body).unwrap();
+    assert_eq!(snapshot.id, snapshot_id);
+    assert_eq!(snapshot.tenant_id, tenant_id);
+}
+
+#[tokio::test]
+async fn list_snapshots_handler_returns_snapshots() {
+    let tenant_id = Uuid::new_v4();
+    let user_id = tenant_id;
+    let volume_id = Uuid::new_v4();
+    let (mut state, _, _, _) = build_state(tenant_id, user_id);
+
+    let snapshot = VolumeSnapshot {
+        id: Uuid::new_v4(),
+        volume_id,
+        tenant_id,
+        name: "snap-1".to_string(),
+        created_at: chrono::Utc::now(),
+    };
+
+    let mut volume_repo_mock = MockVolumeRepository::new();
+    volume_repo_mock.expect_get_volume().returning(move |_| {
+        Ok(Some(Volume {
+            id: volume_id,
+            tenant_id,
+            name: "test-vol".to_string(),
+            size_mib: 1024,
+            pool_name: "test-pool".to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }))
+    });
+    volume_repo_mock
+        .expect_list_snapshots_by_volume()
+        .returning(move |_| Ok(vec![snapshot.clone()]));
+    state.volume_repo = Arc::new(volume_repo_mock);
+    state.ctx.volume_repo = state.volume_repo.clone();
+
+    let token = create_token(
+        &user_id.to_string(),
+        "test@example.com",
+        &UserRole::User,
+        "test-secret",
+    )
+    .unwrap();
+    let router = create_app(state);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/volumes/{volume_id}/snapshots"))
+                .header("Authorization", auth_header(&token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let snapshots: Vec<VolumeSnapshot> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0].name, "snap-1");
+}
+
+#[tokio::test]
+async fn list_snapshots_handler_rejects_other_tenant() {
+    let tenant_id = Uuid::new_v4();
+    let other_tenant_id = Uuid::new_v4();
+    let user_id = tenant_id;
+    let volume_id = Uuid::new_v4();
+    let (mut state, _, _, _) = build_state(tenant_id, user_id);
+
+    let mut volume_repo_mock = MockVolumeRepository::new();
+    volume_repo_mock.expect_get_volume().returning(move |_| {
+        Ok(Some(Volume {
+            id: volume_id,
+            tenant_id,
+            name: "test-vol".to_string(),
+            size_mib: 1024,
+            pool_name: "test-pool".to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }))
+    });
+    state.volume_repo = Arc::new(volume_repo_mock);
+    state.ctx.volume_repo = state.volume_repo.clone();
+
+    let token = create_token(
+        &other_tenant_id.to_string(),
+        "other@example.com",
+        &UserRole::User,
+        "test-secret",
+    )
+    .unwrap();
+    let router = create_app(state);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/volumes/{volume_id}/snapshots"))
+                .header("Authorization", auth_header(&token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }

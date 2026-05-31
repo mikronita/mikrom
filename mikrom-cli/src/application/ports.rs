@@ -71,4 +71,7 @@ pub trait ApiClient: Send + Sync {
     async fn list_databases(&self) -> CliResult<Vec<DatabaseInfo>>;
     async fn create_database(&self, req: CreateDatabaseRequest) -> CliResult<DatabaseInfo>;
     async fn delete_database(&self, db_id: &str) -> CliResult<()>;
+
+    async fn list_projects(&self) -> CliResult<Vec<ProjectInfo>>;
+    async fn create_project(&self, name: &str) -> CliResult<ProjectInfo>;
 }

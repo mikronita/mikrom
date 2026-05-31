@@ -1,9 +1,9 @@
 use crate::AppState;
 use crate::application::database::DatabaseService;
-use crate::auth::AuthUser;
 use crate::domain::CreateDatabaseParams;
 use crate::domain::types::{CpuCores, MemoryMb};
 use crate::error::ApiResult;
+use crate::infrastructure::auth::extractor::TenantContext;
 use axum::Json;
 use axum::extract::{Path, State};
 use serde::{Deserialize, Serialize};
@@ -33,24 +33,23 @@ pub struct DatabaseResponse {
 
 #[rovo::rovo]
 pub async fn create_database(
-    auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Json(payload): Json<CreateDatabaseRequest>,
 ) -> ApiResult<Json<DatabaseResponse>> {
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| crate::error::ApiError::Auth("Invalid user ID".to_string()))?;
+    let tenant_id = tenant_ctx.tenant.id;
 
     let params = CreateDatabaseParams {
         name: payload.name,
         engine: payload.engine,
-        user_id,
+        tenant_id,
         vcpus: payload.vcpus.unwrap_or(CpuCores::try_from(1).unwrap()),
         memory_mib: payload
             .memory_mib
             .unwrap_or(MemoryMb::try_from(512).unwrap()),
         disk_mib: payload.disk_mib.unwrap_or(1024),
-        tenant_id: None,
-        timeline_id: None,
+        neon_tenant_id: None,
+        neon_timeline_id: None,
         tenant_gen: None,
         settings: payload.settings.unwrap_or_default(),
     };
@@ -71,16 +70,13 @@ pub async fn create_database(
 
 #[rovo::rovo]
 pub async fn list_databases(
-    auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<DatabaseResponse>>> {
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| crate::error::ApiError::Auth("Invalid user ID".to_string()))?;
-
     let dbs = state
         .ctx
         .database_repo
-        .list_databases_by_user(user_id)
+        .list_databases_by_tenant(tenant_ctx.tenant.id)
         .await
         .map_err(|e| crate::error::ApiError::Internal(e.to_string()))?;
 
@@ -103,13 +99,10 @@ pub async fn list_databases(
 
 #[rovo::rovo]
 pub async fn delete_database(
-    auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<()>> {
-    let user_id = Uuid::parse_str(&auth.user_id)
-        .map_err(|_| crate::error::ApiError::Auth("Invalid user ID".to_string()))?;
-
     // Check ownership
     let db = state
         .ctx
@@ -119,7 +112,7 @@ pub async fn delete_database(
         .map_err(|e| crate::error::ApiError::Internal(e.to_string()))?
         .ok_or_else(|| crate::error::ApiError::NotFound("Database not found".to_string()))?;
 
-    if db.user_id != user_id {
+    if db.tenant_id != tenant_ctx.tenant.id {
         return Err(crate::error::ApiError::Forbidden);
     }
 

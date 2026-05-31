@@ -1,8 +1,9 @@
 Package: mikrom-router
-Version: 0.3.0
-Section: utils
+Version: 0.3.1
+Section: admin
 Priority: optional
 Architecture: amd64
-Maintainer: Mikrom Team <team@mikrom.io>
-Description: High-performance dynamic ingress router for Mikrom based on Pingora.
- Includes dynamic routing via NATS/PostgreSQL and automatic TLS management.
+Maintainer: Antonio Pardo <apardo@spluca.org>
+Depends: libc6, libssl3, wireguard-tools
+Description: Mikrom Router provides high-performance ingress routing for the Mikrom platform using Pingora.
+ It integrates dynamic routing via NATS/PostgreSQL and automatic TLS management.

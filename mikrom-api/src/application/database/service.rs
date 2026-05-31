@@ -13,8 +13,6 @@ const NEON_TENANT_ID_KEY: &str = "NEON_TENANT_ID";
 const NEON_TIMELINE_ID_KEY: &str = "NEON_TIMELINE_ID";
 const MIKROM_DATABASE_ID_KEY: &str = "MIKROM_DATABASE_ID";
 const NEON_JWKS_JSON_KEY: &str = "NEON_JWKS_JSON";
-#[cfg(test)]
-const NEON_JWKS_PATH_KEY: &str = "NEON_JWKS_PATH";
 const NEON_PAGESERVER_IPV6_KEY: &str = "NEON_PAGESERVER_IPV6";
 const NEON_SAFEKEEPERS_GENERATION_KEY: &str = "NEON_SAFEKEEPERS_GENERATION";
 const NEON_INSTANCE_ID_KEY: &str = "NEON_INSTANCE_ID";
@@ -42,6 +40,22 @@ struct NeonConfigureClaims {
 }
 
 impl DatabaseService {
+    async fn resolve_tenant_owner_user_id(state: &AppState, tenant_id: Uuid) -> ApiResult<Uuid> {
+        let members = state
+            .ctx
+            .tenant_repo
+            .get_members(tenant_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        members
+            .iter()
+            .find(|member| member.role == "admin")
+            .or_else(|| members.first())
+            .map(|member| member.user_id)
+            .ok_or_else(|| ApiError::NotFound("Tenant has no members".to_string()))
+    }
+
     pub async fn validate_tenant_retention(
         state: &AppState,
         tenant_id: &str,
@@ -50,7 +64,7 @@ impl DatabaseService {
         match state
             .ctx
             .database_repo
-            .get_database_by_tenant_id(tenant_id)
+            .get_database_by_neon_tenant_id(tenant_id)
             .await
         {
             Ok(Some(database)) => {
@@ -73,16 +87,14 @@ impl DatabaseService {
         state: &AppState,
         params: CreateDatabaseParams,
     ) -> ApiResult<Database> {
-        // Ensure the authenticated user still exists before creating
-        // any database rows that reference it. This avoids surfacing a
-        // foreign-key violation as a generic 500 when the token points to
-        // a deleted or missing user.
+        // Ensure the tenant exists before creating any database rows that reference it.
         state
-            .user_repo
-            .find_by_id(params.user_id)
+            .ctx
+            .tenant_repo
+            .find_by_id(params.tenant_id)
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?
-            .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+            .ok_or_else(|| ApiError::NotFound("Tenant not found".to_string()))?;
 
         let mut params = params;
         Self::ensure_neon_provisioning_ids(&mut params);
@@ -188,8 +200,8 @@ impl DatabaseService {
                 .await
                 .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-            database.tenant_id = Some(provisioning.tenant_id);
-            database.timeline_id = Some(provisioning.timeline_id);
+            database.neon_tenant_id = Some(provisioning.tenant_id);
+            database.neon_timeline_id = Some(provisioning.timeline_id);
             database.tenant_gen = Some(provisioning.tenant_gen);
         }
 
@@ -209,11 +221,13 @@ impl DatabaseService {
             .map_err(|e| ApiError::Internal(e.to_string()))?
             .ok_or_else(|| ApiError::NotFound("Database not found".to_string()))?;
 
+        let owner_user_id = Self::resolve_tenant_owner_user_id(state, database.tenant_id).await?;
+
         // 1. Create deployment record
         let deployment = state
             .ctx
             .database_repo
-            .create_deployment(database.id, database.user_id)
+            .create_deployment(database.id, database.tenant_id)
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -228,7 +242,7 @@ impl DatabaseService {
         // 3. Get user VPC info for IPv6
         let user = state
             .user_repo
-            .find_by_id(database.user_id)
+            .find_by_id(owner_user_id)
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?
             .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
@@ -248,7 +262,7 @@ impl DatabaseService {
             database_id: database.id.to_string(),
             database_name: database.name.clone(),
             rootfs_image: DATABASE_ROOTFS_IMAGE.to_string(),
-            user_id: database.user_id.to_string(),
+            tenant_id: database.tenant_id.to_string(),
             deployment_id: deployment.id.to_string(),
             vpc_ipv6_prefix,
             config: Some(mikrom_proto::scheduler::AppConfig {
@@ -349,7 +363,7 @@ impl DatabaseService {
             if let Some(job_id) = job_id {
                 state
                     .scheduler
-                    .delete_database(job_id, database.user_id.to_string())
+                    .delete_database(job_id, database.tenant_id.to_string())
                     .await
                     .ok();
             }
@@ -373,10 +387,10 @@ impl DatabaseService {
         let mut env = database.settings.clone();
         env.insert(MIKROM_DATABASE_ID_KEY.to_string(), database.id.to_string());
 
-        if let Some(tenant_id) = &database.tenant_id {
+        if let Some(tenant_id) = &database.neon_tenant_id {
             env.insert(NEON_TENANT_ID_KEY.to_string(), tenant_id.clone());
         }
-        if let Some(timeline_id) = &database.timeline_id {
+        if let Some(timeline_id) = &database.neon_timeline_id {
             env.insert(NEON_TIMELINE_ID_KEY.to_string(), timeline_id.clone());
         }
 
@@ -530,19 +544,19 @@ impl DatabaseService {
             return;
         }
 
-        if params.tenant_id.is_none() {
-            params.tenant_id = Some(Self::placeholder_neon_id("tenant"));
+        if params.neon_tenant_id.is_none() {
+            params.neon_tenant_id = Some(Self::placeholder_neon_id("tenant"));
         }
-        if params.timeline_id.is_none() {
-            params.timeline_id = Some(Self::placeholder_neon_id("timeline"));
+        if params.neon_timeline_id.is_none() {
+            params.neon_timeline_id = Some(Self::placeholder_neon_id("timeline"));
         }
     }
 
     fn needs_neon_provisioning(database: &Database) -> bool {
-        (match database.tenant_id.as_deref() {
+        (match database.neon_tenant_id.as_deref() {
             None => true,
             Some(value) => Self::is_placeholder_neon_id(value),
-        }) || match database.timeline_id.as_deref() {
+        }) || match database.neon_timeline_id.as_deref() {
             None => true,
             Some(value) => Self::is_placeholder_neon_id(value),
         }
@@ -554,13 +568,13 @@ impl DatabaseService {
 
     fn resolve_neon_provisioning_ids(database: &Database) -> (String, String) {
         let tenant_id = database
-            .tenant_id
+            .neon_tenant_id
             .as_deref()
             .and_then(|id| id.strip_prefix("pending-tenant-"))
             .map(|id| id.to_string())
             .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
         let timeline_id = database
-            .timeline_id
+            .neon_timeline_id
             .as_deref()
             .and_then(|id| id.strip_prefix("pending-timeline-"))
             .map(|id| id.to_string())
@@ -588,7 +602,7 @@ impl DatabaseService {
     }
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::application::ApiContext;

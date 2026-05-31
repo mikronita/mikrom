@@ -183,3 +183,11 @@ pub struct CreateDatabaseRequest {
     pub disk_mib: Option<u32>,
     pub settings: Option<HashMap<String, String>>,
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ProjectInfo {
+    pub id: String,
+    pub tenant_id: String,
+    pub name: String,
+    pub created_at: Option<String>,
+}

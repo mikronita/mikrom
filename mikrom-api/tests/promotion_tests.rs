@@ -1,407 +1,219 @@
-use futures::StreamExt;
-use mikrom_api::domain::MockScheduler;
-use mikrom_api::domain::app::{App, Deployment};
-use mikrom_api::domain::user::{User, UserRole};
-use mikrom_api::domain::{MockAppRepository, MockUserRepository};
-use mikrom_proto::scheduler::DeployResponse;
-use mockall::predicate::*;
 use std::sync::Arc;
-use tokio::time::Duration;
+
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use mockall::predicate::eq;
 use uuid::Uuid;
 
-async fn connect_nats_or_skip(test_name: &str) -> Option<async_nats::Client> {
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
+use mikrom_api::AppState;
+use mikrom_api::auth::AuthUser;
+use mikrom_api::domain::app::{App, Deployment};
+use mikrom_api::domain::github::MockGithubRepository;
+use mikrom_api::domain::user::{MockUserRepository, UserRole};
+use mikrom_api::domain::{MockAppRepository, MockScheduler, MockTenantRepository};
+use mikrom_api::infrastructure::http::handlers::deploy::__activate_deployment_handler_impl as activate_deployment_handler;
 
-    match async_nats::connect(nats_url).await {
-        Ok(client) => Some(client),
-        Err(err) => {
-            eprintln!("skipping {}: unable to connect to NATS: {}", test_name, err);
-            None
-        },
+fn build_state(app_repo: MockAppRepository, scheduler: MockScheduler) -> AppState {
+    AppState {
+        ctx: mikrom_api::application::ApiContext::default(),
+        user_repo: Arc::new(MockUserRepository::new()),
+        tenant_repo: Arc::new(MockTenantRepository::new()),
+        app_repo: Arc::new(app_repo),
+        database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
+        github_repo: Arc::new(MockGithubRepository::default()),
+        volume_repo: Arc::new(mikrom_api::domain::MockVolumeRepository::new()),
+        scheduler: Arc::new(scheduler),
+        nats: mikrom_api::nats::TypedNatsClient::default(),
+        router_addr: "http://localhost:8080".to_string(),
+        frontend_url: "http://localhost:3000".to_string(),
+        api_db: sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
+        jwt_secret: "test-secret".into(),
+        master_key: "key".into(),
+        deployment_events: tokio::sync::broadcast::channel(1).0,
+        workspace_events: tokio::sync::broadcast::channel(100).0,
+        mesh_status: tokio::sync::watch::channel(
+            mikrom_api::application::vms::MeshStatus::default(),
+        )
+        .0,
+        acme_email: "admin@mikrom.spluca.org".to_string(),
+        acme_staging: true,
+        acme_check_interval: 3600,
+        github_app_id: None,
+        github_private_key: None,
+        github_app_slug: None,
+        github_webhook_url_base: None,
+        active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     }
 }
 
 #[tokio::test]
-async fn test_promote_paused_deployment_resumes_it() {
-    eprintln!(
-        "skipping test_promote_paused_deployment_resumes_it: flaky under parallel nextest due shared NATS subjects"
-    );
-    return;
-}
-
-#[tokio::test]
-#[allow(unreachable_code, unused_variables, unused_imports)]
-async fn test_promote_running_deployment_while_flow_active_is_immediate() {
-    use axum::extract::{Path, State};
-    use axum::http::StatusCode;
-    use mikrom_api::auth::AuthUser;
-    use mikrom_api::infrastructure::http::handlers::deploy::__activate_deployment_handler_impl as activate_deployment_handler;
-
-    eprintln!(
-        "skipping test_promote_running_deployment_while_flow_active_is_immediate: flaky under parallel nextest due runtime promotion state"
-    );
-    return;
-
-    let mut mock_app_repo = MockAppRepository::new();
-    let mut mock_scheduler = MockScheduler::new();
-
-    let user_id = Uuid::new_v4();
+async fn test_activate_deployment_promotes_running_record() {
+    let tenant_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
     let deployment_id = Uuid::new_v4();
 
-    let app = App {
-        id: app_id,
-        name: "test-app".to_string(),
-        user_id,
-        active_deployment_id: Some(Uuid::new_v4()),
-        ..Default::default()
-    };
-    let old_dep_id = app.active_deployment_id.unwrap();
-
-    let deployment = Deployment {
-        id: deployment_id,
-        app_id,
-        user_id,
-        status: "RUNNING".to_string(),
-        job_id: Some("job-running".to_string()),
-        image_tag: Some("v1".to_string()),
-        vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
-        memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
-        disk_mib: 1024,
-        env_vars: serde_json::json!({}),
-        ..Default::default()
-    };
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = match async_nats::connect(nats_url).await {
-        Ok(client) => client,
-        Err(err) => {
-            eprintln!(
-                "skipping test_promote_running_deployment_while_flow_active_is_immediate: unable to connect to NATS: {}",
-                err
-            );
-            return;
-        },
-    };
-
+    let mut mock_app_repo = MockAppRepository::new();
     mock_app_repo
         .expect_get_app_by_name()
-        .with(eq("test-app".to_string()))
-        .returning({
-            let a = app.clone();
-            move |_| Ok(Some(a.clone()))
+        .with(eq("test-app"))
+        .returning(move |_| {
+            Ok(Some(App {
+                id: app_id,
+                name: "test-app".to_string(),
+                tenant_id,
+                hostname: None,
+                active_deployment_id: None,
+                ..Default::default()
+            }))
         });
-
     mock_app_repo
         .expect_get_deployment()
         .with(eq(deployment_id))
-        .returning({
-            let d = deployment.clone();
-            move |_| Ok(Some(d.clone()))
+        .returning(move |_| {
+            Ok(Some(Deployment {
+                id: deployment_id,
+                app_id,
+                tenant_id,
+                status: "RUNNING".to_string(),
+                job_id: None,
+                ..Default::default()
+            }))
         });
-
     mock_app_repo
         .expect_set_active_deployment()
+        .with(eq(app_id), eq(deployment_id))
+        .times(1)
         .returning(|_, _| Ok(()));
 
-    let old_dep = Deployment {
-        id: old_dep_id,
-        app_id,
-        user_id,
-        status: "RUNNING".to_string(),
-        job_id: Some("job-old".to_string()),
-        ..Default::default()
-    };
-    mock_app_repo
-        .expect_get_deployment()
-        .with(eq(old_dep_id))
-        .returning({
-            let d = old_dep.clone();
-            move |_| Ok(Some(d.clone()))
-        });
-
-    mock_scheduler.expect_pause_app().returning(|_, _| Ok(true));
-    mock_app_repo
-        .expect_update_deployment()
-        .returning(|_, _| Ok(()));
-
-    mock_app_repo.expect_get_app().with(eq(app_id)).returning({
-        let a = app.clone();
-        move |_| Ok(Some(a.clone()))
-    });
-
-    let mut state = mikrom_api::test_utils::create_test_app_state(
-        sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
-    );
-    state.app_repo = Arc::new(mock_app_repo);
-    state.scheduler = Arc::new(mock_scheduler);
-    state.ctx.app_repo = state.app_repo.clone();
-    state.ctx.scheduler = state.scheduler.clone();
-    state.nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone());
-    state.ctx.nats = state.nats.clone();
-
-    state.active_deployment_flows.insert(app_id.into());
-
+    let scheduler = MockScheduler::new();
+    let state = build_state(mock_app_repo, scheduler);
     let auth = AuthUser {
-        user_id: user_id.to_string(),
+        user_id: tenant_id.to_string(),
         email: "test@example.com".to_string(),
-        role: mikrom_api::domain::user::UserRole::User,
+        role: UserRole::User,
     };
 
-    let result = activate_deployment_handler(
+    let status = activate_deployment_handler(
         auth,
         State(state),
         Path(("test-app".to_string(), deployment_id)),
     )
     .await
-    .expect("Handler should succeed");
+    .expect("handler should succeed");
 
-    assert_eq!(result, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
-#[allow(unreachable_code, unused_variables, unused_imports)]
-async fn test_promote_running_deployment_with_stale_db_status_uses_runtime_status() {
-    use axum::extract::{Path, State};
-    use axum::http::StatusCode;
-    use mikrom_api::auth::AuthUser;
-    use mikrom_api::infrastructure::http::handlers::deploy::__activate_deployment_handler_impl as activate_deployment_handler;
-
-    eprintln!(
-        "skipping test_promote_running_deployment_with_stale_db_status_uses_runtime_status: flaky under parallel nextest due shared NATS subjects"
-    );
-    return;
-
-    let mut mock_app_repo = MockAppRepository::new();
-    let mock_scheduler = MockScheduler::new();
-
-    let user_id = Uuid::new_v4();
+async fn test_activate_failed_deployment_is_rejected() {
+    let tenant_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
     let deployment_id = Uuid::new_v4();
-    let old_dep_id = Uuid::new_v4();
 
-    let app = App {
-        id: app_id,
-        name: "test-app".to_string(),
-        user_id,
-        active_deployment_id: Some(old_dep_id),
-        ..Default::default()
-    };
-
-    let deployment = Deployment {
-        id: deployment_id,
-        app_id,
-        user_id,
-        status: "SCHEDULED".to_string(),
-        job_id: Some("job-running-runtime".to_string()),
-        image_tag: Some("v2".to_string()),
-        vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
-        memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
-        disk_mib: 1024,
-        env_vars: serde_json::json!({}),
-        ..Default::default()
-    };
-
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let nats_client = match async_nats::connect(nats_url).await {
-        Ok(client) => client,
-        Err(err) => {
-            eprintln!(
-                "skipping test_promote_running_deployment_with_stale_db_status_uses_runtime_status: unable to connect to NATS: {}",
-                err
-            );
-            return;
-        },
-    };
-
-    let app_clone = app.clone();
+    let mut mock_app_repo = MockAppRepository::new();
     mock_app_repo
         .expect_get_app_by_name()
-        .with(eq("test-app".to_string()))
-        .returning(move |_| Ok(Some(app_clone.clone())));
-
+        .with(eq("test-app"))
+        .returning(move |_| {
+            Ok(Some(App {
+                id: app_id,
+                name: "test-app".to_string(),
+                tenant_id,
+                hostname: None,
+                active_deployment_id: None,
+                ..Default::default()
+            }))
+        });
     mock_app_repo
         .expect_get_deployment()
         .with(eq(deployment_id))
-        .returning({
-            let d = deployment.clone();
-            move |_| Ok(Some(d.clone()))
+        .returning(move |_| {
+            Ok(Some(Deployment {
+                id: deployment_id,
+                app_id,
+                tenant_id,
+                status: "FAILED".to_string(),
+                job_id: None,
+                ..Default::default()
+            }))
         });
 
-    let nats_clone = nats_client.clone();
-    tokio::spawn(async move {
-        use mikrom_proto::scheduler::{AppStatusRequest, AppStatusResponse, DeployStatus};
-        use prost::Message;
-
-        let mut status_sub = nats_clone
-            .subscribe("mikrom.scheduler.get_job")
-            .await
-            .unwrap();
-
-        while let Some(msg) = status_sub.next().await {
-            if let Ok(req) = AppStatusRequest::decode(&msg.payload[..])
-                && req.job_id != "job-running-runtime"
-            {
-                continue;
-            }
-
-            let resp = AppStatusResponse {
-                job_id: "job-running-runtime".to_string(),
-                status: DeployStatus::Running.into(),
-                host_id: "host-1".to_string(),
-                vm_id: "vm-1".to_string(),
-                ..Default::default()
-            };
-            let mut buf = Vec::new();
-            resp.encode(&mut buf).unwrap();
-            let _ = nats_clone.publish(msg.reply.unwrap(), buf.into()).await;
-        }
-    });
-
-    let mut state = mikrom_api::test_utils::create_test_app_state(
-        sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
-    );
-    state.app_repo = Arc::new(mock_app_repo);
-    state.scheduler = Arc::new(mock_scheduler);
-    state.ctx.app_repo = state.app_repo.clone();
-    state.ctx.scheduler = state.scheduler.clone();
-    state.nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone());
-    state.ctx.nats = state.nats.clone();
-
+    let scheduler = MockScheduler::new();
+    let state = build_state(mock_app_repo, scheduler);
     let auth = AuthUser {
-        user_id: user_id.to_string(),
+        user_id: tenant_id.to_string(),
         email: "test@example.com".to_string(),
-        role: mikrom_api::domain::user::UserRole::User,
+        role: UserRole::User,
     };
 
-    let result = activate_deployment_handler(
+    let err = activate_deployment_handler(
         auth,
         State(state),
         Path(("test-app".to_string(), deployment_id)),
     )
     .await
-    .expect("Handler should succeed");
+    .expect_err("failed deployment should be rejected");
 
-    assert_eq!(result, StatusCode::OK);
+    assert!(
+        err.to_string()
+            .contains("Cannot activate a failed deployment")
+    );
 }
 
 #[tokio::test]
-async fn test_promote_unhealthy_deployment_no_cleanup() {
-    let mut mock_app_repo = MockAppRepository::new();
-    let mut mock_scheduler = MockScheduler::new();
-
-    let user_id = Uuid::new_v4();
+async fn test_activate_deployment_rejects_foreign_deployment() {
+    let tenant_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
-    let dep_id = Uuid::new_v4();
+    let other_app_id = Uuid::new_v4();
+    let deployment_id = Uuid::new_v4();
 
-    let app = App {
-        id: app_id,
-        name: "test-app".to_string(),
-        user_id,
-        ..Default::default()
-    };
-
-    let deployment = Deployment {
-        id: dep_id,
-        app_id,
-        user_id,
-        status: "RUNNING".to_string(),
-        job_id: Some("job-unhealthy".to_string()),
-        ..Default::default()
-    };
-
-    let Some(nats_client) =
-        connect_nats_or_skip("test_promote_unhealthy_deployment_no_cleanup").await
-    else {
-        return;
-    };
-
-    // 1. Scheduler pause_app should NOT be called
-    mock_scheduler.expect_pause_app().times(0);
-
-    // 2. App repo update_deployment to FAILED should NOT be called
-    mock_app_repo.expect_update_deployment().times(0);
-
-    let app_clone = app.clone();
+    let mut mock_app_repo = MockAppRepository::new();
     mock_app_repo
-        .expect_get_app()
-        .returning(move |_| Ok(Some(app_clone.clone())));
+        .expect_get_app_by_name()
+        .with(eq("test-app"))
+        .returning(move |_| {
+            Ok(Some(App {
+                id: app_id,
+                name: "test-app".to_string(),
+                tenant_id,
+                hostname: None,
+                active_deployment_id: None,
+                ..Default::default()
+            }))
+        });
+    mock_app_repo
+        .expect_get_deployment()
+        .with(eq(deployment_id))
+        .returning(move |_| {
+            Ok(Some(Deployment {
+                id: deployment_id,
+                app_id: other_app_id,
+                tenant_id,
+                status: "RUNNING".to_string(),
+                job_id: None,
+                ..Default::default()
+            }))
+        });
+    mock_app_repo.expect_set_active_deployment().times(0);
 
-    let job_id = format!("job-unhealthy-{}", Uuid::new_v4());
-    let job_id_clone = job_id.clone();
+    let scheduler = MockScheduler::new();
+    let state = build_state(mock_app_repo, scheduler);
+    let auth = AuthUser {
+        user_id: tenant_id.to_string(),
+        email: "test@example.com".to_string(),
+        role: UserRole::User,
+    };
 
-    // Subscribe to health check requests to respond (only for our job_id)
-    let nats_clone = nats_client.clone();
-    tokio::spawn(async move {
-        use mikrom_proto::scheduler::{CheckHealthRequest, CheckHealthResponse};
-        use prost::Message;
+    let err = activate_deployment_handler(
+        auth,
+        State(state),
+        Path(("test-app".to_string(), deployment_id)),
+    )
+    .await
+    .expect_err("foreign deployment should be rejected");
 
-        let mut health_sub = nats_clone
-            .subscribe("mikrom.scheduler.check_health")
-            .await
-            .unwrap();
-
-        while let Some(msg) = health_sub.next().await {
-            if let Ok(req) = CheckHealthRequest::decode(&msg.payload[..])
-                && req.job_id != job_id_clone
-            {
-                continue;
-            }
-
-            let resp = CheckHealthResponse {
-                is_healthy: false,
-                message: "Unhealthy".to_string(),
-            };
-            let mut buf = Vec::new();
-            resp.encode(&mut buf).unwrap();
-            let _ = nats_clone.publish(msg.reply.unwrap(), buf.into()).await;
-        }
-    });
-
-    let mut mock_user_repo = MockUserRepository::new();
-    mock_user_repo.expect_find_by_id().returning(|id| {
-        Ok(Some(User {
-            id,
-            email: "test@example.com".into(),
-            password_hash: "hash".into(),
-            role: UserRole::User,
-            first_name: None,
-            last_name: None,
-            vpc_ipv6_prefix: None,
-        }))
-    });
-
-    let mut state = mikrom_api::test_utils::create_test_app_state(
-        sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+    assert_eq!(
+        err.to_string(),
+        "Bad request: Deployment does not belong to this application"
     );
-    state.user_repo = Arc::new(mock_user_repo);
-    state.app_repo = Arc::new(mock_app_repo);
-    state.scheduler = Arc::new(mock_scheduler);
-    state.ctx.user_repo = state.user_repo.clone();
-    state.ctx.app_repo = state.app_repo.clone();
-    state.ctx.scheduler = state.scheduler.clone();
-    state.nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone());
-    state.ctx.nats = state.nats.clone();
-
-    let guard = state.try_start_flow(app_id.into()).unwrap();
-
-    // Start zero-downtime flow with cleanup_on_failure = false (since it was RUNNING)
-    mikrom_api::application::deployment::service::DeploymentService::run_zero_downtime_flow(
-        state.clone(),
-        app,
-        deployment,
-        DeployResponse {
-            job_id: job_id.clone(),
-            ..Default::default()
-        },
-        user_id.to_string(),
-        false, // cleanup_on_failure = false
-        guard,
-    );
-
-    // Wait a bit
-    tokio::time::sleep(Duration::from_millis(500)).await;
 }

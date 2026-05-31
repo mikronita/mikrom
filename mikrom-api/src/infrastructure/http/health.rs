@@ -59,7 +59,7 @@ async fn get_system_health(state: &crate::AppState) -> HashMap<String, String> {
 
     use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
     let nats_req = ListAppsRequest {
-        user_id: "system".to_string(),
+        tenant_id: "system".to_string(),
         status: None,
     };
 
@@ -158,8 +158,8 @@ pub async fn re_attach(
     let tenants = databases
         .into_iter()
         .filter_map(|database| {
-            let tenant_id = database.tenant_id?;
-            let timeline_id = database.timeline_id?;
+            let tenant_id = database.neon_tenant_id?;
+            let timeline_id = database.neon_timeline_id?;
 
             if database.engine != "neon" {
                 return None;

@@ -22,6 +22,9 @@ pub async fn dispatch(
         },
         Commands::Volume(vol_cmd) => crate::application::volume::handle(ctx, vol_cmd, output).await,
         Commands::Db(db_cmd) => crate::application::database::handle(ctx, db_cmd, output).await,
+        Commands::Project(project_cmd) => {
+            crate::application::project::handle(ctx, project_cmd, cfg, output).await
+        },
         Commands::System(sys_cmd) => crate::application::system::handle(ctx, sys_cmd, output).await,
         Commands::Completion { .. } => {
             // Handled in main.rs before dispatch

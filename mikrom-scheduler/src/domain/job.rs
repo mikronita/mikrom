@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::domain::{AppId, DeploymentId, HostId, JobId, UserId, VmId, VolumeId};
+use crate::domain::{AppId, DeploymentId, HostId, JobId, TenantId, VmId, VolumeId};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -139,7 +139,7 @@ pub struct Job {
     pub app_id: AppId,
     pub app_name: String,
     pub image: String,
-    pub user_id: UserId,
+    pub tenant_id: TenantId,
     pub status: JobStatus,
     pub host_id: Option<HostId>,
     pub vm_id: Option<VmId>,
@@ -159,7 +159,7 @@ impl Job {
         app_name: String,
         image: String,
         config: VmConfig,
-        user_id: UserId,
+        tenant_id: TenantId,
         deployment_id: Option<DeploymentId>,
     ) -> Self {
         Self {
@@ -167,7 +167,7 @@ impl Job {
             app_id,
             app_name,
             image,
-            user_id,
+            tenant_id,
             status: JobStatus::Pending,
             host_id: None,
             vm_id: None,

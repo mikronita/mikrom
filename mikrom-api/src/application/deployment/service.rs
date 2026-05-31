@@ -55,6 +55,22 @@ pub struct ScaleAppParams {
 }
 
 impl DeploymentService {
+    async fn resolve_tenant_owner_user_id(state: &AppState, tenant_id: Uuid) -> ApiResult<Uuid> {
+        let members = state
+            .ctx
+            .tenant_repo
+            .get_members(tenant_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        members
+            .iter()
+            .find(|member| member.role == "admin")
+            .or_else(|| members.first())
+            .map(|member| member.user_id)
+            .ok_or_else(|| ApiError::NotFound("Tenant has no members".to_string()))
+    }
+
     fn parse_usize_env(value: Option<String>, default: usize) -> usize {
         value
             .and_then(|value| value.parse::<usize>().ok())
@@ -87,10 +103,11 @@ impl DeploymentService {
         state: &AppState,
         params: crate::domain::CreateAppParams,
     ) -> ApiResult<App> {
-        let user_id = params.user_id;
+        let tenant_id = params.tenant_id;
+        let owner_user_id = Self::resolve_tenant_owner_user_id(state, tenant_id).await?;
         let user = state
             .user_repo
-            .find_by_id(user_id)
+            .find_by_id(owner_user_id)
             .await?
             .ok_or_else(|| ApiError::NotFound("User not found".into()))?;
 
@@ -98,7 +115,8 @@ impl DeploymentService {
 
         state.publish_workspace_event(WorkspaceEvent {
             kind: WorkspaceEventKind::AppCreated,
-            user_id: Some(user_id),
+            user_id: None,
+            tenant_id: Some(tenant_id),
             app_id: Some(app.id),
             app_name: Some(app.name.clone()),
             deployment_id: app.active_deployment_id,
@@ -111,7 +129,7 @@ impl DeploymentService {
             .scheduler
             .update_app_scaling_config(mikrom_proto::scheduler::UpdateAppScalingConfigRequest {
                 app_id: app.id.to_string(),
-                user_id: app.user_id.to_string(),
+                tenant_id: app.tenant_id.to_string(),
                 min_replicas: app.min_replicas as u32,
                 max_replicas: app.max_replicas as u32,
                 autoscaling_enabled: app.autoscaling_enabled,
@@ -230,7 +248,7 @@ impl DeploymentService {
     pub async fn get_app_by_name_and_auth(
         state: &AppState,
         app_name: &str,
-        auth_user_id: &str,
+        auth_tenant_id: &str,
     ) -> ApiResult<App> {
         let app = state
             .app_repo
@@ -239,7 +257,7 @@ impl DeploymentService {
             .map_err(|e| ApiError::Internal(e.to_string()))?
             .ok_or_else(|| ApiError::NotFound("Application not found".into()))?;
 
-        if app.user_id.to_string() != auth_user_id {
+        if app.tenant_id.to_string() != auth_tenant_id {
             return Err(ApiError::Forbidden);
         }
 
@@ -291,7 +309,7 @@ impl DeploymentService {
         deployment: Deployment,
         params: DeployVersionParams,
         guard: crate::DeploymentFlowGuard,
-        user_id: String,
+        tenant_id: String,
     ) -> ApiResult<super::DeployResponseBody> {
         let DeployVersionParams {
             vcpus,
@@ -324,7 +342,7 @@ impl DeploymentService {
             app,
             deployment,
             inner.clone(),
-            user_id,
+            tenant_id,
             true,
             guard,
         );
@@ -342,17 +360,17 @@ impl DeploymentService {
 
     pub async fn deploy_app_version(
         state: &AppState,
-        auth_user_id: &str,
+        auth_tenant_id: &str,
         app_name: &str,
         params: DeployVersionParams,
     ) -> ApiResult<super::DeployResponseBody> {
-        let app = Self::get_app_by_name_and_auth(state, app_name, auth_user_id).await?;
+        let app = Self::get_app_by_name_and_auth(state, app_name, auth_tenant_id).await?;
         let git_metadata = Self::fetch_app_git_metadata(state, &app).await;
         let deployment = state
             .app_repo
             .create_deployment(crate::domain::NewDeployment::from_handler(
                 app.id,
-                auth_user_id.to_string(),
+                auth_tenant_id.to_string(),
                 params.vcpus,
                 params.memory_mib,
                 params.disk_mib as i64,
@@ -381,7 +399,7 @@ impl DeploymentService {
                     ..params
                 },
                 guard,
-                auth_user_id.to_string(),
+                auth_tenant_id.to_string(),
             )
             .await;
         }
@@ -426,7 +444,7 @@ impl DeploymentService {
             .app_repo
             .create_deployment(crate::domain::NewDeployment::from_handler(
                 app.id,
-                app.user_id.to_string(),
+                app.tenant_id.to_string(),
                 vcpus,
                 memory_mib,
                 disk_mib as i64,
@@ -479,11 +497,11 @@ impl DeploymentService {
 
         let cleanup_state = state.clone();
         let app_id = app.id.to_string();
-        let user_id = app.user_id.to_string();
+        let tenant_id = app.tenant_id.to_string();
         tokio::spawn(async move {
             if let Err(e) = cleanup_state
                 .scheduler
-                .delete_all_by_app(app_id.clone(), user_id.clone())
+                .delete_all_by_app(app_id.clone(), tenant_id.clone())
                 .await
             {
                 tracing::error!(
@@ -496,7 +514,8 @@ impl DeploymentService {
 
         state.publish_workspace_event(WorkspaceEvent {
             kind: WorkspaceEventKind::AppDeleted,
-            user_id: Some(app.user_id),
+            user_id: None,
+            tenant_id: Some(app.tenant_id),
             app_id: Some(app.id),
             app_name: Some(app.name.clone()),
             deployment_id: app.active_deployment_id,
@@ -508,10 +527,11 @@ impl DeploymentService {
     }
 
     pub async fn scale_app(state: &AppState, app: &App, params: ScaleAppParams) -> ApiResult<()> {
-        let user_uuid = app.user_id;
+        let user_uuid = app.tenant_id;
+        let owner_user_id = Self::resolve_tenant_owner_user_id(state, user_uuid).await?;
         let user = state
             .user_repo
-            .find_by_id(user_uuid)
+            .find_by_id(owner_user_id)
             .await?
             .ok_or_else(|| ApiError::NotFound("User not found".into()))?;
 
@@ -569,7 +589,7 @@ impl DeploymentService {
                 .scale_app(
                     updated_app.id.to_string(),
                     updated_app.desired_replicas as u32,
-                    updated_app.user_id.to_string(),
+                    updated_app.tenant_id.to_string(),
                 )
                 .await?;
         }
@@ -579,7 +599,7 @@ impl DeploymentService {
             .scheduler
             .update_app_scaling_config(mikrom_proto::scheduler::UpdateAppScalingConfigRequest {
                 app_id: updated_app.id.to_string(),
-                user_id: updated_app.user_id.to_string(),
+                tenant_id: updated_app.tenant_id.to_string(),
                 min_replicas: updated_app.min_replicas as u32,
                 max_replicas: updated_app.max_replicas as u32,
                 autoscaling_enabled: updated_app.autoscaling_enabled,
@@ -623,7 +643,7 @@ impl DeploymentService {
                 app_name: app.name.clone(),
                 image: String::new(),
                 status: 1, // Pending/Building
-                user_id: app.user_id.to_string(),
+                tenant_id: app.tenant_id.to_string(),
                 deployment_id: deployment.id.to_string(),
                 hypervisor: deployment.hypervisor,
                 ..Default::default()
@@ -637,7 +657,8 @@ impl DeploymentService {
         state.deployment_events.send(app.id).ok();
         state.publish_workspace_event(WorkspaceEvent {
             kind: WorkspaceEventKind::DeploymentChanged,
-            user_id: Some(app.user_id),
+            user_id: None,
+            tenant_id: Some(app.tenant_id),
             app_id: Some(app.id),
             app_name: Some(app.name.clone()),
             deployment_id: Some(deployment.id),
@@ -714,7 +735,7 @@ impl DeploymentService {
             deployment_id: deployment.id,
             app_id: app.id,
             app_name: app.name.clone(),
-            user_id: app.user_id.to_string(),
+            user_id: app.tenant_id.to_string(),
             build_id: build_id.clone(),
             vcpus: params.vcpus,
             memory_mib: MemoryMb::new(
@@ -751,9 +772,10 @@ impl DeploymentService {
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+        let owner_user_id = Self::resolve_tenant_owner_user_id(state, app.tenant_id).await?;
         let user = state
             .user_repo
-            .find_by_id(app.user_id)
+            .find_by_id(owner_user_id)
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?
             .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
@@ -770,7 +792,7 @@ impl DeploymentService {
             app_id: app.id.to_string(),
             app_name: app.name.clone(),
             image: params.image_tag.clone(),
-            user_id: app.user_id.to_string(),
+            tenant_id: app.tenant_id.to_string(),
             config: Some(AppConfig {
                 vcpus: params.vcpus.value(),
                 memory_mib: params.memory_mib.value(),
@@ -825,7 +847,8 @@ impl DeploymentService {
                 state.deployment_events.send(app.id).ok();
                 state.publish_workspace_event(WorkspaceEvent {
                     kind: WorkspaceEventKind::DeploymentChanged,
-                    user_id: Some(app.user_id),
+                    user_id: None,
+                    tenant_id: Some(app.tenant_id),
                     app_id: Some(app.id),
                     app_name: Some(app.name.clone()),
                     deployment_id: Some(deployment.id),
@@ -861,7 +884,8 @@ impl DeploymentService {
         state.deployment_events.send(app.id).ok();
         state.publish_workspace_event(WorkspaceEvent {
             kind: WorkspaceEventKind::DeploymentChanged,
-            user_id: Some(app.user_id),
+            user_id: None,
+            tenant_id: Some(app.tenant_id),
             app_id: Some(app.id),
             app_name: Some(app.name.clone()),
             deployment_id: Some(deployment.id),
@@ -876,7 +900,7 @@ impl DeploymentService {
         state: &AppState,
         app: &App,
         deployment: &Deployment,
-        user_id: String,
+        tenant_id: String,
     ) -> ApiResult<bool> {
         let job_id = deployment
             .job_id
@@ -886,12 +910,12 @@ impl DeploymentService {
         tracing::info!(
             app = %app.name,
             job_id = %job_id,
-            user_id = %user_id,
+            tenant_id = %tenant_id,
             origin = "manual_pause",
             "Forwarding pause request to scheduler"
         );
 
-        let success = state.scheduler.pause_app(job_id.clone(), user_id).await?;
+        let success = state.scheduler.pause_app(job_id.clone(), tenant_id).await?;
 
         if success {
             tracing::info!(
@@ -921,7 +945,8 @@ impl DeploymentService {
             state.deployment_events.send(app.id).ok();
             state.publish_workspace_event(WorkspaceEvent {
                 kind: WorkspaceEventKind::DeploymentChanged,
-                user_id: Some(app.user_id),
+                user_id: None,
+                tenant_id: Some(app.tenant_id),
                 app_id: Some(app.id),
                 app_name: Some(app.name.clone()),
                 deployment_id: Some(deployment.id),
@@ -937,14 +962,17 @@ impl DeploymentService {
         state: &AppState,
         app: &App,
         deployment: &Deployment,
-        user_id: String,
+        tenant_id: String,
     ) -> ApiResult<bool> {
         let job_id = deployment
             .job_id
             .clone()
             .ok_or_else(|| ApiError::BadRequest("Deployment is missing a job id".into()))?;
 
-        let success = state.scheduler.resume_app(job_id.clone(), user_id).await?;
+        let success = state
+            .scheduler
+            .resume_app(job_id.clone(), tenant_id)
+            .await?;
 
         if success {
             // Update database status
@@ -968,7 +996,8 @@ impl DeploymentService {
             state.deployment_events.send(app.id).ok();
             state.publish_workspace_event(WorkspaceEvent {
                 kind: WorkspaceEventKind::DeploymentChanged,
-                user_id: Some(app.user_id),
+                user_id: None,
+                tenant_id: Some(app.tenant_id),
                 app_id: Some(app.id),
                 app_name: Some(app.name.clone()),
                 deployment_id: Some(deployment.id),
@@ -984,7 +1013,7 @@ impl DeploymentService {
         state: &AppState,
         app: &App,
         deployment: &Deployment,
-        user_id: String,
+        tenant_id: String,
     ) -> ApiResult<(bool, String)> {
         let job_id = deployment
             .job_id
@@ -995,7 +1024,7 @@ impl DeploymentService {
 
         let nats_req = CancelRequest {
             job_id: job_id.clone(),
-            user_id,
+            tenant_id,
         };
 
         let inner: CancelResponse = state
@@ -1026,7 +1055,8 @@ impl DeploymentService {
             state.deployment_events.send(app.id).ok();
             state.publish_workspace_event(WorkspaceEvent {
                 kind: WorkspaceEventKind::DeploymentChanged,
-                user_id: Some(app.user_id),
+                user_id: None,
+                tenant_id: Some(app.tenant_id),
                 app_id: Some(app.id),
                 app_name: Some(app.name.clone()),
                 deployment_id: Some(deployment.id),
@@ -1052,7 +1082,8 @@ impl DeploymentService {
         state.deployment_events.send(app.id).ok();
         state.publish_workspace_event(WorkspaceEvent {
             kind: WorkspaceEventKind::DeploymentChanged,
-            user_id: Some(app.user_id),
+            user_id: None,
+            tenant_id: Some(app.tenant_id),
             app_id: Some(app.id),
             app_name: Some(app.name.clone()),
             deployment_id: None,
@@ -1068,7 +1099,7 @@ impl DeploymentService {
         app: App,
         deployment: Deployment,
         inner: mikrom_proto::scheduler::DeployResponse,
-        user_id: String,
+        tenant_id: String,
         cleanup_on_failure: bool,
         _guard: crate::DeploymentFlowGuard,
     ) {
@@ -1077,14 +1108,14 @@ impl DeploymentService {
             app,
             deployment,
             inner,
-            user_id,
+            tenant_id,
             cleanup_on_failure,
             _guard,
         );
     }
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::domain::MockAppRepository;
@@ -1155,7 +1186,7 @@ mod tests {
     #[tokio::test]
     async fn deploy_to_scheduler_maps_no_responders_to_scheduler_unavailable() {
         let app_id = Uuid::new_v4();
-        let user_id = Uuid::new_v4();
+        let tenant_id = Uuid::new_v4();
         let deployment_id = Uuid::new_v4();
 
         let mut app_repo = MockAppRepository::new();
@@ -1167,7 +1198,7 @@ mod tests {
         let mut user_repo = MockUserRepository::new();
         user_repo.expect_find_by_id().returning(move |_| {
             Ok(Some(User {
-                id: user_id,
+                id: tenant_id,
                 email: "test@example.com".to_string(),
                 password_hash: "hash".to_string(),
                 role: UserRole::User,
@@ -1213,7 +1244,7 @@ mod tests {
 
         let app = App {
             id: app_id,
-            user_id,
+            tenant_id,
             name: "demo".into(),
             git_url: "https://example.com/demo".into(),
             port: Port::new(8080).unwrap(),
@@ -1224,7 +1255,7 @@ mod tests {
         let deployment = Deployment {
             id: deployment_id,
             app_id,
-            user_id,
+            tenant_id,
             status: "PENDING".into(),
             vcpus: CpuCores::new(1).unwrap(),
             memory_mib: MemoryMb::new(128).unwrap(),

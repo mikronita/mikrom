@@ -1,0 +1,10 @@
+#!/bin/bash
+set -e
+
+if [ "$1" = "configure" ]; then
+    systemctl daemon-reload || true
+    systemctl enable mikrom-network || true
+    systemctl restart mikrom-network || true
+fi
+
+exit 0

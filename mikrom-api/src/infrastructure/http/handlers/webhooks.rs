@@ -203,6 +203,7 @@ mod tests {
         AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(MockUserRepository::new()),
+            tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
             database_repo: Arc::new(MockDatabaseRepository::new()),
             app_repo: Arc::new(app_repo),
             github_repo: Arc::new(crate::domain::github::MockGithubRepository::default()),

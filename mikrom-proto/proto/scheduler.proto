@@ -17,7 +17,7 @@ message FirewallRule {
 
 message UpdateSecurityGroupsRequest {
   string app_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
   repeated FirewallRule rules = 3;
 }
 
@@ -155,7 +155,7 @@ message DeleteSnapshotResponse {
 
 message CheckHealthRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message CheckHealthResponse {
@@ -164,7 +164,7 @@ message CheckHealthResponse {
 }
 
 message WatchAppsRequest {
-  string user_id = 1;
+  string tenant_id = 1;
 }
 
 message WatchAppsResponse {
@@ -211,7 +211,7 @@ message WorkerInfo {
 message ScaleAppRequest {
   string app_id = 1;
   uint32 desired_replicas = 2;
-  string user_id = 3;
+  string tenant_id = 3;
 }
 
 message ScaleAppResponse {
@@ -221,7 +221,7 @@ message ScaleAppResponse {
 
 message PauseRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message PauseResponse {
@@ -231,7 +231,7 @@ message PauseResponse {
 
 message ResumeRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message ResumeResponse {
@@ -241,7 +241,7 @@ message ResumeResponse {
 
 message GetLogsRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
   bool follow = 3;
 }
 
@@ -252,7 +252,7 @@ message GetLogsResponse {
 
 message DeleteAppRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message DeleteAppResponse {
@@ -262,7 +262,7 @@ message DeleteAppResponse {
 
 message DeleteAllByAppRequest {
   string app_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message DeleteAllByAppResponse {
@@ -327,7 +327,7 @@ message DeployRequest {
   string app_name = 2;
   string image = 3;
   AppConfig config = 4;
-  string user_id = 5;
+  string tenant_id = 5;
   string deployment_id = 6;
   string vpc_ipv6_prefix = 7;
 }
@@ -397,7 +397,7 @@ enum DeployStatus {
 
 message AppStatusRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message AppStatusResponse {
@@ -420,7 +420,7 @@ message AppStatusResponse {
 
 message CancelRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message CancelResponse {
@@ -429,7 +429,7 @@ message CancelResponse {
 }
 
 message ListAppsRequest {
-  string user_id = 1;
+  string tenant_id = 1;
   optional DeployStatus status = 2;
 }
 
@@ -447,7 +447,7 @@ message AppInfo {
   string vm_id = 7;
   float cpu_usage = 8;
   uint64 ram_used_bytes = 9;
-  string user_id = 10;
+  string tenant_id = 10;
   string deployment_id = 11;
   string ipv6_address = 12;
   uint64 tx_bytes = 13;
@@ -457,7 +457,7 @@ message AppInfo {
 
 message UpdateAppScalingConfigRequest {
   string app_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
   uint32 min_replicas = 3;
   uint32 max_replicas = 4;
   bool autoscaling_enabled = 5;
@@ -478,7 +478,7 @@ message UpdateAppScalingConfigResponse {
 // ── VM Snapshot Operations ─────────────────────────────────────────────────
 message VmSnapshotCreateRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
   string snapshot_name = 3;
 }
 
@@ -489,7 +489,7 @@ message VmSnapshotCreateResponse {
 
 message VmSnapshotRestoreRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
   string snapshot_name = 3;
 }
 
@@ -500,7 +500,7 @@ message VmSnapshotRestoreResponse {
 
 message VmSnapshotDeleteRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
   string snapshot_name = 3;
 }
 
@@ -511,7 +511,7 @@ message VmSnapshotDeleteResponse {
 
 message VmSnapshotListRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message VmSnapshotInfo {
@@ -531,7 +531,7 @@ message VmSnapshotListResponse {
 // ── VM Volume Hot-Plug ─────────────────────────────────────────────────────
 message AttachVolumeRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
   string volume_id = 3;
   string mount_point = 4;
   bool read_only = 5;
@@ -544,7 +544,7 @@ message AttachVolumeResponse {
 
 message DetachVolumeRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
   string volume_id = 3;
 }
 
@@ -556,7 +556,7 @@ message DetachVolumeResponse {
 // ── VM Live Migration ──────────────────────────────────────────────────────
 message StartMigrationRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
   string target_host = 3;
   string target_uri = 4;
 }
@@ -568,7 +568,7 @@ message StartMigrationResponse {
 
 message CancelMigrationRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message CancelMigrationResponse {
@@ -578,7 +578,7 @@ message CancelMigrationResponse {
 
 message QueryMigrationRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message QueryMigrationResponse {
@@ -593,7 +593,7 @@ message QueryMigrationResponse {
 // ── VM Balloon ─────────────────────────────────────────────────────────────
 message SetBalloonRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
   uint32 target_memory_mib = 3;
 }
 
@@ -604,7 +604,7 @@ message SetBalloonResponse {
 
 message QueryBalloonRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message QueryBalloonResponse {
@@ -619,7 +619,7 @@ message DeployDatabaseRequest {
   string database_name = 2;
   string rootfs_image = 3;
   AppConfig config = 4;
-  string user_id = 5;
+  string tenant_id = 5;
   string deployment_id = 6;
   string vpc_ipv6_prefix = 7;
 }
@@ -634,7 +634,7 @@ message DeployDatabaseResponse {
 }
 
 message ListDatabasesRequest {
-  string user_id = 1;
+  string tenant_id = 1;
 }
 
 message ListDatabasesResponse {
@@ -652,7 +652,7 @@ message DatabaseInfo {
 
 message DatabaseStatusRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message DatabaseStatusResponse {
@@ -665,7 +665,7 @@ message DatabaseStatusResponse {
 
 message DeleteDatabaseRequest {
   string job_id = 1;
-  string user_id = 2;
+  string tenant_id = 2;
 }
 
 message DeleteDatabaseResponse {

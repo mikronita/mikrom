@@ -12,7 +12,7 @@ pub struct App {
     pub git_url: String,
     pub port: Port,
     pub hostname: Option<String>,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub github_webhook_secret: Option<String>,
     pub github_installation_id: Option<i64>,
     pub github_repo_id: Option<i64>,
@@ -40,7 +40,7 @@ impl Default for App {
             git_url: String::new(),
             port: Port::new(8080).unwrap(),
             hostname: None,
-            user_id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
             github_webhook_secret: None,
             github_installation_id: None,
             github_repo_id: None,
@@ -66,7 +66,7 @@ impl Default for App {
 pub struct Deployment {
     pub id: Uuid,
     pub app_id: Uuid,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub build_id: Option<String>,
     pub image_tag: Option<String>,
     pub job_id: Option<String>,
@@ -91,7 +91,7 @@ impl Default for Deployment {
         Self {
             id: Uuid::new_v4(),
             app_id: Uuid::new_v4(),
-            user_id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
             build_id: None,
             image_tag: None,
             job_id: None,
@@ -129,7 +129,7 @@ pub struct SecurityRule {
 #[derive(Debug, Clone)]
 pub struct NewDeployment {
     pub app_id: Uuid,
-    pub user_id: String,
+    pub tenant_id: String,
     pub vcpus: CpuCores,
     pub memory_mib: MemoryMb,
     pub disk_mib: i64,
@@ -146,7 +146,7 @@ impl Default for NewDeployment {
     fn default() -> Self {
         Self {
             app_id: Uuid::new_v4(),
-            user_id: String::new(),
+            tenant_id: String::new(),
             vcpus: CpuCores::new(1).unwrap(),
             memory_mib: MemoryMb::new(128).unwrap(),
             disk_mib: 1024,
@@ -165,7 +165,7 @@ impl NewDeployment {
     #[allow(clippy::too_many_arguments)]
     pub fn from_handler(
         app_id: Uuid,
-        user_id: String,
+        tenant_id: String,
         vcpus: CpuCores,
         memory_mib: MemoryMb,
         disk_mib: i64,
@@ -177,7 +177,7 @@ impl NewDeployment {
     ) -> Self {
         Self {
             app_id,
-            user_id,
+            tenant_id,
             vcpus,
             memory_mib,
             disk_mib,
@@ -218,7 +218,7 @@ pub struct CreateAppParams {
     pub git_url: String,
     pub port: Port,
     pub hostname: Option<String>,
-    pub user_id: Uuid,
+    pub tenant_id: Uuid,
     pub github_webhook_secret: Option<String>,
     pub github_installation_id: Option<i64>,
     pub github_repo_id: Option<i64>,
@@ -240,7 +240,7 @@ impl Default for CreateAppParams {
             git_url: String::new(),
             port: Port::new(8080).unwrap(),
             hostname: None,
-            user_id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
             github_webhook_secret: None,
             github_installation_id: None,
             github_repo_id: None,
@@ -265,7 +265,7 @@ pub trait AppRepository: Send + Sync {
     async fn get_app_by_name(&self, name: &str) -> DomainResult<Option<App>>;
     async fn get_app_by_github_repo_id(&self, repo_id: i64) -> DomainResult<Option<App>>;
     async fn delete_app(&self, id: Uuid) -> DomainResult<()>;
-    async fn list_apps_by_user(&self, user_id: Option<Uuid>) -> DomainResult<Vec<App>>;
+    async fn list_apps_by_tenant(&self, tenant_id: Option<Uuid>) -> DomainResult<Vec<App>>;
     async fn set_active_deployment(&self, app_id: Uuid, deployment_id: Uuid) -> DomainResult<()>;
     async fn update_app_port(&self, id: Uuid, port: Port) -> DomainResult<()>;
     async fn update_app_scaling(&self, id: Uuid, desired_replicas: i32) -> DomainResult<()>;
@@ -299,7 +299,7 @@ pub trait AppRepository: Send + Sync {
     async fn list_deployments_by_app(&self, app_id: Uuid) -> DomainResult<Vec<Deployment>>;
     async fn list_deployments_by_user(
         &self,
-        user_id: Option<Uuid>,
+        tenant_id: Option<Uuid>,
     ) -> DomainResult<Vec<Deployment>>;
     async fn get_active_deployment(&self, app_id: Uuid) -> DomainResult<Option<Deployment>>;
     async fn delete_deployment_by_job_id(&self, job_id: &str) -> DomainResult<()>;

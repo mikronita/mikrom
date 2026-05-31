@@ -13,7 +13,7 @@ impl AppQueryService {
         Self { ctx }
     }
 
-    pub async fn get_app_status(&self, job_id: &str, user_id: &str) -> DomainResult<Job> {
+    pub async fn get_app_status(&self, job_id: &str, tenant_id: &str) -> DomainResult<Job> {
         let telemetry = self.ctx.telemetry.clone();
         telemetry
             .observe_result("query", "get_app_status", async {
@@ -24,7 +24,7 @@ impl AppQueryService {
                     .await?
                     .ok_or_else(|| DomainError::JobNotFound(job_id.to_string()))?;
 
-                if job.user_id.as_ref() != user_id && user_id != "system" {
+                if job.tenant_id.as_ref() != tenant_id && tenant_id != "system" {
                     return Err(DomainError::Unauthorized(
                         "You do not own this job".to_string(),
                     ));
@@ -35,11 +35,11 @@ impl AppQueryService {
             .await
     }
 
-    pub async fn check_health(&self, job_id: &str, user_id: &str) -> DomainResult<bool> {
+    pub async fn check_health(&self, job_id: &str, tenant_id: &str) -> DomainResult<bool> {
         let telemetry = self.ctx.telemetry.clone();
         telemetry
             .observe_result("query", "check_health", async {
-                let job = self.get_app_status(job_id, user_id).await?;
+                let job = self.get_app_status(job_id, tenant_id).await?;
                 if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
                     self.ctx.agent_client.check_health(host_id, vm_id).await
                 } else {
@@ -85,7 +85,7 @@ impl AppQueryService {
 
     pub async fn list_apps(
         &self,
-        user_id: &str,
+        tenant_id: &str,
         status: Option<JobStatus>,
     ) -> DomainResult<Vec<AppInfo>> {
         let telemetry = self.ctx.telemetry.clone();
@@ -94,7 +94,7 @@ impl AppQueryService {
                 let jobs = self
                     .ctx
                     .job_repo
-                    .list_jobs(Some(user_id), None, status)
+                    .list_jobs(Some(tenant_id), None, status)
                     .await?;
 
                 let workers = self.ctx.worker_repo.list_workers().await?;
@@ -129,7 +129,7 @@ impl AppQueryService {
                         vm_id: job.vm_id.unwrap_or_default().to_string(),
                         cpu_usage,
                         ram_used_bytes,
-                        user_id: job.user_id.to_string(),
+                        tenant_id: job.tenant_id.to_string(),
                         deployment_id: job.deployment_id.unwrap_or_default().to_string(),
                         ipv6_address: job.config.ipv6_address.unwrap_or_default(),
                         tx_bytes,

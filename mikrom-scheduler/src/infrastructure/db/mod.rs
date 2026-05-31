@@ -10,7 +10,7 @@ pub struct PgJobRepository {
     pool: PgPool,
 }
 
-const JOB_COLUMNS: &str = "job_id, app_id, app_name, image, user_id, status, host_id, vm_id, vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path, ipv6_address, ipv6_gateway, scheduled_at, started_at, stopped_at, error_message, hypervisor, workload_type";
+const JOB_COLUMNS: &str = "job_id, app_id, app_name, image, tenant_id, status, host_id, vm_id, vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path, ipv6_address, ipv6_gateway, scheduled_at, started_at, stopped_at, error_message, hypervisor, workload_type";
 
 impl PgJobRepository {
     pub fn new(pool: PgPool) -> Self {
@@ -27,7 +27,7 @@ impl JobRepository for PgJobRepository {
         sqlx::query(
             r#"
             INSERT INTO jobs (
-                job_id, app_id, app_name, image, user_id, status, host_id, vm_id,
+                job_id, app_id, app_name, image, tenant_id, status, host_id, vm_id,
                 vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path,
                 ipv6_address, ipv6_gateway, hypervisor, workload_type
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
@@ -37,7 +37,7 @@ impl JobRepository for PgJobRepository {
         .bind(&job.app_id)
         .bind(&job.app_name)
         .bind(&job.image)
-        .bind(&job.user_id)
+        .bind(&job.tenant_id)
         .bind(status_str)
         .bind(&job.host_id)
         .bind(&job.vm_id)
@@ -132,15 +132,15 @@ impl JobRepository for PgJobRepository {
 
     async fn list_jobs<'a>(
         &self,
-        user_id: Option<&'a str>,
+        tenant_id: Option<&'a str>,
         app_id: Option<&'a str>,
         status: Option<JobStatus>,
     ) -> DomainResult<Vec<Job>> {
         let mut query = format!("SELECT {} FROM jobs WHERE 1=1", JOB_COLUMNS);
         let mut params_count = 1;
 
-        if user_id.is_some() {
-            query.push_str(&format!(" AND user_id = ${}", params_count));
+        if tenant_id.is_some() {
+            query.push_str(&format!(" AND tenant_id = ${}", params_count));
             params_count += 1;
         }
         if app_id.is_some() {
@@ -152,7 +152,7 @@ impl JobRepository for PgJobRepository {
         }
 
         let mut q = sqlx::query(&query);
-        if let Some(uid) = user_id {
+        if let Some(uid) = tenant_id {
             q = q.bind(uid);
         }
         if let Some(aid) = app_id {
@@ -336,7 +336,7 @@ fn map_row_to_job(r: &sqlx::postgres::PgRow) -> Job {
         app_id: r.get("app_id"),
         app_name: r.get("app_name"),
         image: r.get("image"),
-        user_id: r.get("user_id"),
+        tenant_id: r.get("tenant_id"),
         status,
         host_id: r.get("host_id"),
         vm_id: r.get("vm_id"),
@@ -409,7 +409,7 @@ impl AppRepository for PgAppRepository {
         sqlx::query(
             r#"
             INSERT INTO apps (
-                id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas,
+                id, tenant_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas,
                 autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at,
                 last_scaled_to_zero_at, restore_retry_after_at, updated_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
@@ -429,7 +429,7 @@ impl AppRepository for PgAppRepository {
             "#,
         )
         .bind(&config.id)
-        .bind(&config.user_id)
+        .bind(&config.tenant_id)
         .bind(&config.vpc_ipv6_prefix)
         .bind(&config.hostname)
         .bind(config.desired_replicas as i32)
@@ -449,7 +449,7 @@ impl AppRepository for PgAppRepository {
 
     async fn get_app_config(&self, app_id: &str) -> anyhow::Result<Option<AppConfig>> {
         let row = sqlx::query(
-            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps WHERE id = $1"
+            "SELECT id, tenant_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps WHERE id = $1"
         )
         .bind(app_id)
         .fetch_optional(&self.pool)
@@ -463,7 +463,7 @@ impl AppRepository for PgAppRepository {
         hostname: &str,
     ) -> anyhow::Result<Option<AppConfig>> {
         let row = sqlx::query(
-            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps WHERE hostname = $1"
+            "SELECT id, tenant_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps WHERE hostname = $1"
         )
         .bind(hostname)
         .fetch_optional(&self.pool)
@@ -474,7 +474,7 @@ impl AppRepository for PgAppRepository {
 
     async fn list_all_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
         let rows = sqlx::query(
-            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps"
+            "SELECT id, tenant_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps"
         )
         .fetch_all(&self.pool)
         .await?;
@@ -484,7 +484,7 @@ impl AppRepository for PgAppRepository {
 
     async fn list_autoscaling_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
         let rows = sqlx::query(
-            "SELECT id, user_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps WHERE autoscaling_enabled = TRUE"
+            "SELECT id, tenant_id, vpc_ipv6_prefix, hostname, desired_replicas, min_replicas, max_replicas, autoscaling_enabled, cpu_threshold, mem_threshold, last_router_traffic_at, last_scaled_to_zero_at, restore_retry_after_at FROM apps WHERE autoscaling_enabled = TRUE"
         )
         .fetch_all(&self.pool)
         .await?;
@@ -521,7 +521,7 @@ impl AppRepository for PgAppRepository {
 fn map_row_to_app_config(r: &sqlx::postgres::PgRow) -> AppConfig {
     AppConfig {
         id: r.get("id"),
-        user_id: r.get("user_id"),
+        tenant_id: r.get("tenant_id"),
         vpc_ipv6_prefix: r.get("vpc_ipv6_prefix"),
         hostname: r.get("hostname"),
         desired_replicas: r.get::<i32, _>("desired_replicas") as u32,

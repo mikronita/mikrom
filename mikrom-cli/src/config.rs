@@ -7,6 +7,8 @@ pub struct Config {
     pub api_url: Option<String>,
     #[serde(default)]
     pub token: Option<String>,
+    #[serde(default)]
+    pub active_tenant_id: Option<String>,
 }
 
 impl Config {
@@ -64,6 +66,14 @@ impl Config {
         self.api_url.as_deref().unwrap_or("http://localhost:5001")
     }
 
+    pub fn active_tenant_id(&self) -> Option<&String> {
+        self.active_tenant_id.as_ref()
+    }
+
+    pub fn set_active_tenant_id(&mut self, tenant_id: String) {
+        self.active_tenant_id = Some(tenant_id);
+    }
+
     pub fn validate(&self) -> anyhow::Result<()> {
         if let Some(url) = &self.api_url {
             let _ = url
@@ -94,6 +104,7 @@ mod tests {
         let cfg = Config {
             api_url: Some("http://remote:9000".to_string()),
             token: None,
+            active_tenant_id: None,
         };
         assert_eq!(cfg.api_url(), "http://remote:9000");
     }
@@ -143,6 +154,7 @@ mod tests {
         let original = Config {
             api_url: Some("http://example.com:5001".to_string()),
             token: Some("my-jwt-token".to_string()),
+            active_tenant_id: None,
         };
         original.save_to(&path).unwrap();
         let loaded = Config::load_from(&path);
@@ -165,12 +177,14 @@ mod tests {
         Config {
             api_url: Some("http://old:5001".to_string()),
             token: None,
+            active_tenant_id: None,
         }
         .save_to(&path)
         .unwrap();
         Config {
             api_url: Some("http://new:5001".to_string()),
             token: Some("tok".to_string()),
+            active_tenant_id: None,
         }
         .save_to(&path)
         .unwrap();
@@ -223,6 +237,7 @@ token = "full-token-123"
         Config {
             api_url: Some("http://api-only:8000".to_string()),
             token: None,
+            active_tenant_id: None,
         }
         .save_to(&path)
         .unwrap();
@@ -238,6 +253,7 @@ token = "full-token-123"
         Config {
             api_url: None,
             token: Some("token-only".to_string()),
+            active_tenant_id: None,
         }
         .save_to(&path)
         .unwrap();
@@ -260,6 +276,7 @@ token = "full-token-123"
         let cfg = Config {
             api_url: Some("http://example.com:5001/".to_string()),
             token: None,
+            active_tenant_id: None,
         };
         assert_eq!(cfg.api_url(), "http://example.com:5001/");
     }
@@ -269,6 +286,7 @@ token = "full-token-123"
         let cfg = Config {
             api_url: Some("http://example.com:5001/api/v1".to_string()),
             token: None,
+            active_tenant_id: None,
         };
         assert_eq!(cfg.api_url(), "http://example.com:5001/api/v1");
     }
@@ -285,6 +303,7 @@ token = "full-token-123"
         let cfg = Config {
             api_url: Some("http://test:5001".to_string()),
             token: Some("test-token".to_string()),
+            active_tenant_id: None,
         };
         let serialized = toml::to_string(&cfg).unwrap();
         assert!(serialized.contains("api_url"));
@@ -307,6 +326,7 @@ token = "deser-token"
         let cfg = Config {
             api_url: Some("http://localhost:5001".to_string()),
             token: None,
+            active_tenant_id: None,
         };
         assert!(cfg.validate().is_ok());
     }
@@ -316,6 +336,7 @@ token = "deser-token"
         let cfg = Config {
             api_url: Some("not-a-url".to_string()),
             token: None,
+            active_tenant_id: None,
         };
         assert!(cfg.validate().is_err());
     }
