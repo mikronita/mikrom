@@ -12,7 +12,9 @@ const PLAYWRIGHT_IMAGE: &str = "mcr.microsoft.com/playwright:v1.60.0-noble";
 const CARGO_BIN_DIR: &str = "/usr/local/cargo/bin";
 const CARGO_REGISTRY_CACHE: &str = "mikrom-ci-cargo-registry";
 const CARGO_GIT_CACHE: &str = "mikrom-ci-cargo-git";
-const CARGO_TARGET_CACHE: &str = "mikrom-ci-cargo-target";
+const CARGO_TARGET_DEBUG_CACHE: &str = "mikrom-ci-cargo-target-debug";
+const CARGO_TARGET_RELEASE_CACHE: &str = "mikrom-ci-cargo-target-release";
+const CARGO_TARGET_EBPF_CACHE: &str = "mikrom-ci-cargo-target-ebpf";
 const PNPM_STORE_CACHE: &str = "mikrom-ci-pnpm-store";
 const PNPM_NODE_MODULES_CACHE: &str = "mikrom-ci-pnpm-node-modules";
 const IMAGE_PREFIX_ENV: &str = "MIKROM_IMAGE_PREFIX";
@@ -62,7 +64,9 @@ pub struct MikromCi {
     base_container: Container,
     cargo_registry: CacheVolume,
     cargo_git: CacheVolume,
-    cargo_target: CacheVolume,
+    cargo_target_debug: CacheVolume,
+    cargo_target_release: CacheVolume,
+    cargo_target_ebpf: CacheVolume,
     rustup: CacheVolume,
     pnpm_store: CacheVolume,
     pnpm_node_modules: CacheVolume,
@@ -83,7 +87,9 @@ impl MikromCi {
         );
         let cargo_registry = client.cache_volume(CARGO_REGISTRY_CACHE);
         let cargo_git = client.cache_volume(CARGO_GIT_CACHE);
-        let cargo_target = client.cache_volume(CARGO_TARGET_CACHE);
+        let cargo_target_debug = client.cache_volume(CARGO_TARGET_DEBUG_CACHE);
+        let cargo_target_release = client.cache_volume(CARGO_TARGET_RELEASE_CACHE);
+        let cargo_target_ebpf = client.cache_volume(CARGO_TARGET_EBPF_CACHE);
         let rustup = client.cache_volume("mikrom-ci-rustup");
         let pnpm_store = client.cache_volume(PNPM_STORE_CACHE);
         let pnpm_node_modules = client.cache_volume(PNPM_NODE_MODULES_CACHE);
@@ -116,7 +122,9 @@ impl MikromCi {
             base_container,
             cargo_registry,
             cargo_git,
-            cargo_target,
+            cargo_target_debug,
+            cargo_target_release,
+            cargo_target_ebpf,
             rustup,
             pnpm_store,
             pnpm_node_modules,
@@ -209,15 +217,16 @@ impl MikromCi {
     }
 
     pub async fn release_build(&self) -> Result<()> {
-        self.run_stage(
+        self.run_stage_with_container(
             "build",
+            self.workspace_release_container(),
             "/usr/local/cargo/bin/cargo build --workspace --exclude mikrom-agent-ebpf --release --locked",
         )
         .await
     }
 
     pub async fn ebpf_check(&self) -> Result<()> {
-        let container = self.workspace_container().with_exec(vec![
+        let container = self.workspace_ebpf_container().with_exec(vec![
             "sh",
             "-lc",
             "/usr/local/cargo/bin/rustup toolchain install nightly --component rust-src",
@@ -280,9 +289,19 @@ impl MikromCi {
     }
 
     async fn run_stage(&self, stage: &str, command: &str) -> Result<()> {
+        self.run_stage_with_container(stage, self.workspace_container(), command)
+            .await
+    }
+
+    async fn run_stage_with_container(
+        &self,
+        stage: &str,
+        container: Container,
+        command: &str,
+    ) -> Result<()> {
         info!(stage, command, "starting");
 
-        self.workspace_container()
+        container
             .with_exec(vec!["sh", "-lc", command])
             .combined_output()
             .await
@@ -352,15 +371,40 @@ impl MikromCi {
     }
 
     fn workspace_container(&self) -> Container {
+        self.workspace_container_with_target(
+            self.cargo_target_debug.clone(),
+            format!("{WORKDIR}/target"),
+        )
+    }
+
+    fn workspace_release_container(&self) -> Container {
+        self.workspace_container_with_target(
+            self.cargo_target_release.clone(),
+            format!("{WORKDIR}/target-release"),
+        )
+    }
+
+    fn workspace_ebpf_container(&self) -> Container {
+        self.workspace_container_with_target(
+            self.cargo_target_ebpf.clone(),
+            format!("{WORKDIR}/target-ebpf"),
+        )
+    }
+
+    fn workspace_container_with_target(
+        &self,
+        cargo_target: CacheVolume,
+        target_dir: String,
+    ) -> Container {
         self.base_container
             .clone()
             .with_mounted_directory(WORKDIR, self.source.clone())
             .with_workdir(WORKDIR)
             .with_mounted_cache("/usr/local/cargo/registry", self.cargo_registry.clone())
             .with_mounted_cache("/usr/local/cargo/git", self.cargo_git.clone())
-            .with_mounted_cache(format!("{WORKDIR}/target"), self.cargo_target.clone())
+            .with_mounted_cache(target_dir.clone(), cargo_target)
             .with_mounted_cache("/root/.rustup", self.rustup.clone())
-            .with_env_variable("CARGO_TARGET_DIR", format!("{WORKDIR}/target"))
+            .with_env_variable("CARGO_TARGET_DIR", target_dir)
             .with_env_variable("CARGO_TERM_COLOR", "always")
             .with_env_variable("RUST_BACKTRACE", "1")
     }
