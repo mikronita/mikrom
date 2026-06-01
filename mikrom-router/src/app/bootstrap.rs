@@ -5,12 +5,18 @@ use crate::domain::health::RouterHealth;
 use crate::infrastructure::persistence::state_manager;
 use crate::infrastructure::{tls, upstream_ca};
 use anyhow::Result;
-use pingora::listeners::tls::TlsSettings;
+use pingora::listeners::{TcpSocketOptions, tls::TlsSettings};
 use pingora::prelude::*;
 use pingora::server::RunArgs;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::info;
+
+fn dual_stack_tcp_socket_options() -> TcpSocketOptions {
+    let mut options = TcpSocketOptions::default();
+    options.ipv6_only = Some(false);
+    options
+}
 
 pub fn run(config: &RouterConfig) -> Result<()> {
     runtime::init_bootstrap_tracing_once();
@@ -88,15 +94,30 @@ pub fn run(config: &RouterConfig) -> Result<()> {
     );
 
     let mut proxy_service = http_proxy_service(&server.configuration, proxy_instance);
-    proxy_service.add_tcp("[::]:80");
+    proxy_service.add_tcp_with_settings("[::]:80", dual_stack_tcp_socket_options());
 
     let tls_handler = tls::MikromTlsHandler::new(state);
     let mut tls_settings = TlsSettings::with_callbacks(Box::new(tls_handler))?;
     tls_settings.enable_h2();
-    proxy_service.add_tls_with_settings("[::]:443", None, tls_settings);
+    proxy_service.add_tls_with_settings(
+        "[::]:443",
+        Some(dual_stack_tcp_socket_options()),
+        tls_settings,
+    );
 
     server.add_service(proxy_service);
     server.run(RunArgs::default());
     runtime::shutdown_telemetry();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dual_stack_tcp_socket_options;
+
+    #[test]
+    fn dual_stack_listener_options_disable_ipv6_only() {
+        let options = dual_stack_tcp_socket_options();
+        assert_eq!(options.ipv6_only, Some(false));
+    }
 }

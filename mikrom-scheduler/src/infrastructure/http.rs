@@ -6,6 +6,7 @@ use axum::{
     routing::get,
 };
 use sqlx::{PgPool, Row};
+use std::net::Ipv6Addr;
 use std::{collections::BTreeMap, fmt::Write as _, time::Duration, time::Instant};
 use tower_http::trace::TraceLayer;
 
@@ -69,7 +70,6 @@ impl SchedulerHttpServer {
 
     pub fn spawn(self) -> tokio::task::JoinHandle<()> {
         let port = self.port;
-        let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
         let app = Router::new()
             .route("/health", get(Self::health_handler))
             .route("/ready", get(Self::ready_handler))
@@ -80,8 +80,11 @@ impl SchedulerHttpServer {
         tracing::info!(port = port, "Scheduler HTTP observability server starting");
 
         tokio::spawn(async move {
-            match tokio::net::TcpListener::bind(addr).await {
+            match bind_dual_stack_listener(port) {
                 Ok(listener) => {
+                    if let Ok(addr) = listener.local_addr() {
+                        tracing::info!(listen_addr = %addr, port = port, "Scheduler HTTP server bound");
+                    }
                     if let Err(e) = axum::serve(listener, app).await {
                         tracing::error!(port = port, error = %e, "Scheduler HTTP server exited");
                     }
@@ -130,6 +133,23 @@ impl SchedulerHttpServer {
             body,
         )
     }
+}
+
+fn bind_dual_stack_listener(port: u16) -> std::io::Result<tokio::net::TcpListener> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV6,
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    socket.set_only_v6(false)?;
+
+    let addr = std::net::SocketAddr::from((Ipv6Addr::UNSPECIFIED, port));
+    socket.bind(&socket2::SockAddr::from(addr))?;
+    socket.listen(1024)?;
+    socket.set_nonblocking(true)?;
+
+    let listener: std::net::TcpListener = socket.into();
+    tokio::net::TcpListener::from_std(listener)
 }
 
 impl SchedulerHttpState {
@@ -402,6 +422,45 @@ impl SchedulerMetricsSnapshot {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr, TcpStream};
+
+    #[test]
+    fn dual_stack_listener_accepts_ipv4_and_ipv6() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+
+        let listener = match runtime.block_on(async { bind_dual_stack_listener(0) }) {
+            Ok(listener) => listener,
+            Err(err) => {
+                eprintln!("skipping scheduler smoke test: dual-stack bind unavailable: {err}");
+                return;
+            },
+        };
+        let port = listener
+            .local_addr()
+            .expect("local addr should be available")
+            .port();
+
+        let handle = std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().expect("runtime should build");
+            rt.block_on(async move {
+                for _ in 0..2 {
+                    let _ = listener.accept().await;
+                }
+            });
+        });
+
+        let v6 = std::net::SocketAddr::from((Ipv6Addr::LOCALHOST, port));
+        let v4 = std::net::SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+        TcpStream::connect(v6).expect("ipv6 loopback should connect");
+        TcpStream::connect(v4).expect("ipv4 loopback should connect");
+
+        handle.join().expect("listener thread should exit");
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
     use super::SchedulerMetricsSnapshot;
     use std::collections::BTreeMap;
 

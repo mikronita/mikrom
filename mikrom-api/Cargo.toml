@@ -51,6 +51,7 @@ rand = "0.10.1"
 rustls = { version = "0.23", features = ["ring"] }
 reqwest = { workspace = true, features = ["json"] }
 dashmap.workspace = true
+socket2.workspace = true
 
 [dev-dependencies]
 axum-test = "15"

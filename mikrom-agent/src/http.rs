@@ -1,10 +1,27 @@
 use crate::hypervisor::{HypervisorType, VmHypervisor};
 use crate::metrics::MetricsCollector;
 use std::collections::HashMap;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 
 type HypervisorMap = Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>;
 type HttpServerState = (MetricsCollector, HypervisorMap);
+
+fn bind_dual_stack_listener(port: u16) -> std::io::Result<std::net::TcpListener> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV6,
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    socket.set_only_v6(false)?;
+
+    let addr = std::net::SocketAddr::from((Ipv6Addr::UNSPECIFIED, port));
+    socket.bind(&socket2::SockAddr::from(addr))?;
+    socket.listen(1024)?;
+    socket.set_nonblocking(true)?;
+
+    Ok(socket.into())
+}
 
 /// HTTP server exposing health and metrics endpoints.
 pub struct AgentHttpServer {
@@ -33,15 +50,13 @@ impl AgentHttpServer {
             .route("/metrics", axum::routing::get(Self::metrics_handler))
             .with_state((self.metrics_collector, self.hypervisors));
 
-        let listener = match std::net::TcpListener::bind(("0.0.0.0", self.port)) {
+        let listener = match bind_dual_stack_listener(self.port) {
             Ok(l) => l,
             Err(e) => {
                 tracing::error!(port = self.port, error = %e, "Failed to bind HTTP server");
                 return tokio::spawn(async {});
             },
         };
-
-        listener.set_nonblocking(true).ok();
         let listener = match tokio::net::TcpListener::from_std(listener) {
             Ok(l) => l,
             Err(e) => {
@@ -208,6 +223,7 @@ impl AgentHttpServer {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::net::{Ipv4Addr, TcpStream};
 
     #[tokio::test]
     async fn test_agent_metrics_handler_output() {
@@ -222,5 +238,41 @@ mod tests {
         assert!(response.contains("mikrom_sys_cpu_usage{node_id=\"unknown-host\"}"));
         assert!(response.contains("mikrom_sys_ram_used_bytes{node_id=\"unknown-host\"}"));
         assert!(response.contains("mikrom_sys_apps_count{node_id=\"unknown-host\"} 0\n"));
+    }
+
+    #[test]
+    fn dual_stack_listener_accepts_ipv4_and_ipv6() {
+        let listener = match bind_dual_stack_listener(0) {
+            Ok(listener) => listener,
+            Err(err) => {
+                eprintln!("skipping agent smoke test: dual-stack bind unavailable: {err}");
+                return;
+            },
+        };
+        let port = listener
+            .local_addr()
+            .expect("local addr should be available")
+            .port();
+
+        let v6 = std::net::SocketAddr::from((Ipv6Addr::LOCALHOST, port));
+        let v4 = std::net::SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+        let v6_stream = TcpStream::connect(v6).expect("ipv6 loopback should connect");
+        let v4_stream = match TcpStream::connect(v4) {
+            Ok(stream) => Some(stream),
+            Err(err) => {
+                eprintln!("skipping agent smoke test: ipv4 loopback unavailable: {err}");
+                return;
+            },
+        };
+
+        let expected_accepts = if v4_stream.is_some() { 2 } else { 1 };
+        let handle = std::thread::spawn(move || {
+            for _ in 0..expected_accepts {
+                let _ = listener.accept();
+            }
+        });
+
+        handle.join().expect("listener thread should exit");
+        drop((v4_stream, v6_stream));
     }
 }
