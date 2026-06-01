@@ -1,6 +1,5 @@
 name: CI
 
-# ── Triggers ───────────────────────────────────────────────────────────────────
 on:
   push:
     branches: [main]
@@ -8,262 +7,166 @@ on:
   pull_request:
     branches: [main]
 
-# ── Global permissions (read-only baseline) ────────────────────────────────────
 permissions:
   contents: read
 
-# Cancel in-progress runs for the same ref on force-push / new commits
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/antpard/mikrom
+  MIKROM_IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/mikrom
 
-# ══════════════════════════════════════════════════════════════════════════════
-# JOBS: Linting (Parallel)
-# ══════════════════════════════════════════════════════════════════════════════
 jobs:
-  lint-rust:
-    name: Lint Rust
+  smoke:
+    name: Smoke
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Ceph development libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y librados-dev librbd-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cache Rust artifacts
+      - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
-      - name: Rust fmt check
-        run: cargo fmt --all -- --check
+      - name: Install Dagger CLI
+        run: |
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Rust clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Run smoke validation
+        run: cargo run --manifest-path ci/Cargo.toml -- smoke
 
-  lint-frontend:
-    name: Lint Frontend
+  fast:
+    name: Fast
     runs-on: ubuntu-latest
+    needs: smoke
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 9
-          run_install: false
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: mikrom-app/pnpm-lock.yaml
-
-      - name: Restore Next.js cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            mikrom-app/.next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('mikrom-app/pnpm-lock.yaml') }}-${{ hashFiles('mikrom-app/app/**/*.{js,jsx,ts,tsx}') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('mikrom-app/pnpm-lock.yaml') }}-
-
-      - name: Install frontend dependencies
-        working-directory: mikrom-app
-        run: pnpm install --frozen-lockfile
-
-      - name: pnpm lint
-        working-directory: mikrom-app
-        run: pnpm lint
-
-# ══════════════════════════════════════════════════════════════════════════════
-# JOB: test
-# ══════════════════════════════════════════════════════════════════════════════
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: mikrom
-          POSTGRES_PASSWORD: mikrom_password
-          POSTGRES_DB: mikrom_api
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U mikrom -d mikrom_api"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-      nats:
-        image: nats:2.10-alpine
-        ports:
-          - 4222:4222
-      nats-test:
-        image: nats:2.10-alpine
-        ports:
-          - 4223:4222
-
-    steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf /usr/lib/jvm
-          df -h
-
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Ceph development libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y librados-dev librbd-dev
-
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cache Rust artifacts
+      - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
-
-      - name: Initialize test databases
+      - name: Install Dagger CLI
         run: |
-          chmod +x scripts/init-db.sh
-          PGPASSWORD=mikrom_password ./scripts/init-db.sh
-        env:
-          POSTGRES_USER: mikrom
-          POSTGRES_DB: mikrom_api
-          PGHOST: localhost
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Test mikrom-api
-        env:
-          TEST_DATABASE_URL: postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test
-          TEST_NATS_URL: nats://localhost:4223
-          JWT_SECRET: ci-integration-test-secret
-        run: cargo nextest run -p mikrom-api --all-features
+      - name: Run fast validation
+        run: cargo run --manifest-path ci/Cargo.toml -- fast
 
-      - name: Test mikrom-scheduler
-        env:
-          TEST_DATABASE_URL: postgres://mikrom:mikrom_password@localhost:5432/mikrom_scheduler_test
-          TEST_NATS_URL: nats://localhost:4223
-        run: cargo nextest run -p mikrom-scheduler --all-features
+  frontend-e2e:
+    name: Frontend E2E
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: fast
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
 
-      - name: Test other components
-        env:
-          TEST_NATS_URL: nats://localhost:4223
-        run: cargo nextest run --workspace --exclude mikrom-api --exclude mikrom-router --exclude mikrom-scheduler --all-features
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Integration tests
-        working-directory: mikrom-api
-        env:
-          TEST_DATABASE_URL: postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test
-          TEST_NATS_URL: nats://localhost:4223
-          JWT_SECRET: ci-integration-test-secret
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install Dagger CLI
         run: |
-          cargo nextest run --test integration_auth_tests --all-features
-          cargo nextest run --test integration_app_lifecycle_tests --all-features
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# JOB: docker
-# ══════════════════════════════════════════════════════════════════════════════
-#  docker:
-#    name: "Docker: ${{ matrix.image }}"
-#    runs-on: ubuntu-latest
-#    needs: [lint-rust, lint-frontend, test]
-#    if: github.event_name == 'push'
-#    permissions:
-#      contents: read
-#      packages: write
-#
-#    strategy:
-#      fail-fast: false
-#      matrix:
-#        include:
-#          - image: mikrom-api
-#            dockerfile: mikrom-api/Dockerfile
-#            context: .
-#          - image: mikrom-scheduler
-#            dockerfile: mikrom-scheduler/Dockerfile
-#            context: .
-#          - image: mikrom-agent
-#            dockerfile: mikrom-agent/Dockerfile
-#            context: .
-#          - image: mikrom-cert-gen
-#            dockerfile: mikrom-proto/Dockerfile.cert-gen
-#            context: .
-#          - image: mikrom-cli
-#            dockerfile: mikrom-cli/Dockerfile
-#            context: .
-#          - image: mikrom-app
-#            dockerfile: mikrom-app/Dockerfile
-#            context: mikrom-app
-#          - image: mikrom-builder
-#            dockerfile: mikrom-builder/Dockerfile
-#            context: .
-#          - image: mikrom-router
-#            dockerfile: mikrom-router/Dockerfile
-#            context: .
-#
-#    steps:
-#      - name: Checkout
-#        uses: actions/checkout@v6
-#
-#      - name: Docker metadata
-#        id: meta
-#        uses: docker/metadata-action@v6
-#        with:
-#          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
-#          tags: |
-#            type=sha,format=short
-#            type=ref,event=branch
-#            type=ref,event=tag
-#            type=semver,pattern={{version}}
-#            type=semver,pattern={{major}}.{{minor}}
-#            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
-#            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-#
-#      - name: Log in to GitHub Container Registry
-#        uses: docker/login-action@v4
-#        with:
-#          registry: ${{ env.REGISTRY }}
-#          username: ${{ github.actor }}
-#          password: ${{ secrets.GITHUB_TOKEN }}
-#
-#      - name: Set up Docker Buildx
-#        uses: docker/setup-buildx-action@v4
-#
-#      - name: Build and push ${{ matrix.image }}
-#        uses: docker/build-push-action@v7
-#        with:
-#          context: ${{ matrix.context }}
-#          file: ${{ matrix.dockerfile }}
-#          push: true
-#          tags: ${{ steps.meta.outputs.tags }}
-#          labels: ${{ steps.meta.outputs.labels }}
-#          cache-from: type=gha,scope=${{ matrix.image }}
-#          cache-to: type=gha,scope=${{ matrix.image }},mode=max
-#          provenance: false
+      - name: Run frontend e2e
+        run: cargo run --manifest-path ci/Cargo.toml -- app-e2e
+
+  full:
+    name: Full
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install Dagger CLI
+        run: |
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run full validation
+        run: cargo run --manifest-path ci/Cargo.toml -- full
+
+  images:
+    name: Build Images
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: full
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install Dagger CLI
+        run: |
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build service images
+        run: cargo run --manifest-path ci/Cargo.toml -- images
+
+  publish:
+    name: Publish Images
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: full
+    permissions:
+      contents: read
+      packages: write
+    env:
+      MIKROM_REGISTRY_USERNAME: ${{ github.actor }}
+      MIKROM_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MIKROM_IMAGE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install Dagger CLI
+        run: |
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Publish release
+        run: cargo run --manifest-path ci/Cargo.toml -- publish-release

@@ -118,7 +118,7 @@ impl ControlPlane {
 
         let mut state = State::default();
 
-        // 1. Load routes
+        // Load routes.
         let routes_rows = sqlx::query(
             "SELECT hostname, target_url, EXTRACT(EPOCH FROM updated_at)::BIGINT as ts FROM routes",
         )
@@ -170,7 +170,7 @@ impl ControlPlane {
             );
         }
 
-        // 2. Load ACME tokens
+        // Load ACME tokens.
         let acme_rows = sqlx::query("SELECT token, key_auth FROM acme_challenges")
             .fetch_all(db)
             .await?;
@@ -181,7 +181,7 @@ impl ControlPlane {
                 .insert(row.get("token"), row.get("key_auth"));
         }
 
-        // 3. Load Certificates
+        // Load certificates.
         let cert_rows =
             sqlx::query("SELECT hostname, cert_chain, private_key FROM tls_certificates")
                 .fetch_all(db)
@@ -248,7 +248,7 @@ impl BackgroundService for ControlPlane {
             .await;
         info!("Control Plane: Connected to NATS.");
 
-        // 0. Initialize WireGuard
+        // Initialize WireGuard.
         let priv_key = match mikrom_network::KeyManager::load_or_generate_key(
             &self.data_dir,
             &mikrom_network::FileWireGuardKeyStore,
@@ -290,7 +290,7 @@ impl BackgroundService for ControlPlane {
         let mut pending = false;
         let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
 
-        // 1. Initial sync
+        // Perform the initial sync.
         if let Err(e) = self.sync_full_state(&db).await {
             error!("Control Plane: Initial state sync failed: {e}");
             self.health.set_startup_error(e.to_string());
@@ -299,7 +299,7 @@ impl BackgroundService for ControlPlane {
             self.health.mark_control_plane_synced();
         }
 
-        // 2. Setup subscribers
+        // Set up subscribers.
         let mut router_sub = match nats
             .subscribe(router_subjects::control_plane_subject_wildcard().to_string())
             .await
@@ -327,7 +327,7 @@ impl BackgroundService for ControlPlane {
 
         loop {
             tokio::select! {
-                // Heartbeat loop
+                // Heartbeat loop.
                 _ = heartbeat_interval.tick() => {
                     let heartbeat = RouterHeartbeat {
                         host_id: self.router_id.as_str().to_string(),
@@ -349,12 +349,12 @@ impl BackgroundService for ControlPlane {
                     }
                 }
 
-                // Internal trigger for state sync
+                // Internal trigger for state sync.
                 _ = rx.recv() => {
                     pending = true;
                 }
 
-                // Batching state syncs
+                // Batch state syncs.
                 _ = interval.tick(), if pending => {
                     if let Err(e) = self.sync_full_state(&db).await {
                         error!("Control Plane: State sync failed: {e}");
@@ -362,7 +362,7 @@ impl BackgroundService for ControlPlane {
                     pending = false;
                 }
 
-                // NATS Router Updates
+                // NATS router updates.
                 Some(msg) = router_sub.next() => {
                     let tx_clone = tx.clone();
                     let self_clone = self.clone();
@@ -373,12 +373,12 @@ impl BackgroundService for ControlPlane {
                     });
                 }
 
-                // NATS Mesh Updates
+                // NATS mesh updates.
                 Some(msg) = mesh_sub.next() => {
                     handlers::process_mesh_message(self, msg, &priv_key).await;
                 }
 
-                // Shutdown
+                // Shutdown.
                 _ = _shutdown.changed() => {
                     info!("Control Plane: Shutting down...");
                     break;

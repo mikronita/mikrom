@@ -151,7 +151,7 @@ impl SchedulerServer {
 
         let strategy = crate::domain::worker::SchedulingStrategy::LeastLoaded;
 
-        // Reuse DeploymentService for now, as it's generic enough for VmConfig
+        // Reuse the deployment service because it already fits the VmConfig shape.
         match self
             .app_service
             .deployment

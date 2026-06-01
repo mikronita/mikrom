@@ -117,8 +117,6 @@ impl Drop for VmStartupGuard {
                     }
                 }
 
-                // Note: cleanup_tap is not easily accessible here without a manager reference.
-                // We might need to handle tap cleanup separately or pass a cleanup closure.
                 if let Some(tap) = tap_name {
                     tracing::warn!(vm_id = %vm_id, tap = %tap, "Tap cleanup skipped in guard drop (needs manual cleanup or manager reference)");
                 }

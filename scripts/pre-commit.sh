@@ -1,5 +1,5 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -23,31 +23,13 @@ for file in $staged_files; do
 done
 
 if [ "$run_rust" = true ]; then
-  echo "Checking Rust formatting..."
-  cargo fmt --all -- --check
-
-  echo "Running Clippy..."
-  cargo clippy --all-targets --all-features -- -D warnings
-
-  echo "Running Rust tests with nextest..."
-  if ! command -v cargo-nextest &>/dev/null; then
-    echo "cargo-nextest not found. Please install it with 'cargo binstall cargo-nextest' or 'cargo install cargo-nextest'."
-    exit 1
-  fi
-  export TEST_DATABASE_URL="postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test"
-  export TEST_NATS_URL="nats://localhost:4223"
-  make test-all
+  echo "Running Dagger-backed Rust validation (make ci-fast)..."
+  make ci-fast
 fi
 
 if [ "$run_app" = true ]; then
-  echo "Checking mikrom-app..."
-  make app-check
-  echo "Linting mikrom-app..."
-  make app-lint
-  echo "Unit Tests mikrom-app..."
-  make app-test-unit
-  echo "Playwright e2e Tests on mikrom-app..."
-  make app-test-e2e
+  echo "Running Dagger-backed frontend validation (make ci-app)..."
+  make ci-app
 fi
 
 echo "All checks passed!"

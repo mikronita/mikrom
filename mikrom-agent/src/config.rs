@@ -300,7 +300,7 @@ impl AgentConfig {
     }
 
     pub fn get_supported_hypervisors(&self) -> Vec<i32> {
-        let mut supported = vec![1]; // Firecracker is always supported for now
+        let mut supported = vec![1]; // Firecracker remains the default hypervisor
         if self.cloud_hypervisor_enabled {
             supported.push(3);
         }
