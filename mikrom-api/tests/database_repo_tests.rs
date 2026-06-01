@@ -8,12 +8,12 @@ use uuid::Uuid;
 #[tokio::test]
 #[ignore = "requires a PostgreSQL test database with the migrated schema"]
 async fn test_postgres_database_repository_crud_and_deployments() {
-    let Ok(db) = TestDb::try_new().await else {
+    let Ok(_db) = TestDb::try_new().await else {
         eprintln!("Skipping database repository test: database unavailable");
         return;
     };
 
-    let pool = db.pool().clone();
+    let pool = _db.pool().clone();
     let tenant_id = Uuid::new_v4();
     let user_id = Uuid::new_v4();
 

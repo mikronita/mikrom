@@ -42,4 +42,6 @@ make ci-full
 ## Database-backed tests
 
 - Repository tests and some handler tests use `TestDb` from `src/test_utils.rs`.
-- If you run them outside Dagger, start PostgreSQL first or set `TEST_DATABASE_URL`.
+- The helper creates an ephemeral database per test binary, runs migrations, and drops it on teardown.
+- It defaults to `postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test` when `TEST_DATABASE_URL` is unset.
+- The helper rejects non-test database names, so development `DATABASE_URL` values are not reused.

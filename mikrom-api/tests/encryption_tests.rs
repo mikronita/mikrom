@@ -12,11 +12,11 @@ mod common;
 #[tokio::test]
 #[ignore = "requires a PostgreSQL test database with the migrated apps schema"]
 async fn test_encryption_at_rest() {
-    let Ok(db) = TestDb::try_new().await else {
+    let Ok(_db) = TestDb::try_new().await else {
         eprintln!("Skipping encryption test: database unavailable");
         return;
     };
-    let pool = db.pool().clone();
+    let pool = _db.pool().clone();
     let master_key = "test-master-key-123";
     let app_repo = PostgresAppRepository::new(pool.clone(), master_key.to_string());
     let user_repo = PostgresUserRepository::new(pool.clone());

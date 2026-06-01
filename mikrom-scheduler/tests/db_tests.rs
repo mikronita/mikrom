@@ -13,11 +13,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_scheduler_migrations() {
-        let Ok(db) = common_utils::TestDb::try_new().await else {
+        let Ok(_db) = common_utils::TestDb::try_new().await else {
             eprintln!("Skipping db test: database unavailable");
             return;
         };
-        let pool = db.pool().clone();
+        let pool = _db.pool().clone();
 
         // Verify tables exist
         let tables = sqlx::query(
@@ -38,11 +38,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_scheduler_app_config_persists_router_activity_and_hostname_lookup() {
-        let Ok(db) = common_utils::TestDb::try_new().await else {
+        let Ok(_db) = common_utils::TestDb::try_new().await else {
             eprintln!("Skipping db test: database unavailable");
             return;
         };
-        let pool = db.pool().clone();
+        let pool = _db.pool().clone();
         let repo = PgAppRepository::new(pool.clone());
 
         let config = AppConfig {
@@ -89,11 +89,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_scheduler_remove_app_and_jobs_by_app_cleans_app_row() {
-        let Ok(db) = common_utils::TestDb::try_new().await else {
+        let Ok(_db) = common_utils::TestDb::try_new().await else {
             eprintln!("Skipping db test: database unavailable");
             return;
         };
-        let pool = db.pool().clone();
+        let pool = _db.pool().clone();
         let app_repo = PgAppRepository::new(pool.clone());
         let job_repo = PgJobRepository::new(pool.clone());
 

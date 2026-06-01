@@ -1,497 +1,38 @@
 #![cfg(feature = "scale-to-zero-e2e")]
 
-use async_trait::async_trait;
-use axum::{
-    Router,
-    http::{HeaderMap, StatusCode},
-    routing::any,
-};
+use axum::http::StatusCode;
+use futures_util::StreamExt;
 use mikrom_api::NatsScheduler;
 use mikrom_api::application::vms::MeshStatus;
 use mikrom_api::create_app;
 use mikrom_api::domain::user::UserRepository;
 use mikrom_api::domain::{
-    AppRepository, MockDatabaseRepository, MockGithubRepository, MockTenantRepository,
-    MockVolumeRepository,
+    AppRepository, MockDatabaseRepository, MockGithubRepository, MockVolumeRepository,
+    TenantRepository,
 };
 use mikrom_api::domain::{CpuCores, MemoryMb, Port};
-use mikrom_api::infrastructure::db::{PostgresAppRepository, PostgresUserRepository};
+use mikrom_api::infrastructure::db::{
+    PostgresAppRepository, PostgresTenantRepository, PostgresUserRepository,
+};
 use mikrom_api::test_utils::TestDb as ApiTestDb;
+use mikrom_proto::router::{RouterConfigAck, RouterConfigUpdate};
 use mikrom_proto::subjects;
-use mikrom_router::application::proxy::{MikromProxy, RouterMetricsCounters};
-use mikrom_router::application::traffic::RouterTrafficPublisher;
-use mikrom_router::domain::health::RouterHealth;
-use mikrom_router::domain::state::{Route, State};
 use mikrom_scheduler::application::{AppService, SchedulerRuntimeConfig};
 use mikrom_scheduler::domain::{
-    AgentClient, AppConfig, AppId, AppRepository as _, DeploymentId, DomainResult, HostId, Job,
-    JobId, JobRepository as _, JobStatus, TenantId, VmConfig, VmId,
+    AppConfig, AppId, AppRepository as _, DeploymentId, HostId, Job, JobId, JobRepository as _,
+    JobStatus, TenantId, VmConfig, VmId,
 };
 use mikrom_scheduler::infrastructure::db::{PgJobRepository, PgWorkerRepository};
 use mikrom_scheduler::infrastructure::nats::NatsEventLoop;
 use mikrom_scheduler::server::SchedulerServer;
-use opentelemetry_sdk::propagation::TraceContextPropagator;
-use pingora::lb::LoadBalancer;
-use pingora::lb::selection::RoundRobin;
-use pingora::prelude::*;
 use prost::Message;
 use rustls::crypto::ring::default_provider;
-use std::collections::HashMap;
-use std::fmt::Write;
-use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio::sync::{RwLock, mpsc};
+use std::sync::atomic::Ordering;
 use tower::util::ServiceExt;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-
-static INIT: std::sync::Once = std::sync::Once::new();
-
-fn init_test_tracing() {
-    INIT.call_once(|| {
-        use opentelemetry::trace::TracerProvider as _;
-        use opentelemetry_sdk::trace::SdkTracerProvider;
-
-        opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
-
-        let provider = SdkTracerProvider::builder().build();
-        let tracer = provider.tracer("mikrom-router-test");
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-        let _ = tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer())
-            .with(telemetry)
-            .try_init();
-    });
-}
-
-async fn dummy_upstream_handler(headers: HeaderMap) -> (StatusCode, String) {
-    let mut echo = String::new();
-    for (name, value) in &headers {
-        let _ = writeln!(echo, "{name}: {}", value.to_str().unwrap_or(""));
-    }
-    (StatusCode::OK, echo)
-}
-
-struct TestEnv {
-    proxy_url: String,
-    state: Arc<RwLock<State>>,
-    upstream_addr: SocketAddr,
-}
-
-#[derive(Default)]
-struct RecordingAgentClient {
-    starts: AtomicUsize,
-    resumes: AtomicUsize,
-    pauses: AtomicUsize,
-}
-
-struct MemoryAppRepository {
-    inner: RwLock<HashMap<String, AppConfig>>,
-    pool: sqlx::PgPool,
-}
-
-impl MemoryAppRepository {
-    fn new(pool: sqlx::PgPool) -> Self {
-        Self {
-            inner: RwLock::new(HashMap::new()),
-            pool,
-        }
-    }
-
-    async fn upsert(&self, config: AppConfig) {
-        self.update_app_config(config).await.unwrap();
-    }
-
-    async fn mirror_to_api_db(&self, config: &AppConfig) -> anyhow::Result<()> {
-        let app_id = uuid::Uuid::parse_str(&config.id)?;
-        sqlx::query(
-            r"
-            UPDATE apps
-            SET vpc_ipv6_prefix = $2,
-                hostname = $3,
-                desired_replicas = $4,
-                min_replicas = $5,
-                max_replicas = $6,
-                autoscaling_enabled = $7,
-                cpu_threshold = $8,
-                mem_threshold = $9,
-                last_router_traffic_at = $10,
-                last_scaled_to_zero_at = $11,
-                updated_at = NOW()
-            WHERE id = $1
-            ",
-        )
-        .bind(app_id)
-        .bind(&config.vpc_ipv6_prefix)
-        .bind(&config.hostname)
-        .bind(config.desired_replicas.cast_signed())
-        .bind(config.min_replicas.cast_signed())
-        .bind(config.max_replicas.cast_signed())
-        .bind(config.autoscaling_enabled)
-        .bind(config.cpu_threshold)
-        .bind(config.mem_threshold)
-        .bind(config.last_router_traffic_at)
-        .bind(config.last_scaled_to_zero_at)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl mikrom_scheduler::domain::AppRepository for MemoryAppRepository {
-    async fn update_app_config(&self, config: AppConfig) -> anyhow::Result<()> {
-        self.inner
-            .write()
-            .await
-            .insert(config.id.to_string(), config.clone());
-        self.mirror_to_api_db(&config).await?;
-        Ok(())
-    }
-
-    async fn get_app_config(&self, app_id: &str) -> anyhow::Result<Option<AppConfig>> {
-        Ok(self.inner.read().await.get(app_id).cloned())
-    }
-
-    async fn get_app_config_by_hostname(
-        &self,
-        hostname: &str,
-    ) -> anyhow::Result<Option<AppConfig>> {
-        Ok(self
-            .inner
-            .read()
-            .await
-            .values()
-            .find(|app| app.hostname == hostname)
-            .cloned())
-    }
-
-    async fn list_all_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
-        Ok(self.inner.read().await.values().cloned().collect())
-    }
-
-    async fn list_autoscaling_apps(&self) -> anyhow::Result<Vec<AppConfig>> {
-        Ok(self
-            .inner
-            .read()
-            .await
-            .values()
-            .filter(|app| app.autoscaling_enabled)
-            .cloned()
-            .collect())
-    }
-
-    async fn remove_app_config(&self, app_id: &str) -> anyhow::Result<()> {
-        self.inner.write().await.remove(app_id);
-        Ok(())
-    }
-
-    async fn remove_app_and_jobs_by_app(&self, app_id: &str) -> anyhow::Result<()> {
-        self.inner.write().await.remove(app_id);
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl AgentClient for RecordingAgentClient {
-    async fn start_vm(
-        &self,
-        _host_id: &str,
-        _app_id: &str,
-        _image: &str,
-        _vm_id: &str,
-        _config: &VmConfig,
-    ) -> DomainResult<()> {
-        self.starts.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-
-    async fn pause_vm(&self, _host_id: &str, _vm_id: &str) -> DomainResult<()> {
-        self.pauses.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-
-    async fn resume_vm(&self, _host_id: &str, _vm_id: &str) -> DomainResult<()> {
-        self.resumes.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-
-    async fn stop_vm(&self, _host_id: &str, _vm_id: &str) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn delete_vm(
-        &self,
-        _host_id: &str,
-        _vm_id: &str,
-        _hv: mikrom_scheduler::domain::HypervisorType,
-    ) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn check_health(&self, _host_id: &str, _vm_id: &str) -> DomainResult<bool> {
-        Ok(true)
-    }
-
-    async fn update_firewall(
-        &self,
-        _host_id: &str,
-        _vm_id: &str,
-        _rules: Vec<mikrom_proto::scheduler::FirewallRule>,
-    ) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn create_volume(
-        &self,
-        _host_id: &str,
-        _volume_id: &str,
-        _size_mib: u32,
-        _pool_name: &str,
-    ) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn create_snapshot(
-        &self,
-        _host_id: &str,
-        _volume_id: &str,
-        _snapshot_name: &str,
-        _pool_name: &str,
-    ) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn delete_volume(
-        &self,
-        _host_id: &str,
-        _volume_id: &str,
-        _pool_name: &str,
-    ) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn delete_snapshot(
-        &self,
-        _host_id: &str,
-        _volume_id: &str,
-        _snapshot_name: &str,
-        _pool_name: &str,
-    ) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn restore_snapshot(
-        &self,
-        _host_id: &str,
-        _volume_id: &str,
-        _snapshot_name: &str,
-        _pool_name: &str,
-    ) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn clone_volume(
-        &self,
-        _host_id: &str,
-        _source_volume_id: &str,
-        _snapshot_name: &str,
-        _target_volume_id: &str,
-        _pool_name: &str,
-    ) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn vm_snapshot_create(&self, _h: &str, _v: &str, _s: &str) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn vm_snapshot_restore(&self, _h: &str, _v: &str, _s: &str) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn vm_snapshot_delete(&self, _h: &str, _v: &str, _s: &str) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn vm_snapshot_list(
-        &self,
-        _h: &str,
-        _v: &str,
-    ) -> DomainResult<Vec<mikrom_proto::agent::VmSnapshotInfo>> {
-        Ok(vec![])
-    }
-
-    async fn attach_volume(
-        &self,
-        _h: &str,
-        _v: &str,
-        _vol: &str,
-        _m: &str,
-        _r: bool,
-    ) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn detach_volume(&self, _h: &str, _v: &str, _vol: &str) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn start_migration(&self, _h: &str, _v: &str, _th: &str, _tu: &str) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn cancel_migration(&self, _h: &str, _v: &str) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn query_migration(&self, _h: &str, _v: &str) -> DomainResult<String> {
-        Ok("completed".to_string())
-    }
-
-    async fn set_balloon(&self, _h: &str, _v: &str, _s: u32) -> DomainResult<()> {
-        Ok(())
-    }
-
-    async fn query_balloon(&self, _h: &str, _v: &str) -> DomainResult<(u32, u32)> {
-        Ok((512, 512))
-    }
-}
-
-#[allow(clippy::too_many_lines)]
-async fn setup_test_env(rps_limit: isize, use_ipv6: bool) -> Option<TestEnv> {
-    init_test_tracing();
-
-    let app = Router::new().fallback(any(dummy_upstream_handler));
-    let bind_addr = if use_ipv6 { "[::1]:0" } else { "127.0.0.1:0" };
-    let listener = match tokio::net::TcpListener::bind(bind_addr).await {
-        Ok(listener) => listener,
-        Err(err) => {
-            tracing::warn!(
-                bind_addr = %bind_addr,
-                error = %err,
-                "Skipping router integration test environment because the sandbox does not allow binding"
-            );
-            return None;
-        },
-    };
-    let upstream_addr = match listener.local_addr() {
-        Ok(addr) => addr,
-        Err(err) => {
-            tracing::warn!(
-                bind_addr = %bind_addr,
-                error = %err,
-                "Skipping router integration test environment because the upstream socket could not be inspected"
-            );
-            return None;
-        },
-    };
-
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-
-    let state = Arc::new(RwLock::new(State::default()));
-    let metrics = Arc::new(RouterMetricsCounters::new());
-    let health = Arc::new(RouterHealth::new());
-    let nats_url =
-        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
-    let traffic_bridge_nats = async_nats::connect(nats_url).await.ok();
-    let (traffic_tx, traffic_rx) = mpsc::channel(1024);
-    tokio::spawn(async move {
-        let mut rx: mpsc::Receiver<mikrom_proto::router::RouterTrafficEvent> = traffic_rx;
-        while let Some(event) = rx.recv().await {
-            if let Some(client) = &traffic_bridge_nats {
-                let mut buf = Vec::new();
-                if event.encode(&mut buf).is_ok() {
-                    let _ = client
-                        .publish(subjects::ROUTER_TRAFFIC_EVENT, buf.into())
-                        .await;
-                }
-            }
-        }
-    });
-
-    let (proxy_addr_str, proxy_port) = match std::net::TcpListener::bind(bind_addr) {
-        Ok(listener) => {
-            let addr = listener.local_addr().unwrap();
-            (addr.to_string(), addr.port())
-        },
-        Err(err) => {
-            tracing::warn!(
-                bind_addr = %bind_addr,
-                error = %err,
-                "Skipping router integration test environment because the proxy listener could not be bound"
-            );
-            return None;
-        },
-    };
-    let proxy_url = if use_ipv6 {
-        format!("http://[::1]:{proxy_port}")
-    } else {
-        format!("http://127.0.0.1:{proxy_port}")
-    };
-
-    let targets = vec![upstream_addr.to_string()];
-    let lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice()).unwrap();
-    let lb_arc = Arc::new(lb);
-    {
-        let mut s = state.write().await;
-        let route = Route {
-            host: "localhost".to_string(),
-            targets: targets.clone(),
-            lb: lb_arc,
-            use_tls: false,
-            tls_alternative_cn: None,
-        };
-
-        s.routes.insert("localhost".to_string(), route.clone());
-        s.routes.insert("127.0.0.1".to_string(), route.clone());
-        s.routes.insert("[::1]".to_string(), route.clone());
-        s.routes
-            .insert(format!("localhost:{proxy_port}"), route.clone());
-        s.routes
-            .insert(format!("127.0.0.1:{proxy_port}"), route.clone());
-        s.routes.insert(format!("[::1]:{proxy_port}"), route);
-        drop(s);
-    }
-
-    let traffic_publisher = Arc::new(RouterTrafficPublisher::new(
-        "router-test".into(),
-        traffic_tx,
-    ));
-    let proxy = MikromProxy::new(
-        state.clone(),
-        health,
-        false,
-        None,
-        metrics,
-        Some(traffic_publisher),
-        rps_limit,
-    );
-
-    std::thread::spawn(move || {
-        let mut my_server = Server::new(None).expect("Failed to create server");
-        my_server.bootstrap();
-
-        let mut proxy_service = http_proxy_service(&my_server.configuration, proxy);
-        proxy_service.add_tcp(&proxy_addr_str);
-
-        my_server.add_service(proxy_service);
-        my_server.run_forever();
-    });
-
-    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-
-    Some(TestEnv {
-        proxy_url,
-        state,
-        upstream_addr,
-    })
-}
+#[path = "support/scale_to_zero.rs"]
+mod scale_to_zero_support;
+use scale_to_zero_support::*;
 
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
@@ -559,6 +100,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
             wireguard_port INTEGER NOT NULL DEFAULT 51820,
             metrics JSONB,
             status VARCHAR NOT NULL DEFAULT 'Online',
+            supported_hypervisors INTEGER[] NOT NULL DEFAULT '{}'::integer[],
             last_heartbeat BIGINT NOT NULL,
             registered_at BIGINT NOT NULL
         )
@@ -574,7 +116,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
             app_id VARCHAR NOT NULL,
             app_name VARCHAR NOT NULL,
             image VARCHAR NOT NULL,
-            user_id VARCHAR NOT NULL,
+            tenant_id VARCHAR NOT NULL,
             status VARCHAR NOT NULL,
             host_id VARCHAR REFERENCES workers(id) ON DELETE SET NULL,
             vm_id VARCHAR,
@@ -588,6 +130,8 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
             health_check_path TEXT DEFAULT '/',
             ipv6_address VARCHAR(45),
             ipv6_gateway VARCHAR(45),
+            hypervisor INTEGER NOT NULL DEFAULT 0,
+            workload_type INTEGER NOT NULL DEFAULT 0,
             scheduled_at BIGINT,
             started_at BIGINT,
             stopped_at BIGINT,
@@ -602,7 +146,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id)")
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_jobs_tenant_id ON jobs(tenant_id)")
         .execute(&pool)
         .await
         .unwrap();
@@ -648,6 +192,28 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let router_config_updates = nats_client
+        .subscribe(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED)
+        .await
+        .unwrap();
+    let router_nats = nats_client.clone();
+    let _router_config_handle = tokio::spawn(async move {
+        let mut updates = router_config_updates;
+        while let Some(msg) = updates.next().await {
+            if RouterConfigUpdate::decode(&msg.payload[..]).is_ok()
+                && let Some(reply) = msg.reply
+            {
+                let response = RouterConfigAck {
+                    success: true,
+                    message: String::new(),
+                };
+                let mut buf = Vec::new();
+                if response.encode(&mut buf).is_ok() {
+                    let _ = router_nats.publish(reply, buf.into()).await;
+                }
+            }
+        }
+    });
 
     let scheduler_app_repo = Arc::new(MemoryAppRepository::new(pool.clone()));
     let scheduler_job_repo = Arc::new(PgJobRepository::new(pool.clone()));
@@ -678,10 +244,11 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         pool.clone(),
         "test-key".to_string(),
     ));
-    let api_state = mikrom_api::AppState {
+    let tenant_repo = Arc::new(PostgresTenantRepository::new(pool.clone()));
+    let mut api_state = mikrom_api::AppState {
         ctx: mikrom_api::application::ApiContext::default(),
         user_repo: user_repo.clone(),
-        tenant_repo: Arc::new(MockTenantRepository::new()),
+        tenant_repo: tenant_repo.clone(),
         app_repo: api_app_repo.clone(),
         database_repo: Arc::new(MockDatabaseRepository::new()),
         volume_repo: Arc::new(MockVolumeRepository::new()),
@@ -707,6 +274,15 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         github_webhook_url_base: None,
         active_deployment_flows: Arc::new(dashmap::DashSet::new()),
     };
+    api_state.ctx.user_repo = api_state.user_repo.clone();
+    api_state.ctx.tenant_repo = api_state.tenant_repo.clone();
+    api_state.ctx.app_repo = api_state.app_repo.clone();
+    api_state.ctx.database_repo = api_state.database_repo.clone();
+    api_state.ctx.volume_repo = api_state.volume_repo.clone();
+    api_state.ctx.github_repo = api_state.github_repo.clone();
+    api_state.ctx.scheduler = api_state.scheduler.clone();
+    api_state.ctx.nats = api_state.nats.clone();
+    api_state.ctx.db = api_state.api_db.clone();
     let api = create_app(api_state);
 
     let email = format!("e2e_{}@example.com", uuid::Uuid::new_v4());
@@ -749,6 +325,13 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
     let login_json: serde_json::Value = serde_json::from_slice(&login_body).unwrap();
     let token = login_json["token"].as_str().unwrap().to_string();
     let registered_user = user_repo.find_by_email(&email).await.unwrap().unwrap();
+    let tenant = tenant_repo
+        .list_by_user(registered_user.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("registration should create a default tenant");
 
     let app_name = format!("e2e-{}", uuid::Uuid::new_v4().simple());
     let upstream_port = env.upstream_addr.port();
@@ -761,6 +344,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
                 .uri("/v1/apps")
                 .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {token}"))
+                .header("x-mikrom-tenant-id", tenant.tenant_id.clone())
                 .body(axum::body::Body::from(
                     serde_json::json!({
                         "name": app_name,
@@ -877,28 +461,13 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
                     app_name, deployment.id
                 ))
                 .header("Authorization", format!("Bearer {token}"))
+                .header("x-mikrom-tenant-id", tenant.tenant_id.clone())
                 .body(axum::body::Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(activate_resp.status(), StatusCode::OK);
-
-    {
-        let mut state = env.state.write().await;
-        let targets = vec![env.upstream_addr.to_string()];
-        let lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice()).unwrap();
-        state.routes.insert(
-            hostname.clone(),
-            Route {
-                host: hostname.clone(),
-                targets,
-                lb: Arc::new(lb),
-                use_tls: false,
-                tls_alternative_cn: None,
-            },
-        );
-    }
 
     scheduler_app_repo
         .update_app_config(AppConfig {
@@ -928,6 +497,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
                 .method("GET")
                 .uri("/v1/apps")
                 .header("Authorization", format!("Bearer {token}"))
+                .header("x-mikrom-tenant-id", tenant.tenant_id.clone())
                 .body(axum::body::Body::empty())
                 .unwrap(),
         )
@@ -944,14 +514,17 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         .expect("expected created app in list");
     assert_eq!(app_entry["scale_state"], "warming_up");
 
-    let client = reqwest::Client::new();
-    let proxy_res = client
-        .get(format!("{}/", env.proxy_url))
-        .header("Host", hostname.clone())
-        .send()
+    let traffic_event = mikrom_proto::router::RouterTrafficEvent {
+        hostname: hostname.clone(),
+        router_id: "router-test".to_string(),
+        timestamp: chrono::Utc::now().timestamp(),
+    };
+    let mut traffic_buf = Vec::new();
+    traffic_event.encode(&mut traffic_buf).unwrap();
+    nats_client
+        .publish(subjects::ROUTER_TRAFFIC_EVENT, traffic_buf.into())
         .await
-        .expect("Failed to send request to router proxy");
-    assert_eq!(proxy_res.status(), StatusCode::OK);
+        .unwrap();
 
     let mut restored = false;
     for _ in 0..40 {
@@ -977,6 +550,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
                 .method("GET")
                 .uri("/v1/apps")
                 .header("Authorization", format!("Bearer {token}"))
+                .header("x-mikrom-tenant-id", tenant.tenant_id.clone())
                 .body(axum::body::Body::empty())
                 .unwrap(),
         )
@@ -992,4 +566,40 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         .and_then(|apps| apps.iter().find(|item| item["name"] == app_name))
         .expect("expected created app in list");
     assert_eq!(app_entry["scale_state"], "active");
+}
+
+#[tokio::test]
+#[allow(clippy::large_futures)]
+async fn test_router_proxy_forwards_requests_and_publishes_traffic_events() {
+    let Some(env) = setup_test_env(100, true).await else {
+        eprintln!("skipping router proxy e2e test: network bind unavailable");
+        return;
+    };
+
+    let nats_url =
+        std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let mut traffic_sub = nats_client
+        .subscribe(subjects::ROUTER_TRAFFIC_EVENT)
+        .await
+        .unwrap();
+
+    let client = reqwest::Client::new();
+    let proxy_res = client
+        .get(format!("{}/", env.proxy_url))
+        .header("Host", "localhost")
+        .send()
+        .await
+        .expect("Failed to send request to router proxy");
+    assert_eq!(proxy_res.status(), StatusCode::OK);
+
+    let body = proxy_res.text().await.unwrap();
+    assert!(body.contains("host: localhost"));
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), traffic_sub.next())
+        .await
+        .expect("expected router traffic event")
+        .expect("traffic subscriber closed");
+    let traffic = mikrom_proto::router::RouterTrafficEvent::decode(&event.payload[..]).unwrap();
+    assert_eq!(traffic.hostname, "localhost");
 }

@@ -521,8 +521,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires a configured PostgreSQL test database"]
     async fn test_app_lifecycle() {
-        let db = TestDb::new().await;
-        let pool = db.pool().clone();
+        let _db = TestDb::new().await;
+        let pool = _db.pool().clone();
         let user_repo = PostgresUserRepository::new(pool.clone());
         let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".into());
 
@@ -619,8 +619,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires a configured PostgreSQL test database"]
     async fn test_get_app_by_name() {
-        let db = TestDb::new().await;
-        let pool = db.pool().clone();
+        let _db = TestDb::new().await;
+        let pool = _db.pool().clone();
         let user_repo = PostgresUserRepository::new(pool.clone());
         let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".into());
 

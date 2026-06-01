@@ -535,11 +535,11 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
         },
     };
 
-    let Ok(db) = common_utils::TestDb::try_new().await else {
+    let Ok(_db) = common_utils::TestDb::try_new().await else {
         eprintln!("Skipping integration test: database unavailable");
         return;
     };
-    let pool = db.pool().clone();
+    let pool = _db.pool().clone();
 
     let app_repo = Arc::new(PgAppRepository::new(pool.clone()));
     let job_repo = Arc::new(PgJobRepository::new(pool.clone()));
