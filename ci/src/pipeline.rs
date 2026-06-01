@@ -63,6 +63,7 @@ pub struct MikromCi {
     cargo_registry: CacheVolume,
     cargo_git: CacheVolume,
     cargo_target: CacheVolume,
+    rustup: CacheVolume,
     pnpm_store: CacheVolume,
     pnpm_node_modules: CacheVolume,
 }
@@ -83,6 +84,7 @@ impl MikromCi {
         let cargo_registry = client.cache_volume(CARGO_REGISTRY_CACHE);
         let cargo_git = client.cache_volume(CARGO_GIT_CACHE);
         let cargo_target = client.cache_volume(CARGO_TARGET_CACHE);
+        let rustup = client.cache_volume("mikrom-ci-rustup");
         let pnpm_store = client.cache_volume(PNPM_STORE_CACHE);
         let pnpm_node_modules = client.cache_volume(PNPM_NODE_MODULES_CACHE);
 
@@ -115,6 +117,7 @@ impl MikromCi {
             cargo_registry,
             cargo_git,
             cargo_target,
+            rustup,
             pnpm_store,
             pnpm_node_modules,
         }
@@ -157,14 +160,12 @@ impl MikromCi {
         info!(stage = "app-install", "starting");
         let prepared = self.prepare_app_container(NODE_IMAGE).await?;
         info!(stage = "app-install", "finished");
-        self.run_app_stage(&prepared, "app-check", "pnpm check")
-            .await?;
-        self.run_app_stage(&prepared, "app-lint", "pnpm lint")
-            .await?;
-        self.run_app_stage(&prepared, "app-test", "pnpm test:unit")
-            .await?;
-        self.run_app_stage(&prepared, "app-build", "pnpm build")
-            .await?;
+        tokio::try_join!(
+            self.run_app_stage(&prepared, "app-check", "pnpm check"),
+            self.run_app_stage(&prepared, "app-lint", "pnpm lint"),
+            self.run_app_stage(&prepared, "app-test", "pnpm test:unit"),
+            self.run_app_stage(&prepared, "app-build", "pnpm build"),
+        )?;
 
         Ok(())
     }
@@ -323,14 +324,13 @@ impl MikromCi {
 
     async fn build_service_image(&self, service: &str, dockerfile: &str) -> Result<()> {
         let image = self.service_image(service, dockerfile);
-        let tar_path = format!("/tmp/{service}.tar");
 
         image
-            .export(&tar_path)
+            .sync()
             .await
-            .with_context(|| format!("failed to export {service} image"))?;
+            .with_context(|| format!("failed to build {service} image"))?;
 
-        info!(service, tar_path = %tar_path, "image exported");
+        info!(service, "image built successfully");
 
         Ok(())
     }
@@ -359,6 +359,7 @@ impl MikromCi {
             .with_mounted_cache("/usr/local/cargo/registry", self.cargo_registry.clone())
             .with_mounted_cache("/usr/local/cargo/git", self.cargo_git.clone())
             .with_mounted_cache(format!("{WORKDIR}/target"), self.cargo_target.clone())
+            .with_mounted_cache("/root/.rustup", self.rustup.clone())
             .with_env_variable("CARGO_TARGET_DIR", format!("{WORKDIR}/target"))
             .with_env_variable("CARGO_TERM_COLOR", "always")
             .with_env_variable("RUST_BACKTRACE", "1")

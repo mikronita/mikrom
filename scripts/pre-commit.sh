@@ -13,7 +13,7 @@ run_app=false
 
 for file in $staged_files; do
   case "$file" in
-  Cargo.toml | Cargo.lock | Makefile | *.rs | *.proto | mikrom-api/* | mikrom-agent/* | mikrom-builder/* | mikrom-cli/* | mikrom-dns/* | mikrom-init/* | mikrom-network/* | mikrom-proto/* | mikrom-router/* | mikrom-scheduler/*)
+  Cargo.toml | Cargo.lock | Makefile | *.rs | *.proto | mikrom-api/* | mikrom-agent/* | mikrom-builder/* | mikrom-cli/* | mikrom-dns/* | mikrom-init/* | mikrom-network/* | mikrom-proto/* | mikrom-router/* | mikrom-scheduler/* | ci/*)
     run_rust=true
     ;;
   mikrom-app/*)
