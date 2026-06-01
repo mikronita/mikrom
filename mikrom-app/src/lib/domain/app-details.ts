@@ -184,13 +184,14 @@ export function aggregateReplicaMetrics(
   }>,
 ): MetricsSnapshot {
   const count = activeReplicas.length;
+  const cpuTotal = activeReplicas.reduce((sum, replica) => sum + replica.cpu, 0);
   return {
     time: new Date().toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
     }),
-    cpu: activeReplicas.reduce((sum, replica) => sum + replica.cpu, 0) / count,
+    cpu: count > 0 ? cpuTotal / count : 0,
     ram: activeReplicas.reduce((sum, replica) => sum + replica.ram, 0),
     rx: activeReplicas.reduce((sum, replica) => sum + replica.rx, 0),
     tx: activeReplicas.reduce((sum, replica) => sum + replica.tx, 0),

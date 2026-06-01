@@ -70,4 +70,31 @@ describe("health store", () => {
 
     cleanup?.();
   });
+
+  it("restarts the SSE stream after cleanup", async () => {
+    mocks.health.mockResolvedValue({
+      status: "ok",
+      version: "1.0.0",
+      services: {},
+    });
+    mocks.watchHealthSSE.mockImplementation(() => vi.fn());
+
+    const firstCleanup = initHealthStream();
+
+    await waitFor(() => {
+      expect(mocks.health).toHaveBeenCalledTimes(1);
+      expect(mocks.watchHealthSSE).toHaveBeenCalledTimes(1);
+    });
+
+    firstCleanup();
+
+    const secondCleanup = initHealthStream();
+
+    await waitFor(() => {
+      expect(mocks.health).toHaveBeenCalledTimes(2);
+      expect(mocks.watchHealthSSE).toHaveBeenCalledTimes(2);
+    });
+
+    secondCleanup();
+  });
 });

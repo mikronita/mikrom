@@ -55,4 +55,15 @@ describe("app detail helpers", () => {
     expect(aggregate.ram).toBe(384);
     expect(aggregate.total_rx).toBe(12);
   });
+
+  it("returns zeroed aggregate metrics for an empty replica set", () => {
+    const aggregate = aggregateReplicaMetrics([]);
+
+    expect(aggregate.cpu).toBe(0);
+    expect(aggregate.ram).toBe(0);
+    expect(aggregate.rx).toBe(0);
+    expect(aggregate.tx).toBe(0);
+    expect(aggregate.total_rx).toBe(0);
+    expect(aggregate.total_tx).toBe(0);
+  });
 });
