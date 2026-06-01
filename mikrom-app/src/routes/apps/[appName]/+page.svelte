@@ -51,7 +51,6 @@
     listDeployments,
     type AppInfo,
     type DeploymentInfo,
-    type LiveDeploymentInfo,
     type VmMetricsResponse,
     watchAppMetrics,
     watchDeploymentsSSE,
@@ -61,16 +60,19 @@
   import { vmsStore, vmsLoading } from "$lib/stores/vms";
   import { formatDate } from "$lib/utils";
   import { Separator } from "$lib/components";
-
-  type MetricsSnapshot = {
-    time: string;
-    cpu: number;
-    ram: number;
-    rx: number;
-    tx: number;
-    total_rx: number;
-    total_tx: number;
-  };
+  import {
+    aggregateReplicaMetrics,
+    buildMetricSnapshot,
+    formatBytes,
+    formatDeploymentDate,
+    formatNetworkRate,
+    getDeploymentBadgeProps,
+    getDeploymentButtonText,
+    normalizeCpuUsage,
+    normalizeDeployment,
+    sortDeployments,
+    type MetricsSnapshot,
+  } from "$lib/domain/app-details";
 
   const webhookBaseUrl = browser
     ? `${window.location.protocol}//${window.location.hostname}:5001/v1`
@@ -132,41 +134,6 @@
       ).length
     : 0;
 
-  function normalizeCpuUsage(cpuUsage?: number) {
-    const value = cpuUsage ?? 0;
-    return value <= 1 ? value * 100 : value;
-  }
-
-  function formatNetworkRate(kibPerSecond: number) {
-    if (!kibPerSecond || kibPerSecond <= 0) return "0 KiB/s";
-    if (kibPerSecond < 0.1) return `${(kibPerSecond * 1024).toFixed(0)} B/s`;
-    if (kibPerSecond >= 1024)
-      return `${(kibPerSecond / 1024).toFixed(1)} MiB/s`;
-    return `${kibPerSecond.toFixed(1)} KiB/s`;
-  }
-
-  function formatBytes(bytes: number) {
-    if (!bytes || bytes <= 0) return "0 B";
-    const unit = 1024;
-    const sizes = ["B", "KiB", "MiB", "GiB", "TiB"];
-    const index = Math.floor(Math.log(bytes) / Math.log(unit));
-    if (index < 0) return "0 B";
-    return `${(bytes / Math.pow(unit, index)).toFixed(1)} ${sizes[index]}`;
-  }
-
-  function sortDeployments(list: DeploymentInfo[]) {
-    return [...list].sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    );
-  }
-
-  function formatDeploymentDate(dateStr: string) {
-    const value = new Date(dateStr);
-    if (Number.isNaN(value.getTime())) return "--";
-    return value.toLocaleString();
-  }
-
   function formatReplicaSummary(appInfo: AppInfo) {
     if (appInfo.autoscaling_enabled) {
       if ($vmsLoading && runningReplicaCount === 0)
@@ -176,98 +143,6 @@
 
     if ($vmsLoading && runningReplicaCount === 0) return "--";
     return `${runningReplicaCount}`;
-  }
-
-  function nowIso() {
-    return new Date().toISOString();
-  }
-
-  function normalizeDeployment(
-    deployment: DeploymentInfo | LiveDeploymentInfo,
-    previous?: DeploymentInfo,
-  ): DeploymentInfo {
-    const full = deployment as Partial<DeploymentInfo>;
-    const live = deployment as LiveDeploymentInfo;
-    const fallbackTime =
-      previous?.created_at ?? previous?.updated_at ?? nowIso();
-    const canonicalId =
-      ("deployment_id" in deployment ? live.deployment_id : null) ??
-      ("id" in deployment ? full.id : null) ??
-      deployment.job_id ??
-      previous?.id ??
-      "";
-
-    return {
-      id: canonicalId,
-      app_id: full.app_id ?? live.app_id,
-      build_id: full.build_id ?? previous?.build_id ?? null,
-      image_tag: full.image_tag ?? previous?.image_tag ?? null,
-      job_id: deployment.job_id ?? previous?.job_id ?? null,
-      ipv6_address: deployment.ipv6_address ?? previous?.ipv6_address ?? null,
-      status: deployment.status ?? previous?.status ?? "UNKNOWN",
-      vcpus: full.vcpus ?? previous?.vcpus ?? 0,
-      memory_mib: full.memory_mib ?? previous?.memory_mib ?? 0,
-      disk_mib: full.disk_mib ?? previous?.disk_mib ?? 0,
-      port: full.port ?? previous?.port ?? 0,
-      env_vars: full.env_vars ?? previous?.env_vars ?? {},
-      git_commit_hash:
-        full.git_commit_hash ?? previous?.git_commit_hash ?? null,
-      git_commit_message:
-        full.git_commit_message ?? previous?.git_commit_message ?? null,
-      git_branch: full.git_branch ?? previous?.git_branch ?? null,
-      trigger_source:
-        full.trigger_source ?? previous?.trigger_source ?? "manual",
-      scale_state:
-        full.scale_state ?? live.scale_state ?? previous?.scale_state,
-      created_at: previous?.created_at ?? full.created_at ?? fallbackTime,
-      updated_at: previous?.updated_at ?? full.updated_at ?? fallbackTime,
-    };
-  }
-
-  function getDeploymentBadgeProps(status: string) {
-    const s = status.toLowerCase();
-    if (s === "running") {
-      return {
-        variant: "outline" as const,
-        className:
-          "border-transparent bg-status-info/10 text-status-info",
-      };
-    }
-    if (
-      s === "draining" ||
-      s === "building" ||
-      s === "scheduled" ||
-      s === "pending" ||
-      s === "paused"
-    ) {
-      return {
-        variant: "outline" as const,
-        className:
-          "border-transparent bg-status-warning/10 text-status-warning",
-      };
-    }
-    if (s === "failed" || s === "cancelled") {
-      return {
-        variant: "destructive" as const,
-        className: "",
-      };
-    }
-    return {
-      variant: "outline" as const,
-      className: "",
-    };
-  }
-
-  function getDeploymentButtonText(
-    dep: DeploymentInfo,
-    isCurrentlyInProd: boolean,
-  ) {
-    if (isCurrentlyInProd) return "Currently in Prod";
-    if (dep.status === "DRAINING") return "Draining...";
-    if (dep.status === "BUILDING") return "Building...";
-    if (dep.status === "STARTING" || dep.status === "SCHEDULED")
-      return "Starting...";
-    return "Promote to Prod";
   }
 
   function copy(text: string) {
@@ -280,51 +155,13 @@
 
   function handleMetrics(sample: VmMetricsResponse) {
     if (!sample) return;
-
-    const txBytes = sample.tx_bytes || 0;
-    const rxBytes = sample.rx_bytes || 0;
     const now = Date.now();
     const key = sample.job_id || sample.vm_id || "default";
     const prev = lastNetwork.get(key);
 
-    let txRate = 0;
-    let rxRate = 0;
-
-    if (prev) {
-      const deltaTime = (now - prev.time) / 1000;
-      if (deltaTime > 0.8) {
-        txRate = Math.max(0, txBytes - prev.tx) / deltaTime / 1024;
-        rxRate = Math.max(0, rxBytes - prev.rx) / deltaTime / 1024;
-        lastNetwork.set(key, {
-          tx: txBytes,
-          rx: rxBytes,
-          time: now,
-          txRate,
-          rxRate,
-        });
-      } else {
-        txRate = prev.txRate || 0;
-        rxRate = prev.rxRate || 0;
-      }
-    } else {
-      lastNetwork.set(key, {
-        tx: txBytes,
-        rx: rxBytes,
-        time: now,
-        txRate: 0,
-        rxRate: 0,
-      });
-    }
-
-    replicaSamples.set(key, {
-      cpu: normalizeCpuUsage(sample.cpu_usage),
-      ram: (sample.ram_used_bytes || 0) / (1024 * 1024),
-      rx: rxRate,
-      tx: txRate,
-      total_rx: rxBytes,
-      total_tx: txBytes,
-      lastUpdate: now,
-    });
+    const { cache, sample: replicaSample } = buildMetricSnapshot(sample, now, prev);
+    lastNetwork.set(key, cache);
+    replicaSamples.set(key, replicaSample);
 
     for (const [replicaKey, data] of replicaSamples.entries()) {
       if (now - data.lastUpdate > 15000) {
@@ -335,30 +172,8 @@
     const activeReplicas = Array.from(replicaSamples.values());
     if (activeReplicas.length === 0) return;
 
-    const count = activeReplicas.length;
-    const aggregated: MetricsSnapshot = {
-      time: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }),
-      cpu:
-        activeReplicas.reduce((sum, replica) => sum + replica.cpu, 0) / count,
-      ram: activeReplicas.reduce((sum, replica) => sum + replica.ram, 0),
-      rx: activeReplicas.reduce((sum, replica) => sum + replica.rx, 0),
-      tx: activeReplicas.reduce((sum, replica) => sum + replica.tx, 0),
-      total_rx: activeReplicas.reduce(
-        (sum, replica) => sum + replica.total_rx,
-        0,
-      ),
-      total_tx: activeReplicas.reduce(
-        (sum, replica) => sum + replica.total_tx,
-        0,
-      ),
-    };
-
     liveMetrics = sample;
-    metricsHistory = [...metricsHistory.slice(-29), aggregated];
+    metricsHistory = [...metricsHistory.slice(-29), aggregateReplicaMetrics(activeReplicas)];
   }
 
   onMount(() => {

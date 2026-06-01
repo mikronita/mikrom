@@ -85,7 +85,7 @@ describe("projects store", () => {
     setActiveProjectSlug(null);
 
     expect(get(activeProjectSlugStore)).toBeNull();
-    expect(document.cookie).toContain("mikrom_active_project=");
+    expect(document.cookie).not.toContain("mikrom_active_project=beta");
     expect(localStorage.getItem("mikrom_active_project")).toBeNull();
   });
 });

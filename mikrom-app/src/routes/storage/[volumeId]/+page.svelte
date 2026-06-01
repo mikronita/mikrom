@@ -34,6 +34,7 @@
     SelectItem,
     SelectTrigger,
     SelectValue,
+    SectionTabs,
   } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import { formatDate } from "$lib/utils";
@@ -73,6 +74,11 @@
   $: volumePoolName = volume && "pool_name" in volume ? volume.pool_name : "ceph-rbd-ssd";
 
   let activeTab: "overview" | "snapshots" | "settings" = "overview";
+  const volumeTabs = [
+    { value: "overview", label: "Overview" },
+    { value: "snapshots", label: "Snapshots" },
+    { value: "settings", label: "Settings" },
+  ] as const;
 
   onMount(async () => {
     if ($appsStore.length === 0) {
@@ -88,6 +94,12 @@
   async function openSnapshotsTab() {
     activeTab = "snapshots";
     await loadSnapshots();
+  }
+
+  function handleTabChange(value: string) {
+    if (value === "snapshots") {
+      void openSnapshotsTab();
+    }
   }
 
   async function confirmDeleteVolume() {
@@ -272,38 +284,7 @@
         </div>
       </div>
 
-      <div class="flex border-b border-border">
-        <button
-          class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
-            activeTab === "overview"
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-          onclick={() => (activeTab = "overview")}
-        >
-          Overview
-        </button>
-        <button
-          class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
-            activeTab === "snapshots"
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-          onclick={openSnapshotsTab}
-        >
-          Snapshots
-        </button>
-        <button
-          class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
-            activeTab === "settings"
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-          onclick={() => (activeTab = "settings")}
-        >
-          Settings
-        </button>
-      </div>
+      <SectionTabs bind:active={activeTab} tabs={volumeTabs} onChange={handleTabChange} />
 
       {#if activeTab === "overview"}
         <div class="grid gap-6 md:grid-cols-3">

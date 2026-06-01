@@ -39,6 +39,7 @@
   } from "$lib/stores/projects";
   import { cn, formatDate } from "$lib/utils";
   import { matchesSearch } from "$lib/search";
+  import { sortByCreatedAtDesc } from "$lib/domain/ui";
 
   let projectName = "";
   let creating = false;
@@ -51,10 +52,9 @@
   let renameName = "";
   let query = "";
   let sortedProjects: ProjectInfo[];
+  let filteredProjects: ProjectInfo[];
 
-  $: sortedProjects = [...$projectsStore].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
+  $: sortedProjects = sortByCreatedAtDesc($projectsStore);
   $: filteredProjects = sortedProjects.filter((project) =>
     matchesSearch([project.name, project.tenant_id], query)
   );

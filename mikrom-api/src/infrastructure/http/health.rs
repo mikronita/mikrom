@@ -10,6 +10,8 @@ use tracing::info;
 
 use crate::error::{ApiResult, SseResponse};
 
+const HEALTH_STREAM_INTERVAL: Duration = Duration::from_secs(15);
+
 #[derive(serde::Serialize, rovo::schemars::JsonSchema)]
 pub struct HealthResponse {
     pub status: String,
@@ -226,7 +228,7 @@ pub async fn health_stream(
     State(state): State<crate::AppState>,
 ) -> ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     let stream = async_stream::stream! {
-        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        let mut interval = tokio::time::interval(HEALTH_STREAM_INTERVAL);
         loop {
             interval.tick().await;
             let services = get_system_health(&state).await;

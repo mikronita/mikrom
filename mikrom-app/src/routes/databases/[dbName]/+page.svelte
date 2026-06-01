@@ -39,6 +39,7 @@
     Field,
     AlertDialog,
     EmptyState,
+    SectionTabs,
   } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import { databasesStore, deleteDatabase } from "$lib/stores/databases";
@@ -87,6 +88,13 @@
     { name: "mikrom-api", ipv6: "fd00::1:1", status: "Running" },
     { name: "mikrom-scheduler", ipv6: "fd00::1:2", status: "Running" },
   ];
+
+  const dbTabs = [
+    { value: "overview", label: "Overview" },
+    { value: "networking", label: "Networking" },
+    { value: "backups", label: "Backups" },
+    { value: "settings", label: "Settings" },
+  ] as const;
 </script>
 
 <svelte:head>
@@ -150,32 +158,7 @@
         {/each}
       </div>
 
-      <div class="flex border-b border-border">
-        <button
-          class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'overview' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
-          on:click={() => activeTab = 'overview'}
-        >
-          Overview
-        </button>
-        <button
-          class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'networking' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
-          on:click={() => activeTab = 'networking'}
-        >
-          Networking
-        </button>
-        <button
-          class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'backups' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
-          on:click={() => activeTab = 'backups'}
-        >
-          Backups
-        </button>
-        <button
-          class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'settings' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
-          on:click={() => activeTab = 'settings'}
-        >
-          Settings
-        </button>
-      </div>
+      <SectionTabs bind:active={activeTab} tabs={dbTabs} />
 
       {#if activeTab === 'overview'}
         <div class="grid gap-6 lg:grid-cols-[1fr_400px]">

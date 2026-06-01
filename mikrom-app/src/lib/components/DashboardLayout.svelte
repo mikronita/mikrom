@@ -6,20 +6,17 @@
   import ProjectSwitcher from "$lib/components/ProjectSwitcher.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
+  import { buildBreadcrumbs } from "$lib/domain/navigation";
   import { useProfileBootstrap } from "$lib/stores/profile";
   import { useProjectBootstrap } from "$lib/stores/projects";
 
   useProfileBootstrap();
   useProjectBootstrap();
 
-  const segmentName = (segment: string) => decodeURIComponent(segment).replace(/^\w/, (c) => c.toUpperCase());
-  const breadcrumbHref = (index: number) => `/${pathParts.slice(0, index + 1).map(encodeURIComponent).join("/")}`;
   const SIDEBAR_COOKIE_NAME = "sidebar_state";
   const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
-  let pathParts: string[] = [];
   let sidebarCollapsed = $page.data.sidebarCollapsed ?? false;
-  $: pathParts = $page.url.pathname.split("/").filter(Boolean);
 
   function persistSidebarState(nextCollapsed: boolean) {
     sidebarCollapsed = nextCollapsed;
@@ -62,16 +59,16 @@
         </button>
         <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-sm text-muted-foreground">
           <a href="/" class="hidden font-medium text-foreground md:block">Home</a>
-          {#if pathParts.length}
-            {#each pathParts as part, index}
+          {#if buildBreadcrumbs($page.url.pathname).length}
+            {#each buildBreadcrumbs($page.url.pathname) as crumb}
               <span class="hidden md:block">/</span>
-              {#if index === pathParts.length - 1}
+              {#if crumb.current}
                 <span class="max-w-[140px] truncate font-medium text-foreground sm:max-w-none">
-                  {segmentName(part)}
+                  {crumb.label}
                 </span>
               {:else}
-                <a href={breadcrumbHref(index)} class="hidden font-medium text-foreground hover:underline sm:block">
-                  {segmentName(part)}
+                <a href={crumb.href} class="hidden font-medium text-foreground hover:underline sm:block">
+                  {crumb.label}
                 </a>
               {/if}
             {/each}
