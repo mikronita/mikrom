@@ -2,7 +2,7 @@ use sqlx::{Connection, Executor, PgConnection, PgPool, postgres::PgPoolOptions};
 use std::env;
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_TEST_DATABASE_URL: &str =
     "postgres://mikrom:mikrom_password@localhost:5432/mikrom_router_test";
@@ -105,24 +105,37 @@ impl Drop for TestDbInner {
 
             rt.block_on(async move {
                 let maintenance_url = format!("{server_url}/postgres");
-                if let Ok(mut conn) = PgConnection::connect(&maintenance_url).await {
-                    if let Err(e) = conn
-                        .execute(format!(
-                            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{cleanup_db_name}' AND pid <> pg_backend_pid()"
-                        ).as_str())
-                        .await
-                    {
-                        eprintln!(
-                            "warning: failed to terminate test database sessions for {cleanup_db_name}: {e}"
-                        );
-                    }
+                let cleanup = async {
+                    if let Ok(mut conn) = PgConnection::connect(&maintenance_url).await {
+                        if let Err(e) = conn
+                            .execute(format!(
+                                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{cleanup_db_name}' AND pid <> pg_backend_pid()"
+                            ).as_str())
+                            .await
+                        {
+                            eprintln!(
+                                "warning: failed to terminate test database sessions for {cleanup_db_name}: {e}"
+                            );
+                        }
 
-                    if let Err(e) = conn
-                        .execute(format!("DROP DATABASE IF EXISTS \"{cleanup_db_name}\"").as_str())
-                        .await
-                    {
-                        eprintln!("warning: failed to drop test database {cleanup_db_name}: {e}");
+                        if let Err(e) = conn
+                            .execute(format!("DROP DATABASE IF EXISTS \"{cleanup_db_name}\"").as_str())
+                            .await
+                        {
+                            eprintln!(
+                                "warning: failed to drop test database {cleanup_db_name}: {e}"
+                            );
+                        }
                     }
+                };
+
+                if tokio::time::timeout(Duration::from_secs(5), cleanup)
+                    .await
+                    .is_err()
+                {
+                    eprintln!(
+                        "warning: test database cleanup timed out for {cleanup_db_name}"
+                    );
                 }
             });
         });
