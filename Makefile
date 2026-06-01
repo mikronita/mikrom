@@ -61,6 +61,42 @@ fmt-check: ## Check Rust formatting without writing
 clippy: ## Run Clippy linter
 	cargo clippy -- -D warnings
 
+.PHONY: ci
+ci: ## Run the local Dagger-based CI pipeline
+	cargo run -p mikrom-ci -- full
+
+.PHONY: ci-smoke
+ci-smoke: ## Run the fastest Dagger-based validation profile
+	cargo run -p mikrom-ci -- smoke
+
+.PHONY: ci-fast
+ci-fast: ## Run the intermediate Dagger-based validation profile
+	cargo run -p mikrom-ci -- fast
+
+.PHONY: ci-full
+ci-full: ## Run the full Dagger-based validation profile
+	cargo run -p mikrom-ci -- full
+
+.PHONY: ci-release
+ci-release: ## Run validation plus image publish through Dagger
+	cargo run -p mikrom-ci -- publish-release
+
+.PHONY: ci-app
+ci-app: ## Run the frontend validation subset through Dagger
+	cargo run -p mikrom-ci -- app
+
+.PHONY: ci-app-e2e
+ci-app-e2e: ## Run the frontend e2e suite through Dagger
+	cargo run -p mikrom-ci -- app-e2e
+
+.PHONY: ci-images
+ci-images: ## Build service images through Dagger
+	cargo run -p mikrom-ci -- images
+
+.PHONY: ci-publish
+ci-publish: ## Publish service images through Dagger
+	cargo run -p mikrom-ci -- publish
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 define check_nextest

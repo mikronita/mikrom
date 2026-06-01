@@ -489,7 +489,7 @@ impl ProxyHttp for MikromProxy {
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
-        // 0. Extract Tracing Context and Start Span
+        // Extract tracing context and start the request span.
         let parent_cx = opentelemetry::global::get_text_map_propagator(|propagator| {
             propagator.extract(&PingoraHeaderExtractor(session.req_header()))
         });
@@ -510,7 +510,7 @@ impl ProxyHttp for MikromProxy {
             return Ok(result);
         }
 
-        // 0.1 Rate Limiting (Per IP)
+        // Apply per-IP rate limiting.
         if let Some(addr) = session.client_addr() {
             let ip = addr.to_string();
             let curr_window_requests = self.rate_limiter.observe(&ip, 1);
@@ -581,7 +581,7 @@ impl ProxyHttp for MikromProxy {
             .unwrap_or("");
         let normalized_host = HostName::parse(host);
 
-        // 1. Circuit Breaker Check
+        // Check the circuit breaker.
         if let Some(entry) = self.wake_up_failures.get(normalized_host.as_str()) {
             let (count, last_failure) = *entry;
             if count >= 3 && last_failure.elapsed() < Duration::from_mins(1) {
@@ -600,7 +600,7 @@ impl ProxyHttp for MikromProxy {
         let mut last_log_time = start_time;
 
         loop {
-            // Deduplicate and publish traffic event to wake up app if needed
+            // Publish a traffic event to wake up the app if needed.
             if let Some(publisher) = &self.traffic_publisher {
                 publisher.record(normalized_host.as_str().to_string());
             }
@@ -611,7 +611,7 @@ impl ProxyHttp for MikromProxy {
                 self.wait_for_route(host, normalized_host.as_str()).await?
             };
 
-            // Use client address as a hash seed for better distribution/stickiness if LB supports it
+            // Use the client address as the load-balancer hash seed when available.
             let hash = session
                 .client_addr()
                 .map_or_else(|| b"".to_vec(), |addr| addr.to_string().into_bytes());
@@ -627,7 +627,7 @@ impl ProxyHttp for MikromProxy {
                     "Selected upstream"
                 );
 
-                // Success: Reset circuit breaker
+                // Reset the circuit breaker on success.
                 self.wake_up_failures.remove(normalized_host.as_str());
 
                 let mut peer =
@@ -658,7 +658,7 @@ impl ProxyHttp for MikromProxy {
                 ));
             }
 
-            // Log selection failure every 2 seconds to avoid spamming but keep visibility
+            // Log selection failures every 2 seconds to avoid spamming while keeping visibility.
             if now.duration_since(last_log_time).as_secs() >= 2 {
                 info!(
                     "No healthy upstreams for {} yet (app might be waking up), waiting...",
@@ -712,7 +712,7 @@ impl ProxyHttp for MikromProxy {
         upstream_request: &mut RequestHeader,
         ctx: &mut Self::CTX,
     ) -> Result<()> {
-        // 1. Add standard proxy headers
+        // Add standard proxy headers.
         strip_untrusted_forwarding_headers(upstream_request);
 
         #[allow(clippy::collapsible_if)]
@@ -735,7 +735,7 @@ impl ProxyHttp for MikromProxy {
             upstream_request.insert_header("X-Forwarded-Proto", "http")?;
         }
 
-        // 2. Propagate Trace Context
+        // Propagate trace context.
         let context = ctx.span.context();
         let mut injector = PingoraHeaderInjector(upstream_request);
         opentelemetry::global::get_text_map_propagator(|propagator| {
@@ -751,8 +751,7 @@ impl ProxyHttp for MikromProxy {
         upstream_response: &mut ResponseHeader,
         _ctx: &mut Self::CTX,
     ) -> Result<()> {
-        // 1. Security Headers
-        // HSTS - 1 year
+        // Add security headers.
         if upstream_response
             .headers
             .get("Strict-Transport-Security")
@@ -764,7 +763,6 @@ impl ProxyHttp for MikromProxy {
             )?;
         }
 
-        // X-Content-Type-Options
         if upstream_response
             .headers
             .get("X-Content-Type-Options")
@@ -773,12 +771,10 @@ impl ProxyHttp for MikromProxy {
             upstream_response.insert_header("X-Content-Type-Options", "nosniff")?;
         }
 
-        // X-Frame-Options
         if upstream_response.headers.get("X-Frame-Options").is_none() {
             upstream_response.insert_header("X-Frame-Options", "SAMEORIGIN")?;
         }
 
-        // Referrer-Policy
         if upstream_response.headers.get("Referrer-Policy").is_none() {
             upstream_response
                 .insert_header("Referrer-Policy", "strict-origin-when-cross-origin")?;
@@ -790,7 +786,7 @@ impl ProxyHttp for MikromProxy {
     async fn logging(&self, session: &mut Session, _e: Option<&Error>, ctx: &mut Self::CTX) {
         self.metrics.requests_total.fetch_add(1, Ordering::Relaxed);
 
-        // Record latency
+        // Record latency.
         let latency = chrono::Utc::now()
             .signed_duration_since(ctx.request_start_time)
             .num_milliseconds();

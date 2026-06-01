@@ -1,0 +1,15 @@
+[package]
+name = "mikrom-ci"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+eyre = "0.6"
+clap = { version = "4", features = ["derive"] }
+dagger-sdk = "0.21.3"
+tokio.workspace = true
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

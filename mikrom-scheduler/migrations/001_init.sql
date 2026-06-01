@@ -1,4 +1,4 @@
--- Tables for persistent scheduler state (Workers, IPAM, and Jobs)
+-- Tables for persistent scheduler state (Workers, Jobs, and network metadata)
 
 CREATE TABLE IF NOT EXISTS workers (
     id VARCHAR PRIMARY KEY,
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at BIGINT NOT NULL
 );
 
--- Index for heartbeat cleanup and job lookups
+-- Indexes for heartbeat cleanup and job lookups
 CREATE INDEX IF NOT EXISTS idx_workers_last_heartbeat ON workers(last_heartbeat);
 CREATE INDEX IF NOT EXISTS idx_ip_allocations_worker_id ON ip_allocations(worker_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_app_id ON jobs(app_id);

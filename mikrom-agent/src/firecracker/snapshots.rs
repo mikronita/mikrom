@@ -168,7 +168,7 @@ impl crate::firecracker::FirecrackerManager {
 
     #[tracing::instrument(skip(self), fields(vm_id = %vm_id))]
     pub(crate) async fn resume_vm(&self, vm_id: &VmId) -> Result<(), HypervisorError> {
-        // Phase 1: Inspect process state while holding processes lock.
+        // Inspect process state while holding the processes lock.
         let (socket_path, process_alive, restart_from_snapshot) = {
             let mut processes = self.processes.lock().await;
             let Some(proc) = processes.get_mut(vm_id) else {
@@ -207,9 +207,9 @@ impl crate::firecracker::FirecrackerManager {
             } else {
                 (Some(proc.socket_path.clone()), true, false)
             }
-        }; // processes lock dropped here
+        };
 
-        // Phase 2: If alive, try to resume via API (no locks held).
+        // If the process is still alive, try to resume it in place.
         let mut live_process_resumed = false;
         let mut restart_from_snapshot = restart_from_snapshot;
         if process_alive && let Some(ref socket) = socket_path {
@@ -228,7 +228,7 @@ impl crate::firecracker::FirecrackerManager {
                 },
             }
         }
-        // Phase 3: Update VM status while holding vms lock (no processes lock held).
+        // Update VM status while only holding the VMs lock.
         if live_process_resumed {
             let mut vms = self.vms.write().await;
             if let Some(vm) = vms.get_mut(vm_id) {

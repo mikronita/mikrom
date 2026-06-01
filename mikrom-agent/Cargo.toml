@@ -49,7 +49,7 @@ maintainer = "Antonio Pardo <apardo@spluca.org>"
 copyright = "2026, Mikrom Team"
 license-file = ["../LICENSE", "0"]
 extended-description = """\
-Mikrom Agent is a daemon that runs on compute nodes to manage Firecracker microVMs.
+Mikrom Agent is a daemon that runs on compute nodes to manage Firecracker and Cloud Hypervisor microVMs.
 It communicates with the Mikrom Scheduler to deploy and manage workloads.
 """
 depends = "libc6, libssl3, iptables"

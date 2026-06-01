@@ -1,7 +1,9 @@
+# Upstream Neon Pageserver OpenAPI spec kept here as an integration reference.
+# It is not Mikrom-owned API documentation.
 openapi: "3.0.2"
 info:
-  title: Page Server API
-  description: Neon Pageserver API
+  title: Neon Pageserver API
+  description: Upstream Neon Pageserver API specification mirrored for reference
   version: "1.0"
   license:
     name: "Apache"

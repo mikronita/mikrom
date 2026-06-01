@@ -180,9 +180,8 @@ impl AppState {
         }
 
         if has_targets {
-            // NOTE: vpc_ipv6_prefix is currently associated with a User.
-            // For now, we attempt to find the first member of the tenant to retrieve the prefix.
-            // Future improvement: Move vpc_ipv6_prefix to the Tenant (Project) model.
+            // Resolve the tenant's VPC prefix from one of its members.
+            // The prefix is stored on the user record and shared across the tenant.
             let members = self
                 .tenant_repo
                 .get_members(app.tenant_id)
