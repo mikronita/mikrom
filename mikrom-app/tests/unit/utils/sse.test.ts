@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { consumeSseBuffer } from "$lib/utils/sse";
+import { waitFor } from "@testing-library/svelte";
+import { createFetchSseStream, consumeSseBuffer } from "$lib/utils/sse";
 
 describe("sse utils", () => {
   it("parses chunked SSE payloads and preserves trailing partial data", () => {
@@ -21,5 +22,26 @@ describe("sse utils", () => {
     expect(onMessage).toHaveBeenCalledTimes(2);
     expect(onMessage).toHaveBeenNthCalledWith(1, { kind: "refresh" });
     expect(onMessage).toHaveBeenCalledWith({ kind: "deployment_changed" });
+  });
+
+  it("does not retry on unauthorized SSE responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      body: null,
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cleanup = createFetchSseStream("/api/v1/workspace/events", {}, vi.fn());
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    cleanup();
   });
 });

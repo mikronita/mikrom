@@ -15,11 +15,15 @@ export function consumeSseBuffer(buffer: string, onMessage: (payload: unknown) =
 
     if (dataLines.length === 0) continue;
 
+    let parsed: unknown;
     try {
-      onMessage(JSON.parse(dataLines.join("\n")));
+      parsed = JSON.parse(dataLines.join("\n"));
     } catch {
       // Ignore malformed events.
+      continue;
     }
+
+    onMessage(parsed);
   }
 
   return remainder;
@@ -49,35 +53,55 @@ export function createFetchSseStream(
 
   void (async () => {
     while (!controller.signal.aborted) {
-      try {
-        const response = await fetch(url, {
-          ...init,
-          signal: controller.signal,
-        });
+      const response = await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      }).catch(() => null);
 
-        if (!response.ok || !response.body) {
-          await wait();
-          continue;
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (!controller.signal.aborted) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          buffer = consumeSseBuffer(buffer, onMessage);
-        }
-
-        buffer += decoder.decode();
-        consumeSseBuffer(buffer, onMessage);
-      } catch {
+      if (!response) {
         if (!controller.signal.aborted) {
           await wait();
         }
+        continue;
       }
+
+      if (response.status === 401 || response.status === 403) {
+        break;
+      }
+
+      if (!response.ok || !response.body) {
+        await wait();
+        continue;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (!controller.signal.aborted) {
+        let result: ReadableStreamReadResult<Uint8Array> | null;
+        try {
+          result = await reader.read();
+        } catch {
+          result = null;
+        }
+
+        if (!result) {
+          if (!controller.signal.aborted) {
+            await wait();
+          }
+          break;
+        }
+
+        const { value, done } = result;
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        buffer = consumeSseBuffer(buffer, onMessage);
+      }
+
+      buffer += decoder.decode();
+      consumeSseBuffer(buffer, onMessage);
     }
   })();
 

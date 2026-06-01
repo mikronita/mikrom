@@ -12,6 +12,12 @@ export const healthLoading = writable(false);
 
 let healthStreamCleanup: (() => void) | null = null;
 
+function cleanupHealthStream() {
+  if (!healthStreamCleanup) return;
+  healthStreamCleanup();
+  healthStreamCleanup = null;
+}
+
 function setHealthStatus(result: { status: string; version: string; services?: Record<string, string> }) {
   healthStore.set({
     status: result.status,
@@ -33,7 +39,7 @@ export async function refreshHealth() {
 }
 
 export function initHealthStream() {
-  if (healthStreamCleanup) return healthStreamCleanup;
+  if (healthStreamCleanup) return cleanupHealthStream;
 
   void refreshHealth();
 
@@ -42,12 +48,7 @@ export function initHealthStream() {
     healthLoading.set(false);
   });
 
-  return () => {
-    if (healthStreamCleanup) {
-      healthStreamCleanup();
-      healthStreamCleanup = null;
-    }
-  };
+  return cleanupHealthStream;
 }
 
 export function initHealthPolling() {

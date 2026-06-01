@@ -12,6 +12,16 @@ vi.mock("$lib/stores/databases", () => ({
   addDatabase: mocks.addDatabase,
 }));
 
+vi.mock("$lib/components", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/components")>();
+  const { default: MockModal } = await import("./ModalFixture.svelte");
+
+  return {
+    ...actual,
+    Modal: MockModal,
+  };
+});
+
 vi.mock("$lib/toast", () => ({
   toast: {
     success: mocks.success,

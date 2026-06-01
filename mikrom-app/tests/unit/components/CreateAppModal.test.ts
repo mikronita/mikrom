@@ -25,6 +25,16 @@ vi.mock("$lib/api", () => ({
   listGithubRepos: mocks.listGithubRepos,
 }));
 
+vi.mock("$lib/components", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/components")>();
+  const { default: MockModal } = await import("./ModalFixture.svelte");
+
+  return {
+    ...actual,
+    Modal: MockModal,
+  };
+});
+
 vi.mock("$lib/auth", () => ({
   getToken: mocks.getToken,
 }));
