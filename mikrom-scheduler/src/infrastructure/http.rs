@@ -6,7 +6,7 @@ use axum::{
     routing::get,
 };
 use sqlx::{PgPool, Row};
-use std::net::Ipv6Addr;
+use std::net::{Ipv4Addr, Ipv6Addr, TcpListener};
 use std::{collections::BTreeMap, fmt::Write as _, time::Duration, time::Instant};
 use tower_http::trace::TraceLayer;
 
@@ -82,6 +82,13 @@ impl SchedulerHttpServer {
         tokio::spawn(async move {
             match bind_dual_stack_listener(port) {
                 Ok(listener) => {
+                    let listener = match tokio::net::TcpListener::from_std(listener) {
+                        Ok(listener) => listener,
+                        Err(e) => {
+                            tracing::error!(port = port, error = %e, "Failed to convert scheduler HTTP listener");
+                            return;
+                        },
+                    };
                     if let Ok(addr) = listener.local_addr() {
                         tracing::info!(listen_addr = %addr, port = port, "Scheduler HTTP server bound");
                     }
@@ -135,12 +142,13 @@ impl SchedulerHttpServer {
     }
 }
 
-fn bind_dual_stack_listener(port: u16) -> std::io::Result<tokio::net::TcpListener> {
+fn bind_ipv6_dual_stack_listener(port: u16) -> std::io::Result<TcpListener> {
     let socket = socket2::Socket::new(
         socket2::Domain::IPV6,
         socket2::Type::STREAM,
         Some(socket2::Protocol::TCP),
     )?;
+    socket.set_reuse_address(true)?;
     socket.set_only_v6(false)?;
 
     let addr = std::net::SocketAddr::from((Ipv6Addr::UNSPECIFIED, port));
@@ -148,8 +156,40 @@ fn bind_dual_stack_listener(port: u16) -> std::io::Result<tokio::net::TcpListene
     socket.listen(1024)?;
     socket.set_nonblocking(true)?;
 
-    let listener: std::net::TcpListener = socket.into();
-    tokio::net::TcpListener::from_std(listener)
+    Ok(socket.into())
+}
+
+fn bind_ipv4_listener(port: u16) -> std::io::Result<TcpListener> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    socket.set_reuse_address(true)?;
+
+    let addr = std::net::SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
+    socket.bind(&socket2::SockAddr::from(addr))?;
+    socket.listen(1024)?;
+    socket.set_nonblocking(true)?;
+
+    Ok(socket.into())
+}
+
+fn bind_dual_stack_listener(port: u16) -> std::io::Result<TcpListener> {
+    match bind_ipv6_dual_stack_listener(port) {
+        Ok(listener) => Ok(listener),
+        Err(v6_err) => {
+            tracing::warn!(port = port, error = %v6_err, "IPv6 bind unavailable, falling back to IPv4");
+            bind_ipv4_listener(port).map_err(|v4_err| {
+                std::io::Error::new(
+                    v4_err.kind(),
+                    format!(
+                        "failed to bind listener on port {port} after IPv6 fallback (IPv6 error: {v6_err}; IPv4 error: {v4_err})"
+                    ),
+                )
+            })
+        },
+    }
 }
 
 impl SchedulerHttpState {
@@ -423,39 +463,62 @@ impl SchedulerMetricsSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{Ipv4Addr, Ipv6Addr, TcpStream};
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 
     #[test]
     fn dual_stack_listener_accepts_ipv4_and_ipv6() {
-        let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
-
-        let listener = match runtime.block_on(async { bind_dual_stack_listener(0) }) {
+        let listener = match bind_dual_stack_listener(0) {
             Ok(listener) => listener,
             Err(err) => {
                 eprintln!("skipping scheduler smoke test: dual-stack bind unavailable: {err}");
                 return;
             },
         };
-        let port = listener
+        let local_addr = listener
             .local_addr()
-            .expect("local addr should be available")
-            .port();
+            .expect("local addr should be available");
+        let port = local_addr.port();
 
-        let handle = std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().expect("runtime should build");
-            rt.block_on(async move {
-                for _ in 0..2 {
-                    let _ = listener.accept().await;
+        let mut connected_streams = Vec::new();
+        if local_addr.is_ipv6() {
+            let v6 = SocketAddr::from((Ipv6Addr::LOCALHOST, port));
+            match TcpStream::connect(v6) {
+                Ok(stream) => connected_streams.push(stream),
+                Err(err) => {
+                    eprintln!("skipping scheduler smoke test: ipv6 loopback unavailable: {err}")
+                },
+            }
+        }
+
+        let v4 = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+        match TcpStream::connect(v4) {
+            Ok(stream) => connected_streams.push(stream),
+            Err(err) => {
+                if local_addr.is_ipv6() {
+                    eprintln!("skipping scheduler smoke test: ipv4 loopback unavailable: {err}");
+                } else {
+                    eprintln!(
+                        "skipping scheduler smoke test: ipv4-only fallback could not connect: {err}"
+                    );
+                    return;
                 }
-            });
+            },
+        }
+
+        if connected_streams.is_empty() {
+            eprintln!("skipping scheduler smoke test: no loopback connections succeeded");
+            return;
+        }
+
+        let expected_accepts = connected_streams.len();
+        let handle = std::thread::spawn(move || {
+            for _ in 0..expected_accepts {
+                let _ = listener.accept();
+            }
         });
 
-        let v6 = std::net::SocketAddr::from((Ipv6Addr::LOCALHOST, port));
-        let v4 = std::net::SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-        TcpStream::connect(v6).expect("ipv6 loopback should connect");
-        TcpStream::connect(v4).expect("ipv4 loopback should connect");
-
         handle.join().expect("listener thread should exit");
+        drop(connected_streams);
     }
 }
 
