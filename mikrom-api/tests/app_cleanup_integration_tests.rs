@@ -13,8 +13,10 @@ use mikrom_api::AppState;
 use mikrom_api::create_app;
 use mikrom_api::domain::app::App;
 use mikrom_api::domain::{
-    MockAppRepository, MockScheduler, MockTenantRepository, MockUserRepository,
+    MockAppRepository, MockScheduler, MockTenantRepository, MockUserRepository, Tenant,
 };
+
+const TENANT_SLUG: &str = "cleanup-tenant";
 
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     let nats_url =
@@ -35,17 +37,18 @@ async fn connect_nats_or_skip() -> Option<async_nats::Client> {
 #[tokio::test]
 async fn test_delete_app_triggers_bulk_cleanup() {
     let mock_user_repo = MockUserRepository::new();
-    let mock_tenant_repo = MockTenantRepository::new();
+    let mut mock_tenant_repo = MockTenantRepository::new();
     let mut mock_app_repo = MockAppRepository::new();
     let mut mock_scheduler = MockScheduler::new();
 
     let tenant_id = Uuid::new_v4();
+    let user_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
     let app_name = "cleanup-test-app";
     let jwt_secret = "test-secret";
 
     let token = mikrom_api::auth::jwt::create_token(
-        &tenant_id.to_string(),
+        &user_id.to_string(),
         "test@example.com",
         &mikrom_api::domain::user::UserRole::User,
         jwt_secret,
@@ -65,6 +68,21 @@ async fn test_delete_app_triggers_bulk_cleanup() {
     let Some(nats_client) = connect_nats_or_skip().await else {
         return;
     };
+
+    mock_tenant_repo
+        .expect_find_by_slug()
+        .returning(move |slug| {
+            Ok((slug == TENANT_SLUG).then_some(Tenant {
+                id: tenant_id,
+                tenant_id: TENANT_SLUG.to_string(),
+                name: "Cleanup Tenant".to_string(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            }))
+        });
+    mock_tenant_repo
+        .expect_is_member()
+        .returning(move |tid, uid| Ok(tid == tenant_id && uid == user_id));
 
     let app_clone = app.clone();
     mock_app_repo
@@ -158,6 +176,7 @@ async fn test_delete_app_triggers_bulk_cleanup() {
                 .method("DELETE")
                 .uri(format!("/v1/apps/{}", app_name))
                 .header("Authorization", format!("Bearer {}", token))
+                .header("x-mikrom-tenant-id", TENANT_SLUG)
                 .body(Body::empty())
                 .unwrap(),
         )

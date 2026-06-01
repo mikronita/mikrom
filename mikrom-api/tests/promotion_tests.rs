@@ -10,7 +10,8 @@ use mikrom_api::auth::AuthUser;
 use mikrom_api::domain::app::{App, Deployment};
 use mikrom_api::domain::github::MockGithubRepository;
 use mikrom_api::domain::user::{MockUserRepository, UserRole};
-use mikrom_api::domain::{MockAppRepository, MockScheduler, MockTenantRepository};
+use mikrom_api::domain::{MockAppRepository, MockScheduler, MockTenantRepository, Tenant};
+use mikrom_api::infrastructure::auth::extractor::TenantContext;
 use mikrom_api::infrastructure::http::handlers::deploy::__activate_deployment_handler_impl as activate_deployment_handler;
 
 fn build_state(app_repo: MockAppRepository, scheduler: MockScheduler) -> AppState {
@@ -43,6 +44,18 @@ fn build_state(app_repo: MockAppRepository, scheduler: MockScheduler) -> AppStat
         github_app_slug: None,
         github_webhook_url_base: None,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+    }
+}
+
+fn tenant_context(tenant_id: Uuid) -> TenantContext {
+    TenantContext {
+        tenant: Tenant {
+            id: tenant_id,
+            tenant_id: tenant_id.to_string().chars().take(6).collect(),
+            name: "Default Project".to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        },
     }
 }
 
@@ -92,9 +105,11 @@ async fn test_activate_deployment_promotes_running_record() {
         email: "test@example.com".to_string(),
         role: UserRole::User,
     };
+    let tenant_ctx = tenant_context(tenant_id);
 
     let status = activate_deployment_handler(
         auth,
+        tenant_ctx,
         State(state),
         Path(("test-app".to_string(), deployment_id)),
     )
@@ -145,9 +160,11 @@ async fn test_activate_failed_deployment_is_rejected() {
         email: "test@example.com".to_string(),
         role: UserRole::User,
     };
+    let tenant_ctx = tenant_context(tenant_id);
 
     let err = activate_deployment_handler(
         auth,
+        tenant_ctx,
         State(state),
         Path(("test-app".to_string(), deployment_id)),
     )
@@ -203,9 +220,11 @@ async fn test_activate_deployment_rejects_foreign_deployment() {
         email: "test@example.com".to_string(),
         role: UserRole::User,
     };
+    let tenant_ctx = tenant_context(tenant_id);
 
     let err = activate_deployment_handler(
         auth,
+        tenant_ctx,
         State(state),
         Path(("test-app".to_string(), deployment_id)),
     )

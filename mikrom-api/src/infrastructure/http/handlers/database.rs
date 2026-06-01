@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::application::database::DatabaseService;
+use crate::application::tenant::resolve_tenant_owner_user_id;
 use crate::domain::CreateDatabaseParams;
 use crate::domain::types::{CpuCores, MemoryMb};
 use crate::error::ApiResult;
@@ -38,10 +39,12 @@ pub async fn create_database(
     Json(payload): Json<CreateDatabaseRequest>,
 ) -> ApiResult<Json<DatabaseResponse>> {
     let tenant_id = tenant_ctx.tenant.id;
+    let user_id = resolve_tenant_owner_user_id(&state, tenant_id).await?;
 
     let params = CreateDatabaseParams {
         name: payload.name,
         engine: payload.engine,
+        user_id,
         tenant_id,
         vcpus: payload.vcpus.unwrap_or(CpuCores::try_from(1).unwrap()),
         memory_mib: payload

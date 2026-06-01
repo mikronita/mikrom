@@ -40,8 +40,9 @@ impl PostgresVolumeRepository {
 impl VolumeRepository for PostgresVolumeRepository {
     async fn create_volume(&self, params: CreateVolumeParams) -> DomainResult<Volume> {
         let db_volume = sqlx::query_as::<_, DbVolume>(
-            "INSERT INTO volumes (tenant_id, name, size_mib, pool_name) VALUES ($1, $2, $3, $4) RETURNING *"
+            "INSERT INTO volumes (user_id, tenant_id, name, size_mib, pool_name) VALUES ($1, $2, $3, $4, $5) RETURNING *"
         )
+        .bind(params.user_id)
         .bind(params.tenant_id)
         .bind(params.name)
         .bind(params.size_mib)
@@ -210,9 +211,10 @@ impl VolumeRepository for PostgresVolumeRepository {
 
     async fn create_snapshot(&self, params: CreateSnapshotParams) -> DomainResult<VolumeSnapshot> {
         let db_snapshot = sqlx::query_as::<_, DbVolumeSnapshot>(
-            "INSERT INTO volume_snapshots (volume_id, tenant_id, name) VALUES ($1, $2, $3) RETURNING *"
+            "INSERT INTO volume_snapshots (volume_id, user_id, tenant_id, name) VALUES ($1, $2, $3, $4) RETURNING *"
         )
         .bind(params.volume_id)
+        .bind(params.user_id)
         .bind(params.tenant_id)
         .bind(params.name)
         .fetch_one(&self.pool)

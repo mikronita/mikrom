@@ -95,6 +95,7 @@ pub struct VolumeSnapshot {
 
 #[derive(Debug)]
 pub struct CreateVolumeParams {
+    pub user_id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,
     pub size_mib: i32,
@@ -103,6 +104,7 @@ pub struct CreateVolumeParams {
 
 #[derive(Debug)]
 pub struct CreateSnapshotParams {
+    pub user_id: Uuid,
     pub volume_id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,

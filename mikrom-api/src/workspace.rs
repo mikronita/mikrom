@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::auth::AuthUser;
+use crate::auth::extractor::TenantContext;
 use crate::error::SseResponse;
 use axum::extract::State;
 use axum::response::sse::{Event, Sse};
@@ -38,17 +39,19 @@ pub struct WorkspaceEvent {
 #[rovo::rovo]
 pub async fn workspace_events_stream(
     auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
 ) -> crate::error::ApiResult<SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
     let mut rx = state.workspace_events.subscribe();
     let auth_user_id = Uuid::parse_str(&auth.user_id)
         .map_err(|e| crate::error::ApiError::Internal(e.to_string()))?;
+    let tenant_id = tenant_ctx.tenant.id;
 
     let stream = async_stream::stream! {
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    if (event.tenant_id.is_none() || event.tenant_id == Some(auth_user_id))
+                    if (event.tenant_id.is_none() || event.tenant_id == Some(tenant_id))
                         && (event.user_id.is_none() || event.user_id == Some(auth_user_id))
                         && let Ok(data) = serde_json::to_string(&event)
                     {
@@ -59,7 +62,7 @@ pub async fn workspace_events_stream(
                     let refresh_event = WorkspaceEvent {
                         kind: WorkspaceEventKind::Refresh,
                         user_id: Some(auth_user_id),
-                        tenant_id: Some(auth_user_id),
+                        tenant_id: Some(tenant_id),
                         app_id: None,
                         app_name: None,
                         deployment_id: None,

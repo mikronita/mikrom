@@ -1,3 +1,4 @@
+use crate::application::tenant::resolve_tenant_owner_user_id;
 use crate::domain::{
     AppVolume, AttachedVolume, CreateSnapshotParams, CreateVolumeParams, Volume, VolumeAccessMode,
     VolumeSnapshot, VolumeWithAttachments,
@@ -100,12 +101,14 @@ pub async fn create_volume_handler(
     Json(req): Json<CreateVolumeRequest>,
 ) -> ApiResult<(StatusCode, Json<Volume>)> {
     let tenant_id = tenant_ctx.tenant.id;
+    let user_id = resolve_tenant_owner_user_id(&state, tenant_id).await?;
 
     let pool_name = format!("user_{}_volumes", tenant_id.to_string().replace('-', "_"));
 
     let volume = state
         .volume_repo
         .create_volume(CreateVolumeParams {
+            user_id,
             tenant_id,
             name: req.name,
             size_mib: req.size_mib,
@@ -360,9 +363,12 @@ pub async fn create_snapshot_handler(
         return Err(ApiError::Forbidden);
     }
 
+    let user_id = resolve_tenant_owner_user_id(&state, volume.tenant_id).await?;
+
     let snapshot = state
         .volume_repo
         .create_snapshot(CreateSnapshotParams {
+            user_id,
             volume_id,
             tenant_id: volume.tenant_id,
             name: req.name.clone(),
@@ -596,6 +602,7 @@ pub async fn clone_volume_handler(
     }
 
     let tenant_id = tenant_ctx.tenant.id;
+    let user_id = resolve_tenant_owner_user_id(&state, tenant_id).await?;
 
     let pool_name = format!("user_{}_volumes", tenant_id.to_string().replace('-', "_"));
 
@@ -603,6 +610,7 @@ pub async fn clone_volume_handler(
     let new_volume = state
         .volume_repo
         .create_volume(CreateVolumeParams {
+            user_id,
             tenant_id,
             name: req.name.clone(),
             size_mib: volume.size_mib,

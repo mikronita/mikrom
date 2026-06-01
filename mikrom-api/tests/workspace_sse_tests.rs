@@ -2,12 +2,13 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use chrono::Utc;
 use mikrom_api::auth::jwt::create_token;
 use mikrom_api::create_app;
 use mikrom_api::domain::user::{MockUserRepository, UserRole};
 use mikrom_api::domain::{
     MockAppRepository, MockDatabaseRepository, MockScheduler, MockTenantRepository,
-    MockVolumeRepository,
+    MockVolumeRepository, Tenant,
 };
 use mikrom_api::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use mikrom_api::{AppState, nats::TypedNatsClient};
@@ -41,6 +42,7 @@ fn build_state() -> (
     AppState,
     tokio::sync::broadcast::Sender<WorkspaceEvent>,
     Uuid,
+    Tenant,
 ) {
     let mut state = AppState::default();
     state.jwt_secret = JWT_SECRET.to_string();
@@ -63,15 +65,40 @@ fn build_state() -> (
     state.ctx.nats = state.nats.clone();
 
     let user_id = Uuid::new_v4();
+    let tenant = Tenant {
+        id: Uuid::new_v4(),
+        tenant_id: "acme".to_string(),
+        name: "Acme".to_string(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+
+    let mut tenant_repo = MockTenantRepository::new();
+    let tenant_for_slug = tenant.clone();
+    tenant_repo.expect_find_by_slug().returning(move |slug| {
+        if slug == "acme" {
+            Ok(Some(tenant_for_slug.clone()))
+        } else {
+            Ok(None)
+        }
+    });
+    tenant_repo
+        .expect_is_member()
+        .returning(move |tenant_id, member_user_id| {
+            Ok(tenant_id == tenant.id && member_user_id == user_id)
+        });
+    state.tenant_repo = Arc::new(tenant_repo);
+    state.ctx.tenant_repo = state.tenant_repo.clone();
+
     let (workspace_events, _) = tokio::sync::broadcast::channel(16);
     state.workspace_events = workspace_events.clone();
 
-    (state, workspace_events, user_id)
+    (state, workspace_events, user_id, tenant)
 }
 
 #[tokio::test]
 async fn workspace_stream_emits_matching_tenant_events() {
-    let (state, tx, user_id) = build_state();
+    let (state, tx, user_id, tenant) = build_state();
     let token = create_token(
         &user_id.to_string(),
         "test@example.com",
@@ -87,6 +114,7 @@ async fn workspace_stream_emits_matching_tenant_events() {
                 .method("GET")
                 .uri("/v1/workspace/events")
                 .header("Authorization", format!("Bearer {}", token))
+                .header("x-mikrom-tenant-id", tenant.tenant_id.clone())
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -99,7 +127,7 @@ async fn workspace_stream_emits_matching_tenant_events() {
     tx.send(WorkspaceEvent {
         kind: WorkspaceEventKind::AppCreated,
         user_id: Some(user_id),
-        tenant_id: Some(user_id),
+        tenant_id: Some(tenant.id),
         app_id: Some(Uuid::new_v4()),
         app_name: Some("tenant-app".to_string()),
         deployment_id: None,
@@ -116,7 +144,7 @@ async fn workspace_stream_emits_matching_tenant_events() {
 
 #[tokio::test]
 async fn workspace_stream_ignores_other_tenant_events() {
-    let (state, tx, user_id) = build_state();
+    let (state, tx, user_id, tenant) = build_state();
     let other_tenant_id = Uuid::new_v4();
     let token = create_token(
         &user_id.to_string(),
@@ -133,6 +161,7 @@ async fn workspace_stream_ignores_other_tenant_events() {
                 .method("GET")
                 .uri("/v1/workspace/events")
                 .header("Authorization", format!("Bearer {}", token))
+                .header("x-mikrom-tenant-id", tenant.tenant_id.clone())
                 .body(Body::empty())
                 .unwrap(),
         )

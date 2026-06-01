@@ -9,6 +9,7 @@ use axum::{
 use mikrom_api::NatsScheduler;
 use mikrom_api::application::vms::MeshStatus;
 use mikrom_api::create_app;
+use mikrom_api::domain::user::UserRepository;
 use mikrom_api::domain::{
     AppRepository, MockDatabaseRepository, MockGithubRepository, MockTenantRepository,
     MockVolumeRepository,
@@ -679,7 +680,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
     ));
     let api_state = mikrom_api::AppState {
         ctx: mikrom_api::application::ApiContext::default(),
-        user_repo,
+        user_repo: user_repo.clone(),
         tenant_repo: Arc::new(MockTenantRepository::new()),
         app_repo: api_app_repo.clone(),
         database_repo: Arc::new(MockDatabaseRepository::new()),
@@ -747,6 +748,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         .unwrap();
     let login_json: serde_json::Value = serde_json::from_slice(&login_body).unwrap();
     let token = login_json["token"].as_str().unwrap().to_string();
+    let registered_user = user_repo.find_by_email(&email).await.unwrap().unwrap();
 
     let app_name = format!("e2e-{}", uuid::Uuid::new_v4().simple());
     let upstream_port = env.upstream_addr.port();
@@ -805,6 +807,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
     let deployment = api_app_repo
         .create_deployment(mikrom_api::domain::NewDeployment {
             app_id: app_record.id,
+            user_id: registered_user.id,
             tenant_id: app_record.tenant_id.to_string(),
             vcpus: CpuCores::new(1).unwrap(),
             memory_mib: MemoryMb::new(128).unwrap(),

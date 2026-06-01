@@ -578,9 +578,7 @@ function eventSourceStream(url: string, onMessage: (payload: unknown) => void) {
       // Ignore malformed events.
     }
   };
-  source.onerror = () => {
-    console.debug("SSE connection error, EventSource will retry");
-  };
+  source.onerror = () => {};
   return () => source.close();
 }
 

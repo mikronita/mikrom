@@ -15,11 +15,13 @@ async fn test_postgres_database_repository_crud_and_deployments() {
 
     let pool = db.pool().clone();
     let tenant_id = Uuid::new_v4();
+    let user_id = Uuid::new_v4();
 
     let repo = PostgresDatabaseRepository::new(pool.clone());
     let params = CreateDatabaseParams {
         name: "orders".to_string(),
         engine: "neon".to_string(),
+        user_id,
         tenant_id,
         vcpus: mikrom_api::domain::types::CpuCores::try_from(2).unwrap(),
         memory_mib: mikrom_api::domain::types::MemoryMb::try_from(1024).unwrap(),
@@ -48,6 +50,13 @@ async fn test_postgres_database_repository_crud_and_deployments() {
     );
     assert_eq!(created.tenant_gen, Some(1));
     assert_eq!(created.settings.get("max_connections").unwrap(), "200");
+
+    let stored_user_id: Uuid = sqlx::query_scalar("SELECT user_id FROM databases WHERE id = $1")
+        .bind(created.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored_user_id, user_id);
 
     let other_tenant = Uuid::new_v4();
 
@@ -84,7 +93,17 @@ async fn test_postgres_database_repository_crud_and_deployments() {
             .is_empty()
     );
 
-    let deployment = repo.create_deployment(created.id, tenant_id).await.unwrap();
+    let deployment = repo
+        .create_deployment(created.id, tenant_id, user_id)
+        .await
+        .unwrap();
+    let stored_deployment_user_id: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM database_deployments WHERE id = $1")
+            .bind(deployment.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_deployment_user_id, user_id);
     repo.update_active_deployment(created.id, deployment.id)
         .await
         .unwrap();

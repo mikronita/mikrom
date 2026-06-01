@@ -356,11 +356,13 @@ impl DeploymentService {
         params: DeployVersionParams,
     ) -> ApiResult<super::DeployResponseBody> {
         let app = Self::get_app_by_name_and_auth(state, app_name, auth_tenant_id).await?;
+        let owner_user_id = resolve_tenant_owner_user_id(state, app.tenant_id).await?;
         let git_metadata = Self::fetch_app_git_metadata(state, &app).await;
         let deployment = state
             .app_repo
             .create_deployment(crate::domain::NewDeployment::from_handler(
                 app.id,
+                owner_user_id,
                 auth_tenant_id.to_string(),
                 params.vcpus,
                 params.memory_mib,
@@ -426,6 +428,7 @@ impl DeploymentService {
         app: &App,
         git_metadata: Option<&crate::domain::GitMetadata>,
     ) -> ApiResult<Uuid> {
+        let owner_user_id = resolve_tenant_owner_user_id(state, app.tenant_id).await?;
         let vcpus = CpuCores::new(super::DEFAULT_DEPLOYMENT_VCPUS).unwrap();
         let memory_mib = MemoryMb::new(super::DEFAULT_DEPLOYMENT_MEMORY_MIB).unwrap();
         let disk_mib = 1024;
@@ -435,6 +438,7 @@ impl DeploymentService {
             .app_repo
             .create_deployment(crate::domain::NewDeployment::from_handler(
                 app.id,
+                owner_user_id,
                 app.tenant_id.to_string(),
                 vcpus,
                 memory_mib,

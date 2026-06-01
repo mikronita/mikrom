@@ -104,11 +104,23 @@ test.describe("detail pages", () => {
     await expect(page.getByRole("button", { name: "Detach" })).toBeVisible();
 
     await page.getByRole("button", { name: "Snapshots" }).click();
-    await expect(page.getByText("No snapshots available for this volume.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Create first snapshot" })).toBeVisible();
+    await expect(page.getByText("daily-backup")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create Snapshot" })).toBeVisible();
 
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(page.getByRole("button", { name: "Delete Volume" })).toBeVisible();
+
+    const deleteRequest = page.waitForRequest((request) =>
+      request.url().includes("/api/v1/volumes/vol-1") && request.method() === "DELETE"
+    );
+    await page.getByRole("button", { name: "Delete Volume", exact: true }).click();
+    const deleteDialog = page.getByRole("alertdialog", { name: "Delete volume?" });
+    await expect(deleteDialog).toBeVisible();
+    await deleteDialog.getByRole("button", { name: "Delete Volume", exact: true }).click();
+    await deleteRequest;
+
+    await expect(page).toHaveURL("/storage");
+    await expect(page.getByRole("link", { name: /app-data/i })).toHaveCount(0);
   });
 });
 

@@ -76,6 +76,7 @@ async fn test_encryption_at_rest() {
     let deployment = app_repo
         .create_deployment(NewDeployment {
             app_id: app.id,
+            user_id,
             tenant_id: user_id.to_string(),
             vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
             memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),

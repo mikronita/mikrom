@@ -37,7 +37,6 @@
     createVolume,
     attachVolume,
     cloneVolumeFromSnapshot,
-    deleteVolume,
     deleteVolumeSnapshot,
     restoreVolumeSnapshot,
     type Volume,
@@ -55,7 +54,6 @@
   let showCloneModal = false;
   let query = "";
   let volumeForSnapshots = "";
-  let volumeToDelete: Volume | null = null;
   let snapshotToDelete: VolumeSnapshot | null = null;
   let showSnapshotsModal = false;
   let restoreSnapshotName = "";
@@ -125,15 +123,6 @@
     await loadVolumes(selectedApp);
   }
 
-  async function deleteVolumeNow(id: string) {
-    const token = getToken();
-    if (!token) return;
-    const result = await deleteVolume(token, id);
-    if (result.error) return toast.error(result.error);
-    toast.success("Volume deleted");
-    await loadVolumes(selectedApp);
-  }
-
   async function deleteSnapshotNow(id: string) {
     const token = getToken();
     if (!token) return;
@@ -141,13 +130,6 @@
     if (result.error) return toast.error(result.error);
     toast.success("Snapshot deleted");
     await _loadSnapshots(volumeForSnapshots);
-  }
-
-  async function confirmDeleteVolume() {
-    if (!volumeToDelete) return;
-    const target = volumeToDelete;
-    volumeToDelete = null;
-    await deleteVolumeNow(target.id);
   }
 
   async function confirmDeleteSnapshot() {
@@ -270,16 +252,14 @@
       {:else}
         {#each filteredVolumes as volume (volume.id)}
           <a href={`/storage/${volume.id}`} class="block">
-            <Card size="sm">
+            <Card size="sm" class="overflow-hidden">
               <CardHeader>
                 <div class="flex items-start gap-4">
                   <div class="flex size-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">
                     <HardDrive class="size-5" />
                   </div>
                   <div class="flex min-w-0 flex-1 flex-col gap-2">
-                    <div class="flex min-w-0 items-center gap-2">
-                      <CardTitle class="truncate text-base">{volume.name}</CardTitle>
-                    </div>
+                    <CardTitle class="truncate text-base">{volume.name}</CardTitle>
                   </div>
                 </div>
               </CardHeader>
@@ -414,16 +394,6 @@
       <Button onclick={cloneSnapshot} disabled={!snapshotToClone || !cloneName}>Clone Snapshot</Button>
     </div>
   </Modal>
-
-  <AlertDialog
-    open={!!volumeToDelete}
-    title="Delete volume?"
-    description={`Are you sure you want to delete volume ${volumeToDelete?.name}? All data and snapshots will be permanently lost.`}
-    actionText="Delete Volume"
-    variant="destructive"
-    onclose={() => (volumeToDelete = null)}
-    onaction={confirmDeleteVolume}
-  />
 
   <AlertDialog
     open={!!snapshotToDelete}

@@ -152,18 +152,14 @@ struct CachedWatchDeployments {
 
 async fn load_watch_deployments_cache(
     state: &crate::AppState,
-    auth_user_uuid: Option<uuid::Uuid>,
+    tenant_id: Option<uuid::Uuid>,
 ) -> std::collections::HashMap<String, CachedWatchDeployments> {
     let mut cache = std::collections::HashMap::new();
-    let Some(auth_user_uuid) = auth_user_uuid else {
+    let Some(tenant_id) = tenant_id else {
         return cache;
     };
 
-    let apps = match state
-        .app_repo
-        .list_apps_by_tenant(Some(auth_user_uuid))
-        .await
-    {
+    let apps = match state.app_repo.list_apps_by_tenant(Some(tenant_id)).await {
         Ok(apps) => apps,
         Err(err) => {
             tracing::warn!(
@@ -176,7 +172,7 @@ async fn load_watch_deployments_cache(
 
     let deployments = match state
         .app_repo
-        .list_deployments_by_user(Some(auth_user_uuid))
+        .list_deployments_by_user(Some(tenant_id))
         .await
     {
         Ok(deployments) => deployments,
@@ -251,7 +247,7 @@ pub async fn list_active_deployments(
     // 2. Filter for RUNNING and map to LiveDeploymentInfo
     let mut active_deployments = Vec::new();
 
-    // Optimization: Fetch all deployments for the user once to enrich the scheduler list
+    // Optimization: Fetch all deployments for the tenant once to enrich the scheduler list
     let mut user_deployments = std::collections::HashMap::new();
     if let Ok(deps) = state
         .app_repo
