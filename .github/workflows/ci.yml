@@ -41,8 +41,8 @@ jobs:
       - name: Run smoke validation
         run: cargo run --manifest-path ci/Cargo.toml -- smoke
 
-  fast:
-    name: Fast
+  test:
+    name: Tests
     runs-on: ubuntu-latest
     needs: smoke
     steps:
@@ -62,14 +62,62 @@ jobs:
           curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Run fast validation
-        run: cargo run --manifest-path ci/Cargo.toml -- fast
+      - name: Run workspace tests
+        run: cargo run --manifest-path ci/Cargo.toml -- test
+
+  build:
+    name: Release Build
+    runs-on: ubuntu-latest
+    needs: smoke
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install Dagger CLI
+        run: |
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run release build
+        run: cargo run --manifest-path ci/Cargo.toml -- build
+
+  ebpf:
+    name: eBPF
+    runs-on: ubuntu-latest
+    needs: smoke
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install Dagger CLI
+        run: |
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Check eBPF target
+        run: cargo run --manifest-path ci/Cargo.toml -- ebpf
 
   frontend-e2e:
     name: Frontend E2E
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: fast
+    needs: smoke
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -90,35 +138,11 @@ jobs:
       - name: Run frontend e2e
         run: cargo run --manifest-path ci/Cargo.toml -- app-e2e
 
-  full:
-    name: Full
-    runs-on: ubuntu-latest
-    needs: fast
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Install Dagger CLI
-        run: |
-          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Run full validation
-        run: cargo run --manifest-path ci/Cargo.toml -- full
-
   images:
     name: Build Images
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: full
+    needs: [test, build, ebpf]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -143,7 +167,7 @@ jobs:
     name: Publish Images
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: full
+    needs: [test, build, ebpf]
     permissions:
       contents: read
       packages: write
@@ -168,5 +192,5 @@ jobs:
           curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Publish release
-        run: cargo run --manifest-path ci/Cargo.toml -- publish-release
+      - name: Publish images
+        run: cargo run --manifest-path ci/Cargo.toml -- publish
