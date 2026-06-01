@@ -182,8 +182,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_find_by_email_returns_none_for_unknown_email() {
-        let db = TestDb::new().await;
-        let repo = PostgresUserRepository::new(db.pool().clone());
+        let _db = TestDb::new().await;
+        let repo = PostgresUserRepository::new(_db.pool().clone());
         let result = repo.find_by_email("nonexistent@example.com").await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
@@ -191,8 +191,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_find_roundtrip() {
-        let db = TestDb::new().await;
-        let repo = PostgresUserRepository::new(db.pool().clone());
+        let _db = TestDb::new().await;
+        let repo = PostgresUserRepository::new(_db.pool().clone());
         let email = format!("repo_test_{}@example.com", uuid::Uuid::new_v4());
         let id = repo
             .create(NewUser {
@@ -217,8 +217,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_count_by_email_returns_zero_for_unknown() {
-        let db = TestDb::new().await;
-        let repo = PostgresUserRepository::new(db.pool().clone());
+        let _db = TestDb::new().await;
+        let repo = PostgresUserRepository::new(_db.pool().clone());
         let count = repo
             .count_by_email("nobody_ever@example.com")
             .await
@@ -228,8 +228,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_count_by_email_returns_one_after_create() {
-        let db = TestDb::new().await;
-        let repo = PostgresUserRepository::new(db.pool().clone());
+        let _db = TestDb::new().await;
+        let repo = PostgresUserRepository::new(_db.pool().clone());
         let email = format!("count_test_{}@example.com", uuid::Uuid::new_v4());
         repo.create(NewUser {
             email: email.clone(),

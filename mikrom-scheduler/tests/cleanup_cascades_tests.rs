@@ -11,11 +11,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_cascading_cleanup_on_job_deletion() {
-        let Ok(db) = common_utils::TestDb::try_new().await else {
+        let Ok(_db) = common_utils::TestDb::try_new().await else {
             eprintln!("Skipping cleanup cascade test: database unavailable");
             return;
         };
-        let pool = db.pool().clone();
+        let pool = _db.pool().clone();
 
         let job_repo = PgJobRepository::new(pool.clone());
         let worker_repo = PgWorkerRepository::new(pool.clone());
@@ -65,11 +65,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_jobs_by_app() {
-        let Ok(db) = common_utils::TestDb::try_new().await else {
+        let Ok(_db) = common_utils::TestDb::try_new().await else {
             eprintln!("Skipping cleanup cascade test: database unavailable");
             return;
         };
-        let pool = db.pool().clone();
+        let pool = _db.pool().clone();
         let job_repo = PgJobRepository::new(pool.clone());
 
         let app_id = "app-cleanup-test".to_string();

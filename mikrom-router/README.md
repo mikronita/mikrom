@@ -63,3 +63,10 @@ make ci-smoke
 make ci-fast
 make ci-full
 ```
+
+## Test Database
+
+- Integration tests that need PostgreSQL use `TestDb` from `src/test_utils.rs`.
+- The helper creates an ephemeral database per test binary, runs migrations, and drops it on teardown.
+- It defaults to `postgres://mikrom:mikrom_password@localhost:5432/mikrom_router_test` when `TEST_DATABASE_URL` is unset.
+- The helper rejects non-test database names, so development `DATABASE_URL` values are not reused.

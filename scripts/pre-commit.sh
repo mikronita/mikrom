@@ -23,8 +23,8 @@ for file in $staged_files; do
 done
 
 if [ "$run_rust" = true ]; then
-  echo "Running Dagger-backed Rust validation (make ci-fast)..."
-  make ci-fast
+  echo "Running Dagger-backed Rust validation (make ci)..."
+  make ci
 fi
 
 if [ "$run_app" = true ]; then

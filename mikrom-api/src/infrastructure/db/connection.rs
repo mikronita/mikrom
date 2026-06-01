@@ -31,8 +31,8 @@ mod tests {
     async fn test_run_migrations() {
         let env_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".env");
         dotenvy::from_path(env_path).ok();
-        let db = TestDb::new().await;
-        let pool = db.pool();
+        let _db = TestDb::new().await;
+        let pool = _db.pool();
         let result = run_migrations(pool).await;
         assert!(result.is_ok());
     }

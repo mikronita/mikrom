@@ -1,18 +1,11 @@
-use crate::AppState;
-use crate::application::ApiContext;
-use crate::application::vms::MeshStatus;
-use crate::domain::{
-    MockAppRepository, MockDatabaseRepository, MockGithubRepository, MockScheduler,
-    MockUserRepository, MockVolumeRepository,
-};
-use crate::infrastructure::nats::{MockNatsClient, TypedNatsClient};
 use sqlx::{Connection, Executor, PgConnection, PgPool, postgres::PgPoolOptions};
 use std::env;
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock, Weak};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_TEST_DATABASE_URL: &str =
-    "postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test";
+    "postgres://mikrom:mikrom_password@localhost:5432/mikrom_router_test";
 
 static TEST_DB_REGISTRY: OnceLock<tokio::sync::Mutex<Option<Weak<TestDbInner>>>> = OnceLock::new();
 
@@ -61,7 +54,7 @@ impl TestDb {
             "{}_{}_{}",
             base_db_name,
             std::process::id(),
-            uuid::Uuid::new_v4().simple()
+            unique_suffix()
         );
         let maintenance_url = format!("{server_url}/postgres");
 
@@ -170,69 +163,10 @@ fn split_url(url: &str) -> (String, String) {
     (server_url.to_string(), db_name.to_string())
 }
 
-pub fn create_test_app_state(db: PgPool) -> AppState {
-    let (deployment_events, _) = tokio::sync::broadcast::channel(100);
-    let (workspace_events, _) = tokio::sync::broadcast::channel(100);
-    let (mesh_status, _) = tokio::sync::watch::channel(MeshStatus::default());
-
-    let user_repo = Arc::new(MockUserRepository::new());
-    let app_repo = Arc::new(MockAppRepository::new());
-    let database_repo = Arc::new(MockDatabaseRepository::new());
-    let github_repo = Arc::new(MockGithubRepository::new());
-    let volume_repo = Arc::new(MockVolumeRepository::new());
-    let scheduler = Arc::new(MockScheduler::new());
-    let nats = TypedNatsClient::new_custom(Arc::new(MockNatsClient::new()));
-
-    let config = crate::config::ApiConfig {
-        database_url: "postgres://localhost/dummy".to_string(),
-        nats_url: "nats://localhost:4222".to_string(),
-        jwt_secret: "secret".to_string(),
-        master_key: "0".repeat(64),
-        router_addr: "localhost:8080".to_string(),
-        frontend_url: "http://localhost:3000".to_string(),
-        ..Default::default()
-    };
-
-    let ctx = ApiContext {
-        user_repo: user_repo.clone(),
-        tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
-        app_repo: app_repo.clone(),
-        database_repo: database_repo.clone(),
-        github_repo: github_repo.clone(),
-        volume_repo: volume_repo.clone(),
-        scheduler: scheduler.clone(),
-        nats: nats.clone(),
-        db: db.clone(),
-        config: Arc::new(config),
-        jwt_secret: "secret".to_string(),
-        master_key: "0".repeat(64),
-    };
-
-    AppState {
-        ctx,
-        user_repo,
-        tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
-        app_repo,
-        database_repo,
-        github_repo,
-        volume_repo,
-        scheduler,
-        nats,
-        router_addr: "localhost:8080".to_string(),
-        frontend_url: "http://localhost:3000".to_string(),
-        api_db: db,
-        jwt_secret: "secret".to_string(),
-        master_key: "0".repeat(64),
-        deployment_events,
-        workspace_events,
-        mesh_status,
-        acme_email: "test@example.com".to_string(),
-        acme_staging: true,
-        acme_check_interval: 3600,
-        github_app_id: None,
-        github_private_key: None,
-        github_app_slug: None,
-        github_webhook_url_base: None,
-        active_deployment_flows: Arc::new(dashmap::DashSet::new()),
-    }
+fn unique_suffix() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is before UNIX_EPOCH")
+        .as_nanos();
+    format!("{nanos:x}")
 }

@@ -11,8 +11,8 @@ use uuid::Uuid;
 #[tokio::test]
 #[ignore = "requires a PostgreSQL test database with the migrated apps schema"]
 async fn deployment_metadata_roundtrip_persists_git_fields() {
-    let db = TestDb::new().await;
-    let pool = db.pool().clone();
+    let _db = TestDb::new().await;
+    let pool = _db.pool().clone();
 
     let user_repo = PostgresUserRepository::new(pool.clone());
     let tenant_repo = PostgresTenantRepository::new(pool.clone());
@@ -131,8 +131,8 @@ async fn deployment_metadata_roundtrip_persists_git_fields() {
 #[tokio::test]
 #[ignore = "requires a PostgreSQL test database with the migrated apps schema"]
 async fn deployment_hypervisor_roundtrip_persists_integer_value() {
-    let db = TestDb::new().await;
-    let pool = db.pool().clone();
+    let _db = TestDb::new().await;
+    let pool = _db.pool().clone();
 
     let user_repo = PostgresUserRepository::new(pool.clone());
     let tenant_repo = PostgresTenantRepository::new(pool.clone());

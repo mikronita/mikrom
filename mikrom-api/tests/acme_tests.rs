@@ -20,11 +20,11 @@ async fn connect_nats_or_skip() -> Option<async_nats::Client> {
 #[tokio::test]
 async fn test_acme_account_persistence() {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let Ok(db) = TestDb::try_new().await else {
+    let Ok(_db) = TestDb::try_new().await else {
         eprintln!("Skipping ACME test: database unavailable");
         return;
     };
-    let pool = db.pool().clone();
+    let pool = _db.pool().clone();
 
     let email = "test-persistence@mikrom.spluca.org";
     let acme_url = "https://acme-staging-v02.api.letsencrypt.org/directory";
@@ -56,11 +56,11 @@ async fn test_acme_account_persistence() {
 
 #[tokio::test]
 async fn test_acme_worker_iteration_skips_if_no_domains() {
-    let Ok(db) = TestDb::try_new().await else {
+    let Ok(_db) = TestDb::try_new().await else {
         eprintln!("Skipping ACME test: database unavailable");
         return;
     };
-    let pool = db.pool().clone();
+    let pool = _db.pool().clone();
 
     // Connecting to a local NATS for testing
     let Some(nats_client) = connect_nats_or_skip().await else {
@@ -85,11 +85,11 @@ async fn test_acme_worker_iteration_skips_if_no_domains() {
 #[tokio::test]
 async fn test_router_handles_nats_updates() {
     // This test verifies that mikrom-router correctly updates its DB when receiving NATS messages
-    let Ok(db) = TestDb::try_new().await else {
+    let Ok(_db) = TestDb::try_new().await else {
         eprintln!("Skipping ACME test: database unavailable");
         return;
     };
-    let pool = db.pool().clone();
+    let pool = _db.pool().clone();
 
     // 1. Setup router tables (simulating migrations)
     sqlx::query("CREATE TABLE IF NOT EXISTS tls_certificates (hostname VARCHAR PRIMARY KEY, cert_chain TEXT NOT NULL, private_key TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").execute(&pool).await.unwrap();
