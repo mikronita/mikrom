@@ -1,5 +1,5 @@
 import { writable } from "svelte/store";
-import { listApps, type AppInfo } from "$lib/api";
+import { listApps, type AppInfo, type LiveDeploymentInfo } from "$lib/api";
 import { getToken } from "$lib/auth";
 
 export const appsStore = writable<AppInfo[]>([]);
@@ -30,4 +30,31 @@ export async function refreshApps() {
   } finally {
     appsLoading.set(false);
   }
+}
+
+export function applyDeploymentUpdate(deployment: LiveDeploymentInfo) {
+  const deploymentKey = deployment.deployment_id || deployment.job_id || null;
+  const normalizedStatus = deployment.status.toLowerCase();
+  const isActive = !["stopped", "failed", "cancelled", "error"].includes(normalizedStatus);
+
+  appsStore.update((current) =>
+    current.map((app) => {
+      if (app.id !== deployment.app_id && app.name !== deployment.app_name) {
+        return app;
+      }
+
+      const nextActiveDeploymentId =
+        isActive && deploymentKey
+          ? deploymentKey
+          : app.active_deployment_id === deploymentKey
+            ? null
+            : app.active_deployment_id;
+
+      return {
+        ...app,
+        active_deployment_id: nextActiveDeploymentId,
+        scale_state: deployment.scale_state ?? app.scale_state,
+      };
+    }),
+  );
 }

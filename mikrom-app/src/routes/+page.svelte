@@ -42,61 +42,26 @@
   import {
     healthStore,
     healthLoading,
-    initHealthPolling,
+    initHealthStream,
   } from "$lib/stores/health";
   import { toast } from "$lib/toast";
   import { derived } from "svelte/store";
+  import {
+    buildDashboardSummary,
+    getHealthClass,
+    getSystemHealthStatus,
+  } from "$lib/domain/ui";
 
   let showCreate = false;
-
-  const runningCountStore = derived(
-    vmsStore,
-    ($vms) => $vms.filter((vm) => vm.status.toLowerCase() === "running").length,
-  );
-  const pendingCountStore = derived(
-    vmsStore,
-    ($vms) =>
-      $vms.filter((vm) =>
-        ["scheduled", "pending", "building"].includes(vm.status.toLowerCase()),
-      ).length,
-  );
-  const appsWithStatusStore = derived([appsStore, vmsStore], ([$apps, $vms]) =>
-    [...$apps]
-      .sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      )
-      .slice(0, 5)
-      .map((app) => {
-        const liveVm = $vms.find(
-          (vm) => vm.app_id === app.id || vm.app_name === app.name,
-        );
-        let status =
-          liveVm?.status || (app.active_deployment_id ? "Paused" : "Stopped");
-
-        if (app.scale_state === "scaled_to_zero" && status !== "Stopped") {
-          status = "Paused";
-        }
-
-        return {
-          ...app,
-          liveVm,
-          status,
-        };
-      }),
-  );
-  const hasUndeployedAppsStore = derived(
-    [appsStore, vmsStore],
-    ([$apps, $vms]) =>
-      $apps.length > 0 &&
-      $apps.every(
-        (app) =>
-          !$vms.some((vm) => vm.app_id === app.id || vm.app_name === app.name),
-      ),
+  const dashboardSummaryStore = derived([appsStore, vmsStore], ([$apps, $vms]) =>
+    buildDashboardSummary($apps, $vms),
   );
 
   let unsubscribeHealth: (() => void) | undefined;
-  let unsubscribeUndeployed: () => void;
+  let unsubscribeUndeployed: (() => void) | undefined;
+  let hasShownUndeployedToast = false;
+  let offlineServices: number;
+  let healthStatus: "ONLINE" | "CHECKING" | "OFFLINE";
 
   onMount(async () => {
     const token = getToken();
@@ -110,17 +75,18 @@
       void refreshVms();
     }
 
-    unsubscribeHealth = initHealthPolling();
+    unsubscribeHealth = initHealthStream();
 
-    // Check for undeployed apps and notify
-    unsubscribeUndeployed = hasUndeployedAppsStore.subscribe(
-      ($hasUndeployedApps) => {
+    unsubscribeUndeployed = dashboardSummaryStore.subscribe(
+      ({ hasUndeployedApps }) => {
         if ($appsLoading || $vmsLoading) return;
         if (
-          $hasUndeployedApps &&
+          hasUndeployedApps &&
           $appsStore.length > 0 &&
-          $vmsStore.length === 0
+          $vmsStore.length === 0 &&
+          !hasShownUndeployedToast
         ) {
+          hasShownUndeployedToast = true;
           toast.info(
             "You have undeployed applications. Deploy your first app now!",
             {
@@ -132,6 +98,8 @@
               },
             },
           );
+        } else if (!hasUndeployedApps) {
+          hasShownUndeployedToast = false;
         }
       },
     );
@@ -145,7 +113,10 @@
   $: offlineServices = Object.values($healthStore?.services || {}).filter(
     (status) => status !== "ONLINE",
   ).length;
-  const hasHealthError = () => !$healthLoading && !$healthStore;
+  $: healthStatus =
+    $healthLoading && !$healthStore
+      ? "CHECKING"
+      : getSystemHealthStatus($healthStore);
   const healthServices = [
     { name: "API", key: "API", icon: Cpu },
     { name: "Agents", key: "Agents", icon: Bot },
@@ -154,42 +125,6 @@
     { name: "Router", key: "Router", icon: Router },
   ] as const;
 
-  function getAppStatusVariant(status: string) {
-    const normalized = status.toLowerCase();
-    if (normalized === "running") return "outline";
-    if (normalized === "paused") return "outline";
-    if (
-      ["building", "pending", "scheduled", "starting", "draining"].includes(
-        normalized,
-      )
-    )
-      return "secondary";
-    if (["failed", "cancelled", "offline", "error"].includes(normalized))
-      return "destructive";
-    return "outline";
-  }
-
-  function getAppStatusClass(status: string) {
-    const normalized = status.toLowerCase();
-    if (normalized === "running") {
-      return "border-transparent bg-status-info/10 text-status-info";
-    }
-    if (normalized === "paused") {
-      return "border-transparent bg-muted/70 text-muted-foreground";
-    }
-    if (normalized === "stopped") {
-      return "border-transparent bg-muted/40 text-muted-foreground/60";
-    }
-    return "";
-  }
-
-  function getHealthClass(status: string) {
-    if (status === "ONLINE")
-      return "!border-transparent !bg-status-online/10 !text-status-online";
-    if (status === "CHECKING")
-      return "!border-transparent !bg-muted/70 !text-muted-foreground";
-    return "!border-transparent !bg-status-offline/10 !text-status-offline";
-  }
 </script>
 
 <svelte:head>
@@ -230,7 +165,7 @@
             {#if $appsLoading && $appsStore.length === 0}
               <Skeleton class="mt-1 h-8 w-16" />
             {:else}
-              <CardTitle class="text-2xl">{$appsStore.length}</CardTitle>
+              <CardTitle class="text-2xl">{$dashboardSummaryStore.totalApps}</CardTitle>
             {/if}
           </div>
           <div
@@ -253,7 +188,7 @@
             {#if $vmsLoading && $vmsStore.length === 0}
               <Skeleton class="mt-1 h-8 w-16" />
             {:else}
-              <CardTitle class="text-2xl">{$runningCountStore}</CardTitle>
+              <CardTitle class="text-2xl">{$dashboardSummaryStore.runningCount}</CardTitle>
             {/if}
           </div>
           <div
@@ -276,7 +211,7 @@
             {#if $vmsLoading && $vmsStore.length === 0}
               <Skeleton class="mt-1 h-8 w-16" />
             {:else}
-              <CardTitle class="text-2xl">{$pendingCountStore}</CardTitle>
+              <CardTitle class="text-2xl">{$dashboardSummaryStore.pendingCount}</CardTitle>
             {/if}
           </div>
           <div
@@ -347,7 +282,7 @@
                     </TableRow>
                   {/each}
                 {:else}
-                  {#each $appsWithStatusStore as app}
+                  {#each $dashboardSummaryStore.recentApps as app}
                     <TableRow>
                       <TableCell>
                         <div class="flex min-w-0 items-center gap-3">
@@ -366,8 +301,8 @@
                       </TableCell>
                       <TableCell>
                         <Badge
-                          variant={getAppStatusVariant(app.status)}
-                          class={`capitalize ${getAppStatusClass(app.status)}`}
+                          variant={app.statusVariant}
+                          class={`capitalize ${app.statusClass}`}
                           >{app.status}</Badge
                         >
                       </TableCell>
@@ -399,11 +334,11 @@
               </div>
               <Badge
                 variant="outline"
-                class={hasHealthError() || offlineServices > 0
+                class={offlineServices > 0 || healthStatus === "OFFLINE"
                   ? getHealthClass("OFFLINE")
                   : getHealthClass("ONLINE")}
               >
-                {hasHealthError() || offlineServices > 0
+                {offlineServices > 0 || healthStatus === "OFFLINE"
                   ? "Degraded"
                   : "Operational"}
               </Badge>
@@ -414,7 +349,7 @@
               {@const ServiceIcon = service.icon}
               {@const status =
                 $healthStore?.services?.[service.key] ||
-                (hasHealthError() ? "OFFLINE" : "CHECKING")}
+                (healthStatus === "OFFLINE" ? "OFFLINE" : "CHECKING")}
               <div class="flex flex-col gap-4">
                 <div class="flex items-center justify-between gap-4">
                   <div class="flex items-center gap-2">
@@ -423,7 +358,7 @@
                   </div>
                   <Badge
                     variant="outline"
-                    class={`uppercase ${getHealthClass(status)}`}
+                    class={`uppercase ${getHealthClass(status as "ONLINE" | "CHECKING" | "OFFLINE")}`}
                   >
                     {status}
                   </Badge>

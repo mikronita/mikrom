@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   getToken: vi.fn(),
   listVms: vi.fn(),
   watchVmsSSE: vi.fn(),
-  refreshApps: vi.fn(),
 }));
 
 vi.mock("$lib/auth", () => ({
@@ -18,10 +17,7 @@ vi.mock("$lib/api", () => ({
   watchVmsSSE: mocks.watchVmsSSE,
 }));
 
-vi.mock("$lib/stores/apps", () => ({
-  refreshApps: mocks.refreshApps,
-}));
-
+import { appsStore } from "$lib/stores/apps";
 import { clearVms, initVmsSSE, stopVmsSSE, vmsLoading, vmsStore } from "$lib/stores/vms";
 
 const initialVm = {
@@ -35,6 +31,24 @@ const initialVm = {
   vm_id: "vm-1",
   cpu_usage: 20,
   ram_used_bytes: 128,
+  scale_state: "active" as const,
+};
+
+const initialApp = {
+  id: "app-1",
+  name: "starter",
+  git_url: "https://github.com/mikrom/starter",
+  port: 3000,
+  hostname: null,
+  active_deployment_id: null,
+  desired_replicas: 1,
+  min_replicas: 1,
+  max_replicas: 1,
+  autoscaling_enabled: false,
+  cpu_threshold: 80,
+  mem_threshold: 80,
+  scale_state: "scaled_to_zero" as const,
+  created_at: "2026-05-01T10:00:00.000Z",
 };
 
 let onMessage: ((vm: typeof initialVm) => void) | null = null;
@@ -46,7 +60,7 @@ beforeEach(() => {
   mocks.getToken.mockReset().mockReturnValue("token");
   mocks.listVms.mockReset();
   mocks.watchVmsSSE.mockReset();
-  mocks.refreshApps.mockReset();
+  appsStore.set([initialApp]);
 });
 
 describe("vms store", () => {
@@ -67,11 +81,12 @@ describe("vms store", () => {
       expect(get(vmsLoading)).toBe(false);
     });
 
-    onMessage?.({ ...initialVm, status: "STOPPED" });
+    onMessage?.({ ...initialVm, status: "RUNNING", scale_state: "active" });
 
-    expect(get(vmsStore)).toEqual([]);
-    await waitFor(() => {
-      expect(mocks.refreshApps).toHaveBeenCalled();
+    expect(get(vmsStore)).toEqual([{ ...initialVm, status: "RUNNING", scale_state: "active" }]);
+    expect(get(appsStore)[0]).toMatchObject({
+      active_deployment_id: "deploy-1",
+      scale_state: "active",
     });
   });
 

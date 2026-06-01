@@ -49,8 +49,6 @@ export function initWorkspaceSSE() {
 
       case "deployment_changed":
         void refreshVms();
-        // Also refresh apps to update active_deployment_id
-        void refreshApps();
         break;
 
       case "volume_changed": {

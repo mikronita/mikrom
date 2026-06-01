@@ -1,10 +1,10 @@
 <script lang="ts">
   import "../app.css";
   import { Boxes, LoaderCircle } from "lucide-svelte";
-  import { Toaster } from "svelte-sonner";
   import { initTheme } from "$lib/theme";
   import { onMount } from "svelte";
   import { fade, scale } from "svelte/transition";
+  import { Toaster } from "$lib/components/ui/sonner";
   import { initWorkspaceSSE, closeWorkspaceSSE } from "$lib/stores/workspace";
   import { clearVms, initVmsSSE, refreshVms, stopVmsSSE } from "$lib/stores/vms";
   import { clearApps, refreshApps } from "$lib/stores/apps";
@@ -93,4 +93,4 @@
     </div>
   </div>
 {/if}
-<Toaster position="bottom-right" richColors />
+<Toaster position="bottom-right" />

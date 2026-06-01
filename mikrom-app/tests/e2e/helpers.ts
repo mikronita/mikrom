@@ -22,6 +22,14 @@ function jsonResponse(body: unknown, status = 200) {
   };
 }
 
+function sseResponse(body = "") {
+  return {
+    status: 200,
+    contentType: "text/event-stream",
+    body,
+  };
+}
+
 export async function seedAuth(page: Page, token: string = authToken) {
   await page.addInitScript((value) => {
     localStorage.setItem("mikrom_token", value);
@@ -285,6 +293,16 @@ export async function mockControlPlaneApi(
       return;
     }
 
+    if (pathname === `${apiBase}/workspace/events` && method === "GET") {
+      await route.fulfill(sseResponse());
+      return;
+    }
+
+    if (pathname === `${apiBase}/deployments/events` && method === "GET") {
+      await route.fulfill(sseResponse());
+      return;
+    }
+
     if (pathname === `${apiBase}/deployments/active` && method === "GET") {
       await route.fulfill(jsonResponse(deployments));
       return;
@@ -292,6 +310,11 @@ export async function mockControlPlaneApi(
 
     if (pathname === `${apiBase}/networking/mesh` && method === "GET") {
       await route.fulfill(jsonResponse(mesh));
+      return;
+    }
+
+    if (pathname === `${apiBase}/networking/mesh/stream` && method === "GET") {
+      await route.fulfill(sseResponse());
       return;
     }
 
@@ -315,6 +338,16 @@ export async function mockControlPlaneApi(
 
     if (pathname === `${apiBase}/volumes/vol-1/snapshots` && method === "GET") {
       await route.fulfill(jsonResponse(volumeSnapshots));
+      return;
+    }
+
+    if (pathname.startsWith(`${apiBase}/apps/`) && pathname.endsWith("/metrics/stream") && method === "GET") {
+      await route.fulfill(sseResponse());
+      return;
+    }
+
+    if (pathname.startsWith(`${apiBase}/apps/`) && pathname.endsWith("/logs/stream") && method === "GET") {
+      await route.fulfill(sseResponse());
       return;
     }
 

@@ -1,6 +1,7 @@
 import { browser } from "$app/environment";
 import { env } from "$env/dynamic/public";
 import { logout } from "$lib/auth";
+import { createFetchSseStream } from "$lib/utils/sse";
 
 const PUBLIC_BASE = (
   browser ? window.location.origin : env.PUBLIC_APP_URL || "http://localhost:5173"
@@ -583,33 +584,68 @@ function eventSourceStream(url: string, onMessage: (payload: unknown) => void) {
 }
 
 export function watchDeploymentsSSE(token: string, onMessage: (deployment: LiveDeploymentInfo) => void) {
-  return eventSourceStream(`${API_PROXY_BASE}/deployments/events?token=${encodeURIComponent(token)}`, (payload) =>
-    onMessage(payload as LiveDeploymentInfo)
+  return createFetchSseStream(
+    `${API_PROXY_BASE}/deployments/events`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+    (payload) => onMessage(payload as LiveDeploymentInfo),
   );
 }
 
 export function watchAppMetricsSSE(token: string, appName: string, onMessage: (metrics: VmMetricsResponse) => void) {
-  return eventSourceStream(
-    `${API_PROXY_BASE}/apps/${encodeURIComponent(appName)}/metrics/stream?token=${encodeURIComponent(token)}`,
-    (payload) => onMessage(payload as VmMetricsResponse)
+  return createFetchSseStream(
+    `${API_PROXY_BASE}/apps/${encodeURIComponent(appName)}/metrics/stream`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+    (payload) => onMessage(payload as VmMetricsResponse),
   );
 }
 
 export function watchMeshStatusSSE(token: string, onMessage: (mesh: MeshStatus) => void) {
-  return eventSourceStream(`${API_PROXY_BASE}/networking/mesh/stream?token=${encodeURIComponent(token)}`, (payload) =>
-    onMessage(payload as MeshStatus)
+  return createFetchSseStream(
+    `${API_PROXY_BASE}/networking/mesh/stream`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+    (payload) => onMessage(payload as MeshStatus),
   );
 }
 
 export function watchWorkspaceEventsSSE(token: string, onMessage: (event: WorkspaceEvent) => void) {
-  return eventSourceStream(`${API_PROXY_BASE}/workspace/events?token=${encodeURIComponent(token)}`, (payload) =>
-    onMessage(payload as WorkspaceEvent)
+  return createFetchSseStream(
+    `${API_PROXY_BASE}/workspace/events`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+    (payload) => onMessage(payload as WorkspaceEvent),
+  );
+}
+
+export function watchHealthSSE(onMessage: (health: HealthResponse) => void) {
+  return eventSourceStream(`${API_PROXY_BASE}/health/stream`, (payload) =>
+    onMessage(payload as HealthResponse)
   );
 }
 
 export function watchAppLogsSSE(token: string, appName: string, onMessage: (logs: LogLine | LogLine[]) => void) {
-  return eventSourceStream(`${API_PROXY_BASE}/apps/${encodeURIComponent(appName)}/logs/stream?token=${encodeURIComponent(token)}`, (payload) =>
-    onMessage(payload as LogLine | LogLine[])
+  return createFetchSseStream(
+    `${API_PROXY_BASE}/apps/${encodeURIComponent(appName)}/logs/stream`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+    (payload) => onMessage(payload as LogLine | LogLine[]),
   );
 }
 

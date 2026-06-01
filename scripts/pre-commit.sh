@@ -13,12 +13,12 @@ run_app=false
 
 for file in $staged_files; do
   case "$file" in
-    Cargo.toml|Cargo.lock|Makefile|*.rs|*.proto|mikrom-api/*|mikrom-agent/*|mikrom-builder/*|mikrom-cli/*|mikrom-dns/*|mikrom-init/*|mikrom-network/*|mikrom-proto/*|mikrom-router/*|mikrom-scheduler/*)
-      run_rust=true
-      ;;
-    mikrom-app/*)
-      run_app=true
-      ;;
+  Cargo.toml | Cargo.lock | Makefile | *.rs | *.proto | mikrom-api/* | mikrom-agent/* | mikrom-builder/* | mikrom-cli/* | mikrom-dns/* | mikrom-init/* | mikrom-network/* | mikrom-proto/* | mikrom-router/* | mikrom-scheduler/*)
+    run_rust=true
+    ;;
+  mikrom-app/*)
+    run_app=true
+    ;;
   esac
 done
 
@@ -40,10 +40,10 @@ if [ "$run_rust" = true ]; then
 fi
 
 if [ "$run_app" = true ]; then
-  echo "Linting mikrom-app..."
-  make app-lint
   echo "Checking mikrom-app..."
   make app-check
+  echo "Linting mikrom-app..."
+  make app-lint
   echo "Unit Tests mikrom-app..."
   make app-test-unit
   echo "Playwright e2e Tests on mikrom-app..."
