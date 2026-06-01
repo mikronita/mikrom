@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use mikrom_api::AppState;
@@ -10,6 +10,32 @@ use mikrom_api::infrastructure::db::{
     PostgresAppRepository, PostgresDatabaseRepository, PostgresGithubRepository,
     PostgresTenantRepository, PostgresUserRepository, PostgresVolumeRepository,
 };
+
+fn bind_dual_stack_listener(port: u16) -> anyhow::Result<tokio::net::TcpListener> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV6,
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )
+    .map_err(|e| anyhow::anyhow!("failed to create IPv6 listener socket on port {port}: {e}"))?;
+    socket
+        .set_only_v6(false)
+        .map_err(|e| anyhow::anyhow!("failed to enable dual-stack mode on port {port}: {e}"))?;
+
+    let addr = std::net::SocketAddr::from((Ipv6Addr::UNSPECIFIED, port));
+    socket
+        .bind(&socket2::SockAddr::from(addr))
+        .map_err(|e| anyhow::anyhow!("failed to bind dual-stack listener on {addr}: {e}"))?;
+    socket
+        .listen(1024)
+        .map_err(|e| anyhow::anyhow!("failed to listen on {addr}: {e}"))?;
+    socket
+        .set_nonblocking(true)
+        .map_err(|e| anyhow::anyhow!("failed to set nonblocking on {addr}: {e}"))?;
+
+    tokio::net::TcpListener::from_std(socket.into())
+        .map_err(|e| anyhow::anyhow!("failed to convert listener on {addr} to tokio: {e}"))
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -103,10 +129,10 @@ async fn main() -> anyhow::Result<()> {
 
     let app = create_app_with_rate_limits(state, rate_limiter);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], api_port));
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = bind_dual_stack_listener(api_port)?;
+    let addr = listener.local_addr()?;
 
-    tracing::info!("Server running on http://{}", addr);
+    tracing::info!(listen_addr = %addr, "Server running on http://{addr}");
 
     axum::serve(
         listener,
@@ -114,4 +140,43 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bind_dual_stack_listener;
+    use std::net::{Ipv4Addr, Ipv6Addr, TcpStream};
+
+    #[test]
+    fn dual_stack_listener_accepts_ipv4_and_ipv6() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+
+        let listener = match runtime.block_on(async { bind_dual_stack_listener(0) }) {
+            Ok(listener) => listener,
+            Err(err) => {
+                eprintln!("skipping api smoke test: dual-stack bind unavailable: {err}");
+                return;
+            },
+        };
+        let port = listener
+            .local_addr()
+            .expect("local addr should be available")
+            .port();
+
+        let handle = std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().expect("runtime should build");
+            rt.block_on(async move {
+                for _ in 0..2 {
+                    let _ = listener.accept().await;
+                }
+            });
+        });
+
+        let v6 = std::net::SocketAddr::from((Ipv6Addr::LOCALHOST, port));
+        let v4 = std::net::SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+        TcpStream::connect(v6).expect("ipv6 loopback should connect");
+        TcpStream::connect(v4).expect("ipv4 loopback should connect");
+
+        handle.join().expect("listener thread should exit");
+    }
 }
