@@ -81,8 +81,10 @@ impl DatabaseService {
             .map_err(|e| ApiError::Internal(e.to_string()))?
             .ok_or_else(|| ApiError::NotFound("Tenant not found".to_string()))?;
 
+        let owner_user_id = resolve_tenant_owner_user_id(state, params.tenant_id).await?;
         let mut params = params;
         Self::ensure_neon_provisioning_ids(&mut params);
+        params.user_id = owner_user_id;
 
         let database = state
             .ctx
@@ -212,7 +214,7 @@ impl DatabaseService {
         let deployment = state
             .ctx
             .database_repo
-            .create_deployment(database.id, database.tenant_id)
+            .create_deployment(database.id, database.tenant_id, owner_user_id)
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -750,11 +752,11 @@ mod tests {
             });
         db_repo
             .expect_create_deployment()
-            .with(eq(database_id), eq(user_id))
+            .with(eq(database_id), eq(user_id), eq(user_id))
             .times(1)
             .returning({
                 let deployment = deployment.clone();
-                move |_, _| {
+                move |_, _, _| {
                     let value = deployment.clone();
                     Box::pin(async move { Ok(value) })
                 }
@@ -885,6 +887,7 @@ mod tests {
             .with(function(|params: &CreateDatabaseParams| {
                 params.name == "orders"
                     && params.engine == "neon"
+                    && params.user_id == user_id
                     && params.disk_mib == 1024
                     && params.vcpus.value() == 1
                     && params.memory_mib.value() == 512
@@ -1297,9 +1300,9 @@ mod tests {
             });
         db_repo
             .expect_create_deployment()
-            .with(eq(database_id), eq(user_id))
+            .with(eq(database_id), eq(user_id), eq(user_id))
             .times(1)
-            .returning(move |_, _| {
+            .returning(move |_, _, _| {
                 let value = deployment.clone();
                 Box::pin(async move {
                     Ok(DatabaseDeployment {
@@ -1371,9 +1374,9 @@ mod tests {
             });
         db_repo
             .expect_create_deployment()
-            .with(eq(database_id), eq(user_id))
+            .with(eq(database_id), eq(user_id), eq(user_id))
             .times(1)
-            .returning(move |_, _| {
+            .returning(move |_, _, _| {
                 let value = deployment.clone();
                 Box::pin(async move {
                     Ok(DatabaseDeployment {

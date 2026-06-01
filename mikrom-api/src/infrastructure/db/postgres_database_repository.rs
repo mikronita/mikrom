@@ -23,14 +23,15 @@ impl DatabaseRepository for PostgresDatabaseRepository {
         let db = sqlx::query_as::<_, DbDatabase>(
             r#"
             INSERT INTO databases (
-                name, engine, tenant_id, vcpus, memory_mib, disk_mib, status, neon_tenant_id, neon_timeline_id, tenant_gen, settings
+                name, engine, user_id, tenant_id, vcpus, memory_mib, disk_mib, status, neon_tenant_id, neon_timeline_id, tenant_gen, settings
             )
-            VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $11)
             RETURNING id, name, engine, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at
             "#,
         )
         .bind(params.name)
         .bind(params.engine)
+        .bind(params.user_id)
         .bind(params.tenant_id)
         .bind(params.vcpus.value() as i32)
         .bind(params.memory_mib.value() as i32)
@@ -169,15 +170,17 @@ impl DatabaseRepository for PostgresDatabaseRepository {
         &self,
         db_id: Uuid,
         tenant_id: Uuid,
+        user_id: Uuid,
     ) -> DomainResult<DatabaseDeployment> {
         let deployment = sqlx::query_as::<_, DbDatabaseDeployment>(
             r#"
-            INSERT INTO database_deployments (database_id, tenant_id, status)
-            VALUES ($1, $2, 'PENDING')
+            INSERT INTO database_deployments (database_id, user_id, tenant_id, status)
+            VALUES ($1, $2, $3, 'PENDING')
             RETURNING id, database_id, tenant_id, job_id, status, host_id, vm_id, ipv6_address, created_at, updated_at
             "#,
         )
         .bind(db_id)
+        .bind(user_id)
         .bind(tenant_id)
         .fetch_one(&self.pool)
         .await

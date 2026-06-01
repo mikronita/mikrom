@@ -73,6 +73,7 @@ export async function mockControlPlaneApi(
   let projectsState = [...projects];
   let securityRulesState = [...securityRules];
   let appsState = [...apps];
+  let volumesState = [...volumes];
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -295,7 +296,20 @@ export async function mockControlPlaneApi(
     }
 
     if (pathname === `${apiBase}/volumes` && method === "GET") {
-      await route.fulfill(jsonResponse(volumes));
+      await route.fulfill(jsonResponse(volumesState));
+      return;
+    }
+
+    if (pathname.startsWith(`${apiBase}/volumes/`) && method === "DELETE") {
+      const volumeId = decodeURIComponent(pathname.slice(`${apiBase}/volumes/`.length));
+      const volume = volumesState.find((entry) => entry.id === volumeId);
+      if (!volume) {
+        await route.fulfill(jsonResponse({ error: "Volume not found", status: 404 }, 404));
+        return;
+      }
+
+      volumesState = volumesState.filter((entry) => entry.id !== volumeId);
+      await route.fulfill({ status: 204 });
       return;
     }
 

@@ -9,7 +9,6 @@
     CardDescription, 
     CardContent, 
     Badge, 
-    ButtonGroup,
     Button, 
     Input,
     EmptyState, 
@@ -96,16 +95,52 @@
     </div>
 
     <Card size="sm" class="overflow-hidden">
-      <CardContent class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <CardContent class="flex flex-col gap-4">
         <div class="min-w-0 flex-1">
           <Input bind:value={query} placeholder="Search by app name, hostname or repository" />
         </div>
-        <ButtonGroup class="w-full md:w-auto">
-          <Button size="sm" variant={statusFilter === "all" ? "secondary" : "outline"} onclick={() => (statusFilter = "all")}>All</Button>
-          <Button size="sm" variant={statusFilter === "active" ? "secondary" : "outline"} onclick={() => (statusFilter = "active")}>Active</Button>
-          <Button size="sm" variant={statusFilter === "paused" ? "secondary" : "outline"} onclick={() => (statusFilter = "paused")}>Paused</Button>
-          <Button size="sm" variant={statusFilter === "idle" ? "secondary" : "outline"} onclick={() => (statusFilter = "idle")}>Idle</Button>
-        </ButtonGroup>
+        <div class="flex border-b border-border overflow-x-auto">
+          <button
+            class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+              statusFilter === "all"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onclick={() => (statusFilter = "all")}
+          >
+            All
+          </button>
+          <button
+            class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+              statusFilter === "active"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onclick={() => (statusFilter = "active")}
+          >
+            Active
+          </button>
+          <button
+            class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+              statusFilter === "paused"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onclick={() => (statusFilter = "paused")}
+          >
+            Paused
+          </button>
+          <button
+            class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+              statusFilter === "idle"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onclick={() => (statusFilter = "idle")}
+          >
+            Idle
+          </button>
+        </div>
       </CardContent>
     </Card>
 

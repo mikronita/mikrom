@@ -307,13 +307,14 @@ impl AppRepository for PostgresAppRepository {
 
         let db_deployment = sqlx::query_as::<_, DbDeployment>(&format!(
             r#"
-            INSERT INTO deployments (app_id, tenant_id, status, vcpus, memory_mib, disk_mib, port, env_vars, trigger_source, git_commit_hash, git_commit_message, git_branch, hypervisor)
-            VALUES ($1, $2, 'BUILDING', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            INSERT INTO deployments (app_id, user_id, tenant_id, status, vcpus, memory_mib, disk_mib, port, env_vars, trigger_source, git_commit_hash, git_commit_message, git_branch, hypervisor)
+            VALUES ($1, $2, $3, 'BUILDING', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING {}
             "#,
             Self::deployment_select_columns(None)
         ))
         .bind(data.app_id)
+        .bind(data.user_id)
         .bind(uid)
         .bind(i32::from(data.vcpus))
         .bind(i64::from(i32::from(data.memory_mib)))
@@ -574,6 +575,7 @@ mod tests {
         let deployment = app_repo
             .create_deployment(NewDeployment::from_handler(
                 app.id,
+                tenant_id,
                 tenant_id.to_string(),
                 crate::domain::types::CpuCores::new(1).unwrap(),
                 crate::domain::types::MemoryMb::new(256).unwrap(),

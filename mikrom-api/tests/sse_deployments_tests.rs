@@ -13,9 +13,10 @@ use mikrom_api::create_app;
 use mikrom_api::domain::app::{App, Deployment};
 use mikrom_api::domain::github::MockGithubRepository;
 use mikrom_api::domain::user::{MockUserRepository, UserRole};
-use mikrom_api::domain::{MockAppRepository, MockScheduler, MockTenantRepository};
+use mikrom_api::domain::{MockAppRepository, MockScheduler, MockTenantRepository, Tenant};
 
 const JWT_SECRET: &str = "test-secret";
+const TENANT_SLUG: &str = "abc123";
 
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     let nats_url =
@@ -33,6 +34,7 @@ async fn connect_nats_or_skip() -> Option<async_nats::Client> {
 async fn build_state(
     app_repo: MockAppRepository,
     _tenant_id: uuid::Uuid,
+    user_id: uuid::Uuid,
     nats_client: async_nats::Client,
 ) -> AppState {
     let mut scheduler = MockScheduler::new();
@@ -40,10 +42,32 @@ async fn build_state(
         .expect_list_apps()
         .returning(|_| Ok(mikrom_proto::scheduler::ListAppsResponse::default()));
 
+    let mut tenant_repo = MockTenantRepository::new();
+    tenant_repo.expect_find_by_slug().returning(move |slug| {
+        Ok((slug == TENANT_SLUG).then_some(Tenant {
+            id: _tenant_id,
+            tenant_id: TENANT_SLUG.to_string(),
+            name: "Default Project".to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }))
+    });
+    tenant_repo
+        .expect_is_member()
+        .returning(move |tenant_id, member_user_id| {
+            Ok(tenant_id == _tenant_id && member_user_id == user_id)
+        });
+
+    let tenant_repo = Arc::new(tenant_repo);
+    let ctx = mikrom_api::application::ApiContext {
+        tenant_repo: tenant_repo.clone(),
+        ..mikrom_api::application::ApiContext::default()
+    };
+
     AppState {
-        ctx: mikrom_api::application::ApiContext::default(),
+        ctx,
         user_repo: Arc::new(MockUserRepository::new()),
-        tenant_repo: Arc::new(MockTenantRepository::new()),
+        tenant_repo,
         app_repo: Arc::new(app_repo),
         database_repo: Arc::new(mikrom_api::domain::MockDatabaseRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
@@ -78,6 +102,7 @@ async fn test_sse_deployments_stream_initial_data() {
     let app_name = "test-app";
     let app_id = uuid::Uuid::new_v4();
     let tenant_id = uuid::Uuid::new_v4();
+    let user_id = uuid::Uuid::new_v4();
     let Some(nats_client) = connect_nats_or_skip().await else {
         return;
     };
@@ -108,10 +133,10 @@ async fn test_sse_deployments_stream_initial_data() {
             }])
         });
 
-    let state = build_state(mock_app_repo, tenant_id, nats_client).await;
+    let state = build_state(mock_app_repo, tenant_id, user_id, nats_client).await;
     let router = create_app(state);
     let token = create_token(
-        &tenant_id.to_string(),
+        &user_id.to_string(),
         "test@test.com",
         &UserRole::User,
         JWT_SECRET,
@@ -124,6 +149,7 @@ async fn test_sse_deployments_stream_initial_data() {
                 .method("GET")
                 .uri(format!("/v1/apps/{app_name}/deployments/stream"))
                 .header("Authorization", format!("Bearer {token}"))
+                .header("x-mikrom-tenant-id", TENANT_SLUG)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -146,6 +172,7 @@ async fn test_sse_deployments_stream_updates() {
     let app_name = "test-app-updates";
     let app_id = uuid::Uuid::new_v4();
     let tenant_id = uuid::Uuid::new_v4();
+    let user_id = uuid::Uuid::new_v4();
     let Some(nats_client) = connect_nats_or_skip().await else {
         return;
     };
@@ -182,11 +209,11 @@ async fn test_sse_deployments_stream_updates() {
             }])
         });
 
-    let state = build_state(mock_app_repo, tenant_id, nats_client).await;
+    let state = build_state(mock_app_repo, tenant_id, user_id, nats_client).await;
     let tx = state.deployment_events.clone();
     let router = create_app(state);
     let token = create_token(
-        &tenant_id.to_string(),
+        &user_id.to_string(),
         "test@test.com",
         &UserRole::User,
         JWT_SECRET,
@@ -199,6 +226,7 @@ async fn test_sse_deployments_stream_updates() {
                 .method("GET")
                 .uri(format!("/v1/apps/{app_name}/deployments/stream"))
                 .header("Authorization", format!("Bearer {token}"))
+                .header("x-mikrom-tenant-id", TENANT_SLUG)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -224,6 +252,7 @@ async fn test_sse_deployments_auth_via_query_param() {
     let app_name = "test-app-query-auth";
     let app_id = uuid::Uuid::new_v4();
     let tenant_id = uuid::Uuid::new_v4();
+    let user_id = uuid::Uuid::new_v4();
     let Some(nats_client) = connect_nats_or_skip().await else {
         return;
     };
@@ -245,10 +274,10 @@ async fn test_sse_deployments_auth_via_query_param() {
         .with(eq(app_id))
         .returning(|_| Ok(vec![]));
 
-    let state = build_state(mock_app_repo, tenant_id, nats_client).await;
+    let state = build_state(mock_app_repo, tenant_id, user_id, nats_client).await;
     let router = create_app(state);
     let token = create_token(
-        &tenant_id.to_string(),
+        &user_id.to_string(),
         "test@test.com",
         &UserRole::User,
         JWT_SECRET,
@@ -262,6 +291,7 @@ async fn test_sse_deployments_auth_via_query_param() {
                 .uri(format!(
                     "/v1/apps/{app_name}/deployments/stream?token={token}"
                 ))
+                .header("x-mikrom-tenant-id", TENANT_SLUG)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -278,6 +308,7 @@ async fn test_sse_deployments_ignores_other_tenant_events() {
     let app_id = uuid::Uuid::new_v4();
     let tenant_id = uuid::Uuid::new_v4();
     let other_tenant_id = uuid::Uuid::new_v4();
+    let user_id = uuid::Uuid::new_v4();
     let Some(nats_client) = connect_nats_or_skip().await else {
         return;
     };
@@ -299,10 +330,10 @@ async fn test_sse_deployments_ignores_other_tenant_events() {
         .with(eq(app_id))
         .returning(|_| Ok(vec![]));
 
-    let state = build_state(mock_app_repo, tenant_id, nats_client.clone()).await;
+    let state = build_state(mock_app_repo, tenant_id, user_id, nats_client.clone()).await;
     let router = create_app(state);
     let token = create_token(
-        &tenant_id.to_string(),
+        &user_id.to_string(),
         "test@test.com",
         &UserRole::User,
         JWT_SECRET,
@@ -315,6 +346,7 @@ async fn test_sse_deployments_ignores_other_tenant_events() {
                 .method("GET")
                 .uri(format!("/v1/apps/{app_name}/deployments/stream"))
                 .header("Authorization", format!("Bearer {token}"))
+                .header("x-mikrom-tenant-id", TENANT_SLUG)
                 .body(Body::empty())
                 .unwrap(),
         )

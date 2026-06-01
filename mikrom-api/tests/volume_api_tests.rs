@@ -14,7 +14,7 @@ use mikrom_api::domain::user::{MockUserRepository, User, UserRole};
 use mikrom_api::domain::volume::{Volume, VolumeSnapshot};
 use mikrom_api::domain::{
     CreateSnapshotParams, CreateVolumeParams, MockAppRepository, MockDatabaseRepository,
-    MockScheduler, MockTenantRepository, MockVolumeRepository,
+    MockScheduler, MockTenantRepository, MockVolumeRepository, TenantMember,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -151,8 +151,15 @@ fn build_state(
     tenant_repo
         .expect_is_member()
         .returning(move |_, user_id| Ok(user_id == tenant_id_for_membership));
+    tenant_repo.expect_get_members().returning(move |_| {
+        Ok(vec![TenantMember {
+            tenant_id,
+            user_id,
+            role: "admin".to_string(),
+        }])
+    });
 
-    let state = AppState {
+    let mut state = AppState {
         ctx: mikrom_api::application::ApiContext::default(),
         user_repo: user_repo.clone(),
         tenant_repo: Arc::new(tenant_repo),
@@ -181,6 +188,7 @@ fn build_state(
         github_webhook_url_base: None,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     };
+    state.ctx.tenant_repo = state.tenant_repo.clone();
 
     (state, volume_repo, app_repo, user_repo)
 }
@@ -201,6 +209,7 @@ async fn create_volume_handler_creates_volume_for_tenant() {
     volume_repo_mock
         .expect_create_volume()
         .returning(move |params: CreateVolumeParams| {
+            assert_eq!(params.user_id, user_id);
             assert_eq!(params.tenant_id, tenant_id);
             assert_eq!(params.name, "test-vol");
             assert_eq!(params.size_mib, 1024);
@@ -278,6 +287,7 @@ async fn create_snapshot_handler_creates_snapshot_for_volume() {
     volume_repo_mock
         .expect_create_snapshot()
         .returning(move |params: CreateSnapshotParams| {
+            assert_eq!(params.user_id, user_id);
             assert_eq!(params.volume_id, volume_id);
             assert_eq!(params.tenant_id, tenant_id);
             assert_eq!(params.name, "snap-1");

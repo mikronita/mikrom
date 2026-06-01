@@ -129,6 +129,7 @@ pub struct SecurityRule {
 #[derive(Debug, Clone)]
 pub struct NewDeployment {
     pub app_id: Uuid,
+    pub user_id: Uuid,
     pub tenant_id: String,
     pub vcpus: CpuCores,
     pub memory_mib: MemoryMb,
@@ -146,6 +147,7 @@ impl Default for NewDeployment {
     fn default() -> Self {
         Self {
             app_id: Uuid::new_v4(),
+            user_id: Uuid::nil(),
             tenant_id: String::new(),
             vcpus: CpuCores::new(1).unwrap(),
             memory_mib: MemoryMb::new(128).unwrap(),
@@ -165,6 +167,7 @@ impl NewDeployment {
     #[allow(clippy::too_many_arguments)]
     pub fn from_handler(
         app_id: Uuid,
+        user_id: Uuid,
         tenant_id: String,
         vcpus: CpuCores,
         memory_mib: MemoryMb,
@@ -177,6 +180,7 @@ impl NewDeployment {
     ) -> Self {
         Self {
             app_id,
+            user_id,
             tenant_id,
             vcpus,
             memory_mib,

@@ -59,6 +59,7 @@ pub struct DatabaseDeployment {
 pub struct CreateDatabaseParams {
     pub name: String,
     pub engine: String,
+    pub user_id: Uuid,
     pub tenant_id: Uuid,
     pub vcpus: CpuCores,
     pub memory_mib: MemoryMb,
@@ -115,6 +116,7 @@ pub trait DatabaseRepository: Send + Sync {
         &self,
         db_id: Uuid,
         tenant_id: Uuid,
+        user_id: Uuid,
     ) -> crate::domain::DomainResult<DatabaseDeployment>;
     async fn get_deployment(
         &self,

@@ -7,7 +7,6 @@
     CardDescription,
     CardContent,
     Badge,
-    ButtonGroup,
     Button,
     Input,
     CardSkeleton,
@@ -67,17 +66,62 @@
     </div>
 
     <Card size="sm" class="overflow-hidden">
-      <CardContent class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <CardContent class="flex flex-col gap-4">
         <div class="min-w-0 flex-1">
           <Input bind:value={query} placeholder="Search by database name, version or status" />
         </div>
-        <ButtonGroup class="w-full md:w-auto">
-          <Button size="sm" variant={statusFilter === "all" ? "secondary" : "outline"} onclick={() => (statusFilter = "all")}>All</Button>
-          <Button size="sm" variant={statusFilter === "running" ? "secondary" : "outline"} onclick={() => (statusFilter = "running")}>Running</Button>
-          <Button size="sm" variant={statusFilter === "provisioning" ? "secondary" : "outline"} onclick={() => (statusFilter = "provisioning")}>Provisioning</Button>
-          <Button size="sm" variant={statusFilter === "deleting" ? "secondary" : "outline"} onclick={() => (statusFilter = "deleting")}>Deleting</Button>
-          <Button size="sm" variant={statusFilter === "stopped" ? "secondary" : "outline"} onclick={() => (statusFilter = "stopped")}>Stopped</Button>
-        </ButtonGroup>
+        <div class="flex border-b border-border overflow-x-auto">
+          <button
+            class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+              statusFilter === "all"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onclick={() => (statusFilter = "all")}
+          >
+            All
+          </button>
+          <button
+            class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+              statusFilter === "running"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onclick={() => (statusFilter = "running")}
+          >
+            Running
+          </button>
+          <button
+            class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+              statusFilter === "provisioning"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onclick={() => (statusFilter = "provisioning")}
+          >
+            Provisioning
+          </button>
+          <button
+            class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+              statusFilter === "deleting"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onclick={() => (statusFilter = "deleting")}
+          >
+            Deleting
+          </button>
+          <button
+            class={`px-4 py-2 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+              statusFilter === "stopped"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onclick={() => (statusFilter = "stopped")}
+          >
+            Stopped
+          </button>
+        </div>
       </CardContent>
     </Card>
 

@@ -246,11 +246,17 @@ pub async fn list_apps_handler(
 
 #[rovo::rovo]
 pub async fn delete_app_handler(
-    auth: AuthUser,
+    _auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<StatusCode> {
-    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(
+        &state,
+        &app_name,
+        &tenant_ctx.tenant.id.to_string(),
+    )
+    .await?;
 
     #[allow(clippy::collapsible_if)]
     if let Some(hostname) = &app.hostname {
@@ -299,11 +305,17 @@ pub async fn delete_app_handler(
 #[rovo::rovo]
 pub async fn scale_app_handler(
     auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Path(app_name): Path<String>,
     Json(payload): Json<ScaleAppRequest>,
 ) -> ApiResult<StatusCode> {
-    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(
+        &state,
+        &app_name,
+        &tenant_ctx.tenant.id.to_string(),
+    )
+    .await?;
 
     let user_uuid =
         Uuid::parse_str(&auth.user_id).map_err(|_| ApiError::Auth("Invalid user ID".into()))?;
@@ -396,11 +408,16 @@ pub async fn scale_app_handler(
 
 #[rovo::rovo]
 pub async fn list_deployments_handler(
-    auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<Json<Vec<Deployment>>> {
-    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(
+        &state,
+        &app_name,
+        &tenant_ctx.tenant.id.to_string(),
+    )
+    .await?;
     let deployments = state
         .app_repo
         .list_deployments_by_app(app.id)
@@ -411,11 +428,16 @@ pub async fn list_deployments_handler(
 
 #[rovo::rovo]
 pub async fn deployments_stream_handler(
-    auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Path(app_name): Path<String>,
 ) -> ApiResult<crate::error::SseResponse<impl Stream<Item = Result<Event, Infallible>>>> {
-    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
+    let app = DeploymentService::get_app_by_name_and_auth(
+        &state,
+        &app_name,
+        &tenant_ctx.tenant.id.to_string(),
+    )
+    .await?;
     let app_id = app.id;
     let rx = state.deployment_events.subscribe();
     let state_clone = state.clone();
@@ -495,11 +517,13 @@ pub async fn deployments_stream_handler(
 
 #[rovo::rovo]
 pub async fn activate_deployment_handler(
-    auth: AuthUser,
+    _auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Path((app_name, deployment_id)): Path<(String, Uuid)>,
 ) -> ApiResult<StatusCode> {
-    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &auth.user_id).await?;
+    let tenant_id = tenant_ctx.tenant.id.to_string();
+    let app = DeploymentService::get_app_by_name_and_auth(&state, &app_name, &tenant_id).await?;
 
     let deployment = state
         .app_repo
@@ -518,7 +542,7 @@ pub async fn activate_deployment_handler(
 
         let nats_req = AppStatusRequest {
             job_id,
-            tenant_id: auth.user_id.clone(),
+            tenant_id: tenant_id.clone(),
         };
 
         match state
@@ -638,7 +662,7 @@ pub async fn activate_deployment_handler(
                 app,
                 deployment,
                 inner,
-                auth.user_id,
+                tenant_id,
                 cleanup_on_failure,
                 guard,
             );
@@ -661,6 +685,7 @@ pub async fn activate_deployment_handler(
 #[rovo::rovo]
 pub async fn deploy_app(
     auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Json(payload): Json<DeployRequestPayload>,
 ) -> ApiResult<Json<DeployResponseBody>> {
@@ -670,10 +695,13 @@ pub async fn deploy_app(
     let env_vars = payload.env.clone().unwrap_or_default();
     let image = payload.image.clone();
     let hypervisor = resolve_deployment_hypervisor(payload.hypervisor.as_deref());
+    let owner_user_id =
+        crate::application::tenant::resolve_tenant_owner_user_id(&state, tenant_ctx.tenant.id)
+            .await?;
 
     let app = match state.app_repo.get_app_by_name(&payload.app_name).await? {
         Some(app) => {
-            if app.tenant_id.to_string() != auth.user_id {
+            if app.tenant_id != tenant_ctx.tenant.id {
                 return Err(ApiError::Forbidden);
             }
             app
@@ -686,7 +714,7 @@ pub async fn deploy_app(
 
                 let create_params = crate::domain::CreateAppParams {
                     user_id: user_uuid,
-                    tenant_id: user_uuid,
+                    tenant_id: tenant_ctx.tenant.id,
                     name: payload.app_name.clone(),
                     git_url,
                     port: payload.port.unwrap_or_else(|| Port::new(8080).unwrap()),
@@ -705,6 +733,7 @@ pub async fn deploy_app(
         .app_repo
         .create_deployment(crate::domain::NewDeployment::from_handler(
             app.id,
+            owner_user_id,
             app.tenant_id.to_string(),
             vcpus,
             memory_mib,
@@ -743,7 +772,7 @@ pub async fn deploy_app(
         app,
         deployment.clone(),
         inner.clone(),
-        auth.user_id,
+        tenant_ctx.tenant.id.to_string(),
         true,
         guard,
     );
@@ -761,7 +790,7 @@ pub async fn deploy_app(
 
 #[rovo::rovo]
 pub async fn deploy_app_version_handler(
-    auth: AuthUser,
+    tenant_ctx: TenantContext,
     State(state): State<AppState>,
     Path(app_name): Path<String>,
     Json(payload): Json<ManualDeployRequest>,
@@ -775,7 +804,7 @@ pub async fn deploy_app_version_handler(
 
     let response = DeploymentService::deploy_app_version(
         &state,
-        &auth.user_id,
+        &tenant_ctx.tenant.id.to_string(),
         &app_name,
         crate::application::deployment::service::DeployVersionParams {
             vcpus,
@@ -809,8 +838,9 @@ mod tests {
     use crate::domain::MockScheduler;
     use crate::domain::github::MockGithubRepository;
     use crate::domain::{
-        MockAppRepository, MockUserRepository, MockVolumeRepository, User, UserRole,
+        MockAppRepository, MockUserRepository, MockVolumeRepository, Tenant, User, UserRole,
     };
+    use crate::infrastructure::auth::extractor::TenantContext;
     use axum::extract::{Path, State};
     use std::sync::Arc;
     use uuid::Uuid;
@@ -868,6 +898,18 @@ mod tests {
             github_app_slug: None,
             github_webhook_url_base: None,
             active_deployment_flows: Arc::new(dashmap::DashSet::new()),
+        }
+    }
+
+    fn tenant_context(tenant_id: Uuid) -> TenantContext {
+        TenantContext {
+            tenant: Tenant {
+                id: tenant_id,
+                tenant_id: tenant_id.to_string().chars().take(6).collect(),
+                name: "test-project".to_string(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            },
         }
     }
 
@@ -967,6 +1009,7 @@ mod tests {
             email: "test@example.com".to_string(),
             role: UserRole::User,
         };
+        let tenant_ctx = tenant_context(user_id);
 
         let app = crate::domain::App {
             id: Uuid::new_v4(),
@@ -1009,6 +1052,7 @@ mod tests {
 
         let result = __scale_app_handler_impl(
             auth,
+            tenant_ctx,
             State(state),
             Path("test-app".to_string()),
             axum::Json(payload),
@@ -1034,6 +1078,7 @@ mod tests {
             email: "test@example.com".to_string(),
             role: UserRole::User,
         };
+        let tenant_ctx = tenant_context(user_id);
 
         let shared_app = Arc::new(std::sync::Mutex::new(crate::domain::App {
             id: app_id,
@@ -1109,6 +1154,7 @@ mod tests {
 
         let result = __scale_app_handler_impl(
             auth,
+            tenant_ctx,
             State(state),
             Path("test-app".to_string()),
             axum::Json(ScaleAppRequest {

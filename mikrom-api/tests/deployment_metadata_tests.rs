@@ -56,6 +56,7 @@ async fn deployment_metadata_roundtrip_persists_git_fields() {
     let deployment = app_repo
         .create_deployment(NewDeployment {
             app_id: app.id,
+            user_id,
             tenant_id: tenant.id.to_string(),
             vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
             memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
@@ -174,6 +175,7 @@ async fn deployment_hypervisor_roundtrip_persists_integer_value() {
     let deployment = app_repo
         .create_deployment(NewDeployment {
             app_id: app.id,
+            user_id,
             tenant_id: tenant.id.to_string(),
             vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
             memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),

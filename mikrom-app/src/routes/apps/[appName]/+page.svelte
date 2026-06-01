@@ -33,7 +33,6 @@
     CardContent,
     Badge,
     Button,
-    ButtonGroup,
     AlertDialog,
     EmptyState,
     Modal,
@@ -818,7 +817,7 @@
                     {/if}
                   </td>
                   <td class="px-4 py-4 text-right">
-                    <ButtonGroup class="ml-auto">
+                    <div class="ml-auto flex justify-end">
                       {#if isProduction}
                         <Button size="sm" variant="outline" disabled>
                           Currently in Prod
@@ -841,7 +840,7 @@
                           {/if}
                         </Button>
                       {/if}
-                    </ButtonGroup>
+                    </div>
                   </td>
                 </tr>
               {/each}

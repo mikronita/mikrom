@@ -6,7 +6,7 @@ use mikrom_api::AppState;
 use mikrom_api::application::vms::MeshStatus;
 use mikrom_api::auth::jwt::create_token;
 use mikrom_api::create_app;
-use mikrom_api::domain::app::App;
+use mikrom_api::domain::app::{App, Deployment};
 use mikrom_api::domain::types::Port;
 use mikrom_api::domain::user::{MockUserRepository, User, UserRole};
 use mikrom_api::domain::{
@@ -418,4 +418,114 @@ async fn get_app_secret_handler_returns_raw_secret() {
         .unwrap();
     let secret: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(secret["github_webhook_secret"], "super-secret");
+}
+
+#[tokio::test]
+async fn list_deployments_handler_returns_tenant_deployments() {
+    let tenant_id = Uuid::new_v4();
+    let owner_user_id = Uuid::new_v4();
+    let (mut state, _, _, _) = build_state(tenant_id, owner_user_id);
+
+    let app = App {
+        id: Uuid::new_v4(),
+        name: "deploy-app".to_string(),
+        git_url: "https://github.com/test/repo".to_string(),
+        port: Port::new(8080).unwrap(),
+        hostname: Some("deploy-app.apps.mikrom.spluca.org".to_string()),
+        tenant_id,
+        github_webhook_secret: None,
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
+        active_deployment_id: None,
+        health_check_path: "/".to_string(),
+        drain_timeout: 10,
+        desired_replicas: 1,
+        min_replicas: 0,
+        max_replicas: 1,
+        autoscaling_enabled: false,
+        cpu_threshold: 80.0,
+        mem_threshold: 80.0,
+        last_router_traffic_at: 0,
+        last_scaled_to_zero_at: 0,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+
+    let deployment = Deployment {
+        id: Uuid::new_v4(),
+        app_id: app.id,
+        tenant_id,
+        build_id: Some("build-1".to_string()),
+        image_tag: Some("ghcr.io/mikrom/deploy-app:latest".to_string()),
+        job_id: Some("job-1".to_string()),
+        ipv6_address: Some("fd00::1".to_string()),
+        status: "RUNNING".to_string(),
+        vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+        memory_mib: mikrom_api::domain::types::MemoryMb::new(512).unwrap(),
+        disk_mib: 1024,
+        port: Port::new(8080).unwrap(),
+        env_vars: serde_json::json!({"ENV": "value"}),
+        git_commit_hash: Some("abc123".to_string()),
+        git_commit_message: Some("Deploy app".to_string()),
+        git_branch: Some("main".to_string()),
+        trigger_source: "manual".to_string(),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        hypervisor: 0,
+    };
+    let expected_app_id = app.id;
+    let expected_deployment_id = deployment.id;
+
+    let mut app_repo_mock = MockAppRepository::new();
+    app_repo_mock
+        .expect_get_app_by_name()
+        .with(eq("deploy-app"))
+        .returning({
+            let app = app.clone();
+            move |_| Ok(Some(app.clone()))
+        });
+    app_repo_mock
+        .expect_list_deployments_by_app()
+        .with(eq(expected_app_id))
+        .returning({
+            let deployment = deployment.clone();
+            move |_| Ok(vec![deployment.clone()])
+        });
+    state.app_repo = Arc::new(app_repo_mock);
+    state.ctx.app_repo = state.app_repo.clone();
+
+    let token = create_token(
+        &owner_user_id.to_string(),
+        "owner@example.com",
+        &UserRole::User,
+        "test-secret",
+    )
+    .unwrap();
+
+    let router = create_app(state);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/apps/deploy-app/deployments")
+                .header("Authorization", auth_header(&token))
+                .header("x-mikrom-tenant-id", TENANT_SLUG)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let deployments: Value = serde_json::from_slice(&body).unwrap();
+    let deployments = deployments
+        .as_array()
+        .expect("deployments should be an array");
+    assert_eq!(deployments.len(), 1);
+    assert_eq!(deployments[0]["id"], expected_deployment_id.to_string());
+    assert_eq!(deployments[0]["app_id"], expected_app_id.to_string());
 }

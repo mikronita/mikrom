@@ -3,7 +3,6 @@ export { AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDe
 export { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar/index.js";
 export { Badge } from "./ui/badge/index.js";
 export { Button, buttonVariants } from "./ui/button/index.js";
-export { default as ButtonGroup } from "./ButtonGroup.svelte";
 export { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./ui/card/index.js";
 export { default as CardSkeleton } from "./CardSkeleton.svelte";
 export { default as EmptyState } from "./EmptyState.svelte";
@@ -16,7 +15,6 @@ export { default as Modal } from "./Modal.svelte";
 export { DialogContent as ModalContent, DialogDescription as ModalDescription, DialogFooter as ModalFooter, DialogHeader as ModalHeader, DialogTitle as ModalTitle, DialogTrigger as ModalTrigger } from "./ui/dialog/index.js";
 export { Progress } from "./ui/progress/index.js";
 export { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "./ui/select/index.js";
-export { default as NativeSelect } from "./Select.svelte";
 export { Separator } from "./ui/separator/index.js";
 export { Skeleton } from "./ui/skeleton/index.js";
 export { Switch } from "./ui/switch/index.js";
