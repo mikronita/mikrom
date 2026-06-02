@@ -44,7 +44,6 @@ jobs:
   test:
     name: Tests (${{ matrix.group }})
     runs-on: ubuntu-latest
-    needs: smoke
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -79,7 +78,6 @@ jobs:
   build:
     name: Release Build
     runs-on: ubuntu-latest
-    needs: smoke
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -103,7 +101,6 @@ jobs:
   ebpf:
     name: eBPF
     runs-on: ubuntu-latest
-    needs: smoke
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -128,7 +125,6 @@ jobs:
     name: Frontend E2E
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: smoke
     steps:
       - name: Checkout
         uses: actions/checkout@v6
