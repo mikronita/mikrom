@@ -78,6 +78,12 @@ pub struct RouterConfig {
     #[serde(default = "default_acme_staging")]
     pub acme_staging: bool,
 
+    #[serde(default = "default_default_site_host")]
+    pub default_site_host: String,
+
+    #[serde(default = "default_default_site_redirect_url")]
+    pub default_site_redirect_url: String,
+
     #[serde(default = "default_rps_limit")]
     pub rps_limit: isize,
 
@@ -106,6 +112,14 @@ const fn default_wireguard_port() -> u16 {
 
 const fn default_acme_staging() -> bool {
     false
+}
+
+fn default_default_site_host() -> String {
+    "debaser.spluca.org".to_string()
+}
+
+fn default_default_site_redirect_url() -> String {
+    "https://spluca.org/".to_string()
 }
 
 const fn default_rps_limit() -> isize {
@@ -207,6 +221,14 @@ impl RouterConfig {
             return Err(anyhow::anyhow!("RPS_LIMIT must be greater than zero"));
         }
 
+        if self.default_site_host.trim().is_empty() {
+            return Err(anyhow::anyhow!("DEFAULT_SITE_HOST cannot be empty"));
+        }
+
+        if self.default_site_redirect_url.trim().is_empty() {
+            return Err(anyhow::anyhow!("DEFAULT_SITE_REDIRECT_URL cannot be empty"));
+        }
+
         if self.wireguard_port == 0 {
             return Err(anyhow::anyhow!("WIREGUARD_PORT must be greater than zero"));
         }
@@ -270,6 +292,8 @@ mod tests {
             state_cache_path: None,
             wireguard_port: 51822,
             acme_staging: false,
+            default_site_host: "debaser.spluca.org".to_string(),
+            default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 100,
             router_threads: 1,
         };
@@ -292,6 +316,8 @@ mod tests {
             state_cache_path: None,
             wireguard_port: 51822,
             acme_staging: false,
+            default_site_host: "debaser.spluca.org".to_string(),
+            default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 100,
             router_threads: 1,
         };
@@ -314,6 +340,8 @@ mod tests {
             state_cache_path: None,
             wireguard_port: 51822,
             acme_staging: false,
+            default_site_host: "debaser.spluca.org".to_string(),
+            default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 100,
             router_threads: 1,
         };
@@ -336,6 +364,8 @@ mod tests {
             state_cache_path: None,
             wireguard_port: 51822,
             acme_staging: false,
+            default_site_host: "debaser.spluca.org".to_string(),
+            default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 100,
             router_threads: 1,
         };
@@ -358,6 +388,8 @@ mod tests {
             state_cache_path: None,
             wireguard_port: 51822,
             acme_staging: false,
+            default_site_host: "debaser.spluca.org".to_string(),
+            default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 0,
             router_threads: 1,
         };
@@ -380,6 +412,8 @@ mod tests {
             state_cache_path: None,
             wireguard_port: 51822,
             acme_staging: false,
+            default_site_host: "debaser.spluca.org".to_string(),
+            default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 100,
             router_threads: 1,
         };

@@ -446,6 +446,8 @@ pub async fn setup_test_env(rps_limit: isize, use_ipv6: bool) -> Option<TestEnv>
         state.clone(),
         health,
         false,
+        String::new(),
+        String::new(),
         None,
         metrics,
         Some(traffic_publisher),

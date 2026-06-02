@@ -21,6 +21,8 @@ RUN cargo build --release -p mikrom-api && \
 FROM debian:trixie-slim AS runner
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+ENV ACME_STAGING=false
+ENV ROUTER_TLS_HOSTNAME=debaser.spluca.org
 COPY --from=builder /app/target/release/mikrom-api /usr/local/bin/
 EXPOSE 5001
 CMD ["mikrom-api"]
