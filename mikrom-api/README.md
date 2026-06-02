@@ -28,7 +28,8 @@
 - Uses NATS for scheduler and worker coordination.
 - Supports optional Neon configuration through `NEON_*` environment variables.
 - Uses Let's Encrypt production by default for ACME unless `ACME_STAGING=true` is set explicitly.
-- Manages the router's default redirect certificate for `debaser.spluca.org` through the same ACME worker.
+- Tracks the router's default redirect certificate for `debaser.spluca.org` through the same ACME worker, but the TLS storage tables themselves remain owned by `mikrom-router`.
+- Stores the desired ACME mode and one-shot reissue flag for managed hostnames in `acme_managed_domains`.
 - The runtime Docker image sets `ACME_STAGING=false` and `ROUTER_TLS_HOSTNAME=debaser.spluca.org` by default.
 - Local repository tests use `TestDb` and expect PostgreSQL to be available.
 

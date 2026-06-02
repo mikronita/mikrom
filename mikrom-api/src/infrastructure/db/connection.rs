@@ -13,6 +13,8 @@ pub async fn connect_to_url(database_url: &str) -> Result<PgPool, sqlx::Error> {
 }
 
 pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
+    // sqlx::migrate! embeds the migration directory at compile time, so Rust source
+    // changes are the reliable way to force Cargo to pick up new migration files.
     sqlx::migrate!("./migrations").run(pool).await
 }
 

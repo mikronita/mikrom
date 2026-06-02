@@ -87,22 +87,31 @@ pub async fn trigger_domain_certification(
         &state.master_key,
         &state.router_addr,
     )
-    .await
+    .await?;
+
+    Ok(())
 }
 
 pub async fn trigger_managed_domain_certification(
     state: &crate::AppState,
     hostname: &str,
 ) -> anyhow::Result<()> {
-    let url = LetsEncrypt::Production.url();
+    ensure_managed_domain(&state.api_db, hostname, false, true).await?;
 
-    let account = get_or_create_acme_account(&state.api_db, &state.acme_email, url, false).await?;
+    let account = get_or_create_acme_account(
+        &state.api_db,
+        &state.acme_email,
+        LetsEncrypt::Production.url(),
+        false,
+    )
+    .await?;
 
     certify_managed_domain(
         &state.api_db,
         &state.nats,
         &account,
         hostname,
+        false,
         &state.master_key,
         &state.router_addr,
     )
@@ -121,7 +130,7 @@ pub async fn run_acme_iteration(
     router_addr: &str,
 ) -> anyhow::Result<()> {
     if !router_tls_hostname.trim().is_empty() {
-        ensure_managed_domain(api_db, router_tls_hostname).await?;
+        ensure_managed_domain(api_db, router_tls_hostname, false, true).await?;
     }
 
     // 1. Find domains that need certificates (expired or expiring in < 30 days)
@@ -138,63 +147,100 @@ pub async fn run_acme_iteration(
 
     let managed_domains = sqlx::query(
         r#"
-        SELECT hostname
+        SELECT hostname, is_staging, needs_reissue
         FROM acme_managed_domains
-        WHERE cert_expires_at IS NULL OR cert_expires_at < NOW() + INTERVAL '30 days'
+        WHERE needs_reissue = TRUE
+           OR cert_expires_at IS NULL
+           OR cert_expires_at < NOW() + INTERVAL '30 days'
         "#,
     )
     .fetch_all(api_db)
     .await?;
 
-    let mut domains_to_certify = HashSet::new();
+    let mut app_domains_to_certify = HashSet::new();
     for row in app_domains {
-        domains_to_certify.insert(row.get::<String, _>("hostname"));
+        app_domains_to_certify.insert(row.get::<String, _>("hostname"));
     }
+
+    let mut managed_domains_to_certify = Vec::new();
     for row in managed_domains {
-        domains_to_certify.insert(row.get::<String, _>("hostname"));
+        let hostname: String = row.get("hostname");
+        let is_staging: bool = row.get("is_staging");
+        managed_domains_to_certify.push((hostname, is_staging));
     }
 
-    if !router_tls_hostname.trim().is_empty()
-        && managed_router_tls_needs_refresh(api_db, router_tls_hostname).await?
-    {
-        domains_to_certify.insert(router_tls_hostname.to_string());
-    }
-
-    if domains_to_certify.is_empty() {
+    if app_domains_to_certify.is_empty() && managed_domains_to_certify.is_empty() {
         return Ok(());
     }
 
     // 2. Get or create ACME account(s) from the API database.
-    let account = get_or_create_acme_account(api_db, email, acme_url, is_staging).await?;
-    let router_account = if router_tls_hostname.trim().is_empty() {
+    let app_account = if app_domains_to_certify.is_empty() {
         None
     } else {
-        Some(get_or_create_acme_account(api_db, email, LetsEncrypt::Production.url(), false).await?)
+        Some(get_or_create_acme_account(api_db, email, acme_url, is_staging).await?)
     };
 
-    for hostname in domains_to_certify {
+    let managed_staging_required = managed_domains_to_certify
+        .iter()
+        .any(|(_, is_staging)| *is_staging);
+    let managed_production_required = managed_domains_to_certify
+        .iter()
+        .any(|(_, is_staging)| !*is_staging);
+
+    let managed_staging_account = if managed_staging_required {
+        Some(get_or_create_acme_account(api_db, email, LetsEncrypt::Staging.url(), true).await?)
+    } else {
+        None
+    };
+
+    let managed_production_account = if managed_production_required {
+        Some(get_or_create_acme_account(api_db, email, LetsEncrypt::Production.url(), false).await?)
+    } else {
+        None
+    };
+
+    for hostname in app_domains_to_certify {
         info!("Processing certificate renewal for {}", hostname);
 
-        let result = if hostname == router_tls_hostname {
-            if let Some(router_account) = router_account.as_ref() {
-                certify_managed_domain(
-                    api_db,
-                    nats,
-                    router_account,
-                    &hostname,
-                    master_key,
-                    router_addr,
-                )
+        let result = if let Some(account) = app_account.as_ref() {
+            certify_domain(api_db, nats, account, &hostname, master_key, router_addr)
                 .await
-            } else {
-                certify_domain(api_db, nats, &account, &hostname, master_key, router_addr).await
-            }
+                .map(|_| ())
         } else {
-            certify_domain(api_db, nats, &account, &hostname, master_key, router_addr).await
+            Ok(())
         };
 
         if let Err(e) = result {
             error!("Failed to certify domain {}: {}", hostname, e);
+        }
+    }
+
+    for (hostname, is_staging) in managed_domains_to_certify {
+        info!("Processing managed certificate renewal for {}", hostname);
+
+        let account = if is_staging {
+            managed_staging_account.as_ref()
+        } else {
+            managed_production_account.as_ref()
+        };
+
+        let result = if let Some(account) = account {
+            certify_managed_domain(
+                api_db,
+                nats,
+                account,
+                &hostname,
+                is_staging,
+                master_key,
+                router_addr,
+            )
+            .await
+        } else {
+            Ok(())
+        };
+
+        if let Err(e) = result {
+            error!("Failed to certify managed domain {}: {}", hostname, e);
         }
     }
 
@@ -260,7 +306,7 @@ async fn certify_domain(
     hostname: &str,
     master_key: &str,
     router_addr: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<DateTime<Utc>> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()?;
@@ -371,20 +417,12 @@ async fn certify_domain(
     // Parse expiry
     let expires_at = parse_expiry(&cert_chain_pem)?;
 
-    // Update expiry in API database for the app table and managed-host table.
+    // Update expiry in the API database for app-managed hostnames.
     sqlx::query("UPDATE apps SET cert_expires_at = $1 WHERE hostname = $2")
         .bind(expires_at)
         .bind(hostname)
         .execute(api_db)
         .await?;
-
-    sqlx::query(
-        "INSERT INTO acme_managed_domains (hostname, cert_expires_at, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (hostname) DO UPDATE SET cert_expires_at = EXCLUDED.cert_expires_at, updated_at = NOW()",
-    )
-    .bind(hostname)
-    .bind(expires_at)
-    .execute(api_db)
-    .await?;
 
     // Encrypt private key for storage
     let encrypted_key = crate::crypto::encrypt(&private_key_pem, master_key)
@@ -407,7 +445,7 @@ async fn certify_domain(
         hostname
     );
 
-    Ok(())
+    Ok(expires_at)
 }
 
 async fn certify_managed_domain(
@@ -415,66 +453,41 @@ async fn certify_managed_domain(
     nats: &crate::nats::TypedNatsClient,
     account: &Account,
     hostname: &str,
+    is_staging: bool,
     master_key: &str,
     router_addr: &str,
 ) -> anyhow::Result<()> {
-    certify_domain(api_db, nats, account, hostname, master_key, router_addr).await
-}
+    let expires_at =
+        certify_domain(api_db, nats, account, hostname, master_key, router_addr).await?;
 
-async fn ensure_managed_domain(api_db: &PgPool, hostname: &str) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO acme_managed_domains (hostname, cert_expires_at) VALUES ($1, NULL) ON CONFLICT (hostname) DO NOTHING",
+        "INSERT INTO acme_managed_domains (hostname, cert_expires_at, is_staging, needs_reissue, updated_at) VALUES ($1, $2, $3, FALSE, NOW()) ON CONFLICT (hostname) DO UPDATE SET cert_expires_at = EXCLUDED.cert_expires_at, is_staging = EXCLUDED.is_staging, needs_reissue = FALSE, updated_at = NOW()",
     )
     .bind(hostname)
+    .bind(expires_at)
+    .bind(is_staging)
     .execute(api_db)
     .await?;
 
     Ok(())
 }
 
-async fn managed_router_tls_needs_refresh(api_db: &PgPool, hostname: &str) -> anyhow::Result<bool> {
-    let row = sqlx::query("SELECT cert_chain FROM tls_certificates WHERE hostname = $1")
-        .bind(hostname)
-        .fetch_optional(api_db)
-        .await?;
+async fn ensure_managed_domain(
+    api_db: &PgPool,
+    hostname: &str,
+    is_staging: bool,
+    force_reissue: bool,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO acme_managed_domains (hostname, cert_expires_at, is_staging, needs_reissue) VALUES ($1, NULL, $2, $3) ON CONFLICT (hostname) DO UPDATE SET is_staging = EXCLUDED.is_staging, needs_reissue = CASE WHEN acme_managed_domains.is_staging IS DISTINCT FROM EXCLUDED.is_staging THEN TRUE ELSE acme_managed_domains.needs_reissue END, updated_at = NOW()",
+    )
+    .bind(hostname)
+    .bind(is_staging)
+    .bind(force_reissue)
+    .execute(api_db)
+    .await?;
 
-    let Some(row) = row else {
-        return Ok(true);
-    };
-
-    let cert_chain: String = row.get("cert_chain");
-    let (_, pem) = match x509_parser::pem::parse_x509_pem(cert_chain.as_bytes()) {
-        Ok(parsed) => parsed,
-        Err(err) => {
-            tracing::warn!(
-                hostname = hostname,
-                error = %err,
-                "Failed to parse router TLS certificate chain while checking renewal mode"
-            );
-            return Ok(true);
-        },
-    };
-
-    let (_, cert) = match x509_parser::parse_x509_certificate(&pem.contents) {
-        Ok(parsed) => parsed,
-        Err(err) => {
-            tracing::warn!(
-                hostname = hostname,
-                error = %err,
-                "Failed to parse router TLS certificate while checking renewal mode"
-            );
-            return Ok(true);
-        },
-    };
-
-    let issuer_text = cert
-        .issuer()
-        .iter_common_name()
-        .next()
-        .and_then(|cn| cn.as_str().ok())
-        .unwrap_or_default();
-
-    Ok(is_staging_issuer(issuer_text))
+    Ok(())
 }
 
 async fn verify_challenge_is_live(
@@ -536,21 +549,4 @@ fn parse_expiry(cert_pem: &str) -> anyhow::Result<DateTime<Utc>> {
     let timestamp = not_after.timestamp();
 
     Ok(DateTime::from_timestamp(timestamp, 0).unwrap_or(Utc::now()))
-}
-
-fn is_staging_issuer(issuer_common_name: &str) -> bool {
-    issuer_common_name.to_ascii_uppercase().contains("STAGING")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_staging_issuer;
-
-    #[test]
-    fn staging_issuer_detection_matches_letsencrypt_staging_names() {
-        assert!(is_staging_issuer("(STAGING) Baloney Bulgur YE2"));
-        assert!(is_staging_issuer("Let's Encrypt STAGING"));
-        assert!(!is_staging_issuer("R12"));
-        assert!(!is_staging_issuer("Let's Encrypt Production"));
-    }
 }
