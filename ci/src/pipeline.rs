@@ -189,9 +189,7 @@ impl MikromCi {
     }
 
     pub async fn validate_smoke(&self) -> Result<()> {
-        self.fmt_check().await?;
-        self.clippy_check().await?;
-        self.app_validate().await?;
+        tokio::try_join!(self.fmt_check(), self.clippy_check(), self.app_validate())?;
 
         Ok(())
     }
@@ -209,8 +207,7 @@ impl MikromCi {
 
     pub async fn validate_full(&self) -> Result<()> {
         self.validate_fast().await?;
-        self.release_build().await?;
-        self.ebpf_check().await?;
+        tokio::try_join!(self.release_build(), self.ebpf_check())?;
 
         Ok(())
     }
