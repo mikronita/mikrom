@@ -425,6 +425,12 @@ impl MikromCi {
                 command.push_str(features);
             }
 
+            if stage == "test-api" {
+                // mikrom-api tests share a single database fixture; serialize them to avoid
+                // cross-test interference while keeping the rest of the workspace parallel.
+                command.push_str(" -- --test-threads=1");
+            }
+
             self.run_stage_with_container(stage, container.clone(), &command)
                 .await
                 .with_context(|| format!("stage {stage} failed for {}", spec.package))?;
