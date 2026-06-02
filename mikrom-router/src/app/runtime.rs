@@ -249,7 +249,7 @@ pub fn server_threads(requested: usize) -> usize {
 pub fn server_conf(threads: usize) -> pingora::server::configuration::ServerConf {
     pingora::server::configuration::ServerConf {
         upgrade_sock: "/tmp/mikrom_router_upgrade.sock".to_string(),
-        grace_period_seconds: Some(30),
+        grace_period_seconds: Some(10),
         threads: server_threads(threads),
         ..Default::default()
     }
@@ -295,6 +295,6 @@ mod tests {
         let conf = server_conf(0);
         assert_eq!(conf.upgrade_sock, "/tmp/mikrom_router_upgrade.sock");
         assert_eq!(conf.threads, 1);
-        assert_eq!(conf.grace_period_seconds, Some(30));
+        assert_eq!(conf.grace_period_seconds, Some(10));
     }
 }
