@@ -113,6 +113,7 @@ const fn upstream_idle_timeout() -> Duration {
 const MAX_REQUEST_HEADERS: usize = 128;
 const MAX_REQUEST_HEADER_BYTES: usize = 16 * 1024;
 const MAX_REQUEST_BODY_BYTES: u64 = 16 * 1024 * 1024;
+pub(crate) const ROUTER_SERVER_NAME: &str = "mikrom-router";
 const STRIPPED_UPSTREAM_HEADERS: &[&str] = &[
     "connection",
     "proxy-connection",
@@ -151,6 +152,12 @@ fn strip_untrusted_forwarding_headers(upstream_request: &mut RequestHeader) {
     for header in STRIPPED_UPSTREAM_HEADERS {
         upstream_request.remove_header(*header);
     }
+}
+
+pub(crate) fn set_router_server_header(response: &mut ResponseHeader) -> Result<()> {
+    response.remove_header(&::http::header::SERVER);
+    response.insert_header(::http::header::SERVER, ROUTER_SERVER_NAME)?;
+    Ok(())
 }
 
 impl MikromProxy {
@@ -408,6 +415,7 @@ impl MikromProxy {
 
         let location = format!("https://{normalized_host}{path}");
         let mut redirect = ResponseHeader::build(301, None)?;
+        set_router_server_header(&mut redirect)?;
         redirect.insert_header("Location", location)?;
         session
             .write_response_header(Box::new(redirect), true)
@@ -431,6 +439,7 @@ impl MikromProxy {
         };
 
         let mut redirect = ResponseHeader::build(307, None)?;
+        set_router_server_header(&mut redirect)?;
         redirect.insert_header("Location", location)?;
         redirect.insert_header("Cache-Control", "no-store")?;
         session
@@ -770,6 +779,63 @@ impl ProxyHttp for MikromProxy {
         retry_e
     }
 
+    async fn fail_to_proxy(
+        &self,
+        session: &mut Session,
+        e: &Error,
+        _ctx: &mut Self::CTX,
+    ) -> pingora::proxy::FailToProxy
+    where
+        Self::CTX: Send + Sync,
+    {
+        let code = match e.etype() {
+            ErrorType::HTTPStatus(code) => *code,
+            _ => match e.esource() {
+                ErrorSource::Upstream => 502,
+                ErrorSource::Downstream => match e.etype() {
+                    ErrorType::WriteError | ErrorType::ReadError | ErrorType::ConnectionClosed => 0,
+                    _ => 400,
+                },
+                ErrorSource::Internal | ErrorSource::Unset => 500,
+            },
+        };
+
+        if code > 0 {
+            let mut response = match ResponseHeader::build(code, Some(0)) {
+                Ok(response) => response,
+                Err(err) => {
+                    warn!("Failed to build router error response: {err}");
+                    ResponseHeader::build(500, Some(0))
+                        .expect("failed to build fallback error response")
+                },
+            };
+            if let Err(err) = set_router_server_header(&mut response) {
+                warn!("Failed to set router server header on error response: {err}");
+            }
+            if let Err(err) =
+                response.insert_header(::http::header::CACHE_CONTROL, "private, no-store")
+            {
+                warn!("Failed to set cache-control on error response: {err}");
+            }
+            if let Err(err) = response.insert_header(::http::header::CONTENT_LENGTH, "0") {
+                warn!("Failed to set content-length on error response: {err}");
+            }
+
+            if let Err(err) = session
+                .as_mut()
+                .write_response_header(Box::new(response))
+                .await
+            {
+                warn!("failed to send error response to downstream: {err}");
+            }
+        }
+
+        pingora::proxy::FailToProxy {
+            error_code: code,
+            can_reuse_downstream: false,
+        }
+    }
+
     async fn upstream_request_filter(
         &self,
         session: &mut Session,
@@ -815,6 +881,8 @@ impl ProxyHttp for MikromProxy {
         upstream_response: &mut ResponseHeader,
         _ctx: &mut Self::CTX,
     ) -> Result<()> {
+        set_router_server_header(upstream_response)?;
+
         // Add security headers.
         if upstream_response
             .headers
@@ -1049,6 +1117,16 @@ mod tests {
             None
         );
         assert_eq!(request_content_length_from_value(None), None);
+    }
+
+    #[test]
+    fn test_set_router_server_header_overwrites_existing_value() {
+        let mut response = ResponseHeader::build(200, Some(0)).unwrap();
+        response.insert_header("Server", "Pingora").unwrap();
+
+        set_router_server_header(&mut response).unwrap();
+
+        assert_eq!(response.headers.get("server").unwrap(), ROUTER_SERVER_NAME);
     }
 
     #[test]

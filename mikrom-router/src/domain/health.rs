@@ -202,6 +202,7 @@ pub async fn write_snapshot_response(
     })?;
 
     let mut response = ResponseHeader::build(status, Some(body.len()))?;
+    crate::application::proxy::set_router_server_header(&mut response)?;
     response.insert_header("Content-Type", "application/json")?;
     session
         .write_response_header(Box::new(response), true)
@@ -216,6 +217,7 @@ pub async fn write_text_response(
     body: &str,
 ) -> pingora::prelude::Result<bool> {
     let mut response = ResponseHeader::build(status, Some(body.len()))?;
+    crate::application::proxy::set_router_server_header(&mut response)?;
     response.insert_header("Content-Type", "text/plain")?;
     session
         .write_response_header(Box::new(response), true)
