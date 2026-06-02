@@ -107,9 +107,14 @@ async fn main() -> anyhow::Result<()> {
     let volume_repo = Arc::new(PostgresVolumeRepository::new(db_pool.clone()));
 
     tracing::info!("Connecting to NATS at {}...", config.nats_url);
-    let nats_client = async_nats::connect(&config.nats_url)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to connect to NATS: {}", e))?;
+    // Disable the client's built-in request timeout so the application-level
+    // `TypedNatsClient` timeouts are the only ones that apply to request/reply flows.
+    let nats_client = async_nats::connect_with_options(
+        &config.nats_url,
+        async_nats::ConnectOptions::new().request_timeout(None),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to connect to NATS: {}", e))?;
     let nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone());
 
     let scheduler = Arc::new(mikrom_api::NatsScheduler::new(nats.clone()));
