@@ -3,6 +3,17 @@ use prost::Message;
 use std::sync::Arc;
 use std::time::Duration;
 
+fn is_no_responders_error(err: &anyhow::Error) -> bool {
+    err.to_string().to_lowercase().contains("no responders")
+}
+
+fn scheduler_unavailable_error(subject: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "scheduler unavailable: no responders on subject: {}",
+        subject
+    )
+}
+
 #[mockall::automock]
 #[async_trait::async_trait]
 pub trait NatsClient: Send + Sync {
@@ -22,11 +33,17 @@ struct AsyncNatsClientWrapper(Client);
 #[async_trait::async_trait]
 impl NatsClient for AsyncNatsClientWrapper {
     async fn request_raw(&self, subject: String, payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
-        let response = self
-            .0
-            .request(subject, payload.into())
-            .await
-            .map_err(|e| anyhow::anyhow!("NATS request failed: {}", e))?;
+        let subject_for_error = subject.clone();
+        let response =
+            self.0
+                .request(subject, payload.into())
+                .await
+                .map_err(|e| match e.kind() {
+                    async_nats::RequestErrorKind::NoResponders => {
+                        scheduler_unavailable_error(&subject_for_error)
+                    },
+                    _ => anyhow::anyhow!("NATS request failed: {}", e),
+                })?;
         Ok(response.payload.to_vec())
     }
 
@@ -93,7 +110,14 @@ impl TypedNatsClient {
         let payload =
             tokio::time::timeout(self.timeout, self.client.request_raw(subject.clone(), buf))
                 .await
-                .map_err(|_| anyhow::anyhow!("NATS request timed out on subject: {}", subject))??;
+                .map_err(|_| anyhow::anyhow!("NATS request timed out on subject: {}", subject))?
+                .map_err(|e| {
+                    if is_no_responders_error(&e) {
+                        scheduler_unavailable_error(&subject)
+                    } else {
+                        e
+                    }
+                })?;
 
         let res = Res::decode(&payload[..]).map_err(|e| {
             anyhow::anyhow!("Failed to decode NATS response from {}: {}", subject, e)
@@ -115,5 +139,22 @@ impl TypedNatsClient {
         subject: impl Into<String>,
     ) -> anyhow::Result<async_nats::Subscriber> {
         self.client.subscribe_raw(subject.into()).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_no_responders_errors_from_text() {
+        let err = anyhow::anyhow!("NATS request failed: no responders: no responders");
+        assert!(is_no_responders_error(&err));
+    }
+
+    #[test]
+    fn does_not_flag_unrelated_errors() {
+        let err = anyhow::anyhow!("connection closed");
+        assert!(!is_no_responders_error(&err));
     }
 }

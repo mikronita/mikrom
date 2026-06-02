@@ -447,7 +447,7 @@ pub async fn deployments_stream_handler(
         .nats
         .subscribe("mikrom.scheduler.job_updates")
         .await
-        .map_err(|e| ApiError::Internal(format!("NATS sub error: {}", e)))?;
+        .map_err(|e| ApiError::Scheduler(format!("Failed to subscribe to job updates: {}", e)))?;
 
     let stream = async_stream::stream! {
         let mut local_stream = BroadcastStream::new(rx);

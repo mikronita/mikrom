@@ -353,7 +353,7 @@ impl VmService {
             .nats
             .request("mikrom.scheduler.vm_snapshot_create", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
         Ok((resp.success, resp.message))
     }
 
@@ -372,7 +372,7 @@ impl VmService {
             .nats
             .request("mikrom.scheduler.vm_snapshot_restore", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
         Ok((resp.success, resp.message))
     }
 
@@ -391,7 +391,7 @@ impl VmService {
             .nats
             .request("mikrom.scheduler.vm_snapshot_delete", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
         Ok((resp.success, resp.message))
     }
 
@@ -405,7 +405,7 @@ impl VmService {
             .nats
             .request("mikrom.scheduler.vm_snapshot_list", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
 
         let snapshots = resp
             .snapshots
@@ -441,7 +441,7 @@ impl VmService {
             .nats
             .request("mikrom.scheduler.attach_volume", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
         Ok((resp.success, resp.message))
     }
 
@@ -460,7 +460,7 @@ impl VmService {
             .nats
             .request("mikrom.scheduler.detach_volume", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
         Ok((resp.success, resp.message))
     }
 
@@ -481,7 +481,7 @@ impl VmService {
             .nats
             .request("mikrom.scheduler.start_migration", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
         Ok((resp.success, resp.message))
     }
 
@@ -495,7 +495,7 @@ impl VmService {
             .nats
             .request("mikrom.scheduler.cancel_migration", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
         Ok((resp.success, resp.message))
     }
 
@@ -509,7 +509,7 @@ impl VmService {
             .nats
             .request("mikrom.scheduler.query_migration", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
         Ok((resp.success, resp.message, resp.status))
     }
 
@@ -528,7 +528,7 @@ impl VmService {
             .nats
             .request("mikrom.scheduler.set_balloon", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
         Ok((resp.success, resp.message))
     }
 
@@ -542,7 +542,7 @@ impl VmService {
             .nats
             .request("mikrom.scheduler.query_balloon", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
         Ok((
             resp.success,
             resp.message,

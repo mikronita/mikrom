@@ -316,7 +316,7 @@ pub async fn watch_deployments(
         .nats
         .subscribe("mikrom.scheduler.job_updates")
         .await
-        .map_err(|e| ApiError::Internal(format!("Failed to subscribe to job updates: {}", e)))?;
+        .map_err(|e| ApiError::Scheduler(format!("Failed to subscribe to job updates: {}", e)))?;
 
     let local_rx = state.deployment_events.subscribe();
     let tenant_id = tenant_ctx.tenant.id.to_string();
@@ -600,7 +600,7 @@ pub async fn get_deployment_status(
         .nats
         .request("mikrom.scheduler.get_job", nats_req)
         .await
-        .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
+        .map_err(|e| ApiError::Scheduler(e.to_string()))?;
 
     let scale_state = resolve_app_scale_state(&state, &app).await;
 
@@ -669,7 +669,7 @@ pub async fn get_deployment_logs(
         .nats
         .request("mikrom.scheduler.get_job", nats_req)
         .await
-        .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
+        .map_err(|e| ApiError::Scheduler(e.to_string()))?;
 
     let vm_id = inner.vm_id;
     if vm_id.is_empty() {

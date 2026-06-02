@@ -819,7 +819,7 @@ impl DeploymentService {
             .with_timeout(std::time::Duration::from_secs(15))
             .request("mikrom.scheduler.deploy", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(e.to_string()));
+            .map_err(|e| ApiError::Scheduler(e.to_string()));
 
         let inner = match nats_result {
             Ok(inner) => inner,
@@ -1026,7 +1026,7 @@ impl DeploymentService {
             .nats
             .request("mikrom.scheduler.cancel_app", nats_req)
             .await
-            .map_err(|e| ApiError::Internal(format!("NATS request failed: {}", e)))?;
+            .map_err(|e| ApiError::Scheduler(e.to_string()))?;
 
         if inner.success {
             // Update database status
