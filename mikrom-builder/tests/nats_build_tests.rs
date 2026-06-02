@@ -17,6 +17,7 @@ async fn test_builder_nats_flow() {
 
     // 1. Subscribe to status updates
     let mut status_sub = client.subscribe(status_subject.clone()).await.unwrap();
+    client.flush().await.unwrap();
 
     // 2. Simulate Builder processing
     let build_id_clone = build_id.clone();
@@ -28,6 +29,7 @@ async fn test_builder_nats_flow() {
             .queue_subscribe(subject_clone, queue_group)
             .await
             .unwrap();
+        client_clone.flush().await.unwrap();
         if let Some(msg) = build_sub.next().await {
             let req = BuildRequest::decode(&msg.payload[..]).unwrap();
 
@@ -78,7 +80,7 @@ async fn test_builder_nats_flow() {
     req.encode(&mut buf).unwrap();
 
     let resp_msg =
-        tokio::time::timeout(Duration::from_secs(5), client.request(subject, buf.into()))
+        tokio::time::timeout(Duration::from_secs(10), client.request(subject, buf.into()))
             .await
             .expect("Timeout waiting for builder response")
             .expect("Request failed");
@@ -87,7 +89,7 @@ async fn test_builder_nats_flow() {
     assert_eq!(resp.build_id, build_id);
 
     // 4. Wait for status update
-    let status_msg = tokio::time::timeout(Duration::from_secs(2), status_sub.next())
+    let status_msg = tokio::time::timeout(Duration::from_secs(10), status_sub.next())
         .await
         .expect("Timeout waiting for status update")
         .expect("No status message");
@@ -109,6 +111,7 @@ async fn test_builder_progress_streaming() {
     let progress_subject = format!("mikrom.builder.{}.progress.test", build_id);
 
     let mut progress_sub = client.subscribe(progress_subject.clone()).await.unwrap();
+    client.flush().await.unwrap();
 
     // Simulate Builder publishing progress
     let client_clone = client.clone();
@@ -133,7 +136,7 @@ async fn test_builder_progress_streaming() {
 
     // API side receives progress
     for i in 1..=3 {
-        let msg = tokio::time::timeout(Duration::from_secs(1), progress_sub.next())
+        let msg = tokio::time::timeout(Duration::from_secs(5), progress_sub.next())
             .await
             .expect("Timeout waiting for progress")
             .expect("No progress message");

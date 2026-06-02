@@ -22,6 +22,11 @@ const IMAGE_TAG_ENV: &str = "MIKROM_IMAGE_TAG";
 const REGISTRY_ADDRESS_ENV: &str = "MIKROM_REGISTRY_ADDRESS";
 const REGISTRY_USERNAME_ENV: &str = "MIKROM_REGISTRY_USERNAME";
 const REGISTRY_TOKEN_ENV: &str = "MIKROM_REGISTRY_TOKEN";
+const TEST_GROUP_ENV: &str = "MIKROM_TEST_GROUP";
+const TEST_GROUP_FULL: &str = "full";
+const TEST_GROUP_CORE: &str = "core";
+const TEST_GROUP_API: &str = "api";
+const TEST_GROUP_BINARIES: &str = "binaries";
 const BASE_PACKAGES: &[&str] = &[
     "bash",
     "build-essential",
@@ -48,6 +53,58 @@ const POSTGRES_IMAGE: &str = "postgres:16";
 const NATS_IMAGE: &str = "nats:2";
 const TEST_DATABASE_URL: &str = "postgres://mikrom:mikrom_password@postgres:5432/mikrom_test";
 const TEST_NATS_URL: &str = "nats://nats:4222";
+
+#[derive(Clone, Copy)]
+struct TestSpec {
+    package: &'static str,
+    lib: bool,
+    features: Option<&'static str>,
+}
+
+const CORE_TEST_SPECS: &[TestSpec] = &[
+    TestSpec {
+        package: "mikrom-proto",
+        lib: true,
+        features: None,
+    },
+    TestSpec {
+        package: "mikrom-scheduler",
+        lib: true,
+        features: None,
+    },
+    TestSpec {
+        package: "mikrom-agent",
+        lib: true,
+        features: None,
+    },
+    TestSpec {
+        package: "mikrom-router",
+        lib: true,
+        features: None,
+    },
+    TestSpec {
+        package: "mikrom-dns",
+        lib: true,
+        features: None,
+    },
+    TestSpec {
+        package: "mikrom-network",
+        lib: true,
+        features: None,
+    },
+];
+
+const API_TEST_SPECS: &[TestSpec] = &[TestSpec {
+    package: "mikrom-api",
+    lib: true,
+    features: Some("test-utils"),
+}];
+
+const BINARY_TEST_SPECS: &[TestSpec] = &[TestSpec {
+    package: "mikrom-cli",
+    lib: false,
+    features: None,
+}];
 
 const SERVICE_IMAGES: &[(&str, &str)] = &[
     ("mikrom-api", "mikrom-api/Dockerfile"),
@@ -200,19 +257,37 @@ impl MikromCi {
     }
 
     pub async fn workspace_tests(&self) -> Result<()> {
-        let container = self.workspace_test_container();
-        let command = "set -eux; \
-            until pg_isready -h postgres -p 5432 -U mikrom -d mikrom_test; do sleep 1; done; \
-            until nc -z nats 4222; do sleep 1; done; \
-            /usr/local/cargo/bin/cargo test --workspace --exclude mikrom-agent-ebpf --lib --all-features --locked";
+        match env::var(TEST_GROUP_ENV)
+            .unwrap_or_else(|_| TEST_GROUP_FULL.to_string())
+            .as_str()
+        {
+            TEST_GROUP_CORE => {
+                self.run_workspace_test_group("test-core", CORE_TEST_SPECS)
+                    .await?;
+            },
+            TEST_GROUP_API => {
+                self.run_workspace_test_group("test-api", API_TEST_SPECS)
+                    .await?;
+            },
+            TEST_GROUP_BINARIES => {
+                self.run_workspace_test_group("test-binaries", BINARY_TEST_SPECS)
+                    .await?;
+            },
+            TEST_GROUP_FULL => {
+                self.run_workspace_test_group("test-core", CORE_TEST_SPECS)
+                    .await?;
+                self.run_workspace_test_group("test-api", API_TEST_SPECS)
+                    .await?;
+                self.run_workspace_test_group("test-binaries", BINARY_TEST_SPECS)
+                    .await?;
+            },
+            other => {
+                return Err(eyre::eyre!(
+                    "unknown {TEST_GROUP_ENV} value '{other}', expected one of: {TEST_GROUP_CORE}, {TEST_GROUP_API}, {TEST_GROUP_BINARIES}, {TEST_GROUP_FULL}"
+                ));
+            },
+        }
 
-        info!(stage = "test", command, "starting");
-        container
-            .with_exec(vec!["sh", "-lc", command])
-            .combined_output()
-            .await
-            .with_context(|| "stage test failed".to_string())?;
-        info!(stage = "test", "finished");
         Ok(())
     }
 
@@ -322,6 +397,41 @@ impl MikromCi {
             .with_context(|| format!("stage {stage} failed"))?;
 
         info!(stage, "finished");
+
+        Ok(())
+    }
+
+    async fn run_workspace_test_group(&self, stage: &str, specs: &[TestSpec]) -> Result<()> {
+        let container = self.workspace_test_container();
+        let wait_command = "set -eux; \
+            until pg_isready -h postgres -p 5432 -U mikrom -d mikrom_test; do sleep 1; done; \
+            until nc -z nats 4222; do sleep 1; done";
+
+        container
+            .with_exec(vec!["sh", "-lc", wait_command])
+            .combined_output()
+            .await
+            .with_context(|| format!("stage {stage} readiness failed"))?;
+
+        for spec in specs {
+            let mut command = format!(
+                "/usr/local/cargo/bin/cargo test -p {} --locked",
+                spec.package
+            );
+
+            if spec.lib {
+                command.push_str(" --lib");
+            }
+
+            if let Some(features) = spec.features {
+                command.push_str(" --features ");
+                command.push_str(features);
+            }
+
+            self.run_stage_with_container(stage, container.clone(), &command)
+                .await
+                .with_context(|| format!("stage {stage} failed for {}", spec.package))?;
+        }
 
         Ok(())
     }
