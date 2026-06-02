@@ -94,15 +94,9 @@ pub async fn trigger_managed_domain_certification(
     state: &crate::AppState,
     hostname: &str,
 ) -> anyhow::Result<()> {
-    let url = if state.acme_staging {
-        LetsEncrypt::Staging.url()
-    } else {
-        LetsEncrypt::Production.url()
-    };
+    let url = LetsEncrypt::Production.url();
 
-    let account =
-        get_or_create_acme_account(&state.api_db, &state.acme_email, url, state.acme_staging)
-            .await?;
+    let account = get_or_create_acme_account(&state.api_db, &state.acme_email, url, false).await?;
 
     certify_managed_domain(
         &state.api_db,
@@ -160,19 +154,46 @@ pub async fn run_acme_iteration(
         domains_to_certify.insert(row.get::<String, _>("hostname"));
     }
 
+    if !router_tls_hostname.trim().is_empty()
+        && managed_router_tls_needs_refresh(api_db, router_tls_hostname).await?
+    {
+        domains_to_certify.insert(router_tls_hostname.to_string());
+    }
+
     if domains_to_certify.is_empty() {
         return Ok(());
     }
 
-    // 2. Get or create ACME account from the API database
+    // 2. Get or create ACME account(s) from the API database.
     let account = get_or_create_acme_account(api_db, email, acme_url, is_staging).await?;
+    let router_account = if router_tls_hostname.trim().is_empty() {
+        None
+    } else {
+        Some(get_or_create_acme_account(api_db, email, LetsEncrypt::Production.url(), false).await?)
+    };
 
     for hostname in domains_to_certify {
         info!("Processing certificate renewal for {}", hostname);
 
-        if let Err(e) =
+        let result = if hostname == router_tls_hostname {
+            if let Some(router_account) = router_account.as_ref() {
+                certify_managed_domain(
+                    api_db,
+                    nats,
+                    router_account,
+                    &hostname,
+                    master_key,
+                    router_addr,
+                )
+                .await
+            } else {
+                certify_domain(api_db, nats, &account, &hostname, master_key, router_addr).await
+            }
+        } else {
             certify_domain(api_db, nats, &account, &hostname, master_key, router_addr).await
-        {
+        };
+
+        if let Err(e) = result {
             error!("Failed to certify domain {}: {}", hostname, e);
         }
     }
@@ -411,6 +432,51 @@ async fn ensure_managed_domain(api_db: &PgPool, hostname: &str) -> anyhow::Resul
     Ok(())
 }
 
+async fn managed_router_tls_needs_refresh(api_db: &PgPool, hostname: &str) -> anyhow::Result<bool> {
+    let row = sqlx::query("SELECT cert_chain FROM tls_certificates WHERE hostname = $1")
+        .bind(hostname)
+        .fetch_optional(api_db)
+        .await?;
+
+    let Some(row) = row else {
+        return Ok(true);
+    };
+
+    let cert_chain: String = row.get("cert_chain");
+    let (_, pem) = match x509_parser::pem::parse_x509_pem(cert_chain.as_bytes()) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            tracing::warn!(
+                hostname = hostname,
+                error = %err,
+                "Failed to parse router TLS certificate chain while checking renewal mode"
+            );
+            return Ok(true);
+        },
+    };
+
+    let (_, cert) = match x509_parser::parse_x509_certificate(&pem.contents) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            tracing::warn!(
+                hostname = hostname,
+                error = %err,
+                "Failed to parse router TLS certificate while checking renewal mode"
+            );
+            return Ok(true);
+        },
+    };
+
+    let issuer_text = cert
+        .issuer()
+        .iter_common_name()
+        .next()
+        .and_then(|cn| cn.as_str().ok())
+        .unwrap_or_default();
+
+    Ok(is_staging_issuer(issuer_text))
+}
+
 async fn verify_challenge_is_live(
     client: &reqwest::Client,
     hostname: &str,
@@ -470,4 +536,21 @@ fn parse_expiry(cert_pem: &str) -> anyhow::Result<DateTime<Utc>> {
     let timestamp = not_after.timestamp();
 
     Ok(DateTime::from_timestamp(timestamp, 0).unwrap_or(Utc::now()))
+}
+
+fn is_staging_issuer(issuer_common_name: &str) -> bool {
+    issuer_common_name.to_ascii_uppercase().contains("STAGING")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_staging_issuer;
+
+    #[test]
+    fn staging_issuer_detection_matches_letsencrypt_staging_names() {
+        assert!(is_staging_issuer("(STAGING) Baloney Bulgur YE2"));
+        assert!(is_staging_issuer("Let's Encrypt STAGING"));
+        assert!(!is_staging_issuer("R12"));
+        assert!(!is_staging_issuer("Let's Encrypt Production"));
+    }
 }
