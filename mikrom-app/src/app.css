@@ -191,6 +191,14 @@
 		@apply font-sans;
   }
 
+  .toaster {
+    --normal-bg: var(--bg-overlay);
+    --normal-bg-hover: color-mix(in oklab, var(--bg-overlay) 90%, var(--background));
+    --normal-text: var(--color-card-foreground);
+    --normal-border: var(--color-border);
+    --border-radius: 0.95rem;
+  }
+
   [data-sonner-toast] {
     transition:
       transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
