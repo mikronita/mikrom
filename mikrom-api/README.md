@@ -27,7 +27,21 @@
 - Uses PostgreSQL as the system of record.
 - Uses NATS for scheduler and worker coordination.
 - Supports optional Neon configuration through `NEON_*` environment variables.
+- Uses Let's Encrypt production by default for ACME unless `ACME_STAGING=true` is set explicitly.
+- Manages the router's default redirect certificate for `debaser.spluca.org` through the same ACME worker.
+- The runtime Docker image sets `ACME_STAGING=false` and `ROUTER_TLS_HOSTNAME=debaser.spluca.org` by default.
 - Local repository tests use `TestDb` and expect PostgreSQL to be available.
+
+Common environment variables:
+
+- `DATABASE_URL`
+- `NATS_URL`
+- `JWT_SECRET`
+- `MASTER_KEY`
+- `ACME_EMAIL`
+- `ACME_STAGING`
+- `ROUTER_TLS_HOSTNAME`
+- `ROUTER_ADDR`
 
 ## Local Development
 

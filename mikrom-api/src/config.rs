@@ -56,6 +56,9 @@ pub struct ApiConfig {
     #[serde(default = "default_acme_staging")]
     pub acme_staging: bool,
 
+    #[serde(default = "default_router_tls_hostname")]
+    pub router_tls_hostname: String,
+
     #[serde(default = "default_acme_check_interval")]
     pub acme_check_interval: u64,
 
@@ -121,6 +124,7 @@ impl Default for ApiConfig {
             nats_storage_timeout_secs: default_nats_storage_timeout_secs(),
             acme_email: default_acme_email(),
             acme_staging: default_acme_staging(),
+            router_tls_hostname: default_router_tls_hostname(),
             acme_check_interval: default_acme_check_interval(),
             certs_dir: None,
             github_app_id: None,
@@ -151,7 +155,11 @@ fn default_acme_email() -> String {
 }
 
 fn default_acme_staging() -> bool {
-    true
+    false
+}
+
+fn default_router_tls_hostname() -> String {
+    "debaser.spluca.org".to_string()
 }
 
 fn default_acme_check_interval() -> u64 {
@@ -210,6 +218,22 @@ impl ApiConfig {
             anyhow::bail!("MASTER_KEY must be at least 32 characters long");
         }
 
+        if config.router_tls_hostname.trim().is_empty() {
+            anyhow::bail!("ROUTER_TLS_HOSTNAME must not be empty");
+        }
+
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ApiConfig;
+
+    #[test]
+    fn defaults_use_production_acme_and_router_hostname() {
+        let config = ApiConfig::default();
+        assert!(!config.acme_staging);
+        assert_eq!(config.router_tls_hostname, "debaser.spluca.org");
     }
 }

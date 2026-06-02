@@ -5,21 +5,24 @@ use instant_acme::{
 use mikrom_proto::router::{AcmeChallengeUpdate, TlsCertificateUpdate};
 use mikrom_proto::subjects;
 use sqlx::{PgPool, Row};
+use std::collections::HashSet;
 use std::time::Duration;
 use tracing::{error, info};
 
+#[allow(clippy::too_many_arguments)]
 pub async fn start_acme_worker(
     api_db: PgPool,
     nats: crate::nats::TypedNatsClient,
     email: String,
     staging: bool,
+    router_tls_hostname: String,
     master_key: String,
     interval_secs: u64,
     router_addr: String,
 ) {
     info!(
-        "Starting ACME worker (staging: {}, email: {}, router: {})",
-        staging, email, router_addr
+        "Starting ACME worker (staging: {}, email: {}, router: {}, router_tls_hostname: {})",
+        staging, email, router_addr, router_tls_hostname
     );
 
     let url = if staging {
@@ -35,6 +38,7 @@ pub async fn start_acme_worker(
             &email,
             url,
             staging,
+            &router_tls_hostname,
             &master_key,
             &router_addr,
         )
@@ -86,17 +90,48 @@ pub async fn trigger_domain_certification(
     .await
 }
 
+pub async fn trigger_managed_domain_certification(
+    state: &crate::AppState,
+    hostname: &str,
+) -> anyhow::Result<()> {
+    let url = if state.acme_staging {
+        LetsEncrypt::Staging.url()
+    } else {
+        LetsEncrypt::Production.url()
+    };
+
+    let account =
+        get_or_create_acme_account(&state.api_db, &state.acme_email, url, state.acme_staging)
+            .await?;
+
+    certify_managed_domain(
+        &state.api_db,
+        &state.nats,
+        &account,
+        hostname,
+        &state.master_key,
+        &state.router_addr,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn run_acme_iteration(
     api_db: &PgPool,
     nats: &crate::nats::TypedNatsClient,
     email: &str,
     acme_url: &str,
     is_staging: bool,
+    router_tls_hostname: &str,
     master_key: &str,
     router_addr: &str,
 ) -> anyhow::Result<()> {
+    if !router_tls_hostname.trim().is_empty() {
+        ensure_managed_domain(api_db, router_tls_hostname).await?;
+    }
+
     // 1. Find domains that need certificates (expired or expiring in < 30 days)
-    let domains_to_certify = sqlx::query(
+    let app_domains = sqlx::query(
         r#"
         SELECT hostname
         FROM apps
@@ -107,6 +142,24 @@ pub async fn run_acme_iteration(
     .fetch_all(api_db)
     .await?;
 
+    let managed_domains = sqlx::query(
+        r#"
+        SELECT hostname
+        FROM acme_managed_domains
+        WHERE cert_expires_at IS NULL OR cert_expires_at < NOW() + INTERVAL '30 days'
+        "#,
+    )
+    .fetch_all(api_db)
+    .await?;
+
+    let mut domains_to_certify = HashSet::new();
+    for row in app_domains {
+        domains_to_certify.insert(row.get::<String, _>("hostname"));
+    }
+    for row in managed_domains {
+        domains_to_certify.insert(row.get::<String, _>("hostname"));
+    }
+
     if domains_to_certify.is_empty() {
         return Ok(());
     }
@@ -114,9 +167,7 @@ pub async fn run_acme_iteration(
     // 2. Get or create ACME account from the API database
     let account = get_or_create_acme_account(api_db, email, acme_url, is_staging).await?;
 
-    for row in domains_to_certify {
-        let hostname: String = row.get("hostname");
-
+    for hostname in domains_to_certify {
         info!("Processing certificate renewal for {}", hostname);
 
         if let Err(e) =
@@ -299,12 +350,20 @@ async fn certify_domain(
     // Parse expiry
     let expires_at = parse_expiry(&cert_chain_pem)?;
 
-    // Update expiry in API database
+    // Update expiry in API database for the app table and managed-host table.
     sqlx::query("UPDATE apps SET cert_expires_at = $1 WHERE hostname = $2")
         .bind(expires_at)
         .bind(hostname)
         .execute(api_db)
         .await?;
+
+    sqlx::query(
+        "INSERT INTO acme_managed_domains (hostname, cert_expires_at, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (hostname) DO UPDATE SET cert_expires_at = EXCLUDED.cert_expires_at, updated_at = NOW()",
+    )
+    .bind(hostname)
+    .bind(expires_at)
+    .execute(api_db)
+    .await?;
 
     // Encrypt private key for storage
     let encrypted_key = crate::crypto::encrypt(&private_key_pem, master_key)
@@ -326,6 +385,28 @@ async fn certify_domain(
         "Successfully certified domain and published to NATS: {}",
         hostname
     );
+
+    Ok(())
+}
+
+async fn certify_managed_domain(
+    api_db: &PgPool,
+    nats: &crate::nats::TypedNatsClient,
+    account: &Account,
+    hostname: &str,
+    master_key: &str,
+    router_addr: &str,
+) -> anyhow::Result<()> {
+    certify_domain(api_db, nats, account, hostname, master_key, router_addr).await
+}
+
+async fn ensure_managed_domain(api_db: &PgPool, hostname: &str) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO acme_managed_domains (hostname, cert_expires_at) VALUES ($1, NULL) ON CONFLICT (hostname) DO NOTHING",
+    )
+    .bind(hostname)
+    .execute(api_db)
+    .await?;
 
     Ok(())
 }

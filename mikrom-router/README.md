@@ -44,8 +44,12 @@ Common variables:
 - `STATE_CACHE_PATH`
 - `WIREGUARD_PORT`
 - `ACME_STAGING`
+- `DEFAULT_SITE_HOST`
+- `DEFAULT_SITE_REDIRECT_URL`
 - `RPS_LIMIT`
 - `ROUTER_THREADS`
+
+The packaged default configuration redirects `debaser.spluca.org` to `https://spluca.org/` with a temporary redirect. For that to work over TLS, the API-side ACME flow must issue a Let's Encrypt production certificate for `debaser.spluca.org` and the router must load it from `tls_certificates`.
 
 ## Health Endpoints
 

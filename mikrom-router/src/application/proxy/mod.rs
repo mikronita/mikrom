@@ -66,6 +66,8 @@ pub struct MikromProxy {
     state: Arc<RwLock<State>>,
     health: Arc<RouterHealth>,
     acme_staging: bool,
+    default_site_host: Option<HostName>,
+    default_site_redirect_url: Option<String>,
     upstream_ca: Option<Arc<Box<[X509]>>>,
     pub metrics: Arc<RouterMetricsCounters>,
     traffic_publisher: Option<Arc<RouterTrafficPublisher>>,
@@ -153,19 +155,29 @@ fn strip_untrusted_forwarding_headers(upstream_request: &mut RequestHeader) {
 
 impl MikromProxy {
     #[must_use]
+    #[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
     pub fn new(
         state: Arc<RwLock<State>>,
         health: Arc<RouterHealth>,
         acme_staging: bool,
+        default_site_host: String,
+        default_site_redirect_url: String,
         upstream_ca: Option<Arc<Box<[X509]>>>,
         metrics: Arc<RouterMetricsCounters>,
         traffic_publisher: Option<Arc<RouterTrafficPublisher>>,
         rps_limit: isize,
     ) -> Self {
+        let default_site_host = default_site_host.trim();
+        let default_site_redirect_url = default_site_redirect_url.trim();
+
         Self {
             state,
             health,
             acme_staging,
+            default_site_host: (!default_site_host.is_empty())
+                .then(|| HostName::parse(default_site_host)),
+            default_site_redirect_url: (!default_site_redirect_url.is_empty())
+                .then(|| default_site_redirect_url.to_string()),
             upstream_ca,
             metrics,
             traffic_publisher,
@@ -272,6 +284,21 @@ impl MikromProxy {
         let downstream = session.as_downstream_mut();
         downstream.set_read_timeout(Some(downstream_request_timeout()));
         downstream.set_write_timeout(Some(downstream_response_timeout()));
+    }
+
+    fn is_default_site_host(&self, host: &str) -> bool {
+        self.default_site_host
+            .as_ref()
+            .is_some_and(|default_host| default_host.as_str() == HostName::parse(host).as_str())
+    }
+
+    fn default_site_redirect_location(&self, path_and_query: &str) -> Option<String> {
+        let target = self.default_site_redirect_url.as_deref()?;
+        Some(format!(
+            "{}{}",
+            target,
+            path_and_query.trim_start_matches('/')
+        ))
     }
 
     #[allow(clippy::missing_const_for_fn)]
@@ -382,6 +409,30 @@ impl MikromProxy {
         let location = format!("https://{normalized_host}{path}");
         let mut redirect = ResponseHeader::build(301, None)?;
         redirect.insert_header("Location", location)?;
+        session
+            .write_response_header(Box::new(redirect), true)
+            .await?;
+        self.metrics.redirects.fetch_add(1, Ordering::Relaxed);
+        Ok(Some(true))
+    }
+
+    async fn maybe_redirect_default_site(
+        &self,
+        session: &mut Session,
+        host: &str,
+        path_and_query: &str,
+    ) -> Result<Option<bool>> {
+        if !self.is_default_site_host(host) {
+            return Ok(None);
+        }
+
+        let Some(location) = self.default_site_redirect_location(path_and_query) else {
+            return Ok(None);
+        };
+
+        let mut redirect = ResponseHeader::build(307, None)?;
+        redirect.insert_header("Location", location)?;
+        redirect.insert_header("Cache-Control", "no-store")?;
         session
             .write_response_header(Box::new(redirect), true)
             .await?;
@@ -541,6 +592,11 @@ impl ProxyHttp for MikromProxy {
         let normalized_host = HostName::parse(&host);
 
         let path = session.req_header().uri.path().to_string();
+        let path_and_query = session
+            .req_header()
+            .uri
+            .path_and_query()
+            .map_or_else(|| path.clone(), |value| value.as_str().to_string());
         ctx.host = Some(HostName::parse(&host));
         ctx.normalized_host = Some(normalized_host.clone());
 
@@ -552,6 +608,14 @@ impl ProxyHttp for MikromProxy {
 
         if self
             .maybe_handle_acme_challenge(session, &host, &path)
+            .await?
+            == Some(true)
+        {
+            return Ok(true);
+        }
+
+        if self
+            .maybe_redirect_default_site(session, normalized_host.as_str(), path_and_query.as_str())
             .await?
             == Some(true)
         {
@@ -890,6 +954,8 @@ mod tests {
             state,
             Arc::new(RouterHealth::new()),
             false,
+            String::new(),
+            String::new(),
             None,
             Arc::new(RouterMetricsCounters::new()),
             None,
@@ -908,6 +974,8 @@ mod tests {
             state.clone(),
             Arc::new(RouterHealth::new()),
             false,
+            String::new(),
+            String::new(),
             None,
             Arc::new(RouterMetricsCounters::new()),
             None,
@@ -939,6 +1007,28 @@ mod tests {
             .unwrap();
         assert!(!result.1);
         assert!(result.2.is_none());
+    }
+
+    #[test]
+    fn test_default_site_redirect_location_preserves_path_and_query() {
+        let proxy = MikromProxy::new(
+            Arc::new(RwLock::new(State::default())),
+            Arc::new(RouterHealth::new()),
+            false,
+            "debaser.spluca.org".to_string(),
+            "https://spluca.org/".to_string(),
+            None,
+            Arc::new(RouterMetricsCounters::new()),
+            None,
+            100,
+        );
+
+        assert_eq!(
+            proxy
+                .default_site_redirect_location("/foo?bar=baz")
+                .as_deref(),
+            Some("https://spluca.org/foo?bar=baz")
+        );
     }
 
     #[test]

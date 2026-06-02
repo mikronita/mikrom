@@ -139,7 +139,17 @@ async fn proxy_listener_accepts_ipv4_and_ipv6() {
     }));
     let metrics = Arc::new(RouterMetricsCounters::new());
     let health = Arc::new(RouterHealth::new());
-    let proxy = MikromProxy::new(state, health, false, None, metrics, None, 100);
+    let proxy = MikromProxy::new(
+        state,
+        health,
+        false,
+        String::new(),
+        String::new(),
+        None,
+        metrics,
+        None,
+        100,
+    );
     spawn_proxy_server(use_ipv6, proxy_port, proxy);
 
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
