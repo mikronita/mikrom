@@ -292,7 +292,7 @@ impl MikromCi {
         self.run_stage_with_container(
             "build",
             self.workspace_release_container(),
-            "/usr/local/cargo/bin/cargo build --workspace --exclude mikrom-agent-ebpf --release --locked",
+            "/usr/local/cargo/bin/cargo build --workspace --exclude ci --exclude mikrom-agent-ebpf --release --locked",
         )
         .await
     }
