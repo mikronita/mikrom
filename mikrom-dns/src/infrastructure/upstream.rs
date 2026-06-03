@@ -79,7 +79,11 @@ impl UpstreamDnsForwarder {
     }
 
     async fn query_via_udp(&self, upstream: SocketAddr, request_bytes: &[u8]) -> Result<Message> {
-        let bind_addr = "[::]:0";
+        let bind_addr = if upstream.is_ipv6() {
+            "[::]:0"
+        } else {
+            "0.0.0.0:0"
+        };
         let socket = timeout(Duration::from_secs(5), UdpSocket::bind(bind_addr))
             .await
             .context("timeout binding UDP socket")?

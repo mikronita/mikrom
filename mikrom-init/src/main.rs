@@ -629,7 +629,7 @@ fn ensure_etc_hosts(hostname: &str) -> Result<()> {
 }
 
 fn build_hosts_contents(hostname: &str) -> String {
-    format!("::1 localhost ip6-localhost ip6-loopback\nfd00::1 {hostname}\n")
+    format!("::1 localhost ip6-localhost ip6-loopback {hostname}\n")
 }
 
 async fn setup_networking(config: &InitConfig) -> Result<()> {

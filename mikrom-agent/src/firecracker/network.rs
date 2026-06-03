@@ -287,7 +287,7 @@ impl crate::firecracker::FirecrackerManager {
             .trim()
             .parse()
             .unwrap_or(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1));
-        let base = Ipv6Addr::from(ipv6_to_u128(gateway) & prefix_mask(prefix));
+        let base = Ipv6Addr::from(ipv6_to_u128(gateway) & !prefix_mask(prefix));
         (gateway, base, prefix)
     }
 
