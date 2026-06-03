@@ -458,7 +458,7 @@ impl MikromCi {
         let image = self.service_image(service, dockerfile);
 
         image
-            .sync()
+            .id()
             .await
             .with_context(|| format!("failed to build {service} image"))?;
 

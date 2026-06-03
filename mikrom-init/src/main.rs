@@ -629,7 +629,7 @@ fn ensure_etc_hosts(hostname: &str) -> Result<()> {
 }
 
 fn build_hosts_contents(hostname: &str) -> String {
-    format!("::1 localhost ip6-localhost ip6-loopback\nfd00::1 {hostname}\n")
+    format!("::1 localhost ip6-localhost ip6-loopback {hostname}\n")
 }
 
 async fn setup_networking(config: &InitConfig) -> Result<()> {
@@ -1531,7 +1531,6 @@ mod tests {
     fn test_build_hosts_contents_matches_expected_format() {
         let hosts = build_hosts_contents("localhost");
         assert!(hosts.contains("::1 localhost ip6-localhost ip6-loopback"));
-        assert!(hosts.contains("fd00::1 localhost"));
     }
 
     #[test]
