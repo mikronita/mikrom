@@ -201,6 +201,20 @@ impl crate::firecracker::FirecrackerManager {
         }
     }
 
+    pub(crate) async fn cleanup_snapshot_files(&self, vm_id: &VmId) {
+        let snapshot_dir = std::path::Path::new(&self.fc_config.data_dir).join("snapshots");
+        let snapshot_path = snapshot_dir.join(format!("{vm_id}.snapshot"));
+        let mem_path = snapshot_dir.join(format!("{vm_id}.mem"));
+
+        for path in [snapshot_path, mem_path] {
+            if let Err(e) = tokio::fs::remove_file(&path).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::debug!("Failed to remove snapshot artifact {:?}: {}", path, e);
+            }
+        }
+    }
+
     pub(crate) async fn cleanup_process_chroot(&self, vm_id: &VmId, chroot_dir: Option<&str>) {
         if let Some(chroot) = chroot_dir {
             tracing::info!(vm_id = %vm_id, chroot_dir = %chroot, "Cleaning up jailer chroot");
@@ -273,6 +287,35 @@ impl crate::firecracker::FirecrackerManager {
                             && e.kind() != std::io::ErrorKind::NotFound
                         {
                             tracing::debug!("Failed to remove stale file {:?}: {}", path, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        let snapshot_dir = std::path::Path::new(&self.fc_config.data_dir).join("snapshots");
+        if let Ok(mut entries) = tokio::fs::read_dir(&snapshot_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                if let Ok(file_name) = entry.file_name().into_string()
+                    && (file_name.ends_with(".snapshot") || file_name.ends_with(".mem"))
+                {
+                    let vm_id_str = file_name
+                        .strip_suffix(".snapshot")
+                        .or_else(|| file_name.strip_suffix(".mem"));
+                    if let Some(vm_id_str) = vm_id_str
+                        && let Ok(vm_id) = vm_id_str.parse::<VmId>()
+                        && !active_vm_ids.contains(&vm_id)
+                    {
+                        let path = entry.path();
+                        tracing::debug!("Removing stale snapshot artifact: {:?}", path);
+                        if let Err(e) = tokio::fs::remove_file(&path).await
+                            && e.kind() != std::io::ErrorKind::NotFound
+                        {
+                            tracing::debug!(
+                                "Failed to remove stale snapshot artifact {:?}: {}",
+                                path,
+                                e
+                            );
                         }
                     }
                 }
