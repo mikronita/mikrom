@@ -5,12 +5,7 @@ FROM rust:trixie AS builder
 
 WORKDIR /app
 
-COPY Cargo.toml Cargo.lock ./
-COPY mikrom-proto/ mikrom-proto/
-COPY mikrom-api/ mikrom-api/
-COPY mikrom-scheduler/ mikrom-scheduler/
-COPY mikrom-agent/ mikrom-agent/
-COPY mikrom-cli/ mikrom-cli/
+COPY . .
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends protobuf-compiler cmake \
