@@ -2,6 +2,7 @@ use crate::cloud_hypervisor::api::{ch_request, wait_for_socket};
 use crate::cloud_hypervisor::config as ch_config;
 use crate::cloud_hypervisor::process::CloudHypervisorProcess;
 use crate::config::AgentConfig;
+use crate::hypervisor::KernelBootArgsBuilder;
 use crate::hypervisor::vm_hypervisor::{HypervisorType, VmHypervisor};
 use crate::hypervisor::{HypervisorError, VmConfig, VmDetailedInfo, VmInfo, VmStatus};
 use async_trait::async_trait;
@@ -49,9 +50,8 @@ impl CloudHypervisorManager {
         }
     }
 
-    fn build_boot_args(&self, _config: &VmConfig) -> String {
-        "console=ttyS0 earlyprintk=ttyS0 reboot=k panic=1 net.ifnames=0 nomodules rw root=/dev/vda init=/mikrom-init"
-            .to_string()
+    fn build_boot_args(&self, config: &VmConfig) -> String {
+        KernelBootArgsBuilder::cloud_hypervisor(config).build()
     }
 
     fn workload_artifacts(&self, workload_type: i32) -> (&Path, &Path) {
@@ -1111,7 +1111,7 @@ mod tests {
                 nats_url: "nats://localhost:4222".to_string(),
                 host_id: "host-1".to_string(),
                 use_tls: false,
-                bridge_ip: "10.0.0.1/8".to_string(),
+                bridge_ip: "fd00::1/64".to_string(),
                 certs_dir: "/certs/agent".to_string(),
                 data_path: PathBuf::from("/tmp"),
                 agent_hostname: None,
@@ -1140,6 +1140,52 @@ mod tests {
             mgr.workload_artifacts(mikrom_proto::scheduler::WorkloadType::Database as i32);
         assert_eq!(kernel, Path::new("/opt/neon/vmlinux.bin"));
         assert_eq!(rootfs, Path::new("/opt/neon/base-rootfs.ext4"));
+    }
+
+    #[test]
+    fn boot_args_include_ipv6_network_parameters_when_present() {
+        let mgr = CloudHypervisorManager {
+            config: AgentConfig {
+                nats_url: "nats://localhost:4222".to_string(),
+                host_id: "host-1".to_string(),
+                use_tls: false,
+                bridge_ip: "fd00::1/64".to_string(),
+                certs_dir: "/certs/agent".to_string(),
+                data_path: PathBuf::from("/tmp"),
+                agent_hostname: None,
+                agent_advertise_address: None,
+                wireguard_port: None,
+                wireguard_pubkey: None,
+                cloud_hypervisor_enabled: true,
+                cloud_hypervisor_binary: PathBuf::from("/usr/bin/cloud-hypervisor"),
+                cloud_hypervisor_kernel: PathBuf::from("/opt/cloud-hypervisor/vmlinux.bin"),
+                cloud_hypervisor_base_rootfs: PathBuf::from(
+                    "/opt/cloud-hypervisor/base-rootfs.ext4",
+                ),
+                cloud_hypervisor_database_kernel: PathBuf::from("/opt/neon/vmlinux.bin"),
+                cloud_hypervisor_database_base_rootfs: PathBuf::from("/opt/neon/base-rootfs.ext4"),
+                http_port: 5002,
+                max_vms_per_host: 0,
+                nats_flapping_session_secs: 30,
+            },
+            active_vms: Arc::new(DashMap::new()),
+            vms: Arc::new(DashMap::new()),
+            builder: Arc::new(crate::builder::ImageBuilder),
+            nats_client: Arc::new(RwLock::new(None)),
+        };
+
+        let config = VmConfig {
+            ipv6_address: Some("fd40:b90d:fc5f:1ae0::2".to_string()),
+            ipv6_gateway: Some("fd40:b90d:fc5f:1ae0::1".to_string()),
+            ..Default::default()
+        };
+
+        let boot_args = mgr.build_boot_args(&config);
+        assert!(boot_args.contains("init=/mikrom-init"));
+        assert!(
+            boot_args
+                .contains("ip=[fd40:b90d:fc5f:1ae0::2]::[fd40:b90d:fc5f:1ae0::1]:64::eth0:off")
+        );
     }
 
     #[test]
@@ -1175,7 +1221,7 @@ mod tests {
                 nats_url: "nats://localhost:4222".to_string(),
                 host_id: "host-1".to_string(),
                 use_tls: false,
-                bridge_ip: "10.0.0.1/8".to_string(),
+                bridge_ip: "fd00::1/64".to_string(),
                 certs_dir: "/certs/agent".to_string(),
                 data_path: PathBuf::from("/tmp"),
                 agent_hostname: None,

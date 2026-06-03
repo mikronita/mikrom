@@ -6,7 +6,7 @@ use axum::{
     routing::get,
 };
 use sqlx::{PgPool, Row};
-use std::net::{Ipv4Addr, Ipv6Addr, TcpListener};
+use std::net::{Ipv6Addr, TcpListener};
 use std::{collections::BTreeMap, fmt::Write as _, time::Duration, time::Instant};
 use tower_http::trace::TraceLayer;
 
@@ -159,37 +159,8 @@ fn bind_ipv6_dual_stack_listener(port: u16) -> std::io::Result<TcpListener> {
     Ok(socket.into())
 }
 
-fn bind_ipv4_listener(port: u16) -> std::io::Result<TcpListener> {
-    let socket = socket2::Socket::new(
-        socket2::Domain::IPV4,
-        socket2::Type::STREAM,
-        Some(socket2::Protocol::TCP),
-    )?;
-    socket.set_reuse_address(true)?;
-
-    let addr = std::net::SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
-    socket.bind(&socket2::SockAddr::from(addr))?;
-    socket.listen(1024)?;
-    socket.set_nonblocking(true)?;
-
-    Ok(socket.into())
-}
-
 fn bind_dual_stack_listener(port: u16) -> std::io::Result<TcpListener> {
-    match bind_ipv6_dual_stack_listener(port) {
-        Ok(listener) => Ok(listener),
-        Err(v6_err) => {
-            tracing::warn!(port = port, error = %v6_err, "IPv6 bind unavailable, falling back to IPv4");
-            bind_ipv4_listener(port).map_err(|v4_err| {
-                std::io::Error::new(
-                    v4_err.kind(),
-                    format!(
-                        "failed to bind listener on port {port} after IPv6 fallback (IPv6 error: {v6_err}; IPv4 error: {v4_err})"
-                    ),
-                )
-            })
-        },
-    }
+    bind_ipv6_dual_stack_listener(port)
 }
 
 impl SchedulerHttpState {

@@ -61,8 +61,7 @@ impl DnsSyncService {
 }
 
 pub async fn run_nats_subscriber(store: DnsRecordStore) -> Result<()> {
-    let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://[::1]:4222".to_string());
     let sync_service = DnsSyncService::new(store.clone());
     let mut backoff = std::time::Duration::from_secs(1);
 

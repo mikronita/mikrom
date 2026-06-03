@@ -62,10 +62,10 @@ pub struct AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            nats_url: "nats://localhost:4222".to_string(),
+            nats_url: "nats://[::1]:4222".to_string(),
             host_id: "test-host".to_string(),
             use_tls: false,
-            bridge_ip: "10.0.0.1/8".to_string(),
+            bridge_ip: "fd00::1/64".to_string(),
             certs_dir: "/certs/agent".to_string(),
             data_path: PathBuf::from("/tmp/mikrom-test"),
             agent_hostname: None,
@@ -126,7 +126,7 @@ fn default_certs_dir() -> String {
 }
 
 fn default_bridge_ip() -> String {
-    "10.0.0.1/8".to_string()
+    "fd00::1/64".to_string()
 }
 
 fn default_host_id() -> String {
@@ -352,10 +352,10 @@ mod tests {
     #[test]
     fn default_nats_flapping_session_secs_is_reasonable() {
         let config = AgentConfig {
-            nats_url: "nats://localhost:4222".to_string(),
+            nats_url: "nats://[::1]:4222".to_string(),
             host_id: "host-1".to_string(),
             use_tls: false,
-            bridge_ip: "10.0.0.1/8".to_string(),
+            bridge_ip: "fd00::1/64".to_string(),
             certs_dir: "/certs/agent".to_string(),
             data_path: std::env::temp_dir(),
             agent_hostname: None,

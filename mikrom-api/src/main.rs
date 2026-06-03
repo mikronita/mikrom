@@ -1,4 +1,4 @@
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener};
+use std::net::{Ipv6Addr, SocketAddr, TcpListener};
 use std::sync::Arc;
 
 use mikrom_api::AppState;
@@ -39,43 +39,8 @@ fn bind_ipv6_dual_stack_listener(port: u16) -> anyhow::Result<TcpListener> {
     Ok(socket.into())
 }
 
-fn bind_ipv4_listener(port: u16) -> anyhow::Result<TcpListener> {
-    let socket = socket2::Socket::new(
-        socket2::Domain::IPV4,
-        socket2::Type::STREAM,
-        Some(socket2::Protocol::TCP),
-    )
-    .map_err(|e| anyhow::anyhow!("failed to create IPv4 listener socket on port {port}: {e}"))?;
-    socket
-        .set_reuse_address(true)
-        .map_err(|e| anyhow::anyhow!("failed to set SO_REUSEADDR on IPv4 port {port}: {e}"))?;
-
-    let addr = std::net::SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
-    socket
-        .bind(&socket2::SockAddr::from(addr))
-        .map_err(|e| anyhow::anyhow!("failed to bind IPv4 listener on {addr}: {e}"))?;
-    socket
-        .listen(1024)
-        .map_err(|e| anyhow::anyhow!("failed to listen on {addr}: {e}"))?;
-    socket
-        .set_nonblocking(true)
-        .map_err(|e| anyhow::anyhow!("failed to set nonblocking on {addr}: {e}"))?;
-
-    Ok(socket.into())
-}
-
 fn bind_dual_stack_listener(port: u16) -> anyhow::Result<TcpListener> {
-    match bind_ipv6_dual_stack_listener(port) {
-        Ok(listener) => Ok(listener),
-        Err(v6_err) => {
-            tracing::warn!(port = port, error = %v6_err, "IPv6 bind unavailable, falling back to IPv4");
-            bind_ipv4_listener(port).map_err(|v4_err| {
-                anyhow::anyhow!(
-                    "failed to bind listener on port {port} after IPv6 fallback (IPv6 error: {v6_err}; IPv4 error: {v4_err})"
-                )
-            })
-        },
-    }
+    bind_ipv6_dual_stack_listener(port)
 }
 
 #[tokio::main]
@@ -194,10 +159,10 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::bind_dual_stack_listener;
-    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
+    use std::net::{Ipv6Addr, SocketAddr, TcpStream};
 
     #[test]
-    fn dual_stack_listener_accepts_ipv4_and_ipv6() {
+    fn dual_stack_listener_accepts_ipv6() {
         let listener = match bind_dual_stack_listener(0) {
             Ok(listener) => listener,
             Err(err) => {
@@ -210,45 +175,25 @@ mod tests {
             .expect("local addr should be available");
         let port = local_addr.port();
 
-        let mut connected_streams = Vec::new();
-        if local_addr.is_ipv6() {
-            let v6 = SocketAddr::from((Ipv6Addr::LOCALHOST, port));
-            match TcpStream::connect(v6) {
-                Ok(stream) => connected_streams.push(stream),
-                Err(err) => {
-                    eprintln!("skipping api smoke test: ipv6 loopback unavailable: {err}");
-                },
-            }
-        }
-
-        let v4 = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-        match TcpStream::connect(v4) {
-            Ok(stream) => connected_streams.push(stream),
-            Err(err) => {
-                if local_addr.is_ipv6() {
-                    eprintln!("skipping api smoke test: ipv4 loopback unavailable: {err}");
-                } else {
-                    eprintln!(
-                        "skipping api smoke test: ipv4-only fallback could not connect: {err}"
-                    );
-                    return;
-                }
-            },
-        }
-
-        if connected_streams.is_empty() {
-            eprintln!("skipping api smoke test: no loopback connections succeeded");
+        if !local_addr.is_ipv6() {
+            eprintln!("skipping api smoke test: listener did not bind to ipv6");
             return;
         }
 
-        let accept_count = connected_streams.len();
+        let v6 = SocketAddr::from((Ipv6Addr::LOCALHOST, port));
+        let stream = match TcpStream::connect(v6) {
+            Ok(stream) => stream,
+            Err(err) => {
+                eprintln!("skipping api smoke test: ipv6 loopback unavailable: {err}");
+                return;
+            },
+        };
+
         let handle = std::thread::spawn(move || {
-            for _ in 0..accept_count {
-                let _ = listener.accept();
-            }
+            let _ = listener.accept();
         });
 
         handle.join().expect("listener thread should exit");
-        drop(connected_streams);
+        drop(stream);
     }
 }

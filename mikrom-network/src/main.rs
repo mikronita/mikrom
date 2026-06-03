@@ -9,8 +9,7 @@ async fn main() -> anyhow::Result<()> {
 
     let host_id = std::env::var("MIKROM_HOST_ID")
         .context("MIKROM_HOST_ID environment variable is required")?;
-    let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://[::1]:4222".to_string());
     let data_dir =
         std::env::var("MIKROM_DATA_DIR").unwrap_or_else(|_| "/var/lib/mikrom-network".to_string());
     let wg_port = std::env::var("MIKROM_WG_PORT")

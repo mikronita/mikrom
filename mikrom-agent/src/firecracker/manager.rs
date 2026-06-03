@@ -42,7 +42,7 @@ pub struct FirecrackerManager {
     /// Image builder for converting OCI images to Firecracker-compatible rootfs.
     pub builder: Arc<crate::builder::ImageBuilder>,
     /// Tracks allocated IP addresses on the host bridge.
-    pub allocated_ips: Arc<tokio::sync::Mutex<std::collections::HashSet<std::net::Ipv4Addr>>>,
+    pub allocated_ips: Arc<tokio::sync::Mutex<std::collections::HashSet<std::net::Ipv6Addr>>>,
     /// NATS client for log streaming.
     nats_client: Arc<RwLock<Option<async_nats::Client>>>,
     pub ebpf_manager: Arc<tokio::sync::Mutex<Option<crate::ebpf::EbpfManager>>>,
@@ -494,21 +494,21 @@ impl FirecrackerManager {
         vm_id: &VmId,
         config: &mut VmConfig,
     ) -> Result<(Option<String>, Option<u32>), HypervisorError> {
-        if config.ip_address.as_deref().unwrap_or("").is_empty() {
+        if config.ipv6_address.as_deref().unwrap_or("").is_empty() {
             if let Some((ip, gw, mac)) = self.allocate_vm_network().await {
-                tracing::info!(vm_id = %vm_id, ip = %ip, "Allocated IP from agent bridge subnet");
-                config.ip_address = Some(ip);
-                config.gateway = Some(gw);
+                tracing::info!(vm_id = %vm_id, ipv6 = %ip, "Allocated IPv6 from agent bridge subnet");
+                config.ipv6_address = Some(ip);
+                config.ipv6_gateway = Some(gw);
                 config.mac_address = Some(mac);
             } else {
                 tracing::warn!(
                     vm_id = %vm_id,
-                    "No available IPs in bridge subnet, starting without networking"
+                    "No available IPv6 addresses in bridge subnet, starting without networking"
                 );
             }
         }
 
-        if config.ip_address.is_some() {
+        if config.ipv6_address.is_some() {
             let (tap, ifindex) = self.setup_tap(vm_id).await?;
             self.attach_tc_best_effort(&tap).await;
             Ok((Some(tap), Some(ifindex)))
@@ -699,7 +699,7 @@ impl FirecrackerManager {
 
         let mut vms = self.vms.write().await;
         if let Some(vm) = vms.get_mut(vm_id) {
-            if let Some(ip) = &vm.config.ip_address {
+            if let Some(ip) = &vm.config.ipv6_address {
                 self.release_vm_ip(ip).await;
             }
             vm.status = VmStatus::Stopped;

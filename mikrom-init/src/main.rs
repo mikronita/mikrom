@@ -629,7 +629,7 @@ fn ensure_etc_hosts(hostname: &str) -> Result<()> {
 }
 
 fn build_hosts_contents(hostname: &str) -> String {
-    format!("127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n127.0.1.1 {hostname}\n")
+    format!("::1 localhost ip6-localhost ip6-loopback\nfd00::1 {hostname}\n")
 }
 
 async fn setup_networking(config: &InitConfig) -> Result<()> {
@@ -905,16 +905,9 @@ async fn wait_for_port_ready(port: u16, child: &mut tokio::process::Child) -> Re
             ));
         }
 
-        let attempts = [
-            TcpStream::connect(("127.0.0.1", port)),
-            TcpStream::connect(("::1", port)),
-        ];
-
-        for attempt in attempts {
-            if attempt.await.is_ok() {
-                println!("[mikrom-init] Application is accepting connections on port {port}");
-                return Ok(());
-            }
+        if TcpStream::connect(("::1", port)).await.is_ok() {
+            println!("[mikrom-init] Application is accepting connections on port {port}");
+            return Ok(());
         }
 
         if Instant::now() >= deadline {
@@ -1492,7 +1485,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn test_wait_for_port_ready_detects_listener() {
-        let listener = match tokio::net::TcpListener::bind(("127.0.0.1", 0)).await {
+        let listener = match tokio::net::TcpListener::bind(("::1", 0)).await {
             Ok(listener) => listener,
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return,
             Err(e) => panic!("failed to bind test listener: {e}"),
@@ -1537,21 +1530,20 @@ mod tests {
     #[test]
     fn test_build_hosts_contents_matches_expected_format() {
         let hosts = build_hosts_contents("localhost");
-        assert!(hosts.contains("127.0.0.1 localhost"));
         assert!(hosts.contains("::1 localhost ip6-localhost ip6-loopback"));
-        assert!(hosts.contains("127.0.1.1 localhost"));
+        assert!(hosts.contains("fd00::1 localhost"));
     }
 
     #[test]
     fn test_append_hosts_entry_inserts_newline_before_appending() {
         let temp_dir = tempfile::tempdir().unwrap();
         let hosts_path = temp_dir.path().join("hosts");
-        std::fs::write(&hosts_path, "127.0.0.1 localhost").unwrap();
+        std::fs::write(&hosts_path, "::1 localhost").unwrap();
 
         append_hosts_entry(&hosts_path, "neon-pageserver", "fd00::1").unwrap();
 
         let contents = std::fs::read_to_string(&hosts_path).unwrap();
-        assert_eq!(contents, "127.0.0.1 localhost\nfd00::1 neon-pageserver\n");
+        assert_eq!(contents, "::1 localhost\nfd00::1 neon-pageserver\n");
     }
 
     #[test]

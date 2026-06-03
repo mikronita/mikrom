@@ -3,7 +3,7 @@ use futures::TryStreamExt;
 use std::net::IpAddr;
 
 const BRIDGE_NAME: &str = "mikrom-br0";
-const BRIDGE_CIDR: &str = "10.0.0.1/8";
+const BRIDGE_CIDR: &str = "fd00::1/64";
 
 pub(crate) async fn ensure_bridge() -> Result<(), HypervisorError> {
     let handle = rtnl_handle().await?;
@@ -32,21 +32,19 @@ pub(crate) async fn ensure_bridge() -> Result<(), HypervisorError> {
 
     // Always try to add addresses, ignore "File exists" errors
     let _ = add_ip_address(&handle, index, addr, prefix).await;
-    let _ = add_ip_address(&handle, index, IpAddr::V6("fd00::1".parse().unwrap()), 128).await;
     let _ = add_ip_address(&handle, index, IpAddr::V6("fe80::1".parse().unwrap()), 64).await;
 
-    set_proc_sysctl("net/ipv4/ip_forward", "1").await?;
     set_proc_sysctl("net/ipv6/conf/all/forwarding", "1").await?;
     set_proc_sysctl("net/ipv6/conf/default/forwarding", "1").await?;
     set_proc_sysctl(&format!("net/ipv6/conf/{BRIDGE_NAME}/forwarding"), "1").await?;
 
-    run_iptables(&[
+    run_ip6tables(&[
         "-t",
         "nat",
         "-A",
         "POSTROUTING",
         "-s",
-        "10.0.0.0/8",
+        "fd00::/64",
         "!",
         "-o",
         BRIDGE_NAME,
@@ -143,17 +141,17 @@ async fn set_proc_sysctl(key: &str, value: &str) -> Result<(), HypervisorError> 
         .map_err(|e| HypervisorError::ProcessError(format!("Failed to write {path}: {e}")))
 }
 
-async fn run_iptables(args: &[&str]) {
-    let output = tokio::process::Command::new("iptables")
+async fn run_ip6tables(args: &[&str]) {
+    let output = tokio::process::Command::new("ip6tables")
         .args(args)
         .output()
         .await;
     match output {
         Ok(o) if !o.status.success() => {
-            tracing::warn!("iptables failed: {}", String::from_utf8_lossy(&o.stderr));
+            tracing::warn!("ip6tables failed: {}", String::from_utf8_lossy(&o.stderr));
         },
         Err(e) => {
-            tracing::warn!("iptables command error: {e}");
+            tracing::warn!("ip6tables command error: {e}");
         },
         _ => {},
     }

@@ -3,7 +3,7 @@ use futures::stream::TryStreamExt;
 use mikrom_proto::id::VmId;
 use std::ffi::CString;
 use std::fs;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 
 use netlink_packet_route::route::{RouteAddress, RouteAttribute};
 
@@ -275,51 +275,54 @@ impl crate::firecracker::FirecrackerManager {
 
     pub(crate) fn resolve_bridge_config(env_ip: Option<String>) -> (String, String) {
         let bridge_name = "mikrom-br0";
-        let bridge_ip = env_ip.unwrap_or_else(|| "10.0.0.1/8".to_string());
+        let bridge_ip = env_ip.unwrap_or_else(|| "fd00::1/64".to_string());
         (bridge_name.to_string(), bridge_ip)
     }
 
-    pub(crate) fn parse_bridge_subnet(&self) -> (std::net::Ipv4Addr, std::net::Ipv4Addr, u32) {
+    pub(crate) fn parse_bridge_subnet(&self) -> (Ipv6Addr, Ipv6Addr, u32) {
         let (_, bridge_cidr) = self.get_bridge_config();
-        let (ip_str, prefix_str) = bridge_cidr.split_once('/').unwrap_or((&bridge_cidr, "24"));
-        let prefix: u32 = prefix_str.trim().parse().unwrap_or(24);
-        let gateway: std::net::Ipv4Addr = ip_str
+        let (ip_str, prefix_str) = bridge_cidr.split_once('/').unwrap_or((&bridge_cidr, "64"));
+        let prefix: u32 = prefix_str.trim().parse().unwrap_or(64);
+        let gateway: Ipv6Addr = ip_str
             .trim()
             .parse()
-            .unwrap_or(std::net::Ipv4Addr::new(10, 0, 0, 1));
-        let mask = if prefix == 0 {
-            0u32
-        } else {
-            !0u32 << (32 - prefix)
-        };
-        let base = std::net::Ipv4Addr::from(u32::from(gateway) & mask);
+            .unwrap_or(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1));
+        let base = Ipv6Addr::from(ipv6_to_u128(gateway) & prefix_mask(prefix));
         (gateway, base, prefix)
     }
 
     pub(crate) async fn allocate_vm_network(&self) -> Option<(String, String, String)> {
         let (gateway, base, prefix) = self.parse_bridge_subnet();
-        let host_count = (1u32 << (32 - prefix)).saturating_sub(2);
-        let base_u32 = u32::from(base);
-        let gw_u32 = u32::from(gateway);
+        let base_u128 = ipv6_to_u128(base);
+        let gateway_u128 = ipv6_to_u128(gateway);
+        let subnet_end = base_u128 | prefix_mask(prefix);
 
         let mut allocated = self.allocated_ips.lock().await;
-        for offset in 2..=host_count {
-            let candidate = std::net::Ipv4Addr::from(base_u32 + offset);
-            if u32::from(candidate) == gw_u32 {
-                continue;
+        let mut candidate = allocated
+            .iter()
+            .map(|addr| ipv6_to_u128(*addr))
+            .max()
+            .unwrap_or(base_u128 + 1)
+            .saturating_add(1)
+            .max(base_u128 + 2);
+
+        if candidate == gateway_u128 {
+            candidate = candidate.saturating_add(1);
+        }
+
+        while candidate <= subnet_end {
+            let ip = u128_to_ipv6(candidate);
+            if candidate != gateway_u128 && !allocated.contains(&ip) {
+                allocated.insert(ip);
+                return Some((ip.to_string(), gateway.to_string(), mac_from_ipv6(ip)));
             }
-            if !allocated.contains(&candidate) {
-                allocated.insert(candidate);
-                let o = candidate.octets();
-                let mac = format!("AA:FC:{:02X}:{:02X}:{:02X}:{:02X}", o[0], o[1], o[2], o[3]);
-                return Some((candidate.to_string(), gateway.to_string(), mac));
-            }
+            candidate = candidate.saturating_add(1);
         }
         None
     }
 
     pub(crate) async fn release_vm_ip(&self, ip_str: &str) {
-        if let Ok(ip) = ip_str.parse::<std::net::Ipv4Addr>() {
+        if let Ok(ip) = ip_str.parse::<Ipv6Addr>() {
             self.allocated_ips.lock().await.remove(&ip);
         }
     }
@@ -332,4 +335,30 @@ impl crate::firecracker::FirecrackerManager {
             tracing::warn!("Failed to attach eBPF filter to {}: {}", tap, e);
         }
     }
+}
+
+fn ipv6_to_u128(addr: Ipv6Addr) -> u128 {
+    u128::from_be_bytes(addr.octets())
+}
+
+fn u128_to_ipv6(value: u128) -> Ipv6Addr {
+    Ipv6Addr::from(value.to_be_bytes())
+}
+
+fn prefix_mask(prefix: u32) -> u128 {
+    match prefix {
+        0 => u128::MAX,
+        128 => 0,
+        n if n < 128 => (1u128 << (128 - n)) - 1,
+        _ => 0,
+    }
+}
+
+fn mac_from_ipv6(addr: Ipv6Addr) -> String {
+    let hash = blake3::hash(&addr.octets());
+    let bytes = hash.as_bytes();
+    format!(
+        "AA:FC:{:02X}:{:02X}:{:02X}:{:02X}",
+        bytes[0], bytes[1], bytes[2], bytes[3]
+    )
 }
