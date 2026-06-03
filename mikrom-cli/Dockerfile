@@ -13,7 +13,7 @@ COPY mikrom-agent/ mikrom-agent/
 COPY mikrom-cli/ mikrom-cli/
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends protobuf-compiler \
+    && apt-get install -y --no-install-recommends protobuf-compiler cmake \
     && rm -rf /var/lib/apt/lists/* \
     && cargo build --release -p mikrom-cli
 

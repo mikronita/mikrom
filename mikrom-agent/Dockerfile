@@ -8,7 +8,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 # 2. Builder stage
 FROM chef AS builder
-RUN apt-get update && apt-get install -y protobuf-compiler musl-tools && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y protobuf-compiler cmake musl-tools && rm -rf /var/lib/apt/lists/*
 RUN rustup target add x86_64-unknown-linux-musl
 COPY --from=planner /app/recipe.json recipe.json
 # Build dependencies - this is the caching layer
