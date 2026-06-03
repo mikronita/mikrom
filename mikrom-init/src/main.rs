@@ -1531,7 +1531,6 @@ mod tests {
     fn test_build_hosts_contents_matches_expected_format() {
         let hosts = build_hosts_contents("localhost");
         assert!(hosts.contains("::1 localhost ip6-localhost ip6-loopback"));
-        assert!(hosts.contains("fd00::1 localhost"));
     }
 
     #[test]

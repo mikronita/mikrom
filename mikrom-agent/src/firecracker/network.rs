@@ -298,13 +298,7 @@ impl crate::firecracker::FirecrackerManager {
         let subnet_end = base_u128 | prefix_mask(prefix);
 
         let mut allocated = self.allocated_ips.lock().await;
-        let mut candidate = allocated
-            .iter()
-            .map(|addr| ipv6_to_u128(*addr))
-            .max()
-            .unwrap_or(base_u128 + 1)
-            .saturating_add(1)
-            .max(base_u128 + 2);
+        let mut candidate = base_u128 + 2;
 
         if candidate == gateway_u128 {
             candidate = candidate.saturating_add(1);
