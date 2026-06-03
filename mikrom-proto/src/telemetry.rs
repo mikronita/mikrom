@@ -20,7 +20,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 pub type DynTelemetryLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
 
 const DEFAULT_LOG_LEVEL: &str = "info";
-const DEFAULT_OTLP_ENDPOINT: &str = "http://192.168.122.128:4317";
+const DEFAULT_OTLP_ENDPOINT: &str = "http://[::1]:4317";
 
 #[derive(Clone)]
 pub struct TelemetryProviders {

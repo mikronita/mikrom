@@ -84,17 +84,17 @@ mod tests {
 
     #[test]
     fn test_normalize_allowed_ips() {
-        let ips = vec!["fd00::1".to_string(), "192.168.1.1/24".to_string()];
+        let ips = vec!["fd00::1".to_string(), "fd00::2/64".to_string()];
         let normalized = normalize_allowed_ips(&ips).unwrap();
         assert_eq!(normalized[0], "fd00::1/128");
-        assert_eq!(normalized[1], "192.168.1.1/24");
+        assert_eq!(normalized[1], "fd00::2/64");
     }
 
     #[test]
     fn test_parse_ip_prefix() {
-        let (ip, prefix) = parse_ip_prefix("10.0.0.1").unwrap();
-        assert_eq!(ip, "10.0.0.1".parse::<IpAddr>().unwrap());
-        assert_eq!(prefix, 32);
+        let (ip, prefix) = parse_ip_prefix("fd00::1").unwrap();
+        assert_eq!(ip, "fd00::1".parse::<IpAddr>().unwrap());
+        assert_eq!(prefix, 128);
 
         let (ip, prefix) = parse_ip_prefix("fd00::1/64").unwrap();
         assert_eq!(ip, "fd00::1".parse::<IpAddr>().unwrap());

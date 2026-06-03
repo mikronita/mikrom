@@ -97,8 +97,8 @@ pub struct ApiConfig {
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
-            database_url: "postgres://localhost/mikrom".to_string(),
-            nats_url: "nats://localhost:4222".to_string(),
+            database_url: "postgres://[::1]/mikrom".to_string(),
+            nats_url: "nats://[::1]:4222".to_string(),
             jwt_secret: "default_jwt_secret_at_least_32_chars_long".to_string(),
             master_key: "default_master_key_at_least_32_chars_long".to_string(),
             api_port: default_api_port(),
@@ -171,11 +171,11 @@ fn default_api_port() -> u16 {
 }
 
 fn default_router_addr() -> String {
-    "http://192.168.122.1:80".to_string()
+    "http://[::1]:80".to_string()
 }
 
 fn default_frontend_url() -> String {
-    "http://localhost:3000".to_string()
+    "http://[::1]:3000".to_string()
 }
 
 fn default_use_tls() -> bool {

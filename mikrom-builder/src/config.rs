@@ -33,7 +33,7 @@ impl Config {
 }
 
 fn default_nats_url() -> String {
-    std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string())
+    std::env::var("NATS_URL").unwrap_or_else(|_| "nats://[::1]:4222".to_string())
 }
 
 fn default_log_level() -> String {
@@ -110,6 +110,6 @@ mod tests {
             cfg.build_state_path,
             std::path::PathBuf::from("/tmp/mikrom-builder-state.json")
         );
-        assert_eq!(cfg.nats_url, "nats://localhost:4222");
+        assert_eq!(cfg.nats_url, "nats://[::1]:4222");
     }
 }

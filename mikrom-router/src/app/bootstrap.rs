@@ -8,7 +8,6 @@ use anyhow::Result;
 use pingora::listeners::{TcpSocketOptions, tls::TlsSettings};
 use pingora::prelude::*;
 use pingora::server::RunArgs;
-use std::net::Ipv6Addr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -17,10 +16,6 @@ fn dual_stack_tcp_socket_options() -> TcpSocketOptions {
     let mut options = TcpSocketOptions::default();
     options.ipv6_only = Some(false);
     options
-}
-
-fn ipv6_supported() -> bool {
-    std::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, 0)).is_ok()
 }
 
 pub fn run(config: &RouterConfig) -> Result<()> {
@@ -100,30 +95,20 @@ pub fn run(config: &RouterConfig) -> Result<()> {
         config.rps_limit,
     );
 
-    let use_ipv6 = ipv6_supported();
-    let listen_host = if use_ipv6 { "[::]" } else { "0.0.0.0" };
-    let listen_tcp = format!("{listen_host}:80");
-    let listen_tls = format!("{listen_host}:443");
+    let listen_tcp = format!("[::]:{}", 80);
+    let listen_tls = format!("[::]:{}", 443);
 
     let mut proxy_service = http_proxy_service(&server.configuration, proxy_instance);
-    if use_ipv6 {
-        proxy_service.add_tcp_with_settings(&listen_tcp, dual_stack_tcp_socket_options());
-    } else {
-        proxy_service.add_tcp(&listen_tcp);
-    }
+    proxy_service.add_tcp_with_settings(&listen_tcp, dual_stack_tcp_socket_options());
 
     let tls_handler = tls::MikromTlsHandler::new(state);
     let mut tls_settings = TlsSettings::with_callbacks(Box::new(tls_handler))?;
     tls_settings.enable_h2();
-    if use_ipv6 {
-        proxy_service.add_tls_with_settings(
-            &listen_tls,
-            Some(dual_stack_tcp_socket_options()),
-            tls_settings,
-        );
-    } else {
-        proxy_service.add_tls_with_settings(&listen_tls, None, tls_settings);
-    }
+    proxy_service.add_tls_with_settings(
+        &listen_tls,
+        Some(dual_stack_tcp_socket_options()),
+        tls_settings,
+    );
 
     server.add_service(proxy_service);
     server.run(RunArgs::default());
@@ -139,10 +124,5 @@ mod tests {
     fn dual_stack_listener_options_disable_ipv6_only() {
         let options = dual_stack_tcp_socket_options();
         assert_eq!(options.ipv6_only, Some(false));
-    }
-
-    #[test]
-    fn ipv6_support_probe_succeeds_or_falls_back() {
-        let _ = super::ipv6_supported();
     }
 }

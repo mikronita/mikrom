@@ -71,9 +71,9 @@ mod tests {
         let config: SchedulerConfig = envy::from_iter(vec![
             (
                 "DATABASE_URL".to_string(),
-                "postgres://localhost/mikrom".to_string(),
+                "postgres://[::1]/mikrom".to_string(),
             ),
-            ("NATS_URL".to_string(), "nats://localhost:4222".to_string()),
+            ("NATS_URL".to_string(), "nats://[::1]:4222".to_string()),
         ])
         .expect("config should deserialize");
 
@@ -86,9 +86,9 @@ mod tests {
         let config: SchedulerConfig = envy::from_iter(vec![
             (
                 "DATABASE_URL".to_string(),
-                "postgres://localhost/mikrom".to_string(),
+                "postgres://[::1]/mikrom".to_string(),
             ),
-            ("NATS_URL".to_string(), "nats://localhost:4222".to_string()),
+            ("NATS_URL".to_string(), "nats://[::1]:4222".to_string()),
             ("ROUTER_IDLE_TIMEOUT_SECS".to_string(), "120".to_string()),
         ])
         .expect("config should deserialize");
@@ -101,9 +101,9 @@ mod tests {
         let config: SchedulerConfig = envy::from_iter(vec![
             (
                 "DATABASE_URL".to_string(),
-                "postgres://localhost/mikrom".to_string(),
+                "postgres://[::1]/mikrom".to_string(),
             ),
-            ("NATS_URL".to_string(), "nats://localhost:4222".to_string()),
+            ("NATS_URL".to_string(), "nats://[::1]:4222".to_string()),
         ])
         .expect("config should deserialize");
 
