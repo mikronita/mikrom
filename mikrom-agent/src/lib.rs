@@ -18,3 +18,4 @@ pub use hypervisor::{
     HypervisorError, HypervisorType, VmConfig, VmHypervisor, VmInfo, VmStatus, Volume,
 };
 pub use metrics::{MetricsCollector, SystemMetrics};
+pub use network::cleanup_host_networking;

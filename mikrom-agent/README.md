@@ -11,6 +11,7 @@
 - Firecracker
 - Cloud Hypervisor
 - WireGuard integration through `mikrom-network`
+- Host-wide NAT64 translation for IPv4 egress via `tundra-nat64`
 - eBPF support through `mikrom-agent-ebpf`
 
 ## Responsibilities
@@ -25,6 +26,7 @@
 
 - The agent expects access to the host networking stack.
 - The agent relies on `mikrom-init` and the runtime boot scripts inside microVM images.
+- The agent starts a singleton NAT64 translator on the host bridge and expects `mikrom-dns` to provide DNS64 answers for external names.
 - Build output for the eBPF program is consumed from `target/bpfel-unknown-none/release/mikrom-agent-ebpf`.
 
 ## Local Development
@@ -40,3 +42,4 @@ make ci-full
 
 - Prefer workspace-level CI profiles for the full agent + eBPF path.
 - When making agent lifecycle changes, validate the worker with the scheduler and networking services together.
+- For host and VM smoke validation of NAT64/DNS64, use [docs/nat64-dns64-smoke-checklist.md](/home/apardo/Work/mikrom.rust/docs/nat64-dns64-smoke-checklist.md).

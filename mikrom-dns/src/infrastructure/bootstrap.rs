@@ -56,6 +56,7 @@ pub async fn run() -> Result<()> {
         store.clone(),
         config.upstream_dns.clone(),
         config.allowed_subnets.clone(),
+        config.nat64_prefix,
     );
     let handler = MikromDnsHandler::new(resolver, upstream);
     let listen_addr = config.listen_addr;

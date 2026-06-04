@@ -969,7 +969,7 @@ impl VmHypervisor for CloudHypervisorManager {
     }
 
     async fn init_network(&self) -> Result<(), HypervisorError> {
-        Ok(())
+        crate::network::ensure_host_networking().await
     }
 
     async fn load_runtime_state(&self) -> Result<(), HypervisorError> {

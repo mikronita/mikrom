@@ -41,6 +41,7 @@ pub struct DnsResolutionService {
     store: DnsRecordStore,
     upstream_dns: Vec<SocketAddr>,
     allowed_subnets: Vec<ipnet::IpNet>,
+    nat64_prefix: Ipv6Addr,
     rate_limit_map: dashmap::DashMap<IpAddr, TokenBucket>,
     last_rate_limit_cleanup: Mutex<Instant>,
     rate_limit_qps: f64,
@@ -52,14 +53,23 @@ impl DnsResolutionService {
         store: DnsRecordStore,
         upstream_dns: Vec<SocketAddr>,
         allowed_subnets: Vec<ipnet::IpNet>,
+        nat64_prefix: Ipv6Addr,
     ) -> Self {
-        Self::with_limits(store, upstream_dns, allowed_subnets, 100.0, 200.0)
+        Self::with_limits(
+            store,
+            upstream_dns,
+            allowed_subnets,
+            nat64_prefix,
+            100.0,
+            200.0,
+        )
     }
 
     pub fn with_limits(
         store: DnsRecordStore,
         upstream_dns: Vec<SocketAddr>,
         allowed_subnets: Vec<ipnet::IpNet>,
+        nat64_prefix: Ipv6Addr,
         rate_limit_qps: f64,
         rate_limit_burst: f64,
     ) -> Self {
@@ -67,6 +77,7 @@ impl DnsResolutionService {
             store,
             upstream_dns,
             allowed_subnets,
+            nat64_prefix,
             rate_limit_map: dashmap::DashMap::new(),
             last_rate_limit_cleanup: Mutex::new(Instant::now()),
             rate_limit_qps,
@@ -143,6 +154,10 @@ impl DnsResolutionService {
             ResolutionDecision::Empty(ResponseCode::NoError)
         }
     }
+
+    pub fn nat64_prefix(&self) -> Ipv6Addr {
+        self.nat64_prefix
+    }
 }
 
 #[cfg(test)]
@@ -159,7 +174,14 @@ mod tests {
                 .parse::<Ipv6Addr>()
                 .expect("valid ipv6"),
         );
-        let resolver = DnsResolutionService::with_limits(store, vec![], vec![], 10.0, 10.0);
+        let resolver = DnsResolutionService::with_limits(
+            store,
+            vec![],
+            vec![],
+            Ipv6Addr::new(0x0064, 0xff9b, 0, 0, 0, 0, 0, 0),
+            10.0,
+            10.0,
+        );
 
         let decision = resolver.resolve(
             "127.0.0.1".parse().expect("valid ip"),
@@ -183,8 +205,14 @@ mod tests {
 
     #[test]
     fn returns_no_error_for_non_aaaa_internal_queries() {
-        let resolver =
-            DnsResolutionService::with_limits(DnsRecordStore::new(), vec![], vec![], 10.0, 10.0);
+        let resolver = DnsResolutionService::with_limits(
+            DnsRecordStore::new(),
+            vec![],
+            vec![],
+            Ipv6Addr::new(0x0064, 0xff9b, 0, 0, 0, 0, 0, 0),
+            10.0,
+            10.0,
+        );
 
         match resolver.resolve(
             "127.0.0.1".parse().expect("valid ip"),
@@ -202,6 +230,7 @@ mod tests {
             DnsRecordStore::new(),
             vec![],
             vec!["fd00::/64".parse().expect("valid subnet")],
+            Ipv6Addr::new(0x0064, 0xff9b, 0, 0, 0, 0, 0, 0),
             10.0,
             10.0,
         );
@@ -221,8 +250,14 @@ mod tests {
 
     #[test]
     fn rate_limits_after_burst_exhaustion() {
-        let resolver =
-            DnsResolutionService::with_limits(DnsRecordStore::new(), vec![], vec![], 1.0, 1.0);
+        let resolver = DnsResolutionService::with_limits(
+            DnsRecordStore::new(),
+            vec![],
+            vec![],
+            Ipv6Addr::new(0x0064, 0xff9b, 0, 0, 0, 0, 0, 0),
+            1.0,
+            1.0,
+        );
 
         let name = Name::from_ascii("api.s.mikrom.internal.").expect("valid name");
         assert!(matches!(

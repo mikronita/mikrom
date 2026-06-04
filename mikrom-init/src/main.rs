@@ -752,7 +752,23 @@ async fn setup_networking(config: &InitConfig) -> Result<()> {
         }
     }
 
+    configure_resolver(config)?;
+
     Ok(())
+}
+
+fn configure_resolver(config: &InitConfig) -> Result<()> {
+    let dns_server = config
+        .env
+        .get("DNS_SERVER")
+        .map(String::as_str)
+        .unwrap_or("fd00::3bc2:7b88:289:62e6");
+
+    let resolv_conf = format!(
+        "nameserver {dns_server}\nsearch mikrom.internal\noptions ndots:1 timeout:1 attempts:2\n"
+    );
+    fs::write("/etc/resolv.conf", resolv_conf)
+        .context("Failed to configure /etc/resolv.conf for mikrom-dns")
 }
 
 async fn add_ipv6_route(

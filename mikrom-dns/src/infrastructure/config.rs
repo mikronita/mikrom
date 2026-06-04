@@ -7,6 +7,7 @@ pub struct DnsConfig {
     pub upstream_dns: Vec<SocketAddr>,
     pub allowed_subnets: Vec<ipnet::IpNet>,
     pub sys_records: Vec<(String, Ipv6Addr)>,
+    pub nat64_prefix: Ipv6Addr,
 }
 
 impl DnsConfig {
@@ -47,6 +48,11 @@ impl DnsConfig {
             sys_records.push(("api".to_string(), ip));
         }
 
+        let nat64_prefix = std::env::var("NAT64_PREFIX")
+            .ok()
+            .and_then(|value| parse_nat64_prefix(&value))
+            .unwrap_or_else(default_nat64_prefix);
+
         let listen_addr = "[::]:53"
             .parse()
             .context("Error parsing DNS listen address")?;
@@ -56,8 +62,20 @@ impl DnsConfig {
             upstream_dns,
             allowed_subnets,
             sys_records,
+            nat64_prefix,
         })
     }
+}
+
+const fn default_nat64_prefix() -> Ipv6Addr {
+    Ipv6Addr::new(0x0064, 0xff9b, 0, 0, 0, 0, 0, 0)
+}
+
+fn parse_nat64_prefix(value: &str) -> Option<Ipv6Addr> {
+    let prefix = value.trim().split('/').next()?.trim();
+    let parsed = prefix.parse::<Ipv6Addr>().ok()?;
+    let segments = parsed.segments();
+    Some(Ipv6Addr::new(segments[0], segments[1], 0, 0, 0, 0, 0, 0))
 }
 
 fn parse_socket_addr(value: &str) -> Option<SocketAddr> {

@@ -24,8 +24,13 @@ build-dev: ceph-libs ## Build all Rust crates (debug)
 .PHONY: deb-agent
 deb-agent: build-init ceph-libs ## Build Debian package for mikrom-agent
 	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
-	$(CEPH_ENV) cargo build --release -p mikrom-agent
-	cd mikrom-agent && $(CEPH_ENV) cargo deb --no-build
+	@command -v cmake >/dev/null 2>&1 || { echo >&2 "cmake is not installed. Install it before building mikrom-agent Debian packages"; exit 1; }
+	cmake -S tundra-nat64 -B target/tundra-build -DCMAKE_BUILD_TYPE=Release
+	cmake --build target/tundra-build --parallel
+	strip target/tundra-build/tundra-nat64
+	@mkdir -p target/release && cp target/tundra-build/tundra-nat64 target/release/tundra-nat64
+	RUSTC_WRAPPER= $(CEPH_ENV) cargo build --release -p mikrom-agent
+	cd mikrom-agent && RUSTC_WRAPPER= $(CEPH_ENV) cargo deb --no-build
 	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: deb-network
@@ -177,7 +182,7 @@ run-router: ## Run mikrom-router (Rust/Pingora)
 .PHONY: build-init
 build-init: ## Build mikrom-init as a static binary (musl)
 	rustup target add x86_64-unknown-linux-musl >/dev/null 2>&1 || true
-	cargo build -p mikrom-init --release --target x86_64-unknown-linux-musl
+	RUSTC_WRAPPER= cargo build -p mikrom-init --release --target x86_64-unknown-linux-musl
 	@mkdir -p target/release && cp target/x86_64-unknown-linux-musl/release/mikrom-init target/release/mikrom-init
 
 .PHONY: run-app

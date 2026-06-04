@@ -119,6 +119,8 @@ make test-integration  # Integration tests (requires Docker)
 make test-all          # Complete suite
 ```
 
+- For host and VM smoke validation of NAT64/DNS64, see [docs/nat64-dns64-smoke-checklist.md](/home/apardo/Work/mikrom.rust/docs/nat64-dns64-smoke-checklist.md).
+
 The pre-commit hook in `scripts/pre-commit.sh` uses the Dagger-backed targets:
 
 - `make ci-fast` for Rust and shared workspace changes.

@@ -9,6 +9,7 @@ target
 .zig-cache
 zig-out
 neon
+tundra-nat64/.git
 mikrom-app/coverage
 mikrom-app/playwright-report
 mikrom-app/test-results
