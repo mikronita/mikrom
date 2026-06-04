@@ -114,6 +114,10 @@ impl AgentServer {
     }
 
     pub async fn serve(&self) -> anyhow::Result<()> {
+        if let Err(e) = crate::network::cleanup_host_networking().await {
+            warn!("Failed to clean up stale NAT64 networking before startup: {e}");
+        }
+
         for hv in (*self.hypervisors).values() {
             if let Err(e) = hv.init_network().await {
                 error!("Failed to initialize host networking: {e}");
@@ -473,6 +477,9 @@ impl Clone for AgentServer {
 
 impl AgentServer {
     pub async fn trigger_shutdown(&self) {
+        if let Err(e) = crate::network::cleanup_host_networking().await {
+            warn!("Failed to clean up NAT64 networking during shutdown: {e}");
+        }
         let mut shutdown = self.shutdown_flag.write();
         *shutdown = true;
     }

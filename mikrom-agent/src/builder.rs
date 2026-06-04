@@ -18,6 +18,8 @@ use std::sync::{
 use tokio::process::Command;
 use tracing::info;
 
+const DEFAULT_DNS_SERVER: &str = "fd00::3bc2:7b88:289:62e6";
+
 #[derive(Debug)]
 pub struct ImageBuilder;
 
@@ -263,6 +265,7 @@ impl ImageBuilder {
             }
             env_map.insert("PATH".to_string(), path_parts.join(":"));
             env_map.insert("PORT".to_string(), params.port.to_string());
+            env_map.insert("DNS_SERVER".to_string(), DEFAULT_DNS_SERVER.to_string());
             if let Some(addr) = &params.ipv6_addr {
                 env_map.insert("IPV6_ADDR".to_string(), addr.clone());
             }
@@ -427,6 +430,7 @@ impl ImageBuilder {
 
             let mut env_map = params.env.clone();
             env_map.insert("PORT".to_string(), params.port.to_string());
+            env_map.insert("DNS_SERVER".to_string(), DEFAULT_DNS_SERVER.to_string());
             if let Some(addr) = &params.ipv6_addr {
                 env_map.insert("IPV6_ADDR".to_string(), addr.clone());
             }

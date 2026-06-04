@@ -2,6 +2,7 @@
 name = "mikrom-agent"
 version = "0.3.1"
 edition = "2024"
+description = "Mikrom compute node agent for Firecracker and Cloud Hypervisor workloads"
 
 
 [dependencies]
@@ -53,16 +54,16 @@ extended-description = """\
 Mikrom Agent is a daemon that runs on compute nodes to manage Firecracker and Cloud Hypervisor microVMs.
 It communicates with the Mikrom Scheduler to deploy and manage workloads.
 """
-depends = "libc6, libssl3, iptables"
+depends = "libc6, libssl3, iptables, iproute2"
 section = "admin"
 priority = "optional"
 assets = [
     ["target/release/mikrom-agent", "/usr/bin/mikrom-agent", "755"],
     ["target/release/mikrom-init", "/usr/bin/mikrom-init", "755"],
-    ["debian/mikrom-agent.service", "/lib/systemd/system/mikrom-agent.service", "644"],
+    ["target/release/tundra-nat64", "/usr/local/bin/tundra-nat64", "755"],
+    ["debian/lib/systemd/system/mikrom-agent.service", "/lib/systemd/system/mikrom-agent.service", "644"],
     ["debian/agent.env", "/etc/mikrom/agent.env", "644"],
 ]
-systemd-units = { unit-name = "mikrom-agent" }
 
 [features]
 default = ["build"]

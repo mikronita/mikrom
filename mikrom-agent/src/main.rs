@@ -63,6 +63,9 @@ async fn main() -> anyhow::Result<()> {
     });
 
     server.serve().await?;
+    if let Err(e) = mikrom_agent::cleanup_host_networking().await {
+        tracing::warn!("Failed to clean up NAT64 networking on shutdown: {e}");
+    }
 
     Ok(())
 }

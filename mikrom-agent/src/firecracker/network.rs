@@ -71,7 +71,7 @@ impl crate::firecracker::FirecrackerManager {
     }
 
     pub(crate) async fn init_network(&self) -> Result<(), HypervisorError> {
-        crate::network::ensure_bridge().await
+        crate::network::ensure_host_networking().await
     }
 
     pub(crate) async fn setup_tap(&self, vm_id: &VmId) -> Result<(String, u32), HypervisorError> {

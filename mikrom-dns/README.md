@@ -20,6 +20,7 @@
 
 - Answers are populated reactively from NATS events.
 - Upstream lookups are forwarded to the comma-separated resolvers configured in `UPSTREAM_DNS`.
+- External `AAAA` lookups are synthesized through DNS64 using the NAT64 prefix configured in `NAT64_PREFIX` or the well-known `64:ff9b::/96` prefix by default.
 - The service supports optional `NATS_SYS_IP` for system-zone exposure.
 
 ## Configuration
@@ -29,6 +30,7 @@
 | `NATS_URL` | `nats://localhost:4222` | NATS server URL |
 | `UPSTREAM_DNS` | `2606:4700:4700::1111,2001:4860:4860::8888` | Ordered upstream resolver list |
 | `NATS_SYS_IP` | - | Optional IPv6 address for the system zone |
+| `NAT64_PREFIX` | `64:ff9b::` | NAT64 prefix used to synthesize external AAAA records |
 | `ENABLE_TELEMETRY` | `true` | Enable OTLP export |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://192.168.122.128:4317` | OTLP endpoint |
 
