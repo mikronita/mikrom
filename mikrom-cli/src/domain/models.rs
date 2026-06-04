@@ -174,6 +174,20 @@ pub struct DatabaseInfo {
     pub created_at: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DatabaseConnectionInfo {
+    pub database_id: String,
+    pub database_name: String,
+    pub database_user: String,
+    pub database_host: String,
+    pub database_port: u16,
+    pub ssh_host: String,
+    pub ssh_user: String,
+    pub ssh_port: u16,
+    pub ssh_tunnel_command: String,
+    pub psql_command: String,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct CreateDatabaseRequest {
     pub name: String,

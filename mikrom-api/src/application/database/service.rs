@@ -72,9 +72,9 @@ impl DatabaseService {
             return Err(ApiError::Forbidden);
         }
 
-        let deployment_id = database
-            .active_deployment_id
-            .ok_or_else(|| ApiError::Conflict("Database has no active deployment yet".to_string()))?;
+        let deployment_id = database.active_deployment_id.ok_or_else(|| {
+            ApiError::Conflict("Database has no active deployment yet".to_string())
+        })?;
 
         let deployment = state
             .ctx

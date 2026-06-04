@@ -493,6 +493,15 @@ impl ApiClient for ReqwestApiClient {
             .await
     }
 
+    async fn get_database_connection_info(&self, db_id: &str) -> CliResult<DatabaseConnectionInfo> {
+        self.request(
+            reqwest::Method::GET,
+            &format!("databases/{}/connection", db_id),
+            None::<()>,
+        )
+        .await
+    }
+
     async fn list_projects(&self) -> CliResult<Vec<ProjectInfo>> {
         self.request(reqwest::Method::GET, "projects", None::<()>)
             .await

@@ -321,6 +321,11 @@ pub enum DbCommands {
         #[arg(help = "Name or ID of the database")]
         id: String,
     },
+    /// Show connection details for a database
+    Connection {
+        #[arg(help = "Name or ID of the database")]
+        id: String,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]

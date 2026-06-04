@@ -39,7 +39,9 @@ mod tests {
     use crate::application::ports::MockApiClient;
     use crate::commands::{AuthCommands, ConfigCommands, DbCommands, SystemCommands};
     use crate::config::Config;
-    use crate::domain::models::{DatabaseInfo, HealthResponse, WhoamiResponse};
+    use crate::domain::models::{
+        DatabaseConnectionInfo, DatabaseInfo, HealthResponse, WhoamiResponse,
+    };
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -129,6 +131,44 @@ mod tests {
         let result = dispatch(
             &ctx,
             Commands::Db(DbCommands::List),
+            &mut cfg,
+            crate::commands::OutputFormat::Json,
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn dispatch_routes_database_connection() {
+        let mut mock = MockApiClient::new();
+        mock.expect_get_database_connection_info()
+            .times(1)
+            .returning(|db_id| {
+                assert_eq!(db_id, "db-1");
+                Ok(DatabaseConnectionInfo {
+                    database_id: "db-1".to_string(),
+                    database_name: "orders".to_string(),
+                    database_user: "cloud_admin".to_string(),
+                    database_host: "127.0.0.1".to_string(),
+                    database_port: 5432,
+                    ssh_host: "fd00::1".to_string(),
+                    ssh_user: "mikrom".to_string(),
+                    ssh_port: 22,
+                    ssh_tunnel_command: "ssh -N -L 5432:127.0.0.1:5432 mikrom@[fd00::1]"
+                        .to_string(),
+                    psql_command:
+                        "psql \"host=127.0.0.1 port=5432 user=cloud_admin dbname=orders\""
+                            .to_string(),
+                })
+            });
+
+        let ctx = test_ctx(mock);
+        let mut cfg = Config::default();
+        let result = dispatch(
+            &ctx,
+            Commands::Db(DbCommands::Connection {
+                id: "db-1".to_string(),
+            }),
             &mut cfg,
             crate::commands::OutputFormat::Json,
         )

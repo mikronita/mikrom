@@ -18,7 +18,23 @@ impl Config {
             return Some(PathBuf::from(path));
         }
 
-        dirs::config_dir().map(|d| d.join("mikrom").join("config.toml"))
+        #[cfg(test)]
+        {
+            let unique = format!(
+                "mikrom-config-{}-{}.toml",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|duration| duration.as_nanos())
+                    .unwrap_or_default()
+            );
+            Some(std::env::temp_dir().join(unique))
+        }
+
+        #[cfg(not(test))]
+        {
+            dirs::config_dir().map(|d| d.join("mikrom").join("config.toml"))
+        }
     }
 
     pub fn load() -> anyhow::Result<Self> {
