@@ -647,4 +647,15 @@ mod tests {
             _ => panic!("expected db delete"),
         }
     }
+
+    #[test]
+    fn test_cli_db_connection_parses() {
+        let cli = Cli::try_parse_from(["mikrom", "db", "connection", "db-1"]).unwrap();
+        match cli.command {
+            Commands::Db(DbCommands::Connection { id }) => {
+                assert_eq!(id, "db-1");
+            },
+            _ => panic!("expected db connection"),
+        }
+    }
 }

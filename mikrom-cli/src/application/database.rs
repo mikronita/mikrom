@@ -122,6 +122,25 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
                 ui::error("Database not found.");
             }
         },
+        DbCommands::Connection { id } => {
+            let info = ctx.client.get_database_connection_info(&id).await?;
+            if output == OutputFormat::Json {
+                println!("{}", serde_json::to_string_pretty(&info)?);
+            } else {
+                ui::step(ui::INFO, &ui::bold_cyan("Database Connection:"));
+                ui::label_value(ui::APP, "ID", &info.database_id);
+                ui::label_value(ui::APP, "Name", &info.database_name);
+                ui::label_value(ui::KEY, "User", &info.database_user);
+                ui::label_value(ui::PORT, "Host", &info.database_host);
+                ui::label_value(ui::PORT, "Port", &info.database_port.to_string());
+                ui::label_value(ui::SYS, "SSH Host", &info.ssh_host);
+                ui::label_value(ui::SYS, "SSH Port", &info.ssh_port.to_string());
+                ui::step(ui::WAIT, "SSH tunnel command:");
+                println!("  {}", info.ssh_tunnel_command);
+                ui::step(ui::WAIT, "psql command:");
+                println!("  {}", info.psql_command);
+            }
+        },
     }
     Ok(())
 }
@@ -133,7 +152,7 @@ mod tests {
     use crate::commands::DbCommands;
     use crate::config::Config;
     use crate::domain::error::CliError;
-    use crate::domain::models::DatabaseInfo;
+    use crate::domain::models::{DatabaseConnectionInfo, DatabaseInfo};
     use std::sync::Arc;
 
     fn test_ctx(mock: MockApiClient) -> CliContext {
@@ -206,6 +225,43 @@ mod tests {
                 ui::status_label("pending")
             )
         );
+    }
+
+    #[tokio::test]
+    async fn connection_prints_commands_and_forwards_request() {
+        let mut mock = MockApiClient::new();
+        mock.expect_get_database_connection_info()
+            .times(1)
+            .returning(|db_id| {
+                assert_eq!(db_id, "db-1");
+                Ok(DatabaseConnectionInfo {
+                    database_id: "db-1".to_string(),
+                    database_name: "orders".to_string(),
+                    database_user: "cloud_admin".to_string(),
+                    database_host: "127.0.0.1".to_string(),
+                    database_port: 5432,
+                    ssh_host: "fd00::1".to_string(),
+                    ssh_user: "mikrom".to_string(),
+                    ssh_port: 22,
+                    ssh_tunnel_command: "ssh -N -L 5432:127.0.0.1:5432 mikrom@[fd00::1]"
+                        .to_string(),
+                    psql_command:
+                        "psql \"host=127.0.0.1 port=5432 user=cloud_admin dbname=orders\""
+                            .to_string(),
+                })
+            });
+
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            DbCommands::Connection {
+                id: "db-1".to_string(),
+            },
+            OutputFormat::Json,
+        )
+        .await;
+
+        assert!(result.is_ok());
     }
 
     #[tokio::test]

@@ -4,11 +4,11 @@ use chrono::Utc;
 use mockall::predicate::eq;
 use uuid::Uuid;
 
+use mikrom_api::AppState;
 use mikrom_api::application::database::DatabaseService;
 use mikrom_api::domain::{
     CpuCores, Database, DatabaseDeployment, DatabaseStatus, MemoryMb, MockDatabaseRepository,
 };
-use mikrom_api::AppState;
 
 fn build_state(mock_repo: MockDatabaseRepository) -> AppState {
     let mut state = AppState::default();
@@ -38,7 +38,12 @@ fn database(id: Uuid, tenant_id: Uuid, active_deployment_id: Option<Uuid>) -> Da
     }
 }
 
-fn deployment(id: Uuid, database_id: Uuid, tenant_id: Uuid, ipv6_address: Option<String>) -> DatabaseDeployment {
+fn deployment(
+    id: Uuid,
+    database_id: Uuid,
+    tenant_id: Uuid,
+    ipv6_address: Option<String>,
+) -> DatabaseDeployment {
     DatabaseDeployment {
         id,
         database_id,
@@ -123,7 +128,8 @@ async fn get_connection_info_requires_an_active_deployment() {
         .await
         .unwrap_err();
 
-    assert!(err
-        .to_string()
-        .contains("Database has no active deployment yet"));
+    assert!(
+        err.to_string()
+            .contains("Database has no active deployment yet")
+    );
 }
