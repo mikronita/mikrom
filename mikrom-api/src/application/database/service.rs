@@ -40,7 +40,89 @@ struct NeonConfigureClaims {
     scope: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, rovo::schemars::JsonSchema)]
+pub struct DatabaseConnectionInfo {
+    pub database_id: Uuid,
+    pub database_name: String,
+    pub database_user: String,
+    pub database_host: String,
+    pub database_port: u16,
+    pub ssh_host: String,
+    pub ssh_user: String,
+    pub ssh_port: u16,
+    pub ssh_tunnel_command: String,
+    pub psql_command: String,
+}
+
 impl DatabaseService {
+    pub async fn get_connection_info(
+        state: &AppState,
+        database_id: Uuid,
+        tenant_id: Uuid,
+    ) -> ApiResult<DatabaseConnectionInfo> {
+        let database = state
+            .ctx
+            .database_repo
+            .get_database(database_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or_else(|| ApiError::NotFound("Database not found".to_string()))?;
+
+        if database.tenant_id != tenant_id {
+            return Err(ApiError::Forbidden);
+        }
+
+        let deployment_id = database
+            .active_deployment_id
+            .ok_or_else(|| ApiError::Conflict("Database has no active deployment yet".to_string()))?;
+
+        let deployment = state
+            .ctx
+            .database_repo
+            .get_deployment(deployment_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or_else(|| ApiError::NotFound("Database deployment not found".to_string()))?;
+
+        if deployment.tenant_id != tenant_id {
+            return Err(ApiError::Forbidden);
+        }
+
+        let ssh_host = deployment.ipv6_address.ok_or_else(|| {
+            ApiError::Conflict("Database deployment does not have an IPv6 address yet".to_string())
+        })?;
+        let ssh_user = "mikrom".to_string();
+        let database_user = "cloud_admin".to_string();
+        let database_host = "127.0.0.1".to_string();
+        let database_port = 5432;
+        let ssh_port = 22;
+        let ssh_destination = if ssh_host.contains(':') {
+            format!("[{ssh_host}]")
+        } else {
+            ssh_host.clone()
+        };
+        let ssh_tunnel_command = format!(
+            "ssh -N -L {database_port}:{database_host}:{database_port} {ssh_user}@{ssh_destination}"
+        );
+        let psql_command = format!(
+            "psql \"host={database_host} port={database_port} user={database_user} dbname={}\"",
+            database.name
+        );
+
+        Ok(DatabaseConnectionInfo {
+            database_id,
+            database_name: database.name,
+            database_user,
+            database_host,
+            database_port,
+            ssh_host,
+            ssh_user,
+            ssh_port,
+            ssh_tunnel_command,
+            psql_command,
+        })
+    }
+
     pub async fn validate_tenant_retention(
         state: &AppState,
         tenant_id: &str,

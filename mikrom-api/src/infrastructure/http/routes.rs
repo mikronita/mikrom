@@ -327,6 +327,10 @@ pub fn create_app_with_rate_limits(
             &format!("{}/databases/{{id}}", crate::API_V1),
             delete(crate::infrastructure::http::handlers::database::delete_database),
         )
+        .route(
+            &format!("{}/databases/{{id}}/connection", crate::API_V1),
+            get(crate::infrastructure::http::handlers::database::get_database_connection),
+        )
         .finish_api(&mut api);
 
     let protected_routes_layered = protected_routes.route_layer(middleware::from_fn_with_state(

@@ -1,3 +1,3 @@
 pub mod service;
 
-pub use service::DatabaseService;
+pub use service::{DatabaseConnectionInfo, DatabaseService};

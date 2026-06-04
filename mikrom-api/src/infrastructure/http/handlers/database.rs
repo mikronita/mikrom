@@ -1,5 +1,5 @@
 use crate::AppState;
-use crate::application::database::DatabaseService;
+use crate::application::database::{DatabaseConnectionInfo, DatabaseService};
 use crate::application::tenant::resolve_tenant_owner_user_id;
 use crate::domain::CreateDatabaseParams;
 use crate::domain::types::{CpuCores, MemoryMb};
@@ -122,4 +122,14 @@ pub async fn delete_database(
     DatabaseService::delete_database(&state, id).await?;
 
     Ok(Json(()))
+}
+
+#[rovo::rovo]
+pub async fn get_database_connection(
+    tenant_ctx: TenantContext,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<DatabaseConnectionInfo>> {
+    let connection = DatabaseService::get_connection_info(&state, id, tenant_ctx.tenant.id).await?;
+    Ok(Json(connection))
 }
