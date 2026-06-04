@@ -1,7 +1,5 @@
 # Mikrom - Open-Source PaaS
 
-[![CI](https://github.com/antpard/mikrom/actions/workflows/ci.yml/badge.svg)](https://github.com/antpard/mikrom/actions/workflows/ci.yml)
-
 Mikrom is a Rust-first platform-as-a-service that deploys containerized workloads into lightweight microVMs on Firecracker or Cloud Hypervisor. The workspace now includes a SvelteKit dashboard, a Pingora-based router, WireGuard and DNS control-plane services, eBPF support in the agent, and a Dagger-backed local CI/CD pipeline that runs the same validation logic locally and in GitHub Actions.
 
 ## What Changed Recently
