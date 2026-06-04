@@ -3,13 +3,13 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import CreateDatabaseModal from "$lib/components/CreateDatabaseModal.svelte";
 
 const mocks = vi.hoisted(() => ({
-  addDatabase: vi.fn(),
+  createDatabase: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }));
 
 vi.mock("$lib/stores/databases", () => ({
-  addDatabase: mocks.addDatabase,
+  createDatabase: mocks.createDatabase,
 }));
 
 vi.mock("$lib/components", async (importOriginal) => {
@@ -32,6 +32,20 @@ vi.mock("$lib/toast", () => ({
 describe("CreateDatabaseModal", () => {
   it("submits the selected plan with the entered database details", async () => {
     const onClose = vi.fn();
+    mocks.createDatabase.mockResolvedValue({
+      data: {
+        id: "db-3",
+        name: "analytics",
+        engine: "neon",
+        postgres_version: 16,
+        status: "Provisioning",
+        vcpus: 4,
+        memory_mib: 8192,
+        disk_mib: 25600,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    });
 
     render(CreateDatabaseModal, {
       props: {
@@ -50,12 +64,13 @@ describe("CreateDatabaseModal", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Provision Database" }));
 
     await waitFor(() => {
-      expect(mocks.addDatabase).toHaveBeenCalledWith({
+      expect(mocks.createDatabase).toHaveBeenCalledWith({
         name: "analytics",
-        version: "16",
+        engine: "neon",
+        postgres_version: 16,
         vcpus: 4,
         memory_mib: 8192,
-        storage_gb: 25,
+        disk_mib: 25600,
       });
     });
 

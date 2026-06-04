@@ -3,6 +3,7 @@
 ## Scope
 
 `mikrom-api` is the control plane API for Mikrom. It handles auth, application lifecycle, deployment orchestration, secrets, and Neon-backed database provisioning.
+Database records also persist the PostgreSQL major version and expose it in the user-facing database responses.
 
 ## Current Runtime
 
@@ -10,6 +11,7 @@
 - PostgreSQL via SQLx.
 - NATS for internal control plane events and integrations.
 - Optional Neon provisioning through `NEON_*` environment variables.
+- New Neon databases default to PostgreSQL 16 unless the request specifies a different version.
 
 ## Test Expectations
 

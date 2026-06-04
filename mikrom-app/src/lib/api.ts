@@ -58,6 +58,93 @@ export interface UpdateProjectRequest {
   name: string;
 }
 
+export type DatabaseApiStatus = "pending" | "running" | "failed" | "deleting";
+
+export interface DatabaseInfo {
+  id: string;
+  name: string;
+  engine: string;
+  postgres_version: number;
+  neon_tenant_id?: string | null;
+  neon_timeline_id?: string | null;
+  tenant_gen?: number | null;
+  status: DatabaseApiStatus;
+  vcpus: number;
+  memory_mib: number;
+  disk_mib: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateDatabaseRequest {
+  name: string;
+  engine: string;
+  postgres_version?: number;
+  vcpus?: number;
+  memory_mib?: number;
+  disk_mib?: number;
+  settings?: Record<string, string>;
+}
+
+export interface DatabaseConnectionInfo {
+  database_id: string;
+  database_name: string;
+  database_user: string;
+  database_host: string;
+  database_port: number;
+  ssh_host: string;
+  ssh_user: string;
+  ssh_port: number;
+  ssh_tunnel_command: string;
+  psql_command: string;
+}
+
+export interface DatabaseBranchInfo {
+  database_id: string;
+  database_name: string;
+  branch_name: string;
+  neon_tenant_id: string | null;
+  neon_timeline_id: string | null;
+  tenant_gen: number | null;
+  status: DatabaseApiStatus;
+  is_current: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DatabaseBackupInfo {
+  database_id: string;
+  database_name: string;
+  backup_strategy: string;
+  recovery_mode: string;
+  retention_valid: boolean;
+  neon_tenant_id: string | null;
+  neon_timeline_id: string | null;
+  tenant_gen: number | null;
+  status: DatabaseApiStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DatabaseSnapshotInfo {
+  id: string;
+  name: string;
+  created_at: number;
+  size_bytes: number;
+  vm_status: string;
+}
+
+export interface DatabaseSnapshotListResponse {
+  success: boolean;
+  message: string;
+  snapshots: DatabaseSnapshotInfo[];
+}
+
+export interface DatabaseSnapshotActionResponse {
+  success: boolean;
+  message: string;
+}
+
 export interface UpdateProfileRequest {
   first_name: string | null;
   last_name: string | null;
@@ -527,6 +614,155 @@ export async function deleteProject(token: string, tenantId: string) {
     const result = await parseJson<ApiError>(response);
     if (!response.ok) return { error: getErrorMessage(result, "Failed to delete project") };
     return { data: true };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listDatabases(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/databases`, { headers: authHeaders(token) });
+    if (response.status === 401) logout();
+    const result = await parseJson<DatabaseInfo[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch databases") };
+    return { data: result as DatabaseInfo[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function createDatabase(token: string, data: CreateDatabaseRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/databases`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<DatabaseInfo>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create database") };
+    return { data: result as DatabaseInfo };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function deleteDatabase(token: string, databaseId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/databases/${encodeURIComponent(databaseId)}`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to delete database") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function getDatabaseConnection(token: string, databaseId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/databases/${encodeURIComponent(databaseId)}/connection`, {
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<DatabaseConnectionInfo>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch database connection info") };
+    return { data: result as DatabaseConnectionInfo };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listDatabaseBranches(token: string, databaseId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/databases/${encodeURIComponent(databaseId)}/branches`, {
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<DatabaseBranchInfo[]>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch database branches") };
+    return { data: result as DatabaseBranchInfo[] };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function getDatabaseBackupInfo(token: string, databaseId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/databases/${encodeURIComponent(databaseId)}/backups`, {
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<DatabaseBackupInfo>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch database backup info") };
+    return { data: result as DatabaseBackupInfo };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function listDatabaseSnapshots(token: string, databaseId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/databases/${encodeURIComponent(databaseId)}/backups/snapshots`, {
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<DatabaseSnapshotListResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch database snapshots") };
+    return { data: result as DatabaseSnapshotListResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function createDatabaseSnapshot(token: string, databaseId: string, data: { name: string }) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/databases/${encodeURIComponent(databaseId)}/backups/snapshots`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<DatabaseSnapshotActionResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create database snapshot") };
+    return { data: result as DatabaseSnapshotActionResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function restoreDatabaseSnapshot(token: string, databaseId: string, data: { snapshot_name: string }) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/databases/${encodeURIComponent(databaseId)}/backups/restore`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<DatabaseSnapshotActionResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to restore database snapshot") };
+    return { data: result as DatabaseSnapshotActionResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function deleteDatabaseSnapshot(token: string, databaseId: string, snapshotName: string) {
+  try {
+    const response = await fetch(
+      `${API_PROXY_BASE}/databases/${encodeURIComponent(databaseId)}/backups/snapshots/${encodeURIComponent(snapshotName)}`,
+      {
+        method: "DELETE",
+        headers: authHeaders(token),
+      },
+    );
+    if (response.status === 401) logout();
+    const result = await parseJson<DatabaseSnapshotActionResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to delete database snapshot") };
+    return { data: result as DatabaseSnapshotActionResponse };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Network error" };
   }

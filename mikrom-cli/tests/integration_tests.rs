@@ -568,6 +568,7 @@ async fn test_client_create_database() {
         .and(body_json(json!({
             "name": "orders",
             "engine": "neon",
+            "postgres_version": 16,
             "vcpus": 2,
             "memory_mib": 1024,
             "disk_mib": 4096,
@@ -579,6 +580,7 @@ async fn test_client_create_database() {
             "id": "db-1",
             "name": "orders",
             "engine": "neon",
+            "postgres_version": 16,
             "status": "pending",
             "vcpus": 2,
             "memory_mib": 1024,
@@ -592,6 +594,7 @@ async fn test_client_create_database() {
         .create_database(mikrom_cli::domain::models::CreateDatabaseRequest {
             name: "orders".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             vcpus: Some(2),
             memory_mib: Some(1024),
             disk_mib: Some(4096),

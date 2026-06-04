@@ -1,74 +1,115 @@
 import { writable } from "svelte/store";
+import {
+  createDatabase as apiCreateDatabase,
+  deleteDatabase as apiDeleteDatabase,
+  getDatabaseConnection as apiGetDatabaseConnection,
+  listDatabases,
+  type CreateDatabaseRequest,
+  type DatabaseConnectionInfo,
+  type DatabaseInfo,
+} from "$lib/api";
+import { getToken } from "$lib/auth";
 
-export interface Database {
-  id: string;
-  name: string;
-  version: string;
-  status: "Provisioning" | "Running" | "Deleting" | "Stopped";
-  vcpus: number;
-  memory_mib: number;
-  storage_gb: number;
-  connection_string: string;
-  created_at: string;
-  updated_at: string;
+export type DatabaseStatus = "Provisioning" | "Running" | "Deleting" | "Failed";
+
+export interface Database extends Omit<DatabaseInfo, "status"> {
+  status: DatabaseStatus;
 }
 
-const mockDatabases: Database[] = [
-  {
-    id: "db-1",
-    name: "prod-db",
-    version: "16",
-    status: "Running",
-    vcpus: 2,
-    memory_mib: 4096,
-    storage_gb: 50,
-    connection_string: "postgresql://mikrom:password@prod-db.mikrom.internal:5432/mikrom",
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(), // 7 days ago
-    updated_at: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
-  },
-  {
-    id: "db-2",
-    name: "staging-db",
-    version: "15",
-    status: "Running",
-    vcpus: 1,
-    memory_mib: 1024,
-    storage_gb: 10,
-    connection_string: "postgresql://mikrom:password@staging-db.mikrom.internal:5432/mikrom",
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(), // 2 days ago
-    updated_at: new Date(Date.now() - 1000 * 60 * 60 * 12).toISOString(),
-  }
-];
-
-export const databasesStore = writable<Database[]>(mockDatabases);
+export const databasesStore = writable<Database[]>([]);
 export const databasesLoading = writable<boolean>(false);
+export const databasesError = writable<string>("");
 
-export function addDatabase(db: Omit<Database, "id" | "status" | "connection_string" | "created_at" | "updated_at">) {
-  const newDb: Database = {
-    ...db,
-    id: `db-${Math.random().toString(36).substr(2, 9)}`,
-    status: "Provisioning",
-    connection_string: `postgresql://mikrom:password@${db.name}.mikrom.internal:5432/mikrom`,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+function mapDatabaseStatus(status: DatabaseInfo["status"]): DatabaseStatus {
+  switch (status) {
+    case "running":
+      return "Running";
+    case "deleting":
+      return "Deleting";
+    case "failed":
+      return "Failed";
+    default:
+      return "Provisioning";
+  }
+}
+
+function mapDatabase(database: DatabaseInfo): Database {
+  return {
+    ...database,
+    status: mapDatabaseStatus(database.status),
   };
-
-  databasesStore.update(dbs => [newDb, ...dbs]);
-
-  // Simulate provisioning
-  setTimeout(() => {
-    updateDatabaseStatus(newDb.id, "Running");
-  }, 5000);
 }
 
-export function deleteDatabase(id: string) {
-  databasesStore.update(dbs => dbs.map(db => db.id === id ? { ...db, status: "Deleting" as const } : db));
-  
-  setTimeout(() => {
-    databasesStore.update(dbs => dbs.filter(db => db.id !== id));
-  }, 2000);
+function sortDatabases(databases: Database[]) {
+  return [...databases].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
-export function updateDatabaseStatus(id: string, status: Database["status"]) {
-  databasesStore.update(dbs => dbs.map(db => db.id === id ? { ...db, status, updated_at: new Date().toISOString() } : db));
+export function clearDatabases() {
+  databasesStore.set([]);
+  databasesLoading.set(false);
+  databasesError.set("");
+}
+
+export async function refreshDatabases() {
+  const token = getToken();
+  if (!token) {
+    clearDatabases();
+    return;
+  }
+
+  databasesLoading.set(true);
+  try {
+    const result = await listDatabases(token);
+    if (result.error) {
+      databasesError.set(result.error);
+      return;
+    }
+
+    databasesStore.set(sortDatabases((result.data ?? []).map(mapDatabase)));
+    databasesError.set("");
+  } catch (error) {
+    databasesError.set(error instanceof Error ? error.message : "Failed to fetch databases");
+  } finally {
+    databasesLoading.set(false);
+  }
+}
+
+export async function createDatabase(request: CreateDatabaseRequest) {
+  const token = getToken();
+  if (!token) {
+    return { error: "You must be logged in" };
+  }
+
+  const result = await apiCreateDatabase(token, request);
+  if (result.error || !result.data) {
+    return { error: result.error ?? "Failed to create database" };
+  }
+
+  const created = mapDatabase(result.data);
+  databasesStore.update((current) => sortDatabases([created, ...current.filter((db) => db.id !== created.id)]));
+  return { data: created };
+}
+
+export async function deleteDatabase(databaseId: string) {
+  const token = getToken();
+  if (!token) {
+    return { success: false, error: "You must be logged in" };
+  }
+
+  const result = await apiDeleteDatabase(token, databaseId);
+  if (!result.success) {
+    return result;
+  }
+
+  databasesStore.update((current) => current.filter((database) => database.id !== databaseId));
+  return result;
+}
+
+export async function getDatabaseConnection(databaseId: string): Promise<{ data?: DatabaseConnectionInfo; error?: string }> {
+  const token = getToken();
+  if (!token) {
+    return { error: "You must be logged in" };
+  }
+
+  return apiGetDatabaseConnection(token, databaseId);
 }

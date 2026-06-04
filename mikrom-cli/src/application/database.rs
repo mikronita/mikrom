@@ -6,9 +6,10 @@ use crate::infrastructure::ui;
 
 fn create_database_success_message(name: &str, db: &crate::domain::models::DatabaseInfo) -> String {
     format!(
-        "Database {} created successfully (ID: {}). Initial status: {}",
+        "Database {} created successfully (ID: {}). PostgreSQL {}. Initial status: {}",
         name,
         db.id,
+        db.postgres_version,
         ui::status_label(&db.status)
     )
 }
@@ -27,6 +28,7 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
                             db.id.clone(),
                             db.name.clone(),
                             db.engine.clone(),
+                            format!("PostgreSQL {}", db.postgres_version),
                             ui::status_label(&db.status),
                             db.vcpus.to_string(),
                             format!("{}M", db.memory_mib),
@@ -37,7 +39,7 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
                 ui::table(
                     "🗄️ Registered Databases",
                     &[
-                        "ID", "Name", "Engine", "Status", "vCPUs", "Memory", "Created",
+                        "ID", "Name", "Engine", "Version", "Status", "vCPUs", "Memory", "Created",
                     ],
                     &rows,
                 );
@@ -46,6 +48,7 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
         DbCommands::Create {
             name,
             engine,
+            version,
             vcpus,
             memory,
             disk,
@@ -78,6 +81,7 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
             let req = CreateDatabaseRequest {
                 name: name.clone(),
                 engine,
+                postgres_version: version,
                 vcpus: Some(vcpus),
                 memory_mib: Some(memory_mib),
                 disk_mib: Some(disk),
@@ -112,6 +116,11 @@ pub async fn handle(ctx: &CliContext, cmd: DbCommands, output: OutputFormat) -> 
                     ui::label_value(ui::INFO, "ID", &db.id);
                     ui::label_value(ui::APP, "Name", &db.name);
                     ui::label_value(ui::SYS, "Engine", &db.engine);
+                    ui::label_value(
+                        ui::SYS,
+                        "Version",
+                        &format!("PostgreSQL {}", db.postgres_version),
+                    );
                     ui::label_value(ui::WATCH, "Status", &ui::status_label(&db.status));
                     ui::label_value(ui::SYS, "vCPUs", &db.vcpus.to_string());
                     ui::label_value(ui::SYS, "Memory", &format!("{}M", db.memory_mib));
@@ -165,6 +174,7 @@ mod tests {
         mock.expect_create_database().times(1).returning(|req| {
             assert_eq!(req.name, "orders");
             assert_eq!(req.engine, "neon");
+            assert_eq!(req.postgres_version, 16);
             assert_eq!(req.vcpus, Some(2));
             assert_eq!(req.memory_mib, Some(1024));
             assert_eq!(req.disk_mib, Some(4096));
@@ -179,6 +189,7 @@ mod tests {
                 id: "db-1".to_string(),
                 name: "orders".to_string(),
                 engine: "neon".to_string(),
+                postgres_version: 16,
                 status: "pending".to_string(),
                 vcpus: 2,
                 memory_mib: 1024,
@@ -193,6 +204,7 @@ mod tests {
             DbCommands::Create {
                 name: "orders".to_string(),
                 engine: "neon".to_string(),
+                version: 16,
                 vcpus: 2,
                 memory: "1G".to_string(),
                 disk: 4096,
@@ -211,6 +223,7 @@ mod tests {
             id: "db-1".to_string(),
             name: "orders".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             status: "pending".to_string(),
             vcpus: 1,
             memory_mib: 512,
@@ -221,7 +234,7 @@ mod tests {
         assert_eq!(
             create_database_success_message("orders", &db),
             format!(
-                "Database orders created successfully (ID: db-1). Initial status: {}",
+                "Database orders created successfully (ID: db-1). PostgreSQL 16. Initial status: {}",
                 ui::status_label("pending")
             )
         );
@@ -272,6 +285,7 @@ mod tests {
             DbCommands::Create {
                 name: "orders".to_string(),
                 engine: "neon".to_string(),
+                version: 16,
                 vcpus: 1,
                 memory: "8G".to_string(),
                 disk: 1024,
@@ -296,6 +310,7 @@ mod tests {
             DbCommands::Create {
                 name: "orders".to_string(),
                 engine: "neon".to_string(),
+                version: 16,
                 vcpus: 1,
                 memory: "1G".to_string(),
                 disk: 1024,

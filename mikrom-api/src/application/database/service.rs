@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::application::tenant::resolve_tenant_owner_user_id;
+use crate::application::vms::{VmService, VmSnapshot};
 use crate::domain::{CreateDatabaseParams, Database, DatabaseDeployment, DatabaseStatus};
 use crate::error::{ApiError, ApiResult};
 use chrono::{Duration, Utc};
@@ -148,6 +149,92 @@ impl DatabaseService {
                 true
             },
         }
+    }
+
+    async fn resolve_backup_context(
+        state: &AppState,
+        database_id: Uuid,
+        tenant_id: Uuid,
+    ) -> ApiResult<(Database, DatabaseDeployment, String)> {
+        let database = state
+            .ctx
+            .database_repo
+            .get_database(database_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or_else(|| ApiError::NotFound("Database not found".to_string()))?;
+
+        if database.tenant_id != tenant_id {
+            return Err(ApiError::Forbidden);
+        }
+
+        let deployment_id = database.active_deployment_id.ok_or_else(|| {
+            ApiError::Conflict("Database has no active deployment yet".to_string())
+        })?;
+
+        let deployment = state
+            .ctx
+            .database_repo
+            .get_deployment(deployment_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or_else(|| ApiError::NotFound("Database deployment not found".to_string()))?;
+
+        if deployment.tenant_id != tenant_id {
+            return Err(ApiError::Forbidden);
+        }
+
+        let job_id = deployment.job_id.clone().ok_or_else(|| {
+            ApiError::Conflict("Database deployment does not have a job ID yet".to_string())
+        })?;
+
+        Ok((database, deployment, job_id))
+    }
+
+    pub async fn list_backup_snapshots(
+        state: &AppState,
+        database_id: Uuid,
+        tenant_id: Uuid,
+    ) -> ApiResult<(bool, String, Vec<VmSnapshot>)> {
+        let (database, _deployment, job_id) =
+            Self::resolve_backup_context(state, database_id, tenant_id).await?;
+        VmService::list_snapshots(state, database.tenant_id.to_string(), job_id).await
+    }
+
+    pub async fn create_backup_snapshot(
+        state: &AppState,
+        database_id: Uuid,
+        tenant_id: Uuid,
+        snapshot_name: String,
+    ) -> ApiResult<(bool, String)> {
+        let (database, _deployment, job_id) =
+            Self::resolve_backup_context(state, database_id, tenant_id).await?;
+        VmService::create_snapshot(state, database.tenant_id.to_string(), job_id, snapshot_name)
+            .await
+    }
+
+    pub async fn restore_backup_snapshot(
+        state: &AppState,
+        database_id: Uuid,
+        tenant_id: Uuid,
+        snapshot_name: String,
+    ) -> ApiResult<(bool, String)> {
+        let (database, _deployment, job_id) =
+            Self::resolve_backup_context(state, database_id, tenant_id).await?;
+        VmService::restore_snapshot(state, database.tenant_id.to_string(), job_id, snapshot_name)
+            .await
+    }
+
+    pub async fn delete_backup_snapshot(
+        state: &AppState,
+        database_id: Uuid,
+        tenant_id: Uuid,
+        snapshot_name: String,
+    ) -> ApiResult<(bool, String)> {
+        let (database, _deployment, job_id) =
+            Self::resolve_backup_context(state, database_id, tenant_id).await?;
+        VmService::delete_snapshot(state, database.tenant_id.to_string(), job_id, snapshot_name)
+            .await
     }
 
     pub async fn create_database(
@@ -748,6 +835,7 @@ mod tests {
             id,
             name: "orders".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             user_id,
             vcpus: crate::domain::types::CpuCores::try_from(2).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(1024).unwrap(),
@@ -969,6 +1057,7 @@ mod tests {
             .with(function(|params: &CreateDatabaseParams| {
                 params.name == "orders"
                     && params.engine == "neon"
+                    && params.postgres_version == 16
                     && params.user_id == user_id
                     && params.disk_mib == 1024
                     && params.vcpus.value() == 1
@@ -991,6 +1080,7 @@ mod tests {
                         id: database_id,
                         name: "orders".to_string(),
                         engine: "neon".to_string(),
+                        postgres_version: 16,
                         user_id,
                         vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
                         memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
@@ -1034,6 +1124,7 @@ mod tests {
         let params = CreateDatabaseParams {
             name: "orders".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             user_id,
             vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
@@ -1048,6 +1139,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(created.id, database_id);
+        assert_eq!(created.postgres_version, 16);
         assert_eq!(created.active_deployment_id, None);
         assert_eq!(created.status, DatabaseStatus::Pending);
     }
@@ -1057,6 +1149,7 @@ mod tests {
         let mut neon_params = CreateDatabaseParams {
             name: "orders".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             user_id: Uuid::new_v4(),
             vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
@@ -1084,6 +1177,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "orders".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             user_id: Uuid::new_v4(),
             vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
@@ -1109,6 +1203,7 @@ mod tests {
         let mut postgres_params = CreateDatabaseParams {
             name: "orders".to_string(),
             engine: "postgres".to_string(),
+            postgres_version: 16,
             user_id: Uuid::new_v4(),
             vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
@@ -1129,6 +1224,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "orders".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             user_id: Uuid::new_v4(),
             vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
@@ -1154,6 +1250,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "orders".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             user_id: Uuid::new_v4(),
             vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
@@ -1236,6 +1333,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "orders".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             user_id: Uuid::new_v4(),
             vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),
@@ -1344,6 +1442,7 @@ mod tests {
         let params = CreateDatabaseParams {
             name: "orders".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             user_id,
             vcpus: crate::domain::types::CpuCores::try_from(1).unwrap(),
             memory_mib: crate::domain::types::MemoryMb::try_from(512).unwrap(),

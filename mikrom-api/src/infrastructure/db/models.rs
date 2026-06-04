@@ -289,6 +289,7 @@ pub struct DbDatabase {
     pub id: Uuid,
     pub name: String,
     pub engine: String,
+    pub postgres_version: i32,
     pub tenant_id: Uuid,
     pub vcpus: i32,
     pub memory_mib: i32,
@@ -309,6 +310,7 @@ impl From<DbDatabase> for crate::domain::Database {
             id: db.id,
             name: db.name,
             engine: db.engine,
+            postgres_version: db.postgres_version as u16,
             tenant_id: db.tenant_id,
             vcpus: crate::domain::types::CpuCores::try_from(db.vcpus as u32)
                 .expect("Invalid vcpus"),
@@ -373,6 +375,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "orders".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             user_id: Uuid::new_v4(),
             vcpus: 2,
             memory_mib: 1024,

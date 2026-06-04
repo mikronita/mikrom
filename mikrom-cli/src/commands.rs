@@ -295,6 +295,13 @@ pub enum DbCommands {
         name: String,
         #[arg(long, short, default_value = "neon", help = "Database engine")]
         engine: String,
+        #[arg(
+            long,
+            short = 'V',
+            default_value = "16",
+            help = "PostgreSQL major version"
+        )]
+        version: u16,
         #[arg(long, default_value = "1", help = "CPU cores (1-4)")]
         vcpus: u32,
         #[arg(

@@ -620,6 +620,7 @@ mod tests {
             Commands::Db(DbCommands::Create {
                 name,
                 engine,
+                version,
                 vcpus,
                 memory,
                 disk,
@@ -627,6 +628,7 @@ mod tests {
             }) => {
                 assert_eq!(name, "orders");
                 assert_eq!(engine, "neon");
+                assert_eq!(version, 16);
                 assert_eq!(vcpus, 1);
                 assert_eq!(memory, "512M");
                 assert_eq!(disk, 1024);

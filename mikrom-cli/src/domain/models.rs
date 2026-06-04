@@ -167,6 +167,8 @@ pub struct DatabaseInfo {
     pub id: String,
     pub name: String,
     pub engine: String,
+    #[serde(default = "default_postgres_version")]
+    pub postgres_version: u16,
     pub status: String,
     pub vcpus: u32,
     pub memory_mib: u32,
@@ -192,10 +194,16 @@ pub struct DatabaseConnectionInfo {
 pub struct CreateDatabaseRequest {
     pub name: String,
     pub engine: String,
+    #[serde(default = "default_postgres_version")]
+    pub postgres_version: u16,
     pub vcpus: Option<u32>,
     pub memory_mib: Option<u32>,
     pub disk_mib: Option<u32>,
     pub settings: Option<HashMap<String, String>>,
+}
+
+fn default_postgres_version() -> u16 {
+    16
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

@@ -7,6 +7,7 @@ pub struct Database {
     pub id: Uuid,
     pub name: String,
     pub engine: String,
+    pub postgres_version: u16,
     pub tenant_id: Uuid, // Mikrom Project ID
     pub vcpus: CpuCores,
     pub memory_mib: MemoryMb,
@@ -59,6 +60,7 @@ pub struct DatabaseDeployment {
 pub struct CreateDatabaseParams {
     pub name: String,
     pub engine: String,
+    pub postgres_version: u16,
     pub user_id: Uuid,
     pub tenant_id: Uuid,
     pub vcpus: CpuCores,
@@ -171,6 +173,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "db-1".to_string(),
             engine: "neon".to_string(),
+            postgres_version: 16,
             tenant_id: Uuid::new_v4(),
             vcpus: CpuCores::try_from(2).unwrap(),
             memory_mib: MemoryMb::try_from(1024).unwrap(),

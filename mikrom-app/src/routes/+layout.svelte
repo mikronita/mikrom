@@ -10,6 +10,7 @@
   import { clearApps, refreshApps } from "$lib/stores/apps";
   import { clearVolumes, clearSnapshots } from "$lib/stores/volumes";
   import { clearSecurityRules } from "$lib/stores/networking";
+  import { clearDatabases, refreshDatabases } from "$lib/stores/databases";
   import { activeProjectStore, endProjectSwitch, projectSwitchingStore, refreshProjects } from "$lib/stores/projects";
 
   initTheme();
@@ -24,10 +25,11 @@
       clearVolumes();
       clearSnapshots();
       clearSecurityRules();
+      clearDatabases();
       closeWorkspaceSSE();
       stopVmsSSE();
       try {
-        await Promise.all([refreshProjects(), refreshApps(), refreshVms()]);
+        await Promise.all([refreshProjects(), refreshApps(), refreshVms(), refreshDatabases()]);
         initWorkspaceSSE();
         initVmsSSE({ seed: false });
       } finally {
