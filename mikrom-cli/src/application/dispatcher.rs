@@ -119,6 +119,7 @@ mod tests {
                 id: "db-1".to_string(),
                 name: "orders".to_string(),
                 engine: "neon".to_string(),
+                postgres_version: 16,
                 status: "running".to_string(),
                 vcpus: 1,
                 memory_mib: 512,

@@ -9,7 +9,6 @@
     History, 
     Camera,
     Link,
-    Trash2,
     Activity,
     Server,
     Zap
@@ -242,10 +241,6 @@
             <Button variant="outline" size="sm" onclick={() => (showCreateSnapshotDialog = true)}>
               <Camera class="size-4" />
               Take Snapshot
-            </Button>
-            <Button variant="destructive-soft" size="sm" onclick={() => (showDeleteVolumeDialog = true)}>
-              <Trash2 class="size-4" />
-              Delete
             </Button>
           </div>
         </div>

@@ -21,6 +21,7 @@ async fn test_postgres_database_repository_crud_and_deployments() {
     let params = CreateDatabaseParams {
         name: "orders".to_string(),
         engine: "neon".to_string(),
+        postgres_version: 16,
         user_id,
         tenant_id,
         vcpus: mikrom_api::domain::types::CpuCores::try_from(2).unwrap(),
@@ -38,6 +39,7 @@ async fn test_postgres_database_repository_crud_and_deployments() {
     let created = repo.create_database(params).await.unwrap();
     assert_eq!(created.name, "orders");
     assert_eq!(created.engine, "neon");
+    assert_eq!(created.postgres_version, 16);
     assert_eq!(created.tenant_id, tenant_id);
     assert_eq!(created.status, DatabaseStatus::Pending);
     assert_eq!(
@@ -57,6 +59,13 @@ async fn test_postgres_database_repository_crud_and_deployments() {
         .await
         .unwrap();
     assert_eq!(stored_user_id, user_id);
+    let stored_version: i32 =
+        sqlx::query_scalar("SELECT postgres_version FROM databases WHERE id = $1")
+            .bind(created.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_version, 16);
 
     let other_tenant = Uuid::new_v4();
 

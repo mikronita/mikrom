@@ -3,6 +3,7 @@ import {
   appDeployments,
   apps,
   authToken,
+  databases,
   deployments,
   mesh,
   profile,
@@ -79,6 +80,10 @@ export async function mockControlPlaneApi(
   options: MockControlPlaneApiOptions = {},
 ) {
   let projectsState = [...projects];
+  let databasesState = [...databases];
+  const databaseSnapshotsState: Record<string, Array<{ id: string; name: string; created_at: number; size_bytes: number; vm_status: string }>> = {
+    "db-1": [],
+  };
   let securityRulesState = [...securityRules];
   let appsState = [...apps];
   let volumesState = [...volumes];
@@ -163,7 +168,7 @@ export async function mockControlPlaneApi(
           return;
         }
 
-        if (tenantSlug === "acme" && appsState.length > 0) {
+        if (tenantSlug === "acme" && (appsState.length > 0 || databasesState.length > 0 || volumesState.length > 0)) {
           await route.fulfill(
             jsonResponse(
               {
@@ -187,6 +192,225 @@ export async function mockControlPlaneApi(
     if (pathname === `${apiBase}/apps` && method === "GET") {
       await route.fulfill(jsonResponse(appsState));
       return;
+    }
+
+    if (pathname === `${apiBase}/databases` && method === "GET") {
+      await route.fulfill(jsonResponse(databasesState));
+      return;
+    }
+
+    if (pathname === `${apiBase}/databases` && method === "POST") {
+      const payload = request.postDataJSON() as
+        | {
+            name?: string;
+            engine?: string;
+            postgres_version?: number;
+            vcpus?: number;
+            memory_mib?: number;
+            disk_mib?: number;
+          }
+        | undefined;
+
+      const nextIndex = databasesState.length + 1;
+      const createdDatabase = {
+        id: `db-${nextIndex}`,
+        name: payload?.name ?? `database-${nextIndex}`,
+        engine: payload?.engine ?? "neon",
+        postgres_version: payload?.postgres_version ?? 16,
+        status: "pending",
+        vcpus: payload?.vcpus ?? 1,
+        memory_mib: payload?.memory_mib ?? 512,
+        disk_mib: payload?.disk_mib ?? 10240,
+        active_deployment_id: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      databasesState = [createdDatabase, ...databasesState];
+      databaseSnapshotsState[createdDatabase.id] = [];
+      await route.fulfill(jsonResponse(createdDatabase, 201));
+      return;
+    }
+
+    if (pathname.startsWith(`${apiBase}/databases/`)) {
+      const relativePath = pathname.slice(`${apiBase}/databases/`.length);
+      const databaseId = decodeURIComponent(relativePath.replace(/\/(connection|branches|backups.*)$/, ""));
+      const database = databasesState.find((entry) => entry.id === databaseId);
+      const hasActiveDeployment = Boolean(database?.active_deployment_id);
+
+      if (pathname.endsWith("/connection") && method === "GET") {
+        if (!database) {
+          await route.fulfill(jsonResponse({ error: "Database not found", status: 404 }, 404));
+          return;
+        }
+
+        if (!hasActiveDeployment) {
+          await route.fulfill(
+            jsonResponse({ error: "Database has no active deployment yet", status: 409 }, 409)
+          );
+          return;
+        }
+
+        await route.fulfill(
+          jsonResponse({
+            database_id: database.id,
+            database_name: database.name,
+            database_user: "cloud_admin",
+            database_host: "127.0.0.1",
+            database_port: 5432,
+            ssh_host: "fd00:1234::99",
+            ssh_user: "mikrom",
+            ssh_port: 22,
+            ssh_tunnel_command: "ssh -N -L 5432:127.0.0.1:5432 mikrom@[fd00:1234::99]",
+            psql_command: `psql "host=127.0.0.1 port=5432 user=cloud_admin dbname=${database.name}"`,
+          }),
+        );
+        return;
+      }
+
+      if (pathname.endsWith("/backups") && method === "GET") {
+        if (!database) {
+          await route.fulfill(jsonResponse({ error: "Database not found", status: 404 }, 404));
+          return;
+        }
+
+        if (!hasActiveDeployment) {
+          await route.fulfill(
+            jsonResponse({ error: "Database has no active deployment yet", status: 409 }, 409)
+          );
+          return;
+        }
+
+        await route.fulfill(
+          jsonResponse({
+            database_id: database.id,
+            database_name: database.name,
+            backup_strategy: "continuous",
+            recovery_mode: "point-in-time recovery available",
+            retention_valid: true,
+            neon_tenant_id: "tenant-1",
+            neon_timeline_id: "timeline-1",
+            tenant_gen: 1,
+            status: database.status,
+            created_at: database.created_at,
+            updated_at: database.updated_at,
+          })
+        );
+        return;
+      }
+
+      if (relativePath.endsWith("/backups/snapshots") && method === "GET") {
+        if (!database) {
+          await route.fulfill(jsonResponse({ error: "Database not found", status: 404 }, 404));
+          return;
+        }
+
+        if (!hasActiveDeployment) {
+          await route.fulfill(
+            jsonResponse({ error: "Database has no active deployment yet", status: 409 }, 409)
+          );
+          return;
+        }
+
+        const snapshots = databaseSnapshotsState[databaseId] ?? [];
+        await route.fulfill(
+          jsonResponse({
+            success: true,
+            message: "Snapshot history",
+            snapshots,
+          })
+        );
+        return;
+      }
+
+      if (relativePath.endsWith("/backups/snapshots") && method === "POST") {
+        if (!database) {
+          await route.fulfill(jsonResponse({ error: "Database not found", status: 404 }, 404));
+          return;
+        }
+
+        if (!hasActiveDeployment) {
+          await route.fulfill(
+            jsonResponse({ error: "Database has no active deployment yet", status: 409 }, 409)
+          );
+          return;
+        }
+
+        const payload = request.postDataJSON() as { name?: string } | undefined;
+        const snapshot = {
+          id: `snap-${Date.now()}`,
+          name: payload?.name ?? "manual-snapshot",
+          created_at: Date.now(),
+          size_bytes: 2147483648,
+          vm_status: "RUNNING",
+        };
+        databaseSnapshotsState[databaseId] = [snapshot, ...(databaseSnapshotsState[databaseId] ?? [])];
+        await route.fulfill(
+          jsonResponse({
+            success: true,
+            message: "Snapshot created",
+          })
+        );
+        return;
+      }
+
+      if (relativePath.endsWith("/backups/restore") && method === "POST") {
+        if (!database) {
+          await route.fulfill(jsonResponse({ error: "Database not found", status: 404 }, 404));
+          return;
+        }
+
+        if (!hasActiveDeployment) {
+          await route.fulfill(
+            jsonResponse({ error: "Database has no active deployment yet", status: 409 }, 409)
+          );
+          return;
+        }
+
+        await route.fulfill(
+          jsonResponse({
+            success: true,
+            message: "Snapshot restored",
+          })
+        );
+        return;
+      }
+
+      if (relativePath.includes("/backups/snapshots/") && method === "DELETE") {
+        if (!database) {
+          await route.fulfill(jsonResponse({ error: "Database not found", status: 404 }, 404));
+          return;
+        }
+
+        if (!hasActiveDeployment) {
+          await route.fulfill(
+            jsonResponse({ error: "Database has no active deployment yet", status: 409 }, 409)
+          );
+          return;
+        }
+
+        const snapshotName = decodeURIComponent(relativePath.split("/backups/snapshots/")[1] ?? "");
+        databaseSnapshotsState[databaseId] = (databaseSnapshotsState[databaseId] ?? []).filter(
+          (snapshot) => snapshot.name !== snapshotName,
+        );
+        await route.fulfill(
+          jsonResponse({
+            success: true,
+            message: "Snapshot deleted",
+          })
+        );
+        return;
+      }
+
+      if (method === "DELETE") {
+        if (!database) {
+          await route.fulfill(jsonResponse({ error: "Database not found", status: 404 }, 404));
+          return;
+        }
+
+        databasesState = databasesState.filter((entry) => entry.id !== databaseId);
+        await route.fulfill({ status: 204 });
+        return;
+      }
     }
 
     if (pathname === `${apiBase}/apps` && method === "POST") {

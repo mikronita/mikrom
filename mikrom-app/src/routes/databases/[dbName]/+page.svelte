@@ -1,27 +1,21 @@
 <script lang="ts">
-  import { page } from "$app/stores";
+  import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { 
+  import { page } from "$app/stores";
+  import {
     Database as DatabaseIcon,
     Radio,
     Cpu,
     HardDrive,
-    Settings, 
-    Terminal, 
+    Camera,
+    Terminal,
     Globe2,
-    ShieldCheck,
-    Network,
-    Server,
-    Zap,
-    ExternalLink,
-    LockKeyhole,
-    Eye,
-    EyeOff,
     Copy,
     Check,
+    RotateCcw,
     Trash2,
-    Activity,
-    Clock
+    Server,
+    ArrowLeft,
   } from "lucide-svelte";
   import {
     Card,
@@ -31,45 +25,72 @@
     CardContent,
     Badge,
     Button,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Field,
-    AlertDialog,
     EmptyState,
+    AlertDialog,
     SectionTabs,
+    Input,
   } from "$lib/components";
+  import type {
+    DatabaseBackupInfo,
+    DatabaseBranchInfo,
+    DatabaseConnectionInfo,
+    DatabaseSnapshotInfo,
+  } from "$lib/api";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
-  import { databasesStore, deleteDatabase } from "$lib/stores/databases";
+  import { getToken } from "$lib/auth";
+  import {
+    databasesStore,
+    deleteDatabase,
+    getDatabaseConnection,
+    refreshDatabases,
+    type Database,
+  } from "$lib/stores/databases";
+  import { get } from "svelte/store";
   import { toast } from "$lib/toast";
   import { formatDate } from "$lib/utils";
+  import {
+    createDatabaseSnapshot,
+    deleteDatabaseSnapshot,
+    getDatabaseBackupInfo,
+    listDatabaseBranches,
+    listDatabaseSnapshots,
+    restoreDatabaseSnapshot,
+  } from "$lib/api";
 
-  const dbName = $page.params.dbName;
-  $: db = $databasesStore.find(d => d.name === dbName);
+  let dbName = "";
+  $: dbName = decodeURIComponent($page.params.dbName ?? "");
+  let db: Database | null = null;
 
-  let activeTab: "overview" | "networking" | "backups" | "settings" = "overview";
-  let showPassword = false;
-  let copied = false;
+  let connectionInfo: DatabaseConnectionInfo | null = null;
+  let connectionLoading = false;
+  let connectionError = "";
+  let branches: DatabaseBranchInfo[] = [];
+  let branchesLoading = false;
+  let branchesError = "";
+  let backupInfo: DatabaseBackupInfo | null = null;
+  let backupLoading = false;
+  let backupError = "";
+  let snapshots: DatabaseSnapshotInfo[] = [];
+  let snapshotsLoading = false;
+  let snapshotsError = "";
+  let snapshotName = "";
+  let snapshotActionLoading = false;
+  let snapshotActionError = "";
+  let restoreSnapshotTarget = "";
+  let deleteSnapshotTarget = "";
   let showDeleteDialog = false;
+  let showRestoreSnapshotDialog = false;
+  let showDeleteSnapshotDialog = false;
+  let copiedKey: "ssh" | "psql" | null = null;
+  let lastLoadedDatabaseId: string | null = null;
+  let activeTab: "overview" | "connection" | "branches" | "backups" = "overview";
 
-  function copyToClipboard(text: string) {
-    navigator.clipboard.writeText(text);
-    copied = true;
-    toast.success("Connection string copied to clipboard");
-    setTimeout(() => (copied = false), 2000);
-  }
-
-  let maintenanceWindow = "sunday-02-00";
-
-  function handleDelete() {
-    if (db) {
-      deleteDatabase(db.id);
-      toast.success(`Database ${db.name} is being deleted`);
-      goto("/databases");
-    }
-  }
+  const databaseTabs = [
+    { value: "overview", label: "Overview" },
+    { value: "connection", label: "Connection" },
+    { value: "branches", label: "Branches" },
+    { value: "backups", label: "Backups" },
+  ] as const;
 
   function getStatusBadgeClass(status: string) {
     switch (status) {
@@ -78,23 +99,294 @@
       case "Provisioning":
         return "border-transparent bg-status-info/10 text-status-info";
       case "Deleting":
+      case "Failed":
         return "border-transparent bg-status-offline/10 text-status-offline";
       default:
         return "border-transparent bg-muted/70 text-muted-foreground";
     }
   }
 
-  const mockConnectedApps = [
-    { name: "mikrom-api", ipv6: "fd00::1:1", status: "Running" },
-    { name: "mikrom-scheduler", ipv6: "fd00::1:2", status: "Running" },
-  ];
+  function copyToClipboard(text: string, kind: "ssh" | "psql") {
+    navigator.clipboard.writeText(text);
+    copiedKey = kind;
+    toast.success(`${kind === "ssh" ? "SSH tunnel" : "psql command"} copied to clipboard`);
+    setTimeout(() => {
+      if (copiedKey === kind) copiedKey = null;
+    }, 2000);
+  }
 
-  const dbTabs = [
-    { value: "overview", label: "Overview" },
-    { value: "networking", label: "Networking" },
-    { value: "backups", label: "Backups" },
-    { value: "settings", label: "Settings" },
-  ] as const;
+  function formatBytes(sizeBytes: number) {
+    if (sizeBytes >= 1024 * 1024 * 1024) {
+      return `${(sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GiB`;
+    }
+
+    if (sizeBytes >= 1024 * 1024) {
+      return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MiB`;
+    }
+
+    if (sizeBytes >= 1024) {
+      return `${(sizeBytes / 1024).toFixed(1)} KiB`;
+    }
+
+    return `${sizeBytes} B`;
+  }
+
+  function formatBackupError(message: string) {
+    if (message.includes("Database has no active deployment yet")) {
+      return "This database needs an active deployment before you can use snapshots. Provision or deploy it first.";
+    }
+
+    return message;
+  }
+
+  async function loadConnectionInfo(databaseId: string) {
+    connectionLoading = true;
+    connectionError = "";
+    const result = await getDatabaseConnection(databaseId);
+    connectionLoading = false;
+    if (result.error) {
+      connectionError = result.error;
+      connectionInfo = null;
+      return;
+    }
+
+    connectionInfo = result.data ?? null;
+  }
+
+  async function loadBranches(databaseId: string) {
+    branchesLoading = true;
+    branchesError = "";
+    const token = getToken();
+    if (!token) {
+      branchesLoading = false;
+      branchesError = "You must be logged in";
+      branches = [];
+      return;
+    }
+
+    const result = await listDatabaseBranches(token, databaseId);
+    branchesLoading = false;
+    if (result.error) {
+      branchesError = result.error;
+      branches = [];
+      return;
+    }
+
+    branches = result.data ?? [];
+  }
+
+  async function loadBackups(databaseId: string) {
+    backupLoading = true;
+    backupError = "";
+    const token = getToken();
+    if (!token) {
+      backupLoading = false;
+      backupError = "You must be logged in";
+      backupInfo = null;
+      return;
+    }
+
+    const result = await getDatabaseBackupInfo(token, databaseId);
+    backupLoading = false;
+    if (result.error) {
+      backupError = formatBackupError(result.error);
+      backupInfo = null;
+      return;
+    }
+
+    backupInfo = result.data ?? null;
+  }
+
+  async function loadSnapshots(databaseId: string) {
+    snapshotsLoading = true;
+    snapshotsError = "";
+    const token = getToken();
+    if (!token) {
+      snapshotsLoading = false;
+      snapshotsError = "You must be logged in";
+      snapshots = [];
+      return;
+    }
+
+    const result = await listDatabaseSnapshots(token, databaseId);
+    snapshotsLoading = false;
+    if (result.error) {
+      snapshotsError = formatBackupError(result.error);
+      snapshots = [];
+      return;
+    }
+
+    const data = result.data ?? { success: false, message: "No data returned", snapshots: [] };
+    snapshots = data.snapshots ?? [];
+    if (!data.success && data.message) {
+      snapshotsError = data.message;
+    }
+  }
+
+  function syncDatabaseState(entries: Database[]) {
+    const nextDb = entries.find((entry) => entry.name === dbName) ?? null;
+    db = nextDb;
+    if (!nextDb) {
+      return;
+    }
+
+    if (nextDb.id !== lastLoadedDatabaseId) {
+      lastLoadedDatabaseId = nextDb.id;
+      connectionInfo = null;
+      connectionError = "";
+      branches = [];
+      branchesError = "";
+      backupInfo = null;
+      backupError = "";
+      snapshots = [];
+      snapshotsError = "";
+      void loadConnectionInfo(nextDb.id);
+    }
+  }
+
+  async function createSnapshot() {
+    if (!db || !snapshotName.trim()) return;
+
+    const token = getToken();
+    if (!token) {
+      snapshotActionError = "You must be logged in";
+      return;
+    }
+
+    snapshotActionLoading = true;
+    snapshotActionError = "";
+    const result = await createDatabaseSnapshot(token, db.id, { name: snapshotName.trim() });
+    snapshotActionLoading = false;
+    if (result.error) {
+      snapshotActionError = formatBackupError(result.error);
+      toast.error(snapshotActionError);
+      return;
+    }
+
+    const action = result.data;
+    if (action && !action.success) {
+      snapshotActionError = formatBackupError(action.message);
+      toast.error(snapshotActionError);
+      return;
+    }
+
+    snapshotName = "";
+    toast.success(action?.message || "Snapshot created");
+    void loadSnapshots(db.id);
+  }
+
+  async function restoreSnapshot() {
+    if (!db || !restoreSnapshotTarget) return;
+
+    const token = getToken();
+    if (!token) {
+      snapshotActionError = "You must be logged in";
+      return;
+    }
+
+    snapshotActionLoading = true;
+    snapshotActionError = "";
+    const result = await restoreDatabaseSnapshot(token, db.id, { snapshot_name: restoreSnapshotTarget });
+    snapshotActionLoading = false;
+    if (result.error) {
+      snapshotActionError = formatBackupError(result.error);
+      toast.error(snapshotActionError);
+      return;
+    }
+
+    const action = result.data;
+    if (action && !action.success) {
+      snapshotActionError = formatBackupError(action.message);
+      toast.error(snapshotActionError);
+      return;
+    }
+
+    toast.success(action?.message || "Snapshot restored");
+    showRestoreSnapshotDialog = false;
+    restoreSnapshotTarget = "";
+  }
+
+  async function deleteSnapshot() {
+    if (!db || !deleteSnapshotTarget) return;
+
+    const token = getToken();
+    if (!token) {
+      snapshotActionError = "You must be logged in";
+      return;
+    }
+
+    snapshotActionLoading = true;
+    snapshotActionError = "";
+    const result = await deleteDatabaseSnapshot(token, db.id, deleteSnapshotTarget);
+    snapshotActionLoading = false;
+    if (result.error) {
+      snapshotActionError = formatBackupError(result.error);
+      toast.error(snapshotActionError);
+      return;
+    }
+
+    const action = result.data;
+    if (action && !action.success) {
+      snapshotActionError = formatBackupError(action.message);
+      toast.error(snapshotActionError);
+      return;
+    }
+
+    toast.success(action?.message || "Snapshot deleted");
+    showDeleteSnapshotDialog = false;
+    deleteSnapshotTarget = "";
+    void loadSnapshots(db.id);
+  }
+
+  async function handleDelete() {
+    if (!db) return;
+
+    const result = await deleteDatabase(db.id);
+    if (!result.success) {
+      toast.error(result.error || "Failed to delete database");
+      return;
+    }
+
+    toast.success(`Database ${db.name} is being deleted`);
+    goto("/databases");
+  }
+
+  onMount(() => {
+    if ($databasesStore.length === 0) {
+      void refreshDatabases();
+    }
+    const unsubscribeDatabases = databasesStore.subscribe((entries) => {
+      syncDatabaseState(entries);
+    });
+
+    const unsubscribePage = page.subscribe(($page) => {
+      dbName = decodeURIComponent($page.params.dbName ?? "");
+      syncDatabaseState(get(databasesStore));
+    });
+
+    return () => {
+      unsubscribeDatabases();
+      unsubscribePage();
+    };
+  });
+
+  function handleTabChange(value: string) {
+    if (!db) return;
+
+    if (value === "branches" && branches.length === 0 && !branchesLoading && !branchesError) {
+      void loadBranches(db.id);
+    }
+
+    if (value === "backups") {
+      if (backupInfo === null && !backupLoading && !backupError) {
+        void loadBackups(db.id);
+      }
+
+      if (snapshots.length === 0 && !snapshotsLoading && !snapshotsError) {
+        void loadSnapshots(db.id);
+      }
+    }
+  }
 </script>
 
 <svelte:head>
@@ -103,94 +395,163 @@
 
 <DashboardLayout>
   {#if !db}
-    <div class="flex flex-col items-center justify-center py-20">
-      <p class="text-muted-foreground">Database not found.</p>
-      <Button variant="link" onclick={() => goto("/databases")}>Back to list</Button>
+    <div class="flex flex-col items-center justify-center gap-4 py-20">
+      <EmptyState class="py-0">
+        <DatabaseIcon class="size-10 text-muted-foreground" />
+        <h2 class="text-xl font-semibold">Database not found</h2>
+        <p class="max-w-md text-sm text-muted-foreground">
+          We could not find a database named {dbName} in the active project.
+        </p>
+        <Button variant="outline" onclick={() => goto("/databases")}>
+          <ArrowLeft class="size-4" />
+          Back to databases
+        </Button>
+      </EmptyState>
     </div>
   {:else}
     <div class="flex flex-col gap-6">
-      <div class="flex flex-col gap-4">
-        <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div class="flex items-center gap-4">
-            <div class="flex size-12 items-center justify-center rounded-md border border-border bg-background text-foreground">
-              <DatabaseIcon class="size-6" />
-            </div>
-            <div class="flex flex-col">
-              <div class="flex items-center gap-3">
-                <h1 class="text-3xl font-semibold tracking-tight">{db.name}</h1>
-                <Badge variant="outline" class={`gap-1.5 uppercase ${getStatusBadgeClass(db.status)}`}>
-                  <Radio class="size-3" />
-                  {db.status}
-                </Badge>
-              </div>
-              <p class="text-sm text-muted-foreground">PostgreSQL {db.version} • {db.vcpus} vCPU • {db.memory_mib / 1024} GB RAM</p>
-            </div>
+      <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div class="flex items-center gap-4">
+          <div class="flex size-12 items-center justify-center rounded-md border border-border bg-background text-foreground">
+            <DatabaseIcon class="size-6" />
           </div>
-          <div class="flex items-center gap-2">
-            <Badge variant="outline" class="gap-2 px-3 py-1.5 border-transparent bg-status-info/10 text-status-info">
-              <LockKeyhole class="size-4" />
-              Private 6PN
-            </Badge>
+          <div class="flex flex-col gap-1">
+            <div class="flex flex-wrap items-center gap-3">
+              <h1 class="text-3xl font-semibold tracking-tight">{db.name}</h1>
+              <Badge variant="outline" class={`gap-1.5 uppercase ${getStatusBadgeClass(db.status)}`}>
+                <Radio class="size-3" />
+                {db.status}
+              </Badge>
+            </div>
+            <p class="text-sm text-muted-foreground">
+              PostgreSQL {db.postgres_version} · {db.vcpus} vCPU · {Math.max(1, Math.round(db.disk_mib / 1024))} GB storage
+            </p>
           </div>
         </div>
+        <Button variant="destructive" onclick={() => (showDeleteDialog = true)}>
+          <Trash2 class="size-4" />
+          Delete Database
+        </Button>
       </div>
 
       <div class="grid gap-4 md:grid-cols-3">
-        {#each [
-          { label: "6PN address", value: `fd00::${db.id.split('-')[1]}`, description: "Internal IPv6 for peer connectivity.", icon: Globe2, valueClass: "break-all font-mono text-xl" },
-          { label: "Storage used", value: `${Math.round(db.storage_gb * 0.15)} GB`, description: `Using 15% of your ${db.storage_gb} GB quota.`, icon: HardDrive, valueClass: "text-2xl" },
-          { label: "Active links", value: mockConnectedApps.length, description: "MicroVMs with active 6PN routes to this DB.", icon: Network, valueClass: "text-2xl" },
-        ] as card}
-          <Card size="sm">
-            <CardHeader class="flex flex-row items-start justify-between gap-4">
-              <div class="flex flex-col gap-1">
-                <CardDescription>{card.label}</CardDescription>
-                <CardTitle class={card.valueClass}>{card.value}</CardTitle>
-              </div>
-              <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
-                <svelte:component this={card.icon} class="size-5" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p class="text-sm text-muted-foreground">{card.description}</p>
-            </CardContent>
-          </Card>
-        {/each}
+        <Card size="sm">
+          <CardHeader class="flex flex-row items-start justify-between gap-4">
+            <div class="flex flex-col gap-1">
+              <CardDescription>PostgreSQL version</CardDescription>
+              <CardTitle class="text-2xl">PostgreSQL {db.postgres_version}</CardTitle>
+            </div>
+            <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+              <Globe2 class="size-5" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p class="text-sm text-muted-foreground">Version selected when the database was provisioned.</p>
+          </CardContent>
+        </Card>
+
+        <Card size="sm">
+          <CardHeader class="flex flex-row items-start justify-between gap-4">
+            <div class="flex flex-col gap-1">
+              <CardDescription>Storage quota</CardDescription>
+              <CardTitle class="text-2xl">{Math.max(1, Math.round(db.disk_mib / 1024))} GB</CardTitle>
+            </div>
+            <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+              <HardDrive class="size-5" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p class="text-sm text-muted-foreground">Allocated volume size for this Neon database.</p>
+          </CardContent>
+        </Card>
+
+        <Card size="sm">
+          <CardHeader class="flex flex-row items-start justify-between gap-4">
+            <div class="flex flex-col gap-1">
+              <CardDescription>Compute</CardDescription>
+              <CardTitle class="text-2xl">{db.vcpus} vCPU</CardTitle>
+            </div>
+            <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
+              <Cpu class="size-5" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p class="text-sm text-muted-foreground">Provisioned compute for the backing microVM.</p>
+          </CardContent>
+        </Card>
       </div>
 
-      <SectionTabs bind:active={activeTab} tabs={dbTabs} />
+      <SectionTabs bind:active={activeTab} tabs={databaseTabs} onChange={handleTabChange} />
 
-      {#if activeTab === 'overview'}
-        <div class="grid gap-6 lg:grid-cols-[1fr_400px]">
-          <div class="flex flex-col gap-6">
-            <Card>
-              <CardHeader>
-                <div class="flex items-center gap-2">
-                  <Terminal class="size-4 text-muted-foreground" />
-                  <CardTitle class="text-base">Connection Details</CardTitle>
-                </div>
-                <CardDescription>Use these credentials to connect to your database over 6PN.</CardDescription>
-              </CardHeader>
-              <CardContent class="flex flex-col gap-4">
+      {#if activeTab === "overview"}
+        <div class="grid gap-6 lg:grid-cols-[1fr_360px]">
+          <Card>
+            <CardHeader>
+              <div class="flex items-center gap-2">
+                <Server class="size-4 text-muted-foreground" />
+                <CardTitle class="text-base">Database Facts</CardTitle>
+              </div>
+              <CardDescription>Key metadata returned by the control plane.</CardDescription>
+            </CardHeader>
+            <CardContent class="flex flex-col gap-4 text-sm">
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-muted-foreground">Created</span>
+                <span>{formatDate(db.created_at)}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-muted-foreground">Updated</span>
+                <span>{formatDate(db.updated_at)}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-muted-foreground">Engine</span>
+                <span>{db.engine}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card class="border-border/70 bg-muted/20">
+            <CardHeader>
+              <CardTitle class="text-base">Backups</CardTitle>
+              <CardDescription>Review backup posture and manage database snapshots from the Backups tab.</CardDescription>
+            </CardHeader>
+            <CardContent class="flex flex-col gap-3 text-sm text-muted-foreground">
+              <p>
+                The backup view shows the current recovery posture, existing snapshots, and the actions available for this
+                database VM.
+              </p>
+              <Button variant="outline" size="sm" onclick={() => (activeTab = "backups")}>
+                Open Backups
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      {:else if activeTab === "connection"}
+        <Card>
+          <CardHeader>
+            <div class="flex items-center gap-2">
+              <Terminal class="size-4 text-muted-foreground" />
+              <CardTitle class="text-base">Connection Details</CardTitle>
+            </div>
+            <CardDescription>Copy the exact commands needed to reach this database over 6PN.</CardDescription>
+          </CardHeader>
+          <CardContent class="flex flex-col gap-5">
+            {#if connectionLoading}
+              <p class="text-sm text-muted-foreground">Loading connection details...</p>
+            {:else if connectionError}
+              <div class="rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+                {connectionError}
+              </div>
+            {:else if connectionInfo}
+              {@const connection = connectionInfo}
+              <div class="flex flex-col gap-4">
                 <div class="grid gap-3">
                   <div class="flex flex-col gap-1.5">
-                    <span class="text-xs font-medium text-muted-foreground">Connection String</span>
-                    <div class="relative">
-                      <div class="flex items-center rounded-md border border-border bg-muted/50 px-3 py-2 pr-20 font-mono text-xs overflow-hidden">
-                        <span class="truncate">
-                          {showPassword ? db.connection_string : db.connection_string.replace(/:[^@]+@/, ':••••••••@')}
-                        </span>
-                      </div>
-                      <div class="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1">
-                        <Button variant="ghost" size="icon" class="size-8" onclick={() => showPassword = !showPassword}>
-                          {#if showPassword}
-                            <EyeOff class="size-3.5" />
-                          {:else}
-                            <Eye class="size-3.5" />
-                          {/if}
-                        </Button>
-                        <Button variant="ghost" size="icon" class="size-8" onclick={() => copyToClipboard(db.connection_string)}>
-                          {#if copied}
+                    <span class="text-xs font-medium text-muted-foreground">SSH tunnel command</span>
+                    <div class="rounded-md border border-border bg-muted/50 px-3 py-2 font-mono text-xs">
+                      <div class="flex items-start justify-between gap-3">
+                        <span class="break-all">{connection.ssh_tunnel_command}</span>
+                        <Button variant="ghost" size="icon" class="size-8 shrink-0" onclick={() => copyToClipboard(connection.ssh_tunnel_command, "ssh")}>
+                          {#if copiedKey === "ssh"}
                             <Check class="size-3.5 text-status-online" />
                           {:else}
                             <Copy class="size-3.5" />
@@ -200,215 +561,361 @@
                     </div>
                   </div>
 
-                  <div class="grid grid-cols-2 gap-x-8 gap-y-4 pt-2">
-                    <div class="flex flex-col gap-1">
-                      <span class="text-xs font-medium text-muted-foreground">Host</span>
-                      <span class="text-sm font-mono">{db.name}.mikrom.internal</span>
-                    </div>
-                    <div class="flex flex-col gap-1">
-                      <span class="text-xs font-medium text-muted-foreground">Port</span>
-                      <span class="text-sm font-mono">5432</span>
-                    </div>
-                    <div class="flex flex-col gap-1">
-                      <span class="text-xs font-medium text-muted-foreground">Username</span>
-                      <span class="text-sm font-mono">mikrom</span>
-                    </div>
-                    <div class="flex flex-col gap-1">
-                      <span class="text-xs font-medium text-muted-foreground">Database</span>
-                      <span class="text-sm font-mono">mikrom</span>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader class="border-b border-border bg-muted/20">
-                <div class="flex items-center justify-between gap-4">
                   <div class="flex flex-col gap-1.5">
-                    <CardTitle class="text-base">Connectivity Links</CardTitle>
-                    <CardDescription>Applications currently communicating with this database instance.</CardDescription>
+                    <span class="text-xs font-medium text-muted-foreground">psql command</span>
+                    <div class="rounded-md border border-border bg-muted/50 px-3 py-2 font-mono text-xs">
+                      <div class="flex items-start justify-between gap-3">
+                        <span class="break-all">{connection.psql_command}</span>
+                        <Button variant="ghost" size="icon" class="size-8 shrink-0" onclick={() => copyToClipboard(connection.psql_command, "psql")}>
+                          {#if copiedKey === "psql"}
+                            <Check class="size-3.5 text-status-online" />
+                          {:else}
+                            <Copy class="size-3.5" />
+                          {/if}
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                  <Badge variant="outline" class="border-transparent bg-status-info/10 text-status-info">
-                    <Zap class="size-4" />
-                    Live routes
-                  </Badge>
                 </div>
-              </CardHeader>
-              <div class="overflow-x-auto">
-                <table class="w-full">
-                  <thead>
-                    <tr class="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-                      <th class="px-4 py-3 font-medium">Source App</th>
-                      <th class="px-4 py-3 font-medium">6PN Address</th>
-                      <th class="px-4 py-3 text-right font-medium">Link Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {#each mockConnectedApps as app}
-                      <tr class="border-b border-border last:border-0">
-                        <td class="px-4 py-4">
-                          <div class="flex items-center gap-3">
-                            <div class="flex size-8 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
-                              <Server class="size-4" />
-                            </div>
-                            <span class="font-medium">{app.name}</span>
-                          </div>
-                        </td>
-                        <td class="px-4 py-4">
-                          <span class="rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs">{app.ipv6}</span>
-                        </td>
-                        <td class="px-4 py-4 text-right">
-                          <Badge variant="outline" class="border-transparent bg-status-online/10 text-status-online">
-                            {app.status}
-                          </Badge>
-                        </td>
-                      </tr>
-                    {/each}
-                  </tbody>
-                </table>
+
+                <div class="grid grid-cols-2 gap-4 pt-2">
+                  <div class="flex flex-col gap-1">
+                    <span class="text-xs font-medium text-muted-foreground">SSH host</span>
+                    <span class="font-mono text-sm">{connection.ssh_host}</span>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <span class="text-xs font-medium text-muted-foreground">SSH port</span>
+                    <span class="font-mono text-sm">{connection.ssh_port}</span>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <span class="text-xs font-medium text-muted-foreground">Database user</span>
+                    <span class="font-mono text-sm">{connection.database_user}</span>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <span class="text-xs font-medium text-muted-foreground">Database name</span>
+                    <span class="font-mono text-sm">{connection.database_name}</span>
+                  </div>
+                </div>
               </div>
-            </Card>
-          </div>
-
-          <div class="flex flex-col gap-6">
-            <Card>
-              <CardHeader>
-                <div class="flex items-center gap-2">
-                  <Activity class="size-4 text-muted-foreground" />
-                  <CardTitle class="text-base">Resource Usage</CardTitle>
-                </div>
-                <CardDescription>Current compute and storage allocation.</CardDescription>
-              </CardHeader>
-              <CardContent class="flex flex-col gap-6">
-                <div class="grid grid-cols-2 gap-4">
-                  <div class="flex flex-col gap-1">
-                    <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                      <Cpu class="size-3" />
-                      vCPU
-                    </div>
-                    <span class="text-2xl font-semibold">{db.vcpus} Cores</span>
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                      <HardDrive class="size-3" />
-                      Storage
-                    </div>
-                    <span class="text-2xl font-semibold">{db.storage_gb} GB</span>
-                  </div>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    <DatabaseIcon class="size-3" />
-                    Memory
-                  </div>
-                  <span class="text-2xl font-semibold">{db.memory_mib / 1024} GB RAM</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle class="text-base">Quick Help</CardTitle>
-              </CardHeader>
-              <CardContent class="text-sm text-muted-foreground">
-                <p>Internal databases are only reachable via the private 6PN mesh. Ensure your application has the correct security rules allowed in Networking.</p>
-                <Button variant="link" class="h-auto p-0 pt-4 text-primary" onclick={() => goto("/networking")}>
-                  Manage Mesh Networking
-                  <ExternalLink class="ml-1 size-3" />
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      {:else if activeTab === 'networking'}
-        <Card>
-          <CardHeader>
-            <div class="flex items-center gap-2">
-              <ShieldCheck class="size-4 text-muted-foreground" />
-              <CardTitle class="text-base">Access Control</CardTitle>
-            </div>
-            <CardDescription>Manage which resources can connect to this database.</CardDescription>
-          </CardHeader>
-          <CardContent>
-             <EmptyState class="py-12">
-              <LockKeyhole class="size-10 text-muted-foreground" />
-              <h3 class="text-lg font-semibold">Mesh Security</h3>
-              <p class="max-w-md text-sm text-muted-foreground">By default, all applications in your VPC can connect to this database via port 5432.</p>
-              <Button variant="outline" size="sm" class="mt-4" disabled>
-                Configure Custom Rules (Soon)
-              </Button>
-            </EmptyState>
+            {:else}
+              <p class="text-sm text-muted-foreground">Connection information will appear once provisioning completes.</p>
+            {/if}
           </CardContent>
         </Card>
-      {:else if activeTab === 'backups'}
-        <Card>
-          <CardHeader>
-            <div class="flex items-center gap-2">
-              <Clock class="size-4 text-muted-foreground" />
-              <CardTitle class="text-base">Automated Backups</CardTitle>
-            </div>
-            <CardDescription>Daily snapshots of your database.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div class="flex flex-col gap-1">
-              {#each Array.from({ length: 3 }) as _, i}
-                <div class="flex items-center justify-between border-b border-border py-3 last:border-0">
-                  <div class="flex flex-col gap-0.5">
-                    <span class="text-sm font-medium">Backup-{new Date(Date.now() - i * 86400000).toISOString().split('T')[0]}</span>
-                    <span class="text-xs text-muted-foreground">{formatDate(new Date(Date.now() - i * 86400000).toISOString())}</span>
-                  </div>
-                  <Button variant="outline" size="sm">Restore</Button>
-                </div>
-              {/each}
-            </div>
-          </CardContent>
-        </Card>
-      {:else if activeTab === 'settings'}
-        <div class="flex flex-col gap-6">
+      {:else if activeTab === "branches"}
+        <div class="grid gap-6 lg:grid-cols-[1fr_360px]">
           <Card>
             <CardHeader>
               <div class="flex items-center gap-2">
-                <Settings class="size-4 text-muted-foreground" />
-                <CardTitle class="text-base">Database Configuration</CardTitle>
+                <Globe2 class="size-4 text-muted-foreground" />
+                <CardTitle class="text-base">Current Neon Branch</CardTitle>
               </div>
-              <CardDescription>Manage your database settings and performance.</CardDescription>
+              <CardDescription>
+                Mikrom tracks a single branch per database. The values below are the internal Neon identifiers for that branch.
+              </CardDescription>
             </CardHeader>
-            <CardContent class="flex flex-col gap-4">
-              <Field label="Maintenance Window" description="When automated updates and backups are performed.">
-                <Select bind:value={maintenanceWindow}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select window" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="sunday-02-00">Sunday at 02:00 UTC</SelectItem>
-                    <SelectItem value="saturday-02-00">Saturday at 02:00 UTC</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
+            <CardContent class="flex flex-col gap-5">
+              {#if branchesLoading}
+                <p class="text-sm text-muted-foreground">Loading branch details...</p>
+              {:else if branchesError}
+                <div class="rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  {branchesError}
+                </div>
+              {:else if branches[0]}
+                {@const branch = branches[0]}
+                <div class="flex flex-col gap-4">
+                  <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-background p-4">
+                    <div class="flex flex-col gap-1">
+                      <span class="text-xs font-medium text-muted-foreground">Branch name</span>
+                      <span class="text-base font-semibold">{branch.branch_name}</span>
+                    </div>
+                    <Badge variant="outline" class="uppercase">{branch.status}</Badge>
+                  </div>
+
+                  <div class="grid gap-4 sm:grid-cols-2">
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Neon tenant ID</span>
+                      <span class="break-all font-mono text-sm">{branch.neon_tenant_id || "Not provisioned yet"}</span>
+                    </div>
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Neon timeline ID</span>
+                      <span class="break-all font-mono text-sm">{branch.neon_timeline_id || "Not provisioned yet"}</span>
+                    </div>
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Tenant generation</span>
+                      <span class="font-mono text-sm">{branch.tenant_gen ?? "1"}</span>
+                    </div>
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Current branch</span>
+                      <span class="text-sm font-medium">{branch.is_current ? "Yes" : "No"}</span>
+                    </div>
+                  </div>
+                </div>
+              {:else}
+                <EmptyState class="py-10">
+                  <Globe2 class="size-10 text-muted-foreground" />
+                  <h2 class="text-xl font-semibold">No branch data available</h2>
+                  <p class="max-w-md text-sm text-muted-foreground">
+                    Branch details will appear here once the database has been provisioned.
+                  </p>
+                </EmptyState>
+              {/if}
             </CardContent>
           </Card>
 
-          <Card class="border-destructive/20 bg-destructive/5">
+          <Card class="border-border/70 bg-muted/20">
             <CardHeader>
-              <div class="flex items-center gap-2 text-destructive">
-                <Trash2 class="size-4" />
-                <CardTitle class="text-base">Danger Zone</CardTitle>
-              </div>
-              <CardDescription>Irreversible actions for this database.</CardDescription>
+              <CardTitle class="text-base">Branch Summary</CardTitle>
+              <CardDescription>Read-only view of the Neon branch attached to this database.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div class="flex items-center justify-between">
-                <div class="flex flex-col gap-1">
-                  <span class="text-sm font-medium">Delete Database</span>
-                  <p class="text-xs text-muted-foreground">This will permanently delete the database and all its backups.</p>
-                </div>
-                <Button variant="destructive" size="sm" onclick={() => (showDeleteDialog = true)}>Delete Database</Button>
+            <CardContent class="flex flex-col gap-3 text-sm text-muted-foreground">
+              <p>
+                This view reflects the database's current Neon tenant and timeline identifiers. It does not create or delete
+                branches, but it gives you the exact branch state that backs the running database.
+              </p>
+              <Button variant="outline" size="sm" onclick={() => (activeTab = "connection")}>
+                Review connection details
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      {:else if activeTab === "backups"}
+        <div class="grid gap-6 lg:grid-cols-[1fr_360px]">
+          <Card>
+            <CardHeader>
+              <div class="flex items-center gap-2">
+                <Camera class="size-4 text-muted-foreground" />
+                <CardTitle class="text-base">Snapshot History</CardTitle>
               </div>
+              <CardDescription>Manage VM snapshots for the active database deployment.</CardDescription>
+            </CardHeader>
+            <CardContent class="flex flex-col gap-5">
+              {#if backupLoading}
+                <p class="text-sm text-muted-foreground">Loading backup details...</p>
+              {:else if backupError}
+                <div class="rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  {backupError}
+                </div>
+              {:else if backupInfo}
+                {@const backup = backupInfo}
+                <div class="flex flex-col gap-4">
+                  <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-background p-4">
+                    <div class="flex flex-col gap-1">
+                      <span class="text-xs font-medium text-muted-foreground">Backup strategy</span>
+                      <span class="text-base font-semibold capitalize">{backup.backup_strategy}</span>
+                    </div>
+                    <Badge variant="outline" class="uppercase">
+                      {backup.retention_valid ? "Retention valid" : "Retention pending"}
+                    </Badge>
+                  </div>
+
+                  <div class="grid gap-4 sm:grid-cols-2">
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Recovery mode</span>
+                      <span class="text-sm">{backup.recovery_mode}</span>
+                    </div>
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Retention status</span>
+                      <span class="text-sm">{backup.retention_valid ? "Valid" : "Pending"}</span>
+                    </div>
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Neon tenant ID</span>
+                      <span class="break-all font-mono text-sm">{backup.neon_tenant_id || "Not provisioned yet"}</span>
+                    </div>
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Neon timeline ID</span>
+                      <span class="break-all font-mono text-sm">{backup.neon_timeline_id || "Not provisioned yet"}</span>
+                    </div>
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Tenant generation</span>
+                      <span class="font-mono text-sm">{backup.tenant_gen ?? "1"}</span>
+                    </div>
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Database status</span>
+                      <span class="text-sm capitalize">{backup.status}</span>
+                    </div>
+                  </div>
+
+                  <div class="grid gap-4 sm:grid-cols-2">
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/20 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Created</span>
+                      <span class="text-sm">{formatDate(backup.created_at)}</span>
+                    </div>
+                    <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/20 p-4">
+                      <span class="text-xs font-medium text-muted-foreground">Updated</span>
+                      <span class="text-sm">{formatDate(backup.updated_at)}</span>
+                    </div>
+                  </div>
+                </div>
+              {:else}
+                <EmptyState class="py-10">
+                  <Camera class="size-10 text-muted-foreground" />
+                  <h2 class="text-xl font-semibold">No backup data available</h2>
+                  <p class="max-w-md text-sm text-muted-foreground">
+                    Backup metadata will appear here once the database has an active Neon branch and retention has been
+                    evaluated.
+                  </p>
+                </EmptyState>
+              {/if}
+
+              <div class="mt-2 flex items-center justify-between gap-3">
+                <div class="flex flex-col gap-1">
+                  <h3 class="text-sm font-semibold">Snapshots</h3>
+                  <p class="text-xs text-muted-foreground">
+                    Create, restore, or delete snapshots for the active database VM.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onclick={() => db && loadSnapshots(db.id)}
+                  disabled={snapshotsLoading}
+                >
+                  Refresh
+                </Button>
+              </div>
+
+              {#if snapshotsLoading}
+                <p class="text-sm text-muted-foreground">Loading snapshot history...</p>
+              {:else if snapshotsError}
+                <div class="rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  {snapshotsError}
+                </div>
+              {:else if snapshots.length === 0}
+                <EmptyState class="border border-dashed border-border py-10">
+                  <Camera class="size-10 text-muted-foreground" />
+                  <h2 class="text-xl font-semibold">No snapshots yet</h2>
+                  <p class="max-w-md text-sm text-muted-foreground">
+                    Create a snapshot from the right-hand panel to capture the current state of this database VM.
+                  </p>
+                </EmptyState>
+              {:else}
+                <div class="flex flex-col gap-3">
+                  {#each [...snapshots].sort((a, b) => b.created_at - a.created_at) as snapshot}
+                    <div class="flex flex-col gap-4 rounded-md border border-border bg-background p-4">
+                      <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                        <div class="flex min-w-0 flex-col gap-1">
+                          <span class="truncate font-mono text-sm font-medium">{snapshot.name}</span>
+                          <span class="text-xs text-muted-foreground">
+                            Created {new Date(snapshot.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" class="uppercase">{snapshot.vm_status.toLowerCase()}</Badge>
+                          <Badge variant="outline">{formatBytes(snapshot.size_bytes)}</Badge>
+                        </div>
+                      </div>
+
+                      <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div class="text-xs text-muted-foreground">
+                          Snapshot captured from the active deployment for {backupInfo?.database_name || db.name}.
+                        </div>
+                        <div class="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onclick={() => {
+                              restoreSnapshotTarget = snapshot.name;
+                              showRestoreSnapshotDialog = true;
+                            }}
+                            disabled={snapshotActionLoading}
+                          >
+                            <RotateCcw class="size-4" />
+                            Restore
+                          </Button>
+                          <Button
+                            variant="destructive-soft"
+                            size="sm"
+                            onclick={() => {
+                              deleteSnapshotTarget = snapshot.name;
+                              showDeleteSnapshotDialog = true;
+                            }}
+                            disabled={snapshotActionLoading}
+                          >
+                            <Trash2 class="size-4" />
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </CardContent>
+          </Card>
+
+          <Card class="border-border/70 bg-muted/20">
+            <CardHeader>
+              <CardTitle class="text-base">Snapshot Actions</CardTitle>
+              <CardDescription>Create a new snapshot or review the current recovery posture.</CardDescription>
+            </CardHeader>
+            <CardContent class="flex flex-col gap-4">
+              <div class="flex flex-col gap-3">
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs font-medium text-muted-foreground">Create snapshot</span>
+                  <Input
+                    bind:value={snapshotName}
+                    placeholder="backup-2026-06-04"
+                    disabled={snapshotActionLoading}
+                  />
+                </div>
+                {#if snapshotActionError}
+                  <div class="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+                    {snapshotActionError}
+                  </div>
+                {/if}
+                <Button
+                  class="w-full"
+                  onclick={createSnapshot}
+                  disabled={!snapshotName.trim() || snapshotActionLoading}
+                >
+                  <Camera class="size-4" />
+                  Create Snapshot
+                </Button>
+              </div>
+
+              <div class="rounded-md border border-border bg-background p-4 text-sm text-muted-foreground">
+                <p class="font-medium text-foreground">Recovery posture</p>
+                <p class="mt-1">
+                  {backupInfo
+                    ? backupInfo.recovery_mode
+                    : "Snapshots will appear once the database deployment is active."}
+                </p>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <Badge variant="outline" class="uppercase">
+                    {backupInfo?.retention_valid ? "Retention valid" : "Retention pending"}
+                  </Badge>
+                  <Badge variant="outline" class="uppercase">
+                    {backupInfo?.backup_strategy || "Pending"}
+                  </Badge>
+                </div>
+              </div>
+
+              <Button variant="outline" size="sm" onclick={() => (activeTab = "branches")}>
+                Review branch details
+              </Button>
             </CardContent>
           </Card>
         </div>
       {/if}
+
+      <Card class="border-destructive/20 bg-destructive/5">
+        <CardHeader>
+          <div class="flex items-center gap-2 text-destructive">
+            <Trash2 class="size-4" />
+            <CardTitle class="text-base">Danger Zone</CardTitle>
+          </div>
+          <CardDescription>Remove this database from the active project.</CardDescription>
+        </CardHeader>
+        <CardContent class="flex flex-col gap-3">
+          <p class="text-sm text-muted-foreground">
+            Deleting the database removes its metadata and makes the backing VM unreachable from Mikrom.
+          </p>
+          <Button variant="destructive" class="w-full" onclick={() => (showDeleteDialog = true)}>
+            Delete Database
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   {/if}
 
@@ -419,5 +926,27 @@
     actionText="Delete Database"
     variant="destructive"
     onaction={handleDelete}
+  />
+
+  <AlertDialog
+    bind:open={showRestoreSnapshotDialog}
+    title="Restore snapshot?"
+    description={`Restore database ${db?.name || dbName} from snapshot ${restoreSnapshotTarget}. This will replace the current VM state.`}
+    actionText="Restore Snapshot"
+    variant="destructive"
+    loading={snapshotActionLoading}
+    onclose={() => (restoreSnapshotTarget = "")}
+    onaction={restoreSnapshot}
+  />
+
+  <AlertDialog
+    bind:open={showDeleteSnapshotDialog}
+    title="Delete snapshot?"
+    description={`Delete snapshot ${deleteSnapshotTarget} from database ${db?.name || dbName}? This cannot be undone.`}
+    actionText="Delete Snapshot"
+    variant="destructive"
+    loading={snapshotActionLoading}
+    onclose={() => (deleteSnapshotTarget = "")}
+    onaction={deleteSnapshot}
   />
 </DashboardLayout>

@@ -331,6 +331,30 @@ pub fn create_app_with_rate_limits(
             &format!("{}/databases/{{id}}/connection", crate::API_V1),
             get(crate::infrastructure::http::handlers::database::get_database_connection),
         )
+        .route(
+            &format!("{}/databases/{{id}}/branches", crate::API_V1),
+            get(crate::infrastructure::http::handlers::database::list_database_branches),
+        )
+        .route(
+            &format!("{}/databases/{{id}}/backups", crate::API_V1),
+            get(crate::infrastructure::http::handlers::database::get_database_backups),
+        )
+        .route(
+            &format!("{}/databases/{{id}}/backups/snapshots", crate::API_V1),
+            get(crate::infrastructure::http::handlers::database::list_database_snapshots)
+                .post(crate::infrastructure::http::handlers::database::create_database_snapshot),
+        )
+        .route(
+            &format!("{}/databases/{{id}}/backups/restore", crate::API_V1),
+            post(crate::infrastructure::http::handlers::database::restore_database_snapshot),
+        )
+        .route(
+            &format!(
+                "{}/databases/{{id}}/backups/snapshots/{{snapshot_name}}",
+                crate::API_V1
+            ),
+            delete(crate::infrastructure::http::handlers::database::delete_database_snapshot),
+        )
         .finish_api(&mut api);
 
     let protected_routes_layered = protected_routes.route_layer(middleware::from_fn_with_state(

@@ -6,6 +6,7 @@ import { refreshVolumes, refreshSnapshots, volumesStore } from "./volumes";
 import { refreshVms } from "./vms";
 import { refreshProfile } from "./profile";
 import { refreshSecurityRules } from "./networking";
+import { refreshDatabases } from "./databases";
 
 let cleanup: (() => void) | null = null;
 let currentToken: string | null = null;
@@ -71,6 +72,7 @@ export function initWorkspaceSSE() {
       case "refresh":
         void refreshApps();
         void refreshVms();
+        void refreshDatabases();
         break;
 
       default:

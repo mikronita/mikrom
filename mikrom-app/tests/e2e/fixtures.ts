@@ -45,6 +45,35 @@ export const apps = [
   },
 ];
 
+export const databases = [
+  {
+    id: "db-1",
+    name: "orders-db",
+    engine: "neon",
+    postgres_version: 16,
+    status: "running",
+    vcpus: 2,
+    memory_mib: 4096,
+    disk_mib: 10240,
+    active_deployment_id: "deploy-1",
+    created_at: "2026-05-03T10:00:00.000Z",
+    updated_at: "2026-05-04T10:00:00.000Z",
+  },
+  {
+    id: "db-2",
+    name: "shadow-db",
+    engine: "neon",
+    postgres_version: 16,
+    status: "pending",
+    vcpus: 1,
+    memory_mib: 2048,
+    disk_mib: 5120,
+    active_deployment_id: null,
+    created_at: "2026-05-05T10:00:00.000Z",
+    updated_at: "2026-05-05T10:00:00.000Z",
+  },
+];
+
 export const appDeployments = [
   {
     id: "deploy-1",

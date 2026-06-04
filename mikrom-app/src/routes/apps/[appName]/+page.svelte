@@ -38,6 +38,7 @@
     Modal,
     Input,
     Skeleton,
+    SectionTabs,
   } from "$lib/components";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import MetricChart from "$lib/components/MetricChart.svelte";
@@ -93,6 +94,7 @@
   let app: AppInfo | null = null;
   let active: DeploymentInfo | null;
   let inFlight: DeploymentInfo | undefined;
+  let activeTab: "overview" | "deployments" | "performance" | "settings" = "overview";
   let latestMetrics: MetricsSnapshot;
   let totalTrafficBytes: number;
   let recentDeploymentsList: DeploymentInfo[];
@@ -105,6 +107,12 @@
     color: string;
   }>;
   let showLivePerformance: boolean;
+  const appTabs = [
+    { value: "overview", label: "Overview" },
+    { value: "deployments", label: "Deployments" },
+    { value: "performance", label: "Performance" },
+    { value: "settings", label: "Settings" },
+  ] as const;
 
   $: appName = decodeURIComponent($page.params.appName ?? "");
   $: app = $appsStore.find((item) => item.name === appName) ?? null;
@@ -455,19 +463,6 @@
             <Cog class="size-4" />
             Auto-deploy
           </Button>
-          <Button
-            size="sm"
-            variant="destructive"
-            onclick={() => (showDeleteAppDialog = true)}
-            disabled={deletingApp}
-          >
-            {#if deletingApp}
-              <Loader2 class="size-4 animate-spin" />
-            {:else}
-              <Trash2 class="size-4" />
-            {/if}
-            Delete App
-          </Button>
         </div>
       </div>
 
@@ -505,234 +500,337 @@
       </div>
     </div>
 
-    <section class="flex flex-col gap-4">
-      <div class="flex items-center justify-between">
-        <h2 class="text-lg font-bold tracking-tight">Deployment History</h2>
-    </div>
-    <Card class="overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="min-w-[900px] w-full">
-          <thead>
-            <tr class="border-b border-border text-left text-sm">
-              <th class="px-4 py-3">Version</th>
-              <th class="px-4 py-3">Status</th>
-              <th class="px-4 py-3">Replicas</th>
-              <th class="px-4 py-3">Created</th>
-              <th class="px-4 py-3">Environment</th>
-              <th class="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#if loading && deployments.length === 0}
-              {#each Array.from({ length: 3 }) as _}
-                <tr class="border-b border-border">
-                  <td class="px-4 py-4" colspan="6"
-                    ><Skeleton class="h-8 w-full" /></td
-                  >
-                </tr>
-              {/each}
-            {:else if deployments.length === 0}
-              <tr>
-                <td class="py-10" colspan="6">
-                  <EmptyState>
-                    <Rocket class="size-10 text-muted-foreground" />
-                    <h3 class="text-xl font-semibold">No active deployment</h3>
-                    <p class="text-sm text-muted-foreground">
-                      Deploy your application to see its status here.
-                    </p>
-                  </EmptyState>
-                </td>
-              </tr>
-            {:else}
-              {#each recentDeploymentsList as dep}
-                {@const currentApp = app}
-                {@const isProduction = active?.id === dep.id}
-                {@const isCurrentTarget = inFlight
-                  ? inFlight.id === dep.id
-                  : isProduction}
-                {@const canActivate =
-                  ["RUNNING", "PAUSED", "STOPPED", "FAILED"].includes(
-                    dep.status,
-                  ) && !isProduction}
-                {@const deploymentBadge = getDeploymentBadgeProps(dep.status)}
-                <tr
-                  class="border-b border-border"
-                  style={isProduction
-                    ? "background-color: color-mix(in srgb, var(--accent) 12%, var(--background));"
-                    : undefined}
-                >
-                  <td class="px-4 py-4">
-                    <div class="flex flex-col gap-1">
-                      <span
-                        class="max-w-[300px] truncate text-sm font-semibold line-clamp-1"
-                      >
-                        {dep.git_commit_message ||
-                          dep.image_tag ||
-                          (dep.status === "BUILDING"
-                            ? `Deploying ${dep.id.split("-")[0]}...`
-                            : `Deployment ${dep.id.split("-")[0]}`)}
-                      </span>
-                      <div
-                        class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
-                      >
-                        <span
-                          class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5"
-                          ><GitBranch class="size-3" />{dep.git_branch ||
-                            "main"}</span
-                        >
-                        <span class="font-mono"
-                          >{dep.git_commit_hash?.substring(0, 7) ||
-                            dep.id.split("-")[0]}</span
-                        >
-                        <span class="inline-flex items-center gap-1">
-                          {#if dep.trigger_source === "github_webhook"}
-                            <Zap
-                              class="size-3 fill-status-warning text-status-warning"
-                            />
-                          {:else}
-                            <User class="size-3" />
-                          {/if}
-                          {dep.trigger_source || "manual"}
-                        </span>
-                      </div>
-                    </div>
-                  </td>
-                  <td class="px-4 py-4"
-                    ><Badge
-                      variant={deploymentBadge.variant}
-                      class={`font-semibold capitalize ${deploymentBadge.className}`}
-                      >{dep.status}</Badge
-                    ></td
-                  >
-                  <td
-                    class="px-4 py-4 text-xs font-medium text-muted-foreground"
-                  >
-                    {#if currentApp && isCurrentTarget}
-                      {formatReplicaSummary(currentApp)}
-                    {:else}
-                      0
-                    {/if}
-                  </td>
-                  <td
-                    class="whitespace-nowrap px-4 py-4 text-xs text-muted-foreground"
-                    >{formatDeploymentDate(dep.created_at)}</td
-                  >
-                  <td class="px-4 py-4">
-                    {#if isProduction}
-                      <div
-                        class="flex items-center gap-1.5 text-sm font-semibold text-status-info"
-                      >
-                        <CheckCircle2 class="size-5" />
-                        <span>Production</span>
-                      </div>
-                    {:else}
-                      <span class="text-xs italic text-muted-foreground"
-                        >Preview</span
-                      >
-                    {/if}
-                  </td>
-                  <td class="px-4 py-4 text-right">
-                    <div class="ml-auto flex justify-end">
-                      {#if isProduction}
-                        <Button size="sm" variant="outline" disabled>
-                          Currently in Prod
-                        </Button>
-                      {:else}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          class="border-transparent bg-status-info/10 text-status-info hover:bg-status-info/20"
-                          disabled={!canActivate ||
-                            activatingDeploymentId !== null}
-                          onclick={() => handleActivate(dep.id)}
-                        >
-                          {getDeploymentButtonText(dep, isProduction)}
-                          {#if !["BUILDING", "STARTING", "SCHEDULED", "DRAINING"].includes(dep.status)}
-                            <Rocket class="ml-2 size-3" />
-                          {/if}
-                          {#if dep.status === "BUILDING" || dep.status === "DRAINING" || activatingDeploymentId === dep.id}
-                            <Loader2 class="ml-2 size-3 animate-spin" />
-                          {/if}
-                        </Button>
-                      {/if}
-                    </div>
-                  </td>
-                </tr>
-              {/each}
-            {/if}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  </section>
+    <SectionTabs bind:active={activeTab} tabs={appTabs} />
 
-  {#if showLivePerformance}
-    <div class="flex animate-in fade-in duration-500 flex-col gap-6 border-t border-border pt-6">
-      <h2 class="text-lg font-bold tracking-tight">Live Performance</h2>
-
-      {#if !liveMetrics}
-        <Card class="p-12">
-          <div class="flex flex-col gap-4">
-            <Skeleton class="h-6 w-44" />
-            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {#each Array.from({ length: 4 }) as _}
-                <div class="rounded-2xl border border-border/70 bg-background/80 p-4 shadow-xs">
-                  <Skeleton class="h-4 w-24" />
-                  <div class="mt-3 flex flex-col gap-2">
-                    <Skeleton class="h-6 w-20" />
-                    <Skeleton class="h-3 w-28" />
-                  </div>
-                </div>
-              {/each}
+    {#if activeTab === "overview"}
+      <div class="grid gap-6 lg:grid-cols-[1fr_360px]">
+        <Card>
+          <CardHeader>
+            <div class="flex items-center gap-2">
+              <Boxes class="size-4 text-muted-foreground" />
+              <CardTitle class="text-base">Application Snapshot</CardTitle>
             </div>
-            <Skeleton class="h-48 w-full" />
-          </div>
-        </Card>
-      {:else}
-        <Card class="overflow-hidden">
-          <CardHeader class="border-b bg-muted/20">
-            <div
-              class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"
-            >
-              <div class="flex flex-col gap-1.5">
-                <CardTitle>System Performance</CardTitle>
-                <CardDescription
-                  >Live CPU, RAM and network throughput. Total traffic: {formatBytes(
-                    totalTrafficBytes,
-                  )}.</CardDescription
-                >
-              </div>
-              <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {#each metricCards as metric}
-                  <div class="min-w-36 rounded-2xl border border-border/70 bg-background/80 p-4 shadow-xs">
-                    <div
-                      class="flex items-center gap-2 text-xs font-medium text-muted-foreground"
-                    >
-                      <span class={`size-2 rounded-full ${metric.color}`}
-                      ></span>
-                      <svelte:component this={metric.icon} class="size-4" />
-                      {metric.label}
-                    </div>
-                    <div class="mt-2 flex flex-col gap-1">
-                      <span class="text-xl font-semibold tabular-nums"
-                        >{metric.value}</span
-                      >
-                      <span class="text-xs text-muted-foreground"
-                        >{metric.detail}</span
-                      >
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            </div>
+            <CardDescription>Core status and the current production target for this app.</CardDescription>
           </CardHeader>
-          <CardContent class="p-0">
-            <MetricChart points={metricsHistory} />
+          <CardContent class="grid gap-4 sm:grid-cols-2">
+            <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/20 p-4">
+              <span class="text-xs font-medium text-muted-foreground">Current deployment</span>
+              <span class="text-lg font-semibold">{active?.status || "No active deployment"}</span>
+              <span class="text-xs text-muted-foreground">Production target or preview build</span>
+            </div>
+            <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/20 p-4">
+              <span class="text-xs font-medium text-muted-foreground">Replicas</span>
+              <span class="text-lg font-semibold">{replicaSummary}</span>
+              <span class="text-xs text-muted-foreground">Running microVMs</span>
+            </div>
+            <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/20 p-4">
+              <span class="text-xs font-medium text-muted-foreground">Repository</span>
+              <span class="truncate font-mono text-sm">{app?.git_url || "No repository linked"}</span>
+              <span class="text-xs text-muted-foreground">Source of the current build</span>
+            </div>
+            <div class="flex flex-col gap-1 rounded-md border border-border bg-muted/20 p-4">
+              <span class="text-xs font-medium text-muted-foreground">Updated</span>
+              <span class="text-lg font-semibold">{appUpdatedAt || "--"}</span>
+              <span class="text-xs text-muted-foreground">Latest metadata change</span>
+            </div>
           </CardContent>
         </Card>
-      {/if}
-    </div>
-  {/if}
+
+        <Card class="border-border/70 bg-muted/20">
+          <CardHeader>
+            <CardTitle class="text-base">Quick actions</CardTitle>
+            <CardDescription>Open the views that change app state the most often.</CardDescription>
+          </CardHeader>
+          <CardContent class="flex flex-col gap-3">
+            <Button class="w-full" onclick={() => (showDeployModal = true)} disabled={!app}>
+              <Rocket class="size-4" />
+              Deploy Now
+            </Button>
+            <Button variant="outline" class="w-full" onclick={() => (showScaleModal = true)}>
+              <Scale class="size-4" />
+              Scaling
+            </Button>
+            <Button variant="outline" class="w-full" onclick={() => (showWebhookModal = true)}>
+              <Cog class="size-4" />
+              Auto-deploy
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    {:else if activeTab === "deployments"}
+      <section class="flex flex-col gap-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-bold tracking-tight">Deployment History</h2>
+        </div>
+        <Card class="overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="min-w-[900px] w-full">
+              <thead>
+                <tr class="border-b border-border text-left text-sm">
+                  <th class="px-4 py-3">Version</th>
+                  <th class="px-4 py-3">Status</th>
+                  <th class="px-4 py-3">Replicas</th>
+                  <th class="px-4 py-3">Created</th>
+                  <th class="px-4 py-3">Environment</th>
+                  <th class="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if loading && deployments.length === 0}
+                  {#each Array.from({ length: 3 }) as _}
+                    <tr class="border-b border-border">
+                      <td class="px-4 py-4" colspan="6"><Skeleton class="h-8 w-full" /></td>
+                    </tr>
+                  {/each}
+                {:else if deployments.length === 0}
+                  <tr>
+                    <td class="py-10" colspan="6">
+                      <EmptyState>
+                        <Rocket class="size-10 text-muted-foreground" />
+                        <h3 class="text-xl font-semibold">No active deployment</h3>
+                        <p class="text-sm text-muted-foreground">
+                          Deploy your application to see its status here.
+                        </p>
+                      </EmptyState>
+                    </td>
+                  </tr>
+                {:else}
+                  {#each recentDeploymentsList as dep}
+                    {@const currentApp = app}
+                    {@const isProduction = active?.id === dep.id}
+                    {@const isCurrentTarget = inFlight
+                      ? inFlight.id === dep.id
+                      : isProduction}
+                    {@const canActivate =
+                      ["RUNNING", "PAUSED", "STOPPED", "FAILED"].includes(dep.status) &&
+                      !isProduction}
+                    {@const deploymentBadge = getDeploymentBadgeProps(dep.status)}
+                    <tr
+                      class="border-b border-border"
+                      style={isProduction
+                        ? "background-color: color-mix(in srgb, var(--accent) 12%, var(--background));"
+                        : undefined}
+                    >
+                      <td class="px-4 py-4">
+                        <div class="flex flex-col gap-1">
+                          <span class="max-w-[300px] truncate text-sm font-semibold line-clamp-1">
+                            {dep.git_commit_message ||
+                              dep.image_tag ||
+                              (dep.status === "BUILDING"
+                                ? `Deploying ${dep.id.split("-")[0]}...`
+                                : `Deployment ${dep.id.split("-")[0]}`)}
+                          </span>
+                          <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5">
+                              <GitBranch class="size-3" />{dep.git_branch || "main"}
+                            </span>
+                            <span class="font-mono">{dep.git_commit_hash?.substring(0, 7) || dep.id.split("-")[0]}</span>
+                            <span class="inline-flex items-center gap-1">
+                              {#if dep.trigger_source === "github_webhook"}
+                                <Zap class="size-3 fill-status-warning text-status-warning" />
+                              {:else}
+                                <User class="size-3" />
+                              {/if}
+                              {dep.trigger_source || "manual"}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="px-4 py-4">
+                        <Badge
+                          variant={deploymentBadge.variant}
+                          class={`font-semibold capitalize ${deploymentBadge.className}`}
+                        >
+                          {dep.status}
+                        </Badge>
+                      </td>
+                      <td class="px-4 py-4 text-xs font-medium text-muted-foreground">
+                        {#if currentApp && isCurrentTarget}
+                          {formatReplicaSummary(currentApp)}
+                        {:else}
+                          0
+                        {/if}
+                      </td>
+                      <td class="whitespace-nowrap px-4 py-4 text-xs text-muted-foreground">
+                        {formatDeploymentDate(dep.created_at)}
+                      </td>
+                      <td class="px-4 py-4">
+                        {#if isProduction}
+                          <div class="flex items-center gap-1.5 text-sm font-semibold text-status-info">
+                            <CheckCircle2 class="size-5" />
+                            <span>Production</span>
+                          </div>
+                        {:else}
+                          <span class="text-xs italic text-muted-foreground">Preview</span>
+                        {/if}
+                      </td>
+                      <td class="px-4 py-4 text-right">
+                        <div class="ml-auto flex justify-end">
+                          {#if isProduction}
+                            <Button size="sm" variant="outline" disabled>
+                              Currently in Prod
+                            </Button>
+                          {:else}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              class="border-transparent bg-status-info/10 text-status-info hover:bg-status-info/20"
+                              disabled={!canActivate || activatingDeploymentId !== null}
+                              onclick={() => handleActivate(dep.id)}
+                            >
+                              {getDeploymentButtonText(dep, isProduction)}
+                              {#if !["BUILDING", "STARTING", "SCHEDULED", "DRAINING"].includes(dep.status)}
+                                <Rocket class="ml-2 size-3" />
+                              {/if}
+                              {#if dep.status === "BUILDING" || dep.status === "DRAINING" || activatingDeploymentId === dep.id}
+                                <Loader2 class="ml-2 size-3 animate-spin" />
+                              {/if}
+                            </Button>
+                          {/if}
+                        </div>
+                      </td>
+                    </tr>
+                  {/each}
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </section>
+    {:else if activeTab === "performance"}
+      <section class="flex flex-col gap-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-bold tracking-tight">Live Performance</h2>
+        </div>
+        {#if showLivePerformance}
+          {#if !liveMetrics}
+            <Card class="p-12">
+              <div class="flex flex-col gap-4">
+                <Skeleton class="h-6 w-44" />
+                <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {#each Array.from({ length: 4 }) as _}
+                    <div class="rounded-2xl border border-border/70 bg-background/80 p-4 shadow-xs">
+                      <Skeleton class="h-4 w-24" />
+                      <div class="mt-3 flex flex-col gap-2">
+                        <Skeleton class="h-6 w-20" />
+                        <Skeleton class="h-3 w-28" />
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+                <Skeleton class="h-48 w-full" />
+              </div>
+            </Card>
+          {:else}
+            <Card class="overflow-hidden">
+              <CardHeader class="border-b bg-muted/20">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div class="flex flex-col gap-1.5">
+                    <CardTitle>System Performance</CardTitle>
+                    <CardDescription>
+                      Live CPU, RAM and network throughput. Total traffic: {formatBytes(totalTrafficBytes)}.
+                    </CardDescription>
+                  </div>
+                  <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    {#each metricCards as metric}
+                      <div class="min-w-36 rounded-2xl border border-border/70 bg-background/80 p-4 shadow-xs">
+                        <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                          <span class={`size-2 rounded-full ${metric.color}`}></span>
+                          <svelte:component this={metric.icon} class="size-4" />
+                          {metric.label}
+                        </div>
+                        <div class="mt-2 flex flex-col gap-1">
+                          <span class="text-xl font-semibold tabular-nums">{metric.value}</span>
+                          <span class="text-xs text-muted-foreground">{metric.detail}</span>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent class="p-0">
+                <MetricChart points={metricsHistory} />
+              </CardContent>
+            </Card>
+          {/if}
+        {:else}
+          <Card class="border-border/70 bg-muted/20">
+            <CardContent class="flex flex-col gap-3 p-8">
+              <h3 class="text-base font-semibold">No live performance available</h3>
+              <p class="text-sm text-muted-foreground">
+                Performance data appears once the application is running and at least one replica is active.
+              </p>
+            </CardContent>
+          </Card>
+        {/if}
+      </section>
+    {:else if activeTab === "settings"}
+      <div class="grid gap-6 lg:grid-cols-2">
+        <Card class="border-border/70 bg-muted/20">
+          <CardHeader>
+            <div class="flex items-center gap-2">
+              <Cog class="size-4 text-muted-foreground" />
+              <CardTitle class="text-base">Auto-deploy</CardTitle>
+            </div>
+            <CardDescription>Configure the GitHub webhook that keeps this app in sync.</CardDescription>
+          </CardHeader>
+          <CardContent class="flex flex-col gap-3">
+            <p class="text-sm text-muted-foreground">
+              Use the webhook secret and payload URL to enable automatic deployments on pushes to your main branch.
+            </p>
+            <Button variant="outline" class="w-full" onclick={() => (showWebhookModal = true)}>
+              Open webhook configuration
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card class="border-border/70 bg-muted/20">
+          <CardHeader>
+            <div class="flex items-center gap-2">
+              <Scale class="size-4 text-muted-foreground" />
+              <CardTitle class="text-base">Scaling</CardTitle>
+            </div>
+            <CardDescription>Adjust replica count and autoscaling for this application.</CardDescription>
+          </CardHeader>
+          <CardContent class="flex flex-col gap-3">
+            <p class="text-sm text-muted-foreground">
+              The current scale state is <span class="font-medium text-foreground">{appScaleState.replaceAll("_", " ")}</span>.
+            </p>
+            <Button variant="outline" class="w-full" onclick={() => (showScaleModal = true)}>
+              Open scaling controls
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card class="border-destructive/20 bg-destructive/5 lg:col-span-2">
+          <CardHeader>
+            <div class="flex items-center gap-2 text-destructive">
+              <Trash2 class="size-4" />
+              <CardTitle class="text-base">Danger Zone</CardTitle>
+            </div>
+            <CardDescription>Remove this application and all of its deployments.</CardDescription>
+          </CardHeader>
+          <CardContent class="flex flex-col gap-3">
+            <p class="text-sm text-muted-foreground">
+              Deleting the app removes its deployments, volumes and security rules from the active project.
+            </p>
+            <Button
+              variant="destructive"
+              class="w-full"
+              onclick={() => (showDeleteAppDialog = true)}
+              disabled={deletingApp}
+            >
+              {#if deletingApp}
+                <Loader2 class="size-4 animate-spin" />
+              {:else}
+                <Trash2 class="size-4" />
+              {/if}
+              Delete App
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    {/if}
   </div>
 
   {#if showWebhookModal}

@@ -23,14 +23,15 @@ impl DatabaseRepository for PostgresDatabaseRepository {
         let db = sqlx::query_as::<_, DbDatabase>(
             r#"
             INSERT INTO databases (
-                name, engine, user_id, tenant_id, vcpus, memory_mib, disk_mib, status, neon_tenant_id, neon_timeline_id, tenant_gen, settings
+                name, engine, postgres_version, user_id, tenant_id, vcpus, memory_mib, disk_mib, status, neon_tenant_id, neon_timeline_id, tenant_gen, settings
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $11)
-            RETURNING id, name, engine, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10, $11, $12)
+            RETURNING id, name, engine, postgres_version, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at
             "#,
         )
         .bind(params.name)
         .bind(params.engine)
+        .bind(params.postgres_version as i32)
         .bind(params.user_id)
         .bind(params.tenant_id)
         .bind(params.vcpus.value() as i32)
@@ -49,7 +50,7 @@ impl DatabaseRepository for PostgresDatabaseRepository {
 
     async fn get_database(&self, id: Uuid) -> DomainResult<Option<Database>> {
         let db = sqlx::query_as::<_, DbDatabase>(
-            "SELECT id, name, engine, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE id = $1",
+            "SELECT id, name, engine, postgres_version, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE id = $1",
         )
             .bind(id)
             .fetch_optional(&self.pool)
@@ -64,7 +65,7 @@ impl DatabaseRepository for PostgresDatabaseRepository {
         neon_tenant_id: &str,
     ) -> DomainResult<Option<Database>> {
         let db =
-            sqlx::query_as::<_, DbDatabase>("SELECT id, name, engine, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE neon_tenant_id = $1 LIMIT 1")
+            sqlx::query_as::<_, DbDatabase>("SELECT id, name, engine, postgres_version, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE neon_tenant_id = $1 LIMIT 1")
                 .bind(neon_tenant_id)
                 .fetch_optional(&self.pool)
                 .await
@@ -74,7 +75,7 @@ impl DatabaseRepository for PostgresDatabaseRepository {
     }
 
     async fn list_databases(&self) -> DomainResult<Vec<Database>> {
-        let dbs = sqlx::query_as::<_, DbDatabase>("SELECT id, name, engine, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases ORDER BY created_at")
+        let dbs = sqlx::query_as::<_, DbDatabase>("SELECT id, name, engine, postgres_version, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases ORDER BY created_at")
             .fetch_all(&self.pool)
             .await
             .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
@@ -88,7 +89,7 @@ impl DatabaseRepository for PostgresDatabaseRepository {
         name: &str,
     ) -> DomainResult<Option<Database>> {
         let db = sqlx::query_as::<_, DbDatabase>(
-            "SELECT id, name, engine, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE tenant_id = $1 AND name = $2",
+            "SELECT id, name, engine, postgres_version, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE tenant_id = $1 AND name = $2",
         )
         .bind(tenant_id)
         .bind(name)
@@ -100,7 +101,7 @@ impl DatabaseRepository for PostgresDatabaseRepository {
     }
 
     async fn list_databases_by_tenant(&self, tenant_id: Uuid) -> DomainResult<Vec<Database>> {
-        let dbs = sqlx::query_as::<_, DbDatabase>("SELECT id, name, engine, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE tenant_id = $1")
+        let dbs = sqlx::query_as::<_, DbDatabase>("SELECT id, name, engine, postgres_version, tenant_id, vcpus, memory_mib, disk_mib, neon_tenant_id, neon_timeline_id, tenant_gen, settings, status, active_deployment_id, created_at, updated_at FROM databases WHERE tenant_id = $1")
             .bind(tenant_id)
             .fetch_all(&self.pool)
             .await

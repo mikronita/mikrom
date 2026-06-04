@@ -25,6 +25,8 @@ cargo install --path mikrom-cli
 ## Usage Notes
 
 - `mikrom app deploy` supports the same CPU and memory presets used by the dashboard.
+- `mikrom db create` accepts `--version` to choose the PostgreSQL major version, defaulting to `16`.
+- `mikrom db list` and `mikrom db info` show the PostgreSQL major version alongside the rest of the database metadata.
 - `mikrom db connection <database-id>` prints the SSH tunnel command and the `psql` command for a Neon-backed database.
 - Configuration is stored under `~/.config/mikrom/config.toml`.
 - The CLI is validated through the workspace Dagger profiles as well as its own Rust tests.

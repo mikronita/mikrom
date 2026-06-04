@@ -23,6 +23,7 @@ fn database(id: Uuid, tenant_id: Uuid, active_deployment_id: Option<Uuid>) -> Da
         id,
         name: "orders".to_string(),
         engine: "neon".to_string(),
+        postgres_version: 16,
         tenant_id,
         vcpus: CpuCores::new(1).unwrap(),
         memory_mib: MemoryMb::new(512).unwrap(),
