@@ -102,6 +102,20 @@ mikrom app deploy --name my-app --cpu 2 --memory 1G
 mikrom deployment list
 ```
 
+For Neon-backed databases, the CLI can now print the connection flow directly:
+
+```bash
+mikrom db create orders
+mikrom db list
+mikrom db connection <database-id>
+```
+
+`mikrom db connection <database-id>` returns:
+
+- the SSH tunnel command to reach the VM
+- the `psql` command to connect through the tunnel
+- a JSON form with the same connection metadata via `--output json`
+
 ### Deployment Presets
 
 When you deploy an app from the UI or CLI, Mikrom currently offers the same resource presets:
