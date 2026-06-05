@@ -3,6 +3,13 @@ use crate::hypervisor::{HypervisorError, VmStatus};
 use mikrom_proto::id::VmId;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SnapshotRestoreOutcome {
+    Restored,
+    Missing,
+    Failed,
+}
+
 impl crate::firecracker::FirecrackerManager {
     pub(crate) fn snapshot_create_body(snapshot_path: &str, mem_path: &str) -> String {
         serde_json::json!({
@@ -44,14 +51,14 @@ impl crate::firecracker::FirecrackerManager {
         chroot_dir: &Option<String>,
         active_socket_path: &str,
         paths: &crate::firecracker::paths::VmPaths,
-    ) -> Result<bool, HypervisorError> {
+    ) -> Result<SnapshotRestoreOutcome, HypervisorError> {
         let snapshot_path = paths.snapshot_file();
         let mem_path = paths.memory_file();
 
         if tokio::fs::metadata(&snapshot_path).await.is_err()
             || tokio::fs::metadata(&mem_path).await.is_err()
         {
-            return Ok(false);
+            return Ok(SnapshotRestoreOutcome::Missing);
         }
 
         tracing::info!(vm_id = %vm_id, "Found snapshot, restoring VM...");
@@ -87,10 +94,14 @@ impl crate::firecracker::FirecrackerManager {
         .to_string();
 
         if let Err(e) = fc_put(active_socket_path, "/snapshot/load", &body).await {
-            tracing::error!(vm_id = %vm_id, "Failed to load snapshot: {}. Falling back to normal boot.", e);
-            Ok(false)
+            tracing::error!(
+                vm_id = %vm_id,
+                "Failed to load snapshot: {}. Caller will relaunch Firecracker for a normal boot.",
+                e
+            );
+            Ok(SnapshotRestoreOutcome::Failed)
         } else {
-            Ok(true)
+            Ok(SnapshotRestoreOutcome::Restored)
         }
     }
 
