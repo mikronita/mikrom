@@ -451,7 +451,7 @@ impl FirecrackerManager {
             .await?,
         );
 
-        if self
+        match self
             .try_restore_snapshot(
                 &vm_id,
                 &startup.chroot_dir,
@@ -460,9 +460,20 @@ impl FirecrackerManager {
             )
             .await?
         {
-            self.mark_vm_app_started_now(&mut guard);
-            self.finalize_startup(guard).await?;
-            return Ok(());
+            crate::firecracker::snapshots::SnapshotRestoreOutcome::Restored => {
+                self.mark_vm_app_started_now(&mut guard);
+                self.finalize_startup(guard).await?;
+                return Ok(());
+            },
+            crate::firecracker::snapshots::SnapshotRestoreOutcome::Failed => {
+                tracing::warn!(
+                    vm_id = %vm_id,
+                    "Snapshot load failed, restarting Firecracker process before normal boot"
+                );
+                self.restart_firecracker_process(&startup, &paths, &mut guard)
+                    .await?;
+            },
+            crate::firecracker::snapshots::SnapshotRestoreOutcome::Missing => {},
         }
 
         self.configure_vm_api(
@@ -477,6 +488,36 @@ impl FirecrackerManager {
         .await?;
 
         self.finalize_startup(guard).await?;
+        Ok(())
+    }
+
+    async fn restart_firecracker_process(
+        &self,
+        startup: &StartupContext,
+        paths: &VmPaths,
+        guard: &mut VmStartupGuard,
+    ) -> Result<(), HypervisorError> {
+        if let Some(mut child) = guard.child.take() {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+
+        self.remove_stale_socket(&startup.active_socket_path).await;
+
+        let child = self.spawn_firecracker_process(startup, paths).await?;
+        guard.child = Some(child);
+
+        self.wait_for_firecracker_socket(startup).await?;
+        guard.metrics_path = Some(
+            self.setup_metrics(
+                &guard.vm_id,
+                &startup.chroot_dir,
+                &startup.active_socket_path,
+                paths,
+            )
+            .await?,
+        );
+
         Ok(())
     }
 
@@ -1073,7 +1114,9 @@ mod tests {
     use super::*;
     use crate::firecracker::api::wait_for_socket;
     use crate::firecracker::state::{PersistedAgentState, PersistedVmRecord, PersistedVmRuntime};
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+    use std::sync::OnceLock;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixListener;
     use tokio::task::JoinHandle;
@@ -1131,6 +1174,238 @@ mod tests {
             std::process::id(),
             uuid::Uuid::new_v4()
         ))
+    }
+
+    fn bridge_ip_lock() -> &'static tokio::sync::Mutex<()> {
+        static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+    }
+
+    fn write_fc_helper_script(path: &PathBuf) {
+        let script = r#"#!/usr/bin/env python3
+import os
+import socket
+import sys
+
+def parse_socket_path(argv):
+    for i, arg in enumerate(argv):
+        if arg == "--api-sock" and i + 1 < len(argv):
+            return argv[i + 1]
+    raise SystemExit("missing --api-sock")
+
+def read_request(conn):
+    data = b""
+    while b"\r\n\r\n" not in data:
+        chunk = conn.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+    return data.decode("utf-8", "replace")
+
+def respond(conn, status, body=b""):
+    payload = (
+        f"HTTP/1.1 {status}\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+    ).encode("utf-8") + body
+    conn.sendall(payload)
+
+sock_path = parse_socket_path(sys.argv[1:])
+log_path = sock_path + ".log"
+marker_path = sock_path + ".marker"
+first_run = not os.path.exists(marker_path)
+mode = "restore" if first_run else "boot"
+
+with open(log_path, "a", encoding="utf-8") as log:
+    log.write(f"mode={mode}\n")
+    log.flush()
+
+if first_run:
+    with open(marker_path, "w", encoding="utf-8"):
+        pass
+
+if os.path.exists(sock_path):
+    os.unlink(sock_path)
+
+server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+server.bind(sock_path)
+server.listen(1)
+
+if first_run:
+    while True:
+        conn, _ = server.accept()
+        with conn:
+            request = read_request(conn)
+            first_line = request.splitlines()[0] if request.splitlines() else ""
+            with open(log_path, "a", encoding="utf-8") as log:
+                log.write(first_line + "\n")
+            if "/snapshot/load" in first_line:
+                respond(
+                    conn,
+                    "400 Bad Request",
+                    b'{"fault_message":"snapshot load failed"}',
+                )
+                break
+            respond(conn, "204 No Content")
+    server.close()
+    raise SystemExit(0)
+
+for _ in range(8):
+    conn, _ = server.accept()
+    with conn:
+        request = read_request(conn)
+        first_line = request.splitlines()[0] if request.splitlines() else ""
+        with open(log_path, "a", encoding="utf-8") as log:
+            log.write(first_line + "\n")
+        respond(conn, "204 No Content")
+
+server.close()
+"#;
+
+        std::fs::write(path, script).expect("failed to write helper script");
+        let mut perms = std::fs::metadata(path)
+            .expect("failed to stat helper script")
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms).expect("failed to set helper script permissions");
+    }
+
+    enum SnapshotRestartAction {
+        StartVm,
+        ResumeVm,
+    }
+
+    async fn run_snapshot_restart_test(test_name: &str, action: SnapshotRestartAction) {
+        let _bridge_guard = bridge_ip_lock().lock().await;
+        let prev_bridge_ip = std::env::var("BRIDGE_IP").ok();
+        unsafe {
+            std::env::set_var("BRIDGE_IP", "fd00::1/128");
+        }
+
+        let cleanup_env = |prev: Option<String>| {
+            if let Some(value) = prev {
+                unsafe {
+                    std::env::set_var("BRIDGE_IP", value);
+                }
+            } else {
+                unsafe {
+                    std::env::remove_var("BRIDGE_IP");
+                }
+            }
+        };
+
+        let data_dir = std::env::temp_dir().join(format!("m{}", uuid::Uuid::new_v4().simple()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        std::fs::create_dir_all(&data_dir).expect("failed to create data dir");
+
+        let kernel_path = temp_file_path(&format!("{test_name}-kernel"));
+        std::fs::write(&kernel_path, b"\x7fELFrest").expect("failed to write kernel image");
+
+        let rootfs_image = temp_file_path(&format!("{test_name}-rootfs"));
+        std::fs::write(&rootfs_image, b"rootfs").expect("failed to write rootfs image");
+
+        let helper_script = temp_file_path(&format!("{test_name}-helper"));
+        write_fc_helper_script(&helper_script);
+
+        let fc_config = FirecrackerConfig {
+            kernel_path: Some(kernel_path.to_string_lossy().to_string()),
+            binary: helper_script.to_string_lossy().to_string(),
+            rootfs_path: rootfs_image.to_string_lossy().to_string(),
+            base_rootfs_path: rootfs_image.to_string_lossy().to_string(),
+            data_dir: data_dir.to_string_lossy().to_string(),
+            use_jailer: false,
+            jailer_binary: String::new(),
+            jailer_uid: 0,
+            jailer_gid: 0,
+            chroot_base: data_dir.join("chroot").to_string_lossy().to_string(),
+            virtiofsd_path: String::new(),
+        };
+
+        let vm_id = VmId::new();
+        let snapshot_dir = data_dir.join("snapshots");
+        std::fs::create_dir_all(&snapshot_dir).expect("failed to create snapshot dir");
+        std::fs::write(snapshot_dir.join(format!("{vm_id}.snapshot")), b"snapshot")
+            .expect("failed to seed snapshot file");
+        std::fs::write(snapshot_dir.join(format!("{vm_id}.mem")), b"memory")
+            .expect("failed to seed memory file");
+
+        let mgr = FirecrackerManager::with_config(fc_config);
+        let app_id = AppId::new();
+        let image = rootfs_image.to_string_lossy().to_string();
+        let mut vm_config = config();
+        vm_config.ipv6_address = None;
+        vm_config.ipv6_gateway = None;
+        vm_config.mac_address = None;
+
+        match action {
+            SnapshotRestartAction::StartVm => {
+                mgr.start_vm(vm_id, app_id, image, vm_config)
+                    .await
+                    .expect("start_vm should accept background startup");
+            },
+            SnapshotRestartAction::ResumeVm => {
+                mgr.set_vm_for_test(
+                    &vm_id,
+                    VmInfo {
+                        vm_id,
+                        app_id,
+                        image,
+                        config: vm_config,
+                        status: VmStatus::Paused,
+                        started_at: None,
+                        error_message: None,
+                    },
+                )
+                .await;
+
+                mgr.resume_vm(&vm_id)
+                    .await
+                    .expect("resume_vm should restart from snapshot");
+            },
+        }
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            match mgr.get_vm_status(&vm_id).await {
+                Ok(VmStatus::Running) => break,
+                Ok(VmStatus::Failed) => {
+                    panic!("VM entered failed state: {:?}", mgr.get_vm(&vm_id).await)
+                },
+                Ok(_) => {},
+                Err(err) => panic!("failed to read vm status: {err}"),
+            }
+
+            if std::time::Instant::now() > deadline {
+                panic!("timeout waiting for VM to reach Running");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        let socket_log = data_dir.join(format!("fc-{vm_id}.socket.log"));
+        let log_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Ok(log) = std::fs::read_to_string(&socket_log)
+                && log.contains("mode=restore")
+                && log.contains("mode=boot")
+                && log.contains("PUT /snapshot/load HTTP/1.1")
+                && log.contains("PUT /machine-config HTTP/1.1")
+            {
+                break;
+            }
+
+            if std::time::Instant::now() > log_deadline {
+                panic!("timed out waiting for helper socket log at {socket_log:?}");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        mgr.stop_vm(&vm_id)
+            .await
+            .expect("stop_vm should clean up helper process");
+
+        std::fs::remove_dir_all(&data_dir).ok();
+        cleanup_env(prev_bridge_ip);
     }
 
     fn test_vm_info(vm_id: VmId, status: VmStatus) -> VmInfo {
@@ -1461,6 +1736,16 @@ mod tests {
         if mgr.fc_config.kernel_path.is_some() {
             assert!(mgr.has_process(&vm_id).await);
         }
+    }
+
+    #[tokio::test]
+    async fn test_start_vm_restarts_after_snapshot_load_failure() {
+        run_snapshot_restart_test("snapshot-restart", SnapshotRestartAction::StartVm).await;
+    }
+
+    #[tokio::test]
+    async fn test_resume_vm_restarts_after_snapshot_load_failure() {
+        run_snapshot_restart_test("resume-snapshot-restart", SnapshotRestartAction::ResumeVm).await;
     }
 
     #[tokio::test]
