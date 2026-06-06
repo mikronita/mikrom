@@ -110,6 +110,10 @@ impl Drop for DeploymentFlowGuard {
 }
 
 impl AppState {
+    pub fn nats_request_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.ctx.config.nats_request_timeout_secs.max(1))
+    }
+
     /// Attempts to start a deployment flow for an application.
     /// Returns a guard if successful, or None if a flow is already in progress.
     pub fn try_start_flow(&self, app_id: mikrom_proto::id::AppId) -> Option<DeploymentFlowGuard> {
@@ -167,7 +171,7 @@ impl AppState {
 
         let ack: RouterConfigAck = self
             .nats
-            .with_timeout(std::time::Duration::from_secs(5))
+            .with_timeout(self.nats_request_timeout())
             .request(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
             .await?;
 
@@ -254,7 +258,7 @@ impl AppState {
 
         let ack: RouterConfigAck = self
             .nats
-            .with_timeout(std::time::Duration::from_secs(5))
+            .with_timeout(self.nats_request_timeout())
             .request(mikrom_proto::subjects::ROUTER_CONFIG_UPDATED, config)
             .await
             .map_err(|e| anyhow::anyhow!("failed to request route removal: {}", e))?;

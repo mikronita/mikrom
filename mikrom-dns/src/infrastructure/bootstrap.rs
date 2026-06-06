@@ -29,12 +29,13 @@ pub async fn run() -> Result<()> {
     let upstream = if config.upstream_dns.is_empty() {
         None
     } else {
-        Some(UpstreamDnsForwarder::connect(&config.upstream_dns).await?)
+        Some(UpstreamDnsForwarder::connect(&config.upstream_dns, config.upstream_timeout()).await?)
     };
 
     let nats_store = store.clone();
+    let config_for_nats = config.clone();
     tokio::spawn(async move {
-        let _ = crate::application::sync::run_nats_subscriber(nats_store).await;
+        let _ = crate::application::sync::run_nats_subscriber(nats_store, &config_for_nats).await;
     });
 
     tokio::spawn(async move {

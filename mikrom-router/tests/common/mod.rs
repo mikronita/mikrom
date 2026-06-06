@@ -146,6 +146,7 @@ pub(crate) async fn setup_test_env(rps_limit: isize, use_ipv6: bool) -> Option<T
         metrics,
         Some(traffic_publisher),
         rps_limit,
+        mikrom_router::application::proxy::RouterTimeouts::default(),
     );
 
     std::thread::spawn(move || {

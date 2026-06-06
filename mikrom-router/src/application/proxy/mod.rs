@@ -73,7 +73,48 @@ pub struct MikromProxy {
     traffic_publisher: Option<Arc<RouterTrafficPublisher>>,
     rate_limiter: Rate,
     rps_limit: isize,
+    timeouts: RouterTimeouts,
     wake_up_failures: DashMap<String, (u32, std::time::Instant)>,
+}
+
+#[derive(Clone)]
+pub struct RouterTimeouts {
+    downstream_request: Duration,
+    downstream_response: Duration,
+    upstream_connect: Duration,
+    upstream_read: Duration,
+    upstream_write: Duration,
+    upstream_idle: Duration,
+    route_wait: Duration,
+}
+
+impl RouterTimeouts {
+    #[must_use]
+    pub fn from_config(config: &crate::app::config::RouterConfig) -> Self {
+        Self {
+            downstream_request: config.downstream_request_timeout(),
+            downstream_response: config.downstream_response_timeout(),
+            upstream_connect: config.upstream_connect_timeout(),
+            upstream_read: config.upstream_read_timeout(),
+            upstream_write: config.upstream_write_timeout(),
+            upstream_idle: config.upstream_idle_timeout(),
+            route_wait: config.route_wait_timeout(),
+        }
+    }
+}
+
+impl Default for RouterTimeouts {
+    fn default() -> Self {
+        Self {
+            downstream_request: Duration::from_secs(10),
+            downstream_response: Duration::from_secs(30),
+            upstream_connect: Duration::from_secs(5),
+            upstream_read: Duration::from_secs(30),
+            upstream_write: Duration::from_secs(30),
+            upstream_idle: Duration::from_mins(1),
+            route_wait: Duration::from_secs(30),
+        }
+    }
 }
 
 pub struct MikromCtx {
@@ -83,31 +124,6 @@ pub struct MikromCtx {
     pub(crate) host: Option<HostName>,
     pub(crate) normalized_host: Option<HostName>,
     pub(crate) upstream: Option<String>,
-}
-
-const fn downstream_request_timeout() -> Duration {
-    Duration::from_secs(10)
-}
-
-const fn downstream_response_timeout() -> Duration {
-    Duration::from_secs(30)
-}
-
-const fn upstream_connect_timeout() -> Duration {
-    Duration::from_secs(5)
-}
-
-const fn upstream_read_timeout() -> Duration {
-    Duration::from_secs(30)
-}
-
-const fn upstream_write_timeout() -> Duration {
-    Duration::from_secs(30)
-}
-
-#[allow(clippy::duration_suboptimal_units)]
-const fn upstream_idle_timeout() -> Duration {
-    Duration::from_secs(60)
 }
 
 const MAX_REQUEST_HEADERS: usize = 128;
@@ -173,6 +189,7 @@ impl MikromProxy {
         metrics: Arc<RouterMetricsCounters>,
         traffic_publisher: Option<Arc<RouterTrafficPublisher>>,
         rps_limit: isize,
+        timeouts: RouterTimeouts,
     ) -> Self {
         let default_site_host = default_site_host.trim();
         let default_site_redirect_url = default_site_redirect_url.trim();
@@ -190,6 +207,7 @@ impl MikromProxy {
             traffic_publisher,
             rate_limiter: Rate::new(Duration::from_secs(1)),
             rps_limit,
+            timeouts,
             wake_up_failures: DashMap::new(),
         }
     }
@@ -287,10 +305,10 @@ impl MikromProxy {
         Ok(None)
     }
 
-    fn apply_downstream_timeouts(session: &mut Session) {
+    fn apply_downstream_timeouts(&self, session: &mut Session) {
         let downstream = session.as_downstream_mut();
-        downstream.set_read_timeout(Some(downstream_request_timeout()));
-        downstream.set_write_timeout(Some(downstream_response_timeout()));
+        downstream.set_read_timeout(Some(self.timeouts.downstream_request));
+        downstream.set_write_timeout(Some(self.timeouts.downstream_response));
     }
 
     fn is_default_site_host(&self, host: &str) -> bool {
@@ -308,21 +326,12 @@ impl MikromProxy {
         ))
     }
 
-    #[allow(clippy::missing_const_for_fn)]
-    fn configure_peer_timeouts(peer: &mut HttpPeer) {
-        peer.options.connection_timeout = Some(upstream_connect_timeout());
-        peer.options.total_connection_timeout = Some(upstream_connect_timeout());
-        peer.options.read_timeout = Some(upstream_read_timeout());
-        peer.options.write_timeout = Some(upstream_write_timeout());
-        peer.options.idle_timeout = Some(upstream_idle_timeout());
-    }
-
     async fn wait_for_route(
         &self,
         host: &str,
         normalized_host: &str,
     ) -> Result<(Arc<LoadBalancer<RoundRobin>>, bool, Option<String>)> {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let deadline = std::time::Instant::now() + self.timeouts.route_wait;
 
         loop {
             match self.get_lb_and_tls(host).await {
@@ -560,7 +569,7 @@ impl ProxyHttp for MikromProxy {
         let _ = span.set_parent(parent_cx);
         ctx.span = span;
 
-        Self::apply_downstream_timeouts(session);
+        self.apply_downstream_timeouts(session);
         let request_path = session.req_header().uri.path().to_string();
 
         if let Some(result) = self
@@ -669,7 +678,7 @@ impl ProxyHttp for MikromProxy {
         }
 
         let start_time = std::time::Instant::now();
-        let deadline = start_time + std::time::Duration::from_secs(30);
+        let deadline = start_time + self.timeouts.route_wait;
         let mut last_log_time = start_time;
 
         loop {
@@ -705,7 +714,11 @@ impl ProxyHttp for MikromProxy {
 
                 let mut peer =
                     HttpPeer::new(addr_str, use_tls, normalized_host.as_str().to_string());
-                Self::configure_peer_timeouts(&mut peer);
+                peer.options.connection_timeout = Some(self.timeouts.upstream_connect);
+                peer.options.total_connection_timeout = Some(self.timeouts.upstream_connect);
+                peer.options.read_timeout = Some(self.timeouts.upstream_read);
+                peer.options.write_timeout = Some(self.timeouts.upstream_write);
+                peer.options.idle_timeout = Some(self.timeouts.upstream_idle);
                 if use_tls {
                     if let Some(ca) = &self.upstream_ca {
                         peer.options.ca = Some(ca.clone());
@@ -1028,6 +1041,7 @@ mod tests {
             Arc::new(RouterMetricsCounters::new()),
             None,
             100,
+            RouterTimeouts::default(),
         );
 
         assert!(proxy.has_route("app.example.com").await);
@@ -1048,6 +1062,7 @@ mod tests {
             Arc::new(RouterMetricsCounters::new()),
             None,
             100,
+            RouterTimeouts::default(),
         );
 
         let host = "late.example.com".to_string();
@@ -1089,6 +1104,7 @@ mod tests {
             Arc::new(RouterMetricsCounters::new()),
             None,
             100,
+            RouterTimeouts::default(),
         );
 
         assert_eq!(
@@ -1130,21 +1146,15 @@ mod tests {
     }
 
     #[test]
-    fn test_configure_peer_timeouts_sets_expected_values() {
-        let mut peer = HttpPeer::new("127.0.0.1:8080", false, "example.com".to_string());
-        MikromProxy::configure_peer_timeouts(&mut peer);
-
-        assert_eq!(
-            peer.options.connection_timeout,
-            Some(upstream_connect_timeout())
-        );
-        assert_eq!(
-            peer.options.total_connection_timeout,
-            Some(upstream_connect_timeout())
-        );
-        assert_eq!(peer.options.read_timeout, Some(upstream_read_timeout()));
-        assert_eq!(peer.options.write_timeout, Some(upstream_write_timeout()));
-        assert_eq!(peer.options.idle_timeout, Some(upstream_idle_timeout()));
+    fn test_router_timeouts_default_values() {
+        let timeouts = RouterTimeouts::default();
+        assert_eq!(timeouts.downstream_request, Duration::from_secs(10));
+        assert_eq!(timeouts.downstream_response, Duration::from_secs(30));
+        assert_eq!(timeouts.upstream_connect, Duration::from_secs(5));
+        assert_eq!(timeouts.upstream_read, Duration::from_secs(30));
+        assert_eq!(timeouts.upstream_write, Duration::from_secs(30));
+        assert_eq!(timeouts.upstream_idle, Duration::from_mins(1));
+        assert_eq!(timeouts.route_wait, Duration::from_secs(30));
     }
 
     #[test]

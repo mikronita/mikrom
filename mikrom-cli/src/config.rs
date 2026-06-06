@@ -10,6 +10,18 @@ pub struct Config {
     #[serde(default)]
     #[serde(rename = "active_project_slug", alias = "active_tenant_id")]
     pub active_tenant_id: Option<String>,
+
+    #[serde(default = "default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+
+    #[serde(default = "default_delete_timeout_secs")]
+    pub delete_timeout_secs: u64,
+
+    #[serde(default = "default_restore_timeout_secs")]
+    pub restore_timeout_secs: u64,
+
+    #[serde(default = "default_long_timeout_secs")]
+    pub long_timeout_secs: u64,
 }
 
 impl Config {
@@ -53,6 +65,27 @@ impl Config {
             if env_config.active_tenant_id.is_some() {
                 config.active_tenant_id = env_config.active_tenant_id;
             }
+        }
+
+        if let Ok(value) = std::env::var("MIKROM_REQUEST_TIMEOUT_SECS") {
+            config.request_timeout_secs = value.parse().map_err(|e| {
+                anyhow::anyhow!("Invalid MIKROM_REQUEST_TIMEOUT_SECS '{}': {}", value, e)
+            })?;
+        }
+        if let Ok(value) = std::env::var("MIKROM_DELETE_TIMEOUT_SECS") {
+            config.delete_timeout_secs = value.parse().map_err(|e| {
+                anyhow::anyhow!("Invalid MIKROM_DELETE_TIMEOUT_SECS '{}': {}", value, e)
+            })?;
+        }
+        if let Ok(value) = std::env::var("MIKROM_RESTORE_TIMEOUT_SECS") {
+            config.restore_timeout_secs = value.parse().map_err(|e| {
+                anyhow::anyhow!("Invalid MIKROM_RESTORE_TIMEOUT_SECS '{}': {}", value, e)
+            })?;
+        }
+        if let Ok(value) = std::env::var("MIKROM_LONG_TIMEOUT_SECS") {
+            config.long_timeout_secs = value.parse().map_err(|e| {
+                anyhow::anyhow!("Invalid MIKROM_LONG_TIMEOUT_SECS '{}': {}", value, e)
+            })?;
         }
 
         Ok(config)
@@ -116,6 +149,44 @@ impl Config {
     }
 }
 
+fn timeout_duration(secs: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(secs.max(1))
+}
+
+fn default_request_timeout_secs() -> u64 {
+    30
+}
+
+fn default_delete_timeout_secs() -> u64 {
+    120
+}
+
+fn default_restore_timeout_secs() -> u64 {
+    60
+}
+
+fn default_long_timeout_secs() -> u64 {
+    30
+}
+
+impl Config {
+    pub fn request_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.request_timeout_secs)
+    }
+
+    pub fn delete_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.delete_timeout_secs)
+    }
+
+    pub fn restore_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.restore_timeout_secs)
+    }
+
+    pub fn long_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.long_timeout_secs)
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::get_unwrap)]
 mod tests {
@@ -137,6 +208,7 @@ mod tests {
             api_url: Some("http://remote:9000".to_string()),
             token: None,
             active_tenant_id: None,
+            ..Default::default()
         };
         assert_eq!(cfg.api_url(), "http://remote:9000");
     }
@@ -187,6 +259,7 @@ mod tests {
             api_url: Some("http://example.com:5001".to_string()),
             token: Some("my-jwt-token".to_string()),
             active_tenant_id: None,
+            ..Default::default()
         };
         original.save_to(&path).unwrap();
         let loaded = Config::load_from(&path);
@@ -211,6 +284,7 @@ mod tests {
             api_url: None,
             token: None,
             active_tenant_id: Some("abc123".to_string()),
+            ..Default::default()
         };
         cfg.save_to(&path).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
@@ -233,6 +307,7 @@ mod tests {
             api_url: Some("http://old:5001".to_string()),
             token: None,
             active_tenant_id: None,
+            ..Default::default()
         }
         .save_to(&path)
         .unwrap();
@@ -240,6 +315,7 @@ mod tests {
             api_url: Some("http://new:5001".to_string()),
             token: Some("tok".to_string()),
             active_tenant_id: None,
+            ..Default::default()
         }
         .save_to(&path)
         .unwrap();
@@ -293,6 +369,7 @@ token = "full-token-123"
             api_url: Some("http://api-only:8000".to_string()),
             token: None,
             active_tenant_id: None,
+            ..Default::default()
         }
         .save_to(&path)
         .unwrap();
@@ -309,6 +386,7 @@ token = "full-token-123"
             api_url: None,
             token: Some("token-only".to_string()),
             active_tenant_id: None,
+            ..Default::default()
         }
         .save_to(&path)
         .unwrap();
@@ -332,6 +410,7 @@ token = "full-token-123"
             api_url: Some("http://example.com:5001/".to_string()),
             token: None,
             active_tenant_id: None,
+            ..Default::default()
         };
         assert_eq!(cfg.api_url(), "http://example.com:5001/");
     }
@@ -342,6 +421,7 @@ token = "full-token-123"
             api_url: Some("http://example.com:5001/api/v1".to_string()),
             token: None,
             active_tenant_id: None,
+            ..Default::default()
         };
         assert_eq!(cfg.api_url(), "http://example.com:5001/api/v1");
     }
@@ -359,6 +439,7 @@ token = "full-token-123"
             api_url: Some("http://test:5001".to_string()),
             token: Some("test-token".to_string()),
             active_tenant_id: None,
+            ..Default::default()
         };
         let serialized = toml::to_string(&cfg).unwrap();
         assert!(serialized.contains("api_url"));
@@ -382,6 +463,7 @@ token = "deser-token"
             api_url: Some("http://localhost:5001".to_string()),
             token: None,
             active_tenant_id: None,
+            ..Default::default()
         };
         assert!(cfg.validate().is_ok());
     }
@@ -392,6 +474,7 @@ token = "deser-token"
             api_url: Some("not-a-url".to_string()),
             token: None,
             active_tenant_id: None,
+            ..Default::default()
         };
         assert!(cfg.validate().is_err());
     }

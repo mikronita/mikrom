@@ -5,15 +5,20 @@ use tokio::net::UnixStream;
 
 /// Send a request to the Cloud Hypervisor API socket.
 /// This implementation is robust against slow responses and handles the full HTTP lifecycle.
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all, fields(method = %method, api_path = %api_path))]
 pub async fn ch_request(
     method: &str,
     socket_path: &str,
     api_path: &str,
     body: Option<&str>,
+    connect_timeout: Duration,
+    status_timeout: Duration,
+    header_timeout: Duration,
+    body_timeout: Duration,
 ) -> Result<String, HypervisorError> {
     let stream_fut = UnixStream::connect(socket_path);
-    let mut stream = tokio::time::timeout(Duration::from_secs(5), stream_fut)
+    let mut stream = tokio::time::timeout(connect_timeout, stream_fut)
         .await
         .map_err(|_| HypervisorError::ApiError {
             path: api_path.to_string(),
@@ -50,7 +55,7 @@ pub async fn ch_request(
 
     // 1. Read status line
     let read_fut = reader.read_line(&mut status_line);
-    tokio::time::timeout(Duration::from_secs(30), read_fut)
+    tokio::time::timeout(status_timeout, read_fut)
         .await
         .map_err(|_| HypervisorError::ApiError {
             path: api_path.to_string(),
@@ -77,7 +82,7 @@ pub async fn ch_request(
     loop {
         let mut line = String::new();
         let read_fut = reader.read_line(&mut line);
-        tokio::time::timeout(Duration::from_secs(10), read_fut)
+        tokio::time::timeout(header_timeout, read_fut)
             .await
             .map_err(|_| HypervisorError::ApiError {
                 path: api_path.to_string(),
@@ -104,7 +109,7 @@ pub async fn ch_request(
     if let Some(len) = content_length {
         body_bytes.resize(len, 0);
         let read_fut = reader.read_exact(&mut body_bytes);
-        tokio::time::timeout(Duration::from_secs(60), read_fut)
+        tokio::time::timeout(body_timeout, read_fut)
             .await
             .map_err(|_| HypervisorError::ApiError {
                 path: api_path.to_string(),
@@ -117,7 +122,7 @@ pub async fn ch_request(
     } else {
         // Fallback: read until EOF if no Content-Length
         let read_fut = reader.read_to_end(&mut body_bytes);
-        tokio::time::timeout(Duration::from_secs(60), read_fut)
+        tokio::time::timeout(body_timeout, read_fut)
             .await
             .map_err(|_| HypervisorError::ApiError {
                 path: api_path.to_string(),
@@ -203,9 +208,18 @@ mod tests {
             Err(e) => panic!("failed to bind mock server: {e}"),
         };
 
-        let result = ch_request("GET", &socket_str, "/api/v1/info", None)
-            .await
-            .unwrap();
+        let result = ch_request(
+            "GET",
+            &socket_str,
+            "/api/v1/info",
+            None,
+            Duration::from_secs(5),
+            Duration::from_secs(30),
+            Duration::from_secs(10),
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, "{\"status\":\"ok\"}");
     }
 
@@ -225,9 +239,18 @@ mod tests {
             Err(e) => panic!("failed to bind mock server: {e}"),
         };
 
-        let result = ch_request("PUT", &socket_str, "/api/v1/vm.boot", None)
-            .await
-            .unwrap();
+        let result = ch_request(
+            "PUT",
+            &socket_str,
+            "/api/v1/vm.boot",
+            None,
+            Duration::from_secs(5),
+            Duration::from_secs(30),
+            Duration::from_secs(10),
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, "");
     }
 
@@ -249,7 +272,18 @@ mod tests {
             Err(e) => panic!("failed to bind mock server: {e}"),
         };
 
-        let result = ch_request("GET", &socket_str, "/test", None).await.unwrap();
+        let result = ch_request(
+            "GET",
+            &socket_str,
+            "/test",
+            None,
+            Duration::from_secs(5),
+            Duration::from_secs(30),
+            Duration::from_secs(10),
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
         // Should only read 5 bytes as per Content-Length
         assert_eq!(result, "hello");
     }
@@ -270,7 +304,17 @@ mod tests {
             Err(e) => panic!("failed to bind mock server: {e}"),
         };
 
-        let result = ch_request("GET", &socket_str, "/api", None).await;
+        let result = ch_request(
+            "GET",
+            &socket_str,
+            "/api",
+            None,
+            Duration::from_secs(5),
+            Duration::from_secs(30),
+            Duration::from_secs(10),
+            Duration::from_secs(60),
+        )
+        .await;
         assert!(result.is_err());
         if let Err(HypervisorError::ApiError { msg, .. }) = result {
             assert!(msg.contains("400 Bad Request"));

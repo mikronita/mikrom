@@ -62,6 +62,7 @@ pub fn run(config: &RouterConfig) -> Result<()> {
         config.advertise_address().to_string(),
         config.data_dir.to_string_lossy().into_owned(),
         config.wireguard_port,
+        config.startup_connect_timeout(),
     );
     server.add_service(background_service("Control Plane", cp));
 
@@ -78,6 +79,7 @@ pub fn run(config: &RouterConfig) -> Result<()> {
         config.nats_use_tls,
         config.nats_certs_dir.clone(),
         traffic_rx,
+        config.startup_connect_timeout(),
     );
     server.add_service(background_service("Router Traffic Loop", traffic_loop));
 
@@ -93,6 +95,7 @@ pub fn run(config: &RouterConfig) -> Result<()> {
         metrics_counters,
         Some(traffic_publisher),
         config.rps_limit,
+        proxy::RouterTimeouts::from_config(config),
     );
 
     let listen_tcp = format!("[::]:{}", 80);

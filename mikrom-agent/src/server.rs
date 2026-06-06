@@ -87,7 +87,7 @@ impl AgentServer {
         hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>>,
     ) -> Self {
         let http_client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(2))
+            .timeout(config.cloud_hypervisor_configure_client_timeout())
             .build()
             .unwrap_or_default();
 
@@ -164,42 +164,62 @@ impl AgentServer {
             let mut nats_client = None;
             let mut nats_session_started_at: Option<Instant> = None;
             let mut consecutive_failures: u32 = 0;
-            let max_backoff_secs: u64 = 60;
+            let max_backoff = self_clone.config.nats_max_backoff();
             let circuit_breaker_threshold: u32 = 10;
-            let circuit_breaker_cooldown_secs: u64 = 300;
+            let circuit_breaker_cooldown = self_clone.config.nats_circuit_breaker_cooldown();
+            let nats_connect_timeout = self_clone.config.nats_connect_timeout();
 
             loop {
                 if nats_client.is_none() {
                     if consecutive_failures >= circuit_breaker_threshold {
                         error!(
-                            cooldown_secs = circuit_breaker_cooldown_secs,
+                            cooldown_secs = circuit_breaker_cooldown.as_secs(),
                             "NATS circuit breaker triggered; cooling down"
                         );
-                        tokio::time::sleep(Duration::from_secs(circuit_breaker_cooldown_secs))
-                            .await;
+                        tokio::time::sleep(circuit_breaker_cooldown).await;
                         consecutive_failures = 0;
                         continue;
                     }
 
                     info!(url = %nats_url, "Connecting to NATS...");
-                    match async_nats::connect(nats_url.clone()).await {
-                        Ok(client) => {
+                    match tokio::time::timeout(
+                        nats_connect_timeout,
+                        async_nats::connect(nats_url.clone()),
+                    )
+                    .await
+                    {
+                        Ok(Ok(client)) => {
                             info!("Connected to NATS");
                             nats_client = Some(client);
                             nats_session_started_at = Some(Instant::now());
                             consecutive_failures = 0;
                         },
-                        Err(e) => {
+                        Ok(Err(e)) => {
                             consecutive_failures += 1;
-                            // Clamp exponent to prevent overflow before power calculation
                             let exponent = consecutive_failures.min(10);
-                            let backoff = (2u64.pow(exponent)).min(max_backoff_secs);
+                            let backoff = Duration::from_secs(
+                                (2u64.pow(exponent)).min(max_backoff.as_secs()),
+                            );
                             error!(
                                 error = %e,
-                                backoff_secs = backoff,
+                                backoff_secs = backoff.as_secs(),
                                 "Failed to connect to NATS; retrying"
                             );
-                            tokio::time::sleep(Duration::from_secs(backoff)).await;
+                            tokio::time::sleep(backoff).await;
+                            continue;
+                        },
+                        Err(e) => {
+                            consecutive_failures += 1;
+                            let exponent = consecutive_failures.min(10);
+                            let backoff = Duration::from_secs(
+                                (2u64.pow(exponent)).min(max_backoff.as_secs()),
+                            );
+                            error!(
+                                error = %e,
+                                backoff_secs = backoff.as_secs(),
+                                "Timed out connecting to NATS; retrying"
+                            );
+                            tokio::time::sleep(backoff).await;
                             continue;
                         },
                     }

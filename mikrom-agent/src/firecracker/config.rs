@@ -14,6 +14,54 @@ pub struct FirecrackerConfig {
 }
 
 impl FirecrackerConfig {
+    fn timeout_duration_env(name: &str, default_secs: u64) -> std::time::Duration {
+        let secs = std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(default_secs);
+        std::time::Duration::from_secs(secs.max(1))
+    }
+
+    pub fn socket_wait_timeout_plain(&self) -> std::time::Duration {
+        Self::timeout_duration_env("FC_SOCKET_WAIT_TIMEOUT_SECS", 120)
+    }
+
+    pub fn socket_wait_timeout_chroot(&self) -> std::time::Duration {
+        Self::timeout_duration_env("FC_SOCKET_WAIT_TIMEOUT_CHROOT_SECS", 10)
+    }
+
+    pub fn api_connect_timeout(&self) -> std::time::Duration {
+        Self::timeout_duration_env("FC_API_CONNECT_TIMEOUT_SECS", 2)
+    }
+
+    pub fn api_status_timeout(&self) -> std::time::Duration {
+        Self::timeout_duration_env("FC_API_STATUS_TIMEOUT_SECS", 30)
+    }
+
+    pub fn api_header_timeout(&self) -> std::time::Duration {
+        Self::timeout_duration_env("FC_API_HEADER_TIMEOUT_SECS", 10)
+    }
+
+    pub fn api_body_timeout(&self) -> std::time::Duration {
+        Self::timeout_duration_env("FC_API_BODY_TIMEOUT_SECS", 60)
+    }
+
+    pub fn process_terminate_timeout(&self) -> std::time::Duration {
+        Self::timeout_duration_env("FC_PROCESS_TERMINATE_TIMEOUT_SECS", 10)
+    }
+
+    pub fn process_kill_timeout(&self) -> std::time::Duration {
+        Self::timeout_duration_env("FC_PROCESS_KILL_TIMEOUT_SECS", 2)
+    }
+
+    pub fn vfs_terminate_timeout(&self) -> std::time::Duration {
+        Self::timeout_duration_env("FC_VFS_TERMINATE_TIMEOUT_SECS", 5)
+    }
+
+    pub fn vfs_kill_timeout(&self) -> std::time::Duration {
+        Self::timeout_duration_env("FC_VFS_KILL_TIMEOUT_SECS", 2)
+    }
+
     #[must_use]
     pub fn from_env() -> Self {
         Self {

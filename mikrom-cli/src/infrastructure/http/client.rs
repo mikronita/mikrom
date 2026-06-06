@@ -10,6 +10,10 @@ pub struct ReqwestApiClient {
     base_url: String,
     token: Option<String>,
     active_project_slug: Option<String>,
+    request_timeout: std::time::Duration,
+    delete_timeout: std::time::Duration,
+    restore_timeout: std::time::Duration,
+    long_timeout: std::time::Duration,
 }
 
 #[derive(serde::Deserialize)]
@@ -32,7 +36,25 @@ impl ReqwestApiClient {
             base_url,
             token,
             active_project_slug,
+            request_timeout: std::time::Duration::from_secs(30),
+            delete_timeout: std::time::Duration::from_secs(120),
+            restore_timeout: std::time::Duration::from_secs(60),
+            long_timeout: std::time::Duration::from_secs(30),
         })
+    }
+
+    pub fn with_timeouts(
+        mut self,
+        request_timeout: std::time::Duration,
+        delete_timeout: std::time::Duration,
+        restore_timeout: std::time::Duration,
+        long_timeout: std::time::Duration,
+    ) -> Self {
+        self.request_timeout = request_timeout;
+        self.delete_timeout = delete_timeout;
+        self.restore_timeout = restore_timeout;
+        self.long_timeout = long_timeout;
+        self
     }
 
     async fn request<T: DeserializeOwned, B: Serialize>(
@@ -41,7 +63,7 @@ impl ReqwestApiClient {
         endpoint: &str,
         body: Option<B>,
     ) -> CliResult<T> {
-        self.request_with_timeout(method, endpoint, body, std::time::Duration::from_secs(30))
+        self.request_with_timeout(method, endpoint, body, self.request_timeout)
             .await
     }
 
@@ -179,13 +201,8 @@ impl ReqwestApiClient {
     }
 
     async fn request_no_body(&self, method: reqwest::Method, endpoint: &str) -> CliResult<()> {
-        self.request_no_content_with_timeout(
-            method,
-            endpoint,
-            None::<()>,
-            std::time::Duration::from_secs(30),
-        )
-        .await
+        self.request_no_content_with_timeout(method, endpoint, None::<()>, self.request_timeout)
+            .await
     }
 }
 
@@ -263,7 +280,7 @@ impl ApiClient for ReqwestApiClient {
             reqwest::Method::DELETE,
             &format!("/apps/{}", app_id),
             None::<()>,
-            std::time::Duration::from_secs(120),
+            self.delete_timeout,
         )
         .await
     }
@@ -388,7 +405,7 @@ impl ApiClient for ReqwestApiClient {
             reqwest::Method::PATCH,
             &format!("/apps/{}/scale", app_id),
             Some(req),
-            std::time::Duration::from_secs(30),
+            self.long_timeout,
         )
         .await
     }
@@ -468,7 +485,7 @@ impl ApiClient for ReqwestApiClient {
             reqwest::Method::POST,
             &format!("volumes/{}/restore", volume_id),
             Some(body),
-            std::time::Duration::from_secs(60),
+            self.restore_timeout,
         )
         .await
     }

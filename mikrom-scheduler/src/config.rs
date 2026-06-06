@@ -17,6 +17,9 @@ pub struct SchedulerConfig {
     #[serde(default = "default_restore_retry_backoff_secs")]
     pub restore_retry_backoff_secs: i64,
 
+    #[serde(default = "default_agent_request_timeout_secs")]
+    pub agent_request_timeout_secs: u64,
+
     #[serde(default = "default_database_max_connections")]
     pub database_max_connections: u32,
 
@@ -49,6 +52,10 @@ fn default_worker_stale_threshold_secs() -> i64 {
 
 fn default_restore_retry_backoff_secs() -> i64 {
     3600
+}
+
+fn default_agent_request_timeout_secs() -> u64 {
+    30
 }
 
 fn default_certs_dir() -> String {
@@ -109,5 +116,34 @@ mod tests {
 
         assert_eq!(config.worker_stale_threshold_secs, 60);
         assert_eq!(config.restore_retry_backoff_secs, 3600);
+    }
+
+    #[test]
+    fn defaults_agent_request_timeout_to_thirty_seconds() {
+        let config: SchedulerConfig = envy::from_iter(vec![
+            (
+                "DATABASE_URL".to_string(),
+                "postgres://[::1]/mikrom".to_string(),
+            ),
+            ("NATS_URL".to_string(), "nats://[::1]:4222".to_string()),
+        ])
+        .expect("config should deserialize");
+
+        assert_eq!(config.agent_request_timeout_secs, 30);
+    }
+
+    #[test]
+    fn loads_agent_request_timeout_from_env() {
+        let config: SchedulerConfig = envy::from_iter(vec![
+            (
+                "DATABASE_URL".to_string(),
+                "postgres://[::1]/mikrom".to_string(),
+            ),
+            ("NATS_URL".to_string(), "nats://[::1]:4222".to_string()),
+            ("AGENT_REQUEST_TIMEOUT_SECS".to_string(), "45".to_string()),
+        ])
+        .expect("config should deserialize");
+
+        assert_eq!(config.agent_request_timeout_secs, 45);
     }
 }

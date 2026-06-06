@@ -67,9 +67,30 @@ impl ScalingService {
             return Ok(());
         }
 
+        let direction = if current_count < desired_replicas {
+            "scale_up"
+        } else {
+            "scale_down"
+        };
+        tracing::info!(
+            app_id = %app_id,
+            tenant_id = %tenant_id,
+            current_count = %current_count,
+            desired_replicas = %desired_replicas,
+            direction,
+            "Reconciling app replicas"
+        );
+
         if current_count < desired_replicas {
             let mut to_add = desired_replicas - current_count;
-            tracing::info!(app_id = %app_id, to_add = %to_add, "Scaling up app");
+            tracing::info!(
+                app_id = %app_id,
+                tenant_id = %tenant_id,
+                current_count = %current_count,
+                desired_replicas = %desired_replicas,
+                to_add = %to_add,
+                "Scaling up app"
+            );
 
             let mut resumed = 0u32;
             if current_count == 0 && !paused_jobs.is_empty() {
@@ -172,7 +193,14 @@ impl ScalingService {
             }
         } else {
             let to_remove = current_count - desired_replicas;
-            tracing::info!(app_id = %app_id, to_remove = %to_remove, "Scaling down app");
+            tracing::info!(
+                app_id = %app_id,
+                tenant_id = %tenant_id,
+                current_count = %current_count,
+                desired_replicas = %desired_replicas,
+                to_remove = %to_remove,
+                "Scaling down app"
+            );
 
             let mut jobs_to_kill = active_jobs;
             jobs_to_kill.sort_by_key(|j| match j.status {
@@ -434,6 +462,7 @@ impl ScalingService {
             tracing::info!(
                 event = "restore_from_router_traffic",
                 app_id = %app.id,
+                current_count = %current_count,
                 desired = %app.desired_replicas,
                 "Restoring app after router traffic returned"
             );
@@ -462,7 +491,12 @@ impl ScalingService {
         }
 
         if app.min_replicas > 0 {
-            tracing::info!(app_id = %app.id, "Scaling up to min_replicas");
+            tracing::info!(
+                app_id = %app.id,
+                current_count = %current_count,
+                desired = %app.min_replicas,
+                "Scaling up to min_replicas"
+            );
             if let Err(e) = self
                 .scale_app(&app.id, app.min_replicas, &app.tenant_id)
                 .await
@@ -549,6 +583,7 @@ impl ScalingService {
         if current_count != app.desired_replicas {
             tracing::info!(
                 app_id = %app.id,
+                tenant_id = %app.tenant_id,
                 current = %current_count,
                 desired = %app.desired_replicas,
                 "Reconciling manual scaling"

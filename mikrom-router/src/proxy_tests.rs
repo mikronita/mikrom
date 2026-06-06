@@ -44,6 +44,7 @@ mod tests {
             metrics,
             None,
             100,
+            crate::application::proxy::RouterTimeouts::default(),
         );
 
         let lb = proxy.get_lb("app.mikrom.local").await.unwrap();
@@ -93,6 +94,7 @@ mod tests {
             metrics,
             None,
             100,
+            crate::application::proxy::RouterTimeouts::default(),
         );
 
         let lb = proxy.get_lb("app.mikrom.local").await.unwrap();
@@ -139,6 +141,7 @@ mod tests {
             metrics,
             None,
             100,
+            crate::application::proxy::RouterTimeouts::default(),
         );
 
         let (lb, use_tls, alternative_cn) = proxy

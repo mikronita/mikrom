@@ -1,4 +1,4 @@
-use crate::firecracker::api::{fc_patch, fc_put};
+use crate::firecracker::api::{fc_patch_with_timeouts, fc_put_with_timeouts};
 use crate::hypervisor::{HypervisorError, VmStatus};
 use mikrom_proto::id::VmId;
 use std::path::PathBuf;
@@ -93,7 +93,17 @@ impl crate::firecracker::FirecrackerManager {
         })
         .to_string();
 
-        if let Err(e) = fc_put(active_socket_path, "/snapshot/load", &body).await {
+        if let Err(e) = fc_put_with_timeouts(
+            active_socket_path,
+            "/snapshot/load",
+            &body,
+            self.fc_config.api_connect_timeout(),
+            self.fc_config.api_status_timeout(),
+            self.fc_config.api_header_timeout(),
+            self.fc_config.api_body_timeout(),
+        )
+        .await
+        {
             tracing::error!(
                 vm_id = %vm_id,
                 "Failed to load snapshot: {}. Caller will relaunch Firecracker for a normal boot.",
@@ -115,7 +125,16 @@ impl crate::firecracker::FirecrackerManager {
         tracing::info!(vm_id = %vm_id, "Pausing VM and creating snapshot...");
 
         let pause_body = serde_json::json!({ "state": "Paused" }).to_string();
-        fc_patch(&proc.socket_path, "/vm", &pause_body).await?;
+        fc_patch_with_timeouts(
+            &proc.socket_path,
+            "/vm",
+            &pause_body,
+            self.fc_config.api_connect_timeout(),
+            self.fc_config.api_status_timeout(),
+            self.fc_config.api_header_timeout(),
+            self.fc_config.api_body_timeout(),
+        )
+        .await?;
 
         let snapshot_dir = std::path::Path::new(&self.fc_config.data_dir).join("snapshots");
         tokio::fs::create_dir_all(&snapshot_dir)
@@ -132,7 +151,16 @@ impl crate::firecracker::FirecrackerManager {
             &mem_path.to_string_lossy(),
         );
 
-        fc_put(&proc.socket_path, "/snapshot/create", &snapshot_body).await?;
+        fc_put_with_timeouts(
+            &proc.socket_path,
+            "/snapshot/create",
+            &snapshot_body,
+            self.fc_config.api_connect_timeout(),
+            self.fc_config.api_status_timeout(),
+            self.fc_config.api_header_timeout(),
+            self.fc_config.api_body_timeout(),
+        )
+        .await?;
 
         if chroot_dir.is_some() {
             let chroot_root = self.get_chroot_dir(vm_id).join("root");
@@ -225,7 +253,17 @@ impl crate::firecracker::FirecrackerManager {
         let mut restart_from_snapshot = restart_from_snapshot;
         if process_alive && let Some(ref socket) = socket_path {
             let resume_body = serde_json::json!({ "state": "Resumed" }).to_string();
-            match fc_patch(socket, "/vm", &resume_body).await {
+            match fc_patch_with_timeouts(
+                socket,
+                "/vm",
+                &resume_body,
+                self.fc_config.api_connect_timeout(),
+                self.fc_config.api_status_timeout(),
+                self.fc_config.api_header_timeout(),
+                self.fc_config.api_body_timeout(),
+            )
+            .await
+            {
                 Ok(_) => {
                     live_process_resumed = true;
                 },

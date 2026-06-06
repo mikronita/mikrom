@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
 use uuid::Uuid;
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -142,6 +143,58 @@ fn default_data_path() -> PathBuf {
 }
 
 impl AgentConfig {
+    fn timeout_duration_env(name: &str, default_secs: u64) -> Duration {
+        let secs = std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(default_secs);
+        Duration::from_secs(secs.max(1))
+    }
+
+    pub fn nats_connect_timeout(&self) -> Duration {
+        Self::timeout_duration_env("AGENT_NATS_CONNECT_TIMEOUT_SECS", 5)
+    }
+
+    pub fn nats_max_backoff(&self) -> Duration {
+        Self::timeout_duration_env("AGENT_NATS_MAX_BACKOFF_SECS", 60)
+    }
+
+    pub fn nats_circuit_breaker_cooldown(&self) -> Duration {
+        Self::timeout_duration_env("AGENT_NATS_CIRCUIT_BREAKER_COOLDOWN_SECS", 300)
+    }
+
+    pub fn cloud_hypervisor_socket_wait_timeout(&self) -> Duration {
+        Self::timeout_duration_env("AGENT_CLOUD_HYPERVISOR_SOCKET_WAIT_TIMEOUT_SECS", 10)
+    }
+
+    pub fn cloud_hypervisor_api_connect_timeout(&self) -> Duration {
+        Self::timeout_duration_env("AGENT_CLOUD_HYPERVISOR_API_CONNECT_TIMEOUT_SECS", 5)
+    }
+
+    pub fn cloud_hypervisor_api_status_timeout(&self) -> Duration {
+        Self::timeout_duration_env("AGENT_CLOUD_HYPERVISOR_API_STATUS_TIMEOUT_SECS", 30)
+    }
+
+    pub fn cloud_hypervisor_api_header_timeout(&self) -> Duration {
+        Self::timeout_duration_env("AGENT_CLOUD_HYPERVISOR_API_HEADER_TIMEOUT_SECS", 10)
+    }
+
+    pub fn cloud_hypervisor_api_body_timeout(&self) -> Duration {
+        Self::timeout_duration_env("AGENT_CLOUD_HYPERVISOR_API_BODY_TIMEOUT_SECS", 60)
+    }
+
+    pub fn cloud_hypervisor_configure_client_timeout(&self) -> Duration {
+        Self::timeout_duration_env("AGENT_CLOUD_HYPERVISOR_CONFIGURE_CLIENT_TIMEOUT_SECS", 5)
+    }
+
+    pub fn cloud_hypervisor_configure_request_timeout(&self) -> Duration {
+        Self::timeout_duration_env("AGENT_CLOUD_HYPERVISOR_CONFIGURE_REQUEST_TIMEOUT_SECS", 6)
+    }
+
+    pub fn cloud_hypervisor_configure_backoff_max(&self) -> Duration {
+        Self::timeout_duration_env("AGENT_CLOUD_HYPERVISOR_CONFIGURE_BACKOFF_MAX_SECS", 5)
+    }
+
     pub fn load() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
         let env_host_id = std::env::var("AGENT_HOST_ID")

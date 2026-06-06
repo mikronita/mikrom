@@ -80,9 +80,15 @@ async fn main() -> anyhow::Result<()> {
     )
     .await
     .map_err(|e| anyhow::anyhow!("Failed to connect to NATS: {}", e))?;
-    let nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone());
+    let nats = mikrom_api::nats::TypedNatsClient::new(nats_client.clone()).with_timeout(
+        std::time::Duration::from_secs(config.nats_request_timeout_secs.max(1)),
+    );
 
-    let scheduler = Arc::new(mikrom_api::NatsScheduler::new(nats.clone()));
+    let scheduler = Arc::new(mikrom_api::NatsScheduler::new(
+        nats.clone(),
+        std::time::Duration::from_secs(config.nats_scheduler_long_timeout_secs.max(1)),
+        std::time::Duration::from_secs(config.nats_scheduler_database_timeout_secs.max(1)),
+    ));
 
     let ctx = ApiContext::new(
         user_repo.clone(),

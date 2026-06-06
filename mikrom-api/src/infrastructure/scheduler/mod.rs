@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::domain::error::DomainResult;
 pub use crate::domain::scheduler::Scheduler;
 use crate::nats::TypedNatsClient;
@@ -5,11 +7,21 @@ use mikrom_proto::scheduler::ListWorkersResponse;
 
 pub struct NatsScheduler {
     nats: TypedNatsClient,
+    delete_all_by_app_timeout: Duration,
+    deploy_database_timeout: Duration,
 }
 
 impl NatsScheduler {
-    pub fn new(nats: TypedNatsClient) -> Self {
-        Self { nats }
+    pub fn new(
+        nats: TypedNatsClient,
+        delete_all_by_app_timeout: Duration,
+        deploy_database_timeout: Duration,
+    ) -> Self {
+        Self {
+            nats,
+            delete_all_by_app_timeout,
+            deploy_database_timeout,
+        }
     }
 }
 
@@ -46,7 +58,7 @@ impl Scheduler for NatsScheduler {
         let req = mikrom_proto::scheduler::DeleteAllByAppRequest { app_id, tenant_id };
         let res: mikrom_proto::scheduler::DeleteAllByAppResponse = self
             .nats
-            .with_timeout(std::time::Duration::from_secs(15))
+            .with_timeout(self.delete_all_by_app_timeout)
             .request("mikrom.scheduler.delete_all_by_app", req)
             .await?;
         Ok(res.success)
@@ -110,7 +122,7 @@ impl Scheduler for NatsScheduler {
     ) -> DomainResult<mikrom_proto::scheduler::DeployDatabaseResponse> {
         let res: mikrom_proto::scheduler::DeployDatabaseResponse = self
             .nats
-            .with_timeout(std::time::Duration::from_secs(10))
+            .with_timeout(self.deploy_database_timeout)
             .request(mikrom_proto::subjects::SCHEDULER_DEPLOY_DATABASE, req)
             .await?;
         Ok(res)

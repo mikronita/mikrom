@@ -60,22 +60,34 @@ impl DnsSyncService {
     }
 }
 
-pub async fn run_nats_subscriber(store: DnsRecordStore) -> Result<()> {
+pub async fn run_nats_subscriber(
+    store: DnsRecordStore,
+    config: &crate::infrastructure::config::DnsConfig,
+) -> Result<()> {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://[::1]:4222".to_string());
     let sync_service = DnsSyncService::new(store.clone());
     let mut backoff = std::time::Duration::from_secs(1);
+    let max_backoff = config.nats_backoff_max();
 
     loop {
         info!(%nats_url, "Connecting to NATS...");
-        let client = match async_nats::connect(nats_url.clone()).await {
-            Ok(client) => client,
-            Err(err) => {
+        let client = match tokio::time::timeout(
+            config.nats_connect_timeout(),
+            async_nats::connect(nats_url.clone()),
+        )
+        .await
+        {
+            Ok(Ok(client)) => client,
+            Ok(Err(err)) => {
                 tracing::warn!(error = %err, "Failed to connect to NATS, retrying");
                 tokio::time::sleep(backoff).await;
-                backoff = std::cmp::min(
-                    backoff.saturating_mul(2),
-                    std::time::Duration::from_secs(30),
-                );
+                backoff = std::cmp::min(backoff.saturating_mul(2), max_backoff);
+                continue;
+            },
+            Err(err) => {
+                tracing::warn!(error = %err, "Timed out connecting to NATS, retrying");
+                tokio::time::sleep(backoff).await;
+                backoff = std::cmp::min(backoff.saturating_mul(2), max_backoff);
                 continue;
             },
         };
@@ -86,10 +98,7 @@ pub async fn run_nats_subscriber(store: DnsRecordStore) -> Result<()> {
             Err(err) => {
                 tracing::warn!(error = %err, "Failed to subscribe to job updates, retrying");
                 tokio::time::sleep(backoff).await;
-                backoff = std::cmp::min(
-                    backoff.saturating_mul(2),
-                    std::time::Duration::from_secs(30),
-                );
+                backoff = std::cmp::min(backoff.saturating_mul(2), max_backoff);
                 continue;
             },
         };
@@ -103,10 +112,7 @@ pub async fn run_nats_subscriber(store: DnsRecordStore) -> Result<()> {
             Err(err) => {
                 tracing::warn!(error = %err, "Failed to subscribe to worker heartbeats, retrying");
                 tokio::time::sleep(backoff).await;
-                backoff = std::cmp::min(
-                    backoff.saturating_mul(2),
-                    std::time::Duration::from_secs(30),
-                );
+                backoff = std::cmp::min(backoff.saturating_mul(2), max_backoff);
                 continue;
             },
         };
@@ -144,10 +150,7 @@ pub async fn run_nats_subscriber(store: DnsRecordStore) -> Result<()> {
         if reconnect {
             tracing::warn!("NATS subscriber stream ended, reconnecting");
             tokio::time::sleep(backoff).await;
-            backoff = std::cmp::min(
-                backoff.saturating_mul(2),
-                std::time::Duration::from_secs(30),
-            );
+            backoff = std::cmp::min(backoff.saturating_mul(2), max_backoff);
         }
     }
 }

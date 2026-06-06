@@ -89,6 +89,30 @@ pub struct RouterConfig {
 
     #[serde(default = "default_router_threads")]
     pub router_threads: usize,
+
+    #[serde(default = "default_startup_connect_timeout_secs")]
+    pub startup_connect_timeout_secs: u64,
+
+    #[serde(default = "default_downstream_request_timeout_secs")]
+    pub downstream_request_timeout_secs: u64,
+
+    #[serde(default = "default_downstream_response_timeout_secs")]
+    pub downstream_response_timeout_secs: u64,
+
+    #[serde(default = "default_upstream_connect_timeout_secs")]
+    pub upstream_connect_timeout_secs: u64,
+
+    #[serde(default = "default_upstream_read_timeout_secs")]
+    pub upstream_read_timeout_secs: u64,
+
+    #[serde(default = "default_upstream_write_timeout_secs")]
+    pub upstream_write_timeout_secs: u64,
+
+    #[serde(default = "default_upstream_idle_timeout_secs")]
+    pub upstream_idle_timeout_secs: u64,
+
+    #[serde(default = "default_route_wait_timeout_secs")]
+    pub route_wait_timeout_secs: u64,
 }
 
 const fn default_nats_use_tls() -> bool {
@@ -128,6 +152,84 @@ const fn default_rps_limit() -> isize {
 
 fn default_router_threads() -> usize {
     std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+}
+
+const fn default_startup_connect_timeout_secs() -> u64 {
+    5
+}
+
+const fn default_downstream_request_timeout_secs() -> u64 {
+    10
+}
+
+const fn default_downstream_response_timeout_secs() -> u64 {
+    30
+}
+
+const fn default_upstream_connect_timeout_secs() -> u64 {
+    5
+}
+
+const fn default_upstream_read_timeout_secs() -> u64 {
+    30
+}
+
+const fn default_upstream_write_timeout_secs() -> u64 {
+    30
+}
+
+const fn default_upstream_idle_timeout_secs() -> u64 {
+    60
+}
+
+const fn default_route_wait_timeout_secs() -> u64 {
+    30
+}
+
+fn timeout_duration(secs: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(secs.max(1))
+}
+
+impl RouterConfig {
+    #[must_use]
+    pub fn startup_connect_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.startup_connect_timeout_secs)
+    }
+
+    #[must_use]
+    pub fn downstream_request_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.downstream_request_timeout_secs)
+    }
+
+    #[must_use]
+    pub fn downstream_response_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.downstream_response_timeout_secs)
+    }
+
+    #[must_use]
+    pub fn upstream_connect_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.upstream_connect_timeout_secs)
+    }
+
+    #[must_use]
+    pub fn upstream_read_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.upstream_read_timeout_secs)
+    }
+
+    #[must_use]
+    pub fn upstream_write_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.upstream_write_timeout_secs)
+    }
+
+    #[must_use]
+    pub fn upstream_idle_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.upstream_idle_timeout_secs)
+    }
+
+    #[must_use]
+    pub fn route_wait_timeout(&self) -> std::time::Duration {
+        timeout_duration(self.route_wait_timeout_secs)
+    }
 }
 
 impl RouterConfig {
@@ -272,6 +374,37 @@ impl RouterConfig {
     }
 }
 
+impl Default for RouterConfig {
+    fn default() -> Self {
+        Self {
+            database_url: DatabaseUrl::from("postgres://localhost/router"),
+            nats_url: NatsUrl::from("nats://localhost:4222"),
+            nats_use_tls: default_nats_use_tls(),
+            nats_certs_dir: None,
+            upstream_ca_certs_dir: None,
+            master_key: MasterKey::from("router-test-key"),
+            router_id: default_router_id(),
+            advertise_address: None,
+            data_dir: default_data_dir(),
+            state_cache_path: None,
+            wireguard_port: default_wireguard_port(),
+            acme_staging: default_acme_staging(),
+            default_site_host: default_default_site_host(),
+            default_site_redirect_url: default_default_site_redirect_url(),
+            rps_limit: default_rps_limit(),
+            router_threads: default_router_threads(),
+            startup_connect_timeout_secs: default_startup_connect_timeout_secs(),
+            downstream_request_timeout_secs: default_downstream_request_timeout_secs(),
+            downstream_response_timeout_secs: default_downstream_response_timeout_secs(),
+            upstream_connect_timeout_secs: default_upstream_connect_timeout_secs(),
+            upstream_read_timeout_secs: default_upstream_read_timeout_secs(),
+            upstream_write_timeout_secs: default_upstream_write_timeout_secs(),
+            upstream_idle_timeout_secs: default_upstream_idle_timeout_secs(),
+            route_wait_timeout_secs: default_route_wait_timeout_secs(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DatabaseUrl, MasterKey, NatsUrl, RouterConfig, RouterId};
@@ -296,6 +429,7 @@ mod tests {
             default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 100,
             router_threads: 1,
+            ..Default::default()
         };
 
         assert!(config.validate().is_err());
@@ -320,6 +454,7 @@ mod tests {
             default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 100,
             router_threads: 1,
+            ..Default::default()
         };
 
         assert!(config.validate().is_err());
@@ -344,6 +479,7 @@ mod tests {
             default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 100,
             router_threads: 1,
+            ..Default::default()
         };
 
         assert_eq!(config.advertise_address(), "router-1");
@@ -368,6 +504,7 @@ mod tests {
             default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 100,
             router_threads: 1,
+            ..Default::default()
         };
 
         assert!(config.validate().is_err());
@@ -392,6 +529,7 @@ mod tests {
             default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 0,
             router_threads: 1,
+            ..Default::default()
         };
 
         assert!(config.validate().is_err());
@@ -416,6 +554,7 @@ mod tests {
             default_site_redirect_url: "https://spluca.org/".to_string(),
             rps_limit: 100,
             router_threads: 1,
+            ..Default::default()
         };
 
         assert!(config.validate().is_err());
