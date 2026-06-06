@@ -200,8 +200,13 @@ impl ReqwestApiClient {
         Err(map_http_error(status, err_body.error))
     }
 
-    async fn request_no_body(&self, method: reqwest::Method, endpoint: &str) -> CliResult<()> {
-        self.request_no_content_with_timeout(method, endpoint, None::<()>, self.request_timeout)
+    async fn request_no_body(
+        &self,
+        method: reqwest::Method,
+        endpoint: &str,
+        timeout: std::time::Duration,
+    ) -> CliResult<()> {
+        self.request_no_content_with_timeout(method, endpoint, None::<()>, timeout)
             .await
     }
 }
@@ -457,6 +462,7 @@ impl ApiClient for ReqwestApiClient {
         self.request_no_body(
             reqwest::Method::DELETE,
             &format!("apps/{}/volumes/{}/detach", app_id, volume_id),
+            self.delete_timeout,
         )
         .await
     }
@@ -491,8 +497,12 @@ impl ApiClient for ReqwestApiClient {
     }
 
     async fn delete_volume(&self, volume_id: &str) -> CliResult<()> {
-        self.request_no_body(reqwest::Method::DELETE, &format!("volumes/{}", volume_id))
-            .await
+        self.request_no_body(
+            reqwest::Method::DELETE,
+            &format!("volumes/{}", volume_id),
+            self.delete_timeout,
+        )
+        .await
     }
 
     async fn list_databases(&self) -> CliResult<Vec<DatabaseInfo>> {
@@ -506,8 +516,12 @@ impl ApiClient for ReqwestApiClient {
     }
 
     async fn delete_database(&self, db_id: &str) -> CliResult<()> {
-        self.request_no_body(reqwest::Method::DELETE, &format!("databases/{}", db_id))
-            .await
+        self.request_no_body(
+            reqwest::Method::DELETE,
+            &format!("databases/{}", db_id),
+            self.delete_timeout,
+        )
+        .await
     }
 
     async fn get_database_connection_info(&self, db_id: &str) -> CliResult<DatabaseConnectionInfo> {
@@ -531,5 +545,41 @@ impl ApiClient for ReqwestApiClient {
             Some(serde_json::json!({ "name": name })),
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    };
+
+    #[tokio::test]
+    async fn delete_database_uses_delete_timeout_instead_of_request_timeout() {
+        let server = MockServer::start().await;
+        let client = ReqwestApiClient::new(server.uri(), None, None)
+            .expect("client should build")
+            .with_timeouts(
+                std::time::Duration::from_millis(25),
+                std::time::Duration::from_millis(250),
+                std::time::Duration::from_millis(100),
+                std::time::Duration::from_millis(100),
+            );
+
+        Mock::given(method("DELETE"))
+            .and(path("/v1/databases/db-123"))
+            .respond_with(
+                ResponseTemplate::new(204).set_delay(std::time::Duration::from_millis(75)),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        client
+            .delete_database("db-123")
+            .await
+            .expect("delete_database should use the longer delete timeout");
     }
 }
