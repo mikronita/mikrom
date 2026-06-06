@@ -80,7 +80,6 @@ impl BuilderClient for RealBuilderClient {
     )> {
         let resp: GetBuildStatusResponse = self
             .nats
-            .with_timeout(std::time::Duration::from_secs(5))
             .request(
                 "mikrom.builder.get_status",
                 GetBuildStatusRequest {
@@ -127,7 +126,9 @@ impl SchedulerClient for RealSchedulerClient {
         let inner = self
             .state
             .nats
-            .with_timeout(std::time::Duration::from_secs(5))
+            .with_timeout(std::time::Duration::from_secs(
+                self.state.ctx.config.nats_request_timeout_secs.max(1),
+            ))
             .request("mikrom.scheduler.deploy", req)
             .await?;
 
@@ -141,7 +142,9 @@ impl SchedulerClient for RealSchedulerClient {
         let inner = self
             .state
             .nats
-            .with_timeout(std::time::Duration::from_secs(5))
+            .with_timeout(std::time::Duration::from_secs(
+                self.state.ctx.config.nats_request_timeout_secs.max(1),
+            ))
             .request("mikrom.scheduler.delete_app", req)
             .await?;
         Ok(inner)
@@ -154,7 +157,13 @@ impl SchedulerClient for RealSchedulerClient {
         let inner = self
             .state
             .nats
-            .with_timeout(std::time::Duration::from_secs(15))
+            .with_timeout(std::time::Duration::from_secs(
+                self.state
+                    .ctx
+                    .config
+                    .nats_scheduler_long_timeout_secs
+                    .max(1),
+            ))
             .request("mikrom.scheduler.delete_all_by_app", req)
             .await?;
         Ok(inner)
@@ -167,7 +176,9 @@ impl SchedulerClient for RealSchedulerClient {
         let inner = self
             .state
             .nats
-            .with_timeout(std::time::Duration::from_secs(5))
+            .with_timeout(std::time::Duration::from_secs(
+                self.state.ctx.config.nats_request_timeout_secs.max(1),
+            ))
             .request("mikrom.scheduler.pause_app", req)
             .await?;
         Ok(inner)
@@ -180,7 +191,9 @@ impl SchedulerClient for RealSchedulerClient {
         let inner = self
             .state
             .nats
-            .with_timeout(std::time::Duration::from_secs(5))
+            .with_timeout(std::time::Duration::from_secs(
+                self.state.ctx.config.nats_request_timeout_secs.max(1),
+            ))
             .request("mikrom.scheduler.resume_app", req)
             .await?;
         Ok(inner)

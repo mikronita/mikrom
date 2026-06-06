@@ -24,16 +24,18 @@ use tracing::info;
 
 pub struct UpstreamDnsForwarder {
     upstreams: Vec<SocketAddr>,
+    timeout: Duration,
 }
 
 impl UpstreamDnsForwarder {
-    pub async fn connect(upstream_dns: &[SocketAddr]) -> Result<Self> {
+    pub async fn connect(upstream_dns: &[SocketAddr], timeout: Duration) -> Result<Self> {
         for upstream in upstream_dns {
             info!(%upstream, "Configured upstream DNS");
         }
 
         Ok(Self {
             upstreams: upstream_dns.to_vec(),
+            timeout,
         })
     }
 
@@ -80,25 +82,21 @@ impl UpstreamDnsForwarder {
 
     async fn query_via_udp(&self, upstream: SocketAddr, request_bytes: &[u8]) -> Result<Message> {
         let bind_addr = "[::]:0";
-        let socket = timeout(Duration::from_secs(5), UdpSocket::bind(bind_addr))
+        let socket = timeout(self.timeout, UdpSocket::bind(bind_addr))
             .await
             .context("timeout binding UDP socket")?
             .context("failed to bind UDP socket")?;
 
-        timeout(
-            Duration::from_secs(5),
-            socket.send_to(request_bytes, upstream),
-        )
-        .await
-        .context("timeout sending upstream UDP request")?
-        .context("failed to send upstream UDP request")?;
+        timeout(self.timeout, socket.send_to(request_bytes, upstream))
+            .await
+            .context("timeout sending upstream UDP request")?
+            .context("failed to send upstream UDP request")?;
 
         let mut response_buf = vec![0u8; 4096];
-        let (response_len, _) =
-            timeout(Duration::from_secs(5), socket.recv_from(&mut response_buf))
-                .await
-                .context("timeout reading upstream UDP response")?
-                .context("failed to read upstream UDP response")?;
+        let (response_len, _) = timeout(self.timeout, socket.recv_from(&mut response_buf))
+            .await
+            .context("timeout reading upstream UDP response")?
+            .context("failed to read upstream UDP response")?;
 
         response_buf.truncate(response_len);
         let message =
@@ -108,7 +106,7 @@ impl UpstreamDnsForwarder {
     }
 
     async fn query_via_tcp(&self, upstream: SocketAddr, request_bytes: &[u8]) -> Result<Message> {
-        let mut stream = timeout(Duration::from_secs(5), TcpStream::connect(upstream))
+        let mut stream = timeout(self.timeout, TcpStream::connect(upstream))
             .await
             .context("timeout connecting to upstream DNS")?
             .context("failed to connect to upstream DNS")?;
@@ -130,13 +128,13 @@ impl UpstreamDnsForwarder {
             .context("failed to flush upstream request")?;
 
         let mut len_buf = [0u8; 2];
-        timeout(Duration::from_secs(5), stream.read_exact(&mut len_buf))
+        timeout(self.timeout, stream.read_exact(&mut len_buf))
             .await
             .context("timeout reading upstream response length")?
             .context("failed to read upstream response length")?;
         let response_len = usize::from(u16::from_be_bytes(len_buf));
         let mut response_buf = vec![0u8; response_len];
-        timeout(Duration::from_secs(5), stream.read_exact(&mut response_buf))
+        timeout(self.timeout, stream.read_exact(&mut response_buf))
             .await
             .context("timeout reading upstream response body")?
             .context("failed to read upstream response body")?;

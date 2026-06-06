@@ -29,6 +29,9 @@
 |---|---|---|
 | `NATS_URL` | `nats://localhost:4222` | NATS server URL |
 | `UPSTREAM_DNS` | `2606:4700:4700::1111,2001:4860:4860::8888` | Ordered upstream resolver list |
+| `UPSTREAM_DNS_TIMEOUT_SECS` | `5` | Timeout used for bind/send/receive/connect against upstream resolvers |
+| `NATS_CONNECT_TIMEOUT_SECS` | `5` | Timeout for the initial NATS connection in the subscriber |
+| `NATS_BACKOFF_MAX_SECS` | `30` | Maximum backoff between NATS reconnect attempts |
 | `NATS_SYS_IP` | - | Optional IPv6 address for the system zone |
 | `NAT64_PREFIX` | `64:ff9b::` | NAT64 prefix used to synthesize external AAAA records |
 | `ENABLE_TELEMETRY` | `true` | Enable OTLP export |

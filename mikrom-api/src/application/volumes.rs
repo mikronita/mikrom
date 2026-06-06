@@ -74,8 +74,8 @@ fn has_duplicate_mount_point_for_volume(
         .any(|volume| volume.volume.id != volume_id && volume.mount_point == mount_point)
 }
 
-fn storage_nats_timeout() -> Duration {
-    Duration::from_secs(30)
+fn storage_nats_timeout(state: &crate::AppState) -> Duration {
+    Duration::from_secs(state.ctx.config.nats_storage_timeout_secs.max(1))
 }
 
 #[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
@@ -126,7 +126,7 @@ pub async fn create_volume_handler(
 
     let resp: mikrom_proto::scheduler::CreateVolumeResponse = state
         .nats
-        .with_timeout(storage_nats_timeout())
+        .with_timeout(storage_nats_timeout(&state))
         .request("mikrom.scheduler.create_volume", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;
@@ -385,7 +385,7 @@ pub async fn create_snapshot_handler(
 
     let resp: mikrom_proto::scheduler::CreateSnapshotResponse = state
         .nats
-        .with_timeout(storage_nats_timeout())
+        .with_timeout(storage_nats_timeout(&state))
         .request("mikrom.scheduler.create_snapshot", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;
@@ -458,7 +458,7 @@ pub async fn delete_volume_handler(
 
     let resp: mikrom_proto::scheduler::DeleteVolumeResponse = state
         .nats
-        .with_timeout(storage_nats_timeout())
+        .with_timeout(storage_nats_timeout(&state))
         .request("mikrom.scheduler.delete_volume", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;
@@ -518,7 +518,7 @@ pub async fn delete_snapshot_handler(
 
     let resp: mikrom_proto::scheduler::DeleteSnapshotResponse = state
         .nats
-        .with_timeout(storage_nats_timeout())
+        .with_timeout(storage_nats_timeout(&state))
         .request("mikrom.scheduler.delete_snapshot", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;
@@ -572,7 +572,7 @@ pub async fn restore_snapshot_handler(
 
     let resp: mikrom_proto::scheduler::RestoreSnapshotResponse = state
         .nats
-        .with_timeout(storage_nats_timeout())
+        .with_timeout(storage_nats_timeout(&state))
         .request("mikrom.scheduler.restore_snapshot", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;
@@ -629,7 +629,7 @@ pub async fn clone_volume_handler(
 
     let resp: mikrom_proto::scheduler::CloneVolumeResponse = state
         .nats
-        .with_timeout(storage_nats_timeout())
+        .with_timeout(storage_nats_timeout(&state))
         .request("mikrom.scheduler.clone_volume", nats_req)
         .await
         .map_err(|e| ApiError::Scheduler(e.to_string()))?;

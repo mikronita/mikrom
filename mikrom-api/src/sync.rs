@@ -39,7 +39,7 @@ pub async fn start_ip_sync_task(state: AppState) {
 
                     if let Ok(inner) = state
                         .nats
-                        .with_timeout(Duration::from_secs(2))
+                        .with_timeout(state.nats_request_timeout())
                         .request::<_, AppStatusResponse>(
                             mikrom_proto::subjects::SCHEDULER_GET_JOB,
                             nats_req,

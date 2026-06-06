@@ -50,6 +50,22 @@ impl CloudHypervisorManager {
         }
     }
 
+    fn ch_connect_timeout(&self) -> Duration {
+        self.config.cloud_hypervisor_api_connect_timeout()
+    }
+
+    fn ch_status_timeout(&self) -> Duration {
+        self.config.cloud_hypervisor_api_status_timeout()
+    }
+
+    fn ch_header_timeout(&self) -> Duration {
+        self.config.cloud_hypervisor_api_header_timeout()
+    }
+
+    fn ch_body_timeout(&self) -> Duration {
+        self.config.cloud_hypervisor_api_body_timeout()
+    }
+
     fn build_boot_args(&self, config: &VmConfig) -> String {
         KernelBootArgsBuilder::cloud_hypervisor(config).build()
     }
@@ -251,7 +267,7 @@ impl CloudHypervisorManager {
         let url = Self::build_database_configure_url(ipv6);
         let spec = self.build_database_configure_spec(vm_id, config)?;
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
+            .timeout(self.config.cloud_hypervisor_configure_client_timeout())
             .build()
             .map_err(|e| {
                 HypervisorError::ProcessError(format!("Failed to build configure client: {e}"))
@@ -268,7 +284,12 @@ impl CloudHypervisorManager {
                 request = request.bearer_auth(token);
             }
 
-            match tokio::time::timeout(Duration::from_secs(6), request.send()).await {
+            match tokio::time::timeout(
+                self.config.cloud_hypervisor_configure_request_timeout(),
+                request.send(),
+            )
+            .await
+            {
                 Ok(Ok(resp)) if resp.status().is_success() => {
                     tracing::info!(
                         vm_id = %vm_id,
@@ -324,7 +345,10 @@ impl CloudHypervisorManager {
                 tokio::time::sleep(delay).await;
             }
 
-            delay = std::cmp::min(delay.saturating_mul(2), Duration::from_secs(5));
+            delay = std::cmp::min(
+                delay.saturating_mul(2),
+                self.config.cloud_hypervisor_configure_backoff_max(),
+            );
             attempt += 1;
         }
 
@@ -482,7 +506,11 @@ impl CloudHypervisorManager {
         proc.sidecars = sidecars;
 
         // 4. Wait for API socket
-        wait_for_socket(&socket_str, std::time::Duration::from_secs(10)).await?;
+        wait_for_socket(
+            &socket_str,
+            self.config.cloud_hypervisor_socket_wait_timeout(),
+        )
+        .await?;
 
         // 5. Assemble CH VmConfig
         let mut ch_vm_config = ch_config::VmConfig {
@@ -534,13 +562,34 @@ impl CloudHypervisorManager {
         })?;
 
         // 6. Send vm.create
-        match ch_request("PUT", &socket_str, "/api/v1/vm.create", Some(&body)).await {
+        match ch_request(
+            "PUT",
+            &socket_str,
+            "/api/v1/vm.create",
+            Some(&body),
+            self.ch_connect_timeout(),
+            self.ch_status_timeout(),
+            self.ch_header_timeout(),
+            self.ch_body_timeout(),
+        )
+        .await
+        {
             Ok(_) => tracing::info!(vm_id = %vm_id, "Cloud Hypervisor VM created successfully"),
             Err(e) => {
                 // If it timed out, verify if it was actually created
                 if e.to_string().contains("timeout") {
                     tracing::warn!(vm_id = %vm_id, "vm.create timed out, verifying current state...");
-                    let info = ch_request("GET", &socket_str, "/api/v1/vm.info", None).await?;
+                    let info = ch_request(
+                        "GET",
+                        &socket_str,
+                        "/api/v1/vm.info",
+                        None,
+                        self.ch_connect_timeout(),
+                        self.ch_status_timeout(),
+                        self.ch_header_timeout(),
+                        self.ch_body_timeout(),
+                    )
+                    .await?;
                     if info.contains("\"Created\"") || info.contains("\"Running\"") {
                         tracing::info!(vm_id = %vm_id, "Verified VM exists despite timeout");
                     } else {
@@ -553,12 +602,33 @@ impl CloudHypervisorManager {
         }
 
         // 7. Send vm.boot
-        match ch_request("PUT", &socket_str, "/api/v1/vm.boot", None).await {
+        match ch_request(
+            "PUT",
+            &socket_str,
+            "/api/v1/vm.boot",
+            None,
+            self.ch_connect_timeout(),
+            self.ch_status_timeout(),
+            self.ch_header_timeout(),
+            self.ch_body_timeout(),
+        )
+        .await
+        {
             Ok(_) => tracing::info!(vm_id = %vm_id, "Cloud Hypervisor VM booted successfully"),
             Err(e) => {
                 if e.to_string().contains("timeout") {
                     tracing::warn!(vm_id = %vm_id, "vm.boot timed out, verifying current state...");
-                    let info = ch_request("GET", &socket_str, "/api/v1/vm.info", None).await?;
+                    let info = ch_request(
+                        "GET",
+                        &socket_str,
+                        "/api/v1/vm.info",
+                        None,
+                        self.ch_connect_timeout(),
+                        self.ch_status_timeout(),
+                        self.ch_header_timeout(),
+                        self.ch_body_timeout(),
+                    )
+                    .await?;
                     if info.contains("\"Running\"") {
                         tracing::info!(vm_id = %vm_id, "Verified VM is Running despite boot timeout");
                     } else {
@@ -776,7 +846,17 @@ impl VmHypervisor for CloudHypervisorManager {
 
             // 1. Try graceful shutdown via ACPI power button
             tracing::info!(vm_id = %vm_id, "Attempting graceful shutdown via power button...");
-            let _ = ch_request("PUT", &socket_str, "/api/v1/vm.power-button", None).await;
+            let _ = ch_request(
+                "PUT",
+                &socket_str,
+                "/api/v1/vm.power-button",
+                None,
+                self.ch_connect_timeout(),
+                self.ch_status_timeout(),
+                self.ch_header_timeout(),
+                self.ch_body_timeout(),
+            )
+            .await;
 
             // 2. Wait for exit
             let mut exited = false;
@@ -830,6 +910,10 @@ impl VmHypervisor for CloudHypervisorManager {
                 &socket_path.to_string_lossy(),
                 "/api/v1/vm.power-button",
                 None,
+                self.ch_connect_timeout(),
+                self.ch_status_timeout(),
+                self.ch_header_timeout(),
+                self.ch_body_timeout(),
             )
             .await;
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -838,6 +922,10 @@ impl VmHypervisor for CloudHypervisorManager {
                 &socket_path.to_string_lossy(),
                 "/api/v1/vm.shutdown",
                 None,
+                self.ch_connect_timeout(),
+                self.ch_status_timeout(),
+                self.ch_header_timeout(),
+                self.ch_body_timeout(),
             )
             .await;
         }
@@ -886,7 +974,18 @@ impl VmHypervisor for CloudHypervisorManager {
         let socket_path = self.get_vm_paths(vm_id).0;
         let socket_str = socket_path.to_string_lossy().to_string();
 
-        if let Ok(resp_body) = ch_request("GET", &socket_str, "/api/v1/vm.info", None).await {
+        if let Ok(resp_body) = ch_request(
+            "GET",
+            &socket_str,
+            "/api/v1/vm.info",
+            None,
+            self.ch_connect_timeout(),
+            self.ch_status_timeout(),
+            self.ch_header_timeout(),
+            self.ch_body_timeout(),
+        )
+        .await
+        {
             match serde_json::from_str::<ch_config::VmInfoResponse>(&resp_body) {
                 Ok(ch_info) => {
                     info.status = match ch_info.state.as_str() {
@@ -921,7 +1020,18 @@ impl VmHypervisor for CloudHypervisorManager {
                 let socket_path = self.get_vm_paths(vm_id).0;
                 let socket_str = socket_path.to_string_lossy().to_string();
                 let raw_metrics = if info.status == VmStatus::Running {
-                    match ch_request("GET", &socket_str, "/api/v1/vm.counters", None).await {
+                    match ch_request(
+                        "GET",
+                        &socket_str,
+                        "/api/v1/vm.counters",
+                        None,
+                        self.ch_connect_timeout(),
+                        self.ch_status_timeout(),
+                        self.ch_header_timeout(),
+                        self.ch_body_timeout(),
+                    )
+                    .await
+                    {
                         Ok(resp) => serde_json::from_str(&resp).ok(),
                         Err(_) => None,
                     }

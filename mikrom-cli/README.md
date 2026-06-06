@@ -31,6 +31,13 @@ cargo install --path mikrom-cli
 - Configuration is stored under `~/.config/mikrom/config.toml`.
 - The CLI is validated through the workspace Dagger profiles as well as its own Rust tests.
 
+Timeout tuning:
+
+- `MIKROM_REQUEST_TIMEOUT_SECS` default `30`
+- `MIKROM_DELETE_TIMEOUT_SECS` default `120`
+- `MIKROM_RESTORE_TIMEOUT_SECS` default `60`
+- `MIKROM_LONG_TIMEOUT_SECS` default `30`
+
 ## Development
 
 ```bash

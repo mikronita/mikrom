@@ -149,6 +149,7 @@ async fn proxy_listener_accepts_ipv4_and_ipv6() {
         metrics,
         None,
         100,
+        mikrom_router::application::proxy::RouterTimeouts::default(),
     );
     spawn_proxy_server(use_ipv6, proxy_port, proxy);
 

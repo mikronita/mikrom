@@ -1,4 +1,4 @@
-use crate::firecracker::api::fc_put;
+use crate::firecracker::api::fc_put_with_timeouts;
 use crate::firecracker::guard::VmStartupGuard;
 use crate::hypervisor::{HypervisorError, KernelBootArgsBuilder, VmConfig};
 use std::time::Duration;
@@ -12,7 +12,16 @@ impl crate::firecracker::FirecrackerManager {
         path: &str,
         payload: serde_json::Value,
     ) -> Result<(), HypervisorError> {
-        fc_put(socket, path, &payload.to_string()).await
+        fc_put_with_timeouts(
+            socket,
+            path,
+            &payload.to_string(),
+            self.fc_config.api_connect_timeout(),
+            self.fc_config.api_status_timeout(),
+            self.fc_config.api_header_timeout(),
+            self.fc_config.api_body_timeout(),
+        )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]

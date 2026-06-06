@@ -169,9 +169,9 @@ impl crate::firecracker::FirecrackerManager {
         startup: &crate::firecracker::manager::StartupContext,
     ) -> Result<(), HypervisorError> {
         let wait_timeout = if startup.chroot_dir.is_some() {
-            std::time::Duration::from_secs(10)
+            self.fc_config.socket_wait_timeout_chroot()
         } else {
-            std::time::Duration::from_secs(5)
+            self.fc_config.socket_wait_timeout_plain()
         };
 
         crate::firecracker::api::wait_for_socket(&startup.active_socket_path, wait_timeout).await?;

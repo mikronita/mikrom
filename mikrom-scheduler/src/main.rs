@@ -46,7 +46,10 @@ async fn main() -> anyhow::Result<()> {
     let job_repo = Arc::new(PgJobRepository::new(pool.clone()));
     let app_repo = Arc::new(PgAppRepository::new(pool.clone()));
     let worker_repo = Arc::new(PgWorkerRepository::new(pool.clone()));
-    let agent_client = Arc::new(NatsAgentClient::new(nats_client.clone()));
+    let agent_client = Arc::new(NatsAgentClient::new(
+        nats_client.clone(),
+        Duration::from_secs(config.agent_request_timeout_secs.max(1)),
+    ));
 
     let runtime = SchedulerRuntimeConfig {
         router_idle_timeout_secs: config.router_idle_timeout_secs,

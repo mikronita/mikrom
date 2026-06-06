@@ -47,6 +47,12 @@ pub struct ApiConfig {
     #[serde(default = "default_nats_request_timeout_secs")]
     pub nats_request_timeout_secs: u64,
 
+    #[serde(default = "default_nats_scheduler_long_timeout_secs")]
+    pub nats_scheduler_long_timeout_secs: u64,
+
+    #[serde(default = "default_nats_scheduler_database_timeout_secs")]
+    pub nats_scheduler_database_timeout_secs: u64,
+
     #[serde(default = "default_nats_storage_timeout_secs")]
     pub nats_storage_timeout_secs: u64,
 
@@ -121,6 +127,8 @@ impl Default for ApiConfig {
             rate_limit_cleanup_interval_secs: default_rate_limit_cleanup_interval_secs(),
             rate_limit_trust_proxy_headers: default_rate_limit_trust_proxy_headers(),
             nats_request_timeout_secs: default_nats_request_timeout_secs(),
+            nats_scheduler_long_timeout_secs: default_nats_scheduler_long_timeout_secs(),
+            nats_scheduler_database_timeout_secs: default_nats_scheduler_database_timeout_secs(),
             nats_storage_timeout_secs: default_nats_storage_timeout_secs(),
             acme_email: default_acme_email(),
             acme_staging: default_acme_staging(),
@@ -202,6 +210,14 @@ fn default_nats_request_timeout_secs() -> u64 {
     5
 }
 
+fn default_nats_scheduler_long_timeout_secs() -> u64 {
+    15
+}
+
+fn default_nats_scheduler_database_timeout_secs() -> u64 {
+    10
+}
+
 fn default_nats_storage_timeout_secs() -> u64 {
     30
 }
@@ -235,5 +251,47 @@ mod tests {
         let config = ApiConfig::default();
         assert!(!config.acme_staging);
         assert_eq!(config.router_tls_hostname, "debaser.spluca.org");
+    }
+
+    #[test]
+    fn defaults_nats_timeouts_to_expected_values() {
+        let config = ApiConfig::default();
+        assert_eq!(config.nats_request_timeout_secs, 5);
+        assert_eq!(config.nats_scheduler_long_timeout_secs, 15);
+        assert_eq!(config.nats_scheduler_database_timeout_secs, 10);
+        assert_eq!(config.nats_storage_timeout_secs, 30);
+    }
+
+    #[test]
+    fn loads_nats_timeouts_from_env() {
+        let config: ApiConfig = envy::from_iter(vec![
+            (
+                "DATABASE_URL".to_string(),
+                "postgres://[::1]/mikrom".to_string(),
+            ),
+            ("NATS_URL".to_string(), "nats://[::1]:4222".to_string()),
+            ("JWT_SECRET".to_string(), "x".repeat(32)),
+            ("MASTER_KEY".to_string(), "y".repeat(32)),
+            (
+                "ROUTER_TLS_HOSTNAME".to_string(),
+                "router.example.com".to_string(),
+            ),
+            ("NATS_REQUEST_TIMEOUT_SECS".to_string(), "7".to_string()),
+            (
+                "NATS_SCHEDULER_LONG_TIMEOUT_SECS".to_string(),
+                "19".to_string(),
+            ),
+            (
+                "NATS_SCHEDULER_DATABASE_TIMEOUT_SECS".to_string(),
+                "11".to_string(),
+            ),
+            ("NATS_STORAGE_TIMEOUT_SECS".to_string(), "31".to_string()),
+        ])
+        .expect("config should deserialize");
+
+        assert_eq!(config.nats_request_timeout_secs, 7);
+        assert_eq!(config.nats_scheduler_long_timeout_secs, 19);
+        assert_eq!(config.nats_scheduler_database_timeout_secs, 11);
+        assert_eq!(config.nats_storage_timeout_secs, 31);
     }
 }

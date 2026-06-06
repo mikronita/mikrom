@@ -8,6 +8,9 @@ pub struct DnsConfig {
     pub allowed_subnets: Vec<ipnet::IpNet>,
     pub sys_records: Vec<(String, Ipv6Addr)>,
     pub nat64_prefix: Ipv6Addr,
+    pub upstream_timeout_secs: u64,
+    pub nats_connect_timeout_secs: u64,
+    pub nats_backoff_max_secs: u64,
 }
 
 impl DnsConfig {
@@ -53,6 +56,21 @@ impl DnsConfig {
             .and_then(|value| parse_nat64_prefix(&value))
             .unwrap_or_else(default_nat64_prefix);
 
+        let upstream_timeout_secs = std::env::var("UPSTREAM_DNS_TIMEOUT_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(5);
+
+        let nats_connect_timeout_secs = std::env::var("NATS_CONNECT_TIMEOUT_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(5);
+
+        let nats_backoff_max_secs = std::env::var("NATS_BACKOFF_MAX_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(30);
+
         let listen_addr = "[::]:53"
             .parse()
             .context("Error parsing DNS listen address")?;
@@ -63,7 +81,25 @@ impl DnsConfig {
             allowed_subnets,
             sys_records,
             nat64_prefix,
+            upstream_timeout_secs,
+            nats_connect_timeout_secs,
+            nats_backoff_max_secs,
         })
+    }
+
+    #[must_use]
+    pub fn upstream_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.upstream_timeout_secs.max(1))
+    }
+
+    #[must_use]
+    pub fn nats_connect_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.nats_connect_timeout_secs.max(1))
+    }
+
+    #[must_use]
+    pub fn nats_backoff_max(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.nats_backoff_max_secs.max(1))
     }
 }
 

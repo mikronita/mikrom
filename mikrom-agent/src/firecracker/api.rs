@@ -5,15 +5,20 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 const MAX_RESPONSE_BODY_BYTES: usize = 10 * 1024 * 1024;
 
 /// Send a request to the Firecracker API socket and return Ok on 2xx.
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all, fields(method = %method, api_path = %api_path))]
 pub async fn fc_request(
     method: &str,
     socket_path: &str,
     api_path: &str,
     body: &str,
+    connect_timeout: Duration,
+    status_timeout: Duration,
+    header_timeout: Duration,
+    body_timeout: Duration,
 ) -> Result<(), HypervisorError> {
     let stream_fut = tokio::net::UnixStream::connect(socket_path);
-    let stream = tokio::time::timeout(Duration::from_secs(2), stream_fut)
+    let stream = tokio::time::timeout(connect_timeout, stream_fut)
         .await
         .map_err(|_| HypervisorError::ApiError {
             path: api_path.to_string(),
@@ -40,19 +45,29 @@ pub async fn fc_request(
         })?;
 
     let mut reader = BufReader::new(reader);
-    read_firecracker_response(&mut reader, api_path).await
+    read_firecracker_response(
+        &mut reader,
+        api_path,
+        status_timeout,
+        header_timeout,
+        body_timeout,
+    )
+    .await
 }
 
 async fn read_firecracker_response<R>(
     reader: &mut BufReader<R>,
     api_path: &str,
+    status_timeout: Duration,
+    header_timeout: Duration,
+    body_timeout: Duration,
 ) -> Result<(), HypervisorError>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
     let mut status_line = String::new();
 
-    tokio::time::timeout(Duration::from_secs(2), reader.read_line(&mut status_line))
+    tokio::time::timeout(status_timeout, reader.read_line(&mut status_line))
         .await
         .map_err(|_| HypervisorError::ApiError {
             path: api_path.to_string(),
@@ -67,7 +82,7 @@ where
 
     loop {
         let mut header_line = String::new();
-        tokio::time::timeout(Duration::from_secs(2), reader.read_line(&mut header_line))
+        tokio::time::timeout(header_timeout, reader.read_line(&mut header_line))
             .await
             .map_err(|_| HypervisorError::ApiError {
                 path: api_path.to_string(),
@@ -109,35 +124,29 @@ where
                 });
             }
             response_body.resize(len, 0);
-            tokio::time::timeout(
-                Duration::from_secs(2),
-                reader.read_exact(&mut response_body),
-            )
-            .await
-            .map_err(|_| HypervisorError::ApiError {
-                path: api_path.to_string(),
-                msg: "body read timeout".to_string(),
-            })?
-            .map_err(|e| HypervisorError::ApiError {
-                path: api_path.to_string(),
-                msg: format!("body read: {e}"),
-            })?;
+            tokio::time::timeout(body_timeout, reader.read_exact(&mut response_body))
+                .await
+                .map_err(|_| HypervisorError::ApiError {
+                    path: api_path.to_string(),
+                    msg: "body read timeout".to_string(),
+                })?
+                .map_err(|e| HypervisorError::ApiError {
+                    path: api_path.to_string(),
+                    msg: format!("body read: {e}"),
+                })?;
         },
         None => {
             let mut limited_reader = reader.take(MAX_RESPONSE_BODY_BYTES as u64 + 1);
-            tokio::time::timeout(
-                Duration::from_secs(2),
-                limited_reader.read_to_end(&mut response_body),
-            )
-            .await
-            .map_err(|_| HypervisorError::ApiError {
-                path: api_path.to_string(),
-                msg: "body read timeout".to_string(),
-            })?
-            .map_err(|e| HypervisorError::ApiError {
-                path: api_path.to_string(),
-                msg: format!("body read: {e}"),
-            })?;
+            tokio::time::timeout(body_timeout, limited_reader.read_to_end(&mut response_body))
+                .await
+                .map_err(|_| HypervisorError::ApiError {
+                    path: api_path.to_string(),
+                    msg: "body read timeout".to_string(),
+                })?
+                .map_err(|e| HypervisorError::ApiError {
+                    path: api_path.to_string(),
+                    msg: format!("body read: {e}"),
+                })?;
 
             if response_body.len() > MAX_RESPONSE_BODY_BYTES {
                 return Err(HypervisorError::ApiError {
@@ -167,7 +176,16 @@ where
 /// Send a PUT request to the Firecracker API socket and return Ok on 2xx.
 #[tracing::instrument(skip_all, fields(api_path = %api_path))]
 pub async fn fc_put(socket_path: &str, api_path: &str, body: &str) -> Result<(), HypervisorError> {
-    fc_request("PUT", socket_path, api_path, body).await
+    fc_put_with_timeouts(
+        socket_path,
+        api_path,
+        body,
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+    )
+    .await
 }
 
 /// Send a PATCH request to the Firecracker API socket and return Ok on 2xx.
@@ -177,7 +195,60 @@ pub async fn fc_patch(
     api_path: &str,
     body: &str,
 ) -> Result<(), HypervisorError> {
-    fc_request("PATCH", socket_path, api_path, body).await
+    fc_patch_with_timeouts(
+        socket_path,
+        api_path,
+        body,
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+    )
+    .await
+}
+
+pub async fn fc_put_with_timeouts(
+    socket_path: &str,
+    api_path: &str,
+    body: &str,
+    connect_timeout: Duration,
+    status_timeout: Duration,
+    header_timeout: Duration,
+    body_timeout: Duration,
+) -> Result<(), HypervisorError> {
+    fc_request(
+        "PUT",
+        socket_path,
+        api_path,
+        body,
+        connect_timeout,
+        status_timeout,
+        header_timeout,
+        body_timeout,
+    )
+    .await
+}
+
+pub async fn fc_patch_with_timeouts(
+    socket_path: &str,
+    api_path: &str,
+    body: &str,
+    connect_timeout: Duration,
+    status_timeout: Duration,
+    header_timeout: Duration,
+    body_timeout: Duration,
+) -> Result<(), HypervisorError> {
+    fc_request(
+        "PATCH",
+        socket_path,
+        api_path,
+        body,
+        connect_timeout,
+        status_timeout,
+        header_timeout,
+        body_timeout,
+    )
+    .await
 }
 
 /// Poll until the Unix socket file appears (Firecracker is ready to accept API calls).
@@ -208,7 +279,14 @@ mod tests {
         });
 
         let mut reader = BufReader::new(client);
-        let result = read_firecracker_response(&mut reader, "/actions").await;
+        let result = read_firecracker_response(
+            &mut reader,
+            "/actions",
+            Duration::from_secs(2),
+            Duration::from_secs(2),
+            Duration::from_secs(2),
+        )
+        .await;
         let _ = response_writer.await;
         assert!(result.is_ok(), "{result:?}");
     }
@@ -222,7 +300,14 @@ mod tests {
         });
 
         let mut reader = BufReader::new(client);
-        let result = read_firecracker_response(&mut reader, "/actions").await;
+        let result = read_firecracker_response(
+            &mut reader,
+            "/actions",
+            Duration::from_secs(2),
+            Duration::from_secs(2),
+            Duration::from_secs(2),
+        )
+        .await;
         let _ = response_writer.await;
 
         let err = result.expect_err("expected api error");

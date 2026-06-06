@@ -29,6 +29,32 @@
 - The agent starts a singleton NAT64 translator on the host bridge and expects `mikrom-dns` to provide DNS64 answers for external names.
 - Build output for the eBPF program is consumed from `target/bpfel-unknown-none/release/mikrom-agent-ebpf`.
 
+### Timeout configuration
+
+The agent now exposes runtime-configurable timeouts for NATS, Firecracker, and Cloud Hypervisor operations:
+
+- `AGENT_NATS_CONNECT_TIMEOUT_SECS` default `5`
+- `AGENT_NATS_MAX_BACKOFF_SECS` default `60`
+- `AGENT_NATS_CIRCUIT_BREAKER_COOLDOWN_SECS` default `300`
+- `AGENT_CLOUD_HYPERVISOR_SOCKET_WAIT_TIMEOUT_SECS` default `10`
+- `AGENT_CLOUD_HYPERVISOR_API_CONNECT_TIMEOUT_SECS` default `5`
+- `AGENT_CLOUD_HYPERVISOR_API_STATUS_TIMEOUT_SECS` default `30`
+- `AGENT_CLOUD_HYPERVISOR_API_HEADER_TIMEOUT_SECS` default `10`
+- `AGENT_CLOUD_HYPERVISOR_API_BODY_TIMEOUT_SECS` default `60`
+- `AGENT_CLOUD_HYPERVISOR_CONFIGURE_CLIENT_TIMEOUT_SECS` default `5`
+- `AGENT_CLOUD_HYPERVISOR_CONFIGURE_REQUEST_TIMEOUT_SECS` default `6`
+- `AGENT_CLOUD_HYPERVISOR_CONFIGURE_BACKOFF_MAX_SECS` default `5`
+- `FC_SOCKET_WAIT_TIMEOUT_SECS` default `120`
+- `FC_SOCKET_WAIT_CHROOT_SECS` default `10`
+- `FC_API_CONNECT_TIMEOUT_SECS` default `2`
+- `FC_API_STATUS_TIMEOUT_SECS` default `30`
+- `FC_API_HEADER_TIMEOUT_SECS` default `10`
+- `FC_API_BODY_TIMEOUT_SECS` default `60`
+- `FC_PROCESS_TERMINATE_TIMEOUT_SECS` default `10`
+- `FC_PROCESS_KILL_TIMEOUT_SECS` default `2`
+- `FC_VFS_TERMINATE_TIMEOUT_SECS` default `5`
+- `FC_VFS_KILL_TIMEOUT_SECS` default `2`
+
 ## Local Development
 
 ```bash

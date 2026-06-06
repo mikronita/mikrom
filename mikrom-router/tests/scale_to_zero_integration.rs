@@ -29,6 +29,7 @@ use prost::Message;
 use rustls::crypto::ring::default_provider;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tower::util::ServiceExt;
 #[path = "support/scale_to_zero.rs"]
 mod scale_to_zero_support;
@@ -253,9 +254,11 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         database_repo: Arc::new(MockDatabaseRepository::new()),
         volume_repo: Arc::new(MockVolumeRepository::new()),
         github_repo: Arc::new(MockGithubRepository::default()),
-        scheduler: Arc::new(NatsScheduler::new(mikrom_api::nats::TypedNatsClient::new(
-            nats_client.clone(),
-        ))),
+        scheduler: Arc::new(NatsScheduler::new(
+            mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
+            Duration::from_secs(15),
+            Duration::from_secs(10),
+        )),
         nats: mikrom_api::nats::TypedNatsClient::new(nats_client.clone()),
         router_addr: env.proxy_url.clone(),
         frontend_url: "http://localhost:3000".to_string(),

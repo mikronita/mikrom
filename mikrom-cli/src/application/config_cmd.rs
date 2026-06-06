@@ -115,6 +115,7 @@ mod tests {
             api_url: Some("http://localhost:5001".to_string()),
             token: Some("tok".to_string()),
             active_tenant_id: None,
+            ..Default::default()
         };
         let result = show(&cfg, OutputFormat::Json);
         assert!(result.is_ok());

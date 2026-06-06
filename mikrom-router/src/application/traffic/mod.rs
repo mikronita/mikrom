@@ -56,6 +56,7 @@ pub struct RouterTrafficLoop {
     nats_use_tls: bool,
     nats_certs_dir: Option<String>,
     rx: Arc<Mutex<Option<mpsc::Receiver<RouterTrafficEvent>>>>,
+    startup_connect_timeout: std::time::Duration,
 }
 
 impl RouterTrafficLoop {
@@ -65,12 +66,14 @@ impl RouterTrafficLoop {
         nats_use_tls: bool,
         nats_certs_dir: Option<String>,
         rx: mpsc::Receiver<RouterTrafficEvent>,
+        startup_connect_timeout: std::time::Duration,
     ) -> Self {
         Self {
             nats_url,
             nats_use_tls,
             nats_certs_dir,
             rx: Arc::new(Mutex::new(Some(rx))),
+            startup_connect_timeout,
         }
     }
 }
@@ -82,7 +85,7 @@ impl BackgroundService for RouterTrafficLoop {
 
         let nats = runtime::connect_with_backoff(
             "Router traffic loop NATS",
-            std::time::Duration::from_secs(5),
+            self.startup_connect_timeout,
             || async {
                 crate::infrastructure::nats::connect_nats(
                     self.nats_url.as_str(),

@@ -49,6 +49,17 @@ Common variables:
 - `RPS_LIMIT`
 - `ROUTER_THREADS`
 
+Timeout tuning:
+
+- `STARTUP_CONNECT_TIMEOUT_SECS` default `5`
+- `DOWNSTREAM_REQUEST_TIMEOUT_SECS` default `10`
+- `DOWNSTREAM_RESPONSE_TIMEOUT_SECS` default `30`
+- `UPSTREAM_CONNECT_TIMEOUT_SECS` default `5`
+- `UPSTREAM_READ_TIMEOUT_SECS` default `30`
+- `UPSTREAM_WRITE_TIMEOUT_SECS` default `30`
+- `UPSTREAM_IDLE_TIMEOUT_SECS` default `60`
+- `ROUTE_WAIT_TIMEOUT_SECS` default `30`
+
 The packaged default configuration redirects `debaser.spluca.org` to `https://spluca.org/` with a temporary redirect. For that to work over TLS, the API-side ACME flow must issue a Let's Encrypt production certificate for `debaser.spluca.org` and the router must load it from `tls_certificates`.
 
 ## Health Endpoints

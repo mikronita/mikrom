@@ -232,7 +232,7 @@ pub async fn list_active_deployments(
 
     let scheduler_res: anyhow::Result<ListAppsResponse> = state
         .nats
-        .with_timeout(std::time::Duration::from_secs(2))
+        .with_timeout(state.nats_request_timeout())
         .request("mikrom.scheduler.list_apps", nats_req)
         .await;
 
@@ -333,7 +333,7 @@ pub async fn watch_deployments(
 
         let scheduler_apps = state_clone
             .nats
-            .with_timeout(std::time::Duration::from_secs(2))
+            .with_timeout(state_clone.nats_request_timeout())
             .request::<ListAppsRequest, ListAppsResponse>(
                     "mikrom.scheduler.list_apps",
                     ListAppsRequest {
@@ -477,12 +477,12 @@ pub async fn watch_deployments(
 
                     use mikrom_proto::scheduler::{ListAppsRequest, ListAppsResponse};
 
-                    let scheduler_res = state_clone
-                        .nats
-                        .with_timeout(std::time::Duration::from_secs(2))
-                        .request::<ListAppsRequest, ListAppsResponse>(
-                            "mikrom.scheduler.list_apps",
-                            ListAppsRequest {
+    let scheduler_res = state_clone
+        .nats
+        .with_timeout(state_clone.nats_request_timeout())
+        .request::<ListAppsRequest, ListAppsResponse>(
+            "mikrom.scheduler.list_apps",
+            ListAppsRequest {
                                 tenant_id: tenant_id.clone(),
                                 status: None,
                             },

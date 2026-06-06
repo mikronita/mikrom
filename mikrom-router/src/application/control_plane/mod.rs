@@ -78,6 +78,7 @@ pub struct ControlPlane {
     data_dir: String,
     wg_manager: Arc<mikrom_network::WireGuardManager>,
     wg_port: u16,
+    startup_connect_timeout: Duration,
 }
 
 impl ControlPlane {
@@ -94,6 +95,7 @@ impl ControlPlane {
         advertise_address: String,
         data_dir: String,
         wg_port: u16,
+        startup_connect_timeout: Duration,
     ) -> Self {
         Self {
             db_url,
@@ -110,6 +112,7 @@ impl ControlPlane {
                 mikrom_network::WireGuardManager::new("wg-mikrom").with_listen_port(wg_port),
             ),
             wg_port,
+            startup_connect_timeout,
         }
     }
 
@@ -220,8 +223,10 @@ impl BackgroundService for ControlPlane {
     async fn start(&self, mut _shutdown: ShutdownWatch) {
         info!("Control Plane: Starting...");
 
-        let db =
-            runtime::connect_with_backoff("Control Plane DB", Duration::from_secs(5), || async {
+        let db = runtime::connect_with_backoff(
+            "Control Plane DB",
+            self.startup_connect_timeout,
+            || async {
                 let pool = PgPool::connect(self.db_url.as_str())
                     .await
                     .with_context(|| {
@@ -232,20 +237,24 @@ impl BackgroundService for ControlPlane {
                     .await
                     .context("Database migration failed")?;
                 Ok(pool)
-            })
-            .await;
+            },
+        )
+        .await;
         info!("Control Plane: Connected to database and migrated.");
 
-        let nats =
-            runtime::connect_with_backoff("Control Plane NATS", Duration::from_secs(5), || async {
+        let nats = runtime::connect_with_backoff(
+            "Control Plane NATS",
+            self.startup_connect_timeout,
+            || async {
                 crate::infrastructure::nats::connect_nats(
                     self.nats_url.as_str(),
                     self.nats_use_tls,
                     self.nats_certs_dir.as_deref(),
                 )
                 .await
-            })
-            .await;
+            },
+        )
+        .await;
         info!("Control Plane: Connected to NATS.");
 
         // Initialize WireGuard.
@@ -403,6 +412,7 @@ impl Clone for ControlPlane {
             data_dir: self.data_dir.clone(),
             wg_manager: self.wg_manager.clone(),
             wg_port: self.wg_port,
+            startup_connect_timeout: self.startup_connect_timeout,
         }
     }
 }

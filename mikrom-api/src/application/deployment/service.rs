@@ -689,7 +689,9 @@ impl DeploymentService {
 
         let build_resp: mikrom_proto::builder::BuildResponse = match state
             .nats
-            .with_timeout(std::time::Duration::from_secs(5))
+            .with_timeout(std::time::Duration::from_secs(
+                state.ctx.config.nats_request_timeout_secs.max(1),
+            ))
             .request("mikrom.builder.build", build_req)
             .await
         {
@@ -816,7 +818,9 @@ impl DeploymentService {
 
         let nats_result: ApiResult<DeployResponse> = state
             .nats
-            .with_timeout(std::time::Duration::from_secs(15))
+            .with_timeout(std::time::Duration::from_secs(
+                state.ctx.config.nats_scheduler_long_timeout_secs.max(1),
+            ))
             .request("mikrom.scheduler.deploy", nats_req)
             .await
             .map_err(|e| ApiError::Scheduler(e.to_string()));

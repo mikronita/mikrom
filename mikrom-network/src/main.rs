@@ -1,6 +1,15 @@
 use anyhow::Context;
 use mikrom_network::{FileWireGuardKeyStore, KeyManager, MeshOrchestrator, WireGuardManager};
 use std::sync::Arc;
+use std::time::Duration;
+
+fn parse_timeout_env(name: &str, default_secs: u64) -> anyhow::Result<Duration> {
+    let secs = std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(default_secs);
+    Ok(Duration::from_secs(secs.max(1)))
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -17,6 +26,7 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(51823);
     let advertise_addr = std::env::var("MIKROM_ADVERTISE_ADDRESS").ok();
+    let nats_connect_timeout = parse_timeout_env("MIKROM_NETWORK_NATS_CONNECT_TIMEOUT_SECS", 5)?;
 
     // 1. Initialize WireGuard Manager
     let wg_manager = Arc::new(WireGuardManager::new("wg-mikrom").with_listen_port(wg_port));
@@ -34,7 +44,9 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to initialize WireGuard interface: {e}"))?;
 
     // 4. Connect to NATS
-    let nats_client = async_nats::connect(nats_url).await?;
+    let nats_client = tokio::time::timeout(nats_connect_timeout, async_nats::connect(nats_url))
+        .await
+        .context("timeout connecting to NATS")??;
 
     // 5. Run Mesh Orchestrator
     let orchestrator = MeshOrchestrator::new(wg_manager, nats_client);

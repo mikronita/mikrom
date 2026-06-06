@@ -10,6 +10,7 @@ use mikrom_scheduler::infrastructure::nats::NatsEventLoop;
 use mikrom_scheduler::server::SchedulerServer;
 use prost::Message;
 use std::sync::Arc;
+use std::time::Duration as StdDuration;
 use tokio::time::{Duration, timeout};
 
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
@@ -67,7 +68,12 @@ async fn test_scheduler_storage_nats_dispatch() {
         Arc::new(job_repo),
         Arc::new(mikrom_scheduler::domain::app::MockAppRepository::new()),
         Arc::new(worker_repo),
-        Arc::new(mikrom_scheduler::infrastructure::nats::NatsAgentClient::new(client.clone())),
+        Arc::new(
+            mikrom_scheduler::infrastructure::nats::NatsAgentClient::new(
+                client.clone(),
+                StdDuration::from_secs(30),
+            ),
+        ),
         client.clone(),
         sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
         test_runtime(),

@@ -15,15 +15,112 @@ use mikrom_proto::agent::{
     VmSnapshotRestoreRequest, Volume as ProtoVolume,
 };
 use prost::Message;
-use std::time::Duration;
+use std::future::Future;
+use std::time::{Duration, Instant};
 
 pub struct NatsAgentClient {
     client: async_nats::Client,
+    request_timeout: Duration,
+}
+
+async fn request_with_timeout<T, F, E>(
+    timeout: Duration,
+    host_id: &str,
+    subject: &str,
+    request_kind: &'static str,
+    request: F,
+) -> DomainResult<T>
+where
+    F: Future<Output = Result<T, E>>,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let started_at = Instant::now();
+    tracing::debug!(
+        host_id = %host_id,
+        subject = %subject,
+        request_kind,
+        timeout_ms = timeout.as_millis(),
+        "Sending request to agent"
+    );
+
+    match tokio::time::timeout(timeout, request).await {
+        Ok(Ok(response)) => {
+            tracing::debug!(
+                host_id = %host_id,
+                subject = %subject,
+                request_kind,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "Agent request completed"
+            );
+            Ok(response)
+        },
+        Ok(Err(e)) => {
+            tracing::warn!(
+                host_id = %host_id,
+                subject = %subject,
+                request_kind,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                error = %e,
+                "Agent request failed"
+            );
+            Err(DomainError::Infrastructure(e.to_string()))
+        },
+        Err(_) => {
+            tracing::warn!(
+                host_id = %host_id,
+                subject = %subject,
+                request_kind,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                timeout_ms = timeout.as_millis(),
+                "Agent request timed out"
+            );
+            Err(DomainError::Infrastructure(
+                "Agent request timed out".to_string(),
+            ))
+        },
+    }
 }
 
 impl NatsAgentClient {
-    pub fn new(client: async_nats::Client) -> Self {
-        Self { client }
+    pub fn new(client: async_nats::Client, request_timeout: Duration) -> Self {
+        Self {
+            client,
+            request_timeout,
+        }
+    }
+
+    fn command_label(command: &mikrom_proto::agent::agent_command::Command) -> &'static str {
+        match command {
+            mikrom_proto::agent::agent_command::Command::StartVm(_) => "start_vm",
+            mikrom_proto::agent::agent_command::Command::StopVm(_) => "stop_vm",
+            mikrom_proto::agent::agent_command::Command::PauseVm(_) => "pause_vm",
+            mikrom_proto::agent::agent_command::Command::ResumeVm(_) => "resume_vm",
+            mikrom_proto::agent::agent_command::Command::DeleteVm(_) => "delete_vm",
+            mikrom_proto::agent::agent_command::Command::UpdateFirewall(_) => "update_firewall",
+            mikrom_proto::agent::agent_command::Command::CreateVolume(_) => "create_volume",
+            mikrom_proto::agent::agent_command::Command::DeleteVolume(_) => "delete_volume",
+            mikrom_proto::agent::agent_command::Command::CreateSnapshot(_) => "create_snapshot",
+            mikrom_proto::agent::agent_command::Command::DeleteSnapshot(_) => "delete_snapshot",
+            mikrom_proto::agent::agent_command::Command::RestoreSnapshot(_) => "restore_snapshot",
+            mikrom_proto::agent::agent_command::Command::CloneVolume(_) => "clone_volume",
+            mikrom_proto::agent::agent_command::Command::VmSnapshotCreate(_) => {
+                "vm_snapshot_create"
+            },
+            mikrom_proto::agent::agent_command::Command::VmSnapshotDelete(_) => {
+                "vm_snapshot_delete"
+            },
+            mikrom_proto::agent::agent_command::Command::VmSnapshotList(_) => "vm_snapshot_list",
+            mikrom_proto::agent::agent_command::Command::VmSnapshotRestore(_) => {
+                "vm_snapshot_restore"
+            },
+            mikrom_proto::agent::agent_command::Command::AttachVolume(_) => "attach_volume",
+            mikrom_proto::agent::agent_command::Command::DetachVolume(_) => "detach_volume",
+            mikrom_proto::agent::agent_command::Command::StartMigration(_) => "start_migration",
+            mikrom_proto::agent::agent_command::Command::CancelMigration(_) => "cancel_migration",
+            mikrom_proto::agent::agent_command::Command::QueryMigration(_) => "query_migration",
+            mikrom_proto::agent::agent_command::Command::SetBalloon(_) => "set_balloon",
+            mikrom_proto::agent::agent_command::Command::QueryBalloon(_) => "query_balloon",
+        }
     }
 
     async fn send_command(
@@ -32,7 +129,7 @@ impl NatsAgentClient {
         command: mikrom_proto::agent::agent_command::Command,
     ) -> DomainResult<()> {
         let subject = format!("mikrom.agent.{}.cmd", host_id);
-        tracing::debug!(?command, %subject, "Sending command to agent");
+        let request_kind = Self::command_label(&command);
         let cmd = AgentCommand {
             command: Some(command),
         };
@@ -41,13 +138,14 @@ impl NatsAgentClient {
         cmd.encode(&mut payload)
             .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
 
-        let response = tokio::time::timeout(
-            Duration::from_secs(15),
-            self.client.request(subject, payload.into()),
+        let response = request_with_timeout(
+            self.request_timeout,
+            host_id,
+            &subject,
+            request_kind,
+            self.client.request(subject.clone(), payload.into()),
         )
-        .await
-        .map_err(|_| DomainError::Infrastructure("Agent request timed out".to_string()))?
-        .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+        .await?;
 
         let inner = AgentCommandResponse::decode(&response.payload[..]).map_err(|e| {
             DomainError::Infrastructure(format!("Failed to decode agent response: {}", e))
@@ -66,7 +164,7 @@ impl NatsAgentClient {
         command: mikrom_proto::agent::agent_command::Command,
     ) -> DomainResult<Vec<u8>> {
         let subject = format!("mikrom.agent.{}.cmd", host_id);
-        tracing::debug!(?command, %subject, "Sending command to agent (raw)");
+        let request_kind = Self::command_label(&command);
         let cmd = AgentCommand {
             command: Some(command),
         };
@@ -75,13 +173,14 @@ impl NatsAgentClient {
         cmd.encode(&mut payload)
             .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
 
-        let response = tokio::time::timeout(
-            Duration::from_secs(15),
-            self.client.request(subject, payload.into()),
+        let response = request_with_timeout(
+            self.request_timeout,
+            host_id,
+            &subject,
+            request_kind,
+            self.client.request(subject.clone(), payload.into()),
         )
-        .await
-        .map_err(|_| DomainError::Infrastructure("Agent request timed out".to_string()))?
-        .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+        .await?;
 
         Ok(response.payload.to_vec())
     }
@@ -190,13 +289,20 @@ impl AgentClient for NatsAgentClient {
         req.encode(&mut payload)
             .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
 
-        let response = tokio::time::timeout(
+        let response = request_with_timeout(
             Duration::from_secs(2),
-            self.client.request(subject, payload.into()),
+            host_id,
+            &subject,
+            "check_health",
+            self.client.request(subject.clone(), payload.into()),
         )
         .await
-        .map_err(|_| DomainError::Infrastructure("Health check timed out".to_string()))?
-        .map_err(|e| DomainError::Infrastructure(e.to_string()))?;
+        .map_err(|e| match e {
+            DomainError::Infrastructure(message) if message == "Agent request timed out" => {
+                DomainError::Infrastructure("Health check timed out".to_string())
+            },
+            other => other,
+        })?;
 
         let res = mikrom_proto::agent::CheckHealthResponse::decode(&response.payload[..])
             .map_err(|e| DomainError::Infrastructure(format!("Decode failed: {e}")))?;
@@ -545,5 +651,63 @@ impl AgentClient for NatsAgentClient {
         } else {
             Err(DomainError::Infrastructure(resp.message))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::future::pending;
+
+    #[test]
+    fn command_label_maps_common_variants() {
+        assert_eq!(
+            NatsAgentClient::command_label(&mikrom_proto::agent::agent_command::Command::StartVm(
+                StartVmRequest {
+                    vm_id: String::new(),
+                    app_id: String::new(),
+                    image: String::new(),
+                    config: None,
+                }
+            )),
+            "start_vm"
+        );
+        assert_eq!(
+            NatsAgentClient::command_label(&mikrom_proto::agent::agent_command::Command::ResumeVm(
+                ResumeVmRequest {
+                    vm_id: String::new(),
+                }
+            )),
+            "resume_vm"
+        );
+        assert_eq!(
+            NatsAgentClient::command_label(
+                &mikrom_proto::agent::agent_command::Command::CreateVolume(
+                    mikrom_proto::agent::CreateVolumeRequest {
+                        volume_id: String::new(),
+                        size_mib: 0,
+                        pool_name: String::new(),
+                    }
+                )
+            ),
+            "create_volume"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_with_timeout_maps_elapsed_deadlines() {
+        let err = request_with_timeout(
+            Duration::from_millis(50),
+            "host-1",
+            "mikrom.agent.host-1.cmd",
+            "start_vm",
+            pending::<Result<(), std::io::Error>>(),
+        )
+        .await
+        .expect_err("timeout should be mapped to infrastructure error");
+
+        assert!(
+            matches!(err, DomainError::Infrastructure(msg) if msg == "Agent request timed out")
+        );
     }
 }

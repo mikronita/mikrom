@@ -67,8 +67,9 @@ async fn test_dns_resolution_lifecycle() -> Result<()> {
 
     // 1. Start NATS subscriber
     let subscriber_records = records.clone();
+    let dns_config = mikrom_dns::infrastructure::config::DnsConfig::from_env()?;
     tokio::spawn(async move {
-        let _ = mikrom_dns::run_nats_subscriber(subscriber_records).await;
+        let _ = mikrom_dns::run_nats_subscriber(subscriber_records, &dns_config).await;
     });
 
     tokio::time::sleep(Duration::from_millis(500)).await;

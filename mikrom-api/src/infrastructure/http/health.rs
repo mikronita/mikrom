@@ -67,7 +67,7 @@ async fn get_system_health(state: &crate::AppState) -> HashMap<String, String> {
 
     let scheduler_res: anyhow::Result<ListAppsResponse> = state
         .nats
-        .with_timeout(Duration::from_secs(2))
+        .with_timeout(state.nats_request_timeout())
         .request("mikrom.scheduler.list_apps", nats_req)
         .await;
 
@@ -81,7 +81,7 @@ async fn get_system_health(state: &crate::AppState) -> HashMap<String, String> {
     let agents_req = ListWorkersRequest {};
     let agents_res: anyhow::Result<ListWorkersResponse> = state
         .nats
-        .with_timeout(Duration::from_secs(2))
+        .with_timeout(state.nats_request_timeout())
         .request("mikrom.scheduler.list_workers", agents_req)
         .await;
 
@@ -100,7 +100,7 @@ async fn get_system_health(state: &crate::AppState) -> HashMap<String, String> {
     };
     let builder_res: anyhow::Result<GetBuildStatusResponse> = state
         .nats
-        .with_timeout(Duration::from_secs(2))
+        .with_timeout(state.nats_request_timeout())
         .request("mikrom.builder.get_status", builder_req)
         .await;
 
