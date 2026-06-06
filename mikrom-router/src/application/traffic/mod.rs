@@ -37,8 +37,8 @@ impl RouterTrafficPublisher {
         {
             return;
         }
-        self.last_sent.insert(hostname.clone(), now);
 
+        let hostname_for_event = hostname.clone();
         let event = RouterTrafficEvent {
             hostname,
             router_id: self.router_id.as_str().to_string(),
@@ -47,6 +47,8 @@ impl RouterTrafficPublisher {
 
         if let Err(e) = self.tx.try_send(event) {
             warn!("Router traffic queue is full or closed: {e}");
+        } else {
+            self.last_sent.insert(hostname_for_event, now);
         }
     }
 }
@@ -130,6 +132,7 @@ impl BackgroundService for RouterTrafficLoop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::time::timeout;
 
     #[tokio::test]
     async fn test_record_enqueues_router_traffic_event() {
@@ -142,5 +145,32 @@ mod tests {
         assert_eq!(event.hostname, "app.example.com");
         assert_eq!(event.router_id, "router-1");
         assert!(event.timestamp > 0);
+    }
+
+    #[tokio::test]
+    async fn test_record_retries_after_full_queue() {
+        let (tx, mut rx) = mpsc::channel(1);
+        tx.try_send(RouterTrafficEvent {
+            hostname: "busy.example.com".to_string(),
+            router_id: "router-1".to_string(),
+            timestamp: 1,
+        })
+        .expect("should fill the queue");
+
+        let publisher = RouterTrafficPublisher::new("router-1".into(), tx);
+
+        publisher.record("busy.example.com".to_string());
+
+        let _ = rx.recv().await.expect("expected seeded event");
+
+        publisher.record("busy.example.com".to_string());
+
+        let event = timeout(std::time::Duration::from_millis(100), rx.recv())
+            .await
+            .expect("should enqueue after queue space is available")
+            .expect("expected traffic event after retry");
+
+        assert_eq!(event.hostname, "busy.example.com");
+        assert_eq!(event.router_id, "router-1");
     }
 }

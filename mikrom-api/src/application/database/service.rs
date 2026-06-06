@@ -41,6 +41,240 @@ struct NeonConfigureClaims {
     scope: String,
 }
 
+#[cfg(test)]
+mod delete_database_tests {
+    use super::*;
+    use crate::application::ApiContext;
+    use crate::domain::{
+        Database, DatabaseDeployment, DatabaseStatus, MockDatabaseRepository, MockScheduler,
+        MockTenantRepository, MockUserRepository, UserRepository,
+    };
+    use crate::infrastructure::nats::TypedNatsClient;
+    use crate::{AppState, domain::DatabaseRepository};
+    use mockall::predicate::eq;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    fn build_state(
+        config: crate::config::ApiConfig,
+        user_repo: Arc<dyn UserRepository>,
+        tenant_repo: Arc<dyn crate::domain::TenantRepository>,
+        database_repo: Arc<dyn DatabaseRepository>,
+        scheduler: Arc<dyn crate::domain::Scheduler>,
+    ) -> AppState {
+        let ctx = ApiContext {
+            user_repo: user_repo.clone(),
+            tenant_repo: tenant_repo.clone(),
+            app_repo: Arc::new(crate::domain::MockAppRepository::new()),
+            database_repo: database_repo.clone(),
+            github_repo: Arc::new(crate::domain::MockGithubRepository::new()),
+            volume_repo: Arc::new(crate::domain::MockVolumeRepository::new()),
+            scheduler: scheduler.clone(),
+            nats: TypedNatsClient::default(),
+            db: sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
+            config: Arc::new(config.clone()),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".to_string(),
+        };
+
+        let (deployment_events, _) = tokio::sync::broadcast::channel(4);
+        let (workspace_events, _) = tokio::sync::broadcast::channel(4);
+        let (mesh_status, _) =
+            tokio::sync::watch::channel(crate::application::vms::MeshStatus::default());
+
+        AppState {
+            ctx,
+            user_repo,
+            tenant_repo,
+            app_repo: Arc::new(crate::domain::MockAppRepository::new()),
+            database_repo,
+            github_repo: Arc::new(crate::domain::MockGithubRepository::new()),
+            volume_repo: Arc::new(crate::domain::MockVolumeRepository::new()),
+            scheduler,
+            nats: TypedNatsClient::default(),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".to_string(),
+            deployment_events,
+            workspace_events,
+            mesh_status,
+            acme_email: "test@example.com".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: Arc::new(dashmap::DashSet::new()),
+        }
+    }
+
+    fn database(
+        id: Uuid,
+        tenant_id: Uuid,
+        status: DatabaseStatus,
+        active_deployment_id: Option<Uuid>,
+    ) -> Database {
+        Database {
+            id,
+            name: "orders".to_string(),
+            engine: "neon".to_string(),
+            postgres_version: 16,
+            tenant_id,
+            vcpus: crate::domain::types::CpuCores::try_from(2).unwrap(),
+            memory_mib: crate::domain::types::MemoryMb::try_from(1024).unwrap(),
+            disk_mib: 4096,
+            neon_tenant_id: Some("11111111111111111111111111111111".to_string()),
+            neon_timeline_id: Some("22222222222222222222222222222222".to_string()),
+            tenant_gen: Some(1),
+            settings: HashMap::from([("max_connections".to_string(), "200".to_string())]),
+            status,
+            active_deployment_id,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_database_deletes_active_deployment_before_row() {
+        let tenant_id = Uuid::new_v4();
+        let database_id = Uuid::new_v4();
+        let deployment_id = Uuid::new_v4();
+        let active_db = database(
+            database_id,
+            tenant_id,
+            DatabaseStatus::Running,
+            Some(deployment_id),
+        );
+        let deployment = DatabaseDeployment {
+            id: deployment_id,
+            database_id,
+            tenant_id,
+            job_id: Some("job-123".to_string()),
+            status: "RUNNING".to_string(),
+            host_id: Some("host-1".to_string()),
+            vm_id: Some("vm-1".to_string()),
+            ipv6_address: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let mut db_repo = MockDatabaseRepository::new();
+        db_repo
+            .expect_get_database()
+            .with(eq(database_id))
+            .times(1)
+            .returning(move |_| {
+                let value = active_db.clone();
+                Ok(Some(value))
+            });
+        db_repo
+            .expect_get_deployment()
+            .with(eq(deployment_id))
+            .times(1)
+            .returning(move |_| {
+                let value = deployment.clone();
+                Ok(Some(value))
+            });
+        db_repo
+            .expect_delete_database()
+            .with(eq(database_id))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let mut scheduler = MockScheduler::new();
+        scheduler
+            .expect_delete_database()
+            .with(eq("job-123".to_string()), eq(tenant_id.to_string()))
+            .times(1)
+            .returning(|_, _| Ok(true));
+
+        let state = build_state(
+            crate::config::ApiConfig::default(),
+            Arc::new(MockUserRepository::new()),
+            Arc::new(MockTenantRepository::new()),
+            Arc::new(db_repo),
+            Arc::new(scheduler),
+        );
+
+        DatabaseService::delete_database(&state, database_id)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_database_keeps_row_when_scheduler_rejects_cleanup() {
+        let tenant_id = Uuid::new_v4();
+        let database_id = Uuid::new_v4();
+        let deployment_id = Uuid::new_v4();
+        let active_db = database(
+            database_id,
+            tenant_id,
+            DatabaseStatus::Running,
+            Some(deployment_id),
+        );
+        let deployment = DatabaseDeployment {
+            id: deployment_id,
+            database_id,
+            tenant_id,
+            job_id: Some("job-123".to_string()),
+            status: "RUNNING".to_string(),
+            host_id: Some("host-1".to_string()),
+            vm_id: Some("vm-1".to_string()),
+            ipv6_address: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let mut db_repo = MockDatabaseRepository::new();
+        db_repo
+            .expect_get_database()
+            .with(eq(database_id))
+            .times(1)
+            .returning(move |_| {
+                let value = active_db.clone();
+                Ok(Some(value))
+            });
+        db_repo
+            .expect_get_deployment()
+            .with(eq(deployment_id))
+            .times(1)
+            .returning(move |_| {
+                let value = deployment.clone();
+                Ok(Some(value))
+            });
+        db_repo.expect_delete_database().times(0);
+
+        let mut scheduler = MockScheduler::new();
+        scheduler
+            .expect_delete_database()
+            .with(eq("job-123".to_string()), eq(tenant_id.to_string()))
+            .times(1)
+            .returning(|_, _| Ok(false));
+
+        let state = build_state(
+            crate::config::ApiConfig::default(),
+            Arc::new(MockUserRepository::new()),
+            Arc::new(MockTenantRepository::new()),
+            Arc::new(db_repo),
+            Arc::new(scheduler),
+        );
+
+        let err = DatabaseService::delete_database(&state, database_id)
+            .await
+            .unwrap_err();
+
+        match err {
+            ApiError::Scheduler(message) => {
+                assert_eq!(message, "Scheduler rejected database deletion")
+            },
+            other => panic!("expected scheduler error, got {other:?}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, rovo::schemars::JsonSchema)]
 pub struct DatabaseConnectionInfo {
     pub database_id: Uuid,
@@ -517,11 +751,17 @@ impl DatabaseService {
 
             let job_id = deployment.and_then(|deployment| deployment.job_id);
             if let Some(job_id) = job_id {
-                state
+                let deleted = state
                     .scheduler
                     .delete_database(job_id, database.tenant_id.to_string())
                     .await
-                    .ok();
+                    .map_err(|e| ApiError::Scheduler(e.to_string()))?;
+
+                if !deleted {
+                    return Err(ApiError::Scheduler(
+                        "Scheduler rejected database deletion".to_string(),
+                    ));
+                }
             }
         }
 
@@ -1687,6 +1927,75 @@ mod tests {
         DatabaseService::delete_database(&state, database_id)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_database_keeps_row_when_scheduler_rejects_cleanup() {
+        let user_id = Uuid::new_v4();
+        let database_id = Uuid::new_v4();
+        let deployment_id = Uuid::new_v4();
+        let active_db = database(
+            database_id,
+            user_id,
+            DatabaseStatus::Running,
+            Some(deployment_id),
+        );
+        let deployment = DatabaseDeployment {
+            id: deployment_id,
+            database_id,
+            user_id,
+            job_id: Some("job-123".to_string()),
+            status: "RUNNING".to_string(),
+            host_id: Some("host-1".to_string()),
+            vm_id: Some("vm-1".to_string()),
+            ipv6_address: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let mut db_repo = MockDatabaseRepository::new();
+        db_repo
+            .expect_get_database()
+            .with(eq(database_id))
+            .times(1)
+            .returning(move |_| {
+                let value = active_db.clone();
+                Box::pin(async move { Ok(Some(value)) })
+            });
+        db_repo
+            .expect_get_deployment()
+            .with(eq(deployment_id))
+            .times(1)
+            .returning(move |_| {
+                let value = deployment.clone();
+                Box::pin(async move { Ok(Some(value)) })
+            });
+        db_repo.expect_delete_database().times(0);
+
+        let mut scheduler = MockScheduler::new();
+        scheduler
+            .expect_delete_database()
+            .with(eq("job-123".to_string()), eq(user_id.to_string()))
+            .times(1)
+            .returning(|_, _| Ok(false));
+
+        let state = build_state(
+            crate::config::ApiConfig::default(),
+            Arc::new(MockUserRepository::new()),
+            Arc::new(db_repo),
+            Arc::new(scheduler),
+        );
+
+        let err = DatabaseService::delete_database(&state, database_id)
+            .await
+            .unwrap_err();
+
+        match err {
+            ApiError::Scheduler(message) => {
+                assert_eq!(message, "Scheduler rejected database deletion")
+            },
+            other => panic!("expected scheduler error, got {other:?}"),
+        }
     }
 
     #[tokio::test]

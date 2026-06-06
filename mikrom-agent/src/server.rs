@@ -52,6 +52,10 @@ fn is_flapping_nats_session(uptime: Option<Duration>, threshold_secs: u64) -> bo
     uptime.is_some_and(|age| age < Duration::from_secs(threshold_secs))
 }
 
+fn parse_vm_id(vm_id: &str) -> anyhow::Result<VmId> {
+    VmId::from_str(vm_id).map_err(|e| anyhow::anyhow!("Invalid VM ID: {e}"))
+}
+
 fn abort_nats_listeners(
     cmd_handle: &mut tokio::task::JoinHandle<()>,
     health_check_handle: &mut tokio::task::JoinHandle<()>,
@@ -576,9 +580,8 @@ impl AgentServer {
             },
             Some(Command::DeleteVm(req)) => {
                 let hv = self.get_hypervisor(req.hypervisor)?;
-                let res = hv
-                    .delete_vm(&VmId::from_str(&req.vm_id).unwrap_or_default())
-                    .await;
+                let vm_id = parse_vm_id(&req.vm_id)?;
+                let res = hv.delete_vm(&vm_id).await;
                 let response = DeleteVmResponse {
                     success: res.is_ok(),
                     message: res.err().map(|e| e.to_string()).unwrap_or_default(),
@@ -914,5 +917,15 @@ impl AgentServer {
             ip_address: None,
             workload_type: proto.workload_type,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_vm_id;
+
+    #[test]
+    fn parse_vm_id_rejects_invalid_values() {
+        assert!(parse_vm_id("not-a-uuid").is_err());
     }
 }
