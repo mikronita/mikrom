@@ -12,6 +12,9 @@ use crate::infrastructure::http::handlers::{
     auth::{get_profile, login, register, update_profile},
     billing::{create_billing_checkout, create_billing_portal, get_billing_summary, polar_webhook},
     github::{github_callback, github_install, list_repos},
+    notifications::{
+        list_user_notifications, mark_all_user_notifications_read, mark_user_notification_read,
+    },
     vms::{
         attach_volume_runtime_handler, cancel_migration_handler, create_security_rule_handler,
         delete_deployment_record, delete_security_rule_handler, detach_volume_runtime_handler,
@@ -87,6 +90,18 @@ pub fn create_app_with_rate_limits(
         .route(
             &format!("{}/billing/portal", crate::API_V1),
             post(create_billing_portal),
+        )
+        .route(
+            &format!("{}/notifications", crate::API_V1),
+            get(list_user_notifications),
+        )
+        .route(
+            &format!("{}/notifications/{{notification_id}}/read", crate::API_V1),
+            post(mark_user_notification_read),
+        )
+        .route(
+            &format!("{}/notifications/read-all", crate::API_V1),
+            post(mark_all_user_notifications_read),
         )
         .route(
             &format!("{}/github/install", crate::API_V1),

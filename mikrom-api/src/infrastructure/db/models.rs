@@ -31,6 +31,22 @@ pub struct DbTenantMember {
     pub role: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct DbWorkspaceNotification {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub tenant_id: Option<Uuid>,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub route: String,
+    pub entity_name: Option<String>,
+    pub resource_id: Option<String>,
+    pub metadata: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    pub read_at: Option<DateTime<Utc>>,
+}
+
 impl From<DbTenantMember> for crate::domain::tenant::TenantMember {
     fn from(db: DbTenantMember) -> Self {
         Self {

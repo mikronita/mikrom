@@ -55,6 +55,11 @@ impl PolarSettings {
     }
 }
 
+pub fn validate_polar_environment() -> ApiResult<()> {
+    let _ = PolarSettings::from_env()?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 struct BillingRow {
     pub tenant_id: Uuid,
@@ -687,6 +692,7 @@ mod tests {
     use chrono::Utc;
     use hmac::{Hmac, Mac};
     use serde_json::json;
+    use serial_test::serial;
     use sha2::Sha256;
     use wiremock::matchers::{body_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -901,6 +907,40 @@ mod tests {
 
         assert_eq!(checkout_url, "https://polar.sh/checkout/session");
         assert_eq!(portal_url, "https://polar.sh/portal/session");
+    }
+
+    #[test]
+    #[serial]
+    fn validate_polar_environment_rejects_missing_access_token() {
+        let original_access_token = std::env::var("POLAR_ACCESS_TOKEN").ok();
+        let original_webhook_secret = std::env::var("POLAR_WEBHOOK_SECRET").ok();
+
+        unsafe {
+            if let Some(value) = original_webhook_secret.as_ref() {
+                std::env::set_var("POLAR_WEBHOOK_SECRET", value);
+            } else {
+                std::env::set_var("POLAR_WEBHOOK_SECRET", "webhook-secret");
+            }
+            std::env::remove_var("POLAR_ACCESS_TOKEN");
+        }
+
+        let result = validate_polar_environment();
+
+        unsafe {
+            match original_access_token {
+                Some(value) => std::env::set_var("POLAR_ACCESS_TOKEN", value),
+                None => std::env::remove_var("POLAR_ACCESS_TOKEN"),
+            }
+            match original_webhook_secret {
+                Some(value) => std::env::set_var("POLAR_WEBHOOK_SECRET", value),
+                None => std::env::remove_var("POLAR_WEBHOOK_SECRET"),
+            }
+        }
+
+        assert!(matches!(
+            result,
+            Err(ApiError::Internal(message)) if message.contains("POLAR_ACCESS_TOKEN is not configured")
+        ));
     }
 
     #[test]

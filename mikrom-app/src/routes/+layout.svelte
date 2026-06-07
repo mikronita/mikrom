@@ -6,11 +6,12 @@
   import { fade, scale } from "svelte/transition";
   import { Toaster } from "$lib/components/ui/sonner";
   import { initWorkspaceSSE, closeWorkspaceSSE } from "$lib/stores/workspace";
-  import { clearVms, initVmsSSE, refreshVms, stopVmsSSE } from "$lib/stores/vms";
-  import { clearApps, refreshApps } from "$lib/stores/apps";
-  import { clearVolumes, clearSnapshots } from "$lib/stores/volumes";
-  import { clearSecurityRules } from "$lib/stores/networking";
-  import { clearDatabases, refreshDatabases } from "$lib/stores/databases";
+import { clearVms, initVmsSSE, refreshVms, stopVmsSSE } from "$lib/stores/vms";
+import { clearApps, refreshApps } from "$lib/stores/apps";
+import { clearVolumes, clearSnapshots } from "$lib/stores/volumes";
+import { clearSecurityRules } from "$lib/stores/networking";
+import { clearDatabases, refreshDatabases } from "$lib/stores/databases";
+import { clearNotifications } from "$lib/stores/notifications";
   import { activeProjectStore, endProjectSwitch, projectSwitchingStore, refreshProjects } from "$lib/stores/projects";
 
   initTheme();
@@ -26,6 +27,7 @@
       clearSnapshots();
       clearSecurityRules();
       clearDatabases();
+      clearNotifications();
       closeWorkspaceSSE();
       stopVmsSSE();
       try {

@@ -208,6 +208,9 @@ export type WorkspaceEventKind =
   | "security_rules_changed"
   | "volume_changed"
   | "snapshot_changed"
+  | "database_created"
+  | "database_updated"
+  | "database_deleted"
   | "refresh";
 
 export interface WorkspaceEvent {
@@ -219,6 +222,29 @@ export interface WorkspaceEvent {
   deployment_id?: string | null;
   volume_id?: string | null;
   resource_id?: string | null;
+}
+
+export interface WorkspaceNotification {
+  id: string;
+  user_id: string;
+  tenant_id?: string | null;
+  kind: string;
+  title: string;
+  body: string;
+  route: string;
+  entity_name?: string | null;
+  resource_id?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  read_at?: string | null;
+  is_read: boolean;
+}
+
+export interface WorkspaceNotificationListResponse {
+  notifications: WorkspaceNotification[];
+  unread_count: number;
+  has_more: boolean;
+  next_offset: number;
 }
 
 export type AppScaleState = "active" | "scaled_to_zero";
@@ -937,6 +963,60 @@ export function watchWorkspaceEventsSSE(token: string, onMessage: (event: Worksp
   );
 }
 
+export async function listNotifications(
+  token: string,
+  options: { limit?: number; offset?: number; unreadOnly?: boolean } = {},
+) {
+  try {
+    const params = new URLSearchParams();
+    if (typeof options.limit === "number") params.set("limit", String(options.limit));
+    if (typeof options.offset === "number") params.set("offset", String(options.offset));
+    if (typeof options.unreadOnly === "boolean") params.set("unread_only", String(options.unreadOnly));
+
+    const response = await fetch(
+      `${API_PROXY_BASE}/notifications${params.toString() ? `?${params.toString()}` : ""}`,
+      {
+        headers: authHeaders(token),
+      },
+    );
+    const result = await parseJson<WorkspaceNotificationListResponse>(response);
+    if (!response.ok) {
+      return { error: getErrorMessage(result, "Failed to fetch notifications") };
+    }
+    return { data: result as WorkspaceNotificationListResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function markNotificationRead(token: string, notificationId: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/notifications/${notificationId}/read`, {
+      method: "POST",
+      headers: authHeaders(token),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to mark notification as read") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function markAllNotificationsRead(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/notifications/read-all`, {
+      method: "POST",
+      headers: authHeaders(token),
+    });
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to mark notifications as read") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
 export function watchHealthSSE(onMessage: (health: HealthResponse) => void) {
   return eventSourceStream(`${API_PROXY_BASE}/health/stream`, (payload) =>
     onMessage(payload as HealthResponse)
@@ -1311,6 +1391,9 @@ export const watchAppMetrics = watchAppMetricsSSE;
 export const watchAppLogs = watchAppLogsSSE;
 export const watchMeshStatus = watchMeshStatusSSE;
 export const watchWorkspaceEvents = watchWorkspaceEventsSSE;
+export const getNotifications = listNotifications;
+export const readNotification = markNotificationRead;
+export const readAllNotifications = markAllNotificationsRead;
 export const getVmStatus = getLiveDeploymentStatus;
 export const getVm = getVmStatus;
 export const getVmLogsSSE = watchAppLogsSSE;

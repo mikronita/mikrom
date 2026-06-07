@@ -6,6 +6,7 @@ vi.mock("$env/dynamic/public", () => ({
 }));
 
 import {
+  listNotifications,
   watchAppLogsSSE,
   watchAppMetricsSSE,
   watchDeploymentsSSE,
@@ -116,5 +117,33 @@ describe("api SSE helpers", () => {
     });
 
     cleanup();
+  });
+});
+
+describe("api notifications helper", () => {
+  it("passes pagination and unread filter query params", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        notifications: [],
+        unread_count: 0,
+        has_more: false,
+        next_offset: 0,
+      }),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listNotifications("secret-token", { limit: 5, offset: 10, unreadOnly: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/notifications?limit=5&offset=10&unread_only=true",
+      expect.objectContaining({
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer secret-token",
+        },
+      }),
+    );
   });
 });

@@ -275,7 +275,18 @@ impl AppState {
     }
 
     pub fn publish_workspace_event(&self, event: WorkspaceEvent) {
-        let _ = self.workspace_events.send(event);
+        let state = self.clone();
+        tokio::spawn(async move {
+            let projection_event = event.clone();
+            if let Err(err) =
+                crate::application::notifications::project_workspace_event(&state, projection_event)
+                    .await
+            {
+                tracing::error!(error = %err, "Failed to project workspace notification");
+            }
+
+            let _ = state.workspace_events.send(event);
+        });
     }
 }
 

@@ -34,6 +34,8 @@
 - Stores the desired ACME mode and one-shot reissue flag for managed hostnames in `acme_managed_domains`.
 - The runtime Docker image sets `ACME_STAGING=false` and `ROUTER_TLS_HOSTNAME=debaser.spluca.org` by default.
 - Exposes Polar-backed billing endpoints for checkout, portal redirection, and webhook sync.
+- Polar uses an Organization Access Token (OAT) on the backend; set `POLAR_ACCESS_TOKEN` in the `mikrom-api` process environment alongside `POLAR_WEBHOOK_SECRET` and `POLAR_CHECKOUT_PRODUCT_ID` when billing is enabled.
+- The service validates the required Polar environment on startup and exits early if `POLAR_ACCESS_TOKEN` or `POLAR_WEBHOOK_SECRET` is missing.
 - Local repository tests use `TestDb` and expect PostgreSQL to be available.
 
 Common environment variables:
@@ -54,6 +56,10 @@ Common environment variables:
 - `POLAR_WEBHOOK_SECRET`
 - `POLAR_CHECKOUT_PRODUCT_ID`
 - `POLAR_API_BASE_URL` or `POLAR_SERVER`
+
+Local development template:
+
+- [`./.env.example`](./.env.example)
 
 Timeout defaults:
 

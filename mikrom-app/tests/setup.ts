@@ -4,6 +4,12 @@ vi.mock("$app/environment", () => ({
   browser: true,
 }));
 
+vi.mock("$env/dynamic/public", () => ({
+  env: {
+    PUBLIC_APP_URL: "http://localhost:5173",
+  },
+}));
+
 class MockEventSource {
   static instances: MockEventSource[] = [];
 

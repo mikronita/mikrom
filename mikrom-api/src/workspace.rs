@@ -22,6 +22,9 @@ pub enum WorkspaceEventKind {
     SecurityRulesChanged,
     VolumeChanged,
     SnapshotChanged,
+    DatabaseCreated,
+    DatabaseUpdated,
+    DatabaseDeleted,
     Refresh,
 }
 

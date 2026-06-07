@@ -49,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let config = ApiConfig::load()?;
+    mikrom_api::application::billing::validate_polar_environment()?;
 
     let _telemetry =
         mikrom_proto::telemetry::init_telemetry("mikrom-api", env!("CARGO_PKG_VERSION"), None)?;

@@ -34,6 +34,8 @@ async fn openapi_json_is_served() {
     assert!(spec["paths"].get("/v1/billing").is_some());
     assert!(spec["paths"].get("/v1/billing/checkout").is_some());
     assert!(spec["paths"].get("/v1/billing/portal").is_some());
+    assert!(spec["paths"].get("/v1/notifications").is_some());
+    assert!(spec["paths"].get("/v1/notifications/read-all").is_some());
     assert!(spec["paths"].get("/v1/webhooks/polar").is_some());
 }
 

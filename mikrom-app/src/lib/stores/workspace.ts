@@ -8,6 +8,7 @@ import { refreshProfile } from "./profile";
 import { refreshBilling } from "./billing";
 import { refreshSecurityRules } from "./networking";
 import { refreshDatabases } from "./databases";
+import { refreshNotifications } from "./notifications";
 
 let cleanup: (() => void) | null = null;
 let currentToken: string | null = null;
@@ -74,6 +75,12 @@ export function initWorkspaceSSE() {
         break;
       }
 
+      case "database_created":
+      case "database_updated":
+      case "database_deleted":
+        void refreshDatabases();
+        break;
+
       case "refresh":
         void refreshApps();
         void refreshVms();
@@ -84,6 +91,8 @@ export function initWorkspaceSSE() {
       default:
         break;
     }
+
+    void refreshNotifications();
   });
 }
 
