@@ -15,33 +15,48 @@
   import { refreshApps } from "$lib/stores/apps";
   import { Loader2, Scale } from "lucide-svelte";
 
-  export let open = false;
-  export let app: AppInfo;
+  let {
+    open = $bindable(false),
+    app,
+  } = $props<{
+    open?: boolean;
+    app: AppInfo;
+  }>();
 
-  let loading = false;
-  let config = {
-    desired_replicas: app.desired_replicas,
-    min_replicas: 0, // Mandatory scale-to-zero
-    max_replicas: app.max_replicas,
-    autoscaling_enabled: app.autoscaling_enabled,
-    cpu_threshold: app.cpu_threshold,
-    mem_threshold: app.mem_threshold,
-  };
+  let loading = $state(false);
+  let desiredReplicas = $state(0);
+  let maxReplicas = $state(1);
+  let autoscalingEnabled = $state(false);
+  let cpuThreshold = $state(60);
+  let memThreshold = $state(60);
+
+  $effect(() => {
+    if (open) {
+      desiredReplicas = app.desired_replicas;
+      maxReplicas = app.max_replicas;
+      autoscalingEnabled = app.autoscaling_enabled;
+      cpuThreshold = app.cpu_threshold;
+      memThreshold = app.mem_threshold;
+    }
+  });
 
   async function handleSave() {
     const token = getToken();
     if (!token) return;
 
-    if (!config.autoscaling_enabled) {
-      config.min_replicas = 0;
-      config.max_replicas = config.desired_replicas;
+    if (!autoscalingEnabled) {
+      maxReplicas = desiredReplicas;
     }
 
     loading = true;
     try {
       const result = await scaleApp(token, app.name, {
-        ...config,
-        min_replicas: 0, // Ensure it's 0
+        desired_replicas: desiredReplicas,
+        min_replicas: 0,
+        max_replicas: maxReplicas,
+        autoscaling_enabled: autoscalingEnabled,
+        cpu_threshold: cpuThreshold,
+        mem_threshold: memThreshold,
       });
       if (result.error) {
         toast.error(result.error);
@@ -77,16 +92,16 @@
         <div class="text-sm font-medium">Autoscaling</div>
         <div class="text-xs text-muted-foreground">Automatically adjust replicas based on resource usage.</div>
       </div>
-      <Switch bind:checked={config.autoscaling_enabled} />
+      <Switch bind:checked={autoscalingEnabled} />
     </div>
-{#if !config.autoscaling_enabled}
+{#if !autoscalingEnabled}
   <Field label="Desired Replicas" description="Fixed number of instances to keep running (max 3).">
-    <Input type="number" bind:value={config.desired_replicas} min={0} max={3} />
+    <Input type="number" bind:value={desiredReplicas} min={0} max={3} />
   </Field>
 {:else}
   <FieldSet class="grid grid-cols-1 gap-4 space-y-0">
     <Field label="Max Replicas" description="Maximum number of instances to scale up to (max 3).">
-      <Input type="number" bind:value={config.max_replicas} min={1} max={3} />
+      <Input type="number" bind:value={maxReplicas} min={1} max={3} />
     </Field>
   </FieldSet>
 
@@ -94,10 +109,10 @@
         <FieldLegend>Thresholds</FieldLegend>
         <div class="grid grid-cols-2 gap-4">
           <Field label="CPU Threshold (%)" description="Scale up when above this.">
-            <Input type="number" bind:value={config.cpu_threshold} min={10} max={95} />
+            <Input type="number" bind:value={cpuThreshold} min={10} max={95} />
           </Field>
           <Field label="Memory Threshold (%)" description="Scale up when above this.">
-            <Input type="number" bind:value={config.mem_threshold} min={10} max={95} />
+            <Input type="number" bind:value={memThreshold} min={10} max={95} />
           </Field>
         </div>
       </FieldSet>

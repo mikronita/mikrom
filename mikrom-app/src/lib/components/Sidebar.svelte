@@ -23,7 +23,11 @@
   const SIDEBAR_COOKIE_NAME = "sidebar_state";
   const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
-  export let collapsed = false;
+  let {
+    collapsed = $bindable(false),
+  } = $props<{
+    collapsed?: boolean;
+  }>();
 
   const nav = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -56,7 +60,7 @@
     persistCollapsedState(!collapsed);
   }
 
-  $: pathname = $page.url.pathname;
+  let pathname = $derived($page.url.pathname);
 
   onMount(() => {
     const persisted = document.cookie
@@ -143,6 +147,7 @@
           {/if}
           <nav class="flex flex-col gap-1">
             {#each nav as item}
+              {@const Icon = item.icon}
               <Tooltip.Provider>
                 <Tooltip.Root delayDuration={0}>
                   <Tooltip.Trigger>
@@ -162,10 +167,7 @@
                           collapsed ? "justify-center" : "gap-2",
                         )}
                       >
-                        <svelte:component
-                          this={item.icon}
-                          class="size-4 shrink-0"
-                        />
+                        <Icon class="size-4 shrink-0" />
                         {#if !collapsed}
                           <span class="truncate" transition:fade={{ duration: 120 }}>{item.label}</span>
                         {/if}
@@ -270,7 +272,7 @@
           aria-label="Toggle Sidebar"
           title="Toggle Sidebar"
           class="absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-border group-data-[side=left]:-right-4 sm:flex"
-          on:click={toggleCollapsed}
+          onclick={toggleCollapsed}
         ></button>
       </div>
     </div>

@@ -15,14 +15,19 @@
   import { createDatabase } from "$lib/stores/databases";
   import { toast } from "$lib/toast";
 
-  export let open = false;
-  export let onClose: (() => void) | undefined = undefined;
+  let {
+    open = $bindable(false),
+    onClose = undefined,
+  } = $props<{
+    open?: boolean;
+    onClose?: (() => void) | undefined;
+  }>();
 
-  let name = "";
-  let version = "16";
-  let plan = "shared-1-1";
-  let storage_gb = 10;
-  let submitting = false;
+  let name = $state("");
+  let version = $state("16");
+  let plan = $state("shared-1-1");
+  let storage_gb = $state(10);
+  let submitting = $state(false);
 
   const plans = [
     { id: "shared-1-1", label: "Shared 1 vCPU / 1GB RAM", vcpus: 1, memory_mib: 1024 },
@@ -73,7 +78,7 @@
   width="max-w-[450px]"
   onclose={close}
 >
-  <form class="flex flex-col gap-6 pt-2" on:submit|preventDefault={handleSubmit}>
+  <form class="flex flex-col gap-6 pt-2" onsubmit={handleSubmit}>
     <FieldGroup>
       <Field label="Database Name" forId="db_name">
         <Input id="db_name" bind:value={name} placeholder="my-production-db" required />

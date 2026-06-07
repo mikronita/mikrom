@@ -31,6 +31,10 @@ async fn openapi_json_is_served() {
     assert_eq!(spec["info"]["title"], "Mikrom API");
     assert!(spec["paths"].get("/v1/apps").is_some());
     assert!(spec["paths"].get("/v1/health").is_some());
+    assert!(spec["paths"].get("/v1/billing").is_some());
+    assert!(spec["paths"].get("/v1/billing/checkout").is_some());
+    assert!(spec["paths"].get("/v1/billing/portal").is_some());
+    assert!(spec["paths"].get("/v1/webhooks/polar").is_some());
 }
 
 #[tokio::test]

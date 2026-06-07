@@ -196,6 +196,7 @@
           { label: "Active peers", value: (mesh?.total_workers ?? 0) + runningDeployments.length, description: "Total nodes and microVMs participating in the mesh.", icon: Server, loading: !mesh || loading, valueClass: "text-2xl" },
           { label: "Running workloads", value: runningDeployments.length, description: "MicroVMs currently reachable through 6PN.", icon: Boxes, loading: loading, valueClass: "text-2xl" },
         ] as card}
+          {@const Icon = card.icon}
           <Card size="sm" class="border-border/70 bg-background/70 shadow-none">
             <CardHeader class="flex flex-row items-start justify-between gap-4">
               <div class="flex flex-col gap-1">
@@ -207,7 +208,7 @@
                 {/if}
               </div>
               <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
-                <svelte:component this={card.icon} class="size-5" />
+                <Icon class="size-5" />
               </div>
             </CardHeader>
             <CardContent>

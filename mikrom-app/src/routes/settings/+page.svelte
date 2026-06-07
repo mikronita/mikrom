@@ -10,6 +10,8 @@
   import SettingsSecuritySection from "$lib/components/settings/SettingsSecuritySection.svelte";
   import { getToken } from "$lib/auth";
   import {
+    createBillingCheckout,
+    createBillingPortal,
     getGithubInstallUrl,
     getUserProfile,
     listGithubAccounts,
@@ -17,19 +19,23 @@
     type GithubAccount,
     type UserProfile,
   } from "$lib/api";
+  import { getBillingStatusConfig } from "$lib/domain/billing";
   import { toast } from "$lib/toast";
+  import { billing, billingError, billingLoading, useBillingBootstrap } from "$lib/stores/billing";
   import { settingsTabs, type SettingsTab } from "$lib/domain/settings";
 
-  let activeTab: SettingsTab = "profile";
-  let profile: UserProfile | null = null;
-  let githubAccounts: GithubAccount[] = [];
-  let loading = true;
-  let loadingGithub = true;
-  let firstNameDraft = "";
-  let lastNameDraft = "";
-  let emailNotifications = true;
-  let marketingEmails = false;
-  let saving = false;
+  let activeTab = $state<SettingsTab>("profile");
+  let profile = $state<UserProfile | null>(null);
+  let githubAccounts = $state<GithubAccount[]>([]);
+  let loading = $state(true);
+  let loadingGithub = $state(true);
+  let firstNameDraft = $state("");
+  let lastNameDraft = $state("");
+  let emailNotifications = $state(true);
+  let marketingEmails = $state(false);
+  let saving = $state(false);
+  let billingActionLoading = $state(false);
+  let billingStatus = $derived(getBillingStatusConfig($billing?.status));
 
   onMount(async () => {
     const token = getToken();
@@ -55,6 +61,8 @@
     loading = false;
     loadingGithub = false;
   });
+
+  useBillingBootstrap();
 
   async function saveProfile() {
     const token = getToken();
@@ -91,6 +99,56 @@
 
     toast.error(result.error || "Failed to start GitHub installation");
   }
+
+  async function openBillingCheckout() {
+    const token = getToken();
+    if (!token) {
+      toast.error("You must be logged in to manage billing");
+      return;
+    }
+
+    if (!$billing?.default_checkout_product_id) {
+      toast.error("No Polar product is configured for checkout");
+      return;
+    }
+
+    billingActionLoading = true;
+    try {
+      const result = await createBillingCheckout(token, {
+        product_id: $billing.default_checkout_product_id,
+      });
+
+      if (result.data?.url) {
+        window.location.href = result.data.url;
+        return;
+      }
+
+      toast.error(result.error || "Failed to create checkout session");
+    } finally {
+      billingActionLoading = false;
+    }
+  }
+
+  async function openBillingPortal() {
+    const token = getToken();
+    if (!token) {
+      toast.error("You must be logged in to manage billing");
+      return;
+    }
+
+    billingActionLoading = true;
+    try {
+      const result = await createBillingPortal(token);
+      if (result.data?.url) {
+        window.location.href = result.data.url;
+        return;
+      }
+
+      toast.error(result.error || "Failed to open billing portal");
+    } finally {
+      billingActionLoading = false;
+    }
+  }
 </script>
 
 <svelte:head>
@@ -110,21 +168,28 @@
         <p class="max-w-2xl text-sm text-muted-foreground">
           Manage your personal information, security preferences and billing.
         </p>
+        {#if activeTab === "billing"}
+          <div class="inline-flex w-fit items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
+            <span class={`inline-flex items-center rounded-full px-2 py-0.5 ${billingStatus.tone}`}>{billingStatus.label}</span>
+            <span>Billing status</span>
+          </div>
+        {/if}
       </div>
     </div>
 
     <nav class="border-b border-border" aria-label="Settings sections">
       <div class="grid h-auto w-full grid-cols-2 gap-0.5 sm:grid-cols-3 xl:grid-cols-6">
         {#each settingsTabs as tab}
+          {@const Icon = tab.icon}
           <button
             class={`flex items-center justify-start gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors sm:justify-center ${
               activeTab === tab.value
                 ? "border-primary text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
-            on:click={() => (activeTab = tab.value)}
+            onclick={() => (activeTab = tab.value)}
           >
-            <svelte:component this={tab.icon} class="size-4 shrink-0" />
+            <Icon class="size-4 shrink-0" />
             <span class="truncate">{tab.label}</span>
           </button>
         {/each}
@@ -145,7 +210,14 @@
     {:else if activeTab === "api"}
       <SettingsApiSection />
     {:else if activeTab === "billing"}
-      <SettingsBillingSection />
+      <SettingsBillingSection
+        billing={$billing}
+        loading={$billingLoading}
+        error={$billingError}
+        actionLoading={billingActionLoading}
+        onChangePlan={openBillingCheckout}
+        onManageBilling={openBillingPortal}
+      />
     {:else if activeTab === "integrations"}
       <SettingsIntegrationsSection
         {loadingGithub}

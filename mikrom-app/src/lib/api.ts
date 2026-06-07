@@ -150,6 +150,31 @@ export interface UpdateProfileRequest {
   last_name: string | null;
 }
 
+export interface BillingSummary {
+  tenant_id: string;
+  customer_external_id: string;
+  polar_customer_id: string | null;
+  polar_subscription_id: string | null;
+  polar_product_id: string | null;
+  plan_name: string | null;
+  status: string;
+  amount_cents: number | null;
+  currency: string | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  default_checkout_product_id: string | null;
+  has_billing_record: boolean;
+}
+
+export interface BillingCheckoutRequest {
+  product_id?: string;
+}
+
+export interface BillingRedirectResponse {
+  url: string;
+}
+
 export interface HealthResponse {
   status: string;
   version: string;
@@ -179,6 +204,7 @@ export type WorkspaceEventKind =
   | "deployment_changed"
   | "profile_updated"
   | "github_accounts_changed"
+  | "billing_updated"
   | "security_rules_changed"
   | "volume_changed"
   | "snapshot_changed"
@@ -187,6 +213,7 @@ export type WorkspaceEventKind =
 export interface WorkspaceEvent {
   kind: WorkspaceEventKind;
   user_id?: string | null;
+  tenant_id?: string | null;
   app_id?: string | null;
   app_name?: string | null;
   deployment_id?: string | null;
@@ -778,6 +805,49 @@ export async function updateUserProfile(token: string, data: UpdateProfileReques
     const result = await parseJson<UserProfile>(response);
     if (!response.ok) return { error: getErrorMessage(result, "Failed to update profile") };
     return { data: result as UserProfile };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function getBillingSummary(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/billing`, { headers: authHeaders(token) });
+    if (response.status === 401) logout();
+    const result = await parseJson<BillingSummary>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch billing summary") };
+    return { data: result as BillingSummary };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function createBillingCheckout(token: string, data: BillingCheckoutRequest = {}) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/billing/checkout`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<BillingRedirectResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create billing checkout") };
+    return { data: result as BillingRedirectResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function createBillingPortal(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/billing/portal`, {
+      method: "POST",
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<BillingRedirectResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to create billing portal link") };
+    return { data: result as BillingRedirectResponse };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Network error" };
   }

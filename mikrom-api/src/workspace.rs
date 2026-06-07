@@ -18,6 +18,7 @@ pub enum WorkspaceEventKind {
     DeploymentChanged,
     ProfileUpdated,
     GithubAccountsChanged,
+    BillingUpdated,
     SecurityRulesChanged,
     VolumeChanged,
     SnapshotChanged,

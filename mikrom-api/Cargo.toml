@@ -62,6 +62,7 @@ wiremock = "0.6.5"
 mikrom-scheduler = { path = "../mikrom-scheduler" }
 mikrom-agent = { path = "../mikrom-agent" }
 tempfile = "3.27"
+serial_test = "3"
 
 [[test]]
 name = "integration_auth_tests"
@@ -177,4 +178,9 @@ required-features = ["test-utils"]
 [[test]]
 name = "database_repo_tests"
 path = "tests/database_repo_tests.rs"
+required-features = ["test-utils"]
+
+[[test]]
+name = "billing_webhook_tests"
+path = "tests/billing_webhook_tests.rs"
 required-features = ["test-utils"]

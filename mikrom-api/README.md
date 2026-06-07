@@ -33,6 +33,7 @@
 - Tracks the router's default redirect certificate for `debaser.spluca.org` through the same ACME worker, but the TLS storage tables themselves remain owned by `mikrom-router`.
 - Stores the desired ACME mode and one-shot reissue flag for managed hostnames in `acme_managed_domains`.
 - The runtime Docker image sets `ACME_STAGING=false` and `ROUTER_TLS_HOSTNAME=debaser.spluca.org` by default.
+- Exposes Polar-backed billing endpoints for checkout, portal redirection, and webhook sync.
 - Local repository tests use `TestDb` and expect PostgreSQL to be available.
 
 Common environment variables:
@@ -49,6 +50,10 @@ Common environment variables:
 - `ACME_STAGING`
 - `ROUTER_TLS_HOSTNAME`
 - `ROUTER_ADDR`
+- `POLAR_ACCESS_TOKEN`
+- `POLAR_WEBHOOK_SECRET`
+- `POLAR_CHECKOUT_PRODUCT_ID`
+- `POLAR_API_BASE_URL` or `POLAR_SERVER`
 
 Timeout defaults:
 
