@@ -102,7 +102,7 @@ mod tests {
     use super::*;
     use mikrom_cli::commands::{
         AppCommands, AuthCommands, ConfigCommands, DbCommands, DeploymentCommands, OutputFormat,
-        SystemCommands,
+        SystemCommands, VolumeSnapshotCommands,
     };
 
     #[test]
@@ -585,6 +585,50 @@ mod tests {
                 assert!(yes);
             },
             _ => panic!("expected volume delete with yes"),
+        }
+    }
+
+    #[test]
+    fn test_cli_volume_snapshots_list_parses_volume_id() {
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "volume",
+            "snapshots",
+            "list",
+            "--volume-id",
+            "vol-1",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Volume(mikrom_cli::commands::VolumeCommands::Snapshots(
+                VolumeSnapshotCommands::List { volume_id },
+            )) => {
+                assert_eq!(volume_id, "vol-1");
+            },
+            _ => panic!("expected volume snapshots list"),
+        }
+    }
+
+    #[test]
+    fn test_cli_volume_snapshots_delete_with_yes_flag() {
+        let cli = Cli::try_parse_from([
+            "mikrom",
+            "volume",
+            "snapshots",
+            "delete",
+            "--snapshot-id",
+            "snap-1",
+            "--yes",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Volume(mikrom_cli::commands::VolumeCommands::Snapshots(
+                VolumeSnapshotCommands::Delete { snapshot_id, yes },
+            )) => {
+                assert_eq!(snapshot_id, "snap-1");
+                assert!(yes);
+            },
+            _ => panic!("expected volume snapshots delete with yes"),
         }
     }
 

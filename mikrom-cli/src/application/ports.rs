@@ -65,7 +65,9 @@ pub trait ApiClient: Send + Sync {
         volume_id: &str,
         name: &str,
     ) -> CliResult<VolumeSnapshot>;
+    async fn list_volume_snapshots(&self, volume_id: &str) -> CliResult<Vec<VolumeSnapshot>>;
     async fn restore_volume_snapshot(&self, volume_id: &str, snapshot_name: &str) -> CliResult<()>;
+    async fn delete_volume_snapshot(&self, snapshot_id: &str) -> CliResult<()>;
     async fn delete_volume(&self, volume_id: &str) -> CliResult<()>;
 
     async fn list_databases(&self) -> CliResult<Vec<DatabaseInfo>>;

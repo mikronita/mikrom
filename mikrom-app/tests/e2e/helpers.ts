@@ -87,6 +87,7 @@ export async function mockControlPlaneApi(
   let securityRulesState = [...securityRules];
   let appsState = [...apps];
   let volumesState = [...volumes];
+  let volumeSnapshotsState = [...volumeSnapshots];
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -561,7 +562,20 @@ export async function mockControlPlaneApi(
     }
 
     if (pathname === `${apiBase}/volumes/vol-1/snapshots` && method === "GET") {
-      await route.fulfill(jsonResponse(volumeSnapshots));
+      await route.fulfill(jsonResponse(volumeSnapshotsState));
+      return;
+    }
+
+    if (pathname.startsWith(`${apiBase}/snapshots/`) && method === "DELETE") {
+      const snapshotId = decodeURIComponent(pathname.slice(`${apiBase}/snapshots/`.length));
+      const snapshot = volumeSnapshotsState.find((entry) => entry.id === snapshotId);
+      if (!snapshot) {
+        await route.fulfill(jsonResponse({ error: "Snapshot not found", status: 404 }, 404));
+        return;
+      }
+
+      volumeSnapshotsState = volumeSnapshotsState.filter((entry) => entry.id !== snapshotId);
+      await route.fulfill(jsonResponse({ success: true }));
       return;
     }
 

@@ -107,6 +107,16 @@ test.describe("detail pages", () => {
     await expect(page.getByText("daily-backup")).toBeVisible();
     await expect(page.getByRole("button", { name: "Create Snapshot" })).toBeVisible();
 
+    const deleteSnapshotRequest = page.waitForRequest((request) =>
+      request.url().includes("/api/v1/snapshots/snap-1") && request.method() === "DELETE"
+    );
+    await page.locator('button[title="Delete snapshot"]').click();
+    const deleteSnapshotDialog = page.getByRole("alertdialog", { name: "Delete snapshot?" });
+    await expect(deleteSnapshotDialog).toBeVisible();
+    await deleteSnapshotDialog.getByRole("button", { name: "Delete Snapshot", exact: true }).click();
+    await deleteSnapshotRequest;
+    await expect(page.getByText("daily-backup")).toHaveCount(0);
+
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(page.getByRole("button", { name: "Delete Volume" })).toBeVisible();
 

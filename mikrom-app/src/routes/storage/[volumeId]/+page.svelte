@@ -11,6 +11,7 @@
     Link,
     Activity,
     Server,
+    Trash2,
     Zap
   } from "lucide-svelte";
   import {
@@ -41,10 +42,12 @@
     attachVolume,
     createVolumeSnapshot,
     deleteVolume,
+    deleteVolumeSnapshot,
     detachVolume,
     type AttachedVolume,
     type Volume,
     type VolumeAttachmentInfo,
+    type VolumeSnapshot,
     type VolumeWithAttachments,
   } from "$lib/api";
   import { getToken } from "$lib/auth";
@@ -60,6 +63,8 @@
   let showAttachVolumeDialog = false;
   let attachmentToDetach: VolumeAttachmentInfo | null = null;
   let newSnapshotName = "";
+  let snapshotActionLoading = false;
+  let snapshotToDelete: VolumeSnapshot | null = null;
   let attachTargetAppId = "";
   let attachMountPoint = "/data";
   let attachAccessMode = "0";
@@ -134,6 +139,30 @@
     newSnapshotName = "";
     showCreateSnapshotDialog = false;
     activeTab = "snapshots";
+    await loadSnapshots();
+  }
+
+  async function deleteSnapshotNow() {
+    if (!volume || !snapshotToDelete) return;
+
+    const token = getToken();
+    if (!token) {
+      toast.error("You must be logged in");
+      return;
+    }
+
+    snapshotActionLoading = true;
+    const target = snapshotToDelete;
+    const result = await deleteVolumeSnapshot(token, target.id);
+    snapshotActionLoading = false;
+
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
+
+    toast.success("Snapshot deleted");
+    snapshotToDelete = null;
     await loadSnapshots();
   }
 
@@ -448,6 +477,16 @@
                         <span class="text-xs text-muted-foreground">{formatDate(snapshot.created_at)}</span>
                       </div>
                     </div>
+                    <Button
+                      variant="destructive-soft"
+                      size="icon"
+                      class="size-8 shrink-0"
+                      title="Delete snapshot"
+                      onclick={() => (snapshotToDelete = snapshot)}
+                      disabled={snapshotActionLoading}
+                    >
+                      <Trash2 class="size-4" />
+                    </Button>
                   </div>
                 {/each}
               </div>
@@ -562,6 +601,17 @@
     variant="destructive"
     onaction={confirmDetachAttachment}
     onclose={() => (attachmentToDetach = null)}
+  />
+
+  <AlertDialog
+    open={!!snapshotToDelete}
+    title="Delete snapshot?"
+    description={`Delete snapshot ${snapshotToDelete?.name} from volume ${volume?.name}? This cannot be undone.`}
+    actionText="Delete Snapshot"
+    variant="destructive"
+    loading={snapshotActionLoading}
+    onaction={deleteSnapshotNow}
+    onclose={() => (snapshotToDelete = null)}
   />
 
   <AlertDialog

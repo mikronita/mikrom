@@ -19,6 +19,7 @@ cargo install --path mikrom-cli
 - Projects: `mikrom project list`, `mikrom project create`, `mikrom project switch`
 - Apps: `mikrom app list`, `mikrom app create`, `mikrom app deploy`, `mikrom app deployments`, `mikrom app watch`, `mikrom app secret`, `mikrom app delete`
 - Deployments: `mikrom deployment list`, `mikrom deployment status`, `mikrom deployment logs`, `mikrom deployment stop`, `mikrom deployment pause`, `mikrom deployment resume`, `mikrom deployment watch`, `mikrom deployment delete`
+- Storage: `mikrom volume list`, `mikrom volume create`, `mikrom volume attach`, `mikrom volume detach`, `mikrom volume snapshot`, `mikrom volume restore`, `mikrom volume snapshots list`, `mikrom volume snapshots delete`, `mikrom volume delete`
 - Databases: `mikrom db list`, `mikrom db create`, `mikrom db info`, `mikrom db connection`, `mikrom db delete`
 - System: `mikrom system health`, `mikrom system watch`, `mikrom config show`, `mikrom config set`
 
