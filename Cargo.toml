@@ -6,7 +6,6 @@ members = [
     "mikrom-api",
     "mikrom-cli",
     "mikrom-builder",
-    "mikrom-init",
     "mikrom-agent-ebpf-common",
     "mikrom-agent-ebpf",
     "mikrom-router",

@@ -38,7 +38,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/mikrom-agent /usr/local/bin/
 COPY --from=builder /app/target/release/mikrom-init /usr/bin/mikrom-init
-COPY --from=builder /app/target/release/mikrom-init-zig /usr/bin/mikrom-init-zig
 COPY --from=builder /tmp/tundra-build/tundra-nat64 /usr/local/bin/tundra-nat64
 EXPOSE 5003
 CMD ["mikrom-agent"]

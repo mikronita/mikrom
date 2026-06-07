@@ -143,7 +143,6 @@ test-all-crates: ceph-libs ## Run unit tests for all crates
 	$(CEPH_ENV) cargo nextest run -p mikrom-agent && \
 	$(CEPH_ENV) cargo nextest run -p mikrom-builder && \
 	$(CEPH_ENV) cargo nextest run -p mikrom-api --features test-utils && \
-	$(CEPH_ENV) cargo nextest run -p mikrom-init && \
 	$(CEPH_ENV) cargo nextest run -p mikrom-router && \
 	$(CEPH_ENV) cargo nextest run -p mikrom-cli && \
 	$(CEPH_ENV) cargo nextest run -p mikrom-dns && \
@@ -179,21 +178,17 @@ run-builder: ## Run mikrom-builder with watch
 run-router: ## Run mikrom-router (Rust/Pingora)
 	cd mikrom-router && cargo watch -x run
 
-.PHONY: build-init-zig
-build-init-zig: ## Build mikrom-init-zig and stage it for the agent package
-	@command -v zig >/dev/null 2>&1 || { echo >&2 "zig is not installed. Install Zig to build mikrom-init-zig"; exit 1; }
-	cd mikrom-init-zig && zig build -Doptimize=ReleaseSafe
-	@mkdir -p target/release
-	cp mikrom-init-zig/zig-out/bin/mikrom-init-zig target/release/mikrom-init-zig
-	cp mikrom-init-zig/zig-out/bin/mikrom-init-zig target/release/mikrom-init
-
 .PHONY: build-init
-build-init: build-init-zig ## Build mikrom-init from mikrom-init-zig for the agent image/package
+build-init: ## Build mikrom-init with Zig and stage it for the agent package
+	@command -v zig >/dev/null 2>&1 || { echo >&2 "zig is not installed. Install Zig to build mikrom-init"; exit 1; }
+	cd mikrom-init && zig build -Doptimize=ReleaseSafe
+	@mkdir -p target/release
+	cp mikrom-init/zig-out/bin/mikrom-init target/release/mikrom-init
 
-.PHONY: test-init-zig
-test-init-zig: ## Run mikrom-init-zig tests
-	@command -v zig >/dev/null 2>&1 || { echo >&2 "zig is not installed. Install Zig to test mikrom-init-zig"; exit 1; }
-	cd mikrom-init-zig && zig build test
+.PHONY: test-init
+test-init: ## Run mikrom-init tests
+	@command -v zig >/dev/null 2>&1 || { echo >&2 "zig is not installed. Install Zig to test mikrom-init"; exit 1; }
+	cd mikrom-init && zig build test
 
 .PHONY: run-app
 run-app: ## Run mikrom-app dev server  (port 3001)

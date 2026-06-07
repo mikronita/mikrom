@@ -207,15 +207,10 @@ impl ImageBuilder {
             // Inject the binary into the rootfs
             // We look for it in multiple locations to support both local dev and production
             let host_init_paths = [
-                "/usr/bin/mikrom-init-zig",
-                "target/release/mikrom-init-zig",
-                "../target/release/mikrom-init-zig",
-                "mikrom-init-zig/zig-out/bin/mikrom-init-zig",
                 "/usr/bin/mikrom-init",
                 "target/release/mikrom-init",
                 "../target/release/mikrom-init",
-                "target/x86_64-unknown-linux-musl/release/mikrom-init",
-                "../target/x86_64-unknown-linux-musl/release/mikrom-init",
+                "mikrom-init/zig-out/bin/mikrom-init",
             ];
 
             let mut found_init = false;
@@ -395,15 +390,10 @@ impl ImageBuilder {
 
             info!("Setting up mikrom-init for database workload...");
             let host_init_paths = [
-                "/usr/bin/mikrom-init-zig",
-                "target/release/mikrom-init-zig",
-                "../target/release/mikrom-init-zig",
-                "mikrom-init-zig/zig-out/bin/mikrom-init-zig",
                 "/usr/bin/mikrom-init",
                 "target/release/mikrom-init",
                 "../target/release/mikrom-init",
-                "target/x86_64-unknown-linux-musl/release/mikrom-init",
-                "../target/x86_64-unknown-linux-musl/release/mikrom-init",
+                "mikrom-init/zig-out/bin/mikrom-init",
             ];
 
             let dest_init_path = mount_dir.join("mikrom-init");

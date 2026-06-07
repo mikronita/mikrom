@@ -27,7 +27,7 @@ Mikrom is a Rust-first edge platform that deploys containerized workloads into l
 
 - Control plane: CLI/Web -> `mikrom-app` / `mikrom-cli` -> `mikrom-api` -> `mikrom-builder` -> `mikrom-scheduler` -> `mikrom-agent`.
 - Traffic plane: External traffic -> `mikrom-router` -> app microVM.
-- Platform services: `mikrom-network` maintains the WireGuard mesh, `mikrom-dns` serves internal name resolution, `mikrom-init` boots microVMs, and `mikrom-agent-ebpf` provides the eBPF program used by the agent.
+- Platform services: `mikrom-network` maintains the WireGuard mesh, `mikrom-dns` serves internal name resolution, Zig-built `mikrom-init` boots microVMs, and `mikrom-agent-ebpf` provides the eBPF program used by the agent.
 
 ## Technology Stack
 
@@ -48,7 +48,7 @@ Mikrom is a Rust-first edge platform that deploys containerized workloads into l
 | `mikrom-builder/` | Build engine that turns Git repositories into OCI images. |
 | `mikrom-cli/` | Command-line client for managing the platform. |
 | `mikrom-dns/` | Internal DNS service for platform and workload name resolution. |
-| `mikrom-init/` | Init process used inside the microVMs. |
+| `mikrom-init/` | Zig source that builds the `mikrom-init` binary used inside the microVMs. |
 | `mikrom-network/` | WireGuard mesh and network coordination service. |
 | `mikrom-proto/` | Shared protobuf definitions and generated Rust code. |
 | `mikrom-router/` | Pingora-based ingress router and traffic plane. |

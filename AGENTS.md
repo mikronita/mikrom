@@ -16,7 +16,7 @@ Mikrom is a Rust-first platform-as-a-service that deploys containerized workload
 - `mikrom-builder`: Build engine that turns Git repositories into OCI images.
 - `mikrom-cli`: Command-line client for the platform.
 - `mikrom-dns`: Internal DNS service for platform and workload discovery.
-- `mikrom-init`: Init binary used inside microVMs.
+- `mikrom-init`: Zig source for the `mikrom-init` binary used inside microVMs.
 - `mikrom-network`: WireGuard mesh and network coordination service.
 - `mikrom-proto`: Shared protobuf definitions and generated code.
 - `mikrom-router`: Pingora-based ingress router and traffic plane.

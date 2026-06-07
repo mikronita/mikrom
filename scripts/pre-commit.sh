@@ -14,10 +14,10 @@ run_zig_init=false
 
 for file in $staged_files; do
   case "$file" in
-  Cargo.toml | Cargo.lock | Makefile | *.rs | *.proto | mikrom-api/* | mikrom-agent/* | mikrom-builder/* | mikrom-cli/* | mikrom-dns/* | mikrom-init/* | mikrom-network/* | mikrom-proto/* | mikrom-router/* | mikrom-scheduler/* | ci/*)
+  Cargo.toml | Cargo.lock | Makefile | *.rs | *.proto | mikrom-api/* | mikrom-agent/* | mikrom-builder/* | mikrom-cli/* | mikrom-dns/* | mikrom-network/* | mikrom-proto/* | mikrom-router/* | mikrom-scheduler/* | ci/*)
     run_rust=true
     ;;
-  mikrom-init-zig/*)
+  mikrom-init/*)
     run_zig_init=true
     ;;
   mikrom-app/*)
@@ -37,8 +37,8 @@ if [ "$run_app" = true ]; then
 fi
 
 if [ "$run_zig_init" = true ]; then
-  echo "Running Zig init validation (make test-init-zig)..."
-  make test-init-zig
+  echo "Running Zig init validation (make test-init)..."
+  make test-init
 fi
 
 echo "All checks passed!"

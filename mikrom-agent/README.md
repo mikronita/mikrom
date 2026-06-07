@@ -25,7 +25,7 @@
 ## Runtime Notes
 
 - The agent expects access to the host networking stack.
-- The agent relies on the Zig-backed `mikrom-init` build and the runtime boot scripts inside microVM images.
+- The agent relies on the Zig-backed `mikrom-init` binary and the runtime boot scripts inside microVM images.
 - The agent starts a singleton NAT64 translator on the host bridge and expects `mikrom-dns` to provide DNS64 answers for external names.
 - Build output for the eBPF program is consumed from `target/bpfel-unknown-none/release/mikrom-agent-ebpf`.
 
