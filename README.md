@@ -1,6 +1,6 @@
 # Mikrom - Open-Source PaaS
 
-Mikrom is a Rust-first platform-as-a-service that deploys containerized workloads into lightweight microVMs on Firecracker or Cloud Hypervisor. The workspace now includes a SvelteKit dashboard, a Pingora-based router, WireGuard and DNS control-plane services, eBPF support in the agent, and a Dagger-backed local CI/CD pipeline that runs the same validation logic locally and in GitHub Actions.
+Mikrom is a Rust-first edge platform that deploys containerized workloads into lightweight microVMs on Firecracker or Cloud Hypervisor. The workspace now includes a SvelteKit dashboard, a Pingora-based router, WireGuard and DNS control-plane services, eBPF support in the agent, and a Dagger-backed local CI/CD pipeline that runs the same validation logic locally and in GitHub Actions.
 
 ## What Changed Recently
 
