@@ -53,7 +53,7 @@
           class="flex size-9 items-center justify-center rounded-md hover:bg-muted"
           aria-label="Toggle Sidebar"
           title="Toggle Sidebar"
-          on:click={() => persistSidebarState(!sidebarCollapsed)}
+          onclick={() => persistSidebarState(!sidebarCollapsed)}
         >
           <PanelLeft class="size-4" />
         </button>

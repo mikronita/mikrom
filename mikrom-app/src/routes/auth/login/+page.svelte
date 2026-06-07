@@ -62,7 +62,7 @@
 
     <Card class="w-full max-w-md">
       <div class="p-7">
-        <form class="flex flex-col gap-5" on:submit|preventDefault={handleSubmit}>
+        <form class="flex flex-col gap-5" onsubmit={handleSubmit}>
           <Field label="Email address" forId="email">
             <Input id="email" type="email" bind:value={email} placeholder="name@example.com" required disabled={loading} />
           </Field>

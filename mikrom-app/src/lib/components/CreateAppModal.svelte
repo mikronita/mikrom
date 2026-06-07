@@ -19,17 +19,22 @@
   import { toast } from "$lib/toast";
   import { activeProjectSlugStore, activeProjectStore } from "$lib/stores/projects";
 
-  export let open = false;
-  export let onClose: (() => void) | undefined = undefined;
+  let {
+    open = $bindable(false),
+    onClose = undefined,
+  } = $props<{
+    open?: boolean;
+    onClose?: (() => void) | undefined;
+  }>();
 
-  let name = "";
-  let gitUrl = "";
-  let activeTab: "manual" | "github" = "manual";
-  let githubRepos: GithubRepo[] = [];
-  let selectedRepoId = "";
-  let loadingRepos = false;
+  let name = $state("");
+  let gitUrl = $state("");
+  let activeTab = $state<"manual" | "github">("manual");
+  let githubRepos = $state<GithubRepo[]>([]);
+  let selectedRepoId = $state("");
+  let loadingRepos = $state(false);
 
-  $: selectedRepo = githubRepos.find((repo) => repo.id.toString() === selectedRepoId);
+  let selectedRepo = $derived(githubRepos.find((repo) => repo.id.toString() === selectedRepoId));
 
   onMount(async () => {
     const token = getToken();
@@ -105,7 +110,7 @@
 </script>
 
 <Modal bind:open title="Create New Application" description="Add a Git-backed project to the active project." width="max-w-[425px]" onclose={close}>
-  <form class="flex flex-col gap-6 pt-2" on:submit|preventDefault={handleSubmit}>
+  <form class="flex flex-col gap-6 pt-2" onsubmit={handleSubmit}>
     <Field label="App Name" forId="app_name">
       <Input id="app_name" bind:value={name} placeholder="my-cool-project" required />
     </Field>
@@ -132,7 +137,7 @@
         class={`inline-flex items-center justify-center gap-2 rounded px-3 py-2 text-sm transition-colors ${
           activeTab === "manual" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
         }`}
-        on:click={() => selectTab("manual")}
+        onclick={() => selectTab("manual")}
       >
         <Globe class="size-4" />
         Manual URL
@@ -142,7 +147,7 @@
         class={`inline-flex items-center justify-center gap-2 rounded px-3 py-2 text-sm transition-colors ${
           activeTab === "github" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
         }`}
-        on:click={() => selectTab("github")}
+        onclick={() => selectTab("github")}
       >
         <GitPullRequest class="size-4" />
         GitHub

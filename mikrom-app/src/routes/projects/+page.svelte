@@ -224,7 +224,7 @@
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form class="flex flex-col gap-5" on:submit|preventDefault={handleCreateProject}>
+          <form class="flex flex-col gap-5" onsubmit={handleCreateProject}>
             <FieldGroup>
               <Field
                 label="Project name"
@@ -377,7 +377,7 @@
     renameName = "";
   }}
 >
-  <form class="flex flex-col gap-5" on:submit|preventDefault={handleRenameProject}>
+  <form class="flex flex-col gap-5" onsubmit={handleRenameProject}>
     <FieldGroup>
       <Field label="Project name" forId="rename_project_name">
         <Input id="rename_project_name" bind:value={renameName} autocomplete="off" required />

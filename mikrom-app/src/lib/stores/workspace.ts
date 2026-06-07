@@ -5,6 +5,7 @@ import { refreshApps } from "./apps";
 import { refreshVolumes, refreshSnapshots, volumesStore } from "./volumes";
 import { refreshVms } from "./vms";
 import { refreshProfile } from "./profile";
+import { refreshBilling } from "./billing";
 import { refreshSecurityRules } from "./networking";
 import { refreshDatabases } from "./databases";
 
@@ -42,6 +43,10 @@ export function initWorkspaceSSE() {
         void refreshProfile();
         break;
 
+      case "billing_updated":
+        void refreshBilling();
+        break;
+
       case "security_rules_changed":
         if (event.app_name) {
           void refreshSecurityRules(event.app_name);
@@ -73,6 +78,7 @@ export function initWorkspaceSSE() {
         void refreshApps();
         void refreshVms();
         void refreshDatabases();
+        void refreshBilling();
         break;
 
       default:

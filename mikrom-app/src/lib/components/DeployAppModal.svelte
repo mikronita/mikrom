@@ -20,17 +20,22 @@
   } from "$lib/components";
   import { toast } from "$lib/toast";
 
-  export let open = false;
-  export let app: AppInfo;
+  let {
+    open = $bindable(false),
+    app,
+  } = $props<{
+    open?: boolean;
+    app: AppInfo;
+  }>();
 
   const DEFAULT_CPU = String(DEPLOYMENT_CPU_OPTIONS[0]);
   const DEFAULT_MEMORY = String(DEPLOYMENT_MEMORY_OPTIONS[0].value);
   const DEFAULT_HYPERVISOR = String(DEPLOYMENT_HYPERVISOR_OPTIONS[0].value);
 
-  let loading = false;
-  let selectedCpu = DEFAULT_CPU;
-  let selectedMemory = DEFAULT_MEMORY;
-  let selectedHypervisor = DEFAULT_HYPERVISOR;
+  let loading = $state(false);
+  let selectedCpu = $state(DEFAULT_CPU);
+  let selectedMemory = $state(DEFAULT_MEMORY);
+  let selectedHypervisor = $state(DEFAULT_HYPERVISOR);
 
   function resetForm() {
     selectedCpu = DEFAULT_CPU;
@@ -38,16 +43,19 @@
     selectedHypervisor = DEFAULT_HYPERVISOR;
   }
 
-  $: if (open) {
-    resetForm();
-  }
+  $effect(() => {
+    if (open) {
+      resetForm();
+    }
+  });
 
   function close() {
     resetForm();
     open = false;
   }
 
-  async function handleDeploy() {
+  async function handleDeploy(event: SubmitEvent) {
+    event.preventDefault();
     const token = getToken();
     if (!token || !app) return;
 
@@ -79,7 +87,7 @@
   width="max-w-[440px]"
   onclose={close}
 >
-  <form class="flex flex-col gap-6 pt-2" on:submit|preventDefault={handleDeploy}>
+  <form class="flex flex-col gap-6 pt-2" onsubmit={handleDeploy}>
     <div class="rounded-lg border border-border bg-muted/30 p-4">
       <p class="text-sm font-medium">Resource presets</p>
       <p class="mt-1 text-xs text-muted-foreground">Choose one CPU and one RAM preset.</p>

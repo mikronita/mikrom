@@ -10,6 +10,7 @@ use tracing::Level;
 
 use crate::infrastructure::http::handlers::{
     auth::{get_profile, login, register, update_profile},
+    billing::{create_billing_checkout, create_billing_portal, get_billing_summary, polar_webhook},
     github::{github_callback, github_install, list_repos},
     vms::{
         attach_volume_runtime_handler, cancel_migration_handler, create_security_rule_handler,
@@ -51,6 +52,10 @@ pub fn create_app_with_rate_limits(
             post(crate::infrastructure::http::health::re_attach),
         )
         .route(
+            &format!("{}/webhooks/polar", crate::API_V1),
+            post(polar_webhook),
+        )
+        .route(
             "/validate",
             post(crate::infrastructure::http::health::validate),
         )
@@ -70,6 +75,18 @@ pub fn create_app_with_rate_limits(
         .route(
             &format!("{}/auth/me", crate::API_V1),
             get(get_profile).put(update_profile),
+        )
+        .route(
+            &format!("{}/billing", crate::API_V1),
+            get(get_billing_summary),
+        )
+        .route(
+            &format!("{}/billing/checkout", crate::API_V1),
+            post(create_billing_checkout),
+        )
+        .route(
+            &format!("{}/billing/portal", crate::API_V1),
+            post(create_billing_portal),
         )
         .route(
             &format!("{}/github/install", crate::API_V1),

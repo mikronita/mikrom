@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod billing;
 pub mod context;
 pub mod database;
 pub mod deployment;

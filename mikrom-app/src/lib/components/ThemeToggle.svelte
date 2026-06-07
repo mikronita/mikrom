@@ -11,7 +11,7 @@
   type="button"
   class="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-transparent bg-transparent text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
   aria-label="Toggle theme"
-  on:click={toggle}
+  onclick={toggle}
 >
   {#if $themeStore === "dark"}
     <Sun class="size-4" />
