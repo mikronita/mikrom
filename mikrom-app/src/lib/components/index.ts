@@ -11,6 +11,7 @@ export { default as FieldGroup } from "./FieldGroup.svelte";
 export { default as FieldLegend } from "./FieldLegend.svelte";
 export { default as FieldSet } from "./FieldSet.svelte";
 export { Input } from "./ui/input/index.js";
+export { default as NotificationsMenu } from "./NotificationsMenu.svelte";
 export { default as Modal } from "./Modal.svelte";
 export { default as SectionTabs } from "./SectionTabs.svelte";
 export { DialogContent as ModalContent, DialogDescription as ModalDescription, DialogFooter as ModalFooter, DialogHeader as ModalHeader, DialogTitle as ModalTitle, DialogTrigger as ModalTrigger } from "./ui/dialog/index.js";

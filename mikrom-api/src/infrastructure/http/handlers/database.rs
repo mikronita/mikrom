@@ -6,6 +6,7 @@ use crate::domain::CreateDatabaseParams;
 use crate::domain::types::{CpuCores, MemoryMb};
 use crate::error::ApiResult;
 use crate::infrastructure::auth::extractor::TenantContext;
+use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -123,6 +124,17 @@ pub async fn create_database(
 
     let db = DatabaseService::create_database(&state, params).await?;
 
+    state.publish_workspace_event(WorkspaceEvent {
+        kind: WorkspaceEventKind::DatabaseCreated,
+        user_id: Some(user_id),
+        tenant_id: Some(tenant_id),
+        app_id: None,
+        app_name: None,
+        deployment_id: None,
+        volume_id: None,
+        resource_id: Some(db.name.clone()),
+    });
+
     Ok(Json(DatabaseResponse {
         id: db.id,
         name: db.name,
@@ -190,6 +202,8 @@ pub async fn delete_database(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<()>> {
+    let user_id = resolve_tenant_owner_user_id(&state, tenant_ctx.tenant.id).await?;
+
     // Check ownership
     let db = state
         .ctx
@@ -204,6 +218,17 @@ pub async fn delete_database(
     }
 
     DatabaseService::delete_database(&state, id).await?;
+
+    state.publish_workspace_event(WorkspaceEvent {
+        kind: WorkspaceEventKind::DatabaseDeleted,
+        user_id: Some(user_id),
+        tenant_id: Some(tenant_ctx.tenant.id),
+        app_id: None,
+        app_name: None,
+        deployment_id: None,
+        volume_id: None,
+        resource_id: Some(db.name.clone()),
+    });
 
     Ok(Json(()))
 }

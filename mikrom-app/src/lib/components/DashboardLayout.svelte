@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { page } from "$app/stores";
-  import { Bell, PanelLeft } from "lucide-svelte";
+  import { PanelLeft } from "lucide-svelte";
   import AuthGuard from "$lib/components/AuthGuard.svelte";
+  import NotificationsMenu from "$lib/components/NotificationsMenu.svelte";
   import ProjectSwitcher from "$lib/components/ProjectSwitcher.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
@@ -42,6 +43,7 @@
             <span class="text-sm font-semibold">M</span>
           </a>
           <div class="min-w-0 flex-1"></div>
+          <NotificationsMenu />
           <ThemeToggle />
         </div>
         <ProjectSwitcher compact className="w-full" />
@@ -77,9 +79,7 @@
         <div class="hidden lg:block">
           <ProjectSwitcher compact className="min-w-[220px]" />
         </div>
-        <button class="flex size-9 items-center justify-center rounded-md hover:bg-muted" aria-label="Notifications" type="button">
-          <Bell class="size-4" />
-        </button>
+        <NotificationsMenu />
         <ThemeToggle />
       </header>
 

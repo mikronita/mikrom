@@ -136,7 +136,7 @@ pub async fn create_volume_handler(
     }
 
     // Emit workspace event
-    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+    state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
         user_id: None,
         tenant_id: Some(tenant_id),
@@ -145,9 +145,7 @@ pub async fn create_volume_handler(
         deployment_id: None,
         volume_id: Some(volume.id),
         resource_id: Some(volume.id.to_string()),
-    }) {
-        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
-    }
+    });
 
     Ok((StatusCode::CREATED, Json(volume)))
 }
@@ -265,7 +263,7 @@ pub async fn attach_volume_handler(
         .await?;
 
     // Emit workspace event
-    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+    state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
         user_id: None,
         tenant_id: Some(app.tenant_id),
@@ -274,9 +272,7 @@ pub async fn attach_volume_handler(
         deployment_id: None,
         volume_id: Some(req.volume_id),
         resource_id: Some(req.volume_id.to_string()),
-    }) {
-        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
-    }
+    });
 
     Ok((StatusCode::OK, Json(app_volume)))
 }
@@ -307,7 +303,7 @@ pub async fn detach_volume_handler(
     }
 
     // Emit workspace event
-    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+    state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
         user_id: None,
         tenant_id: Some(app.tenant_id),
@@ -316,9 +312,7 @@ pub async fn detach_volume_handler(
         deployment_id: None,
         volume_id: Some(volume_id),
         resource_id: Some(volume_id.to_string()),
-    }) {
-        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
-    }
+    });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -394,7 +388,7 @@ pub async fn create_snapshot_handler(
         return Err(ApiError::Scheduler(resp.message));
     }
 
-    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+    state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::SnapshotChanged,
         user_id: None,
         tenant_id: Some(volume.tenant_id),
@@ -403,9 +397,7 @@ pub async fn create_snapshot_handler(
         deployment_id: None,
         volume_id: Some(volume.id),
         resource_id: Some(snapshot.id.to_string()),
-    }) {
-        tracing::warn!(error = %e, "Failed to broadcast SnapshotChanged event");
-    }
+    });
 
     Ok((StatusCode::CREATED, Json(snapshot)))
 }
@@ -470,7 +462,7 @@ pub async fn delete_volume_handler(
     state.volume_repo.delete_volume(volume_id).await?;
 
     // Emit workspace event
-    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+    state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
         user_id: None,
         tenant_id: Some(volume.tenant_id),
@@ -479,9 +471,7 @@ pub async fn delete_volume_handler(
         deployment_id: None,
         volume_id: Some(volume_id),
         resource_id: Some(volume_id.to_string()),
-    }) {
-        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
-    }
+    });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -529,7 +519,7 @@ pub async fn delete_snapshot_handler(
 
     state.volume_repo.delete_snapshot(snapshot_id).await?;
 
-    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+    state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::SnapshotChanged,
         user_id: None,
         tenant_id: Some(snapshot.tenant_id),
@@ -538,9 +528,7 @@ pub async fn delete_snapshot_handler(
         deployment_id: None,
         volume_id: Some(snapshot.volume_id),
         resource_id: Some(snapshot.id.to_string()),
-    }) {
-        tracing::warn!(error = %e, "Failed to broadcast SnapshotChanged event");
-    }
+    });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -641,7 +629,7 @@ pub async fn clone_volume_handler(
     }
 
     // Emit workspace event
-    if let Err(e) = state.workspace_events.send(WorkspaceEvent {
+    state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::VolumeChanged,
         user_id: None,
         tenant_id: Some(tenant_id),
@@ -650,9 +638,7 @@ pub async fn clone_volume_handler(
         deployment_id: None,
         volume_id: Some(new_volume.id),
         resource_id: Some(new_volume.id.to_string()),
-    }) {
-        tracing::warn!(error = %e, "Failed to broadcast VolumeChanged event");
-    }
+    });
 
     Ok((StatusCode::CREATED, Json(new_volume)))
 }

@@ -184,3 +184,8 @@ required-features = ["test-utils"]
 name = "billing_webhook_tests"
 path = "tests/billing_webhook_tests.rs"
 required-features = ["test-utils"]
+
+[[test]]
+name = "notifications_api_tests"
+path = "tests/notifications_api_tests.rs"
+required-features = ["test-utils"]
