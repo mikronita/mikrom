@@ -207,6 +207,10 @@ impl ImageBuilder {
             // Inject the binary into the rootfs
             // We look for it in multiple locations to support both local dev and production
             let host_init_paths = [
+                "/usr/bin/mikrom-init-zig",
+                "target/release/mikrom-init-zig",
+                "../target/release/mikrom-init-zig",
+                "mikrom-init-zig/zig-out/bin/mikrom-init-zig",
                 "/usr/bin/mikrom-init",
                 "target/release/mikrom-init",
                 "../target/release/mikrom-init",
@@ -219,7 +223,7 @@ impl ImageBuilder {
 
             for path in &host_init_paths {
                 if tokio::fs::metadata(path).await.is_ok() {
-                    info!(path = %path, "Found mikrom-init binary, inyecting...");
+                    info!(path = %path, "Found mikrom-init binary, injecting...");
                     tokio::fs::copy(path, &dest_init_path)
                         .await
                         .context("Failed to copy mikrom-init binary")?;
@@ -391,6 +395,10 @@ impl ImageBuilder {
 
             info!("Setting up mikrom-init for database workload...");
             let host_init_paths = [
+                "/usr/bin/mikrom-init-zig",
+                "target/release/mikrom-init-zig",
+                "../target/release/mikrom-init-zig",
+                "mikrom-init-zig/zig-out/bin/mikrom-init-zig",
                 "/usr/bin/mikrom-init",
                 "target/release/mikrom-init",
                 "../target/release/mikrom-init",

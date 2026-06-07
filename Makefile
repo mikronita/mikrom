@@ -179,11 +179,21 @@ run-builder: ## Run mikrom-builder with watch
 run-router: ## Run mikrom-router (Rust/Pingora)
 	cd mikrom-router && cargo watch -x run
 
+.PHONY: build-init-zig
+build-init-zig: ## Build mikrom-init-zig and stage it for the agent package
+	@command -v zig >/dev/null 2>&1 || { echo >&2 "zig is not installed. Install Zig to build mikrom-init-zig"; exit 1; }
+	cd mikrom-init-zig && zig build -Doptimize=ReleaseSafe
+	@mkdir -p target/release
+	cp mikrom-init-zig/zig-out/bin/mikrom-init-zig target/release/mikrom-init-zig
+	cp mikrom-init-zig/zig-out/bin/mikrom-init-zig target/release/mikrom-init
+
 .PHONY: build-init
-build-init: ## Build mikrom-init as a static binary (musl)
-	rustup target add x86_64-unknown-linux-musl >/dev/null 2>&1 || true
-	RUSTC_WRAPPER= cargo build -p mikrom-init --release --target x86_64-unknown-linux-musl
-	@mkdir -p target/release && cp target/x86_64-unknown-linux-musl/release/mikrom-init target/release/mikrom-init
+build-init: build-init-zig ## Build mikrom-init from mikrom-init-zig for the agent image/package
+
+.PHONY: test-init-zig
+test-init-zig: ## Run mikrom-init-zig tests
+	@command -v zig >/dev/null 2>&1 || { echo >&2 "zig is not installed. Install Zig to test mikrom-init-zig"; exit 1; }
+	cd mikrom-init-zig && zig build test
 
 .PHONY: run-app
 run-app: ## Run mikrom-app dev server  (port 3001)
