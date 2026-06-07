@@ -483,6 +483,15 @@ impl ApiClient for ReqwestApiClient {
         .await
     }
 
+    async fn list_volume_snapshots(&self, volume_id: &str) -> CliResult<Vec<VolumeSnapshot>> {
+        self.request(
+            reqwest::Method::GET,
+            &format!("volumes/{}/snapshots", volume_id),
+            None::<()>,
+        )
+        .await
+    }
+
     async fn restore_volume_snapshot(&self, volume_id: &str, snapshot_name: &str) -> CliResult<()> {
         let body = serde_json::json!({
             "snapshot_name": snapshot_name
@@ -492,6 +501,15 @@ impl ApiClient for ReqwestApiClient {
             &format!("volumes/{}/restore", volume_id),
             Some(body),
             self.restore_timeout,
+        )
+        .await
+    }
+
+    async fn delete_volume_snapshot(&self, snapshot_id: &str) -> CliResult<()> {
+        self.request_no_body(
+            reqwest::Method::DELETE,
+            &format!("snapshots/{}", snapshot_id),
+            self.delete_timeout,
         )
         .await
     }

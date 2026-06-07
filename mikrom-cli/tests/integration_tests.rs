@@ -419,6 +419,44 @@ async fn test_client_detach_volume_uses_detach_endpoint() {
 }
 
 #[tokio::test]
+async fn test_client_list_volume_snapshots_uses_volume_endpoint() {
+    let server = MockServer::start().await;
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into()), None).unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/v1/volumes/vol-1/snapshots"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": "snap-1",
+                "volume_id": "vol-1",
+                "name": "daily-backup",
+                "created_at": "2024-01-01T00:00:00Z"
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let res = client.list_volume_snapshots("vol-1").await.unwrap();
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0].id, "snap-1");
+    assert_eq!(res[0].name, "daily-backup");
+}
+
+#[tokio::test]
+async fn test_client_delete_volume_snapshot_uses_global_endpoint() {
+    let server = MockServer::start().await;
+    let client = ReqwestApiClient::new(server.uri(), Some("token".into()), None).unwrap();
+
+    Mock::given(method("DELETE"))
+        .and(path("/v1/snapshots/snap-1"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    client.delete_volume_snapshot("snap-1").await.unwrap();
+}
+
+#[tokio::test]
 async fn test_client_delete_deployment_record() {
     let server = MockServer::start().await;
     let client = ReqwestApiClient::new(server.uri(), Some("token".into()), None).unwrap();

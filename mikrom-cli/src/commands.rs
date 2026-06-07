@@ -100,10 +100,29 @@ pub enum VolumeCommands {
         #[arg(long, short, help = "Snapshot name to restore")]
         snapshot: String,
     },
+    /// Snapshot operations for a volume
+    #[command(subcommand)]
+    Snapshots(VolumeSnapshotCommands),
     /// Delete a volume
     Delete {
         #[arg(long, help = "Volume ID")]
         volume_id: String,
+        #[arg(long, short, help = "Skip confirmation prompt")]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum VolumeSnapshotCommands {
+    /// List snapshots for a volume
+    List {
+        #[arg(long, help = "Volume ID")]
+        volume_id: String,
+    },
+    /// Delete a volume snapshot
+    Delete {
+        #[arg(long, help = "Snapshot ID")]
+        snapshot_id: String,
         #[arg(long, short, help = "Skip confirmation prompt")]
         yes: bool,
     },

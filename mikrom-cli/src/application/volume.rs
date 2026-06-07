@@ -1,5 +1,5 @@
 use crate::application::context::CliContext;
-use crate::commands::{OutputFormat, VolumeCommands};
+use crate::commands::{OutputFormat, VolumeCommands, VolumeSnapshotCommands};
 use crate::domain::error::CliResult;
 use crate::infrastructure::ui;
 use crate::output::print_json;
@@ -22,6 +22,7 @@ pub async fn handle(ctx: &CliContext, cmd: VolumeCommands, output: OutputFormat)
             volume_id,
             snapshot,
         } => restore(ctx, &volume_id, &snapshot, output).await,
+        VolumeCommands::Snapshots(cmd) => snapshots(ctx, cmd, output).await,
         VolumeCommands::Delete { volume_id, yes } => delete(ctx, &volume_id, yes, output).await,
     }
 }
@@ -273,6 +274,84 @@ async fn restore(
     Ok(())
 }
 
+async fn snapshots(
+    ctx: &CliContext,
+    cmd: VolumeSnapshotCommands,
+    output: OutputFormat,
+) -> CliResult<()> {
+    match cmd {
+        VolumeSnapshotCommands::List { volume_id } => list_snapshots(ctx, &volume_id, output).await,
+        VolumeSnapshotCommands::Delete { snapshot_id, yes } => {
+            delete_snapshot(ctx, &snapshot_id, yes, output).await
+        },
+    }
+}
+
+async fn list_snapshots(ctx: &CliContext, volume_id: &str, output: OutputFormat) -> CliResult<()> {
+    let snapshots = ctx.client.list_volume_snapshots(volume_id).await?;
+
+    if output == OutputFormat::Json {
+        print_json(&snapshots);
+        return Ok(());
+    }
+
+    if snapshots.is_empty() {
+        ui::info(&format!("No snapshots found for volume {}.", volume_id));
+    } else {
+        let rows = snapshots
+            .iter()
+            .map(|snapshot| {
+                vec![
+                    snapshot.name.clone(),
+                    snapshot.id.clone(),
+                    snapshot.created_at.clone(),
+                ]
+            })
+            .collect::<Vec<_>>();
+        ui::table(
+            &format!("📸 Snapshots for {}", ui::bold_cyan(volume_id)),
+            &["Name", "ID", "Created"],
+            &rows,
+        );
+    }
+
+    Ok(())
+}
+
+async fn delete_snapshot(
+    ctx: &CliContext,
+    snapshot_id: &str,
+    yes: bool,
+    output: OutputFormat,
+) -> CliResult<()> {
+    if output == OutputFormat::Table
+        && !yes
+        && !super::app::confirm(&format!(
+            "Are you sure you want to delete snapshot '{}'?",
+            snapshot_id
+        ))?
+    {
+        return Err(crate::domain::error::CliError::Cancelled);
+    }
+
+    if output == OutputFormat::Table {
+        ui::step(
+            ui::WAIT,
+            &format!("Deleting snapshot {}...", ui::red_label(snapshot_id)),
+        );
+    }
+
+    ctx.client.delete_volume_snapshot(snapshot_id).await?;
+
+    if output == OutputFormat::Json {
+        print_json(&serde_json::json!({ "deleted": true, "snapshot_id": snapshot_id }));
+        return Ok(());
+    }
+
+    ui::success(&format!("Snapshot {} deleted.", snapshot_id));
+    Ok(())
+}
+
 async fn delete(
     ctx: &CliContext,
     volume_id: &str,
@@ -312,7 +391,7 @@ mod tests {
     use crate::application::ports::MockApiClient;
     use crate::config::Config;
     use crate::domain::error::CliError;
-    use crate::domain::models::{AppInfo, Volume};
+    use crate::domain::models::{AppInfo, Volume, VolumeSnapshot};
     use std::sync::Arc;
 
     fn test_ctx(mock: MockApiClient) -> CliContext {
@@ -523,6 +602,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_snapshots_calls_api_and_returns_ok() {
+        let mut mock = MockApiClient::new();
+        mock.expect_list_volume_snapshots()
+            .with(mockall::predicate::eq("vol-1"))
+            .times(1)
+            .returning(|_| {
+                Ok(vec![VolumeSnapshot {
+                    id: "snap-id".to_string(),
+                    volume_id: "vol-1".to_string(),
+                    name: "snap-1".to_string(),
+                    created_at: "2024-01-01T00:00:00Z".to_string(),
+                }])
+            });
+        let ctx = test_ctx(mock);
+        let result = list_snapshots(&ctx, "vol-1", OutputFormat::Json).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn delete_snapshot_calls_api_and_returns_ok() {
+        let mut mock = MockApiClient::new();
+        mock.expect_delete_volume_snapshot()
+            .with(mockall::predicate::eq("snap-id"))
+            .times(1)
+            .returning(|_| Ok(()));
+        let ctx = test_ctx(mock);
+        let result = delete_snapshot(&ctx, "snap-id", true, OutputFormat::Json).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
     async fn handle_routes_create_command() {
         let mut mock = MockApiClient::new();
         mock.expect_create_volume().times(1).returning(|_, _| {
@@ -540,6 +650,26 @@ mod tests {
                 name: "data".to_string(),
                 size: 1024,
             },
+            OutputFormat::Json,
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn handle_routes_snapshot_delete_command() {
+        let mut mock = MockApiClient::new();
+        mock.expect_delete_volume_snapshot()
+            .with(mockall::predicate::eq("snap-id"))
+            .times(1)
+            .returning(|_| Ok(()));
+        let ctx = test_ctx(mock);
+        let result = handle(
+            &ctx,
+            VolumeCommands::Snapshots(VolumeSnapshotCommands::Delete {
+                snapshot_id: "snap-id".to_string(),
+                yes: true,
+            }),
             OutputFormat::Json,
         )
         .await;
