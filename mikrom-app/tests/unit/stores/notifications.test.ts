@@ -2,19 +2,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import {
   clearNotifications,
+  clearWorkspaceEventNotifications,
   loadMoreNotifications,
+  notificationsFeed,
   notificationsError,
   notificationsHasMore,
   notificationsLoading,
   notificationsStore,
   notificationsUnreadCount,
+  notificationsUnreadCountTotal,
   notificationsUnreadOnly,
+  recordWorkspaceEventNotification,
   readAllNotifications,
   readNotificationById,
   refreshNotifications,
+  dismissWorkspaceEventNotification,
 } from "$lib/stores/notifications";
 import { getToken } from "$lib/auth";
-import { getNotifications, markAllNotificationsRead, markNotificationRead } from "$lib/api";
+import { getNotifications, markAllNotificationsRead, markNotificationRead, type WorkspaceEvent } from "$lib/api";
 
 vi.mock("$lib/auth", () => ({
   getToken: vi.fn(),
@@ -47,8 +52,20 @@ const sampleNotification = {
   is_read: false,
 };
 
+const sampleWorkspaceEvent: WorkspaceEvent = {
+  kind: "app_created",
+  user_id: "user-1",
+  tenant_id: null,
+  app_id: "app-1",
+  app_name: "starter",
+  deployment_id: null,
+  volume_id: null,
+  resource_id: null,
+};
+
 beforeEach(() => {
   clearNotifications();
+  clearWorkspaceEventNotifications();
   mockedGetToken.mockReset();
   mockedGetNotifications.mockReset();
   mockedMarkNotificationRead.mockReset();
@@ -79,6 +96,49 @@ describe("notifications store", () => {
     expect(get(notificationsHasMore)).toBe(false);
     expect(get(notificationsError)).toBe("");
     expect(get(notificationsLoading)).toBe(false);
+    expect(get(notificationsUnreadCountTotal)).toBe(1);
+  });
+
+  it("records workspace events and exposes them in the feed", () => {
+    recordWorkspaceEventNotification(sampleWorkspaceEvent);
+
+    expect(get(notificationsFeed)).toHaveLength(1);
+    expect(get(notificationsFeed)[0].source).toBe("workspace_event");
+    expect(get(notificationsUnreadCountTotal)).toBe(1);
+  });
+
+  it("drops matching workspace events when the backend notification arrives", async () => {
+    mockedGetToken.mockReturnValue("token");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(sampleNotification.created_at));
+
+    try {
+      recordWorkspaceEventNotification(sampleWorkspaceEvent);
+      mockedGetNotifications.mockResolvedValue({
+        data: {
+          notifications: [sampleNotification],
+          unread_count: 1,
+          has_more: false,
+          next_offset: 1,
+        },
+      });
+
+      await refreshNotifications();
+
+      expect(get(notificationsFeed)).toHaveLength(1);
+      expect(get(notificationsFeed)[0].source).toBe("backend");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("allows dismissing workspace events locally", () => {
+    recordWorkspaceEventNotification(sampleWorkspaceEvent);
+    const [notification] = get(notificationsFeed);
+
+    dismissWorkspaceEventNotification(notification.id);
+
+    expect(get(notificationsFeed)).toHaveLength(0);
   });
 
   it("loads more notifications using the current filter and appends results", async () => {
