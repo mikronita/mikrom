@@ -12,6 +12,7 @@ Database records also persist the PostgreSQL major version and expose it in the 
 - NATS for internal control plane events and integrations.
 - Optional Neon provisioning through `NEON_*` environment variables.
 - Polar billing uses a backend Organization Access Token; keep `POLAR_ACCESS_TOKEN` in the `mikrom-api` environment together with `POLAR_WEBHOOK_SECRET` and `POLAR_CHECKOUT_PRODUCT_ID`.
+- The billing portal flow will create the Polar customer on demand before creating a customer session, using a tenant-specific alias derived from the authenticated user's email when the customer is missing.
 - New Neon databases default to PostgreSQL 16 unless the request specifies a different version.
 
 ## Test Expectations

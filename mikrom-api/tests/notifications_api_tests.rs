@@ -104,22 +104,28 @@ async fn project_workspace_event_creates_notifications_for_each_tenant_member() 
     .unwrap();
 
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].try_get::<Uuid, _>("user_id").unwrap(), first_user);
-    assert_eq!(rows[0].try_get::<String, _>("kind").unwrap(), "app_created");
-    assert_eq!(
-        rows[0].try_get::<String, _>("title").unwrap(),
-        "Application created"
-    );
-    assert_eq!(
-        rows[0].try_get::<String, _>("route").unwrap(),
-        "/apps/starter"
-    );
-    assert_eq!(
-        rows[0].try_get::<Option<String>, _>("entity_name").unwrap(),
-        Some("starter".to_string())
-    );
-    assert_eq!(rows[1].try_get::<Uuid, _>("user_id").unwrap(), second_user);
-    assert_eq!(rows[1].try_get::<String, _>("kind").unwrap(), "app_created");
+    let mut actual_user_ids = rows
+        .iter()
+        .map(|row| row.try_get::<Uuid, _>("user_id").unwrap())
+        .collect::<Vec<_>>();
+    actual_user_ids.sort_unstable();
+
+    let mut expected_user_ids = vec![first_user, second_user];
+    expected_user_ids.sort_unstable();
+
+    assert_eq!(actual_user_ids, expected_user_ids);
+    for row in &rows {
+        assert_eq!(row.try_get::<String, _>("kind").unwrap(), "app_created");
+        assert_eq!(
+            row.try_get::<String, _>("title").unwrap(),
+            "Application created"
+        );
+        assert_eq!(row.try_get::<String, _>("route").unwrap(), "/apps/starter");
+        assert_eq!(
+            row.try_get::<Option<String>, _>("entity_name").unwrap(),
+            Some("starter".to_string())
+        );
+    }
 
     project_workspace_event(
         &state,

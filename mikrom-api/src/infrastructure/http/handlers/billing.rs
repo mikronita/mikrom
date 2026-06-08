@@ -1,5 +1,5 @@
 use crate::AppState;
-use crate::auth::extractor::TenantContext;
+use crate::auth::extractor::{AuthUser, TenantContext};
 use crate::error::ApiResult;
 use axum::{Json, body::Bytes, extract::State, http::HeaderMap, http::StatusCode};
 
@@ -31,9 +31,12 @@ pub async fn create_billing_checkout(
 #[rovo::rovo]
 pub async fn create_billing_portal(
     tenant_ctx: TenantContext,
+    auth_user: AuthUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<crate::application::billing::RedirectResponse>> {
-    let url = crate::application::billing::create_billing_portal_link(&state, &tenant_ctx).await?;
+    let url =
+        crate::application::billing::create_billing_portal_link(&state, &tenant_ctx, &auth_user)
+            .await?;
     Ok(Json(url))
 }
 

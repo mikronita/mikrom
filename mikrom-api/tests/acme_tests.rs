@@ -5,6 +5,10 @@ use prost::Message;
 use tokio::time::{Duration, sleep};
 use tokio_stream::StreamExt;
 
+fn install_rustls_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".into());
@@ -19,7 +23,7 @@ async fn connect_nats_or_skip() -> Option<async_nats::Client> {
 
 #[tokio::test]
 async fn test_acme_account_persistence() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    install_rustls_provider();
     let Ok(_db) = TestDb::try_new().await else {
         eprintln!("Skipping ACME test: database unavailable");
         return;
@@ -56,6 +60,7 @@ async fn test_acme_account_persistence() {
 
 #[tokio::test]
 async fn test_acme_worker_iteration_skips_if_no_domains() {
+    install_rustls_provider();
     let Ok(_db) = TestDb::try_new().await else {
         eprintln!("Skipping ACME test: database unavailable");
         return;

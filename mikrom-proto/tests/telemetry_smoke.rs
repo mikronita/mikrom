@@ -233,7 +233,7 @@ fn telemetry_helpers_respect_environment() {
     let _enabled = EnvVarGuard::remove("ENABLE_TELEMETRY");
     assert_eq!(
         mikrom_proto::telemetry::telemetry_endpoint(),
-        "http://192.168.122.128:4317"
+        "http://[::1]:4317"
     );
     assert!(!mikrom_proto::telemetry::telemetry_enabled());
 

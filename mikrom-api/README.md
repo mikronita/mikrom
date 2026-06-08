@@ -36,6 +36,7 @@
 - Exposes Polar-backed billing endpoints for checkout, portal redirection, and webhook sync.
 - Polar uses an Organization Access Token (OAT) on the backend; set `POLAR_ACCESS_TOKEN` in the `mikrom-api` process environment alongside `POLAR_WEBHOOK_SECRET` and `POLAR_CHECKOUT_PRODUCT_ID` when billing is enabled.
 - The service validates the required Polar environment on startup and exits early if `POLAR_ACCESS_TOKEN` or `POLAR_WEBHOOK_SECRET` is missing.
+- The billing portal flow ensures the Polar customer exists before requesting a customer session, using a tenant-specific alias derived from the authenticated user's email when it has to create the missing customer.
 - Local repository tests use `TestDb` and expect PostgreSQL to be available.
 
 Common environment variables:
