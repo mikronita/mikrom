@@ -49,7 +49,7 @@ rovo = { version = "0.4.8", features = ["swagger"] }
 schemars = { version = "0.9.0", features = ["chrono04", "uuid1"] }
 rand = "0.10.1"
 rustls = { version = "0.23", features = ["ring"] }
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, default-features = false, features = ["json", "rustls"] }
 dashmap.workspace = true
 socket2.workspace = true
 

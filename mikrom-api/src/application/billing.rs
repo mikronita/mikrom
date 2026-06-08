@@ -1,5 +1,5 @@
 use crate::AppState;
-use crate::auth::extractor::TenantContext;
+use crate::auth::extractor::{AuthUser, TenantContext};
 use crate::domain::Tenant;
 use crate::error::{ApiError, ApiResult};
 use axum::http::HeaderMap;
@@ -321,6 +321,14 @@ fn polar_api_url(base_url: &str, path: &str) -> String {
     )
 }
 
+fn polar_customer_email_for_tenant(email: &str, tenant_id: Uuid) -> String {
+    if let Some((local_part, domain)) = email.split_once('@') {
+        format!("{local_part}+mikrom-{tenant_id}@{domain}")
+    } else {
+        format!("{email}+mikrom-{tenant_id}")
+    }
+}
+
 async fn create_customer_session(
     settings: &PolarSettings,
     tenant: &Tenant,
@@ -357,6 +365,90 @@ async fn create_customer_session(
         .ok_or_else(|| {
             ApiError::Internal("Polar response did not include customer_portal_url".into())
         })
+}
+
+async fn customer_exists_in_polar(
+    settings: &PolarSettings,
+    external_customer_id: &str,
+) -> ApiResult<bool> {
+    let response = http_client()
+        .get(polar_api_url(
+            &settings.base_url,
+            &format!("/customers/external/{external_customer_id}"),
+        ))
+        .bearer_auth(&settings.access_token)
+        .send()
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to reach Polar: {e}")))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .unwrap_or_else(|_| String::from("<unreadable response>"));
+
+    if status.is_success() {
+        return Ok(true);
+    }
+
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+
+    Err(ApiError::Internal(format!(
+        "Polar customer lookup failed ({status}): {body}"
+    )))
+}
+
+async fn create_customer_in_polar(
+    settings: &PolarSettings,
+    external_customer_id: &str,
+    email: &str,
+) -> ApiResult<()> {
+    let response = http_client()
+        .post(polar_api_url(&settings.base_url, "/customers"))
+        .bearer_auth(&settings.access_token)
+        .json(&serde_json::json!({
+            "external_id": external_customer_id,
+            "email": email,
+        }))
+        .send()
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to reach Polar: {e}")))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .unwrap_or_else(|_| String::from("<unreadable response>"));
+
+    if status.is_success() {
+        return Ok(());
+    }
+
+    let already_exists = status == reqwest::StatusCode::CONFLICT
+        || status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
+        || body.to_lowercase().contains("already exists");
+
+    if already_exists && customer_exists_in_polar(settings, external_customer_id).await? {
+        return Ok(());
+    }
+
+    Err(ApiError::Internal(format!(
+        "Polar customer creation failed ({status}): {body}"
+    )))
+}
+
+async fn ensure_polar_customer_exists(
+    settings: &PolarSettings,
+    external_customer_id: &str,
+    email: &str,
+) -> ApiResult<()> {
+    if customer_exists_in_polar(settings, external_customer_id).await? {
+        return Ok(());
+    }
+
+    create_customer_in_polar(settings, external_customer_id, email).await
 }
 
 async fn create_checkout_session(
@@ -552,8 +644,16 @@ pub async fn get_billing_summary(
 pub async fn create_billing_portal_link(
     state: &AppState,
     tenant_ctx: &TenantContext,
+    auth_user: &AuthUser,
 ) -> ApiResult<RedirectResponse> {
     let settings = PolarSettings::from_env()?;
+    let customer_email = polar_customer_email_for_tenant(&auth_user.email, tenant_ctx.tenant.id);
+    ensure_polar_customer_exists(
+        &settings,
+        &tenant_ctx.tenant.id.to_string(),
+        &customer_email,
+    )
+    .await?;
     let return_url = format!(
         "{}/settings?tab=billing",
         state.frontend_url.trim_end_matches('/')
@@ -906,6 +1006,62 @@ mod tests {
             .expect("portal url");
 
         assert_eq!(checkout_url, "https://polar.sh/checkout/session");
+        assert_eq!(portal_url, "https://polar.sh/portal/session");
+    }
+
+    #[tokio::test]
+    async fn portal_customer_is_created_before_session_when_missing() {
+        let server = MockServer::start().await;
+        let settings = PolarSettings {
+            access_token: "polar-token".to_string(),
+            webhook_secret: "webhook-secret".to_string(),
+            base_url: server.uri(),
+            default_product_id: None,
+        };
+        let tenant = test_tenant();
+        let email = "owner@example.com";
+        let polar_email = polar_customer_email_for_tenant(email, tenant.id);
+        let return_url = "http://localhost:3000/settings?tab=billing";
+
+        Mock::given(method("GET"))
+            .and(path(format!("/customers/external/{}", tenant.id)))
+            .and(header("authorization", "Bearer polar-token"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/customers"))
+            .and(header("authorization", "Bearer polar-token"))
+            .and(body_json(json!({
+                "external_id": tenant.id.to_string(),
+                "email": polar_email
+            })))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/customer-sessions"))
+            .and(header("authorization", "Bearer polar-token"))
+            .and(body_json(json!({
+                "external_customer_id": tenant.id.to_string(),
+                "return_url": return_url
+            })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "customer_portal_url": "https://polar.sh/portal/session"
+            })))
+            .mount(&server)
+            .await;
+
+        ensure_polar_customer_exists(&settings, &tenant.id.to_string(), &polar_email)
+            .await
+            .expect("customer should be created");
+
+        let portal_url = create_customer_session(&settings, &tenant, return_url)
+            .await
+            .expect("portal url");
+
         assert_eq!(portal_url, "https://polar.sh/portal/session");
     }
 
