@@ -8,7 +8,7 @@ import { refreshProfile } from "./profile";
 import { refreshBilling } from "./billing";
 import { refreshSecurityRules } from "./networking";
 import { refreshDatabases } from "./databases";
-import { refreshNotifications } from "./notifications";
+import { recordWorkspaceEventNotification, refreshNotifications } from "./notifications";
 
 let cleanup: (() => void) | null = null;
 let currentToken: string | null = null;
@@ -31,6 +31,8 @@ export function initWorkspaceSSE() {
 
   cleanup = watchWorkspaceEvents(token, (event: WorkspaceEvent) => {
     console.debug("Received workspace event:", event);
+
+    recordWorkspaceEventNotification(event);
 
     switch (event.kind) {
       case "app_created":
