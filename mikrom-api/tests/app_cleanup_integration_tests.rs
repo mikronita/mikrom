@@ -18,6 +18,15 @@ use mikrom_api::domain::{
 
 const TENANT_SLUG: &str = "cleanup-tenant";
 
+fn nats_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
@@ -35,7 +44,12 @@ async fn connect_nats_or_skip() -> Option<async_nats::Client> {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-api --test app_cleanup_integration_tests -- --ignored"]
 async fn test_delete_app_triggers_bulk_cleanup() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let mock_user_repo = MockUserRepository::new();
     let mut mock_tenant_repo = MockTenantRepository::new();
     let mut mock_app_repo = MockAppRepository::new();

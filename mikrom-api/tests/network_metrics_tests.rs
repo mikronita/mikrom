@@ -16,6 +16,15 @@ use mikrom_api::domain::{MockAppRepository, MockScheduler, MockTenantRepository}
 
 const JWT_SECRET: &str = "test-secret";
 
+fn nats_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 async fn connect_nats_or_skip(test_name: &str) -> Option<async_nats::Client> {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
@@ -65,6 +74,10 @@ async fn build_state(app_repo: MockAppRepository, nats_client: async_nats::Clien
 #[tokio::test]
 #[ignore = "requires a stable NATS scheduler fixture"]
 async fn test_active_deployments_endpoint_responds() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let Some(nats_client) = connect_nats_or_skip("test_active_deployments_endpoint_responds").await
     else {
         return;
@@ -177,6 +190,10 @@ async fn test_active_deployments_endpoint_responds() {
 #[tokio::test]
 #[ignore = "requires a stable NATS scheduler fixture"]
 async fn test_active_deployments_endpoint_filters_non_running_jobs() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let Some(nats_client) =
         connect_nats_or_skip("test_active_deployments_endpoint_filters_non_running_jobs").await
     else {

@@ -4,6 +4,15 @@ use mikrom_proto::router::RouterConfigUpdate;
 use prost::Message;
 use std::env;
 
+fn nats_integration_enabled() -> bool {
+    if env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     let nats_url =
         env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
@@ -20,7 +29,12 @@ async fn connect_nats_or_skip() -> Option<async_nats::Client> {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-proto --test nats_protobuf_tests -- --ignored"]
 async fn test_nats_protobuf_serialization_router() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let Some(client) = connect_nats_or_skip().await else {
         return;
     };
@@ -56,7 +70,12 @@ async fn test_nats_protobuf_serialization_router() {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-proto --test nats_protobuf_tests -- --ignored"]
 async fn test_nats_protobuf_serialization_logs() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let Some(client) = connect_nats_or_skip().await else {
         return;
     };

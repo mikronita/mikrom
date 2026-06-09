@@ -249,7 +249,7 @@ impl crate::firecracker::FirecrackerManager {
         let mut updated_state = false;
 
         for record in state.vms {
-            let (mut vm, runtime) = match record {
+            let (vm, runtime) = match record {
                 PersistedVmRecord::Legacy(vm) => (vm, None),
                 PersistedVmRecord::Current(runtime) => {
                     let vm = runtime.vm.clone();
@@ -329,15 +329,17 @@ impl crate::firecracker::FirecrackerManager {
                         },
                     );
                 } else {
-                    vm.status = match vm.status {
-                        VmStatus::Stopping => VmStatus::Stopped,
-                        _ => VmStatus::Failed,
-                    };
-                    vm.error_message = Some(
+                    let failure_message =
                         "Recovered Firecracker process was not alive after agent restart"
-                            .to_string(),
-                    );
+                            .to_string();
+                    self.cleanup_recovered_runtime_artifacts(&vm.vm_id, runtime_ref, &vm)
+                        .await;
+                    if !matches!(vm.status, VmStatus::Stopping) {
+                        self.publish_vm_failure_event(&vm.vm_id, failure_message.clone())
+                            .await;
+                    }
                     updated_state = true;
+                    continue;
                 }
             }
 

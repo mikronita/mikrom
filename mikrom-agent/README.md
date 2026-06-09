@@ -69,3 +69,5 @@ make ci-full
 - Prefer workspace-level CI profiles for the full agent + eBPF path.
 - When making agent lifecycle changes, validate the worker with the scheduler and networking services together.
 - For host and VM smoke validation of NAT64/DNS64, use [docs/nat64-dns64-smoke-checklist.md](/home/apardo/Work/mikrom.rust/docs/nat64-dns64-smoke-checklist.md).
+- The ignored NATS integration test is included in `make ci-external-tests` via `MIKROM_RUN_NATS_TESTS=1`; Ceph coverage stays manual through `MIKROM_RUN_CEPH_TESTS=1` when a cluster is available.
+- The Ceph integration test is also wired into the `ceph-tests` workflow job for a self-hosted runner labeled `ceph` that has `/etc/ceph/ceph.conf`, `/etc/ceph/admin.secret`, and cluster access.

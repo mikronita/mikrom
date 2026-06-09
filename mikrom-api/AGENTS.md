@@ -35,5 +35,6 @@ make ci-full
 ## Notes
 
 - Keep `mikrom-api` aligned with the workspace-level Dagger runner; do not duplicate CI logic here.
+- Use `make ci-external-tests` for the ignored API integration suites that need PostgreSQL or NATS fixtures. Keep Ceph-specific or host-dependent coverage out of the default path.
 - When adding new database-backed tests, prefer `TestDb` from `src/test_utils.rs`.
 - Changes to protobuf contracts must be regenerated through the normal Cargo build flow.

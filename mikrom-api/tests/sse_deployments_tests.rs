@@ -18,6 +18,15 @@ use mikrom_api::domain::{MockAppRepository, MockScheduler, MockTenantRepository,
 const JWT_SECRET: &str = "test-secret";
 const TENANT_SLUG: &str = "abc123";
 
+fn nats_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
@@ -99,6 +108,10 @@ async fn build_state(
 #[tokio::test]
 #[ignore = "requires a stable SSE initial snapshot fixture"]
 async fn test_sse_deployments_stream_initial_data() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let app_name = "test-app";
     let app_id = uuid::Uuid::new_v4();
     let tenant_id = uuid::Uuid::new_v4();
@@ -168,7 +181,12 @@ async fn test_sse_deployments_stream_initial_data() {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-api --test sse_deployments_tests -- --ignored"]
 async fn test_sse_deployments_stream_updates() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let app_name = "test-app-updates";
     let app_id = uuid::Uuid::new_v4();
     let tenant_id = uuid::Uuid::new_v4();

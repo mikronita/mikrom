@@ -2,8 +2,22 @@ use futures::StreamExt;
 use mikrom_proto::agent::{AgentCommand, AgentCommandResponse, StartVmRequest, VmConfig};
 use prost::Message;
 
+fn nats_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 #[tokio::test]
+#[ignore = "requires NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-agent --test nats_agent_tests -- --ignored"]
 async fn test_agent_nats_command_handler() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let client = async_nats::connect(&nats_url)

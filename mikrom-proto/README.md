@@ -30,3 +30,7 @@ cargo build -p mikrom-proto
 ## Security
 
 The proto crate includes a `tls` module with utilities for loading and configuring **mutual TLS (mTLS)** certificates, ensuring that all internal NATS traffic is encrypted and authenticated.
+
+## Testing
+
+- The ignored NATS serialization tests are exercised by `make ci-external-tests`.

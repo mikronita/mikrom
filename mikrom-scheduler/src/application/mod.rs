@@ -72,7 +72,7 @@ pub(super) async fn update_app_config_best_effort(
 }
 
 pub(super) async fn publish_job_update_best_effort(
-    nats_client: &async_nats::Client,
+    nats_client: &dyn NatsPublisher,
     job: &Job,
     context: &'static str,
 ) {
@@ -105,7 +105,10 @@ pub(super) async fn publish_job_update_best_effort(
     }
 
     if let Err(e) = nats_client
-        .publish(mikrom_proto::subjects::SCHEDULER_JOB_UPDATES, buf.into())
+        .publish(
+            mikrom_proto::subjects::SCHEDULER_JOB_UPDATES.to_string(),
+            buf,
+        )
         .await
     {
         tracing::warn!(
@@ -118,13 +121,27 @@ pub(super) async fn publish_job_update_best_effort(
     }
 }
 
+#[async_trait::async_trait]
+pub trait NatsPublisher: Send + Sync {
+    async fn publish(&self, subject: String, payload: Vec<u8>) -> anyhow::Result<()>;
+}
+
+#[async_trait::async_trait]
+impl NatsPublisher for async_nats::Client {
+    async fn publish(&self, subject: String, payload: Vec<u8>) -> anyhow::Result<()> {
+        async_nats::Client::publish(self, subject, payload.into())
+            .await
+            .map_err(anyhow::Error::from)
+    }
+}
+
 #[derive(Clone)]
 pub struct AppContext {
     pub job_repo: Arc<dyn JobRepository>,
     pub app_repo: Arc<dyn AppRepository>,
     pub worker_repo: Arc<dyn WorkerRepository>,
     pub agent_client: Arc<dyn AgentClient>,
-    pub nats_client: async_nats::Client,
+    pub nats_client: Arc<dyn NatsPublisher>,
     pub telemetry: SchedulerTelemetry,
     pub runtime: SchedulerRuntimeConfig,
 }
@@ -135,7 +152,7 @@ impl AppContext {
         app_repo: Arc<dyn AppRepository>,
         worker_repo: Arc<dyn WorkerRepository>,
         agent_client: Arc<dyn AgentClient>,
-        nats_client: async_nats::Client,
+        nats_client: Arc<dyn NatsPublisher>,
         runtime: SchedulerRuntimeConfig,
     ) -> Self {
         Self {
@@ -174,7 +191,7 @@ impl AppService {
         app_repo: Arc<dyn AppRepository>,
         worker_repo: Arc<dyn WorkerRepository>,
         agent_client: Arc<dyn AgentClient>,
-        nats_client: async_nats::Client,
+        nats_client: Arc<dyn NatsPublisher>,
         _pool: sqlx::PgPool,
         runtime: SchedulerRuntimeConfig,
     ) -> Self {
@@ -709,14 +726,17 @@ mod tests {
         }
     }
 
-    async fn connect_nats_or_skip() -> Option<async_nats::Client> {
-        match async_nats::connect("nats://localhost:4223").await {
-            Ok(client) => Some(client),
-            Err(err) => {
-                eprintln!("Skipping scheduler test: failed to connect to NATS: {err}");
-                None
-            },
+    struct NoopNatsPublisher;
+
+    #[async_trait]
+    impl NatsPublisher for NoopNatsPublisher {
+        async fn publish(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<()> {
+            Ok(())
         }
+    }
+
+    async fn connect_nats_or_skip() -> Arc<dyn NatsPublisher> {
+        Arc::new(NoopNatsPublisher)
     }
 
     fn test_runtime() -> SchedulerRuntimeConfig {
@@ -748,9 +768,7 @@ mod tests {
         // Use a lazy pool that doesn't connect for testing
         let _pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
 
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
         let service = AppService::new(
             job_repo,
             app_repo,
@@ -780,11 +798,137 @@ mod tests {
         job
     }
 
+    fn failure_app() -> AppConfig {
+        AppConfig {
+            id: crate::domain::AppId::from("app-1".to_string()),
+            tenant_id: crate::domain::TenantId::from("tenant-1".to_string()),
+            vpc_ipv6_prefix: "fd00::".to_string(),
+            hostname: "app.example.com".to_string(),
+            desired_replicas: 1,
+            min_replicas: 1,
+            max_replicas: 3,
+            autoscaling_enabled: false,
+            cpu_threshold: 80.0,
+            mem_threshold: 80.0,
+            last_router_traffic_at: 0,
+            last_scaled_to_zero_at: 0,
+            restore_retry_after_at: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_vm_failure_marks_job_failed_and_sets_restore_backoff() {
+        let nats_client = connect_nats_or_skip().await;
+
+        let job = paused_job();
+        let app = failure_app();
+        let mut job_repo = MockJobRepository::new();
+        job_repo
+            .expect_find_job_by_vm_id()
+            .with(eq("vm-1"))
+            .returning({
+                let job = job.clone();
+                move |_| Ok(Some(job.clone()))
+            });
+        job_repo
+            .expect_fail_job()
+            .with(
+                eq("job-1"),
+                eq("Recovered Firecracker process was not alive after agent restart".to_string()),
+                mockall::predicate::always(),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let mut app_repo = MockAppRepository::new();
+        app_repo
+            .expect_get_app_config()
+            .with(eq("app-1"))
+            .times(1)
+            .returning({
+                let app = app.clone();
+                move |_| {
+                    let app = app.clone();
+                    Box::pin(async move { Ok(Some(app)) })
+                }
+            });
+        app_repo
+            .expect_update_app_config()
+            .times(1)
+            .returning(|config| {
+                assert!(config.restore_retry_after_at > 0);
+                Box::pin(async { Ok(()) })
+            });
+
+        let worker_repo = Arc::new(MockWorkerRepository::new());
+        let agent_client = Arc::new(MockAgentClient::new());
+        let job_repo = Arc::new(job_repo);
+        let app_repo = Arc::new(app_repo);
+        let _pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
+        let service = AppService::new(
+            job_repo,
+            app_repo,
+            worker_repo,
+            agent_client,
+            nats_client,
+            _pool,
+            test_runtime(),
+        );
+
+        service
+            .process_vm_failure(mikrom_proto::agent::VmFailureEvent {
+                vm_id: "vm-1".to_string(),
+                error_message: "Recovered Firecracker process was not alive after agent restart"
+                    .to_string(),
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_process_vm_failure_ignores_terminal_jobs() {
+        let nats_client = connect_nats_or_skip().await;
+
+        let mut job = paused_job();
+        job.status = JobStatus::Failed;
+
+        let mut job_repo = MockJobRepository::new();
+        job_repo
+            .expect_find_job_by_vm_id()
+            .with(eq("vm-1"))
+            .returning({
+                let job = job.clone();
+                move |_| Ok(Some(job.clone()))
+            });
+        job_repo.expect_fail_job().times(0);
+
+        let app_repo = Arc::new(MockAppRepository::new());
+        let worker_repo = Arc::new(MockWorkerRepository::new());
+        let agent_client = Arc::new(MockAgentClient::new());
+        let job_repo = Arc::new(job_repo);
+        let _pool = sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap();
+        let service = AppService::new(
+            job_repo,
+            app_repo,
+            worker_repo,
+            agent_client,
+            nats_client,
+            _pool,
+            test_runtime(),
+        );
+
+        service
+            .process_vm_failure(mikrom_proto::agent::VmFailureEvent {
+                vm_id: "vm-1".to_string(),
+                error_message: "duplicate failure".to_string(),
+            })
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn test_pause_app_success_updates_status_without_stop() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let job = paused_job();
         let mut job_repo = MockJobRepository::new();
@@ -826,9 +970,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pause_app_fallback_stops_vm_on_pause_failure() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let job = paused_job();
         let mut job_repo = MockJobRepository::new();
@@ -874,9 +1016,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_system_pause_bypasses_recent_traffic_guard() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let job = paused_job();
         let mut job_repo = MockJobRepository::new();
@@ -920,9 +1060,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_all_by_app_treats_missing_vm_as_success() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let job = paused_job();
         let mut job_repo = MockJobRepository::new();
@@ -964,9 +1102,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_all_by_app_continues_even_when_vm_delete_fails() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let job = paused_job();
         let mut job_repo = MockJobRepository::new();
@@ -1011,9 +1147,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resume_app_invalidates_missing_host_instead_of_calling_agent() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let mut job = paused_job();
         job.status = JobStatus::Paused;
@@ -1065,9 +1199,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resume_app_rolls_agent_back_when_persisting_running_fails() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let mut job = paused_job();
         job.status = JobStatus::Paused;
@@ -1138,9 +1270,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deploy_app_rolls_back_job_when_start_job_persist_fails() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let worker = crate::domain::worker::Worker {
             host_id: crate::domain::HostId::from("host-1".to_string()),
@@ -1242,9 +1372,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_app_marks_job_stopped_when_remove_fails() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let job = paused_job();
         let mut job_repo = MockJobRepository::new();

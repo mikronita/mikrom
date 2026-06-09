@@ -90,7 +90,7 @@ impl JobLifecycleService {
                     let mut updated_job = job;
                     updated_job.status = JobStatus::Paused;
                     publish_job_update_best_effort(
-                        &self.ctx.nats_client,
+                        self.ctx.nats_client.as_ref(),
                         &updated_job,
                         "pause-app-job-update",
                     )
@@ -135,7 +135,7 @@ impl JobLifecycleService {
                     updated_job.stopped_at = Some(chrono::Utc::now().timestamp());
                     updated_job.error_message = Some(message);
                     publish_job_update_best_effort(
-                        &self.ctx.nats_client,
+                        self.ctx.nats_client.as_ref(),
                         &updated_job,
                         "resume-app-host-missing",
                     )
@@ -192,7 +192,7 @@ impl JobLifecycleService {
                 updated_job.status = JobStatus::Running;
                 updated_job.started_at = Some(chrono::Utc::now().timestamp());
                 publish_job_update_best_effort(
-                    &self.ctx.nats_client,
+                    self.ctx.nats_client.as_ref(),
                     &updated_job,
                     "resume-app-job-update",
                 )
@@ -244,7 +244,7 @@ impl JobLifecycleService {
                         let mut deleted_job = job;
                         deleted_job.status = JobStatus::Stopped;
                         publish_job_update_best_effort(
-                            &self.ctx.nats_client,
+                            self.ctx.nats_client.as_ref(),
                             &deleted_job,
                             "delete-app-job-update-remove-failed",
                         )
@@ -257,7 +257,7 @@ impl JobLifecycleService {
                 let mut deleted_job = job;
                 deleted_job.status = JobStatus::Stopped;
                 publish_job_update_best_effort(
-                    &self.ctx.nats_client,
+                    self.ctx.nats_client.as_ref(),
                     &deleted_job,
                     "delete-app-job-update",
                 )
@@ -323,7 +323,7 @@ impl JobLifecycleService {
                     let mut deleted_job = job;
                     deleted_job.status = JobStatus::Stopped;
                     publish_job_update_best_effort(
-                        &self.ctx.nats_client,
+                        self.ctx.nats_client.as_ref(),
                         &deleted_job,
                         "delete-all-by-app-job-update",
                     )

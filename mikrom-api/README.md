@@ -120,3 +120,4 @@ make ci-full
 - The helper creates an ephemeral database per test binary, runs migrations, and drops it on teardown.
 - It defaults to `postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test` when `TEST_DATABASE_URL` is unset.
 - The helper rejects non-test database names, so development `DATABASE_URL` values are not reused.
+- The ignored PostgreSQL and NATS integration suites are covered by `make ci-external-tests`; they remain opt-in locally unless you pass `MIKROM_RUN_NATS_TESTS=1` for the NATS-backed binaries.

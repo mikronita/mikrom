@@ -36,6 +36,8 @@ enum Command {
     Clippy,
     /// Run workspace library tests.
     Test,
+    /// Run opt-in external integration tests that require NATS or `PostgreSQL` fixtures.
+    ExternalTests,
     /// Build the Rust workspace in release mode.
     Build,
     /// Check the eBPF target independently.
@@ -67,6 +69,7 @@ async fn main() -> Result<()> {
             Command::Fmt => pipeline.fmt_check().await?,
             Command::Clippy => pipeline.clippy_check().await?,
             Command::Test => pipeline.workspace_tests().await?,
+            Command::ExternalTests => pipeline.workspace_external_tests().await?,
             Command::Build => pipeline.release_build().await?,
             Command::Ebpf => pipeline.ebpf_check().await?,
             Command::Images => pipeline.build_service_images().await?,

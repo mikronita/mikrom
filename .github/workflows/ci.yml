@@ -75,6 +75,54 @@ jobs:
       - name: Run workspace tests
         run: cargo run --manifest-path ci/Cargo.toml -- test
 
+  external-tests:
+    name: External Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    needs: [smoke]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install Dagger CLI
+        run: |
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run external integration tests
+        run: cargo run --manifest-path ci/Cargo.toml -- external-tests
+
+  ceph-tests:
+    name: Ceph Tests
+    # Requires a self-hosted runner labeled `ceph` with host access to /etc/ceph
+    # and a Ceph cluster configured for the agent test image.
+    runs-on: [self-hosted, linux, ceph]
+    timeout-minutes: 120
+    needs: [smoke]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Run Ceph integration tests
+        run: MIKROM_RUN_CEPH_TESTS=1 cargo test -p mikrom-agent --test ceph_integration_tests -- --ignored
+
   build:
     name: Release Build
     runs-on: ubuntu-latest

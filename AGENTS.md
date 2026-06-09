@@ -46,6 +46,9 @@ Mikrom is a Rust-first platform-as-a-service that deploys containerized workload
 - Internal communication uses NATS; some services support mTLS via `USE_TLS`.
 - Frontend work in `mikrom-app` must use the existing shadcn-svelte component set under `src/lib/components/ui`.
 - The Dagger CI runner is the preferred local validation path for workspace-wide checks.
+- Use `make ci-fast` for the normal Rust validation path and `make ci-external-tests` for opt-in NATS/PostgreSQL integration suites. Keep Ceph-specific validation manual unless the host provides the required cluster.
+- Use `make ci-ceph-tests` or the dedicated `ceph-tests` workflow job only on a self-hosted runner that has access to the Ceph cluster and host-level `/etc/ceph` configuration.
+- The Ceph runner is expected to carry the `self-hosted`, `linux`, and `ceph` labels and expose `/etc/ceph/ceph.conf` plus `/etc/ceph/admin.secret`.
 
 ## Building and Running
 

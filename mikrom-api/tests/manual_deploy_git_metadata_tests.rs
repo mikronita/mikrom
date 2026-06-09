@@ -16,6 +16,15 @@ use mikrom_api::nats::TypedNatsClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
+fn nats_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 async fn create_test_state(
     app_repo: MockAppRepository,
     tenant_membership: Option<(Uuid, Uuid)>,
@@ -107,7 +116,12 @@ fn tenant_context(tenant_id: Uuid) -> TenantContext {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-api --test manual_deploy_git_metadata_tests -- --ignored"]
 async fn manual_deploy_without_github_metadata_uses_current_app_metadata() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let mut mock_repo = MockAppRepository::new();
     let tenant_id = Uuid::new_v4();
     let owner_user_id = Uuid::new_v4();
@@ -180,7 +194,12 @@ async fn manual_deploy_without_github_metadata_uses_current_app_metadata() {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-api --test manual_deploy_git_metadata_tests -- --ignored"]
 async fn manual_deploy_with_github_metadata_still_creates_deployment() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let mut mock_repo = MockAppRepository::new();
     let tenant_id = Uuid::new_v4();
     let owner_user_id = Uuid::new_v4();

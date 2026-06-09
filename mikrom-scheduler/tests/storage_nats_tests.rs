@@ -13,6 +13,15 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use tokio::time::{Duration, timeout};
 
+fn nats_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
@@ -34,7 +43,12 @@ fn test_runtime() -> SchedulerRuntimeConfig {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-scheduler --test storage_nats_tests -- --ignored"]
 async fn test_scheduler_storage_nats_dispatch() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let Some(client) = connect_nats_or_skip().await else {
         return;
     };
@@ -74,7 +88,7 @@ async fn test_scheduler_storage_nats_dispatch() {
                 StdDuration::from_secs(30),
             ),
         ),
-        client.clone(),
+        Arc::new(client.clone()),
         sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap(),
         test_runtime(),
     );

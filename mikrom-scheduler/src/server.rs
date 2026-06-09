@@ -1146,6 +1146,7 @@ impl Clone for SchedulerServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::NatsPublisher;
     use crate::application::{AppService, SchedulerRuntimeConfig};
     use crate::domain::AppConfig;
     use crate::domain::job::{HypervisorType, JobStatus, VmConfig};
@@ -1155,21 +1156,22 @@ mod tests {
     use mockall::predicate::{eq, function};
     use std::sync::Arc;
 
-    async fn connect_nats_or_skip() -> Option<async_nats::Client> {
-        match async_nats::connect("nats://localhost:4223").await {
-            Ok(client) => Some(client),
-            Err(err) => {
-                eprintln!("Skipping scheduler server test: failed to connect to NATS: {err}");
-                None
-            },
+    struct NoopNatsPublisher;
+
+    #[async_trait::async_trait]
+    impl NatsPublisher for NoopNatsPublisher {
+        async fn publish(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<()> {
+            Ok(())
         }
+    }
+
+    async fn connect_nats_or_skip() -> Arc<dyn NatsPublisher> {
+        Arc::new(NoopNatsPublisher)
     }
 
     #[tokio::test]
     async fn test_update_app_scaling_config_maps_router_activity_fields() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let runtime = SchedulerRuntimeConfig {
             router_idle_timeout_secs: 900,
@@ -1225,9 +1227,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deploy_database_propagates_workload_type_to_agent() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let runtime = SchedulerRuntimeConfig {
             router_idle_timeout_secs: 900,
@@ -1345,9 +1345,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_database_status_maps_running_job() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let runtime = SchedulerRuntimeConfig {
             router_idle_timeout_secs: 900,
@@ -1412,9 +1410,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_database_delegates_to_lifecycle() {
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
 
         let runtime = SchedulerRuntimeConfig {
             router_idle_timeout_secs: 900,

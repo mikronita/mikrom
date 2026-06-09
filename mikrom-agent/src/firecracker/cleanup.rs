@@ -158,6 +158,46 @@ impl crate::firecracker::FirecrackerManager {
         self.cleanup_process_volumes(volumes).await;
     }
 
+    pub(crate) async fn cleanup_recovered_runtime_artifacts(
+        &self,
+        vm_id: &VmId,
+        runtime: Option<&crate::firecracker::state::PersistedVmRuntime>,
+        vm: &crate::hypervisor::VmInfo,
+    ) {
+        let socket_path = runtime.map(|r| r.socket_path.as_str());
+        self.cleanup_process_paths(vm_id, socket_path).await;
+
+        let metrics_path = runtime
+            .and_then(|r| r.metrics_path.as_deref())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                crate::firecracker::paths::VmPaths::new(
+                    &self.fc_config.data_dir,
+                    &self.agent_id,
+                    *vm_id,
+                )
+                .metrics_path()
+            });
+        if let Err(e) = tokio::fs::remove_file(&metrics_path).await
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::debug!("Failed to remove metrics file {:?}: {}", metrics_path, e);
+        }
+
+        if let Some(chroot_dir) = runtime.and_then(|r| r.chroot_dir.as_deref()) {
+            self.cleanup_process_chroot(vm_id, Some(chroot_dir)).await;
+        } else if self.fc_config.use_jailer {
+            self.cleanup_vm_chroot(vm_id).await;
+        }
+
+        self.cleanup_process_volumes(&vm.config.volumes).await;
+        self.cleanup_snapshot_files(vm_id).await;
+
+        if let Some(tap_name) = runtime.and_then(|r| r.tap_name.as_deref()) {
+            self.cleanup_tap(tap_name).await;
+        }
+    }
+
     pub(crate) async fn cleanup_process_paths(&self, vm_id: &VmId, socket_path: Option<&str>) {
         if let Some(socket) = socket_path
             && let Err(e) = tokio::fs::remove_file(socket).await
@@ -171,6 +211,13 @@ impl crate::firecracker::FirecrackerManager {
             &self.agent_id,
             *vm_id,
         );
+        for path in [paths.config_path(), paths.log_path()] {
+            if let Err(e) = tokio::fs::remove_file(&path).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::debug!("Failed to remove artifact {:?}: {}", path, e);
+            }
+        }
         let rootfs_path = paths.rootfs_path();
         if let Err(e) = tokio::fs::remove_file(&rootfs_path).await
             && e.kind() != std::io::ErrorKind::NotFound

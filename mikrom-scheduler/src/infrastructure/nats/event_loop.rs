@@ -1573,6 +1573,7 @@ impl Drop for RouterRestoreGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::NatsPublisher;
     use crate::application::{AppService, SchedulerRuntimeConfig};
     use crate::domain::worker::{
         MockAgentClient, MockJobRepository, MockWorkerRepository, Worker, WorkerStatus,
@@ -1582,14 +1583,17 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
 
-    async fn connect_nats_or_skip() -> Option<async_nats::Client> {
-        match async_nats::connect("nats://localhost:4223").await {
-            Ok(client) => Some(client),
-            Err(err) => {
-                eprintln!("Skipping scheduler event loop test: failed to connect to NATS: {err}");
-                None
-            },
+    struct NoopNatsPublisher;
+
+    #[async_trait::async_trait]
+    impl NatsPublisher for NoopNatsPublisher {
+        async fn publish(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<()> {
+            Ok(())
         }
+    }
+
+    async fn connect_nats_or_skip() -> Arc<dyn NatsPublisher> {
+        Arc::new(NoopNatsPublisher)
     }
 
     fn test_runtime() -> SchedulerRuntimeConfig {
@@ -1651,9 +1655,7 @@ mod tests {
         let job_repo = Arc::new(job_repo);
         let agent_client = Arc::new(MockAgentClient::new());
 
-        let Some(nats_client) = connect_nats_or_skip().await else {
-            return;
-        };
+        let nats_client = connect_nats_or_skip().await;
         // Dummy AppRepo for tests
         #[derive(Debug)]
         struct DummyAppRepo;

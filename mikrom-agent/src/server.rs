@@ -234,6 +234,10 @@ impl AgentServer {
                     None => continue,
                 };
 
+                for hv in self_clone.hypervisors.values() {
+                    hv.set_nats_client(client.clone()).await;
+                }
+
                 let mut cmd_handle = self_clone.start_command_listener(client.clone());
                 let mut health_check_handle =
                     self_clone.start_health_check_listener(client.clone());
