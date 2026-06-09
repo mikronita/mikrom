@@ -51,3 +51,4 @@ make ci-fast
 - The service uses `dashmap` to keep zone state hot in memory.
 - The current implementation is IPv6-first and models customer resources under the tenant-specific `u.mikrom.internal.` zone.
 - Integration tests expect NATS to be reachable.
+- The ignored NATS integration test is exercised by `make ci-external-tests`.

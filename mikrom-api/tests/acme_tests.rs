@@ -9,6 +9,15 @@ fn install_rustls_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
+fn nats_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".into());
@@ -59,6 +68,7 @@ async fn test_acme_account_persistence() {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-api --test acme_tests -- --ignored"]
 async fn test_acme_worker_iteration_skips_if_no_domains() {
     install_rustls_provider();
     let Ok(_db) = TestDb::try_new().await else {
@@ -66,6 +76,10 @@ async fn test_acme_worker_iteration_skips_if_no_domains() {
         return;
     };
     let pool = _db.pool().clone();
+
+    if !nats_integration_enabled() {
+        return;
+    }
 
     // Connecting to a local NATS for testing
     let Some(nats_client) = connect_nats_or_skip().await else {
@@ -89,6 +103,7 @@ async fn test_acme_worker_iteration_skips_if_no_domains() {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-api --test acme_tests -- --ignored"]
 async fn test_router_handles_nats_updates() {
     // This test verifies that mikrom-router correctly updates its DB when receiving NATS messages
     let Ok(_db) = TestDb::try_new().await else {
@@ -96,6 +111,10 @@ async fn test_router_handles_nats_updates() {
         return;
     };
     let pool = _db.pool().clone();
+
+    if !nats_integration_enabled() {
+        return;
+    }
 
     // 1. Setup router tables (simulating migrations)
     sqlx::query("CREATE TABLE IF NOT EXISTS tls_certificates (hostname VARCHAR PRIMARY KEY, cert_chain TEXT NOT NULL, private_key TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").execute(&pool).await.unwrap();

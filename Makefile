@@ -78,6 +78,14 @@ ci-smoke: ## Run the fastest Dagger-based validation profile
 ci-fast: ## Run the intermediate Dagger-based validation profile
 	cargo run -p mikrom-ci -- fast
 
+.PHONY: ci-external-tests
+ci-external-tests: ## Run opt-in integration tests that need local fixtures
+	cargo run -p mikrom-ci -- external-tests
+
+.PHONY: ci-ceph-tests
+ci-ceph-tests: ## Run the Ceph integration test on a host with Ceph available
+	MIKROM_RUN_CEPH_TESTS=1 cargo test -p mikrom-agent --test ceph_integration_tests -- --ignored
+
 .PHONY: ci-full
 ci-full: ## Run the full Dagger-based validation profile
 	cargo run -p mikrom-ci -- full

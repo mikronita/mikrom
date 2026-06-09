@@ -288,6 +288,56 @@ impl MikromCi {
         Ok(())
     }
 
+    pub async fn workspace_external_tests(&self) -> Result<()> {
+        let container = self
+            .workspace_test_container()
+            .with_env_variable("MIKROM_RUN_NATS_TESTS", "1");
+        let wait_command = "set -eux; \
+            until pg_isready -h postgres -p 5432 -U mikrom -d mikrom_test; do sleep 1; done; \
+            until nc -z nats 4222; do sleep 1; done";
+
+        container
+            .with_exec(vec!["sh", "-lc", wait_command])
+            .combined_output()
+            .await
+            .with_context(|| "external-tests readiness failed")?;
+
+        let commands = [
+            (
+                "test-proto-external",
+                "/usr/local/cargo/bin/cargo test -p mikrom-proto --locked --test nats_protobuf_tests -- --ignored",
+            ),
+            (
+                "test-builder-external",
+                "/usr/local/cargo/bin/cargo test -p mikrom-builder --locked --test nats_build_tests -- --ignored",
+            ),
+            (
+                "test-dns-external",
+                "/usr/local/cargo/bin/cargo test -p mikrom-dns --locked --test integration -- --ignored",
+            ),
+            (
+                "test-api-external",
+                "/usr/local/cargo/bin/cargo test -p mikrom-api --locked --features test-utils --tests -- --ignored",
+            ),
+            (
+                "test-scheduler-external",
+                "/usr/local/cargo/bin/cargo test -p mikrom-scheduler --locked --features scheduler-e2e --tests -- --ignored",
+            ),
+            (
+                "test-agent-external",
+                "/usr/local/cargo/bin/cargo test -p mikrom-agent --locked --test nats_agent_tests -- --ignored",
+            ),
+        ];
+
+        for (stage, command) in commands {
+            self.run_stage_with_container(stage, container.clone(), command)
+                .await
+                .with_context(|| format!("stage {stage} failed"))?;
+        }
+
+        Ok(())
+    }
+
     pub async fn release_build(&self) -> Result<()> {
         self.run_stage_with_container(
             "build",

@@ -3,8 +3,22 @@ use mikrom_proto::builder::{BuildProgress, BuildRequest, BuildResponse, GetBuild
 use prost::Message;
 use std::time::Duration;
 
+fn nats_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-builder --test nats_build_tests -- --ignored"]
 async fn test_builder_nats_flow() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let client = async_nats::connect(&nats_url)
@@ -100,7 +114,12 @@ async fn test_builder_nats_flow() {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-builder --test nats_build_tests -- --ignored"]
 async fn test_builder_progress_streaming() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let client = async_nats::connect(&nats_url)

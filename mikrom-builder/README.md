@@ -50,3 +50,4 @@ make ci-fast
 - Build metrics are exposed through the `mikrom.builder.get_metrics` NATS request.
 - The service still supports both authenticated and anonymous registry pushes depending on the environment.
 - The local builder state file survives process restarts.
+- The ignored NATS integration tests are exercised by `make ci-external-tests`.

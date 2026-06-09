@@ -45,6 +45,7 @@ pub struct FirecrackerManager {
     pub allocated_ips: Arc<tokio::sync::Mutex<std::collections::HashSet<std::net::Ipv6Addr>>>,
     /// NATS client for log streaming.
     nats_client: Arc<RwLock<Option<async_nats::Client>>>,
+    pending_vm_failure_events: Arc<Mutex<Vec<PendingVmFailureEvent>>>,
     pub ebpf_manager: Arc<tokio::sync::Mutex<Option<crate::ebpf::EbpfManager>>>,
 }
 
@@ -58,6 +59,7 @@ impl std::fmt::Debug for FirecrackerManager {
             .field("logs", &self.logs)
             .field("builder", &self.builder)
             .field("allocated_ips", &self.allocated_ips)
+            .field("pending_vm_failure_events", &self.pending_vm_failure_events)
             .field("ebpf_manager", &self.ebpf_manager)
             .finish_non_exhaustive()
     }
@@ -68,6 +70,12 @@ pub(crate) struct StartupContext {
     pub(crate) exec_args: Vec<String>,
     pub(crate) active_socket_path: String,
     pub(crate) chroot_dir: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct PendingVmFailureEvent {
+    vm_id: VmId,
+    error_message: String,
 }
 
 impl FirecrackerManager {
@@ -285,6 +293,7 @@ impl FirecrackerManager {
             builder: Arc::new(builder),
             allocated_ips: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
             nats_client: Arc::new(RwLock::new(Option::None)),
+            pending_vm_failure_events: Arc::new(Mutex::new(Vec::new())),
             ebpf_manager: Arc::new(tokio::sync::Mutex::new(ebpf)),
         }
     }
@@ -292,6 +301,69 @@ impl FirecrackerManager {
     pub async fn set_nats_client(&self, client: async_nats::Client) {
         let mut n = self.nats_client.write().await;
         *n = Some(client);
+        drop(n);
+        self.flush_pending_vm_failure_events().await;
+    }
+
+    async fn queue_vm_failure_event(&self, vm_id: &VmId, error_message: String) {
+        let mut pending = self.pending_vm_failure_events.lock().await;
+        pending.push(PendingVmFailureEvent {
+            vm_id: *vm_id,
+            error_message,
+        });
+    }
+
+    async fn publish_vm_failure_event_now(
+        client: &async_nats::Client,
+        vm_id: &VmId,
+        error_message: String,
+    ) -> anyhow::Result<()> {
+        let event = mikrom_proto::agent::VmFailureEvent {
+            vm_id: vm_id.to_string(),
+            error_message,
+        };
+        let mut buf = Vec::new();
+        event
+            .encode(&mut buf)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        client
+            .publish(subjects::SCHEDULER_VM_FAILED, buf.into())
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    async fn flush_pending_vm_failure_events(&self) {
+        let Some(client) = self.nats_client.read().await.clone() else {
+            return;
+        };
+
+        let pending = {
+            let mut queued = self.pending_vm_failure_events.lock().await;
+            std::mem::take(&mut *queued)
+        };
+
+        let mut failed = Vec::new();
+        for event in pending {
+            if let Err(e) = Self::publish_vm_failure_event_now(
+                &client,
+                &event.vm_id,
+                event.error_message.clone(),
+            )
+            .await
+            {
+                tracing::warn!(
+                    vm_id = %event.vm_id,
+                    error = %e,
+                    "Failed to publish queued VM failure event"
+                );
+                failed.push(event);
+            }
+        }
+
+        if !failed.is_empty() {
+            let mut queued = self.pending_vm_failure_events.lock().await;
+            queued.extend(failed);
+        }
     }
 
     pub fn start_background_tasks(&self) {
@@ -892,22 +964,15 @@ impl FirecrackerManager {
         self.publish_vm_failure_event(vm_id, msg).await;
     }
 
-    async fn publish_vm_failure_event(&self, vm_id: &VmId, msg: String) {
+    pub(crate) async fn publish_vm_failure_event(&self, vm_id: &VmId, msg: String) {
         let Some(client) = self.nats_client.read().await.clone() else {
+            self.queue_vm_failure_event(vm_id, msg).await;
             return;
         };
 
-        let event = mikrom_proto::agent::VmFailureEvent {
-            vm_id: vm_id.to_string(),
-            error_message: msg,
-        };
-        let mut buf = Vec::new();
-        if event.encode(&mut buf).is_ok()
-            && let Err(e) = client
-                .publish(subjects::SCHEDULER_VM_FAILED, buf.into())
-                .await
-        {
+        if let Err(e) = Self::publish_vm_failure_event_now(&client, vm_id, msg.clone()).await {
             tracing::warn!(vm_id = %vm_id, error = %e, "Failed to publish VM failure event");
+            self.queue_vm_failure_event(vm_id, msg).await;
         }
     }
 
@@ -2131,7 +2196,7 @@ server.close()
     }
 
     #[tokio::test]
-    async fn test_load_runtime_state_recovers_alive_process_and_marks_dead_process_failed() {
+    async fn test_load_runtime_state_recovers_live_process_and_removes_dead_vm() {
         let mut mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         let data_dir = temp_data_dir("load-runtime-state");
         tokio::fs::create_dir_all(&data_dir).await.unwrap();
@@ -2143,6 +2208,44 @@ server.close()
         let dead_vm = test_vm_info(dead_vm_id, VmStatus::Running);
         let current_pid = std::process::id();
         let dead_pid = u32::MAX.saturating_sub(1);
+        let dead_paths = crate::firecracker::paths::VmPaths::new(
+            &mgr.fc_config.data_dir,
+            &mgr.agent_id,
+            dead_vm_id,
+        );
+        let dead_socket = data_dir.join("dead-custom.sock");
+        let dead_chroot = data_dir.join("dead-chroot");
+        tokio::fs::create_dir_all(&dead_chroot).await.unwrap();
+        tokio::fs::create_dir_all(data_dir.join("snapshots"))
+            .await
+            .unwrap();
+        tokio::fs::write(dead_paths.config_path(), b"dead-config")
+            .await
+            .unwrap();
+        tokio::fs::write(dead_paths.log_path(), b"dead-log")
+            .await
+            .unwrap();
+        tokio::fs::write(dead_paths.rootfs_path(), b"dead-rootfs")
+            .await
+            .unwrap();
+        tokio::fs::write(dead_paths.stdout_log_path(), b"dead-stdout")
+            .await
+            .unwrap();
+        tokio::fs::write(dead_paths.stderr_log_path(), b"dead-stderr")
+            .await
+            .unwrap();
+        tokio::fs::write(dead_paths.snapshot_file(), b"dead-snapshot")
+            .await
+            .unwrap();
+        tokio::fs::write(dead_paths.memory_file(), b"dead-memory")
+            .await
+            .unwrap();
+        tokio::fs::write(&dead_paths.metrics_path(), b"dead-metrics")
+            .await
+            .unwrap();
+        tokio::fs::write(&dead_socket, b"dead-socket")
+            .await
+            .unwrap();
 
         let state = PersistedAgentState {
             vms: vec![
@@ -2165,15 +2268,15 @@ server.close()
                 PersistedVmRecord::Current(PersistedVmRuntime {
                     vm: dead_vm,
                     pid: Some(dead_pid),
-                    socket_path: "/run/firecracker.socket".to_string(),
-                    metrics_path: Some("/run/metrics.json".to_string()),
-                    stdout_log_path: "/run/stdout.log".to_string(),
-                    stderr_log_path: "/run/stderr.log".to_string(),
+                    socket_path: dead_socket.to_string_lossy().to_string(),
+                    metrics_path: Some(dead_paths.metrics_path().to_string_lossy().to_string()),
+                    stdout_log_path: dead_paths.stdout_log_path().to_string_lossy().to_string(),
+                    stderr_log_path: dead_paths.stderr_log_path().to_string_lossy().to_string(),
                     stdout_log_offset: 0,
                     stderr_log_offset: 0,
                     tap_name: Some("m-tap-dead".to_string()),
                     tap_ifindex: Some(13),
-                    chroot_dir: Some("/srv/jailer/firecracker/dead".to_string()),
+                    chroot_dir: Some(dead_chroot.to_string_lossy().to_string()),
                     app_started: true,
                     app_started_at_ms: 5678,
                     vfs_pids: Vec::new(),
@@ -2196,22 +2299,40 @@ server.close()
             VmStatus::Running
         );
 
-        let dead_vm_info = mgr.get_vm(&dead_vm_id).await.unwrap();
-        assert_eq!(dead_vm_info.status, VmStatus::Failed);
-        assert!(
-            dead_vm_info
-                .error_message
-                .as_deref()
-                .unwrap_or_default()
-                .contains("Recovered Firecracker process was not alive")
-        );
+        assert!(mgr.get_vm(&dead_vm_id).await.is_none());
         assert!(!mgr.has_process(&dead_vm_id).await);
+        assert!(tokio::fs::metadata(dead_paths.config_path()).await.is_err());
+        assert!(tokio::fs::metadata(dead_paths.log_path()).await.is_err());
+        assert!(tokio::fs::metadata(dead_paths.rootfs_path()).await.is_err());
+        assert!(
+            tokio::fs::metadata(dead_paths.stdout_log_path())
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::fs::metadata(dead_paths.stderr_log_path())
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::fs::metadata(dead_paths.snapshot_file())
+                .await
+                .is_err()
+        );
+        assert!(tokio::fs::metadata(dead_paths.memory_file()).await.is_err());
+        assert!(
+            tokio::fs::metadata(dead_paths.metrics_path())
+                .await
+                .is_err()
+        );
+        assert!(tokio::fs::metadata(&dead_socket).await.is_err());
+        assert!(tokio::fs::metadata(&dead_chroot).await.is_err());
 
         let _ = tokio::fs::remove_dir_all(&data_dir).await;
     }
 
     #[tokio::test]
-    async fn test_load_runtime_state_handles_legacy_records() {
+    async fn test_load_runtime_state_removes_legacy_records_without_live_process() {
         let mut mgr = FirecrackerManager::with_config(FirecrackerConfig::stub());
         let data_dir = temp_data_dir("load-legacy-runtime-state");
         tokio::fs::create_dir_all(&data_dir).await.unwrap();
@@ -2232,14 +2353,7 @@ server.close()
 
         mgr.load_runtime_state().await.unwrap();
 
-        let vm = mgr.get_vm(&legacy_vm_id).await.unwrap();
-        assert_eq!(vm.status, VmStatus::Failed);
-        assert!(
-            vm.error_message
-                .as_deref()
-                .unwrap_or_default()
-                .contains("Recovered Firecracker process was not alive")
-        );
+        assert!(mgr.get_vm(&legacy_vm_id).await.is_none());
         assert!(!mgr.has_process(&legacy_vm_id).await);
 
         let _ = tokio::fs::remove_dir_all(&data_dir).await;

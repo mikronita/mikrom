@@ -131,18 +131,16 @@ mod tests {
     use super::*;
     use crate::domain::user::{NewUser, UserRepository, UserRole};
     use crate::infrastructure::db::postgres_user_repository::PostgresUserRepository;
-    use sqlx::PgPool;
-
-    async fn setup_test_pool() -> PgPool {
-        let db_url = std::env::var("DATABASE_URL")
-            .unwrap_or("postgres://postgres:postgres@localhost:5432/mikrom".into());
-        PgPool::connect(&db_url).await.unwrap()
-    }
+    use crate::test_utils::TestDb;
 
     #[tokio::test]
     #[ignore = "requires a configured PostgreSQL test database"]
     async fn test_tenant_lifecycle() {
-        let pool = setup_test_pool().await;
+        let Ok(db) = TestDb::try_new().await else {
+            eprintln!("Skipping tenant repository test: database unavailable");
+            return;
+        };
+        let pool = db.pool().clone();
         let repo = PostgresTenantRepository::new(pool.clone());
         let user_repo = PostgresUserRepository::new(pool.clone());
 

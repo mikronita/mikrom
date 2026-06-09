@@ -226,7 +226,7 @@ async fn test_integration_scale_to_zero_and_restore_reuses_same_job() {
         scheduler_app_repo.clone(),
         scheduler_worker_repo.clone(),
         agent_client.clone(),
-        nats_client.clone(),
+        Arc::new(nats_client.clone()),
         pool.clone(),
         SchedulerRuntimeConfig {
             router_idle_timeout_secs: 900,

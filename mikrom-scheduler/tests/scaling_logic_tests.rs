@@ -8,6 +8,15 @@ use mikrom_scheduler::domain::{
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+fn nats_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     match async_nats::connect("nats://localhost:4223").await {
         Ok(client) => Some(client),
@@ -317,7 +326,12 @@ impl AgentClient for MockScalingAgentClient {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-scheduler --test scaling_logic_tests -- --ignored"]
 async fn test_reconcile_scale_up_from_zero_manual() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let app_id = "app-1";
     let app_config = AppConfig {
         id: AppId::from(app_id.to_string()),
@@ -353,7 +367,7 @@ async fn test_reconcile_scale_up_from_zero_manual() {
         Arc::new(app_repo),
         worker_repo,
         agent_client,
-        nats_client,
+        Arc::new(nats_client),
         pool,
         test_runtime(),
     );
@@ -373,7 +387,12 @@ async fn test_reconcile_scale_up_from_zero_manual() {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-scheduler --test scaling_logic_tests -- --ignored"]
 async fn test_reconcile_scale_up_from_zero_with_traffic() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let app_id = "app-1";
     let now = chrono::Utc::now().timestamp();
     let app_config = AppConfig {
@@ -428,7 +447,7 @@ async fn test_reconcile_scale_up_from_zero_with_traffic() {
         Arc::new(app_repo),
         worker_repo,
         agent_client,
-        nats_client,
+        Arc::new(nats_client),
         pool,
         test_runtime(),
     );
@@ -452,7 +471,12 @@ async fn test_reconcile_scale_up_from_zero_with_traffic() {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-scheduler --test scaling_logic_tests -- --ignored"]
 async fn test_reconcile_skips_restore_during_backoff() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let app_id = "app-1";
     let now = chrono::Utc::now().timestamp();
     let app_config = AppConfig {
@@ -507,7 +531,7 @@ async fn test_reconcile_skips_restore_during_backoff() {
         Arc::new(app_repo),
         worker_repo,
         agent_client,
-        nats_client,
+        Arc::new(nats_client),
         pool,
         test_runtime(),
     );

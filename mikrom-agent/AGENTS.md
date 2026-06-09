@@ -35,3 +35,4 @@ make ci-full
 - Prefer the workspace caches and local `Makefile` targets over ad-hoc build commands.
 - When updating VM lifecycle behavior, verify the worker-side integration with the scheduler and the data plane together.
 - Runtime timeouts are configurable via environment variables. See `README.md` for the current `AGENT_*` and `FC_*` timeout list and defaults, including `FC_SOCKET_WAIT_TIMEOUT_SECS` defaulting to 120s for the non-jailer boot path.
+- Use `make ci-external-tests` for the ignored NATS integration suite. Keep Ceph tests opt-in with `MIKROM_RUN_CEPH_TESTS=1` and out of the default CI path unless the runner has a Ceph cluster.

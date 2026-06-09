@@ -123,7 +123,7 @@ impl HeartbeatService {
                         }
 
                         publish_job_update_best_effort(
-                            &self.ctx.nats_client,
+                            self.ctx.nats_client.as_ref(),
                             &updated_job,
                             "worker-heartbeat-failed-vm",
                         )
@@ -210,7 +210,7 @@ impl HeartbeatService {
         let result = self
             .ctx
             .nats_client
-            .publish(subject.clone(), event.to_string().into())
+            .publish(subject.clone(), event.to_string().into_bytes())
             .await;
 
         self.ctx.telemetry.record(
@@ -322,7 +322,7 @@ impl HeartbeatService {
                 }
 
                 publish_job_update_best_effort(
-                    &self.ctx.nats_client,
+                    self.ctx.nats_client.as_ref(),
                     &updated_job,
                     "vm-failure-job-update",
                 )

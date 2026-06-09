@@ -4,6 +4,15 @@ use mikrom_proto::scheduler::{AppInfo, DeployStatus, WorkerHeartbeat};
 use prost::Message;
 use std::time::Duration;
 
+fn nats_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 // Helper to simulate a NATS publish for Job Updates
 async fn simulate_job_publish(
     nats_client: &async_nats::Client,
@@ -55,7 +64,12 @@ async fn simulate_worker_publish(
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-dns --test integration -- --ignored"]
 async fn test_dns_resolution_lifecycle() -> Result<()> {
+    if !nats_integration_enabled() {
+        return Ok(());
+    }
+
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     let Ok(nats_client) = async_nats::connect(&nats_url).await else {

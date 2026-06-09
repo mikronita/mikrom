@@ -21,6 +21,15 @@ use tokio::time::Duration;
 #[path = "common_utils.rs"]
 mod common_utils;
 
+fn nats_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_NATS_TESTS").is_err() {
+        println!("Skipping NATS test: set MIKROM_RUN_NATS_TESTS=1 to run it");
+        return false;
+    }
+
+    true
+}
+
 fn test_runtime() -> SchedulerRuntimeConfig {
     SchedulerRuntimeConfig {
         router_idle_timeout_secs: 900,
@@ -375,7 +384,12 @@ impl AgentClient for RecordingAgentClient {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-scheduler --test router_activity_integration_tests -- --ignored"]
 async fn test_router_traffic_restores_paused_deployment() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let client = match async_nats::connect(&nats_url).await {
@@ -455,7 +469,7 @@ async fn test_router_traffic_restores_paused_deployment() {
         Arc::new(app_repo.clone()),
         Arc::new(worker_repo),
         Arc::new(agent_client.clone()),
-        client.clone(),
+        Arc::new(client.clone()),
         pool,
         test_runtime(),
     ));
@@ -524,7 +538,12 @@ async fn test_router_traffic_restores_paused_deployment() {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-scheduler --test router_activity_integration_tests -- --ignored"]
 async fn test_router_traffic_restores_paused_deployment_with_real_db() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let client = match async_nats::connect(&nats_url).await {
@@ -605,7 +624,7 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
         app_repo.clone(),
         worker_repo.clone(),
         agent_client.clone(),
-        client.clone(),
+        Arc::new(client.clone()),
         pool,
         test_runtime(),
     ));
@@ -668,7 +687,12 @@ async fn test_router_traffic_restores_paused_deployment_with_real_db() {
 }
 
 #[tokio::test]
+#[ignore = "requires a NATS broker; run with MIKROM_RUN_NATS_TESTS=1 cargo test -p mikrom-scheduler --test router_activity_integration_tests -- --ignored"]
 async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
+    if !nats_integration_enabled() {
+        return;
+    }
+
     let nats_url =
         std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://localhost:4223".to_string());
     let client = match async_nats::connect(&nats_url).await {
@@ -747,7 +771,7 @@ async fn test_router_traffic_restore_is_deduplicated_under_concurrency() {
         Arc::new(app_repo),
         Arc::new(worker_repo),
         Arc::new(agent_client.clone()),
-        client.clone(),
+        Arc::new(client.clone()),
         pool,
         test_runtime(),
     );

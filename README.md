@@ -147,19 +147,37 @@ Use the Dagger-backed CI runner directly for the fastest feedback loop. The prof
 ```bash
 make ci-smoke   # fmt + clippy + mikrom-app validation
 make ci-fast    # smoke + workspace tests with ephemeral Postgres and NATS
+make ci-external-tests # opt-in NATS/PostgreSQL integration suites that are ignored by default
+make ci-ceph-tests # Ceph-only agent integration on a host with the cluster available
 make ci-full    # fast + release build + eBPF validation
 make ci         # alias for the full profile
 make ci-images  # build service images from the Dockerfiles
 make ci-release # full validation + image build + registry publish
 ```
 
+Ceph-specific validation runs separately on a self-hosted runner labeled `ceph`:
+
+- `make ci-ceph-tests`
+- GitHub Actions job `ceph-tests`
+- Provisioning runbook: [docs/infra/ceph-runner.md](/home/apardo/Work/mikrom.rust/docs/infra/ceph-runner.md)
+- See [docs/ceph-runner-checklist.md](/home/apardo/Work/mikrom.rust/docs/ceph-runner-checklist.md) for the runner setup checklist.
+
+That runner must provide:
+
+- `self-hosted`, `linux`, and `ceph` labels
+- host access to `/etc/ceph/ceph.conf`
+- host access to `/etc/ceph/admin.secret`
+- a reachable Ceph cluster for the agent RBD tests
+
 Recommended usage:
 
 1. Use `make ci-smoke` for everyday development and quick feedback.
 2. Use `make ci-fast` before pushing changes that affect shared Rust code or service contracts.
-3. Use `make ci-full` before merging or when you change build logic, native dependencies, or the eBPF path.
-4. Use `make ci-images` after touching any Dockerfile or image build context.
-5. Use `make ci-release` only for release tags or when you want to exercise the full publish flow end to end.
+3. Use `make ci-external-tests` when you touch the NATS or PostgreSQL integration suites that are ignored by default.
+4. Use `make ci-ceph-tests` only on a host with a Ceph cluster and a configured agent test environment.
+5. Use `make ci-full` before merging or when you change build logic, native dependencies, or the eBPF path.
+6. Use `make ci-images` after touching any Dockerfile or image build context.
+7. Use `make ci-release` only for release tags or when you want to exercise the full publish flow end to end.
 
 ## Release Flow
 

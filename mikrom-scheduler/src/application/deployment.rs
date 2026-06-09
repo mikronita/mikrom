@@ -100,7 +100,7 @@ impl DeploymentService {
 
                 // Notify cluster of new job
                 publish_job_update_best_effort(
-                    &self.ctx.nats_client,
+                    self.ctx.nats_client.as_ref(),
                     &job,
                     "deploy-app-job-update",
                 )

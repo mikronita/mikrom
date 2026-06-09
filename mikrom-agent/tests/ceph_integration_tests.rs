@@ -1,12 +1,27 @@
 use mikrom_agent::ceph::CephRbd;
 use uuid::Uuid;
 
-#[tokio::test]
-async fn test_ceph_rbd_lifecycle_native() {
+fn ceph_integration_enabled() -> bool {
+    if std::env::var("MIKROM_RUN_CEPH_TESTS").is_err() {
+        println!("Skipping Ceph test: set MIKROM_RUN_CEPH_TESTS=1 to run it");
+        return false;
+    }
+
     if !std::path::Path::new("/etc/ceph/ceph.conf").exists() {
         println!("Skipping Ceph test: /etc/ceph/ceph.conf not found");
+        return false;
+    }
+
+    true
+}
+
+#[tokio::test]
+#[ignore = "requires Ceph cluster; run with MIKROM_RUN_CEPH_TESTS=1 cargo test -p mikrom-agent --test ceph_integration_tests -- --ignored"]
+async fn test_ceph_rbd_lifecycle_native() {
+    if !ceph_integration_enabled() {
         return;
     }
+
     let pool = "rbd";
     let volume_id = format!("test-vol-{}", Uuid::new_v4());
     let snapshot_name = "snap1";
@@ -71,11 +86,12 @@ async fn test_ceph_rbd_lifecycle_native() {
 }
 
 #[tokio::test]
+#[ignore = "requires Ceph cluster; run with MIKROM_RUN_CEPH_TESTS=1 cargo test -p mikrom-agent --test ceph_integration_tests -- --ignored"]
 async fn test_ceph_restore_busy_image_failure() {
-    if !std::path::Path::new("/etc/ceph/ceph.conf").exists() {
-        println!("Skipping Ceph test: /etc/ceph/ceph.conf not found");
+    if !ceph_integration_enabled() {
         return;
     }
+
     let pool = "rbd";
     let volume_id = format!("test-busy-vol-{}", Uuid::new_v4());
     let snapshot_name = "snap1";

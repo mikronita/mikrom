@@ -32,6 +32,7 @@ make ci-full
 - Integration tests use `TEST_DATABASE_URL` and default to `postgres://mikrom:mikrom_password@localhost:5432/mikrom_scheduler_test` when it is unset.
 - The helper creates an ephemeral database per test binary, runs migrations, and drops it on teardown.
 - The helper rejects non-test database names, so `DATABASE_URL` from the development environment will not be used for scheduler tests.
+- The ignored NATS and scheduler-e2e integration suites are covered by `make ci-external-tests`.
 
 ## Runtime Configuration
 

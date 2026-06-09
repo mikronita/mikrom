@@ -76,8 +76,12 @@ async fn post_polar_webhook(
 
 #[tokio::test]
 #[serial]
+#[ignore = "requires a PostgreSQL test database"]
 async fn polar_webhook_http_upserts_tenant_billing_row() {
-    let db = TestDb::new().await;
+    let Ok(db) = TestDb::try_new().await else {
+        eprintln!("Skipping billing webhook test: database unavailable");
+        return;
+    };
     let pool = db.pool().clone();
     let state = mikrom_api::test_utils::create_test_app_state(pool.clone());
     let app = create_app(state);
