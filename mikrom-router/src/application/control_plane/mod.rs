@@ -65,6 +65,37 @@ fn tls_alternative_cn_for_host(host: &str) -> Option<String> {
     }
 }
 
+fn build_route(host: &str, targets: &[String]) -> Result<Route> {
+    let mut normalized_targets = Vec::new();
+    let mut use_tls = false;
+
+    for target in targets {
+        if target.starts_with("https://") {
+            use_tls = true;
+            normalized_targets.push(target.strip_prefix("https://").unwrap().to_string());
+        } else if target.starts_with("http://") {
+            normalized_targets.push(target.strip_prefix("http://").unwrap().to_string());
+        } else {
+            normalized_targets.push(target.clone());
+        }
+    }
+
+    let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(normalized_targets.as_slice())?;
+    let mut hc = TcpHealthCheck::default();
+    hc.consecutive_success = 1;
+    hc.consecutive_failure = 2;
+    lb.set_health_check(Box::new(hc));
+    lb.health_check_frequency = Some(Duration::from_millis(250));
+
+    Ok(Route {
+        host: host.to_string(),
+        targets: normalized_targets,
+        lb: Arc::new(lb),
+        use_tls,
+        tls_alternative_cn: tls_alternative_cn_for_host(host),
+    })
+}
+
 pub struct ControlPlane {
     db_url: DatabaseUrl,
     nats_url: NatsUrl,
@@ -78,6 +109,10 @@ pub struct ControlPlane {
     data_dir: String,
     wg_manager: Arc<mikrom_network::WireGuardManager>,
     wg_port: u16,
+    api_host: String,
+    api_upstream_url: String,
+    dashboard_host: String,
+    dashboard_upstream_url: String,
     startup_connect_timeout: Duration,
 }
 
@@ -95,6 +130,10 @@ impl ControlPlane {
         advertise_address: String,
         data_dir: String,
         wg_port: u16,
+        api_host: String,
+        api_upstream_url: String,
+        dashboard_host: String,
+        dashboard_upstream_url: String,
         startup_connect_timeout: Duration,
     ) -> Self {
         Self {
@@ -112,6 +151,10 @@ impl ControlPlane {
                 mikrom_network::WireGuardManager::new("wg-mikrom").with_listen_port(wg_port),
             ),
             wg_port,
+            api_host,
+            api_upstream_url,
+            dashboard_host,
+            dashboard_upstream_url,
             startup_connect_timeout,
         }
     }
@@ -140,36 +183,26 @@ impl ControlPlane {
         }
 
         for (host, (targets, _ts)) in route_targets {
-            let mut normalized_targets = Vec::new();
-            let mut use_tls = false;
+            state
+                .routes
+                .insert(host.clone(), build_route(&host, &targets)?);
+        }
 
-            for target in &targets {
-                if target.starts_with("https://") {
-                    use_tls = true;
-                    normalized_targets.push(target.strip_prefix("https://").unwrap().to_string());
-                } else if target.starts_with("http://") {
-                    normalized_targets.push(target.strip_prefix("http://").unwrap().to_string());
-                } else {
-                    normalized_targets.push(target.clone());
-                }
-            }
-
-            let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(normalized_targets.as_slice())?;
-            let mut hc = TcpHealthCheck::default();
-            hc.consecutive_success = 1;
-            hc.consecutive_failure = 2;
-            lb.set_health_check(Box::new(hc));
-            lb.health_check_frequency = Some(Duration::from_millis(250));
-
+        if !self.api_host.trim().is_empty() && !self.api_upstream_url.trim().is_empty() {
             state.routes.insert(
-                host.clone(),
-                Route {
-                    host: host.clone(),
-                    targets: normalized_targets,
-                    lb: Arc::new(lb),
-                    use_tls,
-                    tls_alternative_cn: tls_alternative_cn_for_host(&host),
-                },
+                self.api_host.clone(),
+                build_route(&self.api_host, std::slice::from_ref(&self.api_upstream_url))?,
+            );
+        }
+
+        if !self.dashboard_host.trim().is_empty() && !self.dashboard_upstream_url.trim().is_empty()
+        {
+            state.routes.insert(
+                self.dashboard_host.clone(),
+                build_route(
+                    &self.dashboard_host,
+                    std::slice::from_ref(&self.dashboard_upstream_url),
+                )?,
             );
         }
 
@@ -412,7 +445,44 @@ impl Clone for ControlPlane {
             data_dir: self.data_dir.clone(),
             wg_manager: self.wg_manager.clone(),
             wg_port: self.wg_port,
+            api_host: self.api_host.clone(),
+            api_upstream_url: self.api_upstream_url.clone(),
+            dashboard_host: self.dashboard_host.clone(),
+            dashboard_upstream_url: self.dashboard_upstream_url.clone(),
             startup_connect_timeout: self.startup_connect_timeout,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_route;
+
+    #[test]
+    fn api_route_defaults_to_plain_http_upstream() {
+        let route = build_route(
+            "api.mikrom.spluca.org",
+            &[String::from("http://[::1]:5001")],
+        )
+        .expect("route should build");
+
+        assert_eq!(route.host, "api.mikrom.spluca.org");
+        assert_eq!(route.targets, vec!["[::1]:5001".to_string()]);
+        assert!(!route.use_tls);
+        assert!(route.tls_alternative_cn.is_none());
+    }
+
+    #[test]
+    fn dashboard_route_defaults_to_plain_http_upstream() {
+        let route = build_route(
+            "dashboard.mikrom.spluca.org",
+            &[String::from("http://[::1]:3000")],
+        )
+        .expect("route should build");
+
+        assert_eq!(route.host, "dashboard.mikrom.spluca.org");
+        assert_eq!(route.targets, vec!["[::1]:3000".to_string()]);
+        assert!(!route.use_tls);
+        assert!(route.tls_alternative_cn.is_none());
     }
 }

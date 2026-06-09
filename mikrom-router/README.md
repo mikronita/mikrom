@@ -44,6 +44,10 @@ Common variables:
 - `STATE_CACHE_PATH`
 - `WIREGUARD_PORT`
 - `ACME_STAGING`
+- `API_HOST`
+- `API_UPSTREAM_URL`
+- `DASHBOARD_HOST`
+- `DASHBOARD_UPSTREAM_URL`
 - `DEFAULT_SITE_HOST`
 - `DEFAULT_SITE_REDIRECT_URL`
 - `RPS_LIMIT`
@@ -60,7 +64,7 @@ Timeout tuning:
 - `UPSTREAM_IDLE_TIMEOUT_SECS` default `60`
 - `ROUTE_WAIT_TIMEOUT_SECS` default `30`
 
-The packaged default configuration redirects `debaser.spluca.org` to `https://spluca.org/` with a temporary redirect. For that to work over TLS, the API-side ACME flow must issue a Let's Encrypt production certificate for `debaser.spluca.org` and the router must load it from `tls_certificates`.
+The packaged default configuration proxies `api.mikrom.spluca.org` to `http://[::1]:5001` and `dashboard.mikrom.spluca.org` to `http://[::1]:3000`. The API-side ACME flow must issue Let's Encrypt production certificates for both hostnames and the router must load them from `tls_certificates`.
 
 ## Health Endpoints
 

@@ -78,6 +78,18 @@ pub struct RouterConfig {
     #[serde(default = "default_acme_staging")]
     pub acme_staging: bool,
 
+    #[serde(default = "default_api_host")]
+    pub api_host: String,
+
+    #[serde(default = "default_api_upstream_url")]
+    pub api_upstream_url: String,
+
+    #[serde(default = "default_dashboard_host")]
+    pub dashboard_host: String,
+
+    #[serde(default = "default_dashboard_upstream_url")]
+    pub dashboard_upstream_url: String,
+
     #[serde(default = "default_default_site_host")]
     pub default_site_host: String,
 
@@ -136,6 +148,22 @@ const fn default_wireguard_port() -> u16 {
 
 const fn default_acme_staging() -> bool {
     false
+}
+
+fn default_api_host() -> String {
+    "api.mikrom.spluca.org".to_string()
+}
+
+fn default_api_upstream_url() -> String {
+    "http://[::1]:5001".to_string()
+}
+
+fn default_dashboard_host() -> String {
+    "dashboard.mikrom.spluca.org".to_string()
+}
+
+fn default_dashboard_upstream_url() -> String {
+    "http://[::1]:3000".to_string()
 }
 
 fn default_default_site_host() -> String {
@@ -323,6 +351,22 @@ impl RouterConfig {
             return Err(anyhow::anyhow!("RPS_LIMIT must be greater than zero"));
         }
 
+        if self.api_host.trim().is_empty() {
+            return Err(anyhow::anyhow!("API_HOST cannot be empty"));
+        }
+
+        if self.api_upstream_url.trim().is_empty() {
+            return Err(anyhow::anyhow!("API_UPSTREAM_URL cannot be empty"));
+        }
+
+        if self.dashboard_host.trim().is_empty() {
+            return Err(anyhow::anyhow!("DASHBOARD_HOST cannot be empty"));
+        }
+
+        if self.dashboard_upstream_url.trim().is_empty() {
+            return Err(anyhow::anyhow!("DASHBOARD_UPSTREAM_URL cannot be empty"));
+        }
+
         if self.default_site_host.trim().is_empty() {
             return Err(anyhow::anyhow!("DEFAULT_SITE_HOST cannot be empty"));
         }
@@ -389,6 +433,10 @@ impl Default for RouterConfig {
             state_cache_path: None,
             wireguard_port: default_wireguard_port(),
             acme_staging: default_acme_staging(),
+            api_host: default_api_host(),
+            api_upstream_url: default_api_upstream_url(),
+            dashboard_host: default_dashboard_host(),
+            dashboard_upstream_url: default_dashboard_upstream_url(),
             default_site_host: default_default_site_host(),
             default_site_redirect_url: default_default_site_redirect_url(),
             rps_limit: default_rps_limit(),

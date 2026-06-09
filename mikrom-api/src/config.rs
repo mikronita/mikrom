@@ -65,6 +65,9 @@ pub struct ApiConfig {
     #[serde(default = "default_router_tls_hostname")]
     pub router_tls_hostname: String,
 
+    #[serde(default = "default_frontend_tls_hostname")]
+    pub frontend_tls_hostname: String,
+
     #[serde(default = "default_acme_check_interval")]
     pub acme_check_interval: u64,
 
@@ -133,6 +136,7 @@ impl Default for ApiConfig {
             acme_email: default_acme_email(),
             acme_staging: default_acme_staging(),
             router_tls_hostname: default_router_tls_hostname(),
+            frontend_tls_hostname: default_frontend_tls_hostname(),
             acme_check_interval: default_acme_check_interval(),
             certs_dir: None,
             github_app_id: None,
@@ -167,7 +171,11 @@ fn default_acme_staging() -> bool {
 }
 
 fn default_router_tls_hostname() -> String {
-    "debaser.spluca.org".to_string()
+    "api.mikrom.spluca.org".to_string()
+}
+
+fn default_frontend_tls_hostname() -> String {
+    "dashboard.mikrom.spluca.org".to_string()
 }
 
 fn default_acme_check_interval() -> u64 {
@@ -183,7 +191,7 @@ fn default_router_addr() -> String {
 }
 
 fn default_frontend_url() -> String {
-    "http://[::1]:3000".to_string()
+    "https://dashboard.mikrom.spluca.org".to_string()
 }
 
 fn default_use_tls() -> bool {
@@ -238,6 +246,10 @@ impl ApiConfig {
             anyhow::bail!("ROUTER_TLS_HOSTNAME must not be empty");
         }
 
+        if config.frontend_tls_hostname.trim().is_empty() {
+            anyhow::bail!("FRONTEND_TLS_HOSTNAME must not be empty");
+        }
+
         Ok(config)
     }
 }
@@ -250,7 +262,8 @@ mod tests {
     fn defaults_use_production_acme_and_router_hostname() {
         let config = ApiConfig::default();
         assert!(!config.acme_staging);
-        assert_eq!(config.router_tls_hostname, "debaser.spluca.org");
+        assert_eq!(config.router_tls_hostname, "api.mikrom.spluca.org");
+        assert_eq!(config.frontend_tls_hostname, "dashboard.mikrom.spluca.org");
     }
 
     #[test]

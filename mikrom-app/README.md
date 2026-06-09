@@ -28,7 +28,7 @@ pnpm test:e2e
 ## Environment
 
 - `API_UPSTREAM_URL`: backend REST API URL, for example `http://localhost:5001`
-- `PUBLIC_APP_URL`: public dashboard URL, for example `http://localhost:5173`
+- `PUBLIC_APP_URL`: public dashboard URL, for example `https://dashboard.mikrom.spluca.org`
 - Billing redirects are served by `mikrom-api`; configure Polar there with `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, and `POLAR_CHECKOUT_PRODUCT_ID` when needed.
 
 ## Notes

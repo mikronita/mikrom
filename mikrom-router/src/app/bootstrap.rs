@@ -62,6 +62,10 @@ pub fn run(config: &RouterConfig) -> Result<()> {
         config.advertise_address().to_string(),
         config.data_dir.to_string_lossy().into_owned(),
         config.wireguard_port,
+        config.api_host.clone(),
+        config.api_upstream_url.clone(),
+        config.dashboard_host.clone(),
+        config.dashboard_upstream_url.clone(),
         config.startup_connect_timeout(),
     );
     server.add_service(background_service("Control Plane", cp));
