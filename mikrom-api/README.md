@@ -31,8 +31,11 @@
 - Defaults new Neon databases to PostgreSQL 16 unless the caller selects another supported major version.
 - Uses Let's Encrypt production by default for ACME unless `ACME_STAGING=true` is set explicitly.
 - Tracks the router's default redirect certificate for `debaser.spluca.org` through the same ACME worker, but the TLS storage tables themselves remain owned by `mikrom-router`.
+- Also manages the public API hostname `api.mikrom.spluca.org`, which the router proxies to `mikrom-api` on port `5001`.
+- Also manages the public web hostname `mikrom.spluca.org`, which the router proxies to the frontend on port `5173`.
 - Stores the desired ACME mode and one-shot reissue flag for managed hostnames in `acme_managed_domains`.
 - The runtime Docker image sets `ACME_STAGING=false` and `ROUTER_TLS_HOSTNAME=debaser.spluca.org` by default.
+- The runtime Docker image sets `ROUTER_ADDR=http://[fd00::28fb:f0bf:d8d1:183e]:80` so ACME challenge verification targets `mikrom-router` directly.
 - Exposes Polar-backed billing endpoints for checkout, portal redirection, and webhook sync.
 - Polar uses an Organization Access Token (OAT) on the backend; set `POLAR_ACCESS_TOKEN` in the `mikrom-api` process environment alongside `POLAR_WEBHOOK_SECRET` and `POLAR_CHECKOUT_PRODUCT_ID` when billing is enabled.
 - The service validates the required Polar environment on startup and exits early if `POLAR_ACCESS_TOKEN` or `POLAR_WEBHOOK_SECRET` is missing.

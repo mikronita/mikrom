@@ -84,6 +84,12 @@ pub struct RouterConfig {
     #[serde(default = "default_default_site_redirect_url")]
     pub default_site_redirect_url: String,
 
+    #[serde(default = "default_api_upstream_targets")]
+    pub api_upstream_targets: String,
+
+    #[serde(default = "default_web_upstream_targets")]
+    pub web_upstream_targets: String,
+
     #[serde(default = "default_rps_limit")]
     pub rps_limit: isize,
 
@@ -144,6 +150,14 @@ fn default_default_site_host() -> String {
 
 fn default_default_site_redirect_url() -> String {
     "https://spluca.org/".to_string()
+}
+
+fn default_api_upstream_targets() -> String {
+    "127.0.0.1:5001,[::1]:5001".to_string()
+}
+
+fn default_web_upstream_targets() -> String {
+    "127.0.0.1:5173,[::1]:5173".to_string()
 }
 
 const fn default_rps_limit() -> isize {
@@ -331,6 +345,14 @@ impl RouterConfig {
             return Err(anyhow::anyhow!("DEFAULT_SITE_REDIRECT_URL cannot be empty"));
         }
 
+        if self.api_upstream_targets.trim().is_empty() {
+            return Err(anyhow::anyhow!("API_UPSTREAM_TARGETS cannot be empty"));
+        }
+
+        if self.web_upstream_targets.trim().is_empty() {
+            return Err(anyhow::anyhow!("WEB_UPSTREAM_TARGETS cannot be empty"));
+        }
+
         if self.wireguard_port == 0 {
             return Err(anyhow::anyhow!("WIREGUARD_PORT must be greater than zero"));
         }
@@ -391,6 +413,8 @@ impl Default for RouterConfig {
             acme_staging: default_acme_staging(),
             default_site_host: default_default_site_host(),
             default_site_redirect_url: default_default_site_redirect_url(),
+            api_upstream_targets: "127.0.0.1:5001,[::1]:5001".to_string(),
+            web_upstream_targets: "127.0.0.1:5173,[::1]:5173".to_string(),
             rps_limit: default_rps_limit(),
             router_threads: default_router_threads(),
             startup_connect_timeout_secs: default_startup_connect_timeout_secs(),
@@ -427,6 +451,8 @@ mod tests {
             acme_staging: false,
             default_site_host: "debaser.spluca.org".to_string(),
             default_site_redirect_url: "https://spluca.org/".to_string(),
+            api_upstream_targets: "127.0.0.1:5001,[::1]:5001".to_string(),
+            web_upstream_targets: "127.0.0.1:5173,[::1]:5173".to_string(),
             rps_limit: 100,
             router_threads: 1,
             ..Default::default()
@@ -452,6 +478,8 @@ mod tests {
             acme_staging: false,
             default_site_host: "debaser.spluca.org".to_string(),
             default_site_redirect_url: "https://spluca.org/".to_string(),
+            api_upstream_targets: "127.0.0.1:5001,[::1]:5001".to_string(),
+            web_upstream_targets: "127.0.0.1:5173,[::1]:5173".to_string(),
             rps_limit: 100,
             router_threads: 1,
             ..Default::default()
@@ -477,6 +505,8 @@ mod tests {
             acme_staging: false,
             default_site_host: "debaser.spluca.org".to_string(),
             default_site_redirect_url: "https://spluca.org/".to_string(),
+            api_upstream_targets: "127.0.0.1:5001,[::1]:5001".to_string(),
+            web_upstream_targets: "127.0.0.1:5173,[::1]:5173".to_string(),
             rps_limit: 100,
             router_threads: 1,
             ..Default::default()
@@ -502,6 +532,8 @@ mod tests {
             acme_staging: false,
             default_site_host: "debaser.spluca.org".to_string(),
             default_site_redirect_url: "https://spluca.org/".to_string(),
+            api_upstream_targets: "127.0.0.1:5001,[::1]:5001".to_string(),
+            web_upstream_targets: "127.0.0.1:5173,[::1]:5173".to_string(),
             rps_limit: 100,
             router_threads: 1,
             ..Default::default()
@@ -552,11 +584,45 @@ mod tests {
             acme_staging: false,
             default_site_host: "debaser.spluca.org".to_string(),
             default_site_redirect_url: "https://spluca.org/".to_string(),
+            api_upstream_targets: "127.0.0.1:5001,[::1]:5001".to_string(),
+            web_upstream_targets: "127.0.0.1:5173,[::1]:5173".to_string(),
             rps_limit: 100,
             router_threads: 1,
             ..Default::default()
         };
 
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn loads_api_upstream_targets_from_env() {
+        let config: RouterConfig = envy::from_iter(vec![
+            (
+                "DATABASE_URL".to_string(),
+                "postgres://localhost/router".to_string(),
+            ),
+            ("NATS_URL".to_string(), "nats://localhost:4222".to_string()),
+            ("MASTER_KEY".to_string(), "x".repeat(32)),
+            ("API_UPSTREAM_TARGETS".to_string(), "api.internal:5001".to_string()),
+        ])
+        .expect("config should deserialize");
+
+        assert_eq!(config.api_upstream_targets, "api.internal:5001");
+    }
+
+    #[test]
+    fn loads_web_upstream_targets_from_env() {
+        let config: RouterConfig = envy::from_iter(vec![
+            (
+                "DATABASE_URL".to_string(),
+                "postgres://localhost/router".to_string(),
+            ),
+            ("NATS_URL".to_string(), "nats://localhost:4222".to_string()),
+            ("MASTER_KEY".to_string(), "x".repeat(32)),
+            ("WEB_UPSTREAM_TARGETS".to_string(), "web.internal:5173".to_string()),
+        ])
+        .expect("config should deserialize");
+
+        assert_eq!(config.web_upstream_targets, "web.internal:5173");
     }
 }

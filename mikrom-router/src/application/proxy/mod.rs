@@ -68,6 +68,10 @@ pub struct MikromProxy {
     acme_staging: bool,
     default_site_host: Option<HostName>,
     default_site_redirect_url: Option<String>,
+    api_host: HostName,
+    api_upstream: Arc<LoadBalancer<RoundRobin>>,
+    web_host: HostName,
+    web_upstream: Arc<LoadBalancer<RoundRobin>>,
     upstream_ca: Option<Arc<Box<[X509]>>>,
     pub metrics: Arc<RouterMetricsCounters>,
     traffic_publisher: Option<Arc<RouterTrafficPublisher>>,
@@ -75,6 +79,21 @@ pub struct MikromProxy {
     rps_limit: isize,
     timeouts: RouterTimeouts,
     wake_up_failures: DashMap<String, (u32, std::time::Instant)>,
+}
+
+fn parse_upstream_targets(label: &str, targets: &str) -> anyhow::Result<Vec<String>> {
+    let parsed: Vec<String> = targets
+        .split(',')
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+
+    if parsed.is_empty() {
+        return Err(anyhow::anyhow!("{label} upstream target list cannot be empty"));
+    }
+
+    Ok(parsed)
 }
 
 #[derive(Clone)]
@@ -185,6 +204,8 @@ impl MikromProxy {
         acme_staging: bool,
         default_site_host: String,
         default_site_redirect_url: String,
+        api_upstream_targets: String,
+        web_upstream_targets: String,
         upstream_ca: Option<Arc<Box<[X509]>>>,
         metrics: Arc<RouterMetricsCounters>,
         traffic_publisher: Option<Arc<RouterTrafficPublisher>>,
@@ -193,6 +214,18 @@ impl MikromProxy {
     ) -> Self {
         let default_site_host = default_site_host.trim();
         let default_site_redirect_url = default_site_redirect_url.trim();
+        let api_targets = parse_upstream_targets("API", api_upstream_targets.as_str())
+            .expect("API upstream target list must be non-empty");
+        let api_upstream = Arc::new(
+            LoadBalancer::<RoundRobin>::try_from_iter(api_targets.as_slice())
+                .expect("API upstream targets must be valid"),
+        );
+        let web_targets = parse_upstream_targets("web", web_upstream_targets.as_str())
+            .expect("Web upstream target list must be non-empty");
+        let web_upstream = Arc::new(
+            LoadBalancer::<RoundRobin>::try_from_iter(web_targets.as_slice())
+                .expect("Web upstream targets must be valid"),
+        );
 
         Self {
             state,
@@ -202,6 +235,10 @@ impl MikromProxy {
                 .then(|| HostName::parse(default_site_host)),
             default_site_redirect_url: (!default_site_redirect_url.is_empty())
                 .then(|| default_site_redirect_url.to_string()),
+            api_host: HostName::parse("api.mikrom.spluca.org"),
+            api_upstream,
+            web_host: HostName::parse("mikrom.spluca.org"),
+            web_upstream,
             upstream_ca,
             metrics,
             traffic_publisher,
@@ -218,6 +255,12 @@ impl MikromProxy {
     ) -> Result<(Arc<LoadBalancer<RoundRobin>>, bool, Option<String>)> {
         let raw_host = host;
         let host = HostName::parse(raw_host);
+        if host.as_str() == self.api_host.as_str() {
+            return Ok((self.api_upstream.clone(), false, None));
+        }
+        if host.as_str() == self.web_host.as_str() {
+            return Ok((self.web_upstream.clone(), false, None));
+        }
         let state = self.state.read().await;
 
         let res = state
@@ -250,6 +293,12 @@ impl MikromProxy {
     pub async fn has_route(&self, host: &str) -> bool {
         let raw_host = host;
         let host = HostName::parse(raw_host);
+        if host.as_str() == self.api_host.as_str() {
+            return true;
+        }
+        if host.as_str() == self.web_host.as_str() {
+            return true;
+        }
         let state = self.state.read().await;
         state.routes.contains_key(host.as_str()) || state.routes.contains_key(raw_host)
     }
@@ -1037,6 +1086,8 @@ mod tests {
             false,
             String::new(),
             String::new(),
+            "127.0.0.1:5001,[::1]:5001".to_string(),
+            "127.0.0.1:5173,[::1]:5173".to_string(),
             None,
             Arc::new(RouterMetricsCounters::new()),
             None,
@@ -1058,6 +1109,8 @@ mod tests {
             false,
             String::new(),
             String::new(),
+            "127.0.0.1:5001,[::1]:5001".to_string(),
+            "127.0.0.1:5173,[::1]:5173".to_string(),
             None,
             Arc::new(RouterMetricsCounters::new()),
             None,
@@ -1100,6 +1153,8 @@ mod tests {
             false,
             "debaser.spluca.org".to_string(),
             "https://spluca.org/".to_string(),
+            "127.0.0.1:5001,[::1]:5001".to_string(),
+            "127.0.0.1:5173,[::1]:5173".to_string(),
             None,
             Arc::new(RouterMetricsCounters::new()),
             None,

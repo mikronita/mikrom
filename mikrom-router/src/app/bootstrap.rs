@@ -91,6 +91,8 @@ pub fn run(config: &RouterConfig) -> Result<()> {
         config.acme_staging,
         config.default_site_host.clone(),
         config.default_site_redirect_url.clone(),
+        config.api_upstream_targets.clone(),
+        config.web_upstream_targets.clone(),
         upstream_ca,
         metrics_counters,
         Some(traffic_publisher),

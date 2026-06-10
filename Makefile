@@ -67,8 +67,7 @@ clippy: ## Run Clippy linter
 	cargo clippy -- -D warnings
 
 .PHONY: ci
-ci: ## Run the local Dagger-based CI pipeline
-	cargo run -p mikrom-ci -- full
+ci: ci-full ## Run the local Dagger-based CI pipeline
 
 .PHONY: ci-smoke
 ci-smoke: ## Run the fastest Dagger-based validation profile
@@ -110,7 +109,7 @@ ci-images: ## Build service images through Dagger
 ci-publish: ## Publish service images through Dagger
 	cargo run -p mikrom-ci -- publish
 
-# ── Tests ─────────────────────────────────────────────────────────────────────
+# ── Tests: Unit ──────────────────────────────────────────────────────────────
 
 define check_nextest
 	@command -v cargo-nextest >/dev/null 2>&1 || { echo >&2 "cargo-nextest is not installed. Install it with: cargo binstall cargo-nextest or cargo install cargo-nextest"; exit 1; }
@@ -136,12 +135,16 @@ test-cli: ## Run mikrom-cli unit tests
 	$(call check_nextest)
 	cargo nextest run --lib -p mikrom-cli
 
+# ── Tests: Integration ───────────────────────────────────────────────────────
+
 .PHONY: test-integration
-test-integration: ## Run integration tests (starts PostgreSQL via Docker)
+test-integration: ## Run integration tests (starts PostgreSQL and test NATS via Docker)
 	$(call check_nextest)
-	docker compose up -d --wait postgres nats-test
+	docker compose --profile test up -d --wait postgres nats-test
 	TEST_NATS_URL=nats://localhost:4223 cargo nextest run --test integration_auth_tests -p mikrom-api --features test-utils,api-e2e && \
 	TEST_NATS_URL=nats://localhost:4223 cargo nextest run --test integration_app_lifecycle_tests -p mikrom-api --features test-utils,api-e2e
+
+# ── Tests: Workspace ─────────────────────────────────────────────────────────
 
 .PHONY: test-all-crates
 test-all-crates: ceph-libs ## Run unit tests for all crates
@@ -159,12 +162,14 @@ test-all-crates: ceph-libs ## Run unit tests for all crates
 .PHONY: test-all
 test-all: test-all-crates test-integration ## Run unit + integration tests
 
+# ── Tests: Coverage ──────────────────────────────────────────────────────────
+
 .PHONY: test-coverage
 test-coverage: ## Run tests and generate coverage report (requires cargo-llvm-cov)
 	@command -v cargo-llvm-cov >/dev/null 2>&1 || { echo >&2 "cargo-llvm-cov is not installed. Install it with: cargo install cargo-llvm-cov"; exit 1; }
 	cargo llvm-cov --workspace --all-features --html
 
-# ── Run services ──────────────────────────────────────────────────────────────
+# ── Run services: Rust ────────────────────────────────────────────────────────
 
 .PHONY: run-api
 run-api: ## Run mikrom-api with watch (port 5001)
@@ -186,6 +191,8 @@ run-builder: ## Run mikrom-builder with watch
 run-router: ## Run mikrom-router (Rust/Pingora)
 	cd mikrom-router && cargo watch -x run
 
+# ── Run services: Zig ─────────────────────────────────────────────────────────
+
 .PHONY: build-init
 build-init: ## Build mikrom-init with Zig and stage it for the agent package
 	@command -v zig >/dev/null 2>&1 || { echo >&2 "zig is not installed. Install Zig to build mikrom-init"; exit 1; }
@@ -198,18 +205,28 @@ test-init: ## Run mikrom-init tests
 	@command -v zig >/dev/null 2>&1 || { echo >&2 "zig is not installed. Install Zig to test mikrom-init"; exit 1; }
 	cd mikrom-init && zig build test
 
+# ── Run services: App and Dev ────────────────────────────────────────────────
+
 .PHONY: run-app
 run-app: ## Run mikrom-app dev server  (port 3001)
 	cd mikrom-app && pnpm run dev --host
 
 .PHONY: dev
-dev: ## Launch all services in tmux windows
-	@tmux new-session -d -s mikrom -n api 'make run-api 2>&1 | tee /tmp/mikrom-api.log'
-	@tmux new-window -t mikrom -n scheduler 'make run-scheduler 2>&1 | tee /tmp/mikrom-scheduler.log'
-	@tmux new-window -t mikrom -n builder 'make run-builder 2>&1 | tee /tmp/mikrom-builder.log'
-	@tmux new-window -t mikrom -n app 'make run-app'
-	@tmux select-window -t mikrom:api
-	@tmux attach-session -t mikrom
+dev: ## Launch or attach to the tmux-based dev session
+	@if tmux has-session -t mikrom 2>/dev/null; then \
+		tmux attach-session -t mikrom; \
+	else \
+		tmux new-session -d -s mikrom -n api 'make run-api 2>&1 | tee /tmp/mikrom-api.log'; \
+		tmux new-window -t mikrom -n scheduler 'make run-scheduler 2>&1 | tee /tmp/mikrom-scheduler.log'; \
+		tmux new-window -t mikrom -n builder 'make run-builder 2>&1 | tee /tmp/mikrom-builder.log'; \
+		tmux new-window -t mikrom -n app 'make run-app'; \
+		tmux select-window -t mikrom:api; \
+		tmux attach-session -t mikrom; \
+	fi
+
+.PHONY: dev-stop
+dev-stop: ## Stop the tmux-based dev session
+	@tmux kill-session -t mikrom 2>/dev/null || true
 
 .PHONY: run-cli
 run-cli: ## Run mikrom-cli  →  make run-cli ARGS="health"
@@ -257,26 +274,14 @@ app-test-e2e: ## Run mikrom-app Playwright e2e tests
 app-lint: ## Lint mikrom-app
 	cd mikrom-app && pnpm lint
 
-.PHONY: landing-dev
-landing-dev: ## Run mikrom-landing dev server
-	cd mikrom-landing && pnpm run dev
-
-.PHONY: landing-build
-landing-build: ## Build mikrom-landing
-	cd mikrom-landing && ./node_modules/.bin/astro build
-
-.PHONY: landing-preview
-landing-preview: ## Preview mikrom-landing build
-	cd mikrom-landing && pnpm run preview
-
-# ── Docker ────────────────────────────────────────────────────────────────────
+# ── Docker: Base ──────────────────────────────────────────────────────────────
 
 .PHONY: up
-up: ## Start all services with Docker Compose
+up: ## Start the core Docker Compose infrastructure stack
 	docker compose up --build
 
 .PHONY: up-detach
-up-detach: ## Start all services in the background
+up-detach: ## Start the Docker Compose infrastructure stack in the background
 	docker compose up --build -d
 
 .PHONY: down
@@ -287,8 +292,37 @@ down: ## Stop and remove containers
 down-volumes: ## Stop containers and remove volumes (deletes DB data)
 	docker compose down -v
 
+.PHONY: db-start
+db-start: ## Start PostgreSQL only (for local development)
+	docker compose up -d --wait postgres
+
+.PHONY: db-stop
+db-stop: ## Stop PostgreSQL instance
+	docker compose stop postgres
+
+# ── Docker: Optional ──────────────────────────────────────────────────────────
+
+.PHONY: up-buildkit
+up-buildkit: ## Start the BuildKit service for local image builds
+	docker compose --profile buildkit up --build -d buildkit
+
+.PHONY: up-observability
+up-observability: ## Start the observability stack
+	docker compose --profile observability up --build -d otel-lgtm
+
+.PHONY: up-full
+up-full: ## Start the full local Compose stack
+	docker compose --profile buildkit --profile observability up --build -d
+
+.PHONY: down-full
+down-full: ## Stop the full local development stack
+	@$(MAKE) dev-stop
+	@$(MAKE) down
+
+# ── Docker: Logs ──────────────────────────────────────────────────────────────
+
 .PHONY: logs
-logs: ## Follow logs of all services
+logs: ## Follow logs for the Docker Compose stack
 	docker compose logs -f
 
 .PHONY: logs-api
@@ -303,13 +337,24 @@ logs-scheduler: ## Follow mikrom-scheduler logs
 logs-agent: ## Follow mikrom-agent logs
 	docker compose logs -f mikrom-agent
 
-.PHONY: db-start
-db-start: ## Start PostgreSQL instance (for local development)
-	docker compose up -d --wait postgres
+.PHONY: logs-postgres
+logs-postgres: logs-db ## Follow PostgreSQL logs
 
-.PHONY: db-stop
-db-stop: ## Stop PostgreSQL instance
-	docker compose stop postgres
+.PHONY: logs-db
+logs-db: ## Follow PostgreSQL logs
+	docker compose logs -f postgres
+
+.PHONY: logs-nats
+logs-nats: ## Follow NATS logs
+	docker compose logs -f nats
+
+.PHONY: logs-buildkit
+logs-buildkit: ## Follow BuildKit logs
+	docker compose --profile buildkit logs -f buildkit
+
+.PHONY: logs-observability
+logs-observability: ## Follow observability logs
+	docker compose --profile observability logs -f otel-lgtm
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 
@@ -323,4 +368,5 @@ check: fmt-check clippy test ## Run all checks (Rust)
 .PHONY: help
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} \
-	  /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	  /^# ── / { section = $$0; sub(/^# ── /, "", section); sub(/[[:space:]─]+$$/, "", section); section_pending = 1; next } \
+	  /^[a-zA-Z0-9_-]+:.*?##/ { if (section_pending) { printf "\n%s\n", section; section_pending = 0 } printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)

@@ -40,6 +40,8 @@ mod tests {
             false,
             String::new(),
             String::new(),
+            "127.0.0.1:5001,[::1]:5001".to_string(),
+            "127.0.0.1:5173,[::1]:5173".to_string(),
             None,
             metrics,
             None,
@@ -90,6 +92,8 @@ mod tests {
             false,
             String::new(),
             String::new(),
+            "127.0.0.1:5001,[::1]:5001".to_string(),
+            "127.0.0.1:5173,[::1]:5173".to_string(),
             None,
             metrics,
             None,
@@ -137,6 +141,8 @@ mod tests {
             false,
             String::new(),
             String::new(),
+            "127.0.0.1:5001,[::1]:5001".to_string(),
+            "127.0.0.1:5173,[::1]:5173".to_string(),
             None,
             metrics,
             None,
@@ -154,6 +160,90 @@ mod tests {
         assert_eq!(
             lb.select(b"", 256).unwrap().to_string(),
             "192.168.122.67:443"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_api_route_is_built_in() {
+        let state = Arc::new(RwLock::new(State {
+            routes: HashMap::new(),
+            acme_tokens: HashMap::new(),
+            certificates: HashMap::new(),
+        }));
+
+        let metrics = Arc::new(RouterMetricsCounters::new());
+        let health = Arc::new(RouterHealth::new());
+        let proxy = MikromProxy::new(
+            state,
+            health,
+            false,
+            String::new(),
+            String::new(),
+            "127.0.0.1:5001,[::1]:5001".to_string(),
+            "127.0.0.1:5173,[::1]:5173".to_string(),
+            None,
+            metrics,
+            None,
+            100,
+            crate::application::proxy::RouterTimeouts::default(),
+        );
+
+        assert!(proxy.has_route("api.mikrom.spluca.org").await);
+        assert!(proxy.has_route("api.mikrom.spluca.org:443").await);
+
+        let (lb, use_tls, alternative_cn) = proxy
+            .get_lb_and_tls("api.mikrom.spluca.org:443")
+            .await
+            .unwrap();
+
+        assert!(!use_tls);
+        assert!(alternative_cn.is_none());
+        let upstream = lb.select(b"", 256).unwrap().to_string();
+        assert!(
+            upstream == "127.0.0.1:5001" || upstream == "[::1]:5001",
+            "unexpected API upstream target: {upstream}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_web_route_is_built_in() {
+        let state = Arc::new(RwLock::new(State {
+            routes: HashMap::new(),
+            acme_tokens: HashMap::new(),
+            certificates: HashMap::new(),
+        }));
+
+        let metrics = Arc::new(RouterMetricsCounters::new());
+        let health = Arc::new(RouterHealth::new());
+        let proxy = MikromProxy::new(
+            state,
+            health,
+            false,
+            String::new(),
+            String::new(),
+            "127.0.0.1:5001,[::1]:5001".to_string(),
+            "127.0.0.1:5173,[::1]:5173".to_string(),
+            None,
+            metrics,
+            None,
+            100,
+            crate::application::proxy::RouterTimeouts::default(),
+        );
+
+        assert!(proxy.has_route("mikrom.spluca.org").await);
+        assert!(proxy.has_route("mikrom.spluca.org:443").await);
+
+        let (lb, use_tls, alternative_cn) = proxy
+            .get_lb_and_tls("mikrom.spluca.org:443")
+            .await
+            .unwrap();
+
+        assert!(!use_tls);
+        assert!(alternative_cn.is_none());
+        let upstream = lb.select(b"", 256).unwrap().to_string();
+        assert!(
+            upstream == "127.0.0.1:5173" || upstream == "[::1]:5173",
+            "unexpected web upstream target: {upstream}"
         );
     }
 }

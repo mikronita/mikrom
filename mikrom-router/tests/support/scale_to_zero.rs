@@ -448,6 +448,8 @@ pub async fn setup_test_env(rps_limit: isize, use_ipv6: bool) -> Option<TestEnv>
         false,
         String::new(),
         String::new(),
+        "127.0.0.1:5001,[::1]:5001".to_string(),
+        "127.0.0.1:5173,[::1]:5173".to_string(),
         None,
         metrics,
         Some(traffic_publisher),

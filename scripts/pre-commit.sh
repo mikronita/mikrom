@@ -6,13 +6,11 @@ cd "$repo_root"
 
 echo "Running pre-commit checks..."
 
-staged_files=$(git diff --cached --name-only --diff-filter=ACMR)
-
 run_rust=false
 run_app=false
 run_zig_init=false
 
-for file in $staged_files; do
+while IFS= read -r -d '' file; do
   case "$file" in
   Cargo.toml | Cargo.lock | Makefile | *.rs | *.proto | mikrom-api/* | mikrom-agent/* | mikrom-builder/* | mikrom-cli/* | mikrom-dns/* | mikrom-network/* | mikrom-proto/* | mikrom-router/* | mikrom-scheduler/* | ci/*)
     run_rust=true
@@ -24,7 +22,7 @@ for file in $staged_files; do
     run_app=true
     ;;
   esac
-done
+done < <(git diff --cached --name-only -z --diff-filter=ACMR)
 
 if [ "$run_rust" = true ]; then
   echo "Running Dagger-backed Rust validation (make ci-fast)..."

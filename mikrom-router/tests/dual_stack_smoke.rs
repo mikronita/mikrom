@@ -145,6 +145,8 @@ async fn proxy_listener_accepts_ipv4_and_ipv6() {
         false,
         String::new(),
         String::new(),
+        "127.0.0.1:5001,[::1]:5001".to_string(),
+        "127.0.0.1:5173,[::1]:5173".to_string(),
         None,
         metrics,
         None,

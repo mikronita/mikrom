@@ -1,23 +1,14 @@
 # Mikrom - Open-Source Edge Platform
 
-Mikrom is a Rust-first edge platform that deploys containerized workloads into lightweight microVMs on Firecracker or Cloud Hypervisor. The workspace now includes a SvelteKit dashboard, a Pingora-based router, WireGuard and DNS control-plane services, eBPF support in the agent, and a Dagger-backed local CI/CD pipeline that runs the same validation logic locally and in GitHub Actions.
-
-## What Changed Recently
-
-- Added a Dagger runner in `ci/` with `smoke`, `fast`, `full`, `images`, and `publish-release` profiles.
-- Moved GitHub Actions to the same Rust-based Dagger runner instead of duplicating CI logic in YAML.
-- Migrated the dashboard to SvelteKit, Svelte 5, Vite, Tailwind CSS 4, shadcn-svelte, and bits-ui.
-- Updated the router to Pingora and expanded the platform with `mikrom-dns` and `mikrom-network`.
-- Added eBPF validation for `mikrom-agent-ebpf` with a nightly `build-std` path.
-- Tightened local development targets in the `Makefile` for Docker Compose, tmux-based dev, and Dagger profiles.
+Mikrom is a Rust-first edge platform for deploying containerized workloads into lightweight microVMs on Firecracker or Cloud Hypervisor. It includes a SvelteKit dashboard, a Pingora-based router, WireGuard and DNS control-plane services, eBPF support in the agent, and a Dagger-backed local CI/CD pipeline.
 
 ## Key Features
 
 - Zero-config app deployment from Git repositories through the builder, scheduler, and agent pipeline.
 - MicroVM isolation with Firecracker or Cloud Hypervisor per workload.
 - PostgreSQL databases are provisioned through Neon and run in Cloud Hypervisor-backed microVMs when deployed on the platform.
-- Dynamic ingress routing with automatic TLS and mesh-aware routing.
-- Internal DNS and WireGuard mesh management for platform services and workloads.
+- Dynamic ingress routing with automatic TLS.
+- Platform service discovery and mesh networking via internal DNS and WireGuard.
 - A SvelteKit dashboard and Rust CLI for day-to-day operations.
 - Dagger-backed CI/CD profiles that can be run locally or in GitHub Actions.
 - OpenTelemetry-based observability across services.
@@ -26,7 +17,7 @@ Mikrom is a Rust-first edge platform that deploys containerized workloads into l
 ## Architecture
 
 - Control plane: CLI/Web -> `mikrom-app` / `mikrom-cli` -> `mikrom-api` -> `mikrom-builder` -> `mikrom-scheduler` -> `mikrom-agent`.
-- Traffic plane: External traffic -> `mikrom-router` -> app microVM.
+- Traffic plane: External traffic -> `mikrom-router` -> app microVMs, including public API and web ingress.
 - Platform services: `mikrom-network` maintains the WireGuard mesh, `mikrom-dns` serves internal name resolution, Zig-built `mikrom-init` boots microVMs, and `mikrom-agent-ebpf` provides the eBPF program used by the agent.
 
 ## Technology Stack
@@ -66,22 +57,42 @@ Mikrom is a Rust-first edge platform that deploys containerized workloads into l
 
 ### Local Development
 
-Use Docker Compose for the full stack:
+Recommended workflow:
 
 ```bash
-make db-start   # Start PostgreSQL for local development
-make up         # Start all services with Docker Compose
-make logs       # Follow logs for the full stack
+make up-full    # Start postgres, nats, buildkit, and observability
+make dev        # Attach to the tmux app/service session
+make dev-stop   # Close the tmux session only
+make down-full  # Stop the full local development stack
+```
+
+Base infrastructure only:
+
+```bash
+make up         # Start postgres and nats
+make logs       # Follow logs for the Docker Compose stack
 make down       # Stop and remove containers
 ```
 
-For the tmux-based dev loop:
+Optional variants:
 
 ```bash
-make dev
+make logs-db           # Follow PostgreSQL logs
+make logs-nats          # Follow NATS logs
+make up-buildkit        # Start the BuildKit daemon for local image builds
+make up-observability   # Start Grafana, Prometheus, Loki, and Tempo
+make logs-buildkit      # Follow BuildKit logs
+make logs-observability # Follow observability logs
 ```
 
-If you want to run services individually, the main targets are:
+PostgreSQL only:
+
+```bash
+make db-start
+make db-stop
+```
+
+If you want to run services individually:
 
 ```bash
 make run-api
@@ -133,7 +144,7 @@ make test-integration  # Integration tests (requires Docker)
 make test-all          # Complete suite
 ```
 
-- For host and VM smoke validation of NAT64/DNS64, see [docs/nat64-dns64-smoke-checklist.md](/home/apardo/Work/mikrom.rust/docs/nat64-dns64-smoke-checklist.md).
+- For host and VM smoke validation of NAT64/DNS64, see [docs/nat64-dns64-smoke-checklist.md](docs/nat64-dns64-smoke-checklist.md).
 
 The pre-commit hook in `scripts/pre-commit.sh` uses the Dagger-backed targets:
 
