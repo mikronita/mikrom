@@ -5,6 +5,7 @@ Mikrom is a Rust-first edge platform for deploying containerized workloads into 
 ## Key Features
 
 - Zero-config app deployment from Git repositories through the builder, scheduler, and agent pipeline.
+- Mikrom Edge Platform can deploy applications based on Phoenix, Static, Ruby on Rails, Docker, Go, Rust, Django, Laravel, and JavaScript.
 - MicroVM isolation with Firecracker or Cloud Hypervisor per workload.
 - PostgreSQL databases are provisioned through Neon and run in Cloud Hypervisor-backed microVMs when deployed on the platform.
 - Dynamic ingress routing with automatic TLS.
