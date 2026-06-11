@@ -118,7 +118,7 @@ async fn test_router_handles_nats_updates() {
 
     // 1. Setup router tables (simulating migrations)
     sqlx::query("CREATE TABLE IF NOT EXISTS tls_certificates (hostname VARCHAR PRIMARY KEY, cert_chain TEXT NOT NULL, private_key TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").execute(&pool).await.unwrap();
-    sqlx::query("CREATE TABLE IF NOT EXISTS acme_challenges (token VARCHAR PRIMARY KEY, key_auth TEXT NOT NULL, hostname VARCHAR NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE IF NOT EXISTS acme_challenges (token VARCHAR PRIMARY KEY, key_auth TEXT NOT NULL, hostname VARCHAR, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").execute(&pool).await.unwrap();
 
     let Some(nats_client) = connect_nats_or_skip().await else {
         return;

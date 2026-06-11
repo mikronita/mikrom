@@ -373,13 +373,7 @@ impl BackgroundService for ControlPlane {
 
                 // NATS router updates.
                 Some(msg) = router_sub.next() => {
-                    let tx_clone = tx.clone();
-                    let self_clone = self.clone();
-                    let nats_clone = nats.clone();
-                    let db_clone = db.clone();
-                    tokio::spawn(async move {
-                        handlers::process_router_message(&self_clone, msg, &db_clone, &nats_clone, &tx_clone).await;
-                    });
+                    handlers::process_router_message(self, msg, &db, &nats, &tx).await;
                 }
 
                 // NATS mesh updates.

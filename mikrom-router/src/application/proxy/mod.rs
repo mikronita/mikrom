@@ -413,10 +413,7 @@ impl MikromProxy {
             return Ok(None);
         };
 
-        let key_auth = {
-            let state = self.state.read().await;
-            state.acme_tokens.get(token).cloned()
-        };
+        let key_auth = self.lookup_acme_key_auth(token).await;
 
         if let Some(key_auth) = key_auth {
             self.metrics.acme_hits.fetch_add(1, Ordering::Relaxed);
@@ -445,6 +442,26 @@ impl MikromProxy {
         }
 
         Ok(None)
+    }
+
+    async fn lookup_acme_key_auth(&self, token: &str) -> Option<String> {
+        const ACME_LOOKUP_RETRIES: usize = 10;
+        const ACME_LOOKUP_DELAY: Duration = Duration::from_millis(200);
+
+        for attempt in 0..=ACME_LOOKUP_RETRIES {
+            let key_auth = {
+                let state = self.state.read().await;
+                state.acme_tokens.get(token).cloned()
+            };
+
+            if key_auth.is_some() || attempt == ACME_LOOKUP_RETRIES {
+                return key_auth;
+            }
+
+            tokio::time::sleep(ACME_LOOKUP_DELAY).await;
+        }
+
+        None
     }
 
     async fn maybe_redirect_http(

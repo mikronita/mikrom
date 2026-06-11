@@ -344,6 +344,10 @@ async fn handle_acme_challenge_update(
                 );
                 schedule_state_resync(tx, "ACME persistence failure", &update.token);
             } else {
+                info!(
+                    "Control Plane: Persisted ACME challenge {} for host {}",
+                    update.token, update.hostname
+                );
                 schedule_state_resync(tx, "updating ACME challenge", &update.token);
             }
         },

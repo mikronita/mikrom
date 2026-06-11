@@ -330,7 +330,6 @@ async fn certify_domain(
             let token = challenge_handle.token.clone();
             tokens.push(token.clone());
 
-            // Publish challenge to NATS
             let update = AcmeChallengeUpdate {
                 token: token.clone(),
                 key_auth: key_auth.clone(),
@@ -339,11 +338,19 @@ async fn certify_domain(
                 timestamp: chrono::Utc::now().timestamp(),
             };
 
-            nats.publish(subjects::ROUTER_ACME_CHALLENGE_UPDATED, update)
-                .await?;
-
-            // Wait for router to receive and apply challenge (eventual consistency)
-            verify_challenge_is_live(&client, hostname, &token, &key_auth, router_addr).await?;
+            // Keep republishing the challenge while we probe the router. This
+            // makes the ACME flow resilient to brief router startup races or
+            // transient NATS delivery issues.
+            verify_challenge_is_live(
+                nats,
+                &client,
+                hostname,
+                &update,
+                &token,
+                &key_auth,
+                router_addr,
+            )
+            .await?;
 
             // Trigger challenge
             challenge_handle.set_ready().await?;
@@ -496,8 +503,10 @@ async fn ensure_managed_domain(
 }
 
 async fn verify_challenge_is_live(
+    nats: &crate::nats::TypedNatsClient,
     client: &reqwest::Client,
     hostname: &str,
+    update: &AcmeChallengeUpdate,
     token: &str,
     expected_auth: &str,
     router_addr: &str,
@@ -511,6 +520,8 @@ async fn verify_challenge_is_live(
 
     let mut attempts = 0;
     while attempts < 20 {
+        nats.publish(subjects::ROUTER_ACME_CHALLENGE_UPDATED, update.clone())
+            .await?;
         match client.get(&url).header("Host", hostname).send().await {
             Ok(res) => {
                 if res.status().is_success() {
