@@ -6,12 +6,14 @@ use crate::infrastructure::metrics;
 use crate::infrastructure::upstream::UpstreamDnsForwarder;
 use anyhow::Result;
 use hickory_server::server::Server;
-use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 use tracing::info;
 
 pub async fn run() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    let _telemetry =
+        mikrom_proto::telemetry::init_telemetry("mikrom-dns", env!("CARGO_PKG_VERSION"), None)?;
+    mikrom_proto::telemetry::record_service_startup("mikrom-dns");
+
     info!("Starting mikrom-dns v0.1.0...");
 
     let config = DnsConfig::from_env()?;
@@ -36,21 +38,6 @@ pub async fn run() -> Result<()> {
     let config_for_nats = config.clone();
     tokio::spawn(async move {
         let _ = crate::application::sync::run_nats_subscriber(nats_store, &config_for_nats).await;
-    });
-
-    tokio::spawn(async move {
-        let addr: SocketAddr = "[::]:9091".parse().expect("metrics address parsing failed");
-        let app = axum::Router::new().route(
-            "/metrics",
-            axum::routing::get(|| async { crate::infrastructure::metrics::render_metrics() }),
-        );
-        let _ = axum::serve(
-            tokio::net::TcpListener::bind(addr)
-                .await
-                .expect("metrics bind"),
-            app,
-        )
-        .await;
     });
 
     let resolver = DnsResolutionService::new(

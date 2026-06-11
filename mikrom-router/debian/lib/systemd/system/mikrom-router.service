@@ -7,6 +7,7 @@ Wants=network.target
 Type=simple
 User=root
 EnvironmentFile=/etc/mikrom/router.env
+EnvironmentFile=-/etc/mikrom/dynatrace.env
 ExecStartPre=/usr/sbin/modprobe wireguard
 ExecStart=/usr/bin/mikrom-router
 Restart=always

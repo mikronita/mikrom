@@ -34,7 +34,8 @@
 | `BUILD_STATE_PATH` | `/tmp/mikrom-builder-state.json` | Persistent build state file |
 | `BUILDKIT_HOST` | `docker-container://mikromrust-buildkit-1` | Build backend |
 | `ENABLE_TELEMETRY` | `true` | Enable OTLP export |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://192.168.122.128:4317` | OTLP endpoint |
+| `DT_API_URL` | `http://192.168.122.128:4318/api/v2/otlp` | Dynatrace OTLP base URL |
+| `DT_API_TOKEN` | - | Dynatrace API token for OTLP export |
 
 ## Development
 

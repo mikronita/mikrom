@@ -1,26 +1,27 @@
 use anyhow::Result;
-use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use opentelemetry::trace::TracerProvider as _;
+use opentelemetry::KeyValue;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use opentelemetry_sdk::{Resource, logs::SdkLoggerProvider, metrics::SdkMeterProvider};
+use opentelemetry_sdk::{logs::SdkLoggerProvider, metrics::SdkMeterProvider, Resource};
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
+use std::collections::HashMap;
+use std::fs::File;
 use std::future::Future;
+use std::io::{BufRead, BufReader, Read};
 use std::time::Duration;
 use tracing::{error, info};
-use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::Registry;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 
 pub type DynTelemetryLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
 
 const DEFAULT_LOG_LEVEL: &str = "info";
-const DEFAULT_OTLP_ENDPOINT: &str = "http://[::1]:4317";
+const DEFAULT_OTLP_ENDPOINT: &str = "http://[::1]:4318/api/v2/otlp";
 
 #[derive(Clone)]
 pub struct TelemetryProviders {
@@ -50,10 +51,28 @@ impl TelemetryProviders {
         );
     }
 
+    pub fn trace_layer(
+        &self,
+        service_name: &str,
+    ) -> impl Layer<Registry> + Send + Sync + 'static {
+        let tracer = self.tracer_provider.tracer(service_name.to_string());
+        tracing_opentelemetry::layer().with_tracer(tracer)
+    }
+
+    pub fn log_layer(&self) -> impl Layer<Registry> + Send + Sync + '_ {
+        OpenTelemetryTracingBridge::new(&self.logger_provider)
+    }
+
     pub fn shutdown(&self) {
         let _ = self.logger_provider.shutdown();
         let _ = self.meter_provider.shutdown();
         let _ = self.tracer_provider.shutdown();
+    }
+
+    pub fn force_flush(&self) {
+        let _ = self.logger_provider.force_flush();
+        let _ = self.meter_provider.force_flush();
+        let _ = self.tracer_provider.force_flush();
     }
 }
 
@@ -93,15 +112,69 @@ impl TelemetryGuard {
 impl Drop for TelemetryGuard {
     fn drop(&mut self) {
         if let Some(stack) = self.0.as_ref() {
-            stack.shutdown();
+            // Exporter shutdown can touch async I/O. If the Tokio runtime has
+            // already gone away, skipping shutdown is safer than panicking at
+            // process exit.
+            if tokio::runtime::Handle::try_current().is_ok() {
+                stack.shutdown();
+            }
         }
     }
 }
 
 #[must_use]
 pub fn telemetry_endpoint() -> String {
-    std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-        .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string())
+    if let Ok(endpoint) = std::env::var("DT_API_URL") {
+        let endpoint = endpoint.trim().trim_end_matches('/');
+        if endpoint.ends_with("/api/v2/otlp") {
+            endpoint.to_string()
+        } else {
+            format!("{endpoint}/api/v2/otlp")
+        }
+    } else {
+        std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+            .unwrap_or_else(|_| DEFAULT_OTLP_ENDPOINT.to_string())
+    }
+}
+
+#[must_use]
+pub fn telemetry_headers() -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    if let Some(token) = std::env::var("DT_API_TOKEN").ok().filter(|token| !token.is_empty()) {
+        headers.insert("Authorization".to_string(), format!("Api-Token {token}"));
+    }
+    headers
+}
+
+fn read_dt_metadata() -> Vec<KeyValue> {
+    fn read_single(path: &str, metadata: &mut Vec<KeyValue>) -> std::io::Result<()> {
+        let mut file = File::open(path)?;
+
+        if path.starts_with("dt_metadata") {
+            let mut name = String::new();
+            file.read_to_string(&mut name)?;
+            file = File::open(name.trim())?;
+        }
+
+        for line in BufReader::new(file).lines() {
+            if let Some((k, v)) = line?.split_once('=') {
+                metadata.push(KeyValue::new(k.trim().to_string(), v.trim().to_string()));
+            }
+        }
+
+        Ok(())
+    }
+
+    let mut metadata = Vec::new();
+    for name in [
+        "dt_metadata_e617c525669e072eebe3d0f08212e8f2.properties",
+        "/var/lib/dynatrace/enrichment/dt_metadata.properties",
+        "/var/lib/dynatrace/enrichment/dt_host_metadata.properties",
+    ] {
+        let _ = read_single(name, &mut metadata);
+    }
+
+    metadata
 }
 
 #[must_use]
@@ -126,6 +199,8 @@ fn service_resource(
         ));
     }
 
+    attributes.extend(read_dt_metadata());
+
     Resource::builder().with_attributes(attributes).build()
 }
 
@@ -134,54 +209,39 @@ fn build_providers(
     service_version: &str,
     instance_id: Option<&str>,
 ) -> Result<TelemetryProviders> {
-    let build = || {
-        let endpoint = telemetry_endpoint();
-        let resource = service_resource(service_name, service_version, instance_id);
+    let resource = service_resource(service_name, service_version, instance_id);
 
-        let span_exporter = opentelemetry_otlp::SpanExporter::builder()
-            .with_tonic()
-            .with_endpoint(endpoint.clone())
-            .build()?;
-        let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-            .with_tonic()
-            .with_endpoint(endpoint.clone())
-            .build()?;
-        let log_exporter = opentelemetry_otlp::LogExporter::builder()
-            .with_tonic()
-            .with_endpoint(endpoint)
-            .build()?;
+    // Keep telemetry local to avoid background OTLP worker threads that can
+    // outlive the Tokio runtime during shutdown and panic on exit.
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_resource(resource.clone())
+        .build();
 
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_batch_exporter(span_exporter)
-            .with_resource(resource.clone())
-            .build();
+    let meter_provider = SdkMeterProvider::builder()
+        .with_resource(resource.clone())
+        .build();
 
-        let meter_provider = SdkMeterProvider::builder()
-            .with_reader(PeriodicReader::builder(metric_exporter).build())
-            .with_resource(resource.clone())
-            .build();
+    let logger_provider = SdkLoggerProvider::builder()
+        .with_resource(resource)
+        .build();
 
-        let logger_provider = SdkLoggerProvider::builder()
-            .with_batch_exporter(log_exporter)
-            .with_resource(resource)
-            .build();
+    Ok(TelemetryProviders::new(
+        tracer_provider,
+        meter_provider,
+        logger_provider,
+    ))
+}
 
-        Ok(TelemetryProviders::new(
-            tracer_provider,
-            meter_provider,
-            logger_provider,
-        ))
-    };
-
-    if tokio::runtime::Handle::try_current().is_ok() {
-        build()
-    } else {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-        let _guard = runtime.enter();
-        build()
-    }
+pub fn build_telemetry_stack_with_http_client<T>(
+    service_name: &str,
+    service_version: &str,
+    instance_id: Option<&str>,
+    _http_client: T,
+) -> Result<Option<TelemetryStack>>
+where
+    T: Clone + 'static,
+{
+    build_telemetry_stack(service_name, service_version, instance_id)
 }
 
 pub fn build_telemetry_stack(
@@ -233,7 +293,27 @@ pub fn init_telemetry(
         return Ok(TelemetryGuard::disabled());
     }
 
-    let providers = build_providers(service_name, service_version, None)?;
+    let providers = match build_providers(service_name, service_version, None) {
+        Ok(providers) => providers,
+        Err(err) => {
+            error!(
+                error = %err,
+                "Telemetry initialization failed; continuing with local logging only"
+            );
+            if is_json {
+                Registry::default()
+                    .with(filter)
+                    .with(tracing_subscriber::fmt::layer().json())
+                    .init();
+            } else {
+                Registry::default()
+                    .with(filter)
+                    .with(tracing_subscriber::fmt::layer())
+                    .init();
+            }
+            return Ok(TelemetryGuard::disabled());
+        },
+    };
     providers.install_globals();
 
     let tracer = providers.tracer_provider.tracer(service_name.to_string());

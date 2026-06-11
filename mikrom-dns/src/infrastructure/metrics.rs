@@ -13,63 +13,52 @@
     clippy::unused_async
 )]
 
-use lazy_static::lazy_static;
-use prometheus::{
-    CounterVec, Encoder, Gauge, TextEncoder, opts, register_counter_vec, register_gauge,
-};
+use opentelemetry::global;
+use opentelemetry::metrics::{Counter, Gauge};
+use std::sync::OnceLock;
 
-lazy_static! {
-    static ref DNS_QUERIES_TOTAL: CounterVec = register_counter_vec!(
-        opts!("dns_queries_total", "Total number of DNS queries received"),
-        &["zone", "query_type"]
-    )
-    .expect("Can't create dns_queries_total counter");
-    static ref DNS_RESPONSE_CODE_TOTAL: CounterVec = register_counter_vec!(
-        opts!(
-            "dns_response_code_total",
-            "Total number of DNS responses sent"
-        ),
-        &["rcode"]
-    )
-    .expect("Can't create dns_response_code_total counter");
-    static ref DNS_ACTIVE_RECORDS: Gauge = register_gauge!(opts!(
-        "dns_active_records",
-        "Current number of active DNS records"
-    ))
-    .expect("Can't create dns_active_records gauge");
-    static ref DNS_DROPPED_QUERIES_TOTAL: CounterVec = register_counter_vec!(
-        opts!(
-            "dns_dropped_queries_total",
-            "Total number of dropped DNS queries"
-        ),
-        &["reason"]
-    )
-    .expect("Can't create dns_dropped_queries_total counter");
+struct DnsOtelMetrics {
+    dns_queries_total: Counter<u64>,
+    dns_response_code_total: Counter<u64>,
+    dns_dropped_queries_total: Counter<u64>,
+    dns_active_records: Gauge<u64>,
+}
+
+impl DnsOtelMetrics {
+    fn get() -> &'static Self {
+        static METRICS: OnceLock<DnsOtelMetrics> = OnceLock::new();
+        METRICS.get_or_init(|| {
+            let meter = global::meter("mikrom-dns");
+            Self {
+                dns_queries_total: meter.u64_counter("dns_queries_total").build(),
+                dns_response_code_total: meter.u64_counter("dns_response_code_total").build(),
+                dns_dropped_queries_total: meter.u64_counter("dns_dropped_queries_total").build(),
+                dns_active_records: meter.u64_gauge("dns_active_records").build(),
+            }
+        })
+    }
 }
 
 pub fn record_query(zone: &str, query_type: &str) {
-    DNS_QUERIES_TOTAL
-        .with_label_values(&[zone, query_type])
-        .inc();
+    let attrs = [
+        opentelemetry::KeyValue::new("zone", zone.to_string()),
+        opentelemetry::KeyValue::new("query_type", query_type.to_string()),
+    ];
+    DnsOtelMetrics::get().dns_queries_total.add(1, &attrs);
 }
 
 pub fn record_response(rcode: &str) {
-    DNS_RESPONSE_CODE_TOTAL.with_label_values(&[rcode]).inc();
+    let attrs = [opentelemetry::KeyValue::new("rcode", rcode.to_string())];
+    DnsOtelMetrics::get().dns_response_code_total.add(1, &attrs);
 }
 
 pub fn record_drop(reason: &str) {
-    DNS_DROPPED_QUERIES_TOTAL.with_label_values(&[reason]).inc();
+    let attrs = [opentelemetry::KeyValue::new("reason", reason.to_string())];
+    DnsOtelMetrics::get().dns_dropped_queries_total.add(1, &attrs);
 }
 
 pub fn set_active_records(count: usize) {
-    DNS_ACTIVE_RECORDS.set(count as f64);
-}
-
-pub fn render_metrics() -> String {
-    let encoder = TextEncoder::new();
-    let mut buffer = Vec::new();
-    encoder
-        .encode(&prometheus::gather(), &mut buffer)
-        .expect("metrics encode failed");
-    String::from_utf8(buffer).expect("metrics utf8 conversion failed")
+    DnsOtelMetrics::get()
+        .dns_active_records
+        .record(count as u64, &[]);
 }

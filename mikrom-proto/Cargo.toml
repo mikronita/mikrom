@@ -10,7 +10,8 @@ prost = { workspace = true }
 rcgen = { version = "0.13", features = ["crypto"] }
 opentelemetry = { version = "0.31.0", features = ["trace", "metrics", "logs"] }
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "trace", "metrics", "logs"] }
-opentelemetry-otlp = { version = "0.31.1", features = ["tonic", "grpc-tonic", "prost", "trace", "metrics", "logs"] }
+opentelemetry-otlp = { version = "0.31.1", features = ["http-proto", "http-json", "logs", "metrics", "trace", "reqwest-client", "reqwest-rustls"] }
+opentelemetry-http = { version = "0.31.0" }
 opentelemetry-appender-tracing = { version = "0.31.1" }
 tracing-opentelemetry = "0.32.1"
 opentelemetry-semantic-conventions = "0.31.0"
@@ -19,6 +20,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 async-nats = { workspace = true }
 tokio = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = "0.4"
@@ -34,10 +36,13 @@ path = "src/bin/cert_gen.rs"
 tonic-build = { workspace = true }
 
 [dev-dependencies]
+async-trait = "0.1"
 futures = "0.3"
 opentelemetry-proto = { version = "0.31.0", features = ["gen-tonic"] }
 tonic14 = { package = "tonic", version = "0.14.6", features = ["transport"] }
 tokio-stream = { version = "0.1", features = ["net"] }
+axum = "0.8"
+prost14 = { package = "prost", version = "0.14" }
 
 [features]
 default = ["build"]

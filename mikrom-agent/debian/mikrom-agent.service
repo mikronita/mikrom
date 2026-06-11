@@ -5,6 +5,7 @@ After=network.target
 [Service]
 Type=simple
 EnvironmentFile=-/etc/mikrom/agent.env
+EnvironmentFile=-/etc/mikrom/dynatrace.env
 ExecStartPre=/usr/sbin/modprobe wireguard
 ExecStart=/usr/bin/mikrom-agent
 Restart=always

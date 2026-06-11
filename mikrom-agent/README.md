@@ -28,6 +28,7 @@
 - The agent relies on the Zig-backed `mikrom-init` binary and the runtime boot scripts inside microVM images.
 - The agent starts a singleton NAT64 translator on the host bridge and expects `mikrom-dns` to provide DNS64 answers for external names.
 - Build output for the eBPF program is consumed from `target/bpfel-unknown-none/release/mikrom-agent-ebpf`.
+- On systemd deployments, load `DT_API_TOKEN` from `/etc/mikrom/dynatrace.env` instead of embedding it in `agent.env`. A template is provided at `debian/etc/mikrom/dynatrace.env.example`.
 
 ### Timeout configuration
 

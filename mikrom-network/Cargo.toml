@@ -13,7 +13,6 @@ futures = "0.3"
 anyhow = { workspace = true } # keeping for some internal conversions if needed, but mainly using thiserror
 async-nats = { workspace = true }
 prost = "0.13"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 mikrom-proto = { path = "../mikrom-proto" }
 

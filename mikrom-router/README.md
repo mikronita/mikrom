@@ -24,7 +24,8 @@
 - PostgreSQL for router state.
 - NATS for control-plane and traffic-plane coordination.
 - WireGuard and `CAP_NET_ADMIN` for mesh operations.
-- Optional OTLP endpoint for tracing and metrics.
+- Optional Dynatrace OTLP endpoint and token for tracing and metrics.
+- On systemd deployments, load `DT_API_TOKEN` from `/etc/mikrom/dynatrace.env` instead of embedding it in `router.env`. A template is provided at `debian/etc/mikrom/dynatrace.env.example`.
 
 ## Configuration
 

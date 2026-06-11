@@ -2612,6 +2612,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tower-service",
+ "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -3411,19 +3412,16 @@ dependencies = [
  "anyhow",
  "async-nats",
  "async-trait",
- "axum 0.7.9",
  "dashmap",
  "futures",
  "hickory-proto",
  "hickory-server",
  "ipnet",
- "lazy_static",
  "mikrom-proto",
- "prometheus",
+ "opentelemetry",
  "prost 0.13.5",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -3449,7 +3447,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "uuid",
  "x25519-dalek",
  "zeroize",
@@ -3461,16 +3458,21 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-nats",
+ "async-trait",
+ "axum 0.8.9",
  "chrono",
  "futures",
  "opentelemetry",
  "opentelemetry-appender-tracing",
+ "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry-proto",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "prost 0.13.5",
+ "prost 0.14.3",
  "rcgen 0.13.2",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2",
@@ -4137,6 +4139,7 @@ dependencies = [
  "opentelemetry_sdk",
  "prost 0.14.3",
  "reqwest 0.12.28",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tonic 0.14.6",
@@ -5239,6 +5242,9 @@ dependencies = [
  "native-tls",
  "percent-encoding",
  "pin-project-lite",
+ "quinn",
+ "rustls 0.23.40",
+ "rustls-native-certs 0.8.3",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -5246,6 +5252,7 @@ dependencies = [
  "sync_wrapper 1.0.2",
  "tokio",
  "tokio-native-tls",
+ "tokio-rustls 0.26.4",
  "tokio-util",
  "tower 0.5.3",
  "tower-http",
@@ -5255,6 +5262,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
+ "webpki-roots 1.0.7",
 ]
 
 [[package]]

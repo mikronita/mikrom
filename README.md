@@ -12,7 +12,7 @@ Mikrom is a Rust-first edge platform for deploying containerized workloads into 
 - Platform service discovery and mesh networking via internal DNS and WireGuard.
 - A SvelteKit dashboard and Rust CLI for day-to-day operations.
 - Dagger-backed CI/CD profiles that can be run locally or in GitHub Actions.
-- OpenTelemetry-based observability across services.
+- Dynatrace-backed OpenTelemetry observability across services.
 - An eBPF data plane for agent-side network handling and metrics.
 
 ## Architecture

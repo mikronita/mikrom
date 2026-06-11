@@ -22,6 +22,7 @@
 - Upstream lookups are forwarded to the comma-separated resolvers configured in `UPSTREAM_DNS`.
 - External `AAAA` lookups are synthesized through DNS64 using the NAT64 prefix configured in `NAT64_PREFIX` or the well-known `64:ff9b::/96` prefix by default.
 - The service supports optional `NATS_SYS_IP` for system-zone exposure.
+- On systemd deployments, load `DT_API_TOKEN` from `/etc/mikrom/dynatrace.env` instead of embedding it in `dns.env`. A template is provided at `debian/etc/mikrom/dynatrace.env.example`.
 
 ## Configuration
 
@@ -35,7 +36,8 @@
 | `NATS_SYS_IP` | - | Optional IPv6 address for the system zone |
 | `NAT64_PREFIX` | `64:ff9b::` | NAT64 prefix used to synthesize external AAAA records |
 | `ENABLE_TELEMETRY` | `true` | Enable OTLP export |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://192.168.122.128:4317` | OTLP endpoint |
+| `DT_API_URL` | `http://192.168.122.128:4318/api/v2/otlp` | Dynatrace OTLP base URL |
+| `DT_API_TOKEN` | - | Dynatrace API token for OTLP export |
 
 ## Development
 

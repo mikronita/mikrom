@@ -13,13 +13,10 @@ async-nats = { workspace = true }
 mikrom-proto = { path = "../mikrom-proto" }
 prost = "0.13"
 futures = "0.3"
-prometheus = "0.13"
-axum = "0.7"
-lazy_static = "1.4"
 tracing = "0.1"
-tracing-subscriber = "0.3"
 anyhow = { workspace = true }
 ipnet = "2.9"
+opentelemetry = { version = "0.31", features = ["metrics"] }
 
 [lints]
 workspace = true
