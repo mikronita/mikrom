@@ -512,6 +512,8 @@ async fn verify_challenge_is_live(
     router_addr: &str,
 ) -> anyhow::Result<()> {
     let url = format!("{}/.well-known/acme-challenge/{}", router_addr, token);
+    const MAX_ATTEMPTS: usize = 45;
+    const RETRY_DELAY: Duration = Duration::from_secs(2);
 
     info!(
         "Verifying ACME challenge is live: {} (via Host: {})",
@@ -519,9 +521,10 @@ async fn verify_challenge_is_live(
     );
 
     let mut attempts = 0;
-    while attempts < 20 {
+    while attempts < MAX_ATTEMPTS {
         nats.publish(subjects::ROUTER_ACME_CHALLENGE_UPDATED, update.clone())
             .await?;
+        tokio::time::sleep(Duration::from_millis(250)).await;
         match client.get(&url).header("Host", hostname).send().await {
             Ok(res) => {
                 if res.status().is_success() {
@@ -545,7 +548,7 @@ async fn verify_challenge_is_live(
             },
         }
         attempts += 1;
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(RETRY_DELAY).await;
     }
 
     Err(anyhow::anyhow!(
