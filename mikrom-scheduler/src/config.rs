@@ -23,6 +23,12 @@ pub struct SchedulerConfig {
     #[serde(default = "default_vm_cleanup_ttl_secs")]
     pub vm_cleanup_ttl_secs: i64,
 
+    #[serde(default = "default_beta_deployment_cleanup_enabled")]
+    pub beta_deployment_cleanup_enabled: bool,
+
+    #[serde(default = "default_beta_deployment_cleanup_interval_secs")]
+    pub beta_deployment_cleanup_interval_secs: u64,
+
     #[serde(default = "default_agent_request_timeout_secs")]
     pub agent_request_timeout_secs: u64,
 
@@ -68,6 +74,14 @@ fn default_vm_cleanup_ttl_secs() -> i64 {
     3600
 }
 
+fn default_beta_deployment_cleanup_enabled() -> bool {
+    false
+}
+
+fn default_beta_deployment_cleanup_interval_secs() -> u64 {
+    3600
+}
+
 fn default_agent_request_timeout_secs() -> u64 {
     30
 }
@@ -102,6 +116,8 @@ mod tests {
         assert_eq!(config.router_idle_timeout_secs, 900);
         assert_eq!(config.vm_cleanup_interval_secs, 3600);
         assert_eq!(config.vm_cleanup_ttl_secs, 3600);
+        assert!(!config.beta_deployment_cleanup_enabled);
+        assert_eq!(config.beta_deployment_cleanup_interval_secs, 3600);
     }
 
     #[test]
@@ -134,6 +150,8 @@ mod tests {
         assert_eq!(config.restore_retry_backoff_secs, 3600);
         assert_eq!(config.vm_cleanup_interval_secs, 3600);
         assert_eq!(config.vm_cleanup_ttl_secs, 3600);
+        assert!(!config.beta_deployment_cleanup_enabled);
+        assert_eq!(config.beta_deployment_cleanup_interval_secs, 3600);
     }
 
     #[test]
@@ -151,6 +169,29 @@ mod tests {
 
         assert_eq!(config.vm_cleanup_interval_secs, 120);
         assert_eq!(config.vm_cleanup_ttl_secs, 300);
+    }
+
+    #[test]
+    fn loads_beta_deployment_cleanup_settings_from_env() {
+        let config: SchedulerConfig = envy::from_iter(vec![
+            (
+                "DATABASE_URL".to_string(),
+                "postgres://[::1]/mikrom".to_string(),
+            ),
+            ("NATS_URL".to_string(), "nats://[::1]:4222".to_string()),
+            (
+                "BETA_DEPLOYMENT_CLEANUP_ENABLED".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "BETA_DEPLOYMENT_CLEANUP_INTERVAL_SECS".to_string(),
+                "900".to_string(),
+            ),
+        ])
+        .expect("config should deserialize");
+
+        assert!(config.beta_deployment_cleanup_enabled);
+        assert_eq!(config.beta_deployment_cleanup_interval_secs, 900);
     }
 
     #[test]
