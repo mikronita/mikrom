@@ -142,6 +142,35 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    if config.beta_deployment_cleanup_enabled {
+        let app_service_for_deployment_cleanup = app_service.clone();
+        let deployment_cleanup_interval =
+            Duration::from_secs(config.beta_deployment_cleanup_interval_secs.max(1));
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(deployment_cleanup_interval);
+            loop {
+                interval.tick().await;
+
+                match app_service_for_deployment_cleanup
+                    .lifecycle
+                    .cleanup_beta_deployments()
+                    .await
+                {
+                    Ok(count) => {
+                        if count > 0 {
+                            tracing::info!(
+                                deleted = count,
+                                interval_secs = deployment_cleanup_interval.as_secs(),
+                                "Deleted beta deployments"
+                            );
+                        }
+                    },
+                    Err(e) => tracing::error!("Failed to cleanup beta deployments: {}", e),
+                }
+            }
+        });
+    }
+
     // Start autoscaler
     let app_service_clone = app_service.clone();
     tokio::spawn(async move {

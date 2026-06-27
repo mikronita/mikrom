@@ -39,3 +39,5 @@ make ci-full
 - `AGENT_REQUEST_TIMEOUT_SECS` controls the timeout used for scheduler requests to `mikrom-agent`. The default is `30`.
 - `VM_CLEANUP_INTERVAL_SECS` controls how often the beta VM cleanup sweep runs. The default is `3600`.
 - `VM_CLEANUP_TTL_SECS` controls how old a VM must be before the cleanup sweep deletes it. The default is `3600`.
+- `BETA_DEPLOYMENT_CLEANUP_ENABLED` enables the beta deployment sweep that deletes every deployment and its VM on a fixed interval. Leave it `false` in production.
+- `BETA_DEPLOYMENT_CLEANUP_INTERVAL_SECS` controls how often that beta deployment sweep runs. The default is `3600`.

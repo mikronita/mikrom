@@ -436,15 +436,116 @@ impl JobLifecycleService {
             })
             .await
     }
+
+    pub async fn cleanup_beta_deployments(&self) -> DomainResult<usize> {
+        let telemetry = self.ctx.telemetry.clone();
+        telemetry
+            .observe_result("lifecycle", "cleanup_beta_deployments", async {
+                let jobs = self.ctx.job_repo.list_jobs(None, None, None).await?;
+                let deployment_jobs: Vec<Job> = jobs
+                    .into_iter()
+                    .filter(|job| job.deployment_id.is_some())
+                    .collect();
+
+                let mut cleaned = 0usize;
+
+                for job in deployment_jobs {
+                    let now = chrono::Utc::now().timestamp();
+
+                    if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
+                        match self
+                            .ctx
+                            .agent_client
+                            .delete_vm(host_id, vm_id, job.config.hypervisor)
+                            .await
+                        {
+                            Ok(()) => {},
+                            Err(e) => {
+                                let is_missing_vm = matches!(
+                                    &e,
+                                    DomainError::Infrastructure(message)
+                                        if message.to_lowercase().contains("not found")
+                                );
+
+                                if is_missing_vm {
+                                    tracing::warn!(
+                                        job_id = %job.job_id,
+                                        deployment_id = %job.deployment_id.clone().unwrap_or_default(),
+                                        host_id = %host_id,
+                                        vm_id = %vm_id,
+                                        error = %e,
+                                        "Beta deployment cleanup skipped missing VM"
+                                    );
+                                } else {
+                                    tracing::error!(
+                                        job_id = %job.job_id,
+                                        deployment_id = %job.deployment_id.clone().unwrap_or_default(),
+                                        host_id = %host_id,
+                                        vm_id = %vm_id,
+                                        error = %e,
+                                        "Beta deployment cleanup failed while deleting VM"
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+
+                    let mut stopped_job = job.clone();
+                    stopped_job.status = JobStatus::Stopped;
+                    stopped_job.stopped_at = Some(now);
+
+                    match self.ctx.job_repo.remove_job(&job.job_id).await {
+                        Ok(()) => {
+                            publish_job_update_best_effort(
+                                self.ctx.nats_client.as_ref(),
+                                &stopped_job,
+                                "beta-deployment-cleanup-job-update",
+                            )
+                            .await;
+                            cleaned += 1;
+                        },
+                        Err(e) => {
+                            tracing::error!(
+                                job_id = %job.job_id,
+                                deployment_id = %job.deployment_id.clone().unwrap_or_default(),
+                                error = %e,
+                                "Failed to remove deployment job during beta cleanup"
+                            );
+                            if let Err(update_err) = self
+                                .ctx
+                                .job_repo
+                                .update_job_status(&job.job_id, JobStatus::Stopped)
+                                .await
+                            {
+                                tracing::warn!(
+                                    job_id = %job.job_id,
+                                    deployment_id = %job.deployment_id.clone().unwrap_or_default(),
+                                    error = %update_err,
+                                    "Failed to mark deployment job as stopped after remove_job failure"
+                                );
+                            }
+                            publish_job_update_best_effort(
+                                self.ctx.nats_client.as_ref(),
+                                &stopped_job,
+                                "beta-deployment-cleanup-job-update-remove-failed",
+                            )
+                            .await;
+                        },
+                    }
+                }
+
+                Ok(cleaned)
+            })
+            .await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::application::{AppContext, SchedulerRuntimeConfig};
-    use crate::domain::{
-        TenantId, VmConfig, Volume,
-    };
+    use crate::domain::{TenantId, VmConfig, Volume};
     use crate::domain::app::MockAppRepository;
     use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository};
     use async_trait::async_trait;
@@ -460,7 +561,12 @@ mod tests {
         }
     }
 
-    fn test_job(job_id: &str, created_at: i64, status: JobStatus) -> Job {
+    fn test_job(
+        job_id: &str,
+        created_at: i64,
+        status: JobStatus,
+        deployment_id: Option<&str>,
+    ) -> Job {
         let mut job = Job::new(
             job_id.to_string().into(),
             Uuid::new_v4().to_string().into(),
@@ -479,7 +585,7 @@ mod tests {
                 ..VmConfig::default()
             },
             TenantId::from("tenant-1"),
-            None,
+            deployment_id.map(|id| id.to_string().into()),
         );
         job.created_at = created_at;
         job.status = status;
@@ -496,8 +602,8 @@ mod tests {
         let worker_repo = MockWorkerRepository::new();
 
         let now = chrono::Utc::now().timestamp();
-        let old_job = test_job("job-old", now - 4000, JobStatus::Running);
-        let recent_job = test_job("job-recent", now - 60, JobStatus::Running);
+        let old_job = test_job("job-old", now - 4000, JobStatus::Running, None);
+        let recent_job = test_job("job-recent", now - 60, JobStatus::Running, None);
 
         job_repo
             .expect_list_jobs()
@@ -544,7 +650,7 @@ mod tests {
         let worker_repo = MockWorkerRepository::new();
 
         let now = chrono::Utc::now().timestamp();
-        let expired_job = test_job("job-expired", now - 4000, JobStatus::Running);
+        let expired_job = test_job("job-expired", now - 4000, JobStatus::Running, None);
 
         job_repo
             .expect_list_jobs()
@@ -583,5 +689,63 @@ mod tests {
         let deleted = service.cleanup_expired_vms(3600).await.unwrap();
 
         assert_eq!(deleted, 0);
+    }
+
+    #[tokio::test]
+    async fn cleanup_beta_deployments_deletes_all_deployment_jobs() {
+        let mut job_repo = MockJobRepository::new();
+        let mut agent_client = MockAgentClient::new();
+        let app_repo = MockAppRepository::new();
+        let worker_repo = MockWorkerRepository::new();
+
+        let now = chrono::Utc::now().timestamp();
+        let deployment_job = test_job(
+            "job-deployment",
+            now - 120,
+            JobStatus::Running,
+            Some("dep-1"),
+        );
+        let non_deployment_job = test_job(
+            "job-nondeployment",
+            now - 120,
+            JobStatus::Running,
+            None,
+        );
+
+        job_repo
+            .expect_list_jobs()
+            .withf(|tenant_id, app_id, status| {
+                tenant_id.is_none() && app_id.is_none() && status.is_none()
+            })
+            .returning(move |_, _, _| Ok(vec![deployment_job.clone(), non_deployment_job.clone()]));
+
+        job_repo
+            .expect_remove_job()
+            .withf(|job_id| job_id == "job-deployment")
+            .returning(|_| Ok(()));
+
+        agent_client
+            .expect_delete_vm()
+            .withf(|host_id, vm_id, _| host_id == "host-1" && vm_id == "vm-1")
+            .returning(|_, _, _| Ok(()));
+
+        let state = Arc::new(AppContext {
+            job_repo: Arc::new(job_repo),
+            app_repo: Arc::new(app_repo),
+            worker_repo: Arc::new(worker_repo),
+            agent_client: Arc::new(agent_client),
+            nats_client: Arc::new(TestNatsPublisher),
+            telemetry: crate::infrastructure::telemetry::SchedulerTelemetry,
+            runtime: SchedulerRuntimeConfig {
+                router_idle_timeout_secs: 900,
+                worker_stale_threshold_secs: 60,
+                restore_retry_backoff_secs: 3600,
+            },
+        });
+
+        let service = JobLifecycleService::new(state);
+        let deleted = service.cleanup_beta_deployments().await.unwrap();
+
+        assert_eq!(deleted, 1);
     }
 }
