@@ -354,34 +354,38 @@ impl JobLifecycleService {
                     let now = chrono::Utc::now().timestamp();
 
                     if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
-                        if let Err(e) = self
+                        match self
                             .ctx
                             .agent_client
                             .delete_vm(host_id, vm_id, job.config.hypervisor)
                             .await
                         {
-                            let is_missing_vm = matches!(
-                                &e,
-                                DomainError::Infrastructure(message)
-                                    if message.to_lowercase().contains("not found")
-                            );
+                            Ok(()) => {},
+                            Err(e) => {
+                                let is_missing_vm = matches!(
+                                    &e,
+                                    DomainError::Infrastructure(message)
+                                        if message.to_lowercase().contains("not found")
+                                );
 
-                            if is_missing_vm {
-                                tracing::warn!(
-                                    job_id = %job.job_id,
-                                    host_id = %host_id,
-                                    vm_id = %vm_id,
-                                    error = %e,
-                                    "Beta VM cleanup skipped missing VM"
-                                );
-                            } else {
-                                tracing::error!(
-                                    job_id = %job.job_id,
-                                    host_id = %host_id,
-                                    vm_id = %vm_id,
-                                    error = %e,
-                                    "Beta VM cleanup failed while deleting VM"
-                                );
+                                if is_missing_vm {
+                                    tracing::warn!(
+                                        job_id = %job.job_id,
+                                        host_id = %host_id,
+                                        vm_id = %vm_id,
+                                        error = %e,
+                                        "Beta VM cleanup skipped missing VM"
+                                    );
+                                } else {
+                                    tracing::error!(
+                                        job_id = %job.job_id,
+                                        host_id = %host_id,
+                                        vm_id = %vm_id,
+                                        error = %e,
+                                        "Beta VM cleanup failed while deleting VM"
+                                    );
+                                    continue;
+                                }
                             }
                         }
                     }
@@ -530,5 +534,54 @@ mod tests {
         let deleted = service.cleanup_expired_vms(3600).await.unwrap();
 
         assert_eq!(deleted, 1);
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired_vms_keeps_job_when_vm_delete_fails() {
+        let mut job_repo = MockJobRepository::new();
+        let mut agent_client = MockAgentClient::new();
+        let app_repo = MockAppRepository::new();
+        let worker_repo = MockWorkerRepository::new();
+
+        let now = chrono::Utc::now().timestamp();
+        let expired_job = test_job("job-expired", now - 4000, JobStatus::Running);
+
+        job_repo
+            .expect_list_jobs()
+            .withf(|tenant_id, app_id, status| {
+                tenant_id.is_none() && app_id.is_none() && status.is_none()
+            })
+            .returning(move |_, _, _| Ok(vec![expired_job.clone()]));
+
+        agent_client
+            .expect_delete_vm()
+            .withf(|host_id, vm_id, _| host_id == "host-1" && vm_id == "vm-1")
+            .returning(|_, _, _| {
+                Err(DomainError::Infrastructure(
+                    "temporary agent failure".to_string(),
+                ))
+            });
+
+        job_repo.expect_remove_job().times(0);
+        job_repo.expect_update_job_status().times(0);
+
+        let state = Arc::new(AppContext {
+            job_repo: Arc::new(job_repo),
+            app_repo: Arc::new(app_repo),
+            worker_repo: Arc::new(worker_repo),
+            agent_client: Arc::new(agent_client),
+            nats_client: Arc::new(TestNatsPublisher),
+            telemetry: crate::infrastructure::telemetry::SchedulerTelemetry,
+            runtime: SchedulerRuntimeConfig {
+                router_idle_timeout_secs: 900,
+                worker_stale_threshold_secs: 60,
+                restore_retry_backoff_secs: 3600,
+            },
+        });
+
+        let service = JobLifecycleService::new(state);
+        let deleted = service.cleanup_expired_vms(3600).await.unwrap();
+
+        assert_eq!(deleted, 0);
     }
 }
