@@ -114,6 +114,34 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Beta mode cleanup: any VM older than the configured TTL is deleted.
+    let app_service_for_vm_cleanup = app_service.clone();
+    let vm_cleanup_interval = Duration::from_secs(config.vm_cleanup_interval_secs.max(1));
+    let vm_cleanup_ttl_secs = config.vm_cleanup_ttl_secs.max(1);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(vm_cleanup_interval);
+        loop {
+            interval.tick().await;
+
+            match app_service_for_vm_cleanup
+                .lifecycle
+                .cleanup_expired_vms(vm_cleanup_ttl_secs)
+                .await
+            {
+                Ok(count) => {
+                    if count > 0 {
+                        tracing::info!(
+                            deleted = count,
+                            ttl_secs = vm_cleanup_ttl_secs,
+                            "Deleted expired beta VMs"
+                        );
+                    }
+                },
+                Err(e) => tracing::error!("Failed to cleanup expired beta VMs: {}", e),
+            }
+        }
+    });
+
     // Start autoscaler
     let app_service_clone = app_service.clone();
     tokio::spawn(async move {

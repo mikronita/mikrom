@@ -334,4 +334,201 @@ impl JobLifecycleService {
             })
             .await
     }
+
+    pub async fn cleanup_expired_vms(&self, ttl_secs: i64) -> DomainResult<usize> {
+        let telemetry = self.ctx.telemetry.clone();
+        telemetry
+            .observe_result("lifecycle", "cleanup_expired_vms", async {
+                let ttl_secs = ttl_secs.max(1);
+                let cutoff = chrono::Utc::now().timestamp() - ttl_secs;
+                let jobs = self.ctx.job_repo.list_jobs(None, None, None).await?;
+
+                let expired_jobs: Vec<Job> = jobs
+                    .into_iter()
+                    .filter(|job| job.vm_id.is_some() && job.created_at <= cutoff)
+                    .collect();
+
+                let mut cleaned = 0usize;
+
+                for job in expired_jobs {
+                    let now = chrono::Utc::now().timestamp();
+
+                    if let (Some(host_id), Some(vm_id)) = (&job.host_id, &job.vm_id) {
+                        if let Err(e) = self
+                            .ctx
+                            .agent_client
+                            .delete_vm(host_id, vm_id, job.config.hypervisor)
+                            .await
+                        {
+                            let is_missing_vm = matches!(
+                                &e,
+                                DomainError::Infrastructure(message)
+                                    if message.to_lowercase().contains("not found")
+                            );
+
+                            if is_missing_vm {
+                                tracing::warn!(
+                                    job_id = %job.job_id,
+                                    host_id = %host_id,
+                                    vm_id = %vm_id,
+                                    error = %e,
+                                    "Beta VM cleanup skipped missing VM"
+                                );
+                            } else {
+                                tracing::error!(
+                                    job_id = %job.job_id,
+                                    host_id = %host_id,
+                                    vm_id = %vm_id,
+                                    error = %e,
+                                    "Beta VM cleanup failed while deleting VM"
+                                );
+                            }
+                        }
+                    }
+
+                    let mut stopped_job = job.clone();
+                    stopped_job.status = JobStatus::Stopped;
+                    stopped_job.stopped_at = Some(now);
+
+                    match self.ctx.job_repo.remove_job(&job.job_id).await {
+                        Ok(()) => {
+                            publish_job_update_best_effort(
+                                self.ctx.nats_client.as_ref(),
+                                &stopped_job,
+                                "beta-vm-cleanup-job-update",
+                            )
+                            .await;
+                            cleaned += 1;
+                        },
+                        Err(e) => {
+                            tracing::error!(
+                                job_id = %job.job_id,
+                                error = %e,
+                                "Failed to remove expired VM job during beta cleanup"
+                            );
+                            if let Err(update_err) = self
+                                .ctx
+                                .job_repo
+                                .update_job_status(&job.job_id, JobStatus::Stopped)
+                                .await
+                            {
+                                tracing::warn!(
+                                    job_id = %job.job_id,
+                                    error = %update_err,
+                                    "Failed to mark expired VM job as stopped after remove_job failure"
+                                );
+                            }
+                            publish_job_update_best_effort(
+                                self.ctx.nats_client.as_ref(),
+                                &stopped_job,
+                                "beta-vm-cleanup-job-update-remove-failed",
+                            )
+                            .await;
+                        },
+                    }
+                }
+
+                Ok(cleaned)
+            })
+            .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::{AppContext, SchedulerRuntimeConfig};
+    use crate::domain::{
+        TenantId, VmConfig, Volume,
+    };
+    use crate::domain::app::MockAppRepository;
+    use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository};
+    use async_trait::async_trait;
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    struct TestNatsPublisher;
+
+    #[async_trait]
+    impl crate::application::NatsPublisher for TestNatsPublisher {
+        async fn publish(&self, _subject: String, _payload: Vec<u8>) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn test_job(job_id: &str, created_at: i64, status: JobStatus) -> Job {
+        let mut job = Job::new(
+            job_id.to_string().into(),
+            Uuid::new_v4().to_string().into(),
+            "test-app".to_string(),
+            "registry.example.com/app:latest".to_string(),
+            VmConfig {
+                workload_type: crate::domain::job::WorkloadType::App,
+                volumes: vec![Volume {
+                    volume_id: uuid::Uuid::new_v4().to_string().into(),
+                    size_mib: 512,
+                    read_only: false,
+                    pool_name: "rbd".to_string(),
+                    mount_point: "/data".to_string(),
+                    access_mode: crate::domain::job::AccessMode::ReadWriteOnce,
+                }],
+                ..VmConfig::default()
+            },
+            TenantId::from("tenant-1"),
+            None,
+        );
+        job.created_at = created_at;
+        job.status = status;
+        job.host_id = Some(crate::domain::HostId::from("host-1"));
+        job.vm_id = Some(crate::domain::VmId::from("vm-1"));
+        job
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired_vms_deletes_only_old_jobs_with_vms() {
+        let mut job_repo = MockJobRepository::new();
+        let mut agent_client = MockAgentClient::new();
+        let app_repo = MockAppRepository::new();
+        let worker_repo = MockWorkerRepository::new();
+
+        let now = chrono::Utc::now().timestamp();
+        let old_job = test_job("job-old", now - 4000, JobStatus::Running);
+        let recent_job = test_job("job-recent", now - 60, JobStatus::Running);
+
+        job_repo
+            .expect_list_jobs()
+            .withf(|tenant_id, app_id, status| {
+                tenant_id.is_none() && app_id.is_none() && status.is_none()
+            })
+            .returning(move |_, _, _| Ok(vec![old_job.clone(), recent_job.clone()]));
+
+        job_repo
+            .expect_remove_job()
+            .withf(|job_id| job_id == "job-old")
+            .returning(|_| Ok(()));
+
+        agent_client
+            .expect_delete_vm()
+            .withf(|host_id, vm_id, _| host_id == "host-1" && vm_id == "vm-1")
+            .returning(|_, _, _| Ok(()));
+
+        let state = Arc::new(AppContext {
+            job_repo: Arc::new(job_repo),
+            app_repo: Arc::new(app_repo),
+            worker_repo: Arc::new(worker_repo),
+            agent_client: Arc::new(agent_client),
+            nats_client: Arc::new(TestNatsPublisher),
+            telemetry: crate::infrastructure::telemetry::SchedulerTelemetry,
+            runtime: SchedulerRuntimeConfig {
+                router_idle_timeout_secs: 900,
+                worker_stale_threshold_secs: 60,
+                restore_retry_backoff_secs: 3600,
+            },
+        });
+
+        let service = JobLifecycleService::new(state);
+        let deleted = service.cleanup_expired_vms(3600).await.unwrap();
+
+        assert_eq!(deleted, 1);
+    }
 }
