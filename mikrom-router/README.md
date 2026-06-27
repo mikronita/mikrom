@@ -69,7 +69,7 @@ The router also treats `api.mikrom.spluca.org` as a built-in upstream and proxie
 In the packaged environment, `API_UPSTREAM_TARGETS=[fd00::3bc2:7b88:289:62e6]:5001`.
 Set `API_UPSTREAM_TARGETS` if the API listens somewhere else in your deployment.
 
-The router also treats `mikrom.spluca.org` as a built-in upstream and proxies it to the app frontend on port `5173`. The packaged environment uses `WEB_UPSTREAM_TARGETS=[fd00::3bc2:7b88:289:62e6]:5173`, and the ACME worker must issue a certificate for `mikrom.spluca.org` as well.
+The router also treats `mikrom.spluca.org` as a built-in upstream and proxies it to the app frontend on port `5173`. The packaged environment uses `WEB_UPSTREAM_TARGETS=[fd00::3bc2:7b88:289:62e6]:5173`. Its production certificate is issued by `mikrom-api` through the ACME worker.
 
 ## Health Endpoints
 
