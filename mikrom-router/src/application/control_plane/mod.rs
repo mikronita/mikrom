@@ -227,11 +227,15 @@ impl BackgroundService for ControlPlane {
             "Control Plane DB",
             self.startup_connect_timeout,
             || async {
-                let pool = PgPool::connect(self.db_url.as_str())
-                    .await
-                    .with_context(|| {
-                        format!("Failed to connect to database at {}", self.db_url.as_str())
-                    })?;
+                let pool = tokio::time::timeout(
+                    self.startup_connect_timeout,
+                    PgPool::connect(self.db_url.as_str()),
+                )
+                .await
+                .context("Database connection attempt timed out")?
+                .with_context(|| {
+                    format!("Failed to connect to database at {}", self.db_url.as_str())
+                })?;
                 sqlx::migrate!("./migrations")
                     .run(&pool)
                     .await
@@ -246,12 +250,16 @@ impl BackgroundService for ControlPlane {
             "Control Plane NATS",
             self.startup_connect_timeout,
             || async {
-                crate::infrastructure::nats::connect_nats(
-                    self.nats_url.as_str(),
-                    self.nats_use_tls,
-                    self.nats_certs_dir.as_deref(),
+                tokio::time::timeout(
+                    self.startup_connect_timeout,
+                    crate::infrastructure::nats::connect_nats(
+                        self.nats_url.as_str(),
+                        self.nats_use_tls,
+                        self.nats_certs_dir.as_deref(),
+                    ),
                 )
                 .await
+                .context("NATS connection attempt timed out")?
             },
         )
         .await;
