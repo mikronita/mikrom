@@ -141,6 +141,11 @@ impl RouterHealth {
         self.update_state();
     }
 
+    #[must_use]
+    pub fn is_wireguard_ready(&self) -> bool {
+        self.wireguard_ready.load(Ordering::Acquire)
+    }
+
     pub fn mark_upstream_ca_ready(&self) {
         self.upstream_ca_ready.store(true, Ordering::Release);
         self.update_state();

@@ -257,7 +257,6 @@ impl BackgroundService for ControlPlane {
         .await;
         info!("Control Plane: Connected to NATS.");
 
-        // Initialize WireGuard.
         let priv_key = match mikrom_network::KeyManager::load_or_generate_key(
             &self.data_dir,
             &mikrom_network::FileWireGuardKeyStore,
@@ -279,16 +278,6 @@ impl BackgroundService for ControlPlane {
                 return;
             },
         };
-        if let Err(e) = self
-            .wg_manager
-            .init(&priv_key, self.router_id.as_str())
-            .await
-        {
-            error!("Control Plane: Failed to initialize WireGuard: {e:?}");
-            self.health.set_startup_error(e.to_string());
-            return;
-        }
-        self.health.mark_wireguard_ready();
         let wg_ip = self
             .wg_manager
             .get_host_ipv6(self.router_id.as_str())
@@ -334,10 +323,30 @@ impl BackgroundService for ControlPlane {
         self.health.mark_dependencies_ready();
         info!("Control Plane: Listening for updates...");
 
+        let wg_manager = self.wg_manager.clone();
+        let wg_health = self.health.clone();
+        let wg_router_id = self.router_id.clone();
+        let wg_priv_key = priv_key.clone();
+        info!("Control Plane: Starting WireGuard initialization in the background...");
+        // Keep NATS subscriptions and ACME state processing live even if WireGuard init stalls.
+        tokio::spawn(async move {
+            if let Err(e) = wg_manager.init(&wg_priv_key, wg_router_id.as_str()).await {
+                error!("Control Plane: Failed to initialize WireGuard: {e:?}");
+                wg_health.set_startup_error(e.to_string());
+                return;
+            }
+
+            wg_health.mark_wireguard_ready();
+        });
+
         loop {
             tokio::select! {
                 // Heartbeat loop.
                 _ = heartbeat_interval.tick() => {
+                    if !self.health.is_wireguard_ready() {
+                        continue;
+                    }
+
                     let heartbeat = RouterHeartbeat {
                         host_id: self.router_id.as_str().to_string(),
                         hostname: self.router_id.as_str().to_string(),
