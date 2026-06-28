@@ -17,6 +17,7 @@ const billing = {
   cancel_at_period_end: false,
   default_checkout_product_id: "prod_default",
   selected_checkout_product_id: null,
+  is_test_mode: false,
   has_billing_record: true,
 } as const;
 
@@ -259,6 +260,41 @@ describe("SettingsBillingSection", () => {
 
     expect((screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/Only tenant admins can change the checkout product/)).toBeTruthy();
+  });
+
+  it("allows selecting and buying a plan in test mode for non-admin users", async () => {
+    const onChangePlan = vi.fn();
+    const onCheckoutProductChange = vi.fn();
+
+    render(SettingsBillingSection, {
+      props: {
+        billing: {
+          ...billing,
+          is_test_mode: true,
+        },
+        products,
+        productsLoading: false,
+        loading: false,
+        actionLoading: false,
+        selectionLoading: false,
+        canManageBilling: false,
+        error: "",
+        onChangePlan,
+        onCheckoutProductChange,
+      },
+    });
+
+    const select = screen.getByRole("button", { name: "Checkout product" });
+    expect(select).toBeTruthy();
+    expect((select as HTMLButtonElement).disabled).toBe(false);
+
+    await expect(screen.getByText("Test mode")).toBeTruthy();
+    expect(select).toBeTruthy();
+    await fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+
+    expect(onCheckoutProductChange).not.toHaveBeenCalled();
+    expect(onChangePlan).toHaveBeenCalledWith("prod_default");
+    expect(screen.getByText(/Sandbox checkout is active/)).toBeTruthy();
   });
 
   it("shows a conversion CTA for trialing subscriptions", async () => {

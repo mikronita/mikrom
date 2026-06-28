@@ -66,10 +66,12 @@
   }
 
   function isActionDisabled(handler: "changePlan" | "manageBilling") {
+    const isTestMode = billing?.is_test_mode ?? false;
     return (
       actionLoading ||
       loading ||
-      (isCheckoutAction(handler) && (!canManageBilling || selectionLoading || !selectedCheckoutProductId))
+      (isCheckoutAction(handler) &&
+        ((!canManageBilling && !isTestMode) || selectionLoading || !selectedCheckoutProductId))
     );
   }
 
@@ -112,6 +114,7 @@
   }
 
   let currentBilling = $derived(getBillingStatusConfig(billing?.status));
+  let isTestMode = $derived(billing?.is_test_mode ?? false);
   let defaultCheckoutProduct: BillingProduct | null = $derived(
     products.find((product: BillingProduct) => product.id === billing?.default_checkout_product_id) || null,
   );
@@ -150,8 +153,8 @@
   });
 
   async function handleCheckoutProductChange(nextProductId: string | null) {
-    if (!canManageBilling) return;
     selectedCheckoutProductId = nextProductId || "";
+    if (!canManageBilling) return;
     await onCheckoutProductChange(nextProductId);
   }
 </script>
@@ -170,9 +173,14 @@
             <p class="text-sm text-muted-foreground">{formatMoney(billing?.amount_cents ?? null, billing?.currency ?? null)}</p>
           {/if}
         </div>
-        <Badge variant="outline" class={currentBilling.tone}>
-          {currentBilling.label}
-        </Badge>
+        <div class="flex flex-wrap gap-2">
+          <Badge variant="outline" class={currentBilling.tone}>
+            {currentBilling.label}
+          </Badge>
+          {#if isTestMode}
+            <Badge variant="secondary">Test mode</Badge>
+          {/if}
+        </div>
       </div>
     </CardHeader>
 
@@ -290,11 +298,13 @@
         </Button>
       </div>
       </CardHeader>
-    <CardContent>
+      <CardContent>
         <p class="mb-4 text-xs text-muted-foreground">
           Last synced: {formatSyncedAt(lastSyncedAt)}
-          {#if !canManageBilling}
+          {#if !canManageBilling && !isTestMode}
             {" "}(admin only)
+          {:else if isTestMode}
+            {" "}(sandbox)
           {/if}
         </p>
         {#if productsLoading}
@@ -307,7 +317,7 @@
             <Field label="Checkout product" forId="checkout_product" description="This is the product opened by the Change plan action.">
               <Select
                 bind:value={selectedCheckoutProductId}
-                disabled={actionLoading || selectionLoading || !canManageBilling}
+                disabled={actionLoading || selectionLoading || (!canManageBilling && !isTestMode)}
                 onValueChange={(value: string | undefined) => void handleCheckoutProductChange(value || null)}
               >
                 <SelectTrigger id="checkout_product">
@@ -328,9 +338,13 @@
                 </SelectContent>
               </Select>
             </Field>
-            {#if !canManageBilling}
+            {#if !canManageBilling && !isTestMode}
               <p class="text-xs text-muted-foreground">
                 Only tenant admins can change the checkout product or refresh the catalog.
+              </p>
+            {:else if isTestMode}
+              <p class="text-xs text-muted-foreground">
+                Sandbox checkout is active. You can pick a plan and buy it without saving the selection.
               </p>
             {/if}
 
