@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
+  import { page } from "$app/stores";
   import { Settings } from "lucide-svelte";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import SettingsApiSection from "$lib/components/settings/SettingsApiSection.svelte";
@@ -15,51 +17,114 @@
     getGithubInstallUrl,
     getUserProfile,
     listGithubAccounts,
+    listBillingProducts,
+    refreshBillingProducts,
+    updateBillingCheckoutProduct,
     updateUserProfile,
     type GithubAccount,
     type UserProfile,
+    type BillingProduct,
   } from "$lib/api";
   import { getBillingStatusConfig } from "$lib/domain/billing";
   import { toast } from "$lib/toast";
-  import { billing, billingError, billingLoading, useBillingBootstrap } from "$lib/stores/billing";
+  import {
+    billing,
+    billingError,
+    billingLoading,
+    billingStore,
+    refreshBilling,
+    useBillingBootstrap,
+  } from "$lib/stores/billing";
   import { settingsTabs, type SettingsTab } from "$lib/domain/settings";
+  import { cn } from "$lib/utils";
 
-  let activeTab = $state<SettingsTab>("profile");
   let profile = $state<UserProfile | null>(null);
   let githubAccounts = $state<GithubAccount[]>([]);
   let loading = $state(true);
   let loadingGithub = $state(true);
+  let loadingBillingProducts = $state(true);
   let firstNameDraft = $state("");
   let lastNameDraft = $state("");
   let emailNotifications = $state(true);
   let marketingEmails = $state(false);
   let saving = $state(false);
   let billingActionLoading = $state(false);
+  let checkoutProductSaving = $state(false);
+  let billingProductsRefreshing = $state(false);
+  let billingProducts = $state<BillingProduct[]>([]);
+  let billingProductsLastSyncedAt = $state<string | null>(null);
+  let canManageBilling = $derived((profile?.role || "").toLowerCase() === "admin");
   let billingStatus = $derived(getBillingStatusConfig($billing?.status));
 
-  onMount(async () => {
-    const token = getToken();
-    if (!token) {
+  const settingsTabValues = new Set<SettingsTab>(settingsTabs.map((tab) => tab.value));
+
+  function parseSettingsTab(value: string | null): SettingsTab {
+    if (value && settingsTabValues.has(value as SettingsTab)) {
+      return value as SettingsTab;
+    }
+
+    return "profile";
+  }
+
+  let activeTab = $derived(parseSettingsTab($page.url.searchParams.get("tab")));
+
+  async function setActiveTab(tab: SettingsTab) {
+    const nextUrl = new URL($page.url);
+    nextUrl.searchParams.set("tab", tab);
+    nextUrl.searchParams.delete("checkout");
+
+    await goto(nextUrl.toString(), {
+      replaceState: true,
+      noScroll: true,
+      keepFocus: true,
+    });
+  }
+
+  onMount(() => {
+    if ($page.url.searchParams.get("checkout") === "success") {
+      toast.success("Billing updated successfully");
+
+      const nextUrl = new URL($page.url);
+      nextUrl.searchParams.delete("checkout");
+      void goto(nextUrl.toString(), {
+        replaceState: true,
+        noScroll: true,
+        keepFocus: true,
+      });
+    }
+
+    void (async () => {
+      const token = getToken();
+      if (!token) {
+        loading = false;
+        loadingGithub = false;
+        loadingBillingProducts = false;
+        return;
+      }
+
+      const [profileResult, githubResult, billingProductsResult] = await Promise.all([
+        getUserProfile(token),
+        listGithubAccounts(token),
+        listBillingProducts(token),
+      ]);
+
+      if (profileResult.data) {
+        profile = profileResult.data;
+        firstNameDraft = profile.first_name || "";
+        lastNameDraft = profile.last_name || "";
+      }
+
+      if (githubResult.data) githubAccounts = githubResult.data;
+      if (billingProductsResult.error) {
+        toast.error(billingProductsResult.error);
+      }
+      if (billingProductsResult.data) billingProducts = billingProductsResult.data.products;
+      if (billingProductsResult.data) billingProductsLastSyncedAt = billingProductsResult.data.last_synced_at;
+
       loading = false;
       loadingGithub = false;
-      return;
-    }
-
-    const [profileResult, githubResult] = await Promise.all([
-      getUserProfile(token),
-      listGithubAccounts(token),
-    ]);
-
-    if (profileResult.data) {
-      profile = profileResult.data;
-      firstNameDraft = profile.first_name || "";
-      lastNameDraft = profile.last_name || "";
-    }
-
-    if (githubResult.data) githubAccounts = githubResult.data;
-
-    loading = false;
-    loadingGithub = false;
+      loadingBillingProducts = false;
+    })();
   });
 
   useBillingBootstrap();
@@ -100,14 +165,16 @@
     toast.error(result.error || "Failed to start GitHub installation");
   }
 
-  async function openBillingCheckout() {
+  async function openBillingCheckout(productId?: string | null) {
     const token = getToken();
     if (!token) {
       toast.error("You must be logged in to manage billing");
       return;
     }
 
-    if (!$billing?.default_checkout_product_id) {
+    const checkoutProductId =
+      productId || $billing?.selected_checkout_product_id || $billing?.default_checkout_product_id;
+    if (!checkoutProductId) {
       toast.error("No Polar product is configured for checkout");
       return;
     }
@@ -115,7 +182,7 @@
     billingActionLoading = true;
     try {
       const result = await createBillingCheckout(token, {
-        product_id: $billing.default_checkout_product_id,
+        product_id: checkoutProductId,
       });
 
       if (result.data?.url) {
@@ -126,6 +193,67 @@
       toast.error(result.error || "Failed to create checkout session");
     } finally {
       billingActionLoading = false;
+    }
+  }
+
+  async function updateCheckoutProductSelection(productId?: string | null) {
+    const token = getToken();
+    if (!token) {
+      toast.error("You must be logged in to manage billing");
+      return;
+    }
+    if (!canManageBilling) {
+      toast.error("Only tenant admins can change the checkout product");
+      return;
+    }
+
+    checkoutProductSaving = true;
+    try {
+      const result = await updateBillingCheckoutProduct(token, {
+        product_id: productId || null,
+      });
+
+      if (result.error) {
+        toast.error(result.error);
+        await refreshBilling();
+        return;
+      }
+
+      if (result.data) {
+        billingStore.set(result.data);
+        billingError.set("");
+      }
+    } finally {
+      checkoutProductSaving = false;
+    }
+  }
+
+  async function refreshBillingProductsList() {
+    const token = getToken();
+    if (!token) {
+      toast.error("You must be logged in to refresh billing products");
+      return;
+    }
+    if (!canManageBilling) {
+      toast.error("Only tenant admins can refresh the billing catalog");
+      return;
+    }
+
+    billingProductsRefreshing = true;
+    try {
+      const result = await refreshBillingProducts(token);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+
+      if (result.data) {
+        billingProducts = result.data.products;
+        billingProductsLastSyncedAt = result.data.last_synced_at;
+        toast.success("Billing products refreshed");
+      }
+    } finally {
+      billingProductsRefreshing = false;
     }
   }
 
@@ -170,7 +298,9 @@
         </p>
         {#if activeTab === "billing"}
           <div class="inline-flex w-fit items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
-            <span class={`inline-flex items-center rounded-full px-2 py-0.5 ${billingStatus.tone}`}>{billingStatus.label}</span>
+            <span class={cn("inline-flex items-center rounded-full px-2 py-0.5", billingStatus.tone)}>
+              {billingStatus.label}
+            </span>
             <span>Billing status</span>
           </div>
         {/if}
@@ -187,7 +317,7 @@
                 ? "border-primary text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
-            onclick={() => (activeTab = tab.value)}
+            onclick={() => void setActiveTab(tab.value)}
           >
             <Icon class="size-4 shrink-0" />
             <span class="truncate">{tab.label}</span>
@@ -212,10 +342,18 @@
     {:else if activeTab === "billing"}
       <SettingsBillingSection
         billing={$billing}
+        products={billingProducts}
+        productsLoading={loadingBillingProducts}
+        productsRefreshing={billingProductsRefreshing}
+        lastSyncedAt={billingProductsLastSyncedAt}
         loading={$billingLoading}
         error={$billingError}
         actionLoading={billingActionLoading}
+        selectionLoading={checkoutProductSaving}
+        canManageBilling={canManageBilling}
         onChangePlan={openBillingCheckout}
+        onCheckoutProductChange={updateCheckoutProductSelection}
+        onRefreshProducts={refreshBillingProductsList}
         onManageBilling={openBillingPortal}
       />
     {:else if activeTab === "integrations"}

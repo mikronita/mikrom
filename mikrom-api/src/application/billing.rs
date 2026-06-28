@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::auth::extractor::{AuthUser, TenantContext};
 use crate::domain::Tenant;
 use crate::error::{ApiError, ApiResult};
+use crate::normalize_loopback_url;
 use axum::http::HeaderMap;
 use base64::Engine;
 use chrono::{DateTime, Utc};
@@ -77,6 +78,28 @@ struct BillingRow {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+struct BillingPreferenceRow {
+    pub tenant_id: Uuid,
+    pub checkout_product_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+struct BillingProductCacheRow {
+    pub product_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub price_amount_cents: Option<i32>,
+    pub currency: Option<String>,
+    pub recurring_interval: Option<String>,
+    pub is_archived: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub synced_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, rovo::schemars::JsonSchema)]
 pub struct BillingSummary {
     pub tenant_id: String,
@@ -92,6 +115,7 @@ pub struct BillingSummary {
     pub current_period_end: Option<DateTime<Utc>>,
     pub cancel_at_period_end: bool,
     pub default_checkout_product_id: Option<String>,
+    pub selected_checkout_product_id: Option<String>,
     pub has_billing_record: bool,
 }
 
@@ -100,9 +124,33 @@ pub struct CheckoutRequest {
     pub product_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
+pub struct CheckoutProductPreferenceRequest {
+    pub product_id: Option<String>,
+}
+
 #[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
 pub struct RedirectResponse {
     pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, rovo::schemars::JsonSchema)]
+pub struct BillingProduct {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub price_amount_cents: Option<i32>,
+    pub currency: Option<String>,
+    pub recurring_interval: Option<String>,
+    pub is_archived: bool,
+    pub is_default_checkout_product: bool,
+}
+
+#[derive(Debug, Clone, Serialize, rovo::schemars::JsonSchema)]
+pub struct BillingProductListResponse {
+    pub products: Vec<BillingProduct>,
+    pub default_checkout_product_id: Option<String>,
+    pub last_synced_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -230,6 +278,161 @@ async fn load_billing_row(pool: &sqlx::PgPool, tenant_id: Uuid) -> ApiResult<Opt
     Ok(row)
 }
 
+async fn load_billing_preference(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+) -> ApiResult<Option<BillingPreferenceRow>> {
+    let row = sqlx::query_as::<_, BillingPreferenceRow>(
+        "SELECT tenant_id, checkout_product_id, created_at, updated_at FROM tenant_billing_preferences WHERE tenant_id = $1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(row)
+}
+
+async fn upsert_billing_preference(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    checkout_product_id: Option<&str>,
+) -> ApiResult<()> {
+    sqlx::query(
+        "INSERT INTO tenant_billing_preferences (tenant_id, checkout_product_id, created_at, updated_at) VALUES ($1, $2, NOW(), NOW()) ON CONFLICT (tenant_id) DO UPDATE SET checkout_product_id = EXCLUDED.checkout_product_id, updated_at = NOW()",
+    )
+    .bind(tenant_id)
+    .bind(checkout_product_id)
+    .execute(pool)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(())
+}
+
+async fn ensure_tenant_admin(
+    state: &AppState,
+    tenant_id: Uuid,
+    auth_user: &AuthUser,
+) -> ApiResult<()> {
+    let user_id = Uuid::parse_str(&auth_user.user_id)
+        .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
+
+    let members = state
+        .ctx
+        .tenant_repo
+        .get_members(tenant_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let is_admin = members
+        .iter()
+        .any(|member| member.user_id == user_id && member.role == "admin");
+
+    if !is_admin {
+        return Err(ApiError::Forbidden);
+    }
+
+    Ok(())
+}
+
+async fn load_cached_billing_products(
+    pool: &sqlx::PgPool,
+) -> ApiResult<Vec<BillingProductCacheRow>> {
+    let rows = sqlx::query_as::<_, BillingProductCacheRow>(
+        "SELECT product_id, name, description, price_amount_cents, currency, recurring_interval, is_archived, created_at, updated_at, synced_at FROM polar_billing_products ORDER BY name ASC, product_id ASC",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(rows)
+}
+
+async fn replace_billing_products_cache(
+    pool: &sqlx::PgPool,
+    products: &[BillingProduct],
+) -> ApiResult<()> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    sqlx::query("DELETE FROM polar_billing_products")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    for product in products {
+        sqlx::query(
+            "INSERT INTO polar_billing_products (product_id, name, description, price_amount_cents, currency, recurring_interval, is_archived, created_at, updated_at, synced_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), NOW())",
+        )
+        .bind(&product.id)
+        .bind(&product.name)
+        .bind(&product.description)
+        .bind(product.price_amount_cents)
+        .bind(&product.currency)
+        .bind(&product.recurring_interval)
+        .bind(product.is_archived)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(())
+}
+
+async fn sync_billing_products(
+    state: &AppState,
+    settings: &PolarSettings,
+) -> ApiResult<Vec<BillingProduct>> {
+    let products = list_polar_products(settings).await?;
+    replace_billing_products_cache(&state.api_db, &products).await?;
+    Ok(products)
+}
+
+async fn load_latest_billing_products_sync_at(
+    pool: &sqlx::PgPool,
+) -> ApiResult<Option<DateTime<Utc>>> {
+    let synced_at = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+        "SELECT MAX(synced_at) FROM polar_billing_products",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(synced_at)
+}
+
+fn billing_products_from_cache(
+    rows: Vec<BillingProductCacheRow>,
+    default_checkout_product_id: Option<String>,
+) -> Vec<BillingProduct> {
+    rows.into_iter()
+        .map(|row| {
+            let product_id = row.product_id;
+            let is_default_checkout_product = default_checkout_product_id
+                .as_ref()
+                .is_some_and(|default_id| default_id == &product_id);
+
+            BillingProduct {
+                id: product_id,
+                name: row.name,
+                description: row.description,
+                price_amount_cents: row.price_amount_cents,
+                currency: row.currency,
+                recurring_interval: row.recurring_interval,
+                is_archived: row.is_archived,
+                is_default_checkout_product,
+            }
+        })
+        .collect()
+}
+
 async fn upsert_billing_row(pool: &sqlx::PgPool, row: &BillingRow) -> ApiResult<()> {
     sqlx::query(
         "INSERT INTO tenant_billing (tenant_id, polar_customer_id, polar_subscription_id, polar_product_id, plan_name, status, amount_cents, currency, current_period_start, current_period_end, cancel_at_period_end, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12, NOW()), NOW()) ON CONFLICT (tenant_id) DO UPDATE SET polar_customer_id = EXCLUDED.polar_customer_id, polar_subscription_id = EXCLUDED.polar_subscription_id, polar_product_id = EXCLUDED.polar_product_id, plan_name = EXCLUDED.plan_name, status = EXCLUDED.status, amount_cents = EXCLUDED.amount_cents, currency = EXCLUDED.currency, current_period_start = EXCLUDED.current_period_start, current_period_end = EXCLUDED.current_period_end, cancel_at_period_end = EXCLUDED.cancel_at_period_end, updated_at = NOW()",
@@ -275,6 +478,7 @@ fn billing_summary_from_row(
     row: Option<BillingRow>,
     tenant_id: Uuid,
     default_checkout_product_id: Option<String>,
+    selected_checkout_product_id: Option<String>,
 ) -> BillingSummary {
     if let Some(row) = row {
         BillingSummary {
@@ -291,6 +495,7 @@ fn billing_summary_from_row(
             current_period_end: row.current_period_end,
             cancel_at_period_end: row.cancel_at_period_end,
             default_checkout_product_id,
+            selected_checkout_product_id,
             has_billing_record: true,
         }
     } else {
@@ -308,6 +513,7 @@ fn billing_summary_from_row(
             current_period_end: None,
             cancel_at_period_end: false,
             default_checkout_product_id,
+            selected_checkout_product_id,
             has_billing_record: false,
         }
     }
@@ -491,6 +697,146 @@ async fn create_checkout_session(
         .ok_or_else(|| ApiError::Internal("Polar response did not include checkout url".into()))
 }
 
+fn product_entries_from_value(value: serde_json::Value) -> ApiResult<Vec<serde_json::Value>> {
+    match value {
+        serde_json::Value::Array(items) => Ok(items),
+        serde_json::Value::Object(map) => {
+            for key in ["items", "data", "results", "products"] {
+                if let Some(serde_json::Value::Array(items)) = map.get(key) {
+                    return Ok(items.clone());
+                }
+            }
+
+            Err(ApiError::Internal(
+                "Polar response did not include a product list".into(),
+            ))
+        },
+        _ => Err(ApiError::Internal(
+            "Polar response did not include a product list".into(),
+        )),
+    }
+}
+
+fn product_id_from_value(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("id")
+        .and_then(|value| value.as_str())
+        .or_else(|| value.get("product_id").and_then(|value| value.as_str()))
+        .map(str::to_string)
+}
+
+fn product_name_from_value(value: &serde_json::Value, product_id: &str) -> String {
+    value
+        .get("name")
+        .and_then(|value| value.as_str())
+        .or_else(|| value.get("title").and_then(|value| value.as_str()))
+        .or_else(|| value.get("slug").and_then(|value| value.as_str()))
+        .map(str::to_string)
+        .unwrap_or_else(|| product_id.to_string())
+}
+
+fn product_description_from_value(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("description")
+        .and_then(|value| value.as_str())
+        .or_else(|| value.get("summary").and_then(|value| value.as_str()))
+        .or_else(|| value.get("metadata").and_then(|metadata| {
+            metadata
+                .get("description")
+                .and_then(|value| value.as_str())
+        }))
+        .map(str::to_string)
+}
+
+fn recurring_interval_from_value(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("recurring_interval")
+        .and_then(|value| value.as_str())
+        .or_else(|| value.get("interval").and_then(|value| value.as_str()))
+        .map(str::to_string)
+}
+
+fn price_details_from_value(value: &serde_json::Value) -> (Option<i32>, Option<String>) {
+    let price_source = value
+        .get("price")
+        .or_else(|| value.get("prices").and_then(|value| value.as_array()).and_then(|items| items.first()))
+        .or_else(|| value.get("price_data"));
+
+    let amount_cents = price_source
+        .and_then(|value| value.get("amount").or_else(|| value.get("unit_amount")))
+        .and_then(|value| value.as_i64())
+        .and_then(|value| i32::try_from(value).ok());
+
+    let currency = price_source
+        .and_then(|value| value.get("currency"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+
+    (amount_cents, currency)
+}
+
+fn is_archived_from_value(value: &serde_json::Value) -> bool {
+    value
+        .get("is_archived")
+        .and_then(|value| value.as_bool())
+        .or_else(|| value.get("archived").and_then(|value| value.as_bool()))
+        .or_else(|| value.get("is_active").and_then(|value| value.as_bool()).map(|active| !active))
+        .unwrap_or(false)
+}
+
+fn parse_polar_products(
+    raw_products: Vec<serde_json::Value>,
+    default_checkout_product_id: Option<String>,
+) -> Vec<BillingProduct> {
+    raw_products
+        .into_iter()
+        .filter_map(|product| {
+            let id = product_id_from_value(&product)?;
+            let (price_amount_cents, currency) = price_details_from_value(&product);
+            let is_default_checkout_product = default_checkout_product_id
+                .as_ref()
+                .is_some_and(|default_id| default_id == &id);
+
+            Some(BillingProduct {
+                name: product_name_from_value(&product, &id),
+                description: product_description_from_value(&product),
+                recurring_interval: recurring_interval_from_value(&product),
+                is_archived: is_archived_from_value(&product),
+                is_default_checkout_product,
+                id,
+                price_amount_cents,
+                currency,
+            })
+        })
+        .collect()
+}
+
+async fn list_polar_products(settings: &PolarSettings) -> ApiResult<Vec<BillingProduct>> {
+    let response = http_client()
+        .get(polar_api_url(&settings.base_url, "/products"))
+        .bearer_auth(&settings.access_token)
+        .send()
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to reach Polar: {e}")))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .unwrap_or_else(|_| String::from("<unreadable response>"));
+
+    if !status.is_success() {
+        return Err(ApiError::Internal(format!(
+            "Polar product listing failed ({status}): {body}"
+        )));
+    }
+
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| ApiError::Internal(format!("Invalid Polar response: {e}")))?;
+    let products = product_entries_from_value(json)?;
+    Ok(parse_polar_products(products, settings.default_product_id.clone()))
+}
+
 fn resolve_subscription_product_name(subscription: &PolarSubscription) -> Option<String> {
     subscription
         .product
@@ -634,11 +980,24 @@ pub async fn get_billing_summary(
 ) -> ApiResult<BillingSummary> {
     let default_checkout_product_id = env::var("POLAR_CHECKOUT_PRODUCT_ID").ok();
     let row = load_billing_row(&state.api_db, tenant_ctx.tenant.id).await?;
+    let preference = load_billing_preference(&state.api_db, tenant_ctx.tenant.id).await?;
     Ok(billing_summary_from_row(
         row,
         tenant_ctx.tenant.id,
         default_checkout_product_id,
+        preference.and_then(|preference| preference.checkout_product_id),
     ))
+}
+
+pub async fn update_billing_checkout_product(
+    state: &AppState,
+    tenant_ctx: &TenantContext,
+    auth_user: &AuthUser,
+    product_id: Option<String>,
+) -> ApiResult<BillingSummary> {
+    ensure_tenant_admin(state, tenant_ctx.tenant.id, auth_user).await?;
+    upsert_billing_preference(&state.api_db, tenant_ctx.tenant.id, product_id.as_deref()).await?;
+    get_billing_summary(state, tenant_ctx).await
 }
 
 pub async fn create_billing_portal_link(
@@ -654,10 +1013,8 @@ pub async fn create_billing_portal_link(
         &customer_email,
     )
     .await?;
-    let return_url = format!(
-        "{}/settings?tab=billing",
-        state.frontend_url.trim_end_matches('/')
-    );
+    let frontend_url = normalize_loopback_url(state.frontend_url.trim_end_matches('/'));
+    let return_url = format!("{frontend_url}/settings?tab=billing");
     let url = create_customer_session(&settings, &tenant_ctx.tenant, &return_url).await?;
     Ok(RedirectResponse { url })
 }
@@ -668,19 +1025,18 @@ pub async fn create_billing_checkout_link(
     product_id: Option<String>,
 ) -> ApiResult<RedirectResponse> {
     let settings = PolarSettings::from_env()?;
-    let selected_product_id = product_id
-        .or_else(|| settings.default_product_id.clone())
-        .ok_or_else(|| {
-            ApiError::BadRequest("Missing product_id and POLAR_CHECKOUT_PRODUCT_ID".into())
-        })?;
-    let return_url = format!(
-        "{}/settings?tab=billing",
-        state.frontend_url.trim_end_matches('/')
-    );
-    let success_url = format!(
-        "{}/settings?tab=billing&checkout=success",
-        state.frontend_url.trim_end_matches('/')
-    );
+    let selected_product_id = (if let Some(product_id) = product_id {
+        Some(product_id)
+    } else {
+        load_billing_preference(&state.api_db, tenant_ctx.tenant.id)
+            .await?
+            .and_then(|preference| preference.checkout_product_id)
+            .or_else(|| settings.default_product_id.clone())
+    })
+    .ok_or_else(|| ApiError::BadRequest("Missing product_id and POLAR_CHECKOUT_PRODUCT_ID".into()))?;
+    let frontend_url = normalize_loopback_url(state.frontend_url.trim_end_matches('/'));
+    let return_url = format!("{frontend_url}/settings?tab=billing");
+    let success_url = format!("{frontend_url}/settings?tab=billing&checkout=success");
     let url = create_checkout_session(
         &settings,
         &tenant_ctx.tenant,
@@ -691,6 +1047,52 @@ pub async fn create_billing_checkout_link(
     .await?;
 
     Ok(RedirectResponse { url })
+}
+
+pub async fn list_billing_products(state: &AppState) -> ApiResult<BillingProductListResponse> {
+    let settings = PolarSettings::from_env()?;
+    let default_checkout_product_id = settings.default_product_id.clone();
+
+    match list_polar_products(&settings).await {
+        Ok(products) => {
+            replace_billing_products_cache(&state.api_db, &products).await?;
+            Ok(BillingProductListResponse {
+                products,
+                default_checkout_product_id,
+                last_synced_at: load_latest_billing_products_sync_at(&state.api_db).await?,
+            })
+        },
+        Err(fetch_error) => {
+            let cached_products = load_cached_billing_products(&state.api_db).await?;
+            if cached_products.is_empty() {
+                return Err(fetch_error);
+            }
+
+            Ok(BillingProductListResponse {
+                products: billing_products_from_cache(
+                    cached_products,
+                    default_checkout_product_id.clone(),
+                ),
+                default_checkout_product_id,
+                last_synced_at: load_latest_billing_products_sync_at(&state.api_db).await?,
+            })
+        },
+    }
+}
+
+pub async fn refresh_billing_products(
+    state: &AppState,
+    tenant_ctx: &TenantContext,
+    auth_user: &AuthUser,
+) -> ApiResult<BillingProductListResponse> {
+    ensure_tenant_admin(state, tenant_ctx.tenant.id, auth_user).await?;
+    let settings = PolarSettings::from_env()?;
+    let products = sync_billing_products(state, &settings).await?;
+    Ok(BillingProductListResponse {
+        products,
+        default_checkout_product_id: settings.default_product_id,
+        last_synced_at: load_latest_billing_products_sync_at(&state.api_db).await?,
+    })
 }
 
 pub async fn handle_polar_webhook(
@@ -837,7 +1239,12 @@ mod tests {
     #[test]
     fn billing_summary_from_row_uses_default_values_without_record() {
         let tenant = test_tenant();
-        let summary = billing_summary_from_row(None, tenant.id, Some("prod_123".to_string()));
+        let summary = billing_summary_from_row(
+            None,
+            tenant.id,
+            Some("prod_123".to_string()),
+            Some("prod_selected".to_string()),
+        );
 
         assert_eq!(summary.tenant_id, tenant.id.to_string());
         assert_eq!(summary.customer_external_id, tenant.id.to_string());
@@ -845,6 +1252,10 @@ mod tests {
         assert_eq!(
             summary.default_checkout_product_id.as_deref(),
             Some("prod_123")
+        );
+        assert_eq!(
+            summary.selected_checkout_product_id.as_deref(),
+            Some("prod_selected")
         );
         assert!(!summary.has_billing_record);
     }
@@ -868,7 +1279,7 @@ mod tests {
             updated_at: dt("2026-05-02T00:00:00Z"),
         };
 
-        let summary = billing_summary_from_row(Some(row), tenant.id, None);
+        let summary = billing_summary_from_row(Some(row), tenant.id, None, None);
 
         assert_eq!(summary.polar_customer_id.as_deref(), Some("cus_123"));
         assert_eq!(summary.polar_subscription_id.as_deref(), Some("sub_123"));
@@ -1063,6 +1474,61 @@ mod tests {
             .expect("portal url");
 
         assert_eq!(portal_url, "https://polar.sh/portal/session");
+    }
+
+    #[tokio::test]
+    async fn list_polar_products_normalizes_array_and_marks_default_product() {
+        let server = MockServer::start().await;
+        let settings = PolarSettings {
+            access_token: "polar-token".to_string(),
+            webhook_secret: "webhook-secret".to_string(),
+            base_url: server.uri(),
+            default_product_id: Some("prod_default".to_string()),
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/products"))
+            .and(header("authorization", "Bearer polar-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": [
+                    {
+                        "id": "prod_default",
+                        "name": "Pro",
+                        "description": "Production tier",
+                        "price": {
+                            "amount": 2500,
+                            "currency": "usd"
+                        },
+                        "recurring_interval": "month",
+                        "is_archived": false
+                    },
+                    {
+                        "id": "prod_extra",
+                        "title": "Add-on",
+                        "summary": "Optional add-on",
+                        "price": {
+                            "unit_amount": 500,
+                            "currency": "usd"
+                        },
+                        "archived": true
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let products = list_polar_products(&settings).await.expect("products");
+
+        assert_eq!(products.len(), 2);
+        assert_eq!(products[0].id, "prod_default");
+        assert_eq!(products[0].name, "Pro");
+        assert_eq!(products[0].description.as_deref(), Some("Production tier"));
+        assert_eq!(products[0].price_amount_cents, Some(2500));
+        assert_eq!(products[0].currency.as_deref(), Some("usd"));
+        assert_eq!(products[0].recurring_interval.as_deref(), Some("month"));
+        assert!(products[0].is_default_checkout_product);
+        assert!(!products[1].is_default_checkout_product);
+        assert!(products[1].is_archived);
     }
 
     #[test]

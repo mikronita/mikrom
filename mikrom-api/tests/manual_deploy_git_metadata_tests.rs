@@ -136,6 +136,14 @@ async fn manual_deploy_without_github_metadata_uses_current_app_metadata() {
     mock_repo
         .expect_get_app_by_name()
         .returning(move |_| Ok(Some(app.clone())));
+    mock_repo
+        .expect_update_app_port()
+        .with(
+            mockall::predicate::eq(app_id),
+            mockall::predicate::eq(mikrom_api::domain::types::Port::new(3000).unwrap()),
+        )
+        .times(1)
+        .returning(|_, _| Ok(()));
     mock_repo.expect_create_deployment().returning(move |data| {
         assert_eq!(data.app_id, app_id);
         assert_eq!(data.user_id, owner_user_id);
@@ -143,6 +151,7 @@ async fn manual_deploy_without_github_metadata_uses_current_app_metadata() {
         assert!(data.git_commit_hash.is_none());
         assert!(data.git_commit_message.is_none());
         assert!(data.git_branch.is_none());
+        assert_eq!(data.port, mikrom_api::domain::types::Port::new(3000).unwrap());
         Ok(Deployment {
             id: Uuid::new_v4(),
             app_id,
@@ -151,7 +160,7 @@ async fn manual_deploy_without_github_metadata_uses_current_app_metadata() {
             vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
             memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
             disk_mib: 1024,
-            port: mikrom_api::domain::types::Port::new(8080).unwrap(),
+            port: mikrom_api::domain::types::Port::new(3000).unwrap(),
             build_id: None,
             image_tag: None,
             job_id: None,
@@ -183,6 +192,7 @@ async fn manual_deploy_without_github_metadata_uses_current_app_metadata() {
             vcpus: None,
             memory_mib: None,
             disk_mib: None,
+            port: Some(mikrom_api::domain::types::Port::new(3000).unwrap()),
             env: None,
             image: None,
             hypervisor: None,
@@ -266,6 +276,7 @@ async fn manual_deploy_with_github_metadata_still_creates_deployment() {
             vcpus: None,
             memory_mib: None,
             disk_mib: None,
+            port: None,
             env: None,
             image: None,
             hypervisor: None,
@@ -307,6 +318,7 @@ async fn manual_deploy_rejects_foreign_tenant() {
             vcpus: None,
             memory_mib: None,
             disk_mib: None,
+            port: None,
             env: None,
             image: None,
             hypervisor: None,

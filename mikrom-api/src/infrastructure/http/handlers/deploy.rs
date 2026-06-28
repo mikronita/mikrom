@@ -48,6 +48,11 @@ pub struct AppSecretResponse {
     pub github_webhook_secret: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, rovo::schemars::JsonSchema)]
+pub struct UpdateAppRequest {
+    pub port: Port,
+}
+
 #[rovo::rovo]
 pub async fn get_app_handler(
     tenant_ctx: TenantContext,
@@ -61,6 +66,24 @@ pub async fn get_app_handler(
     )
     .await?;
     Ok(Json(build_app_response(&state, &app).await))
+}
+
+#[rovo::rovo]
+pub async fn update_app_handler(
+    tenant_ctx: TenantContext,
+    State(state): State<AppState>,
+    Path(app_name): Path<String>,
+    Json(payload): Json<UpdateAppRequest>,
+) -> ApiResult<Json<AppResponse>> {
+    let updated_app = DeploymentService::update_app_port(
+        &state,
+        &tenant_ctx.tenant.id.to_string(),
+        &app_name,
+        payload.port,
+    )
+    .await?;
+
+    Ok(Json(build_app_response(&state, &updated_app).await))
 }
 
 #[rovo::rovo]
@@ -98,6 +121,7 @@ pub struct ManualDeployRequest {
     /// Memory to allocate in MiB. Allowed values: 512, 1024, 2048, or 4096.
     pub memory_mib: Option<MemoryMb>,
     pub disk_mib: Option<u32>,
+    pub port: Option<Port>,
     pub env: Option<std::collections::HashMap<String, String>>,
     pub image: Option<String>,
     /// Hypervisor to use: "firecracker" or "cloud-hypervisor". Defaults to scheduler-selected.
@@ -618,7 +642,8 @@ pub async fn activate_deployment_handler(
                 return Ok(StatusCode::OK);
             }
 
-            if current_status != "PAUSED" && current_status != "STOPPED" {
+            if current_status != "PAUSED" && current_status != "STOPPED" && current_status != "UNKNOWN"
+            {
                 return Err(ApiError::BadRequest(format!(
                     "Deployment is not ready to promote yet (current status: {})",
                     current_status
@@ -636,38 +661,49 @@ pub async fn activate_deployment_handler(
                 ApiError::BadRequest("Paused deployment is missing a job id".into())
             })?;
 
-            info!(app = %app.name, "Deployment is paused or stopped, resuming it first...");
+            info!(app = %app.name, "Deployment is paused, stopped, or unknown; trying to recover it...");
 
-            let resume_ok = state
-                .scheduler
-                .resume_app(job_id.clone(), "system".to_string())
-                .await?;
+            match DeploymentService::resume_or_recover_deployment(
+                &state,
+                &app,
+                &deployment,
+                tenant_id.clone(),
+            )
+            .await
+            {
+                Ok(crate::application::deployment::service::ResumeRecovery::Resumed) => {
+                    let inner = DeployResponse {
+                        job_id,
+                        status: DeployStatus::Running as i32,
+                        host_id: String::new(),
+                        vm_id: String::new(),
+                        message: "Resumed".to_string(),
+                        hypervisor: deployment.hypervisor,
+                    };
+                    let cleanup_on_failure = true;
 
-            if !resume_ok {
-                return Err(ApiError::BadRequest("Failed to resume deployment".into()));
+                    DeploymentService::run_zero_downtime_flow(
+                        state.clone(),
+                        app,
+                        deployment,
+                        inner,
+                        tenant_id,
+                        cleanup_on_failure,
+                        guard,
+                    );
+
+                    Ok(StatusCode::ACCEPTED)
+                },
+                Ok(crate::application::deployment::service::ResumeRecovery::Recreated) => {
+                    info!(
+                        app = %app.name,
+                        deployment_id = %deployment.id,
+                        "Recovered deployment by recreating a fresh replica; waiting for scheduler updates"
+                    );
+                    Ok(StatusCode::ACCEPTED)
+                },
+                Err(e) => Err(e),
             }
-
-            let inner = DeployResponse {
-                job_id,
-                status: DeployStatus::Running as i32,
-                host_id: String::new(),
-                vm_id: String::new(),
-                message: "Resumed".to_string(),
-                hypervisor: deployment.hypervisor,
-            };
-            let cleanup_on_failure = true;
-
-            DeploymentService::run_zero_downtime_flow(
-                state.clone(),
-                app,
-                deployment,
-                inner,
-                tenant_id,
-                cleanup_on_failure,
-                guard,
-            );
-
-            Ok(StatusCode::ACCEPTED)
         },
         None => {
             info!(app = %app.name, deployment_id = %deployment.id, "Activating deployment record only...");
@@ -810,6 +846,7 @@ pub async fn deploy_app_version_handler(
             vcpus,
             memory_mib,
             disk_mib,
+            port: payload.port,
             env: env_vars,
             image,
             hypervisor,

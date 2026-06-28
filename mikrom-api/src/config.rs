@@ -183,7 +183,7 @@ fn default_router_addr() -> String {
 }
 
 fn default_frontend_url() -> String {
-    "http://[::1]:3000".to_string()
+    "https://mikrom.spluca.org".to_string()
 }
 
 fn default_use_tls() -> bool {

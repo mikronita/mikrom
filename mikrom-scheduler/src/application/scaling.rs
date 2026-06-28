@@ -104,7 +104,14 @@ impl ScalingService {
                                 resumed += 1;
                             },
                             Ok(false) => {},
-                            Err(e) => return Err(e),
+                            Err(e) => {
+                                tracing::warn!(
+                                    app_id = %app_id,
+                                    job_id = %job.job_id,
+                                    error = %e,
+                                    "Failed to resume paused job during scale-up; will recreate it instead"
+                                );
+                            },
                         }
                     }
                 }

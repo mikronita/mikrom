@@ -29,6 +29,7 @@
 
   let name = $state("");
   let gitUrl = $state("");
+  let port = $state("8080");
   let activeTab = $state<"manual" | "github">("manual");
   let githubRepos = $state<GithubRepo[]>([]);
   let selectedRepoId = $state("");
@@ -85,11 +86,12 @@
         ? {
             name,
             git_url: selectedRepo.html_url,
+            port: Number(port),
             github_installation_id: selectedRepo.installation_id,
             github_repo_id: selectedRepo.id,
             github_repo_full_name: selectedRepo.full_name,
           }
-        : { name, git_url: gitUrl };
+        : { name, git_url: gitUrl, port: Number(port) };
 
     const result = await createApp(token, payload);
     if (result.error) {
@@ -113,6 +115,24 @@
   <form class="flex flex-col gap-6 pt-2" onsubmit={handleSubmit}>
     <Field label="App Name" forId="app_name">
       <Input id="app_name" bind:value={name} placeholder="my-cool-project" required />
+    </Field>
+
+    <Field
+      label="Container Port"
+      forId="app_port"
+      description="Port exposed by the container inside the microVM."
+    >
+      <Input
+        id="app_port"
+        bind:value={port}
+        type="number"
+        min="1"
+        max="65535"
+        step="1"
+        inputmode="numeric"
+        placeholder="8080"
+        required
+      />
     </Field>
 
     <Field

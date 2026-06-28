@@ -33,6 +33,7 @@
     CardContent,
     Badge,
     Button,
+    Field,
     AlertDialog,
     EmptyState,
     Modal,
@@ -50,6 +51,7 @@
     deleteApp,
     getAppSecret,
     listDeployments,
+    updateApp,
     type AppInfo,
     type DeploymentInfo,
     type VmMetricsResponse,
@@ -79,34 +81,21 @@
     ? `${window.location.protocol}//${window.location.hostname}:5001/v1`
     : "http://localhost:5001/v1";
 
-  let deployments: DeploymentInfo[] = [];
-  let loading = true;
-  let liveMetrics: VmMetricsResponse | null = null;
-  let metricsHistory: MetricsSnapshot[] = [];
-  let secret: string | null = null;
-  let showSecret = false;
-  let showWebhookModal = false;
-  let showScaleModal = false;
-  let showDeployModal = false;
-  let showDeleteAppDialog = false;
-  let deletingApp = false;
-  let activatingDeploymentId: string | null = null;
-  let app: AppInfo | null = null;
-  let active: DeploymentInfo | null;
-  let inFlight: DeploymentInfo | undefined;
-  let activeTab: "overview" | "deployments" | "performance" | "settings" = "overview";
-  let latestMetrics: MetricsSnapshot;
-  let totalTrafficBytes: number;
-  let recentDeploymentsList: DeploymentInfo[];
-  let metricCards: Array<{
-    key: string;
-    label: string;
-    detail: string;
-    value: string;
-    icon: typeof Cpu;
-    color: string;
-  }>;
-  let showLivePerformance: boolean;
+  let deployments = $state<DeploymentInfo[]>([]);
+  let loading = $state(true);
+  let liveMetrics = $state<VmMetricsResponse | null>(null);
+  let metricsHistory = $state<MetricsSnapshot[]>([]);
+  let secret = $state<string | null>(null);
+  let showSecret = $state(false);
+  let showWebhookModal = $state(false);
+  let showScaleModal = $state(false);
+  let showDeployModal = $state(false);
+  let showPortModal = $state(false);
+  let showDeleteAppDialog = $state(false);
+  let deletingApp = $state(false);
+  let activatingDeploymentId = $state<string | null>(null);
+  let selectedPort = $state("8080");
+  let activeTab = $state<"overview" | "deployments" | "performance" | "settings">("overview");
   const appTabs = [
     { value: "overview", label: "Overview" },
     { value: "deployments", label: "Deployments" },
@@ -114,9 +103,9 @@
     { value: "settings", label: "Settings" },
   ] as const;
 
-  $: appName = decodeURIComponent($page.params.appName ?? "");
-  $: app = $appsStore.find((item) => item.name === appName) ?? null;
-  $: appScaleState = app?.scale_state ?? "scaled_to_zero";
+  let appName = $derived(decodeURIComponent($page.params.appName ?? ""));
+  let app = $derived($appsStore.find((item) => item.name === appName) ?? null);
+  let appScaleState = $derived(app?.scale_state ?? "scaled_to_zero");
 
   const lastNetwork = new SvelteMap<
     string,
@@ -134,13 +123,15 @@
       lastUpdate: number;
     }
   >();
-  $: runningReplicaCount = app
+  let runningReplicaCount = $derived(
+    app
     ? $vmsStore.filter(
         (vm) =>
           vm.status.toLowerCase() === "running" &&
           (vm.app_id === app.id || vm.app_name === app.name),
       ).length
-    : 0;
+    : 0,
+  );
 
   function formatReplicaSummary(appInfo: AppInfo) {
     if (appInfo.autoscaling_enabled) {
@@ -295,7 +286,34 @@
     }
   }
 
-  $: active =
+  function openPortModal() {
+    selectedPort = String(app?.port ?? 8080);
+    showPortModal = true;
+  }
+
+  async function handleUpdatePort(event: SubmitEvent) {
+    event.preventDefault();
+    const token = getToken();
+    if (!token || !app) return;
+
+    const nextPort = Number(selectedPort);
+    if (!Number.isInteger(nextPort) || nextPort < 1 || nextPort > 65535) {
+      toast.error("Enter a valid port between 1 and 65535");
+      return;
+    }
+
+    const result = await updateApp(token, appName, { port: nextPort });
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
+
+    toast.success(`Port updated to ${nextPort}`);
+    await refreshApps();
+    showPortModal = false;
+  }
+
+  let active: DeploymentInfo | null = $derived(
     deployments.length === 0
       ? null
       : appScaleState === "scaled_to_zero"
@@ -314,11 +332,14 @@
                 (dep.status || "").toUpperCase(),
               ),
             ) ||
-          deployments[0];
-  $: inFlight = deployments.find((d) =>
-    ["HEALTH_CHECKING", "STARTING", "BUILDING", "SCHEDULED"].includes(d.status),
+          deployments[0],
   );
-  $: latestMetrics =
+  let inFlight: DeploymentInfo | undefined = $derived(
+    deployments.find((d) =>
+      ["HEALTH_CHECKING", "STARTING", "BUILDING", "SCHEDULED"].includes(d.status),
+    ),
+  );
+  let latestMetrics = $derived(
     (metricsHistory.length > 0
       ? metricsHistory[metricsHistory.length - 1]
       : null) ||
@@ -336,11 +357,11 @@
           total_rx: liveMetrics.rx_bytes || 0,
           total_tx: liveMetrics.tx_bytes || 0,
         }
-      : { time: "", cpu: 0, ram: 0, rx: 0, tx: 0, total_rx: 0, total_tx: 0 });
-  $: recentDeploymentsList = sortDeployments(deployments).slice(0, 5);
-  $: totalTrafficBytes =
-    (latestMetrics.total_rx || 0) + (latestMetrics.total_tx || 0);
-  $: metricCards = [
+      : { time: "", cpu: 0, ram: 0, rx: 0, tx: 0, total_rx: 0, total_tx: 0 }),
+  );
+  let recentDeploymentsList = $derived(sortDeployments(deployments).slice(0, 5));
+  let totalTrafficBytes = $derived((latestMetrics.total_rx || 0) + (latestMetrics.total_tx || 0));
+  let metricCards = $derived([
     {
       key: "cpu",
       label: "CPU",
@@ -373,23 +394,27 @@
       icon: ArrowUpFromLine,
       color: "bg-[var(--chart-4)]",
     },
-  ];
-  $: showLivePerformance =
-    appScaleState !== "scaled_to_zero" && runningReplicaCount > 0;
-  $: statusBadgeLabel =
+  ]);
+  let showLivePerformance = $derived(appScaleState !== "scaled_to_zero" && runningReplicaCount > 0);
+  let statusBadgeLabel = $derived(
     appScaleState === "scaled_to_zero"
       ? "Scaled to zero"
       : runningReplicaCount > 0
         ? "Running"
-        : "Idle";
-  $: replicaSummary = app ? formatReplicaSummary(app) : "--";
-  $: appUpdatedAt = app?.updated_at || app?.created_at ? formatDate(app?.updated_at || app?.created_at || new Date()) : null;
+        : "Idle",
+  );
+  let replicaSummary = $derived(app ? formatReplicaSummary(app) : "--");
+  let appUpdatedAt = $derived(
+    app?.updated_at || app?.created_at ? formatDate(app?.updated_at || app?.created_at || new Date()) : null,
+  );
 
-  $: if (appScaleState === "scaled_to_zero" || runningReplicaCount === 0) {
-    liveMetrics = null;
-    metricsHistory = [];
-    replicaSamples.clear();
-  }
+  $effect(() => {
+    if (appScaleState === "scaled_to_zero" || runningReplicaCount === 0) {
+      liveMetrics = null;
+      metricsHistory = [];
+      replicaSamples.clear();
+    }
+  });
 </script>
 
 <DashboardLayout>
@@ -766,7 +791,7 @@
         {/if}
       </section>
     {:else if activeTab === "settings"}
-      <div class="grid gap-6 lg:grid-cols-2">
+      <div class="grid gap-6 lg:grid-cols-3">
         <Card class="border-border/70 bg-muted/20">
           <CardHeader>
             <div class="flex items-center gap-2">
@@ -803,7 +828,25 @@
           </CardContent>
         </Card>
 
-        <Card class="border-destructive/20 bg-destructive/5 lg:col-span-2">
+        <Card class="border-border/70 bg-muted/20">
+          <CardHeader>
+            <div class="flex items-center gap-2">
+              <Cog class="size-4 text-muted-foreground" />
+              <CardTitle class="text-base">Runtime Port</CardTitle>
+            </div>
+            <CardDescription>Update the port that the router should use for this app.</CardDescription>
+          </CardHeader>
+          <CardContent class="flex flex-col gap-3">
+            <p class="text-sm text-muted-foreground">
+              Current port is <span class="font-medium text-foreground">{app?.port ?? "--"}</span>.
+            </p>
+            <Button variant="outline" class="w-full" onclick={openPortModal} disabled={!app}>
+              Change runtime port
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card class="border-destructive/20 bg-destructive/5 lg:col-span-3">
           <CardHeader>
             <div class="flex items-center gap-2 text-destructive">
               <Trash2 class="size-4" />
@@ -947,6 +990,40 @@
           </CardContent>
         </Card>
       </div>
+    </Modal>
+  {/if}
+
+  {#if showPortModal && app}
+    <Modal
+      open={showPortModal}
+      title={`Change ${app.name} port`}
+      description="Updates the app and active deployment port so the router can reach the container."
+      width="max-w-[480px]"
+      onclose={() => (showPortModal = false)}
+    >
+      <form class="flex flex-col gap-6 pt-4" onsubmit={handleUpdatePort}>
+        <Field
+          label="Container Port"
+          forId="app_runtime_port"
+          description="Use the port that the process inside the microVM is actually listening on."
+        >
+          <Input
+            id="app_runtime_port"
+            bind:value={selectedPort}
+            type="number"
+            min="1"
+            max="65535"
+            step="1"
+            inputmode="numeric"
+            placeholder="3000"
+          />
+        </Field>
+
+        <div class="flex justify-end gap-3 pt-2">
+          <Button variant="outline" type="button" onclick={() => (showPortModal = false)}>Cancel</Button>
+          <Button type="submit">Update port</Button>
+        </div>
+      </form>
     </Modal>
   {/if}
 

@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::auth::AuthUser;
 use crate::domain::UserGithubAccount;
 use crate::error::{ApiError, ApiResult};
+use crate::normalize_loopback_url;
 use crate::infrastructure::github::{GithubRepo, list_installation_repos};
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::Json;
@@ -60,7 +61,10 @@ pub async fn github_callback(
                 query.installation_id,
                 query.setup_action
             );
-            return Ok(Redirect::to(&format!("{}/settings", state.frontend_url)));
+            return Ok(Redirect::to(&format!(
+                "{}/settings",
+                normalize_loopback_url(state.frontend_url.trim_end_matches('/'))
+            )));
         },
     };
 
@@ -137,7 +141,10 @@ pub async fn github_callback(
     });
 
     // Redirect back to settings in the frontend
-    Ok(Redirect::to(&format!("{}/settings", state.frontend_url)))
+    Ok(Redirect::to(&format!(
+        "{}/settings",
+        normalize_loopback_url(state.frontend_url.trim_end_matches('/'))
+    )))
 }
 
 #[rovo::rovo]

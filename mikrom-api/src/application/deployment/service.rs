@@ -41,6 +41,7 @@ pub struct DeployVersionParams {
     pub vcpus: CpuCores,
     pub memory_mib: MemoryMb,
     pub disk_mib: u32,
+    pub port: Option<Port>,
     pub env: HashMap<String, String>,
     pub image: Option<String>,
     pub hypervisor: i32,
@@ -53,6 +54,12 @@ pub struct ScaleAppParams {
     pub autoscaling_enabled: Option<bool>,
     pub cpu_threshold: Option<f64>,
     pub mem_threshold: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResumeRecovery {
+    Resumed,
+    Recreated,
 }
 
 impl DeploymentService {
@@ -255,6 +262,55 @@ impl DeploymentService {
         Ok(app)
     }
 
+    pub async fn update_app_port(
+        state: &AppState,
+        auth_tenant_id: &str,
+        app_name: &str,
+        port: Port,
+    ) -> ApiResult<App> {
+        let app = Self::get_app_by_name_and_auth(state, app_name, auth_tenant_id).await?;
+
+        if app.port != port {
+            state
+                .app_repo
+                .update_app_port(app.id, port)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+            if let Some(active_deployment_id) = app.active_deployment_id {
+                state
+                    .app_repo
+                    .update_deployment_port(active_deployment_id, port)
+                    .await
+                    .map_err(|e| ApiError::Internal(e.to_string()))?;
+            }
+        }
+
+        let updated_app = state
+            .app_repo
+            .get_app(app.id)
+            .await?
+            .ok_or_else(|| ApiError::Internal("App disappeared after port update".into()))?;
+
+        if let Err(err) = state.notify_router(&updated_app).await {
+            tracing::warn!(app = %updated_app.name, error = %err, "Failed to notify router after port update");
+        }
+
+        state.deployment_events.send(updated_app.id).ok();
+        state.publish_workspace_event(WorkspaceEvent {
+            kind: WorkspaceEventKind::AppUpdated,
+            user_id: None,
+            tenant_id: Some(updated_app.tenant_id),
+            app_id: Some(updated_app.id),
+            app_name: Some(updated_app.name.clone()),
+            deployment_id: updated_app.active_deployment_id,
+            volume_id: None,
+            resource_id: Some(updated_app.id.to_string()),
+        });
+
+        Ok(updated_app)
+    }
+
     pub async fn fetch_app_git_metadata(
         state: &AppState,
         app: &App,
@@ -306,11 +362,13 @@ impl DeploymentService {
             vcpus,
             memory_mib,
             disk_mib,
+            port,
             env,
             image,
             hypervisor,
         } = params;
         let image_tag = image.expect("direct_image_deploy requires an image");
+        let final_port = port.unwrap_or(app.port);
         let deployment_id = deployment.id;
         let inner = Self::deploy_to_scheduler(
             state,
@@ -321,7 +379,7 @@ impl DeploymentService {
                 vcpus,
                 memory_mib,
                 disk_mib,
-                port: app.port,
+                port: final_port,
                 env,
                 hypervisor,
             },
@@ -358,6 +416,16 @@ impl DeploymentService {
         let app = Self::get_app_by_name_and_auth(state, app_name, auth_tenant_id).await?;
         let owner_user_id = resolve_tenant_owner_user_id(state, app.tenant_id).await?;
         let git_metadata = Self::fetch_app_git_metadata(state, &app).await;
+        let final_port = params.port.unwrap_or(app.port);
+
+        if final_port != app.port {
+            state
+                .app_repo
+                .update_app_port(app.id, final_port)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?;
+        }
+
         let deployment = state
             .app_repo
             .create_deployment(crate::domain::NewDeployment::from_handler(
@@ -367,7 +435,7 @@ impl DeploymentService {
                 params.vcpus,
                 params.memory_mib,
                 params.disk_mib as i64,
-                app.port,
+                final_port,
                 params.env.clone(),
                 "manual".to_string(),
                 git_metadata.as_ref(),
@@ -963,49 +1031,78 @@ impl DeploymentService {
         deployment: &Deployment,
         tenant_id: String,
     ) -> ApiResult<bool> {
+        match Self::resume_or_recover_deployment(state, app, deployment, tenant_id).await? {
+            ResumeRecovery::Resumed | ResumeRecovery::Recreated => Ok(true),
+        }
+    }
+
+    pub(crate) async fn resume_or_recover_deployment(
+        state: &AppState,
+        app: &App,
+        deployment: &Deployment,
+        tenant_id: String,
+    ) -> ApiResult<ResumeRecovery> {
         let job_id = deployment
             .job_id
             .clone()
             .ok_or_else(|| ApiError::BadRequest("Deployment is missing a job id".into()))?;
 
-        let success = state
-            .scheduler
-            .resume_app(job_id.clone(), tenant_id)
-            .await?;
+        match state.scheduler.resume_app(job_id.clone(), tenant_id.clone()).await {
+            Ok(true) => {
+                // Update database status
+                let _ = state
+                    .app_repo
+                    .update_deployment(
+                        deployment.id,
+                        UpdateDeploymentParams {
+                            status: Some("RUNNING".to_string()),
+                            job_id: Some(job_id.clone()),
+                            image_tag: deployment.image_tag.clone(),
+                            build_id: deployment.build_id.clone(),
+                            git_commit_hash: deployment.git_commit_hash.clone(),
+                            git_commit_message: deployment.git_commit_message.clone(),
+                            git_branch: deployment.git_branch.clone(),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
 
-        if success {
-            // Update database status
-            let _ = state
-                .app_repo
-                .update_deployment(
-                    deployment.id,
-                    UpdateDeploymentParams {
-                        status: Some("RUNNING".to_string()),
-                        job_id: Some(job_id.clone()),
-                        image_tag: deployment.image_tag.clone(),
-                        build_id: deployment.build_id.clone(),
-                        git_commit_hash: deployment.git_commit_hash.clone(),
-                        git_commit_message: deployment.git_commit_message.clone(),
-                        git_branch: deployment.git_branch.clone(),
-                        ..Default::default()
-                    },
-                )
-                .await;
+                state.deployment_events.send(app.id).ok();
+                state.publish_workspace_event(WorkspaceEvent {
+                    kind: WorkspaceEventKind::DeploymentChanged,
+                    user_id: None,
+                    tenant_id: Some(app.tenant_id),
+                    app_id: Some(app.id),
+                    app_name: Some(app.name.clone()),
+                    deployment_id: Some(deployment.id),
+                    volume_id: None,
+                    resource_id: Some(job_id),
+                });
 
-            state.deployment_events.send(app.id).ok();
-            state.publish_workspace_event(WorkspaceEvent {
-                kind: WorkspaceEventKind::DeploymentChanged,
-                user_id: None,
-                tenant_id: Some(app.tenant_id),
-                app_id: Some(app.id),
-                app_name: Some(app.name.clone()),
-                deployment_id: Some(deployment.id),
-                volume_id: None,
-                resource_id: Some(job_id),
-            });
+                return Ok(ResumeRecovery::Resumed);
+            },
+            Ok(false) | Err(_) => {
+                let desired_replicas = app.desired_replicas.max(app.min_replicas).max(1) as u32;
+                tracing::warn!(
+                    app = %app.name,
+                    deployment_id = %deployment.id,
+                    tenant_id = %tenant_id,
+                    desired_replicas = %desired_replicas,
+                    "Scheduler could not resume the deployment; requesting a fresh replica instead"
+                );
+
+                let recovered = state
+                    .scheduler
+                    .scale_app(app.id.to_string(), desired_replicas, tenant_id)
+                    .await?;
+
+                if !recovered {
+                    return Err(ApiError::BadRequest("Failed to resume deployment".into()));
+                }
+
+                return Ok(ResumeRecovery::Recreated);
+            },
         }
-
-        Ok(success)
     }
 
     pub async fn stop_deployment(
@@ -1280,5 +1377,85 @@ mod tests {
         .expect_err("no responders should map to scheduler unavailable");
 
         assert!(matches!(err, ApiError::Scheduler(_)));
+    }
+
+    #[tokio::test]
+    async fn resume_or_recover_deployment_falls_back_to_scaling_when_resume_fails() {
+        let app_id = Uuid::new_v4();
+        let tenant_id = Uuid::new_v4();
+        let deployment_id = Uuid::new_v4();
+
+        let mut scheduler = MockScheduler::new();
+        scheduler.expect_resume_app().returning(|_, _| {
+            Err(crate::domain::DomainError::Infrastructure(
+                "Job not found".to_string(),
+            ))
+        });
+        scheduler
+            .expect_scale_app()
+            .times(1)
+            .returning(|_, _, _| Ok(true));
+
+        let state = crate::AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(MockUserRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(crate::domain::MockDatabaseRepository::new()),
+            github_repo: Arc::new(crate::domain::github::MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(scheduler),
+            nats: TypedNatsClient::new_custom(Arc::new(NoRespondersNatsClient)),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+            jwt_secret: "secret".into(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "admin@example.com".into(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: Arc::new(dashmap::DashSet::new()),
+        };
+
+        let app = App {
+            id: app_id,
+            tenant_id,
+            name: "demo".into(),
+            git_url: "https://example.com/demo".into(),
+            port: Port::new(3000).unwrap(),
+            desired_replicas: 1,
+            min_replicas: 0,
+            ..Default::default()
+        };
+
+        let deployment = Deployment {
+            id: deployment_id,
+            app_id,
+            tenant_id,
+            status: "PAUSED".into(),
+            vcpus: CpuCores::new(1).unwrap(),
+            memory_mib: MemoryMb::new(128).unwrap(),
+            port: Port::new(3000).unwrap(),
+            job_id: Some(Uuid::new_v4()),
+            ..Default::default()
+        };
+
+        let outcome = DeploymentService::resume_or_recover_deployment(
+            &state,
+            &app,
+            &deployment,
+            tenant_id.to_string(),
+        )
+        .await
+        .expect("fallback recovery should succeed");
+
+        assert_eq!(outcome, ResumeRecovery::Recreated);
     }
 }

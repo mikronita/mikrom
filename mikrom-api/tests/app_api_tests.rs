@@ -421,6 +421,102 @@ async fn get_app_secret_handler_returns_raw_secret() {
 }
 
 #[tokio::test]
+async fn update_app_handler_updates_port_and_returns_updated_app() {
+    let tenant_id = Uuid::new_v4();
+    let owner_user_id = Uuid::new_v4();
+    let (mut state, _, _, _) = build_state(tenant_id, owner_user_id);
+
+    let original_app = App {
+        id: Uuid::new_v4(),
+        name: "port-app".to_string(),
+        git_url: "https://github.com/test/repo".to_string(),
+        port: Port::new(8080).unwrap(),
+        hostname: None,
+        tenant_id,
+        github_webhook_secret: None,
+        github_installation_id: None,
+        github_repo_id: None,
+        github_repo_full_name: None,
+        active_deployment_id: None,
+        health_check_path: "/".to_string(),
+        drain_timeout: 10,
+        desired_replicas: 1,
+        min_replicas: 0,
+        max_replicas: 1,
+        autoscaling_enabled: false,
+        cpu_threshold: 80.0,
+        mem_threshold: 80.0,
+        last_router_traffic_at: 0,
+        last_scaled_to_zero_at: 0,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+
+    let updated_app = App {
+        port: Port::new(3000).unwrap(),
+        ..original_app.clone()
+    };
+
+    let mut app_repo_mock = MockAppRepository::new();
+    app_repo_mock
+        .expect_get_app_by_name()
+        .with(eq("port-app"))
+        .returning({
+            let original_app = original_app.clone();
+            move |_| Ok(Some(original_app.clone()))
+        });
+    app_repo_mock
+        .expect_update_app_port()
+        .with(eq(original_app.id), eq(Port::new(3000).unwrap()))
+        .returning(|_, _| Ok(()));
+    app_repo_mock
+        .expect_get_app()
+        .with(eq(original_app.id))
+        .returning({
+            let updated_app = updated_app.clone();
+            move |_| Ok(Some(updated_app.clone()))
+        });
+    state.app_repo = Arc::new(app_repo_mock);
+    state.ctx.app_repo = state.app_repo.clone();
+
+    let token = create_token(
+        &owner_user_id.to_string(),
+        "owner@example.com",
+        &UserRole::User,
+        "test-secret",
+    )
+    .unwrap();
+
+    let router = create_app(state);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/v1/apps/port-app")
+                .header("Authorization", auth_header(&token))
+                .header("x-mikrom-tenant-id", TENANT_SLUG)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "port": 3000,
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024)
+        .await
+        .unwrap();
+    let app: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(app["name"], "port-app");
+    assert_eq!(app["port"], 3000);
+}
+
+#[tokio::test]
 async fn list_deployments_handler_returns_tenant_deployments() {
     let tenant_id = Uuid::new_v4();
     let owner_user_id = Uuid::new_v4();

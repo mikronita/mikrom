@@ -80,6 +80,7 @@ describe("CreateAppModal", () => {
       expect(mocks.createApp).toHaveBeenCalledWith("token", {
         name: "starter",
         git_url: "https://github.com/mikrom/starter",
+        port: 8080,
       });
     });
 
