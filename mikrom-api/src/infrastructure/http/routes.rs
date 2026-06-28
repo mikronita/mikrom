@@ -2,6 +2,7 @@ use axum::extract::ConnectInfo;
 use axum::middleware;
 use rovo::Router;
 use rovo::routing::{delete, get, patch, post};
+use rovo::routing::put;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
@@ -10,7 +11,10 @@ use tracing::Level;
 
 use crate::infrastructure::http::handlers::{
     auth::{get_profile, login, register, update_profile},
-    billing::{create_billing_checkout, create_billing_portal, get_billing_summary, polar_webhook},
+    billing::{
+        create_billing_checkout, create_billing_portal, get_billing_summary, list_billing_products,
+        polar_webhook, refresh_billing_products, update_billing_checkout_product,
+    },
     github::{github_callback, github_install, list_repos},
     notifications::{
         list_user_notifications, mark_all_user_notifications_read, mark_user_notification_read,
@@ -84,6 +88,18 @@ pub fn create_app_with_rate_limits(
             get(get_billing_summary),
         )
         .route(
+            &format!("{}/billing/products", crate::API_V1),
+            get(list_billing_products),
+        )
+        .route(
+            &format!("{}/billing/products/refresh", crate::API_V1),
+            post(refresh_billing_products),
+        )
+        .route(
+            &format!("{}/billing/checkout-product", crate::API_V1),
+            put(update_billing_checkout_product),
+        )
+        .route(
             &format!("{}/billing/checkout", crate::API_V1),
             post(create_billing_checkout),
         )
@@ -139,6 +155,7 @@ pub fn create_app_with_rate_limits(
         .route(
             &format!("{}/apps/{{app_name}}", crate::API_V1),
             get(crate::infrastructure::http::handlers::deploy::get_app_handler)
+                .patch(crate::infrastructure::http::handlers::deploy::update_app_handler)
                 .delete(crate::infrastructure::http::handlers::deploy::delete_app_handler),
         )
         .route(

@@ -11,6 +11,7 @@
   import {
     Button,
     Field,
+    Input,
     Modal,
     Select,
     SelectContent,
@@ -31,16 +32,19 @@
   const DEFAULT_CPU = String(DEPLOYMENT_CPU_OPTIONS[0]);
   const DEFAULT_MEMORY = String(DEPLOYMENT_MEMORY_OPTIONS[0].value);
   const DEFAULT_HYPERVISOR = String(DEPLOYMENT_HYPERVISOR_OPTIONS[0].value);
+  const DEFAULT_PORT = "8080";
 
   let loading = $state(false);
   let selectedCpu = $state(DEFAULT_CPU);
   let selectedMemory = $state(DEFAULT_MEMORY);
   let selectedHypervisor = $state(DEFAULT_HYPERVISOR);
+  let selectedPort = $state(DEFAULT_PORT);
 
   function resetForm() {
     selectedCpu = DEFAULT_CPU;
     selectedMemory = DEFAULT_MEMORY;
     selectedHypervisor = DEFAULT_HYPERVISOR;
+    selectedPort = DEFAULT_PORT;
   }
 
   $effect(() => {
@@ -64,6 +68,7 @@
       const result = await deployAppVersion(token, app.name, {
         vcpus: Number(selectedCpu),
         memory_mib: Number(selectedMemory),
+        port: Number(selectedPort),
         hypervisor: selectedHypervisor || undefined,
       });
 
@@ -117,6 +122,23 @@
           {/each}
         </SelectContent>
       </Select>
+    </Field>
+
+    <Field
+      label="Container Port"
+      forId="deploy_port"
+      description="Port exposed by the container inside the microVM."
+    >
+      <Input
+        id="deploy_port"
+        bind:value={selectedPort}
+        type="number"
+        min="1"
+        max="65535"
+        step="1"
+        inputmode="numeric"
+        placeholder="8080"
+      />
     </Field>
 
     <Field

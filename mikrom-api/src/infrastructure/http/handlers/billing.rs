@@ -13,6 +13,43 @@ pub async fn get_billing_summary(
 }
 
 #[rovo::rovo]
+pub async fn list_billing_products(
+    State(state): State<AppState>,
+) -> ApiResult<Json<crate::application::billing::BillingProductListResponse>> {
+    let products = crate::application::billing::list_billing_products(&state).await?;
+    Ok(Json(products))
+}
+
+#[rovo::rovo]
+pub async fn refresh_billing_products(
+    tenant_ctx: TenantContext,
+    auth_user: AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<crate::application::billing::BillingProductListResponse>> {
+    let products =
+        crate::application::billing::refresh_billing_products(&state, &tenant_ctx, &auth_user)
+            .await?;
+    Ok(Json(products))
+}
+
+#[rovo::rovo]
+pub async fn update_billing_checkout_product(
+    tenant_ctx: TenantContext,
+    auth_user: AuthUser,
+    State(state): State<AppState>,
+    Json(payload): Json<crate::application::billing::CheckoutProductPreferenceRequest>,
+) -> ApiResult<Json<crate::application::billing::BillingSummary>> {
+    let summary = crate::application::billing::update_billing_checkout_product(
+        &state,
+        &tenant_ctx,
+        &auth_user,
+        payload.product_id,
+    )
+    .await?;
+    Ok(Json(summary))
+}
+
+#[rovo::rovo]
 pub async fn create_billing_checkout(
     tenant_ctx: TenantContext,
     State(state): State<AppState>,

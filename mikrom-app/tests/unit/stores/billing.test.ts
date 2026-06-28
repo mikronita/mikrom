@@ -30,6 +30,7 @@ const billingSummary = {
   current_period_end: "2026-06-01T00:00:00.000Z",
   cancel_at_period_end: false,
   default_checkout_product_id: "prod_default",
+  selected_checkout_product_id: null,
   has_billing_record: true,
 } as const;
 

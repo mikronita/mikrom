@@ -16,7 +16,7 @@ fn build_state() -> AppState {
     let mut state = AppState::default();
     state.github_app_id = Some("123".to_string());
     state.github_private_key = Some("dummy-key".to_string());
-    state.frontend_url = "http://localhost:3000".to_string();
+    state.frontend_url = "http://[::1]:5173".to_string();
     state.user_repo = Arc::new(MockUserRepository::new());
     state.ctx.user_repo = state.user_repo.clone();
     state.tenant_repo = Arc::new(MockTenantRepository::new());
@@ -52,7 +52,7 @@ async fn github_callback_without_state_redirects_to_settings() {
     assert_eq!(response.status(), axum::http::StatusCode::SEE_OTHER);
     assert_eq!(
         response.headers().get("location").unwrap(),
-        "http://localhost:3000/settings"
+        "http://localhost:5173/settings"
     );
 }
 

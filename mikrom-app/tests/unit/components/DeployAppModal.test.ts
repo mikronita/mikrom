@@ -81,6 +81,8 @@ describe("DeployAppModal", () => {
       expect(mocks.deployAppVersion).toHaveBeenCalledWith("token", "starter", {
         vcpus: 1,
         memory_mib: 512,
+        port: 8080,
+        hypervisor: undefined,
       });
     });
 

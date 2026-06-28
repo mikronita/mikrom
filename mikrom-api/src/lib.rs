@@ -31,6 +31,21 @@ use crate::application::vms::MeshStatus;
 
 pub use workspace::{WorkspaceEvent, WorkspaceEventKind};
 
+pub fn normalize_loopback_url(url: &str) -> String {
+    for (prefix, replacement) in [
+        ("http://[::1]", "http://localhost"),
+        ("https://[::1]", "https://localhost"),
+        ("http://[0:0:0:0:0:0:0:1]", "http://localhost"),
+        ("https://[0:0:0:0:0:0:0:1]", "https://localhost"),
+    ] {
+        if let Some(suffix) = url.strip_prefix(prefix) {
+            return format!("{replacement}{suffix}");
+        }
+    }
+
+    url.to_string()
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub ctx: crate::application::ApiContext,

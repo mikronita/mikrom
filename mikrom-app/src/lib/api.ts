@@ -5,7 +5,12 @@ import { createFetchSseStream } from "$lib/utils/sse";
 
 const PUBLIC_BASE = (
   browser ? window.location.origin : env.PUBLIC_APP_URL || "http://localhost:5173"
-).replace(/\/+$/, "");
+)
+  .replace("http://[::1]", "http://localhost")
+  .replace("https://[::1]", "https://localhost")
+  .replace("http://[0:0:0:0:0:0:0:1]", "http://localhost")
+  .replace("https://[0:0:0:0:0:0:0:1]", "https://localhost")
+  .replace(/\/+$/, "");
 
 const API_PROXY_BASE = "/api/v1";
 export const API_BASE_URL = `${PUBLIC_BASE}${API_PROXY_BASE}`;
@@ -164,6 +169,7 @@ export interface BillingSummary {
   current_period_end: string | null;
   cancel_at_period_end: boolean;
   default_checkout_product_id: string | null;
+  selected_checkout_product_id: string | null;
   has_billing_record: boolean;
 }
 
@@ -171,8 +177,29 @@ export interface BillingCheckoutRequest {
   product_id?: string;
 }
 
+export interface BillingCheckoutProductPreferenceRequest {
+  product_id?: string | null;
+}
+
 export interface BillingRedirectResponse {
   url: string;
+}
+
+export interface BillingProduct {
+  id: string;
+  name: string;
+  description: string | null;
+  price_amount_cents: number | null;
+  currency: string | null;
+  recurring_interval: string | null;
+  is_archived: boolean;
+  is_default_checkout_product: boolean;
+}
+
+export interface BillingProductListResponse {
+  products: BillingProduct[];
+  default_checkout_product_id: string | null;
+  last_synced_at: string | null;
 }
 
 export interface HealthResponse {
@@ -349,9 +376,14 @@ export interface ScaleAppRequest {
 export interface CreateAppRequest {
   name: string;
   git_url: string;
+  port?: number;
   github_installation_id?: number;
   github_repo_id?: number;
   github_repo_full_name?: string;
+}
+
+export interface UpdateAppRequest {
+  port: number;
 }
 
 export const DEPLOYMENT_CPU_OPTIONS = [1, 2, 3, 4] as const;
@@ -848,6 +880,52 @@ export async function getBillingSummary(token: string) {
   }
 }
 
+export async function listBillingProducts(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/billing/products`, { headers: authHeaders(token) });
+    if (response.status === 401) logout();
+    const result = await parseJson<BillingProductListResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to fetch billing products") };
+    return { data: result as BillingProductListResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function refreshBillingProducts(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/billing/products/refresh`, {
+      method: "POST",
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<BillingProductListResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to refresh billing products") };
+    return { data: result as BillingProductListResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function updateBillingCheckoutProduct(
+  token: string,
+  data: BillingCheckoutProductPreferenceRequest,
+) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/billing/checkout-product`, {
+      method: "PUT",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    if (response.status === 401) logout();
+    const result = await parseJson<BillingSummary>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to update checkout product") };
+    return { data: result as BillingSummary };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
 export async function createBillingCheckout(token: string, data: BillingCheckoutRequest = {}) {
   try {
     const response = await fetch(`${API_PROXY_BASE}/billing/checkout`, {
@@ -1107,6 +1185,21 @@ export async function createApp(token: string, data: CreateAppRequest) {
     });
     const result = await parseJson<AppInfo>(response);
     if (!response.ok) return { error: getErrorMessage(result, "Failed to create app") };
+    return { data: result as AppInfo };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function updateApp(token: string, appName: string, data: UpdateAppRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/apps/${encodeURIComponent(appName)}`, {
+      method: "PATCH",
+      headers: authHeaders(token),
+      body: JSON.stringify(data),
+    });
+    const result = await parseJson<AppInfo>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to update app") };
     return { data: result as AppInfo };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Network error" };
