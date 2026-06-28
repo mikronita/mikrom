@@ -170,6 +170,7 @@ export interface BillingSummary {
   cancel_at_period_end: boolean;
   default_checkout_product_id: string | null;
   selected_checkout_product_id: string | null;
+  is_test_mode: boolean;
   has_billing_record: boolean;
 }
 

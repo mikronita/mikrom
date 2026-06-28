@@ -31,6 +31,7 @@ const billingSummary = {
   cancel_at_period_end: false,
   default_checkout_product_id: "prod_default",
   selected_checkout_product_id: null,
+  is_test_mode: false,
   has_billing_record: true,
 } as const;
 

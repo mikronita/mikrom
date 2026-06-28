@@ -10,6 +10,7 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use sqlx::FromRow;
+use std::convert::TryFrom;
 use std::env;
 use std::sync::OnceLock;
 use uuid::Uuid;
@@ -116,6 +117,7 @@ pub struct BillingSummary {
     pub cancel_at_period_end: bool,
     pub default_checkout_product_id: Option<String>,
     pub selected_checkout_product_id: Option<String>,
+    pub is_test_mode: bool,
     pub has_billing_record: bool,
 }
 
@@ -479,6 +481,7 @@ fn billing_summary_from_row(
     tenant_id: Uuid,
     default_checkout_product_id: Option<String>,
     selected_checkout_product_id: Option<String>,
+    is_test_mode: bool,
 ) -> BillingSummary {
     if let Some(row) = row {
         BillingSummary {
@@ -496,6 +499,7 @@ fn billing_summary_from_row(
             cancel_at_period_end: row.cancel_at_period_end,
             default_checkout_product_id,
             selected_checkout_product_id,
+            is_test_mode,
             has_billing_record: true,
         }
     } else {
@@ -514,6 +518,7 @@ fn billing_summary_from_row(
             cancel_at_period_end: false,
             default_checkout_product_id,
             selected_checkout_product_id,
+            is_test_mode,
             has_billing_record: false,
         }
     }
@@ -749,30 +754,253 @@ fn product_description_from_value(value: &serde_json::Value) -> Option<String> {
 }
 
 fn recurring_interval_from_value(value: &serde_json::Value) -> Option<String> {
-    value
+    let direct_value = value
         .get("recurring_interval")
-        .and_then(|value| value.as_str())
-        .or_else(|| value.get("interval").and_then(|value| value.as_str()))
-        .map(str::to_string)
-}
-
-fn price_details_from_value(value: &serde_json::Value) -> (Option<i32>, Option<String>) {
-    let price_source = value
-        .get("price")
-        .or_else(|| value.get("prices").and_then(|value| value.as_array()).and_then(|items| items.first()))
-        .or_else(|| value.get("price_data"));
-
-    let amount_cents = price_source
-        .and_then(|value| value.get("amount").or_else(|| value.get("unit_amount")))
-        .and_then(|value| value.as_i64())
-        .and_then(|value| i32::try_from(value).ok());
-
-    let currency = price_source
-        .and_then(|value| value.get("currency"))
+        .or_else(|| value.get("interval"))
         .and_then(|value| value.as_str())
         .map(str::to_string);
 
-    (amount_cents, currency)
+    if direct_value.is_some() {
+        return direct_value;
+    }
+
+    let mut stack = vec![value];
+    while let Some(current) = stack.pop() {
+        if let Some(interval) = current
+            .get("recurring_interval")
+            .or_else(|| current.get("interval"))
+            .and_then(|value| value.as_str())
+        {
+            return Some(interval.to_string());
+        }
+
+        if let Some(object) = current.as_object() {
+            stack.extend(object.values());
+        }
+
+        if let Some(array) = current.as_array() {
+            stack.extend(array.iter());
+        }
+    }
+
+    None
+}
+
+fn first_integer_from_fields(value: &serde_json::Value, fields: &[&str]) -> Option<i32> {
+    for field in fields {
+        if let Some(number) = value.get(*field) {
+            if let Some(integer) = number.as_i64().and_then(|value| i32::try_from(value).ok()) {
+                return Some(integer);
+            }
+
+            if let Some(integer) = number
+                .as_u64()
+                .and_then(|value| i64::try_from(value).ok())
+                .and_then(|value| i32::try_from(value).ok())
+            {
+                return Some(integer);
+            }
+
+            if let Some(float) = number.as_f64() {
+                let rounded = float.round();
+                if (float - rounded).abs() < f64::EPSILON {
+                    if let Ok(integer) = i32::try_from(rounded as i64) {
+                        return Some(integer);
+                    }
+                }
+            }
+
+            if let Some(integer) = number
+                .as_str()
+                .and_then(parse_cents_from_string)
+            {
+                return Some(integer);
+            }
+        }
+    }
+
+    None
+}
+
+fn first_currency_from_fields(value: &serde_json::Value, fields: &[&str]) -> Option<String> {
+    for field in fields {
+        if let Some(currency) = value.get(*field).and_then(|value| value.as_str()) {
+            return Some(currency.to_string());
+        }
+    }
+
+    None
+}
+
+fn parse_cents_from_string(value: &str) -> Option<i32> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(integer) = trimmed.parse::<i32>() {
+        return Some(integer);
+    }
+
+    let mut negative = false;
+    let mut digits = trimmed;
+    if let Some(rest) = digits.strip_prefix('-') {
+        negative = true;
+        digits = rest;
+    }
+
+    let (whole, fractional) = digits.split_once('.')?;
+    let whole = whole.trim();
+    let fractional = fractional.trim();
+    if whole.is_empty() || fractional.len() > 2 || !whole.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    if !fractional.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+
+    let whole_value = whole.parse::<i64>().ok()?;
+    let fractional_value = match fractional.len() {
+        0 => 0_i64,
+        1 => fractional.parse::<i64>().ok()? * 10,
+        _ => fractional.parse::<i64>().ok()?,
+    };
+    let cents = whole_value.checked_mul(100)?.checked_add(fractional_value)?;
+    let cents = if negative { cents.checked_neg()? } else { cents };
+    i32::try_from(cents).ok()
+}
+
+fn price_source_candidates<'a>(value: &'a serde_json::Value) -> Vec<(String, &'a serde_json::Value)> {
+    let mut candidates = Vec::new();
+
+    let mut push_candidate = |label: String, candidate: Option<&'a serde_json::Value>| {
+        if let Some(candidate) = candidate {
+            candidates.push((label, candidate));
+        }
+    };
+
+    push_candidate("price".to_string(), value.get("price"));
+    push_candidate("default_price".to_string(), value.get("default_price"));
+    push_candidate("price_data".to_string(), value.get("price_data"));
+    push_candidate("default_price_data".to_string(), value.get("default_price_data"));
+    push_candidate("recurring_price".to_string(), value.get("recurring_price"));
+    push_candidate("billing_price".to_string(), value.get("billing_price"));
+
+    if let Some(prices) = value.get("prices").and_then(|value| value.as_array()) {
+        candidates.extend(prices.iter().enumerate().map(|(index, value)| {
+            (format!("prices[{index}]"), value)
+        }));
+    }
+
+    if let Some(prices) = value.get("recurring_prices").and_then(|value| value.as_array()) {
+        candidates.extend(prices.iter().enumerate().map(|(index, value)| {
+            (format!("recurring_prices[{index}]"), value)
+        }));
+    }
+
+    if let Some(prices) = value.get("plan_prices").and_then(|value| value.as_array()) {
+        candidates.extend(prices.iter().enumerate().map(|(index, value)| {
+            (format!("plan_prices[{index}]"), value)
+        }));
+    }
+
+    candidates
+}
+
+fn recursive_find_integer_field(value: &serde_json::Value, fields: &[&str]) -> Option<i32> {
+    let mut stack = vec![value];
+    while let Some(current) = stack.pop() {
+        if let Some(amount) = first_integer_from_fields(current, fields) {
+            return Some(amount);
+        }
+
+        if let Some(object) = current.as_object() {
+            stack.extend(object.values());
+        }
+
+        if let Some(array) = current.as_array() {
+            stack.extend(array.iter());
+        }
+    }
+
+    None
+}
+
+fn recursive_find_currency_field(value: &serde_json::Value, fields: &[&str]) -> Option<String> {
+    let mut stack = vec![value];
+    while let Some(current) = stack.pop() {
+        if let Some(currency) = first_currency_from_fields(current, fields) {
+            return Some(currency);
+        }
+
+        if let Some(object) = current.as_object() {
+            stack.extend(object.values());
+        }
+
+        if let Some(array) = current.as_array() {
+            stack.extend(array.iter());
+        }
+    }
+
+    None
+}
+
+fn polar_is_test_mode() -> bool {
+    matches!(env::var("POLAR_SERVER").ok().as_deref(), Some("sandbox"))
+        || env::var("POLAR_API_BASE_URL")
+            .ok()
+            .is_some_and(|url| url.contains("sandbox-api.polar.sh"))
+}
+
+fn price_details_from_value(value: &serde_json::Value) -> (Option<i32>, Option<String>) {
+    let direct_price_source = price_source_candidates(value);
+
+    let mut amount = None;
+    let mut currency = None;
+
+    for (_source_label, source) in direct_price_source {
+        if amount.is_none() {
+            amount = first_integer_from_fields(
+                source,
+                &[
+                    "amount",
+                    "unit_amount",
+                    "unit_amount_decimal",
+                    "amount_cents",
+                    "price_amount_cents",
+                    "price_amount",
+                    "price_amount_decimal",
+                ],
+            );
+        }
+        if currency.is_none() {
+            currency = first_currency_from_fields(
+                source,
+                &["currency", "currency_code", "price_currency"],
+            );
+        }
+        if amount.is_some() && currency.is_some() {
+            return (amount, currency);
+        }
+    }
+
+    let recursive_amount = recursive_find_integer_field(
+        value,
+        &[
+            "amount",
+            "unit_amount",
+            "unit_amount_decimal",
+            "amount_cents",
+            "price_amount_cents",
+            "price_amount",
+            "price_amount_decimal",
+        ],
+    );
+    let recursive_currency = recursive_find_currency_field(
+        value,
+        &["currency", "currency_code", "price_currency"],
+    );
+    (amount.or(recursive_amount), currency.or(recursive_currency))
 }
 
 fn is_archived_from_value(value: &serde_json::Value) -> bool {
@@ -986,6 +1214,7 @@ pub async fn get_billing_summary(
         tenant_ctx.tenant.id,
         default_checkout_product_id,
         preference.and_then(|preference| preference.checkout_product_id),
+        polar_is_test_mode(),
     ))
 }
 
@@ -1244,6 +1473,7 @@ mod tests {
             tenant.id,
             Some("prod_123".to_string()),
             Some("prod_selected".to_string()),
+            false,
         );
 
         assert_eq!(summary.tenant_id, tenant.id.to_string());
@@ -1279,7 +1509,7 @@ mod tests {
             updated_at: dt("2026-05-02T00:00:00Z"),
         };
 
-        let summary = billing_summary_from_row(Some(row), tenant.id, None, None);
+        let summary = billing_summary_from_row(Some(row), tenant.id, None, None, false);
 
         assert_eq!(summary.polar_customer_id.as_deref(), Some("cus_123"));
         assert_eq!(summary.polar_subscription_id.as_deref(), Some("sub_123"));
@@ -1529,6 +1759,65 @@ mod tests {
         assert!(products[0].is_default_checkout_product);
         assert!(!products[1].is_default_checkout_product);
         assert!(products[1].is_archived);
+    }
+
+    #[tokio::test]
+    async fn list_polar_products_handles_nested_price_fields() {
+        let server = MockServer::start().await;
+        let settings = PolarSettings {
+            access_token: "polar-token".to_string(),
+            webhook_secret: "webhook-secret".to_string(),
+            base_url: server.uri(),
+            default_product_id: Some("prod_nested".to_string()),
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/products"))
+            .and(header("authorization", "Bearer polar-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [
+                    {
+                        "id": "prod_nested",
+                        "title": "Nested plan",
+                        "pricing": {
+                            "default_price": {
+                                "unit_amount": 9900,
+                                "currency_code": "eur"
+                            }
+                        },
+                        "recurring": {
+                            "interval": "year"
+                        }
+                    },
+                    {
+                        "id": "prod_decimal",
+                        "name": "Decimal plan",
+                        "price": {
+                            "unit_amount_decimal": "49.99",
+                            "currency_code": "usd"
+                        },
+                        "interval": "month"
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let products = list_polar_products(&settings).await.expect("products");
+
+        assert_eq!(products.len(), 1);
+        assert_eq!(products[0].id, "prod_nested");
+        assert_eq!(products[0].name, "Nested plan");
+        assert_eq!(products[0].price_amount_cents, Some(9900));
+        assert_eq!(products[0].currency.as_deref(), Some("eur"));
+        assert_eq!(products[0].recurring_interval.as_deref(), Some("year"));
+        assert!(products[0].is_default_checkout_product);
+
+        assert_eq!(products[1].id, "prod_decimal");
+        assert_eq!(products[1].name, "Decimal plan");
+        assert_eq!(products[1].price_amount_cents, Some(4999));
+        assert_eq!(products[1].currency.as_deref(), Some("usd"));
+        assert_eq!(products[1].recurring_interval.as_deref(), Some("month"));
     }
 
     #[test]
