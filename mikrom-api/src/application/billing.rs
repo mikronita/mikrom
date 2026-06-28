@@ -1819,7 +1819,6 @@ mod tests {
         assert_eq!(products[1].currency.as_deref(), Some("usd"));
         assert_eq!(products[1].recurring_interval.as_deref(), Some("month"));
     }
-
     #[test]
     #[serial]
     fn validate_polar_environment_rejects_missing_access_token() {
