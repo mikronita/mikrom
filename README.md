@@ -49,6 +49,14 @@ Mikrom is a Rust-first edge platform for deploying containerized workloads into 
 
 For a detailed service map and request flow, see [docs/architecture.md](docs/architecture.md).
 
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md) for the service map and request flow.
+- [docs/nat64-dns64-smoke-checklist.md](docs/nat64-dns64-smoke-checklist.md) for NAT64/DNS64 smoke validation.
+- [docs/ceph-runner-checklist.md](docs/ceph-runner-checklist.md) for the Ceph-only GitHub Actions runner.
+- [docs/infra/ceph-runner.md](docs/infra/ceph-runner.md) for Ceph runner provisioning details.
+- [docs/infra/ceph-runner-platform-task.md](docs/infra/ceph-runner-platform-task.md) for the platform-facing acceptance criteria.
+
 ## Quick Start
 
 ### Prerequisites
@@ -173,8 +181,8 @@ Ceph-specific validation runs separately on a self-hosted runner labeled `ceph`:
 
 - `make ci-ceph-tests`
 - GitHub Actions job `ceph-tests`
-- Provisioning runbook: [docs/infra/ceph-runner.md](/home/apardo/Work/mikrom.rust/docs/infra/ceph-runner.md)
-- See [docs/ceph-runner-checklist.md](/home/apardo/Work/mikrom.rust/docs/ceph-runner-checklist.md) for the runner setup checklist.
+- Provisioning runbook: [docs/infra/ceph-runner.md](docs/infra/ceph-runner.md)
+- See [docs/ceph-runner-checklist.md](docs/ceph-runner-checklist.md) for the runner setup checklist.
 
 That runner must provide:
 
