@@ -47,6 +47,8 @@ Mikrom is a Rust-first edge platform for deploying containerized workloads into 
 | `mikrom-scheduler/` | Resource scheduler and placement engine. |
 | `ci/` | Dagger-backed local CI/CD runner in Rust. |
 
+For a detailed service map and request flow, see [docs/architecture.md](docs/architecture.md).
+
 ## Quick Start
 
 ### Prerequisites
