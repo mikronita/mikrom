@@ -2,9 +2,9 @@
 
 Use this checklist when preparing the self-hosted GitHub Actions runner that executes the Ceph-only agent integration job.
 
-For provisioning details, see [docs/infra/ceph-runner.md](/home/apardo/Work/mikrom.rust/docs/infra/ceph-runner.md).
-For an automation starting point, see [docs/infra/ceph-runner-bootstrap.example.sh](/home/apardo/Work/mikrom.rust/docs/infra/ceph-runner-bootstrap.example.sh).
-For the platform-facing acceptance criteria, see [docs/infra/ceph-runner-platform-task.md](/home/apardo/Work/mikrom.rust/docs/infra/ceph-runner-platform-task.md).
+For provisioning details, see [docs/infra/ceph-runner.md](docs/infra/ceph-runner.md).
+For an automation starting point, see [docs/infra/ceph-runner-bootstrap.example.sh](docs/infra/ceph-runner-bootstrap.example.sh).
+For the platform-facing acceptance criteria, see [docs/infra/ceph-runner-platform-task.md](docs/infra/ceph-runner-platform-task.md).
 
 ## 1. Runner Labels
 
@@ -14,7 +14,7 @@ Register the runner with these labels:
 - `linux`
 - `ceph`
 
-The workflow job lives in [`.github/workflows/ci.yml`](/home/apardo/Work/mikrom.rust/.github/workflows/ci.yml) as `ceph-tests`.
+The workflow job lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) as `ceph-tests`.
 
 ## 2. Host Prerequisites
 

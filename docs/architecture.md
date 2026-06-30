@@ -40,6 +40,20 @@ External traffic -> mikrom-router -> app microVMs
 - `mikrom-init`: boot binary that runs inside microVMs.
 - `mikrom-agent-ebpf` and `mikrom-agent-ebpf-common`: agent data plane support.
 
+## Platform Services
+
+- `mikrom-network` maintains the WireGuard mesh and host identity coordination.
+- `mikrom-dns` resolves internal service, worker, and tenant names and synthesizes DNS64 responses for external lookups when required.
+- `mikrom-init` boots the guest workload environment inside each microVM.
+- `mikrom-agent-ebpf` provides the compiled eBPF payload loaded by the agent for host-side networking and metrics support.
+
+## Coordination Notes
+
+- Control-plane state starts in `mikrom-api` and is fanned out over NATS to the builder, scheduler, and worker services.
+- The scheduler is responsible for placement decisions, not routing or DNS.
+- The router owns ingress, TLS state, and persisted traffic-plane routing data.
+- Network and DNS services are separate from the scheduler so host identity and name resolution can evolve independently of workload placement.
+
 ## Dependencies At A Glance
 
 - `mikrom-app` depends on `mikrom-api`.

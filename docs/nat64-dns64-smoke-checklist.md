@@ -72,4 +72,3 @@ Expected:
 - If `tundra` is missing, check `journalctl -u mikrom-agent -b --no-pager | grep NAT64`.
 - If DNS64 does not synthesize AAAA, verify `mikrom-dns` is running on the node and listening on UDP/53.
 - If DNS64 works but NAT64 fails, verify the `ip6tables` rules and the `64:ff9b::/96` route on the host.
-
