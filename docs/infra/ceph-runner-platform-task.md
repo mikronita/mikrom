@@ -22,7 +22,7 @@ The runner must only carry Ceph validation traffic.
 
 ## Implementation Notes
 
-- Use the example bootstrap script in [docs/infra/ceph-runner-bootstrap.example.sh](/home/apardo/Work/mikrom.rust/docs/infra/ceph-runner-bootstrap.example.sh) as a starting point.
+- Use the example bootstrap script in [docs/infra/ceph-runner-bootstrap.example.sh](ceph-runner-bootstrap.example.sh) as a starting point.
 - Keep the runner isolated from general-purpose workloads.
 - Rotate Ceph secrets on the host before re-enabling the runner if credentials change.
 - If the cluster is unavailable, disable the runner rather than letting the job fail repeatedly.
@@ -32,4 +32,3 @@ The runner must only carry Ceph validation traffic.
 - A registered runner with the correct labels.
 - A documented onboarding procedure for operations.
 - A verified dry run of the Ceph job on the runner host.
-

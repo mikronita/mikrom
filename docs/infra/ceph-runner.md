@@ -6,7 +6,7 @@ Related docs:
 
 - [Runner bootstrap example](./ceph-runner-bootstrap.example.sh)
 - [Platform task checklist](./ceph-runner-platform-task.md)
-- [Operational checklist](/home/apardo/Work/mikrom.rust/docs/ceph-runner-checklist.md)
+- [Operational checklist](../ceph-runner-checklist.md)
 
 ## Scope
 
