@@ -44,6 +44,7 @@ export interface UserProfile {
   role: string;
   first_name: string | null;
   last_name: string | null;
+  avatar_url: string | null;
   vpc_ipv6_prefix: string | null;
 }
 
@@ -153,6 +154,24 @@ export interface DatabaseSnapshotActionResponse {
 export interface UpdateProfileRequest {
   first_name: string | null;
   last_name: string | null;
+}
+
+export async function uploadUserAvatar(token: string, file: File) {
+  try {
+    const formData = new FormData();
+    formData.append("avatar", file);
+
+    const response = await fetch(`${API_PROXY_BASE}/auth/me/avatar`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: formData,
+    });
+    const result = await parseJson<UserProfile>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to upload avatar") };
+    return { data: result as UserProfile };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
 }
 
 export interface BillingSummary {

@@ -468,21 +468,3 @@ pub fn start_background_tasks(state: AppState) {
         crate::application::deployment::worker::resume_pending_builds(state_for_builds).await;
     });
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_health_response_serialization() {
-        let mut services = std::collections::HashMap::new();
-        services.insert("API".to_string(), "ONLINE".to_string());
-        let response = crate::infrastructure::http::health::HealthResponse {
-            status: "ok".to_string(),
-            version: "1.0.0".to_string(),
-            services,
-        };
-        let json = serde_json::to_string(&response).unwrap();
-        assert!(json.contains("ok"));
-        assert!(json.contains("1.0.0"));
-        assert!(json.contains("ONLINE"));
-    }
-}

@@ -54,6 +54,7 @@ async fn build_billing_state_with_token_role(
             role: UserRole::User,
             first_name: None,
             last_name: None,
+            avatar_url: None,
         })
         .await
         .expect("create user");

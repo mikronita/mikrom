@@ -4,6 +4,8 @@
 
 CEPH_LIB_DIR := $(shell pwd)/target/ceph-libs
 CEPH_ENV := LIBRARY_PATH="$(CEPH_LIB_DIR)" RUSTFLAGS="-L $(CEPH_LIB_DIR)"
+PROTOC_BIN := $(shell if [ -x /tmp/opencode/protoc/bin/protoc ]; then printf %s /tmp/opencode/protoc/bin/protoc; else command -v protoc; fi)
+PROTOC_ENV := PROTOC="$(PROTOC_BIN)"
 
 # ── Rust workspace ────────────────────────────────────────────────────────────
 
@@ -15,11 +17,11 @@ ceph-libs:
 
 .PHONY: build
 build: ceph-libs ## Build all Rust crates (release)
-	$(CEPH_ENV) cargo build --release
+	$(PROTOC_ENV) $(CEPH_ENV) cargo build --release
 
 .PHONY: build-dev
 build-dev: ceph-libs ## Build all Rust crates (debug)
-	$(CEPH_ENV) cargo build
+	$(PROTOC_ENV) $(CEPH_ENV) cargo build
 
 .PHONY: deb-agent
 deb-agent: build-init ceph-libs ## Build Debian package for mikrom-agent
@@ -29,29 +31,29 @@ deb-agent: build-init ceph-libs ## Build Debian package for mikrom-agent
 	cmake --build target/tundra-build --parallel
 	strip target/tundra-build/tundra-nat64
 	@mkdir -p target/release && cp target/tundra-build/tundra-nat64 target/release/tundra-nat64
-	RUSTC_WRAPPER= $(CEPH_ENV) cargo build --release -p mikrom-agent
-	cd mikrom-agent && RUSTC_WRAPPER= $(CEPH_ENV) cargo deb --no-build
+	RUSTC_WRAPPER= $(PROTOC_ENV) $(CEPH_ENV) cargo build --release -p mikrom-agent
+	cd mikrom-agent && RUSTC_WRAPPER= $(PROTOC_ENV) $(CEPH_ENV) cargo deb --no-build
 	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: deb-network
 deb-network: ## Build Debian package for mikrom-network
 	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
-	cargo build --release -p mikrom-network
-	cd mikrom-network && cargo deb --no-build
+	$(PROTOC_ENV) cargo build --release -p mikrom-network
+	cd mikrom-network && $(PROTOC_ENV) cargo deb --no-build
 	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: deb-router
 deb-router: ## Build Debian package for mikrom-router
 	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
-	cargo build --release -p mikrom-router
-	cd mikrom-router && cargo deb --no-build
+	$(PROTOC_ENV) cargo build --release -p mikrom-router
+	cd mikrom-router && $(PROTOC_ENV) cargo deb --no-build
 	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: deb-dns
 deb-dns: ## Build Debian package for mikrom-dns
 	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
-	cargo build --release -p mikrom-dns
-	cd mikrom-dns && cargo deb --no-build
+	$(PROTOC_ENV) cargo build --release -p mikrom-dns
+	cd mikrom-dns && $(PROTOC_ENV) cargo deb --no-build
 	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: fmt
@@ -149,15 +151,15 @@ test-integration: ## Run integration tests (starts PostgreSQL and test NATS via 
 .PHONY: test-all-crates
 test-all-crates: ceph-libs ## Run unit tests for all crates
 	$(call check_nextest)
-	$(CEPH_ENV) cargo nextest run -p mikrom-proto && \
-	$(CEPH_ENV) cargo nextest run -p mikrom-scheduler && \
-	$(CEPH_ENV) cargo nextest run -p mikrom-agent && \
-	$(CEPH_ENV) cargo nextest run -p mikrom-builder && \
-	$(CEPH_ENV) cargo nextest run -p mikrom-api --features test-utils && \
-	$(CEPH_ENV) cargo nextest run -p mikrom-router && \
-	$(CEPH_ENV) cargo nextest run -p mikrom-cli && \
-	$(CEPH_ENV) cargo nextest run -p mikrom-dns && \
-	$(CEPH_ENV) cargo nextest run -p mikrom-network
+	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-proto && \
+	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-scheduler && \
+	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-agent && \
+	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-builder && \
+	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-api --features test-utils && \
+	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-router && \
+	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-cli && \
+	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-dns && \
+	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-network
 
 .PHONY: test-all
 test-all: test-all-crates test-integration ## Run unit + integration tests
