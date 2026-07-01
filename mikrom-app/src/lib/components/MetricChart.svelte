@@ -114,6 +114,57 @@
     return path.join(" ");
   }
 
+  function buildSeriesBounds(points: Point[], configs: SeriesConfig[]) {
+    return Object.fromEntries(
+      configs.map((config) => {
+        const values = points.map((point) => point[config.key]);
+        const min = values.length ? Math.min(...values) : 0;
+        const max = values.length ? Math.max(...values) : 0;
+        const paddedMin = min === max ? min - 1 : min;
+        const paddedMax = min === max ? max + 1 : max;
+        return [config.key, { min: paddedMin, max: paddedMax }];
+      }),
+    ) as Record<SeriesKey, { min: number; max: number }>;
+  }
+
+  function buildSeriesPaths(
+    points: Point[],
+    configs: SeriesConfig[],
+    bounds: Record<SeriesKey, { min: number; max: number }>,
+  ) {
+    return Object.fromEntries(
+      configs.map((config) => {
+        const seriesValues = points.map((point) => point[config.key]);
+        const seriesBounds = bounds[config.key];
+        return [config.key, buildCurvePath(seriesValues, seriesBounds.min, seriesBounds.max)];
+      }),
+    ) as Record<SeriesKey, string>;
+  }
+
+  function getTooltipXOffset(index: number | null, totalPoints: number) {
+    if (index === null || totalPoints === 0) return "-50%";
+    if (index < totalPoints / 4) return "0%";
+    if (index > (totalPoints * 3) / 4) return "-100%";
+    return "-50%";
+  }
+
+  function getTooltipTop(
+    activePoint: Point | null,
+    configs: SeriesConfig[],
+    bounds: Record<SeriesKey, { min: number; max: number }>,
+  ) {
+    if (!activePoint) return "24px";
+
+    const pointTop = Math.min(
+      ...configs.map((config) => {
+        const seriesBounds = bounds[config.key];
+        return plotBottom - normalize(activePoint[config.key], seriesBounds.min, seriesBounds.max) * plotHeight;
+      }),
+    );
+
+    return `${Math.max(12, Math.min(plotBottom - 100, pointTop - 24))}px`;
+  }
+
   function hoverFromEvent(event: PointerEvent) {
     if (!points.length || !chartEl) return;
     const rect = chartEl.getBoundingClientRect();
@@ -126,54 +177,17 @@
   const chartPoints = $derived(points.slice(-30));
   const visiblePoints = $derived(chartPoints);
   const xStep = $derived(visiblePoints.length > 1 ? plotWidth / (visiblePoints.length - 1) : 0);
-  const seriesBounds = $derived(Object.fromEntries(
-    series.map((config) => {
-      const values = visiblePoints.map((point: Point) => point[config.key]);
-      const min = values.length ? Math.min(...values) : 0;
-      const max = values.length ? Math.max(...values) : 0;
-      const paddedMin = min === max ? min - 1 : min;
-      const paddedMax = min === max ? max + 1 : max;
-      return [config.key, { min: paddedMin, max: paddedMax }];
-    })
-  ) as Record<SeriesKey, { min: number; max: number }>);
-  
-  const paths = $derived(Object.fromEntries(
-    series.map((config) => {
-      const bounds = seriesBounds[config.key];
-      return [config.key, buildCurvePath(visiblePoints.map((point: Point) => point[config.key]), bounds.min, bounds.max)];
-    })
-  ) as Record<SeriesKey, string>);
-  
+  const seriesBounds = $derived(buildSeriesBounds(visiblePoints, series));
+  const paths = $derived(buildSeriesPaths(visiblePoints, series, seriesBounds));
+
   const activeIndex = $derived(hoveredIndex);
   const activePoint = $derived(activeIndex !== null ? visiblePoints[activeIndex] : null);
   const activeX = $derived(activeIndex !== null ? plotLeft + xStep * activeIndex : null);
-  
-  // Calculate tooltip alignment and position
-  const tooltipXOffset = $derived(activeIndex !== null && visiblePoints.length > 0
-    ? activeIndex < visiblePoints.length / 4 
-      ? "0%" // Align to the left
-      : activeIndex > (visiblePoints.length * 3) / 4
-        ? "-100%" // Align to the right
-        : "-50%"  // Center
-    : "-50%");
+
+  const tooltipXOffset = $derived(getTooltipXOffset(activeIndex, visiblePoints.length));
 
   const tooltipLeft = $derived(activeX !== null ? `${(activeX / width) * 100}%` : "0%");
-  const tooltipTop = $derived(
-    activePoint && activeIndex !== null
-      ? `${Math.max(
-          12,
-          Math.min(
-            plotBottom - 100,
-            Math.min(
-              ...series.map((config) => {
-                const bounds = seriesBounds[config.key];
-                return plotBottom - normalize(activePoint[config.key], bounds.min, bounds.max) * plotHeight;
-              })
-            ) - 24
-          )
-        )}px`
-      : "24px"
-  );
+  const tooltipTop = $derived(getTooltipTop(activePoint, series, seriesBounds));
 
   function clearHover() {
     hoveredIndex = null;
