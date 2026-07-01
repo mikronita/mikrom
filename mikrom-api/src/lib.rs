@@ -46,6 +46,66 @@ pub fn normalize_loopback_url(url: &str) -> String {
     url.to_string()
 }
 
+#[must_use]
+pub fn normalize_app_slug(name: &str) -> Option<String> {
+    let slug = name
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | '0'..='9' => ch,
+            _ => '-',
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+
+    (!slug.is_empty()).then_some(slug)
+}
+
+#[must_use]
+pub fn build_app_hostname(name: &str) -> ApiResult<String> {
+    let slug = normalize_app_slug(name).ok_or_else(|| {
+        ApiError::BadRequest(
+            "Application name must contain at least one alphanumeric character".to_string(),
+        )
+    })?;
+
+    Ok(format!("{}.apps.mikrom.spluca.org", slug))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_app_hostname, normalize_app_slug};
+
+    #[test]
+    fn normalize_app_slug_collapses_invalid_characters() {
+        assert_eq!(
+            normalize_app_slug(" My App! 1 "),
+            Some("my-app-1".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_app_slug_rejects_empty_values() {
+        assert_eq!(normalize_app_slug("   "), None);
+    }
+
+    #[test]
+    fn build_app_hostname_appends_platform_domain() {
+        assert_eq!(
+            build_app_hostname(" My App! 1 ").unwrap(),
+            "my-app-1.apps.mikrom.spluca.org"
+        );
+    }
+
+    #[test]
+    fn build_app_hostname_rejects_empty_values() {
+        let err = build_app_hostname("   ").unwrap_err();
+        assert!(matches!(err, crate::ApiError::BadRequest(_)));
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub ctx: crate::application::ApiContext,

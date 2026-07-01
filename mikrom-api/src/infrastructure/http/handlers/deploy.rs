@@ -1,4 +1,3 @@
-use crate::AppState;
 use crate::application::deployment::{
     AppResponse, DeployRequestPayload, DeployResponseBody, DeploymentOrchestrator,
     DeploymentService, build_app_response, build_app_response_with_scale_state,
@@ -11,6 +10,7 @@ use crate::domain::types::{CpuCores, MemoryMb, Port};
 use crate::error::{ApiError, ApiResult};
 use crate::infrastructure::auth::extractor::{AuthUser, TenantContext};
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
+use crate::{AppState, build_app_hostname};
 use axum::{
     Json,
     extract::{Path, State},
@@ -204,28 +204,6 @@ pub async fn create_app_handler(
         StatusCode::CREATED,
         Json(build_app_response(&state, &app).await),
     ))
-}
-
-fn build_app_hostname(name: &str) -> ApiResult<String> {
-    let hostname = name
-        .trim()
-        .to_lowercase()
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | '0'..='9' => ch,
-            _ => '-',
-        })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string();
-
-    if hostname.is_empty() {
-        return Err(ApiError::BadRequest(
-            "Application name must contain at least one alphanumeric character".to_string(),
-        ));
-    }
-
-    Ok(format!("{}.apps.mikrom.spluca.org", hostname))
 }
 
 #[rovo::rovo]
@@ -1307,87 +1285,6 @@ mod tests {
         match result {
             Err(ApiError::NotFound(msg)) => assert!(msg.contains("not found")),
             _ => panic!("Expected NotFound error, got {:?}", result),
-        }
-    }
-
-    #[tokio::test]
-    async fn create_app_handler_normalizes_app_name_into_hostname() {
-        let mut state = create_test_state().await;
-        let user_id = Uuid::new_v4();
-        let auth = AuthUser {
-            user_id: user_id.to_string(),
-            email: "test@example.com".to_string(),
-            role: UserRole::User,
-        };
-        let tenant_ctx = tenant_context(user_id);
-
-        let mut mock_app_repo = MockAppRepository::new();
-        mock_app_repo
-            .expect_create_app()
-            .returning(move |_, params| {
-                assert_eq!(
-                    params.hostname.as_deref(),
-                    Some("my-app-1.apps.mikrom.spluca.org")
-                );
-                Ok(crate::domain::App {
-                    id: Uuid::new_v4(),
-                    tenant_id: user_id,
-                    name: params.name,
-                    git_url: params.git_url,
-                    port: params.port,
-                    hostname: params.hostname,
-                    desired_replicas: params.desired_replicas.unwrap_or(1),
-                    min_replicas: params.min_replicas.unwrap_or(0),
-                    max_replicas: params.max_replicas.unwrap_or(1),
-                    autoscaling_enabled: params.autoscaling_enabled.unwrap_or(false),
-                    ..crate::domain::App::default()
-                })
-            });
-        state.app_repo = Arc::new(mock_app_repo);
-
-        let mut mock_scheduler = MockScheduler::new();
-        mock_scheduler
-            .expect_create_app()
-            .returning(|_, _, _| Ok(()));
-        state.scheduler = Arc::new(mock_scheduler);
-
-        let result = __create_app_handler_impl(
-            auth,
-            tenant_ctx,
-            State(state),
-            Json(CreateAppRequest {
-                name: " My App! 1 ".to_string(),
-                git_url: "https://github.com/test/repo.git".to_string(),
-                port: None,
-                github_installation_id: None,
-                github_repo_id: None,
-                github_repo_full_name: None,
-                health_check_path: None,
-                drain_timeout: None,
-                desired_replicas: None,
-                min_replicas: None,
-                max_replicas: None,
-                autoscaling_enabled: None,
-            }),
-        )
-        .await;
-
-        let response = result.expect("create_app_handler should succeed");
-        assert_eq!(response.1.0.name, "My App! 1");
-        assert_eq!(
-            response.1.0.hostname.as_deref(),
-            Some("my-app-1.apps.mikrom.spluca.org")
-        );
-    }
-
-    #[test]
-    fn build_app_hostname_rejects_empty_names() {
-        let err = build_app_hostname("   ").unwrap_err();
-        match err {
-            ApiError::BadRequest(msg) => {
-                assert!(msg.contains("at least one alphanumeric character"));
-            },
-            _ => panic!("expected bad request, got {err:?}"),
         }
     }
 }
