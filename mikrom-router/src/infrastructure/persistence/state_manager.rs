@@ -49,17 +49,22 @@ impl SerializableState {
         let mut state = State::default();
 
         for (host, targets) in self.routes {
-            if let Ok(lb) = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice()) {
-                state.routes.insert(
-                    host.clone(),
-                    Route {
-                        host,
-                        targets,
-                        lb: Arc::new(lb),
-                        use_tls: false,
-                        tls_alternative_cn: None,
-                    },
-                );
+            match LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice()) {
+                Ok(lb) => {
+                    state.routes.insert(
+                        host.clone(),
+                        Route {
+                            host,
+                            targets,
+                            lb: Arc::new(lb),
+                            use_tls: false,
+                            tls_alternative_cn: None,
+                        },
+                    );
+                },
+                Err(err) => {
+                    warn!(%host, error = %err, "Skipping invalid cached route");
+                },
             }
         }
 
