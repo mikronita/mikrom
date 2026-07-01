@@ -1047,7 +1047,11 @@ impl DeploymentService {
             .clone()
             .ok_or_else(|| ApiError::BadRequest("Deployment is missing a job id".into()))?;
 
-        match state.scheduler.resume_app(job_id.clone(), tenant_id.clone()).await {
+        match state
+            .scheduler
+            .resume_app(job_id.clone(), tenant_id.clone())
+            .await
+        {
             Ok(true) => {
                 // Update database status
                 let _ = state

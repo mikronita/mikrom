@@ -1,8 +1,8 @@
 use axum::extract::ConnectInfo;
 use axum::middleware;
 use rovo::Router;
-use rovo::routing::{delete, get, patch, post};
 use rovo::routing::put;
+use rovo::routing::{delete, get, patch, post};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};

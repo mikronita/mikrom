@@ -151,7 +151,10 @@ async fn manual_deploy_without_github_metadata_uses_current_app_metadata() {
         assert!(data.git_commit_hash.is_none());
         assert!(data.git_commit_message.is_none());
         assert!(data.git_branch.is_none());
-        assert_eq!(data.port, mikrom_api::domain::types::Port::new(3000).unwrap());
+        assert_eq!(
+            data.port,
+            mikrom_api::domain::types::Port::new(3000).unwrap()
+        );
         Ok(Deployment {
             id: Uuid::new_v4(),
             app_id,

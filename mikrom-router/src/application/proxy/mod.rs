@@ -90,7 +90,9 @@ fn parse_upstream_targets(label: &str, targets: &str) -> anyhow::Result<Vec<Stri
         .collect();
 
     if parsed.is_empty() {
-        return Err(anyhow::anyhow!("{label} upstream target list cannot be empty"));
+        return Err(anyhow::anyhow!(
+            "{label} upstream target list cannot be empty"
+        ));
     }
 
     Ok(parsed)

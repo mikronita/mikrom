@@ -249,7 +249,11 @@ async fn billing_checkout_product_can_be_persisted_per_tenant() {
         .expect("summary body");
     let summary_json: Value = serde_json::from_slice(&summary_body).expect("summary json");
     assert_eq!(summary_json["selected_checkout_product_id"], "prod_custom");
-    assert!(summary_json["has_billing_record"].as_bool().is_some_and(|value| !value));
+    assert!(
+        summary_json["has_billing_record"]
+            .as_bool()
+            .is_some_and(|value| !value)
+    );
 
     let checkout_response = app
         .oneshot(
@@ -509,7 +513,10 @@ async fn billing_products_endpoint_lists_polar_catalog() {
     let payload: Value = serde_json::from_slice(&body).expect("json");
 
     assert_eq!(payload["default_checkout_product_id"], "prod_default");
-    assert_eq!(payload["products"].as_array().map(|items| items.len()), Some(2));
+    assert_eq!(
+        payload["products"].as_array().map(|items| items.len()),
+        Some(2)
+    );
     assert_eq!(payload["products"][0]["id"], "prod_default");
     assert_eq!(payload["products"][0]["name"], "Pro");
     assert_eq!(payload["products"][0]["price_amount_cents"], 2500);
@@ -538,7 +545,12 @@ async fn billing_products_endpoint_lists_polar_catalog() {
         .await
         .expect("cached body");
     let cached_payload: Value = serde_json::from_slice(&cached_body).expect("cached json");
-    assert_eq!(cached_payload["products"].as_array().map(|items| items.len()), Some(2));
+    assert_eq!(
+        cached_payload["products"]
+            .as_array()
+            .map(|items| items.len()),
+        Some(2)
+    );
     assert_eq!(cached_payload["products"][1]["id"], "prod_archive");
     assert!(cached_payload["last_synced_at"].is_string());
 
@@ -615,7 +627,10 @@ async fn billing_products_refresh_endpoint_syncs_catalog() {
     let payload: Value = serde_json::from_slice(&body).expect("json");
 
     assert_eq!(payload["default_checkout_product_id"], "prod_default");
-    assert_eq!(payload["products"].as_array().map(|items| items.len()), Some(1));
+    assert_eq!(
+        payload["products"].as_array().map(|items| items.len()),
+        Some(1)
+    );
     assert_eq!(payload["products"][0]["id"], "prod_refresh");
     assert_eq!(payload["products"][0]["name"], "Refresh");
     assert!(payload["last_synced_at"].is_string());

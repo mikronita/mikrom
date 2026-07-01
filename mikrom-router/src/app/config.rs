@@ -603,7 +603,10 @@ mod tests {
             ),
             ("NATS_URL".to_string(), "nats://localhost:4222".to_string()),
             ("MASTER_KEY".to_string(), "x".repeat(32)),
-            ("API_UPSTREAM_TARGETS".to_string(), "api.internal:5001".to_string()),
+            (
+                "API_UPSTREAM_TARGETS".to_string(),
+                "api.internal:5001".to_string(),
+            ),
         ])
         .expect("config should deserialize");
 
@@ -619,7 +622,10 @@ mod tests {
             ),
             ("NATS_URL".to_string(), "nats://localhost:4222".to_string()),
             ("MASTER_KEY".to_string(), "x".repeat(32)),
-            ("WEB_UPSTREAM_TARGETS".to_string(), "web.internal:5173".to_string()),
+            (
+                "WEB_UPSTREAM_TARGETS".to_string(),
+                "web.internal:5173".to_string(),
+            ),
         ])
         .expect("config should deserialize");
 

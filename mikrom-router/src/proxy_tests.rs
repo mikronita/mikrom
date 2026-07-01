@@ -233,10 +233,8 @@ mod tests {
         assert!(proxy.has_route("mikrom.spluca.org").await);
         assert!(proxy.has_route("mikrom.spluca.org:443").await);
 
-        let (lb, use_tls, alternative_cn) = proxy
-            .get_lb_and_tls("mikrom.spluca.org:443")
-            .await
-            .unwrap();
+        let (lb, use_tls, alternative_cn) =
+            proxy.get_lb_and_tls("mikrom.spluca.org:443").await.unwrap();
 
         assert!(!use_tls);
         assert!(alternative_cn.is_none());
