@@ -144,14 +144,9 @@ impl ControlPlane {
             let mut use_tls = false;
 
             for target in &targets {
-                if target.starts_with("https://") {
-                    use_tls = true;
-                    normalized_targets.push(target.strip_prefix("https://").unwrap().to_string());
-                } else if target.starts_with("http://") {
-                    normalized_targets.push(target.strip_prefix("http://").unwrap().to_string());
-                } else {
-                    normalized_targets.push(target.clone());
-                }
+                let (normalized, has_tls) = normalize_route_target(target);
+                use_tls |= has_tls;
+                normalized_targets.push(normalized);
             }
 
             let mut lb = LoadBalancer::<RoundRobin>::try_from_iter(normalized_targets.as_slice())?;
@@ -216,6 +211,18 @@ impl ControlPlane {
         self.state_manager.update_state(state).await?;
         Ok(())
     }
+}
+
+fn normalize_route_target(target: &str) -> (String, bool) {
+    if let Some(rest) = target.strip_prefix("https://") {
+        return (rest.to_string(), true);
+    }
+
+    if let Some(rest) = target.strip_prefix("http://") {
+        return (rest.to_string(), false);
+    }
+
+    (target.to_string(), false)
 }
 
 #[async_trait]
