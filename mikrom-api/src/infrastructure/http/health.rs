@@ -111,9 +111,7 @@ async fn get_system_health(state: &crate::AppState) -> HashMap<String, String> {
     }
 
     async fn check_tcp(addr_str: &str) -> bool {
-        let clean_addr = crate::normalize_service_url(addr_str)
-            .trim_start_matches("http://")
-            .trim_start_matches("https://");
+        let clean_addr = crate::service_addr_for_tcp_check(addr_str);
 
         matches!(
             tokio::time::timeout(

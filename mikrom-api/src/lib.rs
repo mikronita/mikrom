@@ -52,6 +52,16 @@ pub fn normalize_service_url(url: &str) -> String {
 }
 
 #[must_use]
+pub fn service_addr_for_tcp_check(url: &str) -> String {
+    let normalized = normalize_service_url(url);
+    normalized
+        .strip_prefix("http://")
+        .or_else(|| normalized.strip_prefix("https://"))
+        .unwrap_or_else(|| normalized.as_str())
+        .to_string()
+}
+
+#[must_use]
 pub fn normalize_app_slug(name: &str) -> Option<String> {
     let slug = name
         .trim()
@@ -119,6 +129,18 @@ mod tests {
         assert_eq!(
             super::normalize_service_url("http://example.com/"),
             "http://example.com"
+        );
+    }
+
+    #[test]
+    fn service_addr_for_tcp_check_strips_scheme_and_trailing_slash() {
+        assert_eq!(
+            super::service_addr_for_tcp_check("https://[::1]:8080/"),
+            "localhost:8080"
+        );
+        assert_eq!(
+            super::service_addr_for_tcp_check("http://example.com:80/"),
+            "example.com:80"
         );
     }
 }
