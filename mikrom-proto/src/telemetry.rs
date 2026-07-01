@@ -1,11 +1,11 @@
 use anyhow::Result;
+use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry::KeyValue;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use opentelemetry_sdk::{logs::SdkLoggerProvider, metrics::SdkMeterProvider, Resource};
+use opentelemetry_sdk::{Resource, logs::SdkLoggerProvider, metrics::SdkMeterProvider};
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
 use std::collections::HashMap;
 use std::fs::File;
@@ -13,10 +13,10 @@ use std::future::Future;
 use std::io::{BufRead, BufReader, Read};
 use std::time::Duration;
 use tracing::{error, info};
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::Registry;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::Layer;
 
 pub type DynTelemetryLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
 
@@ -51,10 +51,7 @@ impl TelemetryProviders {
         );
     }
 
-    pub fn trace_layer(
-        &self,
-        service_name: &str,
-    ) -> impl Layer<Registry> + Send + Sync + 'static {
+    pub fn trace_layer(&self, service_name: &str) -> impl Layer<Registry> + Send + Sync + 'static {
         let tracer = self.tracer_provider.tracer(service_name.to_string());
         tracing_opentelemetry::layer().with_tracer(tracer)
     }
@@ -140,7 +137,10 @@ pub fn telemetry_endpoint() -> String {
 #[must_use]
 pub fn telemetry_headers() -> HashMap<String, String> {
     let mut headers = HashMap::new();
-    if let Some(token) = std::env::var("DT_API_TOKEN").ok().filter(|token| !token.is_empty()) {
+    if let Some(token) = std::env::var("DT_API_TOKEN")
+        .ok()
+        .filter(|token| !token.is_empty())
+    {
         headers.insert("Authorization".to_string(), format!("Api-Token {token}"));
     }
     headers
@@ -221,9 +221,7 @@ fn build_providers(
         .with_resource(resource.clone())
         .build();
 
-    let logger_provider = SdkLoggerProvider::builder()
-        .with_resource(resource)
-        .build();
+    let logger_provider = SdkLoggerProvider::builder().with_resource(resource).build();
 
     Ok(TelemetryProviders::new(
         tracer_provider,

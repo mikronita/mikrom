@@ -13,11 +13,8 @@ fn parse_timeout_env(name: &str, default_secs: u64) -> anyhow::Result<Duration> 
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let _telemetry = mikrom_proto::telemetry::init_telemetry(
-        "mikrom-network",
-        env!("CARGO_PKG_VERSION"),
-        None,
-    )?;
+    let _telemetry =
+        mikrom_proto::telemetry::init_telemetry("mikrom-network", env!("CARGO_PKG_VERSION"), None)?;
     mikrom_proto::telemetry::record_service_startup("mikrom-network");
 
     let host_id = std::env::var("MIKROM_HOST_ID")
