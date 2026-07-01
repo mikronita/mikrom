@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::auth::extractor::{AuthUser, TenantContext};
 use crate::domain::Tenant;
 use crate::error::{ApiError, ApiResult};
-use crate::normalize_loopback_url;
+use crate::normalize_service_url;
 use axum::http::HeaderMap;
 use base64::Engine;
 use chrono::{DateTime, Utc};
@@ -745,11 +745,11 @@ fn product_description_from_value(value: &serde_json::Value) -> Option<String> {
         .get("description")
         .and_then(|value| value.as_str())
         .or_else(|| value.get("summary").and_then(|value| value.as_str()))
-        .or_else(|| value.get("metadata").and_then(|metadata| {
-            metadata
-                .get("description")
-                .and_then(|value| value.as_str())
-        }))
+        .or_else(|| {
+            value
+                .get("metadata")
+                .and_then(|metadata| metadata.get("description").and_then(|value| value.as_str()))
+        })
         .map(str::to_string)
 }
 
@@ -810,10 +810,7 @@ fn first_integer_from_fields(value: &serde_json::Value, fields: &[&str]) -> Opti
                 }
             }
 
-            if let Some(integer) = number
-                .as_str()
-                .and_then(parse_cents_from_string)
-            {
+            if let Some(integer) = number.as_str().and_then(parse_cents_from_string) {
                 return Some(integer);
             }
         }
@@ -865,12 +862,20 @@ fn parse_cents_from_string(value: &str) -> Option<i32> {
         1 => fractional.parse::<i64>().ok()? * 10,
         _ => fractional.parse::<i64>().ok()?,
     };
-    let cents = whole_value.checked_mul(100)?.checked_add(fractional_value)?;
-    let cents = if negative { cents.checked_neg()? } else { cents };
+    let cents = whole_value
+        .checked_mul(100)?
+        .checked_add(fractional_value)?;
+    let cents = if negative {
+        cents.checked_neg()?
+    } else {
+        cents
+    };
     i32::try_from(cents).ok()
 }
 
-fn price_source_candidates<'a>(value: &'a serde_json::Value) -> Vec<(String, &'a serde_json::Value)> {
+fn price_source_candidates<'a>(
+    value: &'a serde_json::Value,
+) -> Vec<(String, &'a serde_json::Value)> {
     let mut candidates = Vec::new();
 
     let mut push_candidate = |label: String, candidate: Option<&'a serde_json::Value>| {
@@ -882,26 +887,41 @@ fn price_source_candidates<'a>(value: &'a serde_json::Value) -> Vec<(String, &'a
     push_candidate("price".to_string(), value.get("price"));
     push_candidate("default_price".to_string(), value.get("default_price"));
     push_candidate("price_data".to_string(), value.get("price_data"));
-    push_candidate("default_price_data".to_string(), value.get("default_price_data"));
+    push_candidate(
+        "default_price_data".to_string(),
+        value.get("default_price_data"),
+    );
     push_candidate("recurring_price".to_string(), value.get("recurring_price"));
     push_candidate("billing_price".to_string(), value.get("billing_price"));
 
     if let Some(prices) = value.get("prices").and_then(|value| value.as_array()) {
-        candidates.extend(prices.iter().enumerate().map(|(index, value)| {
-            (format!("prices[{index}]"), value)
-        }));
+        candidates.extend(
+            prices
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (format!("prices[{index}]"), value)),
+        );
     }
 
-    if let Some(prices) = value.get("recurring_prices").and_then(|value| value.as_array()) {
-        candidates.extend(prices.iter().enumerate().map(|(index, value)| {
-            (format!("recurring_prices[{index}]"), value)
-        }));
+    if let Some(prices) = value
+        .get("recurring_prices")
+        .and_then(|value| value.as_array())
+    {
+        candidates.extend(
+            prices
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (format!("recurring_prices[{index}]"), value)),
+        );
     }
 
     if let Some(prices) = value.get("plan_prices").and_then(|value| value.as_array()) {
-        candidates.extend(prices.iter().enumerate().map(|(index, value)| {
-            (format!("plan_prices[{index}]"), value)
-        }));
+        candidates.extend(
+            prices
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (format!("plan_prices[{index}]"), value)),
+        );
     }
 
     candidates
@@ -996,10 +1016,8 @@ fn price_details_from_value(value: &serde_json::Value) -> (Option<i32>, Option<S
             "price_amount_decimal",
         ],
     );
-    let recursive_currency = recursive_find_currency_field(
-        value,
-        &["currency", "currency_code", "price_currency"],
-    );
+    let recursive_currency =
+        recursive_find_currency_field(value, &["currency", "currency_code", "price_currency"]);
     (amount.or(recursive_amount), currency.or(recursive_currency))
 }
 
@@ -1008,7 +1026,12 @@ fn is_archived_from_value(value: &serde_json::Value) -> bool {
         .get("is_archived")
         .and_then(|value| value.as_bool())
         .or_else(|| value.get("archived").and_then(|value| value.as_bool()))
-        .or_else(|| value.get("is_active").and_then(|value| value.as_bool()).map(|active| !active))
+        .or_else(|| {
+            value
+                .get("is_active")
+                .and_then(|value| value.as_bool())
+                .map(|active| !active)
+        })
         .unwrap_or(false)
 }
 
@@ -1062,7 +1085,10 @@ async fn list_polar_products(settings: &PolarSettings) -> ApiResult<Vec<BillingP
     let json: serde_json::Value = serde_json::from_str(&body)
         .map_err(|e| ApiError::Internal(format!("Invalid Polar response: {e}")))?;
     let products = product_entries_from_value(json)?;
-    Ok(parse_polar_products(products, settings.default_product_id.clone()))
+    Ok(parse_polar_products(
+        products,
+        settings.default_product_id.clone(),
+    ))
 }
 
 fn resolve_subscription_product_name(subscription: &PolarSubscription) -> Option<String> {
@@ -1242,7 +1268,7 @@ pub async fn create_billing_portal_link(
         &customer_email,
     )
     .await?;
-    let frontend_url = normalize_loopback_url(state.frontend_url.trim_end_matches('/'));
+    let frontend_url = normalize_service_url(&state.frontend_url);
     let return_url = format!("{frontend_url}/settings?tab=billing");
     let url = create_customer_session(&settings, &tenant_ctx.tenant, &return_url).await?;
     Ok(RedirectResponse { url })
@@ -1262,8 +1288,10 @@ pub async fn create_billing_checkout_link(
             .and_then(|preference| preference.checkout_product_id)
             .or_else(|| settings.default_product_id.clone())
     })
-    .ok_or_else(|| ApiError::BadRequest("Missing product_id and POLAR_CHECKOUT_PRODUCT_ID".into()))?;
-    let frontend_url = normalize_loopback_url(state.frontend_url.trim_end_matches('/'));
+    .ok_or_else(|| {
+        ApiError::BadRequest("Missing product_id and POLAR_CHECKOUT_PRODUCT_ID".into())
+    })?;
+    let frontend_url = normalize_service_url(&state.frontend_url);
     let return_url = format!("{frontend_url}/settings?tab=billing");
     let success_url = format!("{frontend_url}/settings?tab=billing&checkout=success");
     let url = create_checkout_session(
