@@ -19,6 +19,7 @@ pub struct User {
     pub role: UserRole,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
+    pub avatar_url: Option<String>,
     pub vpc_ipv6_prefix: Option<String>,
 }
 
@@ -29,6 +30,7 @@ pub struct NewUser {
     pub role: UserRole,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 #[mockall::automock]
@@ -43,5 +45,6 @@ pub trait UserRepository: Send + Sync {
         id: Uuid,
         first_name: Option<String>,
         last_name: Option<String>,
+        avatar_url: Option<String>,
     ) -> DomainResult<User>;
 }

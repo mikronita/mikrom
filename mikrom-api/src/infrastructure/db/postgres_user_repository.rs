@@ -18,15 +18,23 @@ impl PostgresUserRepository {
 #[async_trait]
 impl UserRepository for PostgresUserRepository {
     async fn find_by_email(&self, email: &str) -> DomainResult<Option<User>> {
-        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>)>(
-            "SELECT id, email, password_hash, role, first_name, last_name, vpc_ipv6_prefix FROM users WHERE email = $1",
+        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>)>(
+            "SELECT id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix FROM users WHERE email = $1",
         )
         .bind(email)
         .fetch_optional(&self.pool)
         .await?;
 
-        if let Some((id, email, password_hash, role_str, first_name, last_name, vpc_ipv6_prefix)) =
-            result
+        if let Some((
+            id,
+            email,
+            password_hash,
+            role_str,
+            first_name,
+            last_name,
+            avatar_url,
+            vpc_ipv6_prefix,
+        )) = result
         {
             let role = match role_str.as_str() {
                 "admin" => UserRole::Admin,
@@ -39,6 +47,7 @@ impl UserRepository for PostgresUserRepository {
                 role,
                 first_name,
                 last_name,
+                avatar_url,
                 vpc_ipv6_prefix,
             }))
         } else {
@@ -49,24 +58,24 @@ impl UserRepository for PostgresUserRepository {
     async fn find_by_id(&self, id: Uuid) -> DomainResult<Option<User>> {
         let result = sqlx::query_as::<
             _,
-            (
-                Uuid,
-                String,
-                String,
-                String,
-                Option<String>,
-                Option<String>,
-                Option<String>,
-            ),
+            (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>),
         >(
-            "SELECT id, email, password_hash, role, first_name, last_name, vpc_ipv6_prefix FROM users WHERE id = $1",
+            "SELECT id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix FROM users WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
 
-        if let Some((id, email, password_hash, role_str, first_name, last_name, vpc_ipv6_prefix)) =
-            result
+        if let Some((
+            id,
+            email,
+            password_hash,
+            role_str,
+            first_name,
+            last_name,
+            avatar_url,
+            vpc_ipv6_prefix,
+        )) = result
         {
             let role = match role_str.as_str() {
                 "admin" => UserRole::Admin,
@@ -79,6 +88,7 @@ impl UserRepository for PostgresUserRepository {
                 role,
                 first_name,
                 last_name,
+                avatar_url,
                 vpc_ipv6_prefix,
             }))
         } else {
@@ -123,29 +133,29 @@ impl UserRepository for PostgresUserRepository {
         id: Uuid,
         first_name: Option<String>,
         last_name: Option<String>,
+        avatar_url: Option<String>,
     ) -> DomainResult<User> {
-        let result = sqlx::query_as::<
-            _,
-            (
-                Uuid,
-                String,
-                String,
-                String,
-                Option<String>,
-                Option<String>,
-                Option<String>,
-            ),
-        >(
-            "UPDATE users SET first_name = COALESCE($1, first_name), last_name = COALESCE($2, last_name) \
-             WHERE id = $3 RETURNING id, email, password_hash, role, first_name, last_name, vpc_ipv6_prefix",
+        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>)>(
+            "UPDATE users SET first_name = COALESCE($1, first_name), last_name = COALESCE($2, last_name), avatar_url = COALESCE($3, avatar_url) \
+             WHERE id = $4 RETURNING id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix",
         )
         .bind(first_name)
         .bind(last_name)
+        .bind(avatar_url)
         .bind(id)
         .fetch_one(&self.pool)
         .await?;
 
-        let (id, email, password_hash, role_str, first_name, last_name, vpc_ipv6_prefix) = result;
+        let (
+            id,
+            email,
+            password_hash,
+            role_str,
+            first_name,
+            last_name,
+            avatar_url,
+            vpc_ipv6_prefix,
+        ) = result;
         let role = match role_str.as_str() {
             "admin" => UserRole::Admin,
             _ => UserRole::User,
@@ -158,6 +168,7 @@ impl UserRepository for PostgresUserRepository {
             role,
             first_name,
             last_name,
+            avatar_url,
             vpc_ipv6_prefix,
         })
     }
@@ -209,6 +220,7 @@ mod tests {
                 role: UserRole::User,
                 first_name: None,
                 last_name: None,
+                avatar_url: None,
             })
             .await
             .expect("create failed");
@@ -253,6 +265,7 @@ mod tests {
             role: UserRole::User,
             first_name: None,
             last_name: None,
+            avatar_url: None,
         })
         .await
         .expect("create failed");

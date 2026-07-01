@@ -4,6 +4,12 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+if [ -x /tmp/opencode/protoc/bin/protoc ]; then
+  export PROTOC=/tmp/opencode/protoc/bin/protoc
+elif command -v protoc >/dev/null 2>&1; then
+  export PROTOC="$(command -v protoc)"
+fi
+
 echo "Running pre-commit checks..."
 
 run_rust=false

@@ -11,12 +11,14 @@ pub struct RegisterParams {
     pub password: String,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 pub struct UpdateProfileParams {
     pub user_id: Uuid,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 pub struct AuthResult {
@@ -54,6 +56,7 @@ impl AuthService {
                 role: crate::domain::UserRole::User,
                 first_name: params.first_name,
                 last_name: params.last_name,
+                avatar_url: params.avatar_url,
             })
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -154,7 +157,12 @@ impl AuthService {
     pub async fn update_profile(state: &AppState, params: UpdateProfileParams) -> ApiResult<User> {
         state
             .user_repo
-            .update_profile(params.user_id, params.first_name, params.last_name)
+            .update_profile(
+                params.user_id,
+                params.first_name,
+                params.last_name,
+                params.avatar_url,
+            )
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -177,6 +185,7 @@ impl AuthService {
         auth_user_id: &str,
         first_name: Option<String>,
         last_name: Option<String>,
+        avatar_url: Option<String>,
     ) -> ApiResult<User> {
         let user_id = Uuid::parse_str(auth_user_id)
             .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
@@ -187,6 +196,7 @@ impl AuthService {
                 user_id,
                 first_name,
                 last_name,
+                avatar_url,
             },
         )
         .await

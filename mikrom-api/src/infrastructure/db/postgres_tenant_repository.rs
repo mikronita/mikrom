@@ -152,6 +152,7 @@ mod tests {
                 role: UserRole::User,
                 first_name: Some("Test".into()),
                 last_name: Some("User".into()),
+                avatar_url: None,
             })
             .await
             .unwrap();

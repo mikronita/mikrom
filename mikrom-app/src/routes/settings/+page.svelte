@@ -21,10 +21,12 @@
     refreshBillingProducts,
     updateBillingCheckoutProduct,
     updateUserProfile,
+    uploadUserAvatar,
     type GithubAccount,
     type UserProfile,
     type BillingProduct,
   } from "$lib/api";
+  import { Avatar, AvatarFallback, AvatarImage } from "$lib/components";
   import { getBillingStatusConfig } from "$lib/domain/billing";
   import { toast } from "$lib/toast";
   import {
@@ -53,6 +55,7 @@
   let billingProductsRefreshing = $state(false);
   let billingProducts = $state<BillingProduct[]>([]);
   let billingProductsLastSyncedAt = $state<string | null>(null);
+  let avatarUploading = $state(false);
   let canManageBilling = $derived((profile?.role || "").toLowerCase() === "admin");
   let billingStatus = $derived(getBillingStatusConfig($billing?.status));
 
@@ -147,6 +150,28 @@
 
     if (result.data) profile = result.data;
     toast.success("Profile updated successfully");
+  }
+
+  async function handleAvatarSelected(event: Event) {
+    const target = event.currentTarget as HTMLInputElement;
+    const file = target.files?.[0];
+    if (!file) return;
+
+    const token = getToken();
+    if (!token) return;
+
+    avatarUploading = true;
+    const result = await uploadUserAvatar(token, file);
+    avatarUploading = false;
+    target.value = "";
+
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
+
+    if (result.data) profile = result.data;
+    toast.success("Avatar updated successfully");
   }
 
   async function connectGithub() {
@@ -335,6 +360,22 @@
         {saving}
         onSave={saveProfile}
       />
+      <div class="mt-6 flex items-center gap-4 rounded-lg border border-border bg-background p-4">
+        <Avatar class="size-16">
+          <AvatarImage src={profile?.avatar_url || undefined} alt="User avatar" />
+          <AvatarFallback>
+            {(profile?.first_name?.[0] || profile?.email?.[0] || "U").toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+        <div class="space-y-2">
+          <div class="text-sm font-medium">Profile avatar</div>
+          <div class="text-xs text-muted-foreground">PNG, JPG or WebP. Up to a small image file.</div>
+          <label class="inline-flex cursor-pointer items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50">
+            <span>{avatarUploading ? "Uploading..." : "Change avatar"}</span>
+            <input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" on:change={handleAvatarSelected} disabled={avatarUploading} />
+          </label>
+        </div>
+      </div>
     {:else if activeTab === "security"}
       <SettingsSecuritySection />
     {:else if activeTab === "api"}

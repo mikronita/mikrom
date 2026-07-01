@@ -1,16 +1,18 @@
 use axum::extract::ConnectInfo;
 use axum::middleware;
+use axum::routing::post as axum_post;
 use rovo::Router;
 use rovo::routing::put;
 use rovo::routing::{delete, get, patch, post};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::ServeDir;
 use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
 use crate::infrastructure::http::handlers::{
-    auth::{get_profile, login, register, update_profile},
+    auth::{get_profile, login, register, update_profile, upload_avatar},
     billing::{
         create_billing_checkout, create_billing_portal, get_billing_summary, list_billing_products,
         polar_webhook, refresh_billing_products, update_billing_checkout_product,
@@ -82,6 +84,10 @@ pub fn create_app_with_rate_limits(
         .route(
             &format!("{}/auth/me", crate::API_V1),
             get(get_profile).put(update_profile),
+        )
+        .route(
+            &format!("{}/auth/me/avatar", crate::API_V1),
+            axum_post(upload_avatar),
         )
         .route(
             &format!("{}/billing", crate::API_V1),
@@ -416,9 +422,12 @@ pub fn create_app_with_rate_limits(
         .with_swagger(crate::SWAGGER_PATH)
         .finish();
 
+    let static_routes = axum::Router::new().fallback_service(ServeDir::new("./data"));
+
     public_routes
         .merge(protected_routes_layered)
         .merge(oas_router)
+        .merge(static_routes)
         .with_state(state)
         .layer(
             TraceLayer::new_for_http()

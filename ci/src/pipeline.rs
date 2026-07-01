@@ -567,6 +567,7 @@ impl MikromCi {
             .with_mounted_cache("/usr/local/cargo/git", self.cargo_git.clone())
             .with_mounted_cache(target_dir.clone(), cargo_target)
             .with_mounted_cache("/root/.rustup", self.rustup.clone())
+            .with_env_variable("PROTOC", "/usr/bin/protoc")
             .with_env_variable("CARGO_TARGET_DIR", target_dir)
             .with_env_variable("CARGO_TERM_COLOR", "always")
             .with_env_variable("RUST_BACKTRACE", "1")
@@ -612,6 +613,7 @@ impl MikromCi {
             )
             .with_env_variable("CI", "true")
             .with_env_variable("PNPM_HOME", "/pnpm")
+            .with_env_variable("PROTOC", "/usr/bin/protoc")
             .with_env_variable("CARGO_TERM_COLOR", "always")
             .with_env_variable("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
     }

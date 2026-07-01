@@ -30,6 +30,7 @@ fn build_state(tenant_id: Uuid, owner_user_id: Uuid) -> AppState {
             role: UserRole::User,
             first_name: None,
             last_name: None,
+            avatar_url: None,
             vpc_ipv6_prefix: Some("fd00::".to_string()),
         }))
     });

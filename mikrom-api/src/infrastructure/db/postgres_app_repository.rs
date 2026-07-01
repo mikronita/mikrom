@@ -538,6 +538,7 @@ mod tests {
                 role: UserRole::User,
                 first_name: None,
                 last_name: None,
+                avatar_url: None,
             })
             .await
             .expect("failed to create user");
@@ -639,6 +640,7 @@ mod tests {
                 role: UserRole::User,
                 first_name: None,
                 last_name: None,
+                avatar_url: None,
             })
             .await
             .expect("failed to create user");
