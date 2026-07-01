@@ -2,8 +2,8 @@ use crate::AppState;
 use crate::auth::AuthUser;
 use crate::domain::UserGithubAccount;
 use crate::error::{ApiError, ApiResult};
-use crate::normalize_loopback_url;
 use crate::infrastructure::github::{GithubRepo, list_installation_repos};
+use crate::normalize_service_url;
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
 use axum::Json;
 use axum::extract::{Query, State};
@@ -63,7 +63,7 @@ pub async fn github_callback(
             );
             return Ok(Redirect::to(&format!(
                 "{}/settings",
-                normalize_loopback_url(state.frontend_url.trim_end_matches('/'))
+                normalize_service_url(&state.frontend_url)
             )));
         },
     };
@@ -143,7 +143,7 @@ pub async fn github_callback(
     // Redirect back to settings in the frontend
     Ok(Redirect::to(&format!(
         "{}/settings",
-        normalize_loopback_url(state.frontend_url.trim_end_matches('/'))
+        normalize_service_url(&state.frontend_url)
     )))
 }
 

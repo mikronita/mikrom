@@ -47,6 +47,11 @@ pub fn normalize_loopback_url(url: &str) -> String {
 }
 
 #[must_use]
+pub fn normalize_service_url(url: &str) -> String {
+    normalize_loopback_url(url.trim_end_matches('/'))
+}
+
+#[must_use]
 pub fn normalize_app_slug(name: &str) -> Option<String> {
     let slug = name
         .trim()
@@ -103,6 +108,18 @@ mod tests {
     fn build_app_hostname_rejects_empty_values() {
         let err = build_app_hostname("   ").unwrap_err();
         assert!(matches!(err, crate::ApiError::BadRequest(_)));
+    }
+
+    #[test]
+    fn normalize_service_url_trims_and_converts_loopback_hosts() {
+        assert_eq!(
+            super::normalize_service_url("https://[::1]:3000/"),
+            "https://localhost:3000"
+        );
+        assert_eq!(
+            super::normalize_service_url("http://example.com/"),
+            "http://example.com"
+        );
     }
 }
 
