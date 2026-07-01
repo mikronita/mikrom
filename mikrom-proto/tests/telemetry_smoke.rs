@@ -1,15 +1,15 @@
-use std::sync::{Arc, Mutex, OnceLock};
 use async_trait::async_trait;
 use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost14::Message;
+use std::sync::{Arc, Mutex, OnceLock};
 use tracing::span::{Attributes, Id, Record};
-use tracing::{Dispatch, Event, Metadata};
 use tracing::subscriber::Interest;
-use tracing_subscriber::layer::Context;
+use tracing::{Dispatch, Event, Metadata};
 use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::Registry;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -78,11 +78,16 @@ struct DeferredTelemetry {
 }
 
 impl DeferredTelemetry {
-    fn new(layers: Arc<Mutex<Vec<Box<dyn tracing_subscriber::Layer<Registry> + Send + Sync>>>>) -> Self {
+    fn new(
+        layers: Arc<Mutex<Vec<Box<dyn tracing_subscriber::Layer<Registry> + Send + Sync>>>>,
+    ) -> Self {
         Self { layers }
     }
 
-    fn with_layers<R>(&self, f: impl FnOnce(&[Box<dyn tracing_subscriber::Layer<Registry> + Send + Sync>]) -> R) -> Option<R> {
+    fn with_layers<R>(
+        &self,
+        f: impl FnOnce(&[Box<dyn tracing_subscriber::Layer<Registry> + Send + Sync>]) -> R,
+    ) -> Option<R> {
         let guard = self.layers.lock().ok()?;
         Some(f(&guard))
     }

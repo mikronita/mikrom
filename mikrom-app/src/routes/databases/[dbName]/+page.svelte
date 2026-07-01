@@ -83,6 +83,7 @@
   let showDeleteSnapshotDialog = false;
   let copiedKey: "ssh" | "psql" | null = null;
   let lastLoadedDatabaseId: string | null = null;
+  let detailsLoading = false;
   let activeTab: "overview" | "connection" | "branches" | "backups" = "overview";
 
   const databaseTabs = [
@@ -147,10 +148,12 @@
     if (result.error) {
       connectionError = result.error;
       connectionInfo = null;
+      detailsLoading = false;
       return;
     }
 
     connectionInfo = result.data ?? null;
+    detailsLoading = false;
   }
 
   async function loadBranches(databaseId: string) {
@@ -227,6 +230,7 @@
     const nextDb = entries.find((entry) => entry.name === dbName) ?? null;
     db = nextDb;
     if (!nextDb) {
+      detailsLoading = false;
       return;
     }
 
@@ -240,6 +244,7 @@
       backupError = "";
       snapshots = [];
       snapshotsError = "";
+      detailsLoading = true;
       void loadConnectionInfo(nextDb.id);
     }
   }
@@ -364,6 +369,8 @@
       syncDatabaseState(get(databasesStore));
     });
 
+    syncDatabaseState(get(databasesStore));
+
     return () => {
       unsubscribeDatabases();
       unsubscribePage();
@@ -483,7 +490,16 @@
 
       <SectionTabs bind:active={activeTab} tabs={databaseTabs} onChange={handleTabChange} />
 
-      {#if activeTab === "overview"}
+      {#if detailsLoading}
+        <Card>
+          <CardContent class="flex flex-col gap-3 py-10">
+            <p class="text-sm font-medium">Loading database details</p>
+            <p class="text-sm text-muted-foreground">
+              Fetching connection, branch, and backup information for this database.
+            </p>
+          </CardContent>
+        </Card>
+      {:else if activeTab === "overview"}
         <div class="grid gap-6 lg:grid-cols-[1fr_360px]">
           <Card>
             <CardHeader>
@@ -787,6 +803,7 @@
                   <h2 class="text-xl font-semibold">No snapshots yet</h2>
                   <p class="max-w-md text-sm text-muted-foreground">
                     Create a snapshot from the right-hand panel to capture the current state of this database VM.
+                    Snapshots become available once the deployment is active.
                   </p>
                 </EmptyState>
               {:else}
@@ -853,6 +870,9 @@
               <div class="flex flex-col gap-3">
                 <div class="flex flex-col gap-1">
                   <span class="text-xs font-medium text-muted-foreground">Create snapshot</span>
+                  <p class="text-xs text-muted-foreground">
+                    Use a short descriptive name like <span class="font-mono">backup-2026-06-04</span>.
+                  </p>
                   <Input
                     bind:value={snapshotName}
                     placeholder="backup-2026-06-04"

@@ -545,9 +545,9 @@ impl JobLifecycleService {
 mod tests {
     use super::*;
     use crate::application::{AppContext, SchedulerRuntimeConfig};
-    use crate::domain::{TenantId, VmConfig, Volume};
     use crate::domain::app::MockAppRepository;
     use crate::domain::worker::{MockAgentClient, MockJobRepository, MockWorkerRepository};
+    use crate::domain::{TenantId, VmConfig, Volume};
     use async_trait::async_trait;
     use std::sync::Arc;
     use uuid::Uuid;
@@ -705,12 +705,7 @@ mod tests {
             JobStatus::Running,
             Some("dep-1"),
         );
-        let non_deployment_job = test_job(
-            "job-nondeployment",
-            now - 120,
-            JobStatus::Running,
-            None,
-        );
+        let non_deployment_job = test_job("job-nondeployment", now - 120, JobStatus::Running, None);
 
         job_repo
             .expect_list_jobs()

@@ -54,7 +54,9 @@ pub fn record_response(rcode: &str) {
 
 pub fn record_drop(reason: &str) {
     let attrs = [opentelemetry::KeyValue::new("reason", reason.to_string())];
-    DnsOtelMetrics::get().dns_dropped_queries_total.add(1, &attrs);
+    DnsOtelMetrics::get()
+        .dns_dropped_queries_total
+        .add(1, &attrs);
 }
 
 pub fn set_active_records(count: usize) {
