@@ -183,8 +183,23 @@ export function aggregateReplicaMetrics(
     total_tx: number;
   }>,
 ): MetricsSnapshot {
+  let cpuTotal = 0;
+  let ramTotal = 0;
+  let rxTotal = 0;
+  let txTotal = 0;
+  let totalRx = 0;
+  let totalTx = 0;
+
+  for (const replica of activeReplicas) {
+    cpuTotal += replica.cpu;
+    ramTotal += replica.ram;
+    rxTotal += replica.rx;
+    txTotal += replica.tx;
+    totalRx += replica.total_rx;
+    totalTx += replica.total_tx;
+  }
+
   const count = activeReplicas.length;
-  const cpuTotal = activeReplicas.reduce((sum, replica) => sum + replica.cpu, 0);
   return {
     time: new Date().toLocaleTimeString([], {
       hour: "2-digit",
@@ -192,10 +207,10 @@ export function aggregateReplicaMetrics(
       second: "2-digit",
     }),
     cpu: count > 0 ? cpuTotal / count : 0,
-    ram: activeReplicas.reduce((sum, replica) => sum + replica.ram, 0),
-    rx: activeReplicas.reduce((sum, replica) => sum + replica.rx, 0),
-    tx: activeReplicas.reduce((sum, replica) => sum + replica.tx, 0),
-    total_rx: activeReplicas.reduce((sum, replica) => sum + replica.total_rx, 0),
-    total_tx: activeReplicas.reduce((sum, replica) => sum + replica.total_tx, 0),
+    ram: ramTotal,
+    rx: rxTotal,
+    tx: txTotal,
+    total_rx: totalRx,
+    total_tx: totalTx,
   };
 }

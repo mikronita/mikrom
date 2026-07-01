@@ -70,215 +70,122 @@ function notificationsMatch(
 
 function workspaceNotificationFromEvent(event: WorkspaceEvent): WorkspaceNotification | null {
   const entityName = event.app_name ?? event.resource_id ?? null;
+  const baseNotification = {
+    id: crypto.randomUUID(),
+    user_id: event.user_id ?? "",
+    tenant_id: event.tenant_id,
+    entity_name: entityName,
+    resource_id: event.resource_id,
+    metadata: { ...event },
+    created_at: new Date().toISOString(),
+    read_at: null,
+    is_read: false,
+  } satisfies Omit<WorkspaceNotification, "kind" | "title" | "body" | "route">;
 
   switch (event.kind) {
     case "app_created":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "app_created",
         title: "Application created",
         body: `Application ${entityName ?? "application"} was created.`,
         route: event.app_name ? `/apps/${event.app_name}` : "/apps",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "app_updated":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "app_updated",
         title: "Application updated",
         body: `Application ${entityName ?? "application"} was updated.`,
         route: event.app_name ? `/apps/${event.app_name}` : "/apps",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "app_deleted":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "app_deleted",
         title: "Application deleted",
         body: `Application ${entityName ?? "application"} was deleted.`,
         route: "/apps",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "deployment_changed":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "deployment_changed",
         title: "Deployment changed",
         body: `Deployment activity was recorded for ${entityName ?? "deployment"}.`,
         route: event.app_name ? `/apps/${event.app_name}` : "/apps",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "profile_updated":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "profile_updated",
         title: "Profile updated",
         body: "Your profile was updated.",
         route: "/settings",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "github_accounts_changed":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "github_accounts_changed",
         title: "GitHub connected",
         body: "Your GitHub integrations changed.",
         route: "/settings",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "billing_updated":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "billing_updated",
         title: "Billing updated",
         body: "Your billing status changed.",
         route: "/settings",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "security_rules_changed":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "security_rules_changed",
         title: "Security rules changed",
         body: `Security rules were updated for ${entityName ?? "application"}.`,
         route: event.app_name ? `/apps/${event.app_name}` : "/apps",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "volume_changed":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "volume_changed",
         title: "Storage updated",
         body: "A storage volume changed.",
         route: "/storage",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "snapshot_changed":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "snapshot_changed",
         title: "Snapshot updated",
         body: "A snapshot changed.",
         route: "/storage",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "database_created":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "database_created",
         title: "Database created",
         body: `Database ${entityName ?? "database"} was created.`,
         route: event.resource_id ? `/databases/${event.resource_id}` : "/databases",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "database_updated":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "database_updated",
         title: "Database updated",
         body: `Database ${entityName ?? "database"} was updated.`,
         route: event.resource_id ? `/databases/${event.resource_id}` : "/databases",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "database_deleted":
       return {
-        id: crypto.randomUUID(),
-        user_id: event.user_id ?? "",
-        tenant_id: event.tenant_id,
+        ...baseNotification,
         kind: "database_deleted",
         title: "Database deleted",
         body: `Database ${entityName ?? "database"} was deleted.`,
         route: "/databases",
-        entity_name: entityName,
-        resource_id: event.resource_id,
-        metadata: { ...event },
-        created_at: new Date().toISOString(),
-        read_at: null,
-        is_read: false,
       };
     case "refresh":
       return null;

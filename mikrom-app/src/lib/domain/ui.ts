@@ -79,6 +79,16 @@ function uniqueVms(app: AppInfo, byAppId: VmsByKey, byAppName: VmsByKey) {
   });
 }
 
+function getAppVmContext(app: AppInfo, byAppId: VmsByKey, byAppName: VmsByKey) {
+  const liveVms = uniqueVms(app, byAppId, byAppName);
+
+  return {
+    liveVms,
+    liveVm: liveVms[0] || null,
+    resources: getAppResources(app, byAppId, byAppName),
+  };
+}
+
 export function sortByCreatedAtDesc<T extends { created_at: string }>(items: T[]) {
   return [...items].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
@@ -88,9 +98,17 @@ export function sortByCreatedAtDesc<T extends { created_at: string }>(items: T[]
 export function getAppResources(app: AppInfo, byAppId: VmsByKey, byAppName: VmsByKey): AppResources {
   const runningVms = uniqueVms(app, byAppId, byAppName).filter((vm) => normalizeStatus(vm.status) === "running");
 
+  let vcpus = 0;
+  let memoryMib = 0;
+
+  for (const vm of runningVms) {
+    vcpus += vm.vcpus || 1;
+    memoryMib += vm.memory_mib || 128;
+  }
+
   return {
-    vcpus: runningVms.reduce((total, vm) => total + (vm.vcpus || 1), 0),
-    memory_mib: runningVms.reduce((total, vm) => total + (vm.memory_mib || 128), 0),
+    vcpus,
+    memory_mib: memoryMib,
     count: runningVms.length,
   };
 }
@@ -115,12 +133,11 @@ export function buildAppCards(apps: AppInfo[], vms: LiveDeploymentInfo[]) {
   const { byAppId, byAppName } = collectVmsByKey(vms);
 
   return sortByCreatedAtDesc(apps).map((app) => {
-    const liveVms = uniqueVms(app, byAppId, byAppName);
-    const resources = getAppResources(app, byAppId, byAppName);
+    const { liveVm, resources } = getAppVmContext(app, byAppId, byAppName);
 
     return {
       ...app,
-      liveVm: liveVms[0] || null,
+      liveVm,
       resources,
       filterState: getAppFilterState(app, resources),
       scaleLabel: getScaleStateLabel(app.scale_state),
@@ -148,8 +165,7 @@ export function buildDashboardSummary(apps: AppInfo[], vms: LiveDeploymentInfo[]
   const sortedApps = sortByCreatedAtDesc(apps);
 
   const recentApps = sortedApps.slice(0, 5).map((app) => {
-    const liveVms = uniqueVms(app, byAppId, byAppName);
-    const liveVm = liveVms[0] || null;
+    const { liveVm } = getAppVmContext(app, byAppId, byAppName);
     let status = liveVm?.status || (app.active_deployment_id ? "Paused" : "Stopped");
 
     if (app.scale_state === "scaled_to_zero" && status !== "Stopped") {
@@ -169,8 +185,8 @@ export function buildDashboardSummary(apps: AppInfo[], vms: LiveDeploymentInfo[]
     runningCount,
     pendingCount,
     hasUndeployedApps:
-      apps.length > 0 &&
-      apps.every((app) => uniqueVms(app, byAppId, byAppName).length === 0),
+    apps.length > 0 &&
+      apps.every((app) => getAppVmContext(app, byAppId, byAppName).liveVms.length === 0),
     recentApps,
   };
 }
