@@ -1200,6 +1200,100 @@ mod tests {
     }
 
     #[test]
+    fn from_api_config_rejects_invalid_deployment_env() {
+        let config = crate::config::ApiConfig {
+            deployment_env: "invalid".to_string(),
+            ..crate::config::ApiConfig::default()
+        };
+
+        let err = RateLimitConfig::from_api_config(&config).unwrap_err();
+        assert!(err.to_string().contains("Invalid DEPLOYMENT_ENV"));
+    }
+
+    #[test]
+    fn from_api_config_uses_environment_profile_defaults() {
+        let cases = [
+            (
+                "development",
+                300,
+                120,
+                60,
+                120,
+                120,
+                120,
+                240,
+                240,
+                1200,
+                600,
+                120,
+            ),
+            (
+                "staging",
+                120,
+                20,
+                20,
+                30,
+                20,
+                30,
+                30,
+                60,
+                600,
+                240,
+                60,
+            ),
+            (
+                "production",
+                60,
+                10,
+                10,
+                15,
+                10,
+                20,
+                20,
+                30,
+                300,
+                120,
+                30,
+            ),
+        ];
+
+        for (
+            deployment_env,
+            public_rpm,
+            auth_login_rpm,
+            auth_register_rpm,
+            github_install_rpm,
+            apps_create_rpm,
+            apps_deploy_rpm,
+            webhooks_generic_rpm,
+            webhooks_named_rpm,
+            authenticated_read_rpm,
+            authenticated_write_rpm,
+            authenticated_stream_rpm,
+        ) in cases
+        {
+            let config = crate::config::ApiConfig {
+                deployment_env: deployment_env.to_string(),
+                ..crate::config::ApiConfig::default()
+            };
+
+            let rate_limit = RateLimitConfig::from_api_config(&config).unwrap();
+
+            assert_eq!(rate_limit.public_rpm, public_rpm, "deployment_env={deployment_env}");
+            assert_eq!(rate_limit.rate_limit_auth_login_rpm, auth_login_rpm, "deployment_env={deployment_env}");
+            assert_eq!(rate_limit.rate_limit_auth_register_rpm, auth_register_rpm, "deployment_env={deployment_env}");
+            assert_eq!(rate_limit.rate_limit_github_install_rpm, github_install_rpm, "deployment_env={deployment_env}");
+            assert_eq!(rate_limit.rate_limit_apps_create_rpm, apps_create_rpm, "deployment_env={deployment_env}");
+            assert_eq!(rate_limit.rate_limit_apps_deploy_rpm, apps_deploy_rpm, "deployment_env={deployment_env}");
+            assert_eq!(rate_limit.rate_limit_webhooks_github_generic_rpm, webhooks_generic_rpm, "deployment_env={deployment_env}");
+            assert_eq!(rate_limit.rate_limit_webhooks_github_named_rpm, webhooks_named_rpm, "deployment_env={deployment_env}");
+            assert_eq!(rate_limit.authenticated_read_rpm, authenticated_read_rpm, "deployment_env={deployment_env}");
+            assert_eq!(rate_limit.authenticated_write_rpm, authenticated_write_rpm, "deployment_env={deployment_env}");
+            assert_eq!(rate_limit.authenticated_stream_rpm, authenticated_stream_rpm, "deployment_env={deployment_env}");
+        }
+    }
+
+    #[test]
     fn rate_limit_response_has_expected_status() {
         let response = (
             StatusCode::TOO_MANY_REQUESTS,

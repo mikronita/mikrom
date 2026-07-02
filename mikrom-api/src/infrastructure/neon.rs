@@ -623,6 +623,25 @@ mod tests {
         assert!(message.contains("NEON_SAFEKEEPER_TOKEN"));
     }
 
+    #[tokio::test]
+    async fn from_config_requires_safekeeper_http_url_when_neon_is_enabled() {
+        let config = ApiConfig {
+            neon_pageserver_url: Some("http://[fd40:b90d:fc5f:1ae0::1]:9898".to_string()),
+            neon_safekeeper_http_url: None,
+            neon_safekeeper_connstrs: Some("[fd40:b90d:fc5f:1ae0::1]:5454".to_string()),
+            neon_safekeeper_token: Some("token-123".to_string()),
+            ..Default::default()
+        };
+
+        let err = NeonClient::from_config(&config).unwrap_err();
+        let message = match err {
+            DomainError::Infrastructure(message) => message,
+            other => panic!("expected infrastructure error, got {other:?}"),
+        };
+
+        assert!(message.contains("NEON_SAFEKEEPER_HTTP_URL"));
+    }
+
     #[test]
     fn attached_single_location_config_is_explicit() {
         let config = TenantLocationConfig::attached_single(TenantGeneration::new(42));

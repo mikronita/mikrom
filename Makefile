@@ -6,6 +6,7 @@ CEPH_LIB_DIR := $(shell pwd)/target/ceph-libs
 CEPH_ENV := LIBRARY_PATH="$(CEPH_LIB_DIR)" RUSTFLAGS="-L $(CEPH_LIB_DIR)"
 PROTOC_BIN := $(shell if [ -x /tmp/opencode/protoc/bin/protoc ]; then printf %s /tmp/opencode/protoc/bin/protoc; else command -v protoc; fi)
 PROTOC_ENV := PROTOC="$(PROTOC_BIN)"
+CEPH_LIBS := /usr/lib/x86_64-linux-gnu/librados.so.2 /usr/lib/x86_64-linux-gnu/librbd.so.1
 
 # ── Rust workspace ────────────────────────────────────────────────────────────
 
@@ -14,6 +15,20 @@ ceph-libs:
 	@mkdir -p $(CEPH_LIB_DIR)
 	@ln -sf /usr/lib/x86_64-linux-gnu/librados.so.2 $(CEPH_LIB_DIR)/librados.so 2>/dev/null || true
 	@ln -sf /usr/lib/x86_64-linux-gnu/librbd.so.1 $(CEPH_LIB_DIR)/librbd.so 2>/dev/null || true
+
+.PHONY: check-ceph-libs
+check-ceph-libs:
+	@missing=""; \
+	for lib in $(CEPH_LIBS); do \
+		if [ ! -e "$${lib}" ]; then \
+			missing="$$missing $${lib}"; \
+		fi; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo >&2 "Missing Ceph client libraries:$$missing"; \
+		echo >&2 "Install the Ceph development packages (for example: librbd-dev and librados-dev) before running make deb-agent."; \
+		exit 1; \
+	fi
 
 .PHONY: build
 build: ceph-libs ## Build all Rust crates (release)
@@ -24,7 +39,7 @@ build-dev: ceph-libs ## Build all Rust crates (debug)
 	$(PROTOC_ENV) $(CEPH_ENV) cargo build
 
 .PHONY: deb-agent
-deb-agent: build-init ceph-libs ## Build Debian package for mikrom-agent
+deb-agent: build-init ceph-libs check-ceph-libs ## Build Debian package for mikrom-agent
 	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
 	@command -v cmake >/dev/null 2>&1 || { echo >&2 "cmake is not installed. Install it before building mikrom-agent Debian packages"; exit 1; }
 	cmake -S tundra-nat64 -B target/tundra-build -DCMAKE_BUILD_TYPE=Release

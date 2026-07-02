@@ -638,8 +638,7 @@ async fn create_customer_in_polar(
     }
 
     let already_exists = status == reqwest::StatusCode::CONFLICT
-        || status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
-        || body.to_lowercase().contains("already exists");
+        || status == reqwest::StatusCode::UNPROCESSABLE_ENTITY;
 
     if already_exists && customer_exists_in_polar(settings, external_customer_id).await? {
         return Ok(());
@@ -1735,6 +1734,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_customer_in_polar_treats_conflict_as_success_when_customer_now_exists() {
+        let server = MockServer::start().await;
+        let settings = PolarSettings {
+            access_token: "polar-token".to_string(),
+            webhook_secret: "webhook-secret".to_string(),
+            base_url: server.uri(),
+            default_product_id: None,
+        };
+        let tenant = test_tenant();
+        let email = "owner@example.com";
+        let polar_email = polar_customer_email_for_tenant(email, tenant.id);
+
+        Mock::given(method("POST"))
+            .and(path("/customers"))
+            .and(header("authorization", "Bearer polar-token"))
+            .and(body_json(json!({
+                "external_id": tenant.id.to_string(),
+                "email": polar_email
+            })))
+            .respond_with(ResponseTemplate::new(409).set_body_json(json!({
+                "error": "already exists"
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/customers/external/{}", tenant.id)))
+            .and(header("authorization", "Bearer polar-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "cus_123",
+                "external_id": tenant.id.to_string()
+            })))
+            .mount(&server)
+            .await;
+
+        create_customer_in_polar(&settings, &tenant.id.to_string(), &polar_email)
+            .await
+            .expect("customer should be treated as existing after conflict");
+    }
+
+    #[tokio::test]
+    async fn create_customer_in_polar_ignores_conflict_body_text_when_lookup_succeeds() {
+        let server = MockServer::start().await;
+        let settings = PolarSettings {
+            access_token: "polar-token".to_string(),
+            webhook_secret: "webhook-secret".to_string(),
+            base_url: server.uri(),
+            default_product_id: None,
+        };
+        let tenant = test_tenant();
+        let email = "owner@example.com";
+        let polar_email = polar_customer_email_for_tenant(email, tenant.id);
+
+        Mock::given(method("POST"))
+            .and(path("/customers"))
+            .and(header("authorization", "Bearer polar-token"))
+            .and(body_json(json!({
+                "external_id": tenant.id.to_string(),
+                "email": polar_email
+            })))
+            .respond_with(ResponseTemplate::new(409).set_body_json(json!({
+                "error": "duplicate customer reference"
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/customers/external/{}", tenant.id)))
+            .and(header("authorization", "Bearer polar-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "cus_123",
+                "external_id": tenant.id.to_string()
+            })))
+            .mount(&server)
+            .await;
+
+        create_customer_in_polar(&settings, &tenant.id.to_string(), &polar_email)
+            .await
+            .expect("customer should be treated as existing after conflict lookup");
+    }
+
+    #[tokio::test]
     async fn list_polar_products_normalizes_array_and_marks_default_product() {
         let server = MockServer::start().await;
         let settings = PolarSettings {
@@ -1847,6 +1928,50 @@ mod tests {
         assert_eq!(products[1].currency.as_deref(), Some("usd"));
         assert_eq!(products[1].recurring_interval.as_deref(), Some("month"));
     }
+
+    #[tokio::test]
+    async fn list_polar_products_uses_first_valid_price_entry() {
+        let server = MockServer::start().await;
+        let settings = PolarSettings {
+            access_token: "polar-token".to_string(),
+            webhook_secret: "webhook-secret".to_string(),
+            base_url: server.uri(),
+            default_product_id: Some("prod_multi_price".to_string()),
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/products"))
+            .and(header("authorization", "Bearer polar-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [
+                    {
+                        "id": "prod_multi_price",
+                        "name": "Multi price plan",
+                        "prices": [
+                            {
+                                "currency": "usd"
+                            },
+                            {
+                                "unit_amount": 7500,
+                                "currency": "usd"
+                            }
+                        ]
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let products = list_polar_products(&settings).await.expect("products");
+
+        assert_eq!(products.len(), 1);
+        assert_eq!(products[0].id, "prod_multi_price");
+        assert_eq!(products[0].name, "Multi price plan");
+        assert_eq!(products[0].price_amount_cents, Some(7500));
+        assert_eq!(products[0].currency.as_deref(), Some("usd"));
+        assert!(products[0].is_default_checkout_product);
+    }
+
     #[test]
     #[serial]
     fn validate_polar_environment_rejects_missing_access_token() {
@@ -1860,6 +1985,70 @@ mod tests {
                 std::env::set_var("POLAR_WEBHOOK_SECRET", "webhook-secret");
             }
             std::env::remove_var("POLAR_ACCESS_TOKEN");
+        }
+
+        let result = validate_polar_environment();
+
+        unsafe {
+            match original_access_token {
+                Some(value) => std::env::set_var("POLAR_ACCESS_TOKEN", value),
+                None => std::env::remove_var("POLAR_ACCESS_TOKEN"),
+            }
+            match original_webhook_secret {
+                Some(value) => std::env::set_var("POLAR_WEBHOOK_SECRET", value),
+                None => std::env::remove_var("POLAR_WEBHOOK_SECRET"),
+            }
+        }
+
+        assert!(matches!(
+            result,
+            Err(ApiError::Internal(message)) if message.contains("POLAR_ACCESS_TOKEN is not configured")
+        ));
+    }
+
+    #[test]
+    #[serial]
+    fn validate_polar_environment_rejects_missing_webhook_secret() {
+        let original_access_token = std::env::var("POLAR_ACCESS_TOKEN").ok();
+        let original_webhook_secret = std::env::var("POLAR_WEBHOOK_SECRET").ok();
+
+        unsafe {
+            if let Some(value) = original_access_token.as_ref() {
+                std::env::set_var("POLAR_ACCESS_TOKEN", value);
+            } else {
+                std::env::set_var("POLAR_ACCESS_TOKEN", "polar-token");
+            }
+            std::env::remove_var("POLAR_WEBHOOK_SECRET");
+        }
+
+        let result = validate_polar_environment();
+
+        unsafe {
+            match original_access_token {
+                Some(value) => std::env::set_var("POLAR_ACCESS_TOKEN", value),
+                None => std::env::remove_var("POLAR_ACCESS_TOKEN"),
+            }
+            match original_webhook_secret {
+                Some(value) => std::env::set_var("POLAR_WEBHOOK_SECRET", value),
+                None => std::env::remove_var("POLAR_WEBHOOK_SECRET"),
+            }
+        }
+
+        assert!(matches!(
+            result,
+            Err(ApiError::Internal(message)) if message.contains("POLAR_WEBHOOK_SECRET is not configured")
+        ));
+    }
+
+    #[test]
+    #[serial]
+    fn validate_polar_environment_rejects_missing_all_required_secrets() {
+        let original_access_token = std::env::var("POLAR_ACCESS_TOKEN").ok();
+        let original_webhook_secret = std::env::var("POLAR_WEBHOOK_SECRET").ok();
+
+        unsafe {
+            std::env::remove_var("POLAR_ACCESS_TOKEN");
+            std::env::remove_var("POLAR_WEBHOOK_SECRET");
         }
 
         let result = validate_polar_environment();
@@ -1929,6 +2118,29 @@ mod tests {
         assert!(matches!(err, ApiError::Auth(_)));
     }
 
+    #[test]
+    fn webhook_signature_verification_accepts_one_of_multiple_signatures() {
+        let body = br#"{"type":"customer.created","data":{"id":"cus_123","external_id":"550e8400-e29b-41d4-a716-446655440000"}}"#;
+        let webhook_id = "wh_123";
+        let webhook_timestamp = Utc::now().timestamp().to_string();
+        let secret = "webhook-secret";
+
+        let valid_signature = signed_signature_header(secret, webhook_id, &webhook_timestamp, body);
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("webhook-id", HeaderValue::from_str(webhook_id).unwrap());
+        headers.insert(
+            "webhook-timestamp",
+            HeaderValue::from_str(&webhook_timestamp).unwrap(),
+        );
+        headers.insert(
+            "webhook-signature",
+            HeaderValue::from_str(&format!("v1,bad-signature {valid_signature}")).unwrap(),
+        );
+
+        let verified = verify_webhook_signature(&headers, body, secret).expect("signature should verify");
+        assert_eq!(verified, webhook_id);
+    }
+
     #[tokio::test]
     async fn webhook_handler_rejects_invalid_external_id_before_db_access() {
         let state = AppState::default();
@@ -1958,5 +2170,38 @@ mod tests {
         let result = handle_polar_webhook_with_secret(&state, &headers, body, secret).await;
 
         assert!(matches!(result, Err(ApiError::BadRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn webhook_handler_rejects_subscription_without_customer() {
+        let state = AppState::default();
+        let body = br#"{"type":"subscription.created","data":{"id":"sub_123","status":"active"}}"#;
+        let webhook_id = "wh_123";
+        let webhook_timestamp = Utc::now().timestamp().to_string();
+        let secret = "webhook-secret";
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("webhook-id", HeaderValue::from_static(webhook_id));
+        headers.insert(
+            "webhook-timestamp",
+            HeaderValue::from_str(&webhook_timestamp).unwrap(),
+        );
+        headers.insert(
+            "webhook-signature",
+            HeaderValue::from_str(&signed_signature_header(
+                secret,
+                webhook_id,
+                &webhook_timestamp,
+                body,
+            ))
+            .unwrap(),
+        );
+
+        let result = handle_polar_webhook_with_secret(&state, &headers, body, secret).await;
+
+        assert!(matches!(
+            result,
+            Err(ApiError::BadRequest(message)) if message.contains("Polar subscription payload missing customer")
+        ));
     }
 }

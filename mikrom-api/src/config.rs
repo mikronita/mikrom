@@ -227,18 +227,24 @@ impl ApiConfig {
         dotenvy::dotenv().ok();
         let config = envy::from_env::<Self>().map_err(anyhow::Error::from)?;
 
-        if config.jwt_secret.len() < 32 {
+        config.validate()?;
+
+        Ok(config)
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if self.jwt_secret.len() < 32 {
             anyhow::bail!("JWT_SECRET must be at least 32 characters long");
         }
-        if config.master_key.len() < 32 {
+        if self.master_key.len() < 32 {
             anyhow::bail!("MASTER_KEY must be at least 32 characters long");
         }
 
-        if config.router_tls_hostname.trim().is_empty() {
+        if self.router_tls_hostname.trim().is_empty() {
             anyhow::bail!("ROUTER_TLS_HOSTNAME must not be empty");
         }
 
-        Ok(config)
+        Ok(())
     }
 }
 
@@ -293,5 +299,41 @@ mod tests {
         assert_eq!(config.nats_scheduler_long_timeout_secs, 19);
         assert_eq!(config.nats_scheduler_database_timeout_secs, 11);
         assert_eq!(config.nats_storage_timeout_secs, 31);
+    }
+
+    #[test]
+    fn load_rejects_empty_router_tls_hostname() {
+        let config = ApiConfig {
+            router_tls_hostname: "   ".to_string(),
+            ..ApiConfig::default()
+        };
+
+        let err = config.validate().unwrap_err();
+
+        assert!(err.to_string().contains("ROUTER_TLS_HOSTNAME must not be empty"));
+    }
+
+    #[test]
+    fn validate_rejects_short_jwt_secret() {
+        let config = ApiConfig {
+            jwt_secret: "short".to_string(),
+            ..ApiConfig::default()
+        };
+
+        let err = config.validate().unwrap_err();
+
+        assert!(err.to_string().contains("JWT_SECRET must be at least 32 characters long"));
+    }
+
+    #[test]
+    fn validate_rejects_short_master_key() {
+        let config = ApiConfig {
+            master_key: "short".to_string(),
+            ..ApiConfig::default()
+        };
+
+        let err = config.validate().unwrap_err();
+
+        assert!(err.to_string().contains("MASTER_KEY must be at least 32 characters long"));
     }
 }
