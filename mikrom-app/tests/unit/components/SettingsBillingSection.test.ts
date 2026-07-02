@@ -259,7 +259,34 @@ describe("SettingsBillingSection", () => {
     });
 
     expect((screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/Only tenant admins can change the checkout product/)).toBeTruthy();
+    expect(screen.getByText(/Only tenant admins can save the default checkout product/)).toBeTruthy();
+  });
+
+  it("allows non-admin users to choose and buy a plan in normal mode", async () => {
+    const onChangePlan = vi.fn();
+    const onCheckoutProductChange = vi.fn();
+
+    render(SettingsBillingSection, {
+      props: {
+        billing,
+        products,
+        productsLoading: false,
+        loading: false,
+        actionLoading: false,
+        selectionLoading: false,
+        canManageBilling: false,
+        error: "",
+        onChangePlan,
+        onCheckoutProductChange,
+      },
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Checkout product" }));
+
+    expect((screen.getByRole("button", { name: "Checkout product" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(onCheckoutProductChange).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+    expect(onChangePlan).toHaveBeenCalledWith("prod_default");
   });
 
   it("allows selecting and buying a plan in test mode for non-admin users", async () => {

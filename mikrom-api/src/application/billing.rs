@@ -688,6 +688,14 @@ async fn create_checkout_session(
         .unwrap_or_else(|_| String::from("<unreadable response>"));
 
     if !status.is_success() {
+        let body_lower = body.to_lowercase();
+        if body_lower.contains("organization is not ready to accept payments") {
+            return Err(ApiError::BadRequest(
+                "Polar organization is not ready to accept payments. Complete the Polar payments setup or switch Mikrom to Polar sandbox mode before buying a plan."
+                    .into(),
+            ));
+        }
+
         return Err(ApiError::Internal(format!(
             "Polar checkout failed ({status}): {body}"
         )));
@@ -1675,6 +1683,40 @@ mod tests {
 
         assert_eq!(checkout_url, "https://polar.sh/checkout/session");
         assert_eq!(portal_url, "https://polar.sh/portal/session");
+    }
+
+    #[tokio::test]
+    async fn checkout_session_surfaces_polar_payment_readiness_error() {
+        let server = MockServer::start().await;
+        let settings = PolarSettings {
+            access_token: "polar-token".to_string(),
+            webhook_secret: "webhook-secret".to_string(),
+            base_url: server.uri(),
+            default_product_id: Some("prod_default".to_string()),
+        };
+        let tenant = test_tenant();
+        let return_url = "http://localhost:3000/settings?tab=billing";
+        let success_url = "http://localhost:3000/settings?tab=billing&checkout=success";
+
+        Mock::given(method("POST"))
+            .and(path("/checkouts"))
+            .and(header("authorization", "Bearer polar-token"))
+            .respond_with(
+                ResponseTemplate::new(422)
+                    .set_body_string("Organization is not ready to accept payments"),
+            )
+            .mount(&server)
+            .await;
+
+        let result =
+            create_checkout_session(&settings, &tenant, "prod_checkout", return_url, success_url)
+                .await;
+
+        assert!(matches!(
+            result,
+            Err(ApiError::BadRequest(message))
+                if message.contains("Polar organization is not ready to accept payments")
+        ));
     }
 
     #[tokio::test]

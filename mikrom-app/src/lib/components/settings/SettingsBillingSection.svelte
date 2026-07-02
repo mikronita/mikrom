@@ -66,12 +66,10 @@
   }
 
   function isActionDisabled(handler: "changePlan" | "manageBilling") {
-    const isTestMode = billing?.is_test_mode ?? false;
     return (
       actionLoading ||
       loading ||
-      (isCheckoutAction(handler) &&
-        ((!canManageBilling && !isTestMode) || selectionLoading || !selectedCheckoutProductId))
+      (isCheckoutAction(handler) && (selectionLoading || !selectedCheckoutProductId))
     );
   }
 
@@ -302,7 +300,7 @@
         <p class="mb-4 text-xs text-muted-foreground">
           Last synced: {formatSyncedAt(lastSyncedAt)}
           {#if !canManageBilling && !isTestMode}
-            {" "}(admin only)
+            (admin only)
           {:else if isTestMode}
             {" "}(sandbox)
           {/if}
@@ -317,7 +315,7 @@
             <Field label="Checkout product" forId="checkout_product" description="This is the product opened by the Change plan action.">
               <Select
                 bind:value={selectedCheckoutProductId}
-                disabled={actionLoading || selectionLoading || (!canManageBilling && !isTestMode)}
+                disabled={actionLoading || selectionLoading}
                 onValueChange={(value: string | undefined) => void handleCheckoutProductChange(value || null)}
               >
                 <SelectTrigger id="checkout_product">
@@ -340,7 +338,7 @@
             </Field>
             {#if !canManageBilling && !isTestMode}
               <p class="text-xs text-muted-foreground">
-                Only tenant admins can change the checkout product or refresh the catalog.
+                Only tenant admins can save the default checkout product or refresh the catalog.
               </p>
             {:else if isTestMode}
               <p class="text-xs text-muted-foreground">
