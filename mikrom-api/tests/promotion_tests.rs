@@ -236,3 +236,64 @@ async fn test_activate_deployment_rejects_foreign_deployment() {
         "Bad request: Deployment does not belong to this application"
     );
 }
+
+#[tokio::test]
+async fn test_activate_running_deployment_promotes_when_idle() {
+    let tenant_id = Uuid::new_v4();
+    let app_id = Uuid::new_v4();
+    let deployment_id = Uuid::new_v4();
+
+    let mut mock_app_repo = MockAppRepository::new();
+    mock_app_repo
+        .expect_get_app_by_name()
+        .with(eq("test-app"))
+        .returning(move |_| {
+            Ok(Some(App {
+                id: app_id,
+                name: "test-app".to_string(),
+                tenant_id,
+                hostname: None,
+                active_deployment_id: None,
+                ..Default::default()
+            }))
+        });
+    mock_app_repo
+        .expect_get_deployment()
+        .with(eq(deployment_id))
+        .returning(move |_| {
+            Ok(Some(Deployment {
+                id: deployment_id,
+                app_id,
+                tenant_id,
+                status: "RUNNING".to_string(),
+                job_id: None,
+                ..Default::default()
+            }))
+        });
+    mock_app_repo
+        .expect_set_active_deployment()
+        .with(eq(app_id), eq(deployment_id))
+        .times(1)
+        .returning(|_, _| Ok(()));
+
+    let scheduler = MockScheduler::new();
+    let state = build_state(mock_app_repo, scheduler);
+
+    let auth = AuthUser {
+        user_id: tenant_id.to_string(),
+        email: "test@example.com".to_string(),
+        role: UserRole::User,
+    };
+    let tenant_ctx = tenant_context(tenant_id);
+
+    let status = activate_deployment_handler(
+        auth,
+        tenant_ctx,
+        State(state),
+        Path(("test-app".to_string(), deployment_id)),
+    )
+    .await
+    .expect("running deployment should promote successfully when idle");
+
+    assert_eq!(status, StatusCode::OK);
+}

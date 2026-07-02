@@ -37,6 +37,7 @@ pub async fn app_logs_stream_handler(
     }
 
     let scale_state = resolve_app_scale_state(&state, &app).await;
+    let active_deployment_id = app.active_deployment_id.map(|id| id.to_string());
 
     // 2. Subscribe to NATS for all logs of this app
     // Subject pattern: mikrom.logs.<app_id>.>
@@ -52,6 +53,9 @@ pub async fn app_logs_stream_handler(
             let enriched = match serde_json::from_slice::<serde_json::Value>(&msg.payload) {
                 Ok(serde_json::Value::Object(mut obj)) => {
                     obj.insert("scale_state".to_string(), serde_json::json!(scale_state));
+                    if let Some(active_deployment_id) = &active_deployment_id {
+                        obj.insert("deployment_id".to_string(), serde_json::json!(active_deployment_id));
+                    }
                     serde_json::Value::Object(obj)
                 },
                 Ok(other) => other,
@@ -59,6 +63,7 @@ pub async fn app_logs_stream_handler(
                     "line": String::from_utf8_lossy(&msg.payload).to_string(),
                     "timestamp": chrono::Utc::now().timestamp_millis(),
                     "scale_state": scale_state,
+                    "deployment_id": active_deployment_id,
                 }),
             };
 

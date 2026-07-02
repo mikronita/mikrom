@@ -1462,4 +1462,197 @@ mod tests {
 
         assert_eq!(outcome, ResumeRecovery::Recreated);
     }
+
+    fn build_zero_downtime_failure_state(
+        app_id: Uuid,
+        tenant_id: Uuid,
+        deployment_id: Uuid,
+        previous_deployment_id: Uuid,
+    ) -> (crate::AppState, App, Deployment, mikrom_proto::scheduler::DeployResponse) {
+        let mut app_repo = MockAppRepository::new();
+        app_repo
+            .expect_get_app()
+            .times(2)
+            .returning(move |_| {
+                Ok(Some(App {
+                    id: app_id,
+                    tenant_id,
+                    name: "demo".into(),
+                    hostname: Some("demo.example.com".into()),
+                    active_deployment_id: Some(previous_deployment_id),
+                    desired_replicas: 1,
+                    ..Default::default()
+                }))
+            });
+        app_repo
+            .expect_get_deployment()
+            .with(eq(previous_deployment_id))
+            .times(1)
+            .returning(move |_| {
+                Ok(Some(Deployment {
+                    id: previous_deployment_id,
+                    app_id,
+                    tenant_id,
+                    status: "RUNNING".into(),
+                    job_id: Some(Uuid::new_v4().to_string()),
+                    ..Default::default()
+                }))
+            });
+        app_repo
+            .expect_update_deployment()
+            .with(
+                eq(previous_deployment_id),
+                function(|params: &crate::domain::UpdateDeploymentParams| {
+                    params.status == Some("DRAINING".to_string())
+                }),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+        app_repo
+            .expect_update_deployment()
+            .with(
+                eq(previous_deployment_id),
+                function(|params: &crate::domain::UpdateDeploymentParams| {
+                    params.status == Some("RUNNING".to_string())
+                }),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+        app_repo
+            .expect_update_deployment()
+            .with(
+                eq(deployment_id),
+                function(|params: &crate::domain::UpdateDeploymentParams| {
+                    params.status == Some("FAILED".to_string())
+                }),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut scheduler = MockScheduler::new();
+        scheduler.expect_pause_app().times(1).returning(|_, _| Ok(true));
+
+        let state = crate::AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(MockUserRepository::new()),
+            app_repo: Arc::new(app_repo),
+            database_repo: Arc::new(crate::domain::MockDatabaseRepository::new()),
+            github_repo: Arc::new(crate::domain::github::MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(scheduler),
+            nats: TypedNatsClient::new_custom(Arc::new(NoRespondersNatsClient)),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+            jwt_secret: "secret".into(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "admin@example.com".into(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: Arc::new(dashmap::DashSet::new()),
+        };
+
+        let app = App {
+            id: app_id,
+            tenant_id,
+            name: "demo".into(),
+            git_url: "https://example.com/demo".into(),
+            port: Port::new(8080).unwrap(),
+            hostname: Some("demo.example.com".into()),
+            desired_replicas: 1,
+            ..Default::default()
+        };
+
+        let deployment = Deployment {
+            id: deployment_id,
+            app_id,
+            tenant_id,
+            status: "PENDING".into(),
+            vcpus: CpuCores::new(1).unwrap(),
+            memory_mib: MemoryMb::new(128).unwrap(),
+            port: Port::new(8080).unwrap(),
+            ..Default::default()
+        };
+
+        let inner = mikrom_proto::scheduler::DeployResponse {
+            job_id: Uuid::new_v4().to_string(),
+            status: mikrom_proto::scheduler::DeployStatus::Running as i32,
+            host_id: String::new(),
+            vm_id: String::new(),
+            message: "Started".into(),
+            hypervisor: deployment.hypervisor,
+        };
+
+        (state, app, deployment, inner)
+    }
+
+    #[tokio::test]
+    async fn run_zero_downtime_flow_rolls_back_when_health_checks_never_succeed() {
+        let app_id = Uuid::new_v4();
+        let tenant_id = Uuid::new_v4();
+        let deployment_id = Uuid::new_v4();
+        let previous_deployment_id = Uuid::new_v4();
+
+        let (state, app, deployment, inner) = build_zero_downtime_failure_state(
+            app_id,
+            tenant_id,
+            deployment_id,
+            previous_deployment_id,
+        );
+
+        let guard = state
+            .try_start_flow(app_id.into())
+            .expect("flow guard should exist");
+
+        DeploymentService::run_zero_downtime_flow(
+            state,
+            app,
+            deployment,
+            inner,
+            tenant_id.to_string(),
+            true,
+            guard,
+        );
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+
+    #[tokio::test]
+    async fn run_zero_downtime_flow_keeps_preview_when_cleanup_disabled() {
+        let app_id = Uuid::new_v4();
+        let tenant_id = Uuid::new_v4();
+        let deployment_id = Uuid::new_v4();
+        let previous_deployment_id = Uuid::new_v4();
+
+        let (state, app, deployment, inner) = build_zero_downtime_failure_state(
+            app_id,
+            tenant_id,
+            deployment_id,
+            previous_deployment_id,
+        );
+
+        let guard = state
+            .try_start_flow(app_id.into())
+            .expect("flow guard should exist");
+
+        DeploymentService::run_zero_downtime_flow(
+            state,
+            app,
+            deployment,
+            inner,
+            tenant_id.to_string(),
+            false,
+            guard,
+        );
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
 }

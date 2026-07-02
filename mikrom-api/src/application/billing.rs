@@ -1956,7 +1956,7 @@ mod tests {
 
         let products = list_polar_products(&settings).await.expect("products");
 
-        assert_eq!(products.len(), 1);
+        assert_eq!(products.len(), 2);
         assert_eq!(products[0].id, "prod_nested");
         assert_eq!(products[0].name, "Nested plan");
         assert_eq!(products[0].price_amount_cents, Some(9900));

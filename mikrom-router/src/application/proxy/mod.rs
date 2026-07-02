@@ -293,8 +293,7 @@ impl MikromProxy {
     }
 
     pub async fn has_route(&self, host: &str) -> bool {
-        let raw_host = host;
-        let host = HostName::parse(raw_host);
+        let host = HostName::parse(host);
         if host.as_str() == self.api_host.as_str() {
             return true;
         }
@@ -302,7 +301,7 @@ impl MikromProxy {
             return true;
         }
         let state = self.state.read().await;
-        state.routes.contains_key(host.as_str()) || state.routes.contains_key(raw_host)
+        state.routes.contains_key(host.as_str())
     }
 
     fn request_header_size(session: &Session) -> usize {
@@ -1117,6 +1116,49 @@ mod tests {
         assert!(proxy.has_route("app.example.com").await);
         assert!(proxy.has_route("app.example.com:443").await);
         assert!(!proxy.has_route("missing.example.com").await);
+    }
+
+    #[tokio::test]
+    async fn test_get_lb_and_tls_normalizes_host_with_port() {
+        let mut routes = HashMap::new();
+        let targets = vec!["127.0.0.1:8080".to_string()];
+        let lb = LoadBalancer::<RoundRobin>::try_from_iter(targets.as_slice()).unwrap();
+        routes.insert(
+            "app.example.com".to_string(),
+            Route {
+                host: "app.example.com".to_string(),
+                targets,
+                lb: Arc::new(lb),
+                use_tls: true,
+                tls_alternative_cn: Some("alt.example.com".to_string()),
+            },
+        );
+
+        let state = Arc::new(RwLock::new(State {
+            routes,
+            acme_tokens: HashMap::new(),
+            certificates: HashMap::new(),
+        }));
+
+        let proxy = MikromProxy::new(
+            state,
+            Arc::new(RouterHealth::new()),
+            false,
+            String::new(),
+            String::new(),
+            "127.0.0.1:5001,[::1]:5001".to_string(),
+            "127.0.0.1:5173,[::1]:5173".to_string(),
+            None,
+            Arc::new(RouterMetricsCounters::new()),
+            None,
+            100,
+            RouterTimeouts::default(),
+        );
+
+        let (_lb, use_tls, alt_cn) = proxy.get_lb_and_tls("app.example.com:443").await.unwrap();
+
+        assert!(use_tls);
+        assert_eq!(alt_cn.as_deref(), Some("alt.example.com"));
     }
 
     #[tokio::test]

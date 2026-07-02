@@ -617,6 +617,12 @@ pub async fn activate_deployment_handler(
                     "Promoting running deployment immediately"
                 );
 
+                let guard = state.try_start_flow(app.id.into()).ok_or_else(|| {
+                    ApiError::BadRequest(
+                        "A deployment flow is already in progress for this application".into(),
+                    )
+                })?;
+
                 let (updated_app, previous_active_id) =
                     DeploymentOrchestrator::promote_deployment_to_active(
                         &state,
@@ -635,6 +641,8 @@ pub async fn activate_deployment_handler(
                     .await
                     .map_err(|e| ApiError::Internal(e.to_string()))?;
                 }
+
+                drop(guard);
 
                 return Ok(StatusCode::OK);
             }
