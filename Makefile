@@ -8,6 +8,14 @@ PROTOC_BIN := $(shell if [ -x /tmp/opencode/protoc/bin/protoc ]; then printf %s 
 PROTOC_ENV := PROTOC="$(PROTOC_BIN)"
 CEPH_LIBS := /usr/lib/x86_64-linux-gnu/librados.so.2 /usr/lib/x86_64-linux-gnu/librbd.so.1
 
+define in_dir
+cd $(1) && $(2)
+endef
+
+define check_tool
+	@command -v $(1) >/dev/null 2>&1 || { echo >&2 "$(2)"; exit 1; }
+endef
+
 # ── Rust workspace ────────────────────────────────────────────────────────────
 
 .PHONY: ceph-libs
@@ -40,35 +48,35 @@ build-dev: ceph-libs ## Build all Rust crates (debug)
 
 .PHONY: deb-agent
 deb-agent: build-init ceph-libs check-ceph-libs ## Build Debian package for mikrom-agent
-	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
-	@command -v cmake >/dev/null 2>&1 || { echo >&2 "cmake is not installed. Install it before building mikrom-agent Debian packages"; exit 1; }
+	$(call check_tool,cargo-deb,cargo-deb is not installed. Install it with: cargo install cargo-deb)
+	$(call check_tool,cmake,cmake is not installed. Install it before building mikrom-agent Debian packages)
 	cmake -S tundra-nat64 -B target/tundra-build -DCMAKE_BUILD_TYPE=Release
 	cmake --build target/tundra-build --parallel
 	strip target/tundra-build/tundra-nat64
 	@mkdir -p target/release && cp target/tundra-build/tundra-nat64 target/release/tundra-nat64
 	RUSTC_WRAPPER= $(PROTOC_ENV) $(CEPH_ENV) cargo build --release -p mikrom-agent
-	cd mikrom-agent && RUSTC_WRAPPER= $(PROTOC_ENV) $(CEPH_ENV) cargo deb --no-build
+	$(call in_dir,mikrom-agent,RUSTC_WRAPPER= $(PROTOC_ENV) $(CEPH_ENV) cargo deb --no-build)
 	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: deb-network
 deb-network: ## Build Debian package for mikrom-network
-	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
+	$(call check_tool,cargo-deb,cargo-deb is not installed. Install it with: cargo install cargo-deb)
 	$(PROTOC_ENV) cargo build --release -p mikrom-network
-	cd mikrom-network && $(PROTOC_ENV) cargo deb --no-build
+	$(call in_dir,mikrom-network,$(PROTOC_ENV) cargo deb --no-build)
 	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: deb-router
 deb-router: ## Build Debian package for mikrom-router
-	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
+	$(call check_tool,cargo-deb,cargo-deb is not installed. Install it with: cargo install cargo-deb)
 	$(PROTOC_ENV) cargo build --release -p mikrom-router
-	cd mikrom-router && $(PROTOC_ENV) cargo deb --no-build
+	$(call in_dir,mikrom-router,$(PROTOC_ENV) cargo deb --no-build)
 	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: deb-dns
 deb-dns: ## Build Debian package for mikrom-dns
-	@command -v cargo-deb >/dev/null 2>&1 || { echo >&2 "cargo-deb is not installed. Install it with: cargo install cargo-deb"; exit 1; }
+	$(call check_tool,cargo-deb,cargo-deb is not installed. Install it with: cargo install cargo-deb)
 	$(PROTOC_ENV) cargo build --release -p mikrom-dns
-	cd mikrom-dns && $(PROTOC_ENV) cargo deb --no-build
+	$(call in_dir,mikrom-dns,$(PROTOC_ENV) cargo deb --no-build)
 	@echo "✅ Debian package built in: target/debian/"
 
 .PHONY: fmt
@@ -134,29 +142,29 @@ endef
 
 .PHONY: test
 test: ## Run all unit tests (no DB required)
-	$(call check_nextest)
+	$(call check_tool,cargo-nextest,cargo-nextest is not installed. Install it with: cargo binstall cargo-nextest or cargo install cargo-nextest)
 	cargo nextest run --lib
 
 .PHONY: test-verbose
 test-verbose: ## Run unit tests with output
-	$(call check_nextest)
+	$(call check_tool,cargo-nextest,cargo-nextest is not installed. Install it with: cargo binstall cargo-nextest or cargo install cargo-nextest)
 	cargo nextest run --lib -- --nocapture
 
 .PHONY: test-one
 test-one: ## Run a single test by name  →  make test-one NAME=test_score_idle
-	$(call check_nextest)
+	$(call check_tool,cargo-nextest,cargo-nextest is not installed. Install it with: cargo binstall cargo-nextest or cargo install cargo-nextest)
 	cargo nextest run --lib $(NAME)
 
 .PHONY: test-cli
 test-cli: ## Run mikrom-cli unit tests
-	$(call check_nextest)
+	$(call check_tool,cargo-nextest,cargo-nextest is not installed. Install it with: cargo binstall cargo-nextest or cargo install cargo-nextest)
 	cargo nextest run --lib -p mikrom-cli
 
 # ── Tests: Integration ───────────────────────────────────────────────────────
 
 .PHONY: test-integration
 test-integration: ## Run integration tests (starts PostgreSQL and test NATS via Docker)
-	$(call check_nextest)
+	$(call check_tool,cargo-nextest,cargo-nextest is not installed. Install it with: cargo binstall cargo-nextest or cargo install cargo-nextest)
 	docker compose --profile test up -d --wait postgres nats-test
 	TEST_NATS_URL=nats://localhost:4223 cargo nextest run --test integration_auth_tests -p mikrom-api --features test-utils,api-e2e && \
 	TEST_NATS_URL=nats://localhost:4223 cargo nextest run --test integration_app_lifecycle_tests -p mikrom-api --features test-utils,api-e2e
@@ -165,7 +173,7 @@ test-integration: ## Run integration tests (starts PostgreSQL and test NATS via 
 
 .PHONY: test-all-crates
 test-all-crates: ceph-libs ## Run unit tests for all crates
-	$(call check_nextest)
+	$(call check_tool,cargo-nextest,cargo-nextest is not installed. Install it with: cargo binstall cargo-nextest or cargo install cargo-nextest)
 	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-proto && \
 	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-scheduler && \
 	$(PROTOC_ENV) $(CEPH_ENV) cargo nextest run -p mikrom-agent && \
@@ -183,50 +191,50 @@ test-all: test-all-crates test-integration ## Run unit + integration tests
 
 .PHONY: test-coverage
 test-coverage: ## Run tests and generate coverage report (requires cargo-llvm-cov)
-	@command -v cargo-llvm-cov >/dev/null 2>&1 || { echo >&2 "cargo-llvm-cov is not installed. Install it with: cargo install cargo-llvm-cov"; exit 1; }
+	$(call check_tool,cargo-llvm-cov,cargo-llvm-cov is not installed. Install it with: cargo install cargo-llvm-cov)
 	cargo llvm-cov --workspace --all-features --html
 
 # ── Run services: Rust ────────────────────────────────────────────────────────
 
 .PHONY: run-api
 run-api: ## Run mikrom-api with watch (port 5001)
-	cd mikrom-api && cargo watch -x run
+	$(call in_dir,mikrom-api,cargo watch -x run)
 
 .PHONY: run-scheduler
 run-scheduler: ## Run mikrom-scheduler with watch
-	cd mikrom-scheduler && cargo watch -x run
+	$(call in_dir,mikrom-scheduler,cargo watch -x run)
 
 .PHONY: run-agent
 run-agent: ceph-libs ## Run mikrom-agent with watch (port 5003)
-	cd mikrom-agent && LIBRARY_PATH="$(shell pwd)/target/ceph-libs" RUSTFLAGS="-L $(shell pwd)/target/ceph-libs" cargo watch -x run
+	$(call in_dir,mikrom-agent,LIBRARY_PATH="$(shell pwd)/target/ceph-libs" RUSTFLAGS="-L $(shell pwd)/target/ceph-libs" cargo watch -x run)
 
 .PHONY: run-builder
 run-builder: ## Run mikrom-builder with watch
-	cd mikrom-builder && cargo watch -x run
+	$(call in_dir,mikrom-builder,cargo watch -x run)
 
 .PHONY: run-router
 run-router: ## Run mikrom-router (Rust/Pingora)
-	cd mikrom-router && cargo watch -x run
+	$(call in_dir,mikrom-router,cargo watch -x run)
 
 # ── Run services: Zig ─────────────────────────────────────────────────────────
 
 .PHONY: build-init
 build-init: ## Build mikrom-init with Zig and stage it for the agent package
-	@command -v zig >/dev/null 2>&1 || { echo >&2 "zig is not installed. Install Zig to build mikrom-init"; exit 1; }
-	cd mikrom-init && zig build -Doptimize=ReleaseSafe
+	$(call check_tool,zig,zig is not installed. Install Zig to build mikrom-init)
+	$(call in_dir,mikrom-init,zig build -Doptimize=ReleaseSafe)
 	@mkdir -p target/release
 	cp mikrom-init/zig-out/bin/mikrom-init target/release/mikrom-init
 
 .PHONY: test-init
 test-init: ## Run mikrom-init tests
-	@command -v zig >/dev/null 2>&1 || { echo >&2 "zig is not installed. Install Zig to test mikrom-init"; exit 1; }
-	cd mikrom-init && zig build test
+	$(call check_tool,zig,zig is not installed. Install Zig to test mikrom-init)
+	$(call in_dir,mikrom-init,zig build test)
 
 # ── Run services: App and Dev ────────────────────────────────────────────────
 
 .PHONY: run-app
 run-app: ## Run mikrom-app dev server  (port 3001)
-	cd mikrom-app && pnpm run dev --host
+	$(call in_dir,mikrom-app,pnpm run dev --host)
 
 .PHONY: dev
 dev: ## Launch or attach to the tmux-based dev session
@@ -257,39 +265,39 @@ install-cli: ## Install the mikrom binary to ~/.cargo/bin
 
 .PHONY: app-install
 app-install: ## Install mikrom-app dependencies
-	cd mikrom-app && pnpm install
+	$(call in_dir,mikrom-app,pnpm install)
 
 .PHONY: app-build
 app-build: ## Build mikrom-app for production
-	cd mikrom-app && pnpm build
+	$(call in_dir,mikrom-app,pnpm build)
 
 .PHONY: app-check
 app-check: ## Run mikrom-app type and Svelte checks
-	cd mikrom-app && pnpm check
+	$(call in_dir,mikrom-app,pnpm check)
 
 .PHONY: app-test
 app-test: ## Run mikrom-app tests in watch mode
-	cd mikrom-app && pnpm test
+	$(call in_dir,mikrom-app,pnpm test)
 
 .PHONY: app-test-unit
 app-test-unit: ## Run mikrom-app unit tests
-	cd mikrom-app && pnpm test:unit
+	$(call in_dir,mikrom-app,pnpm test:unit)
 
 .PHONY: app-test-watch
 app-test-watch: ## Run mikrom-app unit tests in watch mode
-	cd mikrom-app && pnpm test:watch
+	$(call in_dir,mikrom-app,pnpm test:watch)
 
 .PHONY: app-test-coverage
 app-test-coverage: ## Run mikrom-app tests with coverage
-	cd mikrom-app && pnpm test:coverage
+	$(call in_dir,mikrom-app,pnpm test:coverage)
 
 .PHONY: app-test-e2e
 app-test-e2e: ## Run mikrom-app Playwright e2e tests
-	cd mikrom-app && pnpm test:e2e
+	$(call in_dir,mikrom-app,pnpm test:e2e)
 
 .PHONY: app-lint
 app-lint: ## Lint mikrom-app
-	cd mikrom-app && pnpm lint
+	$(call in_dir,mikrom-app,pnpm lint)
 
 # ── Docker: Base ──────────────────────────────────────────────────────────────
 
