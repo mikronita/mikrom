@@ -565,6 +565,170 @@ async fn billing_products_endpoint_lists_polar_catalog() {
 #[tokio::test]
 #[serial]
 #[ignore = "requires a PostgreSQL test database"]
+async fn billing_products_endpoint_falls_back_to_cached_catalog_when_polar_is_unavailable() {
+    let Ok(db) = TestDb::try_new().await else {
+        eprintln!("Skipping billing API test: database unavailable");
+        return;
+    };
+    let pool = db.pool().clone();
+    let (state, tenant_slug, _tenant_id, token) = build_billing_state(&pool).await;
+    let polar = MockServer::start().await;
+
+    let prev_access_token = set_env("POLAR_ACCESS_TOKEN", "polar-token");
+    let prev_secret = set_env("POLAR_WEBHOOK_SECRET", "billing-webhook-secret");
+    let prev_base_url = set_env("POLAR_API_BASE_URL", &polar.uri());
+    let prev_product = set_env("POLAR_CHECKOUT_PRODUCT_ID", "prod_default");
+
+    Mock::given(method("GET"))
+        .and(path("/products"))
+        .and(header("authorization", "Bearer polar-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "items": [
+                {
+                    "id": "prod_cached_default",
+                    "name": "Cached Pro",
+                    "price": {
+                        "amount": 2500,
+                        "currency": "usd"
+                    },
+                    "recurring_interval": "month",
+                    "is_archived": false
+                },
+                {
+                    "id": "prod_cached_other",
+                    "name": "Cached Add-on",
+                    "price": {
+                        "amount": 500,
+                        "currency": "usd"
+                    },
+                    "recurring_interval": "month",
+                    "is_archived": true
+                }
+            ]
+        })))
+        .mount(&polar)
+        .await;
+
+    let app = create_app(AppState {
+        frontend_url: "http://localhost:3000".to_string(),
+        jwt_secret: "billing-secret".to_string(),
+        api_db: pool.clone(),
+        ..state
+    });
+
+    let priming_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/billing/products")
+                .header("Authorization", format!("Bearer {token}"))
+                .header("x-mikrom-tenant-id", tenant_slug.clone())
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("priming response");
+
+    assert_eq!(priming_response.status(), StatusCode::OK);
+
+    drop(polar);
+
+    let fallback_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/billing/products")
+                .header("Authorization", format!("Bearer {token}"))
+                .header("x-mikrom-tenant-id", tenant_slug)
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("fallback response");
+
+    assert_eq!(fallback_response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(fallback_response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let payload: Value = serde_json::from_slice(&body).expect("json");
+
+    assert_eq!(payload["default_checkout_product_id"], "prod_default");
+    assert_eq!(payload["products"].as_array().map(|items| items.len()), Some(2));
+    assert_eq!(payload["products"][0]["id"], "prod_cached_default");
+    assert_eq!(payload["products"][0]["is_default_checkout_product"], false);
+    assert_eq!(payload["products"][1]["id"], "prod_cached_other");
+    assert_eq!(payload["products"][1]["is_default_checkout_product"], false);
+    assert!(payload["last_synced_at"].is_string());
+
+    restore_env("POLAR_ACCESS_TOKEN", prev_access_token);
+    restore_env("POLAR_WEBHOOK_SECRET", prev_secret);
+    restore_env("POLAR_API_BASE_URL", prev_base_url);
+    restore_env("POLAR_CHECKOUT_PRODUCT_ID", prev_product);
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "requires a PostgreSQL test database"]
+async fn billing_products_endpoint_returns_polar_error_when_cache_is_empty() {
+    let Ok(db) = TestDb::try_new().await else {
+        eprintln!("Skipping billing API test: database unavailable");
+        return;
+    };
+    let pool = db.pool().clone();
+    let (state, tenant_slug, _tenant_id, token) = build_billing_state(&pool).await;
+    let polar = MockServer::start().await;
+
+    let prev_access_token = set_env("POLAR_ACCESS_TOKEN", "polar-token");
+    let prev_secret = set_env("POLAR_WEBHOOK_SECRET", "billing-webhook-secret");
+    let prev_base_url = set_env("POLAR_API_BASE_URL", &polar.uri());
+    let prev_product = set_env("POLAR_CHECKOUT_PRODUCT_ID", "prod_default");
+
+    Mock::given(method("GET"))
+        .and(path("/products"))
+        .and(header("authorization", "Bearer polar-token"))
+        .respond_with(ResponseTemplate::new(502).set_body_json(serde_json::json!({
+            "error": "upstream unavailable"
+        })))
+        .mount(&polar)
+        .await;
+
+    let app = create_app(AppState {
+        frontend_url: "http://localhost:3000".to_string(),
+        jwt_secret: "billing-secret".to_string(),
+        api_db: pool.clone(),
+        ..state
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/billing/products")
+                .header("Authorization", format!("Bearer {token}"))
+                .header("x-mikrom-tenant-id", tenant_slug)
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let payload: Value = serde_json::from_slice(&body).expect("json");
+    assert!(payload["error"].as_str().is_some_and(|message| message.contains("Polar product listing failed")));
+
+    restore_env("POLAR_ACCESS_TOKEN", prev_access_token);
+    restore_env("POLAR_WEBHOOK_SECRET", prev_secret);
+    restore_env("POLAR_API_BASE_URL", prev_base_url);
+    restore_env("POLAR_CHECKOUT_PRODUCT_ID", prev_product);
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "requires a PostgreSQL test database"]
 async fn billing_products_refresh_endpoint_syncs_catalog() {
     let Ok(db) = TestDb::try_new().await else {
         eprintln!("Skipping billing API test: database unavailable");
