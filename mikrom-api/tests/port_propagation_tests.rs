@@ -1,7 +1,5 @@
 use mikrom_api::AppState;
-use mikrom_api::application::deployment::worker::{
-    BuildTask, MockBuilderClient, MockSchedulerClient, poll_and_deploy,
-};
+use mikrom_api::application::deployment::service::{DeployParams, DeploymentService};
 use mikrom_api::domain::MockScheduler;
 use mikrom_api::domain::Port;
 use mikrom_api::domain::app::{App, Deployment};
@@ -9,7 +7,6 @@ use mikrom_api::domain::github::MockGithubRepository;
 use mikrom_api::domain::user::MockUserRepository;
 use mikrom_api::domain::{MockAppRepository, TenantMember};
 use mikrom_api::nats::TypedNatsClient;
-use mikrom_proto::builder::BuildStatus;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -30,10 +27,7 @@ async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     match async_nats::connect(nats_url).await {
         Ok(client) => Some(client),
         Err(err) => {
-            eprintln!(
-                "skipping port propagation test: unable to connect to NATS: {}",
-                err
-            );
+            eprintln!("skipping port propagation test: unable to connect to NATS: {}", err);
             None
         },
     }
@@ -81,17 +75,14 @@ async fn create_test_state(
         github_app_slug: Some("test-app".to_string()),
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
-        )
-        .0,
+        mesh_status: tokio::sync::watch::channel(mikrom_api::application::vms::MeshStatus::default()).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     })
 }
 
 #[tokio::test]
 #[ignore = "requires a stable tenant membership fixture"]
-async fn test_port_propagation_from_builder_to_deployment() {
+async fn test_port_propagation_to_scheduler_uses_reported_port() {
     if !nats_integration_enabled() {
         return;
     }
@@ -99,20 +90,17 @@ async fn test_port_propagation_from_builder_to_deployment() {
     let mut mock_repo = MockAppRepository::new();
     let mut mock_user_repo = MockUserRepository::new();
     let mut mock_volume_repo = mikrom_api::domain::MockVolumeRepository::new();
-    let mut mock_builder = MockBuilderClient::new();
-    let _mock_scheduler = MockSchedulerClient::new();
 
     let tenant_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
     let deployment_id = Uuid::new_v4();
-    let build_id = "test-build-123".to_string();
 
     let app = App {
         id: app_id,
         name: "test-app".to_string(),
         git_url: "https://github.com/owner/repo".into(),
         tenant_id,
-        port: mikrom_api::domain::types::Port::new(8080).unwrap(), // Default port
+        port: mikrom_api::domain::types::Port::new(8080).unwrap(),
         ..Default::default()
     };
 
@@ -125,7 +113,6 @@ async fn test_port_propagation_from_builder_to_deployment() {
         ..Default::default()
     };
 
-    // 1. Mock Repository
     let app_clone = app.clone();
     mock_repo
         .expect_get_app()
@@ -136,7 +123,6 @@ async fn test_port_propagation_from_builder_to_deployment() {
         .expect_get_deployment()
         .returning(move |_| Ok(Some(dep_clone.clone())));
 
-    // Verify that the deployment port is updated to 80
     mock_repo
         .expect_update_deployment_port()
         .with(
@@ -146,21 +132,18 @@ async fn test_port_propagation_from_builder_to_deployment() {
         .times(1)
         .returning(|_, _| Ok(()));
 
-    mock_repo
-        .expect_update_deployment()
-        .returning(|_, _| Ok(()));
+    mock_repo.expect_update_deployment().returning(|_, _| Ok(()));
 
-    // Mock volumes
     mock_volume_repo
         .expect_list_volumes_by_app()
         .returning(|_| Ok(vec![]));
 
-    // Mock user
     mock_user_repo.expect_find_by_id().returning(move |id| {
         Ok(Some(mikrom_api::domain::user::User {
             id,
             email: "test@example.com".into(),
             password_hash: "hash".into(),
+            avatar_url: None,
             role: mikrom_api::domain::user::UserRole::User,
             first_name: None,
             last_name: None,
@@ -168,53 +151,26 @@ async fn test_port_propagation_from_builder_to_deployment() {
         }))
     });
 
-    // 2. Mock Builder to report port 80
-    mock_builder
-        .expect_get_build_status()
-        .with(mockall::predicate::eq(build_id.clone()))
-        .returning(|_| {
-            Box::pin(async move {
-                Ok((
-                    BuildStatus::Success,
-                    "registry.mikrom.spluca.org/mikrom/test-app:latest".to_string(),
-                    80, // DETECTED PORT 80
-                    Some("hash".to_string()),
-                    Some("msg".to_string()),
-                    Some("branch".to_string()),
-                    "Build successful".to_string(),
-                ))
-            })
-        });
-
     let Some(state) = create_test_state(mock_repo, mock_user_repo, mock_volume_repo).await else {
         return;
     };
 
-    let task = BuildTask {
-        deployment_id,
-        app_id,
-        app_name: app.name.clone(),
-        user_id: tenant_id.to_string(),
-        build_id: build_id.clone(),
-        vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
-        memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
-        disk_mib: 1024,
-        port: mikrom_api::domain::types::Port::new(8080).unwrap(), // Original port
-        env: std::collections::HashMap::new(),
-        hypervisor: 0,
-    };
-
-    let result = poll_and_deploy(
-        state,
-        task,
-        Arc::new(mock_builder),
-        Arc::new(MockSchedulerClient::new()),
-        None,
+    let result = DeploymentService::deploy_to_scheduler(
+        &state,
+        &app,
+        &deployment,
+        DeployParams {
+            image_tag: "registry.mikrom.spluca.org/mikrom/test-app:latest".to_string(),
+            vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+            memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
+            disk_mib: 1024,
+            port: Port::new(80).unwrap(),
+            env: std::collections::HashMap::new(),
+            hypervisor: 0,
+        },
     )
     .await;
 
-    // The flow may still fail later in deploy_to_scheduler, but the port update
-    // check is done via MockAppRepository expectations.
     assert!(result.is_err());
 }
 
@@ -228,12 +184,10 @@ async fn test_zero_reported_port_keeps_original_deployment_port() {
     let mut mock_repo = MockAppRepository::new();
     let mut mock_user_repo = MockUserRepository::new();
     let mut mock_volume_repo = mikrom_api::domain::MockVolumeRepository::new();
-    let mut mock_builder = MockBuilderClient::new();
 
     let tenant_id = Uuid::new_v4();
     let app_id = Uuid::new_v4();
     let deployment_id = Uuid::new_v4();
-    let build_id = "test-build-zero".to_string();
 
     let app = App {
         id: app_id,
@@ -264,9 +218,7 @@ async fn test_zero_reported_port_keeps_original_deployment_port() {
         .returning(move |_| Ok(Some(dep_clone.clone())));
 
     mock_repo.expect_update_deployment_port().times(0);
-    mock_repo
-        .expect_update_deployment()
-        .returning(|_, _| Ok(()));
+    mock_repo.expect_update_deployment().returning(|_, _| Ok(()));
 
     mock_volume_repo
         .expect_list_volumes_by_app()
@@ -277,6 +229,7 @@ async fn test_zero_reported_port_keeps_original_deployment_port() {
             id,
             email: "test@example.com".into(),
             password_hash: "hash".into(),
+            avatar_url: None,
             role: mikrom_api::domain::user::UserRole::User,
             first_name: None,
             last_name: None,
@@ -284,47 +237,23 @@ async fn test_zero_reported_port_keeps_original_deployment_port() {
         }))
     });
 
-    mock_builder
-        .expect_get_build_status()
-        .with(mockall::predicate::eq(build_id.clone()))
-        .returning(|_| {
-            Box::pin(async move {
-                Ok((
-                    BuildStatus::Success,
-                    "registry.mikrom.spluca.org/mikrom/test-app:latest".to_string(),
-                    0,
-                    None,
-                    None,
-                    None,
-                    "Build successful".to_string(),
-                ))
-            })
-        });
-
     let Some(state) = create_test_state(mock_repo, mock_user_repo, mock_volume_repo).await else {
         return;
     };
 
-    let task = BuildTask {
-        deployment_id,
-        app_id,
-        app_name: app.name.clone(),
-        user_id: tenant_id.to_string(),
-        build_id: build_id.clone(),
-        vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
-        memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
-        disk_mib: 1024,
-        port: mikrom_api::domain::types::Port::new(8080).unwrap(),
-        env: std::collections::HashMap::new(),
-        hypervisor: 0,
-    };
-
-    let result = poll_and_deploy(
-        state,
-        task,
-        Arc::new(mock_builder),
-        Arc::new(MockSchedulerClient::new()),
-        None,
+    let result = DeploymentService::deploy_to_scheduler(
+        &state,
+        &app,
+        &deployment,
+        DeployParams {
+            image_tag: "registry.mikrom.spluca.org/mikrom/test-app:latest".to_string(),
+            vcpus: mikrom_api::domain::types::CpuCores::new(1).unwrap(),
+            memory_mib: mikrom_api::domain::types::MemoryMb::new(256).unwrap(),
+            disk_mib: 1024,
+            port: Port::new(8080).unwrap(),
+            env: std::collections::HashMap::new(),
+            hypervisor: 0,
+        },
     )
     .await;
 

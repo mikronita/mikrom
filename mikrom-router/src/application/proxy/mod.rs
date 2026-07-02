@@ -292,6 +292,22 @@ impl MikromProxy {
         self.get_lb_and_tls(host).await.map(|(lb, _, _)| lb)
     }
 
+    #[cfg(test)]
+    fn record_wake_up_failure(&self, host: &str) {
+        let host = HostName::parse(host);
+
+        if !host.as_str().is_empty() {
+            let now = Instant::now();
+            self.wake_up_failures
+                .entry(host.as_str().to_string())
+                .and_modify(|entry| {
+                    entry.0 = entry.0.saturating_add(1);
+                    entry.1 = now;
+                })
+                .or_insert((1, now));
+        }
+    }
+
     pub async fn has_route(&self, host: &str) -> bool {
         let host = HostName::parse(host);
         if host.as_str() == self.api_host.as_str() {
@@ -749,11 +765,6 @@ impl ProxyHttp for MikromProxy {
         let mut last_log_time = start_time;
 
         loop {
-            // Publish a traffic event to wake up the app if needed.
-            if let Some(publisher) = &self.traffic_publisher {
-                publisher.record(normalized_host.as_str().to_string());
-            }
-
             let (lb, use_tls, alternative_cn) = if self.has_route(host).await {
                 self.get_lb_and_tls(host).await?
             } else {
@@ -1206,6 +1217,34 @@ mod tests {
         assert!(result.2.is_none());
     }
 
+    #[tokio::test]
+    async fn test_wait_for_route_times_out_when_route_never_appears() {
+        let state = Arc::new(RwLock::new(State::default()));
+        let proxy = MikromProxy::new(
+            state,
+            Arc::new(RouterHealth::new()),
+            false,
+            String::new(),
+            String::new(),
+            "127.0.0.1:5001,[::1]:5001".to_string(),
+            "127.0.0.1:5173,[::1]:5173".to_string(),
+            None,
+            Arc::new(RouterMetricsCounters::new()),
+            None,
+            100,
+            RouterTimeouts {
+                route_wait: Duration::from_millis(1),
+                ..RouterTimeouts::default()
+            },
+        );
+
+        let result = proxy
+            .wait_for_route("missing.example.com", "missing.example.com")
+            .await;
+
+        assert!(matches!(result, Err(err) if matches!(err.etype(), ErrorType::HTTPStatus(503))));
+    }
+
     #[test]
     fn test_default_site_redirect_location_preserves_path_and_query() {
         let proxy = MikromProxy::new(
@@ -1289,5 +1328,33 @@ mod tests {
         assert!(header.headers.get("x-real-ip").is_none());
         assert!(header.headers.get("x-forwarded-proto").is_none());
         assert_eq!(header.headers.get("x-custom").unwrap(), "value");
+    }
+
+    #[tokio::test]
+    async fn test_wake_up_failure_recording_is_per_host() {
+        let proxy = MikromProxy::new(
+            Arc::new(RwLock::new(State::default())),
+            Arc::new(RouterHealth::new()),
+            false,
+            String::new(),
+            String::new(),
+            "127.0.0.1:5001,[::1]:5001".to_string(),
+            "127.0.0.1:5173,[::1]:5173".to_string(),
+            None,
+            Arc::new(RouterMetricsCounters::new()),
+            None,
+            100,
+            RouterTimeouts::default(),
+        );
+
+        proxy.record_wake_up_failure("app.example.com:443");
+        proxy.record_wake_up_failure("app.example.com");
+        proxy.record_wake_up_failure("other.example.com");
+
+        let app_entry = proxy.wake_up_failures.get("app.example.com").unwrap();
+        let other_entry = proxy.wake_up_failures.get("other.example.com").unwrap();
+
+        assert_eq!(app_entry.0, 2);
+        assert_eq!(other_entry.0, 1);
     }
 }

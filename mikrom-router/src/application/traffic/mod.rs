@@ -148,29 +148,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_record_retries_after_full_queue() {
-        let (tx, mut rx) = mpsc::channel(1);
-        tx.try_send(RouterTrafficEvent {
-            hostname: "busy.example.com".to_string(),
-            router_id: "router-1".to_string(),
-            timestamp: 1,
-        })
-        .expect("should fill the queue");
-
+    async fn test_record_deduplicates_within_window() {
+        let (tx, mut rx) = mpsc::channel(100);
         let publisher = RouterTrafficPublisher::new("router-1".into(), tx);
 
         publisher.record("busy.example.com".to_string());
-
-        let _ = rx.recv().await.expect("expected seeded event");
-
         publisher.record("busy.example.com".to_string());
 
-        let event = timeout(std::time::Duration::from_millis(100), rx.recv())
-            .await
-            .expect("should enqueue after queue space is available")
-            .expect("expected traffic event after retry");
+        let first = rx.recv().await.expect("expected first event");
+        assert_eq!(first.hostname, "busy.example.com");
 
-        assert_eq!(event.hostname, "busy.example.com");
-        assert_eq!(event.router_id, "router-1");
+        let second = timeout(std::time::Duration::from_millis(100), rx.recv()).await;
+        assert!(second.is_err(), "should deduplicate repeated events within window");
+    }
+
+    #[tokio::test]
+    async fn test_record_deduplicates_per_hostname() {
+        let (tx, mut rx) = mpsc::channel(100);
+        let publisher = RouterTrafficPublisher::new("router-1".into(), tx);
+
+        publisher.record("app1.example.com".to_string());
+        publisher.record("app2.example.com".to_string());
+
+        let first = rx.recv().await.expect("expected first event");
+        let second = rx.recv().await.expect("expected second event");
+
+        assert_ne!(first.hostname, second.hostname);
+        assert!(
+            (first.hostname == "app1.example.com" && second.hostname == "app2.example.com")
+                || (first.hostname == "app2.example.com"
+                    && second.hostname == "app1.example.com")
+        );
     }
 }

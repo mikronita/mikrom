@@ -824,19 +824,6 @@ impl DeploymentService {
         deployment: &Deployment,
         params: DeployParams,
     ) -> ApiResult<DeployResponse> {
-        state
-            .app_repo
-            .update_deployment(
-                deployment.id,
-                UpdateDeploymentParams {
-                    status: Some("SCHEDULED".to_string()),
-                    image_tag: Some(params.image_tag.clone()),
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-
         let owner_user_id = resolve_tenant_owner_user_id(state, app.tenant_id).await?;
         let user = state
             .user_repo
@@ -931,6 +918,19 @@ impl DeploymentService {
                 return Err(e);
             },
         };
+
+        state
+            .app_repo
+            .update_deployment(
+                deployment.id,
+                UpdateDeploymentParams {
+                    status: Some("SCHEDULED".to_string()),
+                    image_tag: Some(params.image_tag.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
 
         let db_status = crate::infrastructure::scheduler::status_name(inner.status);
         state
@@ -1215,15 +1215,17 @@ impl DeploymentService {
     }
 }
 
-#[cfg(any())]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::MockAppRepository;
+    use crate::domain::MockScheduler;
     use crate::domain::MockVolumeRepository;
     use crate::domain::user::{MockUserRepository, User, UserRole};
     use crate::domain::{App, Deployment};
     use crate::nats::{NatsClient, TypedNatsClient};
     use async_trait::async_trait;
+    use mockall::predicate::{eq, function};
     use sqlx::types::Uuid;
     use std::sync::Arc;
 
@@ -1292,7 +1294,7 @@ mod tests {
         let mut app_repo = MockAppRepository::new();
         app_repo
             .expect_update_deployment()
-            .times(2)
+            .times(1)
             .returning(|_, _| Ok(()));
 
         let mut user_repo = MockUserRepository::new();
@@ -1301,11 +1303,21 @@ mod tests {
                 id: tenant_id,
                 email: "test@example.com".to_string(),
                 password_hash: "hash".to_string(),
+                avatar_url: None,
                 role: UserRole::User,
                 first_name: None,
                 last_name: None,
                 vpc_ipv6_prefix: Some("fd00::".to_string()),
             }))
+        });
+
+        let mut tenant_repo = crate::domain::MockTenantRepository::new();
+        tenant_repo.expect_get_members().returning(|tenant_id| {
+            Ok(vec![crate::domain::TenantMember {
+                tenant_id,
+                user_id: Uuid::new_v4(),
+                role: "admin".to_string(),
+            }])
         });
 
         let mut volume_repo = MockVolumeRepository::new();
@@ -1314,9 +1326,13 @@ mod tests {
             .times(1)
             .returning(|_| Ok(vec![]));
 
+        let mut ctx = crate::application::ApiContext::default();
+        ctx.tenant_repo = Arc::new(tenant_repo);
+
         let state = crate::AppState {
-            ctx: crate::application::ApiContext::default(),
+            ctx,
             user_repo: Arc::new(user_repo),
+            tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
             app_repo: Arc::new(app_repo),
             database_repo: Arc::new(crate::domain::MockDatabaseRepository::new()),
             github_repo: Arc::new(crate::domain::github::MockGithubRepository::default()),
@@ -1403,6 +1419,17 @@ mod tests {
         let state = crate::AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(MockUserRepository::new()),
+            tenant_repo: Arc::new({
+                let mut tenant_repo = crate::domain::MockTenantRepository::new();
+                tenant_repo.expect_get_members().returning(|tenant_id| {
+                    Ok(vec![crate::domain::TenantMember {
+                        tenant_id,
+                        user_id: Uuid::new_v4(),
+                        role: "admin".to_string(),
+                    }])
+                });
+                tenant_repo
+            }),
             app_repo: Arc::new(MockAppRepository::new()),
             database_repo: Arc::new(crate::domain::MockDatabaseRepository::new()),
             github_repo: Arc::new(crate::domain::github::MockGithubRepository::default()),
@@ -1447,7 +1474,7 @@ mod tests {
             vcpus: CpuCores::new(1).unwrap(),
             memory_mib: MemoryMb::new(128).unwrap(),
             port: Port::new(3000).unwrap(),
-            job_id: Some(Uuid::new_v4()),
+            job_id: Some(Uuid::new_v4().to_string()),
             ..Default::default()
         };
 
@@ -1535,6 +1562,17 @@ mod tests {
         let state = crate::AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(MockUserRepository::new()),
+            tenant_repo: Arc::new({
+                let mut tenant_repo = crate::domain::MockTenantRepository::new();
+                tenant_repo.expect_get_members().returning(|tenant_id| {
+                    Ok(vec![crate::domain::TenantMember {
+                        tenant_id,
+                        user_id: Uuid::new_v4(),
+                        role: "admin".to_string(),
+                    }])
+                });
+                tenant_repo
+            }),
             app_repo: Arc::new(app_repo),
             database_repo: Arc::new(crate::domain::MockDatabaseRepository::new()),
             github_repo: Arc::new(crate::domain::github::MockGithubRepository::default()),
