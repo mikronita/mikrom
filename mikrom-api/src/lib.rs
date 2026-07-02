@@ -71,11 +71,23 @@ pub fn normalize_app_slug(name: &str) -> Option<String> {
             'a'..='z' | '0'..='9' => ch,
             _ => '-',
         })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string();
+        .collect::<String>();
 
-    (!slug.is_empty()).then_some(slug)
+    let mut collapsed = String::with_capacity(slug.len());
+    let mut last_was_dash = false;
+    for ch in slug.trim_matches('-').chars() {
+        if ch == '-' {
+            if last_was_dash {
+                continue;
+            }
+            last_was_dash = true;
+        } else {
+            last_was_dash = false;
+        }
+        collapsed.push(ch);
+    }
+
+    (!collapsed.is_empty()).then_some(collapsed)
 }
 
 #[must_use]

@@ -14,6 +14,9 @@ pub struct SchedulerConfig {
     #[serde(default = "default_worker_stale_threshold_secs")]
     pub worker_stale_threshold_secs: i64,
 
+    #[serde(default = "default_stale_worker_cleanup_interval_secs")]
+    pub stale_worker_cleanup_interval_secs: u64,
+
     #[serde(default = "default_restore_retry_backoff_secs")]
     pub restore_retry_backoff_secs: i64,
 
@@ -60,6 +63,10 @@ fn default_router_idle_timeout_secs() -> i64 {
 
 fn default_worker_stale_threshold_secs() -> i64 {
     60
+}
+
+fn default_stale_worker_cleanup_interval_secs() -> u64 {
+    30
 }
 
 fn default_restore_retry_backoff_secs() -> i64 {
@@ -116,8 +123,27 @@ mod tests {
         assert_eq!(config.router_idle_timeout_secs, 900);
         assert_eq!(config.vm_cleanup_interval_secs, 3600);
         assert_eq!(config.vm_cleanup_ttl_secs, 3600);
+        assert_eq!(config.stale_worker_cleanup_interval_secs, 30);
         assert!(!config.beta_deployment_cleanup_enabled);
         assert_eq!(config.beta_deployment_cleanup_interval_secs, 3600);
+    }
+
+    #[test]
+    fn loads_stale_worker_cleanup_interval_from_env() {
+        let config: SchedulerConfig = envy::from_iter(vec![
+            (
+                "DATABASE_URL".to_string(),
+                "postgres://[::1]/mikrom".to_string(),
+            ),
+            ("NATS_URL".to_string(), "nats://[::1]:4222".to_string()),
+            (
+                "STALE_WORKER_CLEANUP_INTERVAL_SECS".to_string(),
+                "45".to_string(),
+            ),
+        ])
+        .expect("config should deserialize");
+
+        assert_eq!(config.stale_worker_cleanup_interval_secs, 45);
     }
 
     #[test]
@@ -150,6 +176,7 @@ mod tests {
         assert_eq!(config.restore_retry_backoff_secs, 3600);
         assert_eq!(config.vm_cleanup_interval_secs, 3600);
         assert_eq!(config.vm_cleanup_ttl_secs, 3600);
+        assert_eq!(config.stale_worker_cleanup_interval_secs, 30);
         assert!(!config.beta_deployment_cleanup_enabled);
         assert_eq!(config.beta_deployment_cleanup_interval_secs, 3600);
     }

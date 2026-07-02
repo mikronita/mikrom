@@ -675,4 +675,164 @@ mod tests {
         .await
         .unwrap();
     }
+
+    #[tokio::test]
+    async fn rollback_failed_promotion_without_previous_deployment_marks_new_failed() {
+        let Some(nats_client) =
+            connect_nats_or_skip("rollback_failed_promotion_without_previous_deployment_marks_new_failed").await
+        else {
+            return;
+        };
+
+        let mut mock_app_repo = MockAppRepository::new();
+        let mut mock_scheduler = crate::domain::MockScheduler::new();
+        let new_dep_id = Uuid::new_v4();
+        let app_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+
+        mock_scheduler
+            .expect_pause_app()
+            .with(eq("job-new".to_string()), eq("system".to_string()))
+            .times(1)
+            .returning(|_, _| Ok(true));
+
+        mock_app_repo
+            .expect_update_deployment()
+            .with(
+                eq(new_dep_id),
+                function(|params: &crate::domain::UpdateDeploymentParams| {
+                    params.status == Some("FAILED".to_string())
+                }),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock_app_repo
+            .expect_get_app()
+            .with(eq(app_id))
+            .times(1)
+            .returning(move |_| {
+                Ok(Some(App {
+                    id: app_id,
+                    tenant_id: user_id,
+                    name: "test-app".to_string(),
+                    ..Default::default()
+                }))
+            });
+
+        let state = AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(MockUserRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            app_repo: Arc::new(mock_app_repo),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(crate::domain::MockVolumeRepository::new()),
+            scheduler: Arc::new(mock_scheduler),
+            nats: crate::nats::TypedNatsClient::new(nats_client),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".to_string(),
+            deployment_events: tokio::sync::broadcast::channel(100).0,
+            workspace_events: tokio::sync::broadcast::channel(100).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "test@example.com".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        DeploymentOrchestrator::rollback_failed_promotion(
+            &state,
+            "test-app",
+            app_id,
+            new_dep_id,
+            "job-new",
+            None,
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn promote_deployment_to_active_records_previous_active_id() {
+        let mut mock_app_repo = MockAppRepository::new();
+        let mut mock_scheduler = crate::domain::MockScheduler::new();
+        let app_id = Uuid::new_v4();
+        let deployment_id = Uuid::new_v4();
+        let previous_id = Uuid::new_v4();
+
+        mock_app_repo
+            .expect_set_active_deployment()
+            .with(eq(app_id), eq(deployment_id))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock_app_repo
+            .expect_get_app()
+            .with(eq(app_id))
+            .times(1)
+            .returning(move |_| {
+                Ok(Some(App {
+                    id: app_id,
+                    name: "test-app".to_string(),
+                    tenant_id: Uuid::new_v4(),
+                    active_deployment_id: Some(previous_id),
+                    ..Default::default()
+                }))
+            });
+
+        let state = AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(MockUserRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            app_repo: Arc::new(mock_app_repo),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(crate::domain::MockVolumeRepository::new()),
+            scheduler: Arc::new(mock_scheduler),
+            nats: crate::nats::TypedNatsClient::default(),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::PgPool::connect_lazy("postgres://localhost/fake").unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".to_string(),
+            deployment_events: tokio::sync::broadcast::channel(100).0,
+            workspace_events: tokio::sync::broadcast::channel(100).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "test@example.com".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        let app = App {
+            id: app_id,
+            name: "test-app".to_string(),
+            tenant_id: Uuid::new_v4(),
+            active_deployment_id: Some(previous_id),
+            ..Default::default()
+        };
+
+        let (updated_app, previous) = DeploymentOrchestrator::promote_deployment_to_active(
+            &state,
+            app,
+            deployment_id,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(updated_app.active_deployment_id, Some(deployment_id));
+        assert_eq!(previous, Some(previous_id));
+    }
 }

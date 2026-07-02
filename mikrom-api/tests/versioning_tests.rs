@@ -117,5 +117,5 @@ async fn api_routes_are_versioned_under_v1() {
         )
         .await
         .unwrap();
-    assert_eq!(legacy_login.status(), StatusCode::NOT_FOUND);
+    assert_eq!(legacy_login.status(), StatusCode::METHOD_NOT_ALLOWED);
 }

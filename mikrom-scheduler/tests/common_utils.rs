@@ -1,12 +1,10 @@
 use sqlx::{Connection, Executor, PgConnection, PgPool, postgres::PgPoolOptions};
 use std::env;
 use std::ops::Deref;
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::Arc;
 
 const DEFAULT_TEST_DATABASE_URL: &str =
     "postgres://mikrom:mikrom_password@localhost:5432/mikrom_scheduler_test";
-
-static TEST_DB_REGISTRY: OnceLock<tokio::sync::Mutex<Option<Weak<TestDbInner>>>> = OnceLock::new();
 
 pub struct TestDb {
     inner: Arc<TestDbInner>,
@@ -21,19 +19,9 @@ struct TestDbInner {
 impl TestDb {
     pub async fn try_new() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
-
-        let registry = TEST_DB_REGISTRY.get_or_init(|| tokio::sync::Mutex::new(None));
-        let mut guard = registry.lock().await;
-
-        if let Some(db) = guard.as_ref().and_then(Weak::upgrade) {
-            return Ok(Self { inner: db });
-        }
-
-        let inner = Arc::new(Self::create().await?);
-        *guard = Some(Arc::downgrade(&inner));
-        drop(guard);
-
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(Self::create().await?),
+        })
     }
 
     async fn create() -> anyhow::Result<TestDbInner> {
