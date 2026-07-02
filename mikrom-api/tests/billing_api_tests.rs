@@ -328,6 +328,7 @@ async fn billing_checkout_and_portal_endpoints_proxy_to_polar() {
     };
     let pool = db.pool().clone();
     let (state, tenant_slug, tenant_id, token) = build_billing_state(&pool).await;
+    let _tenant_uuid = sqlx::types::Uuid::parse_str(&tenant_id).expect("tenant uuid");
     let polar = MockServer::start().await;
 
     let prev_access_token = set_env("POLAR_ACCESS_TOKEN", "polar-token");
@@ -736,6 +737,7 @@ async fn billing_checkout_endpoint_uses_requested_product_id() {
     };
     let pool = db.pool().clone();
     let (state, tenant_slug, tenant_id, token) = build_billing_state(&pool).await;
+    let _tenant_uuid = sqlx::types::Uuid::parse_str(&tenant_id).expect("tenant uuid");
     let polar = MockServer::start().await;
 
     let prev_access_token = set_env("POLAR_ACCESS_TOKEN", "polar-token");
