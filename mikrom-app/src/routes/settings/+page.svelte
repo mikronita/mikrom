@@ -372,7 +372,7 @@
           <div class="text-xs text-muted-foreground">PNG, JPG or WebP. Up to a small image file.</div>
           <label class="inline-flex cursor-pointer items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50">
             <span>{avatarUploading ? "Uploading..." : "Change avatar"}</span>
-            <input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" on:change={handleAvatarSelected} disabled={avatarUploading} />
+            <input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" onchange={handleAvatarSelected} disabled={avatarUploading} />
           </label>
         </div>
       </div>

@@ -327,6 +327,7 @@ export interface LiveDeploymentStatus extends LiveDeploymentInfo {
 export interface LogLine {
   line: string;
   timestamp: number;
+  deployment_id?: string;
   scale_state?: AppScaleState;
 }
 

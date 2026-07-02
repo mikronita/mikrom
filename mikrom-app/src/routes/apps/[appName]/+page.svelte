@@ -23,6 +23,8 @@
     CheckCircle2,
     Info,
     Scale,
+    Terminal,
+    RefreshCw,
   } from "lucide-svelte";
   import { SvelteMap } from "svelte/reactivity";
   import {
@@ -55,7 +57,9 @@
     type AppInfo,
     type DeploymentInfo,
     type VmMetricsResponse,
+    type LogLine,
     watchAppMetrics,
+    watchAppLogsSSE,
     watchDeploymentsSSE,
   } from "$lib/api";
   import { toast } from "$lib/toast";
@@ -85,12 +89,15 @@
   let loading = $state(true);
   let liveMetrics = $state<VmMetricsResponse | null>(null);
   let metricsHistory = $state<MetricsSnapshot[]>([]);
+  let liveLogs = $state<LogLine[]>([]);
+  let logsLoading = $state(true);
   let secret = $state<string | null>(null);
   let showSecret = $state(false);
   let showWebhookModal = $state(false);
   let showScaleModal = $state(false);
   let showDeployModal = $state(false);
   let showPortModal = $state(false);
+  let showLogsModal = $state(false);
   let showDeleteAppDialog = $state(false);
   let deletingApp = $state(false);
   let activatingDeploymentId = $state<string | null>(null);
@@ -181,11 +188,14 @@
 
     let cleanupDeployments: (() => void) | null = null;
     let cleanupMetrics: (() => void) | null = null;
+    let cleanupLogs: (() => void) | null = null;
 
     const init = async (currentAppName: string) => {
       loading = true;
       liveMetrics = null;
       metricsHistory = [];
+      liveLogs = [];
+      logsLoading = true;
       replicaSamples.clear();
       lastNetwork.clear();
 
@@ -211,6 +221,7 @@
 
       if (cleanupDeployments) cleanupDeployments();
       if (cleanupMetrics) cleanupMetrics();
+      if (cleanupLogs) cleanupLogs();
 
       cleanupDeployments = watchDeploymentsSSE(token, (deployment) => {
         if (deployment.app_name !== currentAppName) return;
@@ -238,6 +249,17 @@
       });
 
       cleanupMetrics = watchAppMetrics(token, currentAppName, handleMetrics);
+      cleanupLogs = watchAppLogsSSE(token, currentAppName, (payload) => {
+        const lines = Array.isArray(payload) ? payload : [payload];
+        const targetDeploymentId = activeDeploymentId;
+        const filtered = targetDeploymentId
+          ? lines.filter((line) => !line.deployment_id || line.deployment_id === targetDeploymentId)
+          : lines;
+        if (filtered.length > 0) {
+          liveLogs = [...liveLogs, ...filtered].slice(-500);
+        }
+        logsLoading = false;
+      });
     };
 
     const unsub = page.subscribe(($page) => {
@@ -249,6 +271,7 @@
       unsub();
       if (cleanupDeployments) cleanupDeployments();
       if (cleanupMetrics) cleanupMetrics();
+      if (cleanupLogs) cleanupLogs();
     };
   });
 
@@ -334,6 +357,8 @@
             ) ||
           deployments[0],
   );
+  let activeDeploymentId = $derived(active?.id ?? null);
+  let activeDeploymentLabel = $derived(active ? (active.job_id || active.id) : null);
   let inFlight: DeploymentInfo | undefined = $derived(
     deployments.find((d) =>
       ["HEALTH_CHECKING", "STARTING", "BUILDING", "SCHEDULED"].includes(d.status),
@@ -414,6 +439,13 @@
       metricsHistory = [];
       replicaSamples.clear();
     }
+  });
+
+  let logsContainer = $state<HTMLDivElement | null>(null);
+
+  $effect(() => {
+    if (!logsContainer || liveLogs.length === 0) return;
+    logsContainer.scrollTop = logsContainer.scrollHeight;
   });
 </script>
 
@@ -579,6 +611,16 @@
               <Cog class="size-4" />
               Auto-deploy
             </Button>
+            {#if active?.job_id}
+              <Button
+                variant="outline"
+                class="w-full"
+                onclick={() => (showLogsModal = true)}
+              >
+                <Terminal class="size-4" />
+                View active logs
+              </Button>
+            {/if}
           </CardContent>
         </Card>
       </div>
@@ -690,7 +732,16 @@
                         {/if}
                       </td>
                       <td class="px-4 py-4 text-right">
-                        <div class="ml-auto flex justify-end">
+                        <div class="ml-auto flex justify-end gap-2">
+                          {#if dep.job_id}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              href={`/apps/${encodeURIComponent(appName)}/deployments/${encodeURIComponent(dep.job_id)}/logs`}
+                            >
+                              View logs
+                            </Button>
+                          {/if}
                           {#if isProduction}
                             <Button size="sm" variant="outline" disabled>
                               Currently in Prod
@@ -874,6 +925,49 @@
           </CardContent>
         </Card>
       </div>
+    {/if}
+
+    {#if showLogsModal}
+      <Modal
+        bind:open={showLogsModal}
+        title="Live deployment logs"
+        description={active ? `Streaming logs for ${active.job_id || active.id}` : "Streaming logs for the selected deployment"}
+        width="max-w-5xl"
+      >
+        {@const modalSelectedDeployment = active}
+        <div class="flex flex-col gap-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="text-sm text-muted-foreground">
+              {#if modalSelectedDeployment}
+                Showing {modalSelectedDeployment.id} · {modalSelectedDeployment.status} · {formatDeploymentDate(modalSelectedDeployment.created_at)}
+              {/if}
+            </div>
+            {#if modalSelectedDeployment?.job_id}
+              <Button
+                variant="outline"
+                size="sm"
+                href={`/apps/${encodeURIComponent(appName)}/deployments/${encodeURIComponent(modalSelectedDeployment.job_id)}/logs`}
+              >
+                Open full page
+              </Button>
+            {/if}
+          </div>
+          <div class="rounded-xl border border-border bg-[#0b1020] p-4 font-mono text-xs leading-5 text-slate-100">
+            {#if liveLogs.length === 0}
+              <div class="text-slate-400">Waiting for log stream...</div>
+            {:else}
+              <div class="max-h-[30rem] overflow-auto" bind:this={logsContainer}>
+                {#each liveLogs as log}
+                  <div class="flex gap-3 border-b border-white/5 py-1 last:border-b-0">
+                    <span class="shrink-0 text-slate-400">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                    <span class="min-w-0 flex-1 whitespace-pre-wrap break-words">{log.line}</span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
+      </Modal>
     {/if}
   </div>
 
