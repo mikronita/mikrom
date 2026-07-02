@@ -20,6 +20,7 @@ const cachedProfile: UserProfile = {
   role: "admin",
   first_name: "Alice",
   last_name: "Example",
+  avatar_url: null,
   vpc_ipv6_prefix: "fd00:1234::/40",
 };
 
