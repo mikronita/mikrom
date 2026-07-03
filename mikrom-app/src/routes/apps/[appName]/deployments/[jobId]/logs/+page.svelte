@@ -14,6 +14,12 @@
   let error = $state<string | null>(null);
   let container = $state<HTMLDivElement | null>(null);
 
+  function reconnect() {
+    logs = [];
+    loading = true;
+    error = null;
+  }
+
   onMount(() => {
     const token = getToken();
     if (!token || !appName) return;
@@ -66,7 +72,7 @@
     <CardContent>
       {#if loading && logs.length === 0}
         <div class="rounded-xl border border-dashed border-border bg-background/60 p-6 text-sm text-muted-foreground">
-          Waiting for log stream...
+          Waiting for the deployment log stream to connect...
         </div>
       {:else if error}
         <div class="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
@@ -74,7 +80,17 @@
         </div>
       {:else if logs.length === 0}
         <div class="rounded-xl border border-dashed border-border bg-background/60 p-6 text-sm text-muted-foreground">
-          No logs received yet.
+          <p>No logs received yet for this deployment.</p>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onclick={reconnect}>
+              <RefreshCw class="size-4" />
+              Reconnect stream
+            </Button>
+            <Button variant="outline" size="sm" onclick={() => goto(`/apps/${encodeURIComponent(appName)}`)}>
+              <ArrowLeft class="size-4" />
+              Back to app
+            </Button>
+          </div>
         </div>
       {:else}
         <div bind:this={container} class="max-h-[36rem] overflow-auto rounded-xl border border-border bg-[#0b1020] p-4 font-mono text-xs leading-5 text-slate-100">
