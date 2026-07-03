@@ -340,9 +340,18 @@
   <Modal open={showSnapshotsModal} title="Snapshot history" width="max-w-3xl" description={`Manage snapshots for volume ${$volumesStore.find((v) => v.id === volumeForSnapshots)?.name || ""}.`} onclose={() => { showSnapshotsModal = false; volumeForSnapshots = ""; snapshotsStore.set([]); }}>
     <div class="mt-4">
       {#if $snapshotsLoading}
-        <TableSkeleton rows={3} cols={3} />
+        <div class="rounded-md border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
+          Loading snapshots...
+        </div>
       {:else if $snapshotsStore.length === 0}
-        <EmptyState class="py-8"><Camera class="size-8 text-muted-foreground" /><p class="text-sm text-muted-foreground">No snapshots yet.</p></EmptyState>
+        <EmptyState class="py-8">
+          <Camera class="size-8 text-muted-foreground" />
+          <p class="text-sm text-muted-foreground">No snapshots yet for this volume.</p>
+          <Button variant="outline" class="mt-4" href={volumeForSnapshots ? `/storage/${encodeURIComponent(volumeForSnapshots)}` : "/storage"}>
+            <Camera class="mr-2 size-4" />
+            Open volume details
+          </Button>
+        </EmptyState>
       {:else}
         <Table>
           <TableHeader>

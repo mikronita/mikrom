@@ -452,13 +452,13 @@
           </CardHeader>
           <CardContent>
             {#if $snapshotsLoading}
-              <div class="py-12">
-                <p class="text-sm text-muted-foreground">Loading snapshots...</p>
+              <div class="rounded-md border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
+                Loading snapshots...
               </div>
             {:else if $snapshotsStore.length === 0}
               <EmptyState class="py-12">
                 <History class="mb-4 size-10 text-muted-foreground/30" />
-                <p class="text-sm text-muted-foreground">No snapshots available for this volume.</p>
+                <p class="text-sm text-muted-foreground">No snapshots available for this volume yet.</p>
                 <Button variant="outline" class="mt-4" onclick={() => (showCreateSnapshotDialog = true)}>
                   <Camera class="mr-2 size-4" />
                   Create first snapshot
