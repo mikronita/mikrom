@@ -231,14 +231,19 @@
     {#if $appsStore.length === 0 && !$appsLoading}
       <EmptyState class="min-h-[420px] border">
         <Rocket class="size-10 text-muted-foreground" />
-        <h2 class="text-xl font-semibold">No applications found</h2>
+        <h2 class="text-xl font-semibold">No applications yet</h2>
         <p class="max-w-md text-sm text-muted-foreground">
-          Create your first application and deploy it to a Mikrom microVM.
+          Create your first application to start deploying workloads to a Mikrom microVM.
         </p>
-        <Button onclick={() => (showCreate = true)}>
-          <Plus class="size-4" />
-          Create Application
-        </Button>
+        <div class="flex flex-wrap justify-center gap-2">
+          <Button onclick={() => (showCreate = true)}>
+            <Plus class="size-4" />
+            Create Application
+          </Button>
+          <Button variant="outline" href="/apps">
+            View applications
+          </Button>
+        </div>
       </EmptyState>
     {:else}
       <div class="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
