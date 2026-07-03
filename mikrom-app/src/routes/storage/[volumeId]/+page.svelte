@@ -458,7 +458,10 @@
             {:else if $snapshotsStore.length === 0}
               <EmptyState class="py-12">
                 <History class="mb-4 size-10 text-muted-foreground/30" />
-                <p class="text-sm text-muted-foreground">No snapshots available for this volume yet.</p>
+                <h2 class="text-xl font-semibold">No snapshots yet</h2>
+                <p class="max-w-md text-sm text-muted-foreground">
+                  Create a snapshot to capture the current state of this volume before you restore, clone, or delete data.
+                </p>
                 <Button variant="outline" class="mt-4" onclick={() => (showCreateSnapshotDialog = true)}>
                   <Camera class="mr-2 size-4" />
                   Create first snapshot
