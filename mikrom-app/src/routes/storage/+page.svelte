@@ -341,7 +341,7 @@
     <div class="mt-4">
       {#if $snapshotsLoading}
         <div class="rounded-md border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
-          Loading snapshots...
+          Loading snapshot history...
         </div>
       {:else if $snapshotsStore.length === 0}
         <EmptyState class="py-8">

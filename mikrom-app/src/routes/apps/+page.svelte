@@ -121,17 +121,22 @@
           <EmptyState class="py-16">
             <FolderPlus class="size-10 text-muted-foreground" />
             <h2 class="text-xl font-semibold">
-              {query || statusFilter !== "all" ? "No matching applications" : "No applications found"}
+              {query || statusFilter !== "all" ? "No matching applications" : "No applications yet"}
             </h2>
             <p class="max-w-md text-sm text-muted-foreground">
               {query || statusFilter !== "all"
                 ? "Try a different search term or clear the status filter."
-                : "Get started by connecting your first repository."}
+                : "Connect your first repository to start deploying workloads."}
             </p>
-            <Button size="sm" onclick={() => (showCreate = true)}>
-              <Plus class="size-4" />
-              Connect your first repository
-            </Button>
+            <div class="flex flex-wrap justify-center gap-2">
+              <Button size="sm" onclick={() => (showCreate = true)}>
+                <Plus class="size-4" />
+                Connect your first repository
+              </Button>
+              <Button variant="outline" size="sm" href="/apps">
+                View applications
+              </Button>
+            </div>
           </EmptyState>
         </div>
       {:else}
