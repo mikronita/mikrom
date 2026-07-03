@@ -70,6 +70,11 @@
   }
 
   let activeTab = $derived(parseSettingsTab($page.url.searchParams.get("tab")));
+  let billingTabNotice = $derived(
+    activeTab === "billing"
+      ? $billingError || ($billingLoading ? "Loading billing status..." : "")
+      : "",
+  );
 
   async function setActiveTab(tab: SettingsTab) {
     const nextUrl = new URL($page.url);
@@ -83,7 +88,23 @@
     });
   }
 
+  function ensureValidTab() {
+    const tab = $page.url.searchParams.get("tab");
+    if (!tab || settingsTabValues.has(tab as SettingsTab)) return;
+
+    const nextUrl = new URL($page.url);
+    nextUrl.searchParams.set("tab", "profile");
+
+    void goto(nextUrl.toString(), {
+      replaceState: true,
+      noScroll: true,
+      keepFocus: true,
+    });
+  }
+
   onMount(() => {
+    ensureValidTab();
+
     if ($page.url.searchParams.get("checkout") === "success") {
       toast.success("Billing updated successfully");
 
@@ -328,6 +349,9 @@
             </span>
             <span>Billing status</span>
           </div>
+          {#if billingTabNotice}
+            <p class="text-xs text-muted-foreground">{billingTabNotice}</p>
+          {/if}
         {/if}
       </div>
     </div>

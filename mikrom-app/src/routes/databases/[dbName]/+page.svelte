@@ -343,6 +343,16 @@
     void loadSnapshots(db.id);
   }
 
+  function openRestoreSnapshot(snapshotName: string) {
+    restoreSnapshotTarget = snapshotName;
+    showRestoreSnapshotDialog = true;
+  }
+
+  function openDeleteSnapshot(snapshotName: string) {
+    deleteSnapshotTarget = snapshotName;
+    showDeleteSnapshotDialog = true;
+  }
+
   async function handleDelete() {
     if (!db) return;
 
@@ -392,6 +402,24 @@
       if (snapshots.length === 0 && !snapshotsLoading && !snapshotsError) {
         void loadSnapshots(db.id);
       }
+    }
+  }
+
+  function refreshCurrentSection() {
+    if (!db) return;
+
+    if (activeTab === "connection") {
+      void loadConnectionInfo(db.id);
+      return;
+    }
+
+    if (activeTab === "branches") {
+      void loadBranches(db.id);
+      return;
+    }
+
+    if (activeTab === "backups") {
+      void Promise.all([loadBackups(db.id), loadSnapshots(db.id)]);
     }
   }
 </script>
@@ -488,7 +516,13 @@
         </Card>
       </div>
 
-      <SectionTabs bind:active={activeTab} tabs={databaseTabs} onChange={handleTabChange} />
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <SectionTabs bind:active={activeTab} tabs={databaseTabs} onChange={handleTabChange} />
+        <Button variant="outline" size="sm" onclick={refreshCurrentSection} disabled={!db}>
+          <RotateCcw class="size-4" />
+          Refresh section
+        </Button>
+      </div>
 
       {#if detailsLoading}
         <Card>
@@ -632,7 +666,9 @@
             </CardHeader>
             <CardContent class="flex flex-col gap-5">
               {#if branchesLoading}
-                <p class="text-sm text-muted-foreground">Loading branch details...</p>
+                <div class="rounded-md border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
+                  Loading branch details...
+                </div>
               {:else if branchesError}
                 <div class="rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
                   {branchesError}
@@ -672,7 +708,7 @@
                   <Globe2 class="size-10 text-muted-foreground" />
                   <h2 class="text-xl font-semibold">No branch data available</h2>
                   <p class="max-w-md text-sm text-muted-foreground">
-                    Branch details will appear here once the database has been provisioned.
+                    Branch details will appear here once the database has been provisioned and a Neon branch exists.
                   </p>
                 </EmptyState>
               {/if}
@@ -707,7 +743,9 @@
             </CardHeader>
             <CardContent class="flex flex-col gap-5">
               {#if backupLoading}
-                <p class="text-sm text-muted-foreground">Loading backup details...</p>
+                <div class="rounded-md border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
+                  Loading backup details...
+                </div>
               {:else if backupError}
                 <div class="rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
                   {backupError}
@@ -768,8 +806,7 @@
                   <Camera class="size-10 text-muted-foreground" />
                   <h2 class="text-xl font-semibold">No backup data available</h2>
                   <p class="max-w-md text-sm text-muted-foreground">
-                    Backup metadata will appear here once the database has an active Neon branch and retention has been
-                    evaluated.
+                    Backup metadata will appear here once the database has an active Neon branch and retention has been evaluated.
                   </p>
                 </EmptyState>
               {/if}
@@ -791,8 +828,10 @@
                 </Button>
               </div>
 
-              {#if snapshotsLoading}
-                <p class="text-sm text-muted-foreground">Loading snapshot history...</p>
+                {#if snapshotsLoading}
+                <div class="rounded-md border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
+                  Loading snapshot history...
+                </div>
               {:else if snapshotsError}
                 <div class="rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
                   {snapshotsError}
@@ -831,10 +870,7 @@
                           <Button
                             variant="outline"
                             size="sm"
-                            onclick={() => {
-                              restoreSnapshotTarget = snapshot.name;
-                              showRestoreSnapshotDialog = true;
-                            }}
+                            onclick={() => openRestoreSnapshot(snapshot.name)}
                             disabled={snapshotActionLoading}
                           >
                             <RotateCcw class="size-4" />
@@ -843,10 +879,7 @@
                           <Button
                             variant="destructive-soft"
                             size="sm"
-                            onclick={() => {
-                              deleteSnapshotTarget = snapshot.name;
-                              showDeleteSnapshotDialog = true;
-                            }}
+                            onclick={() => openDeleteSnapshot(snapshot.name)}
                             disabled={snapshotActionLoading}
                           >
                             <Trash2 class="size-4" />

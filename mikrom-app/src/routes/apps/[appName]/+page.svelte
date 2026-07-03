@@ -314,6 +314,30 @@
     showPortModal = true;
   }
 
+  function refreshCurrentSection() {
+    if (!app) return;
+
+    if (activeTab === "overview") {
+      void refreshApps();
+      return;
+    }
+
+    if (activeTab === "deployments") {
+      void refreshApps();
+      return;
+    }
+
+    if (activeTab === "performance") {
+      liveMetrics = null;
+      metricsHistory = [];
+      return;
+    }
+
+    if (activeTab === "settings") {
+      void refreshApps();
+    }
+  }
+
   async function handleUpdatePort(event: SubmitEvent) {
     event.preventDefault();
     const token = getToken();
@@ -557,7 +581,13 @@
       </div>
     </div>
 
-    <SectionTabs bind:active={activeTab} tabs={appTabs} />
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <SectionTabs bind:active={activeTab} tabs={appTabs} />
+      <Button variant="outline" size="sm" onclick={refreshCurrentSection} disabled={!app}>
+        <RefreshCw class="size-4" />
+        Refresh section
+      </Button>
+    </div>
 
     {#if activeTab === "overview"}
       <div class="grid gap-6 lg:grid-cols-[1fr_360px]">
@@ -654,10 +684,16 @@
                     <td class="py-10" colspan="6">
                       <EmptyState>
                         <Rocket class="size-10 text-muted-foreground" />
-                        <h3 class="text-xl font-semibold">No active deployment</h3>
+                        <h3 class="text-xl font-semibold">No deployments yet</h3>
                         <p class="text-sm text-muted-foreground">
-                          Deploy your application to see its status here.
+                          Deploy your application to see the deployment history and runtime state here.
                         </p>
+                        <div class="flex flex-wrap justify-center gap-2">
+                          <Button size="sm" onclick={() => (showDeployModal = true)} disabled={!app}>
+                            Deploy Now
+                          </Button>
+                          <Button variant="outline" size="sm" onclick={() => (activeTab = "settings")}>Open settings</Button>
+                        </div>
                       </EmptyState>
                     </td>
                   </tr>

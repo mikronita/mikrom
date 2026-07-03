@@ -50,6 +50,11 @@
   $: if ($appsError) {
     toast.error($appsError);
   }
+
+  function clearFilters() {
+    query = "";
+    statusFilter = "all";
+  }
 </script>
 
 <svelte:head>
@@ -93,6 +98,11 @@
             </button>
           {/each}
         </div>
+        {#if query || statusFilter !== "all"}
+          <div class="flex justify-end">
+            <Button variant="ghost" size="sm" onclick={clearFilters}>Clear filters</Button>
+          </div>
+        {/if}
       </CardContent>
     </Card>
 

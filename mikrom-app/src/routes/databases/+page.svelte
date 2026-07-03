@@ -31,6 +31,11 @@
     { value: "failed", label: "Failed" },
   ] as const;
 
+  function clearFilters() {
+    query = "";
+    statusFilter = "all";
+  }
+
   function getStatusBadgeClass(status: string) {
     switch (status) {
       case "Running":
@@ -114,6 +119,11 @@
             </button>
           {/each}
         </div>
+        {#if query || statusFilter !== "all"}
+          <div class="flex justify-end">
+            <Button variant="ghost" size="sm" onclick={clearFilters}>Clear filters</Button>
+          </div>
+        {/if}
       </CardContent>
     </Card>
 

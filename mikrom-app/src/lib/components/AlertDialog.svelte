@@ -1,20 +1,19 @@
 <script lang="ts">
   import * as AlertDialog from "./ui/alert-dialog/index.js";
 
-
   let {
     open = $bindable(false),
     title = "",
     description = "",
     cancelText = "Cancel",
-    confirmLabel = "Confirm", // Accept confirmLabel for legacy compatibility
-    confirmVariant = "default", // Accept confirmVariant
+    confirmLabel = "Confirm",
+    confirmVariant = "default",
     actionText = "",
     variant = "",
     loading = false,
     onaction = undefined,
     onclose = undefined,
-    onconfirm = undefined, // Accept onconfirm
+    onconfirm = undefined,
     ...rest
   } = $props();
 

@@ -127,6 +127,15 @@
   let lastCheckoutSelectionSourceKey = $state("");
 
   function resolveCheckoutProductId() {
+    if (selectedCheckoutProductId) {
+      const currentSelection = products.find(
+        (product: BillingProduct) => product.id === selectedCheckoutProductId,
+      );
+      if (currentSelection) {
+        return currentSelection.id;
+      }
+    }
+
     const persistedSelection = billing?.selected_checkout_product_id
       ? products.find((product: BillingProduct) => product.id === billing.selected_checkout_product_id)
       : null;
@@ -151,7 +160,14 @@
   });
 
   async function handleCheckoutProductChange(nextProductId: string | null) {
-    selectedCheckoutProductId = nextProductId || "";
+    if (!nextProductId) {
+      selectedCheckoutProductId = "";
+      if (!canManageBilling) return;
+      await onCheckoutProductChange(null);
+      return;
+    }
+
+    selectedCheckoutProductId = nextProductId;
     if (!canManageBilling) return;
     await onCheckoutProductChange(nextProductId);
   }
@@ -280,7 +296,7 @@
     </Card>
 
     <Card>
-    <CardHeader>
+      <CardHeader>
       <div class="flex items-start justify-between gap-3">
         <div class="flex flex-col gap-1">
           <CardTitle>Polar products</CardTitle>
@@ -382,7 +398,7 @@
               </div>
             {/each}
           </div>
-        {:else}
+        {:else if !productsLoading}
           <EmptyState class="min-h-[12rem]">
             <p class="text-sm font-medium">No Polar products found</p>
             <p class="text-sm text-muted-foreground">
