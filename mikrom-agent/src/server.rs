@@ -858,6 +858,7 @@ impl AgentServer {
 
     fn get_hypervisor(&self, hv_type: i32) -> anyhow::Result<Arc<dyn VmHypervisor>> {
         let proto_type = match hv_type {
+            0 => HypervisorType::Firecracker,
             1 => HypervisorType::Firecracker,
             3 => HypervisorType::CloudHypervisor,
             _ => return Err(anyhow::anyhow!("Unsupported hypervisor type: {}", hv_type)),
@@ -927,9 +928,45 @@ impl AgentServer {
 #[cfg(test)]
 mod tests {
     use super::parse_vm_id;
+    use crate::firecracker::config::FirecrackerConfig;
+    use crate::firecracker::FirecrackerManager;
+    use crate::hypervisor::{HypervisorType, VmHypervisor};
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[test]
     fn parse_vm_id_rejects_invalid_values() {
         assert!(parse_vm_id("not-a-uuid").is_err());
+    }
+
+    #[test]
+    fn unspecified_hypervisor_defaults_to_firecracker() {
+        let hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>> = Arc::new(
+            HashMap::from([(
+                HypervisorType::Firecracker,
+                Arc::new(FirecrackerManager::with_config(FirecrackerConfig::stub()))
+                    as Arc<dyn VmHypervisor>,
+            )]),
+        );
+        let server = super::AgentServer::with_hypervisors(
+            crate::config::AgentConfig::default(),
+            "127.0.0.1".to_string(),
+            hypervisors,
+        );
+
+        assert_eq!(
+            server
+                .get_hypervisor(0)
+                .expect("unspecified should resolve")
+                .hypervisor_type(),
+            HypervisorType::Firecracker
+        );
+        assert_eq!(
+            server
+                .get_hypervisor(1)
+                .expect("firecracker should resolve")
+                .hypervisor_type(),
+            HypervisorType::Firecracker
+        );
     }
 }
