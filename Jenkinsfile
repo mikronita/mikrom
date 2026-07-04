@@ -1,10 +1,6 @@
 pipeline {
     agent any
 
-    environment {
-        DOCKER_HOST = "tcp://dind:2375"
-    }
-
     stages {
         stage('Setup and Full Pipeline') {
             steps {
@@ -14,6 +10,12 @@ pipeline {
                     set -eux
 
                     NET="mikrom-ci-net"
+
+                    cleanup() {
+                        docker rm -f dind 2>/dev/null || true
+                        docker network rm "$NET" 2>/dev/null || true
+                    }
+                    trap cleanup EXIT
 
                     # Create a shared Docker network so the build container
                     # can reach the DinD sidecar by hostname.
@@ -32,6 +34,8 @@ pipeline {
                     done
 
                     # Run the build container with the source mounted.
+                    # DOCKER_HOST is passed only to this container so the
+                    # Dagger SDK inside it connects to the DinD sidecar.
                     docker rm -f mikrom-ci-builder 2>/dev/null || true
                     docker run --rm                                  \
                         --network "$NET"                             \
@@ -72,10 +76,6 @@ pipeline {
                             # inside the DinD sidecar.
                             make ci-full
                         "
-
-                    # Tear down the DinD sidecar.
-                    docker rm -f dind 2>/dev/null || true
-                    docker network rm "$NET" 2>/dev/null || true
                 '''
             }
         }
