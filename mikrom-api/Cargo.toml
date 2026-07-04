@@ -41,7 +41,7 @@ instant-acme = { version = "0.8.5", features = ["rcgen"] }
 x509-parser = "0.16"
 aes-gcm = "0.11.0"
 base64 = "0.22.1"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 hmac = "0.12.1"
 hex = "0.4.3"
 indexmap = "2"
