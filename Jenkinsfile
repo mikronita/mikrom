@@ -338,13 +338,15 @@ pipeline {
 
     post {
         always {
-            sh '''#!/bin/bash
-                set -eux
-                docker rm -f builder app-builder test-postgres test-nats 2>/dev/null || true
-                docker rm -f dind 2>/dev/null || true
-                docker network rm "$NET" 2>/dev/null || true
-            '''
-            cleanWs()
+            node('built-in') {
+                sh '''#!/bin/bash
+                    set -eux
+                    docker rm -f builder app-builder test-postgres test-nats 2>/dev/null || true
+                    docker rm -f dind 2>/dev/null || true
+                    docker network rm "$NET" 2>/dev/null || true
+                '''
+                cleanWs()
+            }
         }
     }
 }
