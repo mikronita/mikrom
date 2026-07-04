@@ -2,11 +2,8 @@ pipeline {
     agent any
 
     environment {
-        NET            = "mikrom-ci-net"
-        WORKSPACE      = "/workspace"
-        DOCKER_HOST    = "tcp://dind:2375"
-        CARGO_TERM_COLOR = "always"
-        RUST_BACKTRACE = "1"
+        NET       = "mikrom-ci-net"
+        WORKSPACE = "/workspace"
     }
 
     stages {
@@ -38,9 +35,9 @@ pipeline {
                         --name builder                    \
                         -w "$WORKSPACE"                   \
                         -v "$(pwd):$WORKSPACE"            \
-                        -e DOCKER_HOST                    \
-                        -e CARGO_TERM_COLOR               \
-                        -e RUST_BACKTRACE                 \
+                        -e DOCKER_HOST=tcp://dind:2375    \
+                        -e CARGO_TERM_COLOR=always        \
+                        -e RUST_BACKTRACE=1               \
                         rust:1.96-trixie                  \
                         bash -c "tail -f /dev/null"
 
