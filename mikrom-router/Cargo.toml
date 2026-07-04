@@ -44,7 +44,7 @@ libc = "0.2"
 sha2 = "0.10"
 thiserror = "2"
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
-rand = "0.8"
+rand = "0.10"
 hex = "0.4.3"
 tower = { version = "0.5", features = ["util"], optional = true }
 uuid = { version = "1", features = ["v4", "serde"], optional = true }
