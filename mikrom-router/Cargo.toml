@@ -22,8 +22,8 @@ rustls = { version = "0.23", features = ["ring"], optional = true }
 opentelemetry = { version = "0.32", features = ["trace", "metrics", "logs"] }
 opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "trace", "metrics", "logs"] }
 opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio", "trace", "metrics", "logs"] }
-pingora = { version = "0.8.0", features = ["openssl", "lb", "proxy"] }
-pingora-limits = "0.8.0"
+pingora = { version = "0.8.1", features = ["openssl", "lb", "proxy"] }
+pingora-limits = "0.8.1"
 prost.workspace = true
 axum = "0.8"
 serde = { version = "1.0.228", features = ["derive"] }

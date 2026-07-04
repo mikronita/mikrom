@@ -25,5 +25,5 @@ tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 
 mikrom-proto = { version = "0.3.0", path = "../mikrom-proto", features = ["telemetry"] }
-git2 = "0.20.4"
+git2 = "0.21.0"
 tempfile = "3.27"
