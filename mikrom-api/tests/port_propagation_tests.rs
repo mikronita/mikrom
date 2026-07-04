@@ -82,7 +82,7 @@ async fn create_test_state(
 
 #[tokio::test]
 #[ignore = "requires a stable tenant membership fixture"]
-async fn test_port_propagation_to_scheduler_uses_reported_port() {
+async fn test_port_propagation_from_builder_to_deployment() {
     if !nats_integration_enabled() {
         return;
     }

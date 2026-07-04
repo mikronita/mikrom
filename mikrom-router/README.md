@@ -45,6 +45,10 @@ Common variables:
 - `STATE_CACHE_PATH`
 - `WIREGUARD_PORT`
 - `ACME_STAGING`
+- `API_HOST`
+- `API_UPSTREAM_URL`
+- `DASHBOARD_HOST`
+- `DASHBOARD_UPSTREAM_URL`
 - `DEFAULT_SITE_HOST`
 - `DEFAULT_SITE_REDIRECT_URL`
 - `API_UPSTREAM_TARGETS`
@@ -63,7 +67,7 @@ Timeout tuning:
 - `UPSTREAM_IDLE_TIMEOUT_SECS` default `60`
 - `ROUTE_WAIT_TIMEOUT_SECS` default `30`
 
-The packaged default configuration redirects `debaser.spluca.org` to `https://spluca.org/` with a temporary redirect. For that to work over TLS, the API-side ACME flow must issue a Let's Encrypt production certificate for `debaser.spluca.org` and the router must load it from `tls_certificates`.
+The packaged default configuration proxies `api.mikrom.spluca.org` to `http://[::1]:5001` and `dashboard.mikrom.spluca.org` to `http://[::1]:3000`. The API-side ACME flow must issue Let's Encrypt production certificates for both hostnames and the router must load them from `tls_certificates`.
 
 The router also treats `api.mikrom.spluca.org` as a built-in upstream and proxies it to `mikrom-api` on port `5001`. The API service must still obtain a TLS certificate for that hostname through the ACME worker.
 In the packaged environment, `API_UPSTREAM_TARGETS=[fd00::3bc2:7b88:289:62e6]:5001`.

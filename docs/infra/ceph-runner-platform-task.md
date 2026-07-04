@@ -32,3 +32,4 @@ The runner must only carry Ceph validation traffic.
 - A registered runner with the correct labels.
 - A documented onboarding procedure for operations.
 - A verified dry run of the Ceph job on the runner host.
+

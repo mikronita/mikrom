@@ -317,10 +317,6 @@ async fn billing_checkout_product_update_requires_tenant_admin() {
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
-
-#[tokio::test]
-#[serial]
-#[ignore = "requires a PostgreSQL test database"]
 async fn billing_checkout_and_portal_endpoints_proxy_to_polar() {
     let Ok(db) = TestDb::try_new().await else {
         eprintln!("Skipping billing API test: database unavailable");
@@ -878,10 +874,6 @@ async fn billing_products_refresh_endpoint_syncs_catalog() {
     restore_env("POLAR_API_BASE_URL", prev_base_url);
     restore_env("POLAR_CHECKOUT_PRODUCT_ID", prev_product);
 }
-
-#[tokio::test]
-#[serial]
-#[ignore = "requires a PostgreSQL test database"]
 async fn billing_portal_endpoint_creates_missing_polar_customer_before_session() {
     let Ok(db) = TestDb::try_new().await else {
         eprintln!("Skipping billing API test: database unavailable");

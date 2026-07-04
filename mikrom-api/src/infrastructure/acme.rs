@@ -19,6 +19,7 @@ pub async fn start_acme_worker(
     email: String,
     staging: bool,
     router_tls_hostname: String,
+    frontend_tls_hostname: String,
     master_key: String,
     interval_secs: u64,
     router_addr: String,
@@ -42,6 +43,7 @@ pub async fn start_acme_worker(
             url,
             staging,
             &router_tls_hostname,
+            &frontend_tls_hostname,
             &master_key,
             &router_addr,
         )
@@ -129,6 +131,7 @@ pub async fn run_acme_iteration(
     acme_url: &str,
     is_staging: bool,
     router_tls_hostname: &str,
+    frontend_tls_hostname: &str,
     master_key: &str,
     router_addr: &str,
 ) -> anyhow::Result<()> {
@@ -137,6 +140,11 @@ pub async fn run_acme_iteration(
     }
     ensure_managed_domain(api_db, API_PUBLIC_HOSTNAME, false, true).await?;
     ensure_managed_domain(api_db, WEB_PUBLIC_HOSTNAME, false, true).await?;
+    if !frontend_tls_hostname.trim().is_empty()
+        && frontend_tls_hostname != WEB_PUBLIC_HOSTNAME
+    {
+        ensure_managed_domain(api_db, frontend_tls_hostname, false, true).await?;
+    }
 
     // 1. Find domains that need certificates (expired or expiring in < 30 days)
     let app_domains = sqlx::query(
