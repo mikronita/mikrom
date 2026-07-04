@@ -19,10 +19,13 @@ pipeline {
                     docker network create "$NET" 2>/dev/null || true
 
                     # DinD sidecar (Dagger engine provider)
+                    # Limit memory to avoid OOM on resource-constrained hosts.
                     docker rm -f dind 2>/dev/null || true
                     docker run -d --privileged           \
                         --network "$NET"                 \
                         --name dind                      \
+                        --memory=1536m                   \
+                        --memory-swap=1536m              \
                         docker:dind
 
                     until docker exec dind docker info >/dev/null 2>&1; do
@@ -33,37 +36,48 @@ pipeline {
                     docker rm -f builder 2>/dev/null || true
                     docker run -d --network "$NET"        \
                         --name builder                    \
+                        --memory=4096m                    \
+                        --memory-swap=4096m               \
                         -w "$WORKSPACE"                   \
                         -v "$(pwd):$WORKSPACE"            \
+                        -v cargo-registry:/usr/local/cargo/registry \
                         -e DOCKER_HOST=tcp://dind:2375    \
                         -e CARGO_TERM_COLOR=always        \
                         -e RUST_BACKTRACE=1               \
                         rust:1.96-trixie                  \
                         bash -c "tail -f /dev/null"
 
+                    # Install build deps in batches to keep peak memory low.
                     docker exec builder bash -c "
                         set -eux
                         export DEBIAN_FRONTEND=noninteractive
                         apt-get update
+                    "
+
+                    # Batch 1: core build toolchain
+                    docker exec builder bash -c "
+                        set -eux
+                        export DEBIAN_FRONTEND=noninteractive
                         apt-get install -y --no-install-recommends \
-                            docker.io                           \
-                            build-essential                     \
-                            clang                               \
-                            cmake                               \
-                            curl                                \
-                            git                                 \
-                            libbpf-dev                          \
-                            libclang-dev                        \
-                            libelf-dev                          \
-                            libssl-dev                          \
-                            librados-dev                        \
-                            librbd-dev                          \
-                            llvm                                \
-                            netcat-openbsd                      \
-                            postgresql-client                   \
-                            pkg-config                          \
-                            protobuf-compiler                   \
-                            zlib1g-dev
+                            build-essential clang cmake llvm
+                    "
+
+                    # Batch 2: dev libraries
+                    docker exec builder bash -c "
+                        set -eux
+                        export DEBIAN_FRONTEND=noninteractive
+                        apt-get install -y --no-install-recommends \
+                            curl git libbpf-dev libclang-dev libelf-dev libssl-dev \
+                            librados-dev librbd-dev netcat-openbsd postgresql-client \
+                            pkg-config protobuf-compiler zlib1g-dev
+                    "
+
+                    # Batch 3: Docker CLI (inside the builder so Dagger SDK can
+                    # connect to the DinD sidecar).
+                    docker exec builder bash -c "
+                        set -eux
+                        export DEBIAN_FRONTEND=noninteractive
+                        apt-get install -y --no-install-recommends docker.io
                         rm -rf /var/lib/apt/lists/*
                         rustup component add clippy rustfmt
                     "
