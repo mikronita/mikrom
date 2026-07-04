@@ -9,7 +9,7 @@ workspace = true
 [dependencies]
 eyre = "0.6"
 clap = { version = "4", features = ["derive"] }
-dagger-sdk = "0.21.3"
+dagger-sdk = "0.21.7"
 tokio.workspace = true
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

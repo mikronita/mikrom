@@ -1,0 +1,120 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - rust
+    groups:
+      rust-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - patch
+      rust-minor:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+
+  - package-ecosystem: npm
+    directory: /mikrom-app
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - javascript
+    groups:
+      npm-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - patch
+      npm-minor:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+
+  - package-ecosystem: docker
+    directory: /mikrom-api
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Madrid
+    labels:
+      - dependencies
+      - docker
+  - package-ecosystem: docker
+    directory: /mikrom-agent
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Madrid
+    labels:
+      - dependencies
+      - docker
+  - package-ecosystem: docker
+    directory: /mikrom-builder
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Madrid
+    labels:
+      - dependencies
+      - docker
+  - package-ecosystem: docker
+    directory: /mikrom-scheduler
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Madrid
+    labels:
+      - dependencies
+      - docker
+  - package-ecosystem: docker
+    directory: /mikrom-cli
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Madrid
+    labels:
+      - dependencies
+      - docker
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Madrid
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      actions-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - patch
