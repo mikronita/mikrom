@@ -1,4 +1,5 @@
-use aes_gcm::{AeadInPlace, Aes256Gcm, Key, KeyInit, Nonce};
+use aes_gcm::aead::AeadInPlace;
+use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use thiserror::Error;
 
@@ -23,16 +24,19 @@ pub fn decrypt(encrypted_data: &str, master_key: &str) -> Result<String, CryptoE
         .decode(encrypted_data)
         .map_err(|_| CryptoError::InvalidBase64)?;
 
-    if combined.len() < 12 {
+    if combined.len() < 12 + 16 {
         return Err(CryptoError::InvalidLength);
     }
 
-    let (nonce_bytes, ciphertext) = combined.split_at(12);
+    let (nonce_bytes, rest) = combined.split_at(12);
+    let (ciphertext, tag_bytes) = rest.split_at(rest.len() - 16);
+
     let nonce = Nonce::from_slice(nonce_bytes);
+    let tag = aes_gcm::aead::Tag::<Aes256Gcm>::from_slice(tag_bytes);
     let mut buffer = ciphertext.to_vec();
 
     cipher
-        .decrypt_in_place(nonce, b"", &mut buffer)
+        .decrypt_in_place_detached(nonce, b"", &mut buffer, tag)
         .map_err(|_| CryptoError::DecryptionFailed)?;
 
     String::from_utf8(buffer).map_err(|_| CryptoError::InvalidUtf8)
