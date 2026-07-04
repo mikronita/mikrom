@@ -1,7 +1,7 @@
 # Build context: workspace root
 # docker build -f mikrom-cli/Dockerfile .
 
-FROM lukemathwalker/cargo-chef:latest-rust-1.95-trixie AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.96-trixie AS chef
 
 WORKDIR /app
 
