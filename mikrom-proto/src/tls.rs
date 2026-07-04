@@ -69,7 +69,8 @@ mod tests {
 
         let leaf_key = KeyPair::generate().unwrap();
         let leaf_params = CertificateParams::new(vec!["localhost".to_string()]).unwrap();
-        let leaf_cert = leaf_params.signed_by(&leaf_key, &ca_cert, &ca_key).unwrap();
+        let issuer = rcgen::Issuer::from_ca_cert_der(ca_cert.der(), &ca_key).unwrap();
+        let leaf_cert = leaf_params.signed_by(&leaf_key, &issuer).unwrap();
 
         fs::create_dir_all(dir).unwrap();
         fs::write(dir.join("cert.pem"), leaf_cert.pem()).unwrap();

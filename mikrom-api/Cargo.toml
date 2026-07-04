@@ -41,13 +41,13 @@ instant-acme = { version = "0.8.5", features = ["rcgen"] }
 x509-parser = "0.16"
 aes-gcm = "0.11.0"
 base64 = "0.22.1"
-sha2 = "0.11.0"
+sha2 = "0.10"
 hmac = "0.12.1"
 hex = "0.4.3"
 indexmap = "2"
 rovo = { version = "0.4.8", features = ["swagger"] }
 schemars = { version = "0.9.0", features = ["chrono04", "uuid1"] }
-rand = "0.10.1"
+rand = { version = "0.10.1", features = ["sys_rng"] }
 rustls = { version = "0.23", features = ["ring"] }
 reqwest = { workspace = true, default-features = false, features = ["json", "rustls"] }
 dashmap.workspace = true

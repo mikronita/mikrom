@@ -80,7 +80,8 @@ fn generate_service_cert(
     dn.push(DnType::OrganizationName, "mikrom");
     params.distinguished_name = dn;
 
-    let service_cert = params.signed_by(&service_key, ca_cert, ca_key)?;
+    let issuer = rcgen::Issuer::from_ca_cert_der(ca_cert.der(), ca_key)?;
+    let service_cert = params.signed_by(&service_key, &issuer)?;
 
     let service_dir = out_dir.join(name);
     fs::create_dir_all(&service_dir)
