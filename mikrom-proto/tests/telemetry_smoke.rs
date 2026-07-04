@@ -1,3 +1,9 @@
+use async_trait::async_trait;
+use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
+use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use prost14::Message;
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::span::{Attributes, Id, Record};
 use tracing::subscriber::Interest;
