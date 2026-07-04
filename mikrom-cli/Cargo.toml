@@ -24,7 +24,7 @@ dotenvy = "0.15"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-mockall = "0.13"
+mockall = "0.15"
 envy = "0.4"
 async-trait = "0.1"
 

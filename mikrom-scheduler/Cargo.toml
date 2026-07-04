@@ -17,7 +17,7 @@ thiserror = "2"
 anyhow.workspace = true
 async-nats.workspace = true
 async-trait = "0.1"
-mockall = "0.13"
+mockall = "0.15"
 envy.workspace = true
 opentelemetry = { version = "0.32", features = ["metrics"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "migrate"] }
