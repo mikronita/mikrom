@@ -163,7 +163,7 @@ export async function uploadUserAvatar(token: string, file: File) {
 
     const response = await fetch(`${API_PROXY_BASE}/auth/me/avatar`, {
       method: "POST",
-      headers: authHeaders(token),
+      headers: authUploadHeaders(token),
       body: formData,
     });
     const result = await parseJson<UserProfile>(response);
@@ -570,6 +570,10 @@ export interface CloneVolumeRequest {
 
 const authHeaders = (token: string) => ({
   "Content-Type": "application/json",
+  Authorization: `Bearer ${token}`,
+});
+
+const authUploadHeaders = (token: string) => ({
   Authorization: `Bearer ${token}`,
 });
 

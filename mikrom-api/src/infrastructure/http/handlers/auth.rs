@@ -163,7 +163,7 @@ pub async fn upload_avatar_impl(
         let content_type = field.content_type().unwrap_or("application/octet-stream");
         let extension = match content_type {
             "image/png" => "png",
-            "image/jpeg" => "jpg",
+            "image/jpeg" | "image/jpg" => "jpg",
             "image/webp" => "webp",
             _ => {
                 return Err(crate::error::ApiError::BadRequest(
