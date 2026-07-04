@@ -751,7 +751,12 @@ mod tests {
         };
 
         DeploymentOrchestrator::rollback_failed_promotion(
-            &state, "test-app", app_id, new_dep_id, "job-new", None,
+            &state,
+            "test-app",
+            app_id,
+            new_dep_id,
+            "job-new",
+            None,
         )
         .await
         .unwrap();
@@ -821,10 +826,13 @@ mod tests {
             ..Default::default()
         };
 
-        let (updated_app, previous) =
-            DeploymentOrchestrator::promote_deployment_to_active(&state, app, deployment_id)
-                .await
-                .unwrap();
+        let (updated_app, previous) = DeploymentOrchestrator::promote_deployment_to_active(
+            &state,
+            app,
+            deployment_id,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(updated_app.active_deployment_id, Some(deployment_id));
         assert_eq!(previous, Some(previous_id));
