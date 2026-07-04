@@ -254,10 +254,9 @@ mod tests {
             .expect_add_member()
             .returning(|_, _, _| Ok(()));
 
-        let nats_url =
-            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
-        let nats_client = async_nats::connect(nats_url).await.unwrap();
-        let nats = crate::nats::TypedNatsClient::new(nats_client);
+        let nats = crate::nats::TypedNatsClient::new_custom(Arc::new(
+            crate::nats::MockNatsClient::new(),
+        ));
 
         let state = AppState {
             ctx: crate::application::ApiContext::default(),
@@ -321,10 +320,9 @@ mod tests {
             }))
         });
 
-        let nats_url =
-            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
-        let nats_client = async_nats::connect(nats_url).await.unwrap();
-        let nats = crate::nats::TypedNatsClient::new(nats_client);
+        let nats = crate::nats::TypedNatsClient::new_custom(Arc::new(
+            crate::nats::MockNatsClient::new(),
+        ));
 
         let state = AppState {
             ctx: crate::application::ApiContext::default(),
