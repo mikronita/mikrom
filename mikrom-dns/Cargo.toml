@@ -16,7 +16,7 @@ futures = "0.3"
 tracing = "0.1"
 anyhow = { workspace = true }
 ipnet = "2.9"
-opentelemetry = { version = "0.31", features = ["metrics"] }
+opentelemetry = { version = "0.32", features = ["metrics"] }
 
 [lints]
 workspace = true
