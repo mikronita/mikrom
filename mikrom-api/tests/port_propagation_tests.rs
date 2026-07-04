@@ -27,10 +27,7 @@ async fn connect_nats_or_skip() -> Option<async_nats::Client> {
     match async_nats::connect(nats_url).await {
         Ok(client) => Some(client),
         Err(err) => {
-            eprintln!(
-                "skipping port propagation test: unable to connect to NATS: {}",
-                err
-            );
+            eprintln!("skipping port propagation test: unable to connect to NATS: {}", err);
             None
         },
     }
@@ -78,10 +75,7 @@ async fn create_test_state(
         github_app_slug: Some("test-app".to_string()),
         github_webhook_url_base: None,
         workspace_events: tokio::sync::broadcast::channel(100).0,
-        mesh_status: tokio::sync::watch::channel(
-            mikrom_api::application::vms::MeshStatus::default(),
-        )
-        .0,
+        mesh_status: tokio::sync::watch::channel(mikrom_api::application::vms::MeshStatus::default()).0,
         active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
     })
 }
@@ -138,9 +132,7 @@ async fn test_port_propagation_to_scheduler_uses_reported_port() {
         .times(1)
         .returning(|_, _| Ok(()));
 
-    mock_repo
-        .expect_update_deployment()
-        .returning(|_, _| Ok(()));
+    mock_repo.expect_update_deployment().returning(|_, _| Ok(()));
 
     mock_volume_repo
         .expect_list_volumes_by_app()
@@ -226,9 +218,7 @@ async fn test_zero_reported_port_keeps_original_deployment_port() {
         .returning(move |_| Ok(Some(dep_clone.clone())));
 
     mock_repo.expect_update_deployment_port().times(0);
-    mock_repo
-        .expect_update_deployment()
-        .returning(|_, _| Ok(()));
+    mock_repo.expect_update_deployment().returning(|_, _| Ok(()));
 
     mock_volume_repo
         .expect_list_volumes_by_app()
