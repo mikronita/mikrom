@@ -386,7 +386,7 @@
         onSave={saveProfile}
       />
       <div class="mt-6 flex items-center gap-4 rounded-lg border border-border bg-background p-4">
-        <Avatar class="size-16">
+        <Avatar class="size-16" key={profile?.avatar_url || "no-avatar"}>
           <AvatarImage src={resolveAvatarUrl(profile?.avatar_url) || undefined} alt="User avatar" />
           <AvatarFallback>
             {(profile?.first_name?.[0] || profile?.email?.[0] || "U").toUpperCase()}

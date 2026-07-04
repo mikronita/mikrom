@@ -77,7 +77,7 @@ fn avatar_storage_dir() -> PathBuf {
 }
 
 fn public_avatar_url(filename: &str) -> String {
-    format!("/uploads/avatars/{filename}")
+    format!("/avatars/{filename}")
 }
 
 const MAX_AVATAR_BYTES: u64 = 2 * 1024 * 1024;
@@ -376,7 +376,7 @@ mod tests {
                 role: crate::domain::UserRole::User,
                 first_name: None,
                 last_name: None,
-                avatar_url: Some("/uploads/avatars/test.png".into()),
+                avatar_url: Some("/avatars/test.png".into()),
                 vpc_ipv6_prefix: None,
             }))
         });
@@ -386,7 +386,7 @@ mod tests {
                 assert!(first_name.is_none());
                 assert!(last_name.is_none());
                 let url = avatar_url.expect("expected avatar url");
-                assert!(url.starts_with("/uploads/avatars/"));
+                assert!(url.starts_with("/avatars/"));
                 Ok(User {
                     id,
                     email: "test@example.com".into(),
@@ -442,7 +442,7 @@ mod tests {
             &Uuid::new_v4().to_string(),
             None,
             None,
-            Some(format!("/uploads/avatars/{filename}")),
+            Some(format!("/avatars/{filename}")),
         )
         .await
         .unwrap();
