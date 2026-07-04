@@ -15,6 +15,12 @@ const PUBLIC_BASE = (
 const API_PROXY_BASE = "/api/v1";
 export const API_BASE_URL = `${PUBLIC_BASE}${API_PROXY_BASE}`;
 
+export function resolveAvatarUrl(avatarUrl: string | null | undefined) {
+  if (!avatarUrl) return null;
+  if (/^https?:\/\//i.test(avatarUrl)) return avatarUrl;
+  return `${API_BASE_URL}${avatarUrl.startsWith("/") ? avatarUrl : `/${avatarUrl}`}`;
+}
+
 export interface ApiError {
   error: string;
 }

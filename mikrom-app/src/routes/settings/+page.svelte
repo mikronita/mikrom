@@ -22,6 +22,7 @@
     updateBillingCheckoutProduct,
     updateUserProfile,
     uploadUserAvatar,
+    resolveAvatarUrl,
     type GithubAccount,
     type UserProfile,
     type BillingProduct,
@@ -386,7 +387,7 @@
       />
       <div class="mt-6 flex items-center gap-4 rounded-lg border border-border bg-background p-4">
         <Avatar class="size-16">
-          <AvatarImage src={profile?.avatar_url || undefined} alt="User avatar" />
+          <AvatarImage src={resolveAvatarUrl(profile?.avatar_url) || undefined} alt="User avatar" />
           <AvatarFallback>
             {(profile?.first_name?.[0] || profile?.email?.[0] || "U").toUpperCase()}
           </AvatarFallback>
