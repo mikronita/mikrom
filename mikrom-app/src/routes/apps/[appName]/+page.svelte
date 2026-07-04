@@ -90,6 +90,7 @@
   let liveMetrics = $state<VmMetricsResponse | null>(null);
   let metricsHistory = $state<MetricsSnapshot[]>([]);
   let liveLogs = $state<LogLine[]>([]);
+  let logsLoading = $state(true);
   let secret = $state<string | null>(null);
   let showSecret = $state(false);
   let showWebhookModal = $state(false);
@@ -194,6 +195,7 @@
       liveMetrics = null;
       metricsHistory = [];
       liveLogs = [];
+      logsLoading = true;
       replicaSamples.clear();
       lastNetwork.clear();
 
@@ -256,6 +258,7 @@
         if (filtered.length > 0) {
           liveLogs = [...liveLogs, ...filtered].slice(-500);
         }
+        logsLoading = false;
       });
     };
 
@@ -379,6 +382,7 @@
           deployments[0],
   );
   let activeDeploymentId = $derived(active?.id ?? null);
+  let activeDeploymentLabel = $derived(active ? (active.job_id || active.id) : null);
   let inFlight: DeploymentInfo | undefined = $derived(
     deployments.find((d) =>
       ["HEALTH_CHECKING", "STARTING", "BUILDING", "SCHEDULED"].includes(d.status),
