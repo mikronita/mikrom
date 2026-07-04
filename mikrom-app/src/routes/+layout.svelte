@@ -1,6 +1,7 @@
 <script lang="ts">
   import "../app.css";
-  import { Boxes, LoaderCircle } from "lucide-svelte";
+    import Boxes from "lucide-svelte/icons/boxes";
+  import LoaderCircle from "lucide-svelte/icons/loader-circle";
   import { initTheme } from "$lib/theme";
   import { onMount } from "svelte";
   import { fade, scale } from "svelte/transition";

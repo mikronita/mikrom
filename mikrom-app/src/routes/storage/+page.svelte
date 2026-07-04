@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Calendar, Camera, Copy, HardDrive, Plus, RotateCcw, Trash2 } from "lucide-svelte";
+    import Calendar from "lucide-svelte/icons/calendar";
+  import Camera from "lucide-svelte/icons/camera";
+  import Copy from "lucide-svelte/icons/copy";
+  import HardDrive from "lucide-svelte/icons/hard-drive";
+  import Plus from "lucide-svelte/icons/plus";
+  import RotateCcw from "lucide-svelte/icons/rotate-ccw";
+  import Trash2 from "lucide-svelte/icons/trash-2";
   import {
     Card,
     CardHeader,

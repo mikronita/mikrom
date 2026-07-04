@@ -8,6 +8,9 @@ export default defineConfig({
   server: {
     allowedHosts: ["mikrom.spluca.org"],
   },
+  optimizeDeps: {
+    exclude: ["lucide-svelte"],
+  },
   ssr: {
     noExternal: ["svelte-sonner"],
   },

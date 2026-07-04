@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Loader2, Rocket } from "lucide-svelte";
+    import Loader2 from "lucide-svelte/icons/loader-2";
+  import Rocket from "lucide-svelte/icons/rocket";
   import {
     DEPLOYMENT_CPU_OPTIONS,
     DEPLOYMENT_MEMORY_OPTIONS,

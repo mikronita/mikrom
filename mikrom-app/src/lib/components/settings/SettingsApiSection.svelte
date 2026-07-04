@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "$lib/components";
-  import { CheckCircle2, Plus } from "lucide-svelte";
+    import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
+  import Plus from "lucide-svelte/icons/plus";
 </script>
 
 <Card size="sm">

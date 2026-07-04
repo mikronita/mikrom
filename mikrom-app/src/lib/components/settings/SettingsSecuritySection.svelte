@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Badge, Button, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Field, Input } from "$lib/components";
-  import { ShieldCheck, Trash2 } from "lucide-svelte";
+    import ShieldCheck from "lucide-svelte/icons/shield-check";
+  import Trash2 from "lucide-svelte/icons/trash-2";
 </script>
 
 <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">

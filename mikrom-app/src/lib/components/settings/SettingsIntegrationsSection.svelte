@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, CardSkeleton } from "$lib/components";
-  import { Github, Plus } from "lucide-svelte";
+  import GithubIcon from "$lib/components/GithubIcon.svelte";
+  import Plus from "lucide-svelte/icons/plus";
   import type { GithubAccount } from "$lib/api";
 
   let {
@@ -51,7 +52,7 @@
                 <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div class="flex items-center gap-4">
                     <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
-                      <Github class="size-4" />
+                      <GithubIcon class="size-4" />
                     </div>
                     <div class="min-w-0">
                       <p class="truncate text-sm font-semibold">@{account.github_username}</p>
@@ -77,7 +78,7 @@
               <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div class="flex items-center gap-4">
                   <div class="flex size-10 items-center justify-center rounded-md border border-border bg-background text-foreground">
-                    <Github class="size-4" />
+                    <GithubIcon class="size-4" />
                   </div>
                   <div class="min-w-0">
                     <p class="text-sm font-semibold">GitHub app integration</p>

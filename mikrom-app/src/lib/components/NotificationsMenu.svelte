@@ -1,7 +1,10 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import { goto } from "$app/navigation";
-  import { Bell, CheckCheck, CircleAlert, LoaderCircle } from "lucide-svelte";
+    import Bell from "lucide-svelte/icons/bell";
+  import CheckCheck from "lucide-svelte/icons/check-check";
+  import CircleAlert from "lucide-svelte/icons/circle-alert";
+  import LoaderCircle from "lucide-svelte/icons/loader-circle";
   import { Badge } from "$lib/components";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { cn } from "$lib/utils";

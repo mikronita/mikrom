@@ -2,21 +2,19 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
-  import {
-    Database as DatabaseIcon,
-    Radio,
-    Cpu,
-    HardDrive,
-    Camera,
-    Terminal,
-    Globe2,
-    Copy,
-    Check,
-    RotateCcw,
-    Trash2,
-    Server,
-    ArrowLeft,
-  } from "lucide-svelte";
+    import DatabaseIcon from "lucide-svelte/icons/database";
+  import Radio from "lucide-svelte/icons/radio";
+  import Cpu from "lucide-svelte/icons/cpu";
+  import HardDrive from "lucide-svelte/icons/hard-drive";
+  import Camera from "lucide-svelte/icons/camera";
+  import Terminal from "lucide-svelte/icons/terminal";
+  import Globe2 from "lucide-svelte/icons/globe-2";
+  import Copy from "lucide-svelte/icons/copy";
+  import Check from "lucide-svelte/icons/check";
+  import RotateCcw from "lucide-svelte/icons/rotate-ccw";
+  import Trash2 from "lucide-svelte/icons/trash-2";
+  import Server from "lucide-svelte/icons/server";
+  import ArrowLeft from "lucide-svelte/icons/arrow-left";
   import {
     Card,
     CardHeader,

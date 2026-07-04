@@ -1,7 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { Boxes, Pencil, Plus, ArrowRight, Trash2 } from "lucide-svelte";
+    import Boxes from "lucide-svelte/icons/boxes";
+  import Pencil from "lucide-svelte/icons/pencil";
+  import Plus from "lucide-svelte/icons/plus";
+  import ArrowRight from "lucide-svelte/icons/arrow-right";
+  import Trash2 from "lucide-svelte/icons/trash-2";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import {
     AlertDialog,

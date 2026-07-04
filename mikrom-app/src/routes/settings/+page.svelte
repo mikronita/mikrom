@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
-  import { Settings } from "lucide-svelte";
+    import Settings from "lucide-svelte/icons/settings";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import SettingsApiSection from "$lib/components/settings/SettingsApiSection.svelte";
   import SettingsBillingSection from "$lib/components/settings/SettingsBillingSection.svelte";

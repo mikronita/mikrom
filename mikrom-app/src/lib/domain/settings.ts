@@ -1,11 +1,9 @@
-import {
-  Bell,
-  CloudDownload,
-  CreditCard,
-  KeyRound,
-  Puzzle,
-  User,
-} from "lucide-svelte";
+import Bell from "lucide-svelte/icons/bell";
+import CloudDownload from "lucide-svelte/icons/cloud-download";
+import CreditCard from "lucide-svelte/icons/credit-card";
+import KeyRound from "lucide-svelte/icons/key-round";
+import Puzzle from "lucide-svelte/icons/puzzle";
+import User from "lucide-svelte/icons/user";
 
 export const settingsTabs = [
   { value: "profile", label: "Profile", icon: User },
