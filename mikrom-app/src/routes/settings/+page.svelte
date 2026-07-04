@@ -392,13 +392,13 @@
       />
       <div class="mt-6 flex items-center gap-4 rounded-lg border border-border bg-background p-4">
         <div class="size-16 shrink-0 overflow-hidden rounded-full bg-muted">
-          {#if resolvedAvatarUrl as avatarSrc}
-            <img src={avatarSrc} alt="User avatar" class="size-full object-cover" />
+          {#if resolvedAvatarUrl}
+            <img src={resolvedAvatarUrl} alt="User avatar" class="size-full object-cover" />
           {:else}
             <div class="flex size-full items-center justify-center text-lg font-semibold text-muted-foreground">
-            {( $profile?.first_name?.[0] || $profile?.email?.[0] || "U").toUpperCase()}
-          </div>
-        {/if}
+              {($profile?.first_name?.[0] || $profile?.email?.[0] || "U").toUpperCase()}
+            </div>
+          {/if}
         </div>
         <div class="space-y-2">
           <div class="text-sm font-medium">Profile avatar</div>
