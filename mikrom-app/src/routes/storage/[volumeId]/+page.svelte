@@ -2,18 +2,16 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
-  import { 
-    ArrowLeft,
-    HardDrive, 
-    Database, 
-    History, 
-    Camera,
-    Link,
-    Activity,
-    Server,
-    Trash2,
-    Zap
-  } from "lucide-svelte";
+    import ArrowLeft from "lucide-svelte/icons/arrow-left";
+  import HardDrive from "lucide-svelte/icons/hard-drive";
+  import Database from "lucide-svelte/icons/database";
+  import History from "lucide-svelte/icons/history";
+  import Camera from "lucide-svelte/icons/camera";
+  import Link from "lucide-svelte/icons/link";
+  import Activity from "lucide-svelte/icons/activity";
+  import Server from "lucide-svelte/icons/server";
+  import Trash2 from "lucide-svelte/icons/trash-2";
+  import Zap from "lucide-svelte/icons/zap";
   import {
     Card,
     CardHeader,

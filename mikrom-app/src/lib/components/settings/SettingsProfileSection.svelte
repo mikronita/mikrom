@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Loader2, Mail } from "lucide-svelte";
+    import Loader2 from "lucide-svelte/icons/loader-2";
+  import Mail from "lucide-svelte/icons/mail";
   import {
     Avatar,
     AvatarFallback,

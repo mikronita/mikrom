@@ -3,29 +3,27 @@
   import { browser } from "$app/environment";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import {
-    ArrowLeft,
-    ArrowDownToLine,
-    ArrowUpFromLine,
-    Boxes,
-    Cpu,
-    GitBranch,
-    Loader2,
-    MemoryStick,
-    Rocket,
-    User,
-    Zap,
-    Eye,
-    EyeOff,
-    Clipboard,
-    Trash2,
-    Cog,
-    CheckCircle2,
-    Info,
-    Scale,
-    Terminal,
-    RefreshCw,
-  } from "lucide-svelte";
+    import ArrowLeft from "lucide-svelte/icons/arrow-left";
+  import ArrowDownToLine from "lucide-svelte/icons/arrow-down-to-line";
+  import ArrowUpFromLine from "lucide-svelte/icons/arrow-up-from-line";
+  import Boxes from "lucide-svelte/icons/boxes";
+  import Cpu from "lucide-svelte/icons/cpu";
+  import GitBranch from "lucide-svelte/icons/git-branch";
+  import Loader2 from "lucide-svelte/icons/loader-2";
+  import MemoryStick from "lucide-svelte/icons/memory-stick";
+  import Rocket from "lucide-svelte/icons/rocket";
+  import User from "lucide-svelte/icons/user";
+  import Zap from "lucide-svelte/icons/zap";
+  import Eye from "lucide-svelte/icons/eye";
+  import EyeOff from "lucide-svelte/icons/eye-off";
+  import Clipboard from "lucide-svelte/icons/clipboard";
+  import Trash2 from "lucide-svelte/icons/trash-2";
+  import Cog from "lucide-svelte/icons/cog";
+  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
+  import Info from "lucide-svelte/icons/info";
+  import Scale from "lucide-svelte/icons/scale";
+  import Terminal from "lucide-svelte/icons/terminal";
+  import RefreshCw from "lucide-svelte/icons/refresh-cw";
   import { SvelteMap } from "svelte/reactivity";
   import {
     Card,

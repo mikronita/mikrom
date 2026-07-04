@@ -1,6 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Boxes, Globe2, LockKeyhole, Network, Plus, Server, ShieldCheck, Trash2 } from "lucide-svelte";
+    import Boxes from "lucide-svelte/icons/boxes";
+  import Globe2 from "lucide-svelte/icons/globe-2";
+  import LockKeyhole from "lucide-svelte/icons/lock-keyhole";
+  import Network from "lucide-svelte/icons/network";
+  import Plus from "lucide-svelte/icons/plus";
+  import Server from "lucide-svelte/icons/server";
+  import ShieldCheck from "lucide-svelte/icons/shield-check";
+  import Trash2 from "lucide-svelte/icons/trash-2";
   import {
     Card,
     CardHeader,

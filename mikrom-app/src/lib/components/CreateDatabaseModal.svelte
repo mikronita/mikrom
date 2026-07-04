@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Layers } from "lucide-svelte";
+  import Layers from "lucide-svelte/icons/layers";
   import {
     Modal,
     Button,
