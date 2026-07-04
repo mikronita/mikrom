@@ -385,7 +385,7 @@
       <SettingsProfileSection
         bind:firstNameDraft
         bind:lastNameDraft
-        {profile}
+        profile={$profile}
         {loading}
         {saving}
         onSave={saveProfile}
