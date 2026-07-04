@@ -2,69 +2,81 @@ pipeline {
     agent any
 
     environment {
-        // Tell Dagger SDK to connect to the DinD sidecar
         DOCKER_HOST = "tcp://dind:2375"
     }
 
     stages {
-        stage('Full Pipeline') {
+        stage('Setup and Full Pipeline') {
             steps {
-                script {
-                    // Create a shared Docker network so the build container
-                    // can reach the DinD sidecar by hostname.
-                    sh 'docker network create mikrom-ci-net 2>/dev/null || true'
+                checkout scm
 
-                    // Start Docker-in-Docker sidecar for Dagger engine.
-                    def dind = docker.image('docker:dind').run(
-                        '--privileged --network mikrom-ci-net --name dind'
-                    )
+                sh '''
+                    set -eux
 
-                    try {
-                        // Run the build container on the same network.
-                        docker.image('rust:1.96-trixie').inside(
-                            '--network mikrom-ci-net'
-                        ) {
-                            checkout scm
+                    NET="mikrom-ci-net"
 
-                            sh '''
-                                set -eux
+                    # Create a shared Docker network so the build container
+                    # can reach the DinD sidecar by hostname.
+                    docker network create "$NET" 2>/dev/null || true
 
-                                # Install build dependencies (mirrors BASE_PACKAGES in pipeline.rs).
-                                apt-get update && apt-get install -y --no-install-recommends \
-                                    docker.io \
-                                    build-essential \
-                                    clang \
-                                    cmake \
-                                    curl \
-                                    git \
-                                    libbpf-dev \
-                                    libclang-dev \
-                                    libelf-dev \
-                                    libssl-dev \
-                                    librados-dev \
-                                    librbd-dev \
-                                    llvm \
-                                    netcat-openbsd \
-                                    postgresql-client \
-                                    pkg-config \
-                                    protobuf-compiler \
-                                    zlib1g-dev
+                    # Start Docker-in-Docker sidecar for Dagger engine.
+                    docker rm -f dind 2>/dev/null || true
+                    docker run -d --privileged                        \
+                        --network "$NET"                              \
+                        --name dind                                   \
+                        docker:dind
 
-                                # Install Rust toolchain components needed by the pipeline.
-                                rustup component add clippy rustfmt
+                    # Wait for DinD to be ready.
+                    until docker exec dind docker info >/dev/null 2>&1; do
+                        sleep 1
+                    done
 
-                                # Run the full Dagger-based CI pipeline.
-                                # Dagger SDK auto-detects DOCKER_HOST and starts its engine
-                                # inside the DinD sidecar.
-                                make ci-full
-                            '''
-                        }
-                    } finally {
-                        // Tear down the DinD sidecar.
-                        dind.stop()
-                        sh 'docker network rm mikrom-ci-net 2>/dev/null || true'
-                    }
-                }
+                    # Run the build container with the source mounted.
+                    docker rm -f mikrom-ci-builder 2>/dev/null || true
+                    docker run --rm                                  \
+                        --network "$NET"                             \
+                        --name mikrom-ci-builder                     \
+                        -w /workspace                                \
+                        -v "$(pwd):/workspace"                       \
+                        -e DOCKER_HOST="tcp://dind:2375"             \
+                        rust:1.96-trixie                             \
+                        sh -c "
+                            set -eux
+
+                            # Install build dependencies (mirrors BASE_PACKAGES in pipeline.rs).
+                            apt-get update && apt-get install -y --no-install-recommends \
+                                docker.io \
+                                build-essential \
+                                clang \
+                                cmake \
+                                curl \
+                                git \
+                                libbpf-dev \
+                                libclang-dev \
+                                libelf-dev \
+                                libssl-dev \
+                                librados-dev \
+                                librbd-dev \
+                                llvm \
+                                netcat-openbsd \
+                                postgresql-client \
+                                pkg-config \
+                                protobuf-compiler \
+                                zlib1g-dev
+
+                            # Install Rust toolchain components needed by the pipeline.
+                            rustup component add clippy rustfmt
+
+                            # Run the full Dagger-based CI pipeline.
+                            # Dagger SDK auto-detects DOCKER_HOST and starts its engine
+                            # inside the DinD sidecar.
+                            make ci-full
+                        "
+
+                    # Tear down the DinD sidecar.
+                    docker rm -f dind 2>/dev/null || true
+                    docker network rm "$NET" 2>/dev/null || true
+                '''
             }
         }
     }
