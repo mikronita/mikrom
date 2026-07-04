@@ -79,6 +79,7 @@ fn build_state(
             id: user_id,
             email: "test@example.com".to_string(),
             password_hash: "hash".to_string(),
+            avatar_url: None,
             role: UserRole::User,
             first_name: None,
             last_name: None,

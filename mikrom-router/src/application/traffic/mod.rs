@@ -159,7 +159,10 @@ mod tests {
         assert_eq!(first.hostname, "busy.example.com");
 
         let second = timeout(std::time::Duration::from_millis(100), rx.recv()).await;
-        assert!(second.is_err(), "should deduplicate repeated events within window");
+        assert!(
+            second.is_err(),
+            "should deduplicate repeated events within window"
+        );
     }
 
     #[tokio::test]
@@ -176,8 +179,7 @@ mod tests {
         assert_ne!(first.hostname, second.hostname);
         assert!(
             (first.hostname == "app1.example.com" && second.hostname == "app2.example.com")
-                || (first.hostname == "app2.example.com"
-                    && second.hostname == "app1.example.com")
+                || (first.hostname == "app2.example.com" && second.hostname == "app1.example.com")
         );
     }
 }

@@ -38,6 +38,7 @@ fn build_state(
             role: UserRole::User,
             first_name: None,
             last_name: None,
+            avatar_url: None,
             vpc_ipv6_prefix: Some("fd00::".to_string()),
         }))
     });

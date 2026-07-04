@@ -58,6 +58,7 @@ fn user(id: Uuid, email: &str) -> User {
         role: UserRole::User,
         first_name: None,
         last_name: None,
+        avatar_url: None,
         vpc_ipv6_prefix: Some("fd00::".to_string()),
     }
 }
@@ -110,6 +111,7 @@ async fn register_creates_tenant_and_emits_profile_flow_inputs() {
             password: "password123".to_string(),
             first_name: Some("Ada".to_string()),
             last_name: Some("Lovelace".to_string()),
+            avatar_url: None,
         },
     )
     .await
@@ -135,6 +137,7 @@ async fn login_returns_token_for_valid_credentials() {
             role: UserRole::User,
             first_name: None,
             last_name: None,
+            avatar_url: None,
             vpc_ipv6_prefix: Some("fd00::".to_string()),
         }))
     });
@@ -162,6 +165,7 @@ async fn login_rejects_invalid_password() {
             role: UserRole::User,
             first_name: None,
             last_name: None,
+            avatar_url: None,
             vpc_ipv6_prefix: Some("fd00::".to_string()),
         }))
     });
@@ -180,10 +184,11 @@ async fn update_profile_emits_workspace_event() {
     let mut user_repo = MockUserRepository::new();
     user_repo
         .expect_update_profile()
-        .returning(move |id, first_name, last_name| {
+        .returning(move |id, first_name, last_name, avatar_url| {
             assert_eq!(id, user_id);
             assert_eq!(first_name.as_deref(), Some("Ada"));
             assert_eq!(last_name.as_deref(), Some("Lovelace"));
+            assert!(avatar_url.is_none());
             Ok(User {
                 id,
                 email: email.to_string(),
@@ -191,6 +196,7 @@ async fn update_profile_emits_workspace_event() {
                 role: UserRole::User,
                 first_name,
                 last_name,
+                avatar_url: None,
                 vpc_ipv6_prefix: Some("fd00::".to_string()),
             })
         });
@@ -202,6 +208,7 @@ async fn update_profile_emits_workspace_event() {
             role: UserRole::User,
             first_name: Some("Ada".to_string()),
             last_name: Some("Lovelace".to_string()),
+            avatar_url: None,
             vpc_ipv6_prefix: Some("fd00::".to_string()),
         }))
     });
@@ -218,6 +225,7 @@ async fn update_profile_emits_workspace_event() {
         &user_id.to_string(),
         Some("Ada".to_string()),
         Some("Lovelace".to_string()),
+        None,
     )
     .await
     .unwrap();

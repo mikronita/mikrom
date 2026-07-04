@@ -655,7 +655,10 @@ async fn billing_products_endpoint_falls_back_to_cached_catalog_when_polar_is_un
     let payload: Value = serde_json::from_slice(&body).expect("json");
 
     assert_eq!(payload["default_checkout_product_id"], "prod_default");
-    assert_eq!(payload["products"].as_array().map(|items| items.len()), Some(2));
+    assert_eq!(
+        payload["products"].as_array().map(|items| items.len()),
+        Some(2)
+    );
     assert_eq!(payload["products"][0]["id"], "prod_cached_default");
     assert_eq!(payload["products"][0]["is_default_checkout_product"], false);
     assert_eq!(payload["products"][1]["id"], "prod_cached_other");
@@ -719,7 +722,11 @@ async fn billing_products_endpoint_returns_polar_error_when_cache_is_empty() {
         .await
         .expect("body");
     let payload: Value = serde_json::from_slice(&body).expect("json");
-    assert!(payload["error"].as_str().is_some_and(|message| message.contains("Polar product listing failed")));
+    assert!(
+        payload["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("Polar product listing failed"))
+    );
 
     restore_env("POLAR_ACCESS_TOKEN", prev_access_token);
     restore_env("POLAR_WEBHOOK_SECRET", prev_secret);

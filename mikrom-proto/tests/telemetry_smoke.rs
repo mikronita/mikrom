@@ -1,9 +1,3 @@
-use async_trait::async_trait;
-use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
-use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
-use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use prost14::Message;
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::span::{Attributes, Id, Record};
 use tracing::subscriber::Interest;
@@ -52,27 +46,6 @@ impl Drop for EnvVarGuard {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RecordedRequest {
-    path: String,
-    body: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Default)]
-struct RecordingHttpClient {
-    requests: Arc<Mutex<Vec<RecordedRequest>>>,
-}
-
-impl RecordingHttpClient {
-    fn requests(&self) -> Vec<RecordedRequest> {
-        self.requests
-            .lock()
-            .expect("recording client mutex poisoned")
-            .clone()
-    }
-}
-
-#[derive(Clone)]
 struct DeferredTelemetry {
     layers: Arc<Mutex<Vec<Box<dyn tracing_subscriber::Layer<Registry> + Send + Sync>>>>,
 }
@@ -208,25 +181,6 @@ impl tracing_subscriber::Layer<Registry> for DeferredTelemetry {
                 layer.on_id_change(old, new, ctx.clone());
             }
         });
-    }
-}
-
-#[async_trait]
-impl HttpClient for RecordingHttpClient {
-    async fn send_bytes(&self, request: Request<Bytes>) -> Result<Response<Bytes>, HttpError> {
-        let recorded = RecordedRequest {
-            path: request.uri().path().to_string(),
-            body: request.body().to_vec(),
-        };
-        self.requests
-            .lock()
-            .expect("recording client mutex poisoned")
-            .push(recorded);
-
-        Ok(Response::builder()
-            .status(200)
-            .body(Bytes::new())
-            .expect("response should build"))
     }
 }
 

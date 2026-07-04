@@ -928,8 +928,8 @@ impl AgentServer {
 #[cfg(test)]
 mod tests {
     use super::parse_vm_id;
-    use crate::firecracker::config::FirecrackerConfig;
     use crate::firecracker::FirecrackerManager;
+    use crate::firecracker::config::FirecrackerConfig;
     use crate::hypervisor::{HypervisorType, VmHypervisor};
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -941,13 +941,12 @@ mod tests {
 
     #[test]
     fn unspecified_hypervisor_defaults_to_firecracker() {
-        let hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>> = Arc::new(
-            HashMap::from([(
+        let hypervisors: Arc<HashMap<HypervisorType, Arc<dyn VmHypervisor>>> =
+            Arc::new(HashMap::from([(
                 HypervisorType::Firecracker,
                 Arc::new(FirecrackerManager::with_config(FirecrackerConfig::stub()))
                     as Arc<dyn VmHypervisor>,
-            )]),
-        );
+            )]));
         let server = super::AgentServer::with_hypervisors(
             crate::config::AgentConfig::default(),
             "127.0.0.1".to_string(),

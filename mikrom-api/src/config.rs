@@ -310,7 +310,10 @@ mod tests {
 
         let err = config.validate().unwrap_err();
 
-        assert!(err.to_string().contains("ROUTER_TLS_HOSTNAME must not be empty"));
+        assert!(
+            err.to_string()
+                .contains("ROUTER_TLS_HOSTNAME must not be empty")
+        );
     }
 
     #[test]
@@ -322,7 +325,10 @@ mod tests {
 
         let err = config.validate().unwrap_err();
 
-        assert!(err.to_string().contains("JWT_SECRET must be at least 32 characters long"));
+        assert!(
+            err.to_string()
+                .contains("JWT_SECRET must be at least 32 characters long")
+        );
     }
 
     #[test]
@@ -334,6 +340,9 @@ mod tests {
 
         let err = config.validate().unwrap_err();
 
-        assert!(err.to_string().contains("MASTER_KEY must be at least 32 characters long"));
+        assert!(
+            err.to_string()
+                .contains("MASTER_KEY must be at least 32 characters long")
+        );
     }
 }

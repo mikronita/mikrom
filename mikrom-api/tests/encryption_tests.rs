@@ -29,6 +29,7 @@ async fn test_encryption_at_rest() {
             role: UserRole::User,
             first_name: None,
             last_name: None,
+            avatar_url: None,
         })
         .await
         .expect("failed to create user");

@@ -1083,7 +1083,7 @@ impl DeploymentService {
                     resource_id: Some(job_id),
                 });
 
-                return Ok(ResumeRecovery::Resumed);
+                Ok(ResumeRecovery::Resumed)
             },
             Ok(false) | Err(_) => {
                 let desired_replicas = app.desired_replicas.max(app.min_replicas).max(1) as u32;
@@ -1104,7 +1104,7 @@ impl DeploymentService {
                     return Err(ApiError::BadRequest("Failed to resume deployment".into()));
                 }
 
-                return Ok(ResumeRecovery::Recreated);
+                Ok(ResumeRecovery::Recreated)
             },
         }
     }
@@ -1326,8 +1326,10 @@ mod tests {
             .times(1)
             .returning(|_| Ok(vec![]));
 
-        let mut ctx = crate::application::ApiContext::default();
-        ctx.tenant_repo = Arc::new(tenant_repo);
+        let ctx = crate::application::ApiContext {
+            tenant_repo: Arc::new(tenant_repo),
+            ..Default::default()
+        };
 
         let state = crate::AppState {
             ctx,
@@ -1495,22 +1497,24 @@ mod tests {
         tenant_id: Uuid,
         deployment_id: Uuid,
         previous_deployment_id: Uuid,
-    ) -> (crate::AppState, App, Deployment, mikrom_proto::scheduler::DeployResponse) {
+    ) -> (
+        crate::AppState,
+        App,
+        Deployment,
+        mikrom_proto::scheduler::DeployResponse,
+    ) {
         let mut app_repo = MockAppRepository::new();
-        app_repo
-            .expect_get_app()
-            .times(2)
-            .returning(move |_| {
-                Ok(Some(App {
-                    id: app_id,
-                    tenant_id,
-                    name: "demo".into(),
-                    hostname: Some("demo.example.com".into()),
-                    active_deployment_id: Some(previous_deployment_id),
-                    desired_replicas: 1,
-                    ..Default::default()
-                }))
-            });
+        app_repo.expect_get_app().times(2).returning(move |_| {
+            Ok(Some(App {
+                id: app_id,
+                tenant_id,
+                name: "demo".into(),
+                hostname: Some("demo.example.com".into()),
+                active_deployment_id: Some(previous_deployment_id),
+                desired_replicas: 1,
+                ..Default::default()
+            }))
+        });
         app_repo
             .expect_get_deployment()
             .with(eq(previous_deployment_id))
@@ -1557,7 +1561,10 @@ mod tests {
             .returning(|_, _| Ok(()));
 
         let mut scheduler = MockScheduler::new();
-        scheduler.expect_pause_app().times(1).returning(|_, _| Ok(true));
+        scheduler
+            .expect_pause_app()
+            .times(1)
+            .returning(|_, _| Ok(true));
 
         let state = crate::AppState {
             ctx: crate::application::ApiContext::default(),

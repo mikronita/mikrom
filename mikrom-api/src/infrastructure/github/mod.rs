@@ -74,7 +74,10 @@ async fn get_installation_token_with_client(
     let jwt = generate_jwt(app_id, private_key_pem)?;
 
     let response = client
-        .post(format!("{}/app/installations/{}/access_tokens", api_base_url, installation_id))
+        .post(format!(
+            "{}/app/installations/{}/access_tokens",
+            api_base_url, installation_id
+        ))
         .header("Authorization", format!("Bearer {}", jwt))
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "mikrom-api")
@@ -121,7 +124,14 @@ async fn list_installation_repos_with_client(
     private_key_pem: &str,
     installation_id: i64,
 ) -> ApiResult<Vec<GithubRepo>> {
-    let token = get_installation_token_with_client(client, api_base_url, app_id, private_key_pem, installation_id).await?;
+    let token = get_installation_token_with_client(
+        client,
+        api_base_url,
+        app_id,
+        private_key_pem,
+        installation_id,
+    )
+    .await?;
     let mut all_repos = Vec::new();
     let mut page = 1;
 
@@ -193,21 +203,36 @@ pub async fn list_installation_repos(
     .await
 }
 
-async fn create_repository_webhook_with_client(
-    client: &reqwest::Client,
-    api_base_url: &str,
-    app_id: &str,
-    private_key_pem: &str,
+struct CreateRepositoryWebhookParams<'a> {
+    client: &'a reqwest::Client,
+    api_base_url: &'a str,
+    app_id: &'a str,
+    private_key_pem: &'a str,
     installation_id: i64,
-    repo_full_name: &str,
-    webhook_url: &str,
-    webhook_secret: &str,
-) -> ApiResult<()> {
-    tracing::info!(repo = %repo_full_name, url = %webhook_url, "Creating GitHub repository webhook...");
-    let token = get_installation_token_with_client(client, api_base_url, app_id, private_key_pem, installation_id).await?;
+    repo_full_name: &'a str,
+    webhook_url: &'a str,
+    webhook_secret: &'a str,
+}
 
-    let response = client
-        .post(format!("{}/repos/{}/hooks", api_base_url, repo_full_name))
+async fn create_repository_webhook_with_client(
+    params: CreateRepositoryWebhookParams<'_>,
+) -> ApiResult<()> {
+    tracing::info!(repo = %params.repo_full_name, url = %params.webhook_url, "Creating GitHub repository webhook...");
+    let token = get_installation_token_with_client(
+        params.client,
+        params.api_base_url,
+        params.app_id,
+        params.private_key_pem,
+        params.installation_id,
+    )
+    .await?;
+
+    let response = params
+        .client
+        .post(format!(
+            "{}/repos/{}/hooks",
+            params.api_base_url, params.repo_full_name
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "mikrom-api")
@@ -217,9 +242,9 @@ async fn create_repository_webhook_with_client(
             "active": true,
             "events": ["push"],
             "config": {
-                "url": webhook_url,
+                "url": params.webhook_url,
                 "content_type": "json",
-                "secret": webhook_secret,
+                "secret": params.webhook_secret,
                 "insecure_ssl": "0"
             }
         }))
@@ -231,17 +256,28 @@ async fn create_repository_webhook_with_client(
         let status = response.status();
         let error_body = response.text().await.unwrap_or_default();
         if webhook_create_status_is_idempotent(status) {
-            tracing::info!(repo = %repo_full_name, "GitHub webhook creation returned 422, treating as idempotent");
+            tracing::info!(
+                repo = %params.repo_full_name,
+                "GitHub webhook creation returned 422, treating as idempotent"
+            );
             return Ok(());
         }
-        tracing::error!(repo = %repo_full_name, status = %status, body = %error_body, "Failed to create GitHub webhook");
+        tracing::error!(
+            repo = %params.repo_full_name,
+            status = %status,
+            body = %error_body,
+            "Failed to create GitHub webhook"
+        );
         return Err(ApiError::Internal(format!(
             "Failed to create webhook: {} - {}",
             status, error_body
         )));
     }
 
-    tracing::info!(repo = %repo_full_name, "Successfully created GitHub repository webhook");
+    tracing::info!(
+        repo = %params.repo_full_name,
+        "Successfully created GitHub repository webhook"
+    );
     Ok(())
 }
 
@@ -257,16 +293,16 @@ pub async fn create_repository_webhook(
     webhook_url: &str,
     webhook_secret: &str,
 ) -> ApiResult<()> {
-    create_repository_webhook_with_client(
-        &HTTP_CLIENT,
-        "https://api.github.com",
+    create_repository_webhook_with_client(CreateRepositoryWebhookParams {
+        client: &HTTP_CLIENT,
+        api_base_url: "https://api.github.com",
         app_id,
         private_key_pem,
         installation_id,
         repo_full_name,
         webhook_url,
         webhook_secret,
-    )
+    })
     .await
 }
 
@@ -290,10 +326,20 @@ async fn get_repo_latest_commit_with_client(
     repo_full_name: &str,
     branch: &str,
 ) -> ApiResult<crate::domain::app::GitMetadata> {
-    let token = get_installation_token_with_client(client, api_base_url, app_id, private_key_pem, installation_id).await?;
+    let token = get_installation_token_with_client(
+        client,
+        api_base_url,
+        app_id,
+        private_key_pem,
+        installation_id,
+    )
+    .await?;
 
     let response = client
-        .get(format!("{}/repos/{}/commits/{}", api_base_url, repo_full_name, branch))
+        .get(format!(
+            "{}/repos/{}/commits/{}",
+            api_base_url, repo_full_name, branch
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "mikrom-api")
@@ -382,6 +428,8 @@ mod tests {
         assert!(webhook_create_status_is_idempotent(
             reqwest::StatusCode::UNPROCESSABLE_ENTITY
         ));
-        assert!(!webhook_create_status_is_idempotent(reqwest::StatusCode::CONFLICT));
+        assert!(!webhook_create_status_is_idempotent(
+            reqwest::StatusCode::CONFLICT
+        ));
     }
 }

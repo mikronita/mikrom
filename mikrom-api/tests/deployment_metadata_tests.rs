@@ -28,6 +28,7 @@ async fn deployment_metadata_roundtrip_persists_git_fields() {
             role: UserRole::User,
             first_name: None,
             last_name: None,
+            avatar_url: None,
         })
         .await
         .expect("failed to create user");
@@ -151,6 +152,7 @@ async fn deployment_hypervisor_roundtrip_persists_integer_value() {
             role: UserRole::User,
             first_name: None,
             last_name: None,
+            avatar_url: None,
         })
         .await
         .expect("failed to create user");

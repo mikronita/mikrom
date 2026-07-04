@@ -8,10 +8,12 @@ fn ensure_protoc() -> Result<PathBuf, Box<dyn std::error::Error>> {
         }
     }
 
-    if let Ok(output) = std::process::Command::new("protoc").arg("--version").output() {
-        if output.status.success() {
-            return Ok(PathBuf::from("protoc"));
-        }
+    if let Ok(output) = std::process::Command::new("protoc")
+        .arg("--version")
+        .output()
+        && output.status.success()
+    {
+        return Ok(PathBuf::from("protoc"));
     }
 
     let cache_dir = Path::new("/tmp/opencode/protoc");
@@ -46,7 +48,9 @@ fn ensure_protoc() -> Result<PathBuf, Box<dyn std::error::Error>> {
     let archive_name = format!("protoc-{version}-linux-x86_64.zip");
     let archive_path = cache_dir.join(&archive_name);
     if !archive_path.exists() {
-        let url = format!("https://github.com/protocolbuffers/protobuf/releases/download/v{version}/{archive_name}");
+        let url = format!(
+            "https://github.com/protocolbuffers/protobuf/releases/download/v{version}/{archive_name}"
+        );
         let status = std::process::Command::new("curl")
             .args(["-L", "--fail", "--silent", "--show-error", "-o"])
             .arg(&archive_path)
@@ -58,7 +62,11 @@ fn ensure_protoc() -> Result<PathBuf, Box<dyn std::error::Error>> {
     }
 
     let unzip_status = std::process::Command::new("unzip")
-        .args(["-o", archive_path.to_str().ok_or("invalid archive path")?, "-d"])
+        .args([
+            "-o",
+            archive_path.to_str().ok_or("invalid archive path")?,
+            "-d",
+        ])
         .arg(cache_dir)
         .status()?;
     if !unzip_status.success() {
@@ -92,8 +100,13 @@ fn ensure_protoc() -> Result<PathBuf, Box<dyn std::error::Error>> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protoc = ensure_protoc()?;
-    let protoc_dir = protoc.parent().ok_or("protoc path missing parent directory")?;
-    println!("cargo:rustc-env=PATH=/tmp/opencode/bin:{}", std::env::var("PATH").unwrap_or_default());
+    let protoc_dir = protoc
+        .parent()
+        .ok_or("protoc path missing parent directory")?;
+    println!(
+        "cargo:rustc-env=PATH=/tmp/opencode/bin:{}",
+        std::env::var("PATH").unwrap_or_default()
+    );
     let _ = protoc_dir;
     tonic_build::configure()
         .out_dir(std::path::Path::new("src"))

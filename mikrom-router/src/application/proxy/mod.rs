@@ -1356,5 +1356,7 @@ mod tests {
 
         assert_eq!(app_entry.0, 2);
         assert_eq!(other_entry.0, 1);
+        drop(app_entry);
+        drop(other_entry);
     }
 }

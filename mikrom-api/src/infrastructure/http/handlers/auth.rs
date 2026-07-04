@@ -197,7 +197,8 @@ pub async fn upload_avatar_impl(
         ));
     }
 
-    let user = AuthService::update_profile_by_auth(&state, &auth.user_id, None, None, avatar_url).await?;
+    let user =
+        AuthService::update_profile_by_auth(&state, &auth.user_id, None, None, avatar_url).await?;
 
     Ok(Json(user.into()))
 }
@@ -447,7 +448,11 @@ mod tests {
         .await
         .unwrap();
         assert!(response.avatar_url.is_some());
-        assert!(std::fs::read_dir("./data/avatars").unwrap().next().is_some());
+        assert!(
+            std::fs::read_dir("./data/avatars")
+                .unwrap()
+                .next()
+                .is_some()
+        );
     }
-
 }

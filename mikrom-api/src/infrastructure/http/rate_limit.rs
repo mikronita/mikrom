@@ -1227,34 +1227,8 @@ mod tests {
                 600,
                 120,
             ),
-            (
-                "staging",
-                120,
-                20,
-                20,
-                30,
-                20,
-                30,
-                30,
-                60,
-                600,
-                240,
-                60,
-            ),
-            (
-                "production",
-                60,
-                10,
-                10,
-                15,
-                10,
-                20,
-                20,
-                30,
-                300,
-                120,
-                30,
-            ),
+            ("staging", 120, 20, 20, 30, 20, 30, 30, 60, 600, 240, 60),
+            ("production", 60, 10, 10, 15, 10, 20, 20, 30, 300, 120, 30),
         ];
 
         for (
@@ -1279,17 +1253,50 @@ mod tests {
 
             let rate_limit = RateLimitConfig::from_api_config(&config).unwrap();
 
-            assert_eq!(rate_limit.public_rpm, public_rpm, "deployment_env={deployment_env}");
-            assert_eq!(rate_limit.rate_limit_auth_login_rpm, auth_login_rpm, "deployment_env={deployment_env}");
-            assert_eq!(rate_limit.rate_limit_auth_register_rpm, auth_register_rpm, "deployment_env={deployment_env}");
-            assert_eq!(rate_limit.rate_limit_github_install_rpm, github_install_rpm, "deployment_env={deployment_env}");
-            assert_eq!(rate_limit.rate_limit_apps_create_rpm, apps_create_rpm, "deployment_env={deployment_env}");
-            assert_eq!(rate_limit.rate_limit_apps_deploy_rpm, apps_deploy_rpm, "deployment_env={deployment_env}");
-            assert_eq!(rate_limit.rate_limit_webhooks_github_generic_rpm, webhooks_generic_rpm, "deployment_env={deployment_env}");
-            assert_eq!(rate_limit.rate_limit_webhooks_github_named_rpm, webhooks_named_rpm, "deployment_env={deployment_env}");
-            assert_eq!(rate_limit.authenticated_read_rpm, authenticated_read_rpm, "deployment_env={deployment_env}");
-            assert_eq!(rate_limit.authenticated_write_rpm, authenticated_write_rpm, "deployment_env={deployment_env}");
-            assert_eq!(rate_limit.authenticated_stream_rpm, authenticated_stream_rpm, "deployment_env={deployment_env}");
+            assert_eq!(
+                rate_limit.public_rpm, public_rpm,
+                "deployment_env={deployment_env}"
+            );
+            assert_eq!(
+                rate_limit.rate_limit_auth_login_rpm, auth_login_rpm,
+                "deployment_env={deployment_env}"
+            );
+            assert_eq!(
+                rate_limit.rate_limit_auth_register_rpm, auth_register_rpm,
+                "deployment_env={deployment_env}"
+            );
+            assert_eq!(
+                rate_limit.rate_limit_github_install_rpm, github_install_rpm,
+                "deployment_env={deployment_env}"
+            );
+            assert_eq!(
+                rate_limit.rate_limit_apps_create_rpm, apps_create_rpm,
+                "deployment_env={deployment_env}"
+            );
+            assert_eq!(
+                rate_limit.rate_limit_apps_deploy_rpm, apps_deploy_rpm,
+                "deployment_env={deployment_env}"
+            );
+            assert_eq!(
+                rate_limit.rate_limit_webhooks_github_generic_rpm, webhooks_generic_rpm,
+                "deployment_env={deployment_env}"
+            );
+            assert_eq!(
+                rate_limit.rate_limit_webhooks_github_named_rpm, webhooks_named_rpm,
+                "deployment_env={deployment_env}"
+            );
+            assert_eq!(
+                rate_limit.authenticated_read_rpm, authenticated_read_rpm,
+                "deployment_env={deployment_env}"
+            );
+            assert_eq!(
+                rate_limit.authenticated_write_rpm, authenticated_write_rpm,
+                "deployment_env={deployment_env}"
+            );
+            assert_eq!(
+                rate_limit.authenticated_stream_rpm, authenticated_stream_rpm,
+                "deployment_env={deployment_env}"
+            );
         }
     }
 

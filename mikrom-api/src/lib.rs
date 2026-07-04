@@ -57,7 +57,7 @@ pub fn service_addr_for_tcp_check(url: &str) -> String {
     normalized
         .strip_prefix("http://")
         .or_else(|| normalized.strip_prefix("https://"))
-        .unwrap_or_else(|| normalized.as_str())
+        .unwrap_or(normalized.as_str())
         .to_string()
 }
 
@@ -90,7 +90,6 @@ pub fn normalize_app_slug(name: &str) -> Option<String> {
     (!collapsed.is_empty()).then_some(collapsed)
 }
 
-#[must_use]
 pub fn build_app_hostname(name: &str) -> ApiResult<String> {
     let slug = normalize_app_slug(name).ok_or_else(|| {
         ApiError::BadRequest(

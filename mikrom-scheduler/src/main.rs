@@ -79,7 +79,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Periodic pool telemetry for diagnosing contention and starvation.
     let pool_for_metrics = pool.clone();
-    let stale_worker_cleanup_interval = Duration::from_secs(config.stale_worker_cleanup_interval_secs.max(1));
+    let stale_worker_cleanup_interval =
+        Duration::from_secs(config.stale_worker_cleanup_interval_secs.max(1));
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(stale_worker_cleanup_interval);
         loop {

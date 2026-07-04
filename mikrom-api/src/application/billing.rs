@@ -810,10 +810,10 @@ fn first_integer_from_fields(value: &serde_json::Value, fields: &[&str]) -> Opti
 
             if let Some(float) = number.as_f64() {
                 let rounded = float.round();
-                if (float - rounded).abs() < f64::EPSILON {
-                    if let Ok(integer) = i32::try_from(rounded as i64) {
-                        return Some(integer);
-                    }
+                if (float - rounded).abs() < f64::EPSILON
+                    && let Ok(integer) = i32::try_from(rounded as i64)
+                {
+                    return Some(integer);
                 }
             }
 
@@ -2179,7 +2179,8 @@ mod tests {
             HeaderValue::from_str(&format!("v1,bad-signature {valid_signature}")).unwrap(),
         );
 
-        let verified = verify_webhook_signature(&headers, body, secret).expect("signature should verify");
+        let verified =
+            verify_webhook_signature(&headers, body, secret).expect("signature should verify");
         assert_eq!(verified, webhook_id);
     }
 
