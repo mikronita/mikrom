@@ -10,7 +10,6 @@
     Button,
     AlertDialog,
     EmptyState,
-    TableSkeleton,
     Table,
     TableHeader,
     TableBody,

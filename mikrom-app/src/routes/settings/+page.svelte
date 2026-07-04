@@ -24,7 +24,6 @@
     uploadUserAvatar,
     resolveAvatarUrl,
     type GithubAccount,
-    type UserProfile,
     type BillingProduct,
   } from "$lib/api";
   import { getBillingStatusConfig } from "$lib/domain/billing";

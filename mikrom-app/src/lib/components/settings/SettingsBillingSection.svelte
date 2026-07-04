@@ -317,8 +317,7 @@
           Last synced: {formatSyncedAt(lastSyncedAt)}
           {#if !canManageBilling && !isTestMode}
             (admin only)
-          {:else if isTestMode}
-            {" "}(sandbox)
+          {:else if isTestMode} (sandbox)
           {/if}
         </p>
         {#if productsLoading}
@@ -341,12 +340,8 @@
                   {#each products as product}
                     <SelectItem value={product.id}>
                       {product.name}
-                      {#if product.is_default_checkout_product}
-                        {" "}Default
-                      {/if}
-                      {#if product.is_archived}
-                        {" "}Archived
-                      {/if}
+                      {#if product.is_default_checkout_product} Default{/if}
+                      {#if product.is_archived} Archived{/if}
                     </SelectItem>
                   {/each}
                 </SelectContent>
