@@ -54,3 +54,4 @@ codegen-units = 1
 inherits = "release"
 lto = false
 debug = false
+codegen-units = 16
