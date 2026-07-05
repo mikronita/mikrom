@@ -1,5 +1,6 @@
 use crate::error::ApiError;
-use aes_gcm::aead::AeadInPlace;
+use aes_gcm::aead::inout::InOutBuf;
+use aes_gcm::aead::AeadInOut;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rand::rngs::SysRng;
@@ -16,6 +17,7 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, ApiError> {
         .map_err(|e| ApiError::Internal(format!("Failed to verify password: {}", e)))
 }
 
+#[allow(deprecated)]
 pub fn encrypt(data: &str, master_key: &str) -> Result<String, ApiError> {
     let key_bytes = hash_key(master_key);
     let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
@@ -29,7 +31,7 @@ pub fn encrypt(data: &str, master_key: &str) -> Result<String, ApiError> {
     let mut buffer = data.as_bytes().to_vec();
 
     let tag = cipher
-        .encrypt_in_place_detached(nonce, b"", &mut buffer)
+        .encrypt_inout_detached(nonce, b"", InOutBuf::from(buffer.as_mut_slice()))
         .map_err(|_| ApiError::Internal("Encryption failed".to_string()))?;
 
     let mut result = nonce_bytes.to_vec();
@@ -39,6 +41,7 @@ pub fn encrypt(data: &str, master_key: &str) -> Result<String, ApiError> {
     Ok(STANDARD.encode(result))
 }
 
+#[allow(deprecated)]
 pub fn decrypt(encrypted_data: &str, master_key: &str) -> Result<String, ApiError> {
     let key_bytes = hash_key(master_key);
     let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
@@ -62,7 +65,7 @@ pub fn decrypt(encrypted_data: &str, master_key: &str) -> Result<String, ApiErro
     let mut buffer = ciphertext.to_vec();
 
     cipher
-        .decrypt_in_place_detached(nonce, b"", &mut buffer, tag)
+        .decrypt_inout_detached(nonce, b"", InOutBuf::from(buffer.as_mut_slice()), tag)
         .map_err(|_| ApiError::Auth("Decryption failed (check master key)".to_string()))?;
 
     String::from_utf8(buffer)
