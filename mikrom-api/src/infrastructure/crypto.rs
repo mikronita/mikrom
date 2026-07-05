@@ -1,10 +1,10 @@
 use crate::error::ApiError;
-use aes_gcm::aead::inout::InOutBuf;
 use aes_gcm::aead::AeadInOut;
+use aes_gcm::aead::inout::InOutBuf;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use rand::rngs::SysRng;
 use rand::TryRng;
+use rand::rngs::SysRng;
 
 pub fn hash_password(password: &str) -> Result<String, ApiError> {
     let salt = bcrypt::DEFAULT_COST;

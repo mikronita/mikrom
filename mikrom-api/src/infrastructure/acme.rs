@@ -140,9 +140,7 @@ pub async fn run_acme_iteration(
     }
     ensure_managed_domain(api_db, API_PUBLIC_HOSTNAME, false, true).await?;
     ensure_managed_domain(api_db, WEB_PUBLIC_HOSTNAME, false, true).await?;
-    if !frontend_tls_hostname.trim().is_empty()
-        && frontend_tls_hostname != WEB_PUBLIC_HOSTNAME
-    {
+    if !frontend_tls_hostname.trim().is_empty() && frontend_tls_hostname != WEB_PUBLIC_HOSTNAME {
         ensure_managed_domain(api_db, frontend_tls_hostname, false, true).await?;
     }
 

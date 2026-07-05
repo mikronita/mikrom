@@ -196,9 +196,8 @@ mod tests {
     use std::sync::Arc;
     use uuid::Uuid;
     async fn create_test_state(app_repo: MockAppRepository) -> AppState {
-        let nats = crate::nats::TypedNatsClient::new_custom(Arc::new(
-            crate::nats::MockNatsClient::new(),
-        ));
+        let nats =
+            crate::nats::TypedNatsClient::new_custom(Arc::new(crate::nats::MockNatsClient::new()));
         AppState {
             ctx: crate::application::ApiContext::default(),
             user_repo: Arc::new(MockUserRepository::new()),

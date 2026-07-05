@@ -254,9 +254,8 @@ mod tests {
             .expect_add_member()
             .returning(|_, _, _| Ok(()));
 
-        let nats = crate::nats::TypedNatsClient::new_custom(Arc::new(
-            crate::nats::MockNatsClient::new(),
-        ));
+        let nats =
+            crate::nats::TypedNatsClient::new_custom(Arc::new(crate::nats::MockNatsClient::new()));
 
         let state = AppState {
             ctx: crate::application::ApiContext::default(),
@@ -320,9 +319,8 @@ mod tests {
             }))
         });
 
-        let nats = crate::nats::TypedNatsClient::new_custom(Arc::new(
-            crate::nats::MockNatsClient::new(),
-        ));
+        let nats =
+            crate::nats::TypedNatsClient::new_custom(Arc::new(crate::nats::MockNatsClient::new()));
 
         let state = AppState {
             ctx: crate::application::ApiContext::default(),

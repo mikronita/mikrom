@@ -1,5 +1,5 @@
-use aes_gcm::aead::inout::InOutBuf;
 use aes_gcm::aead::AeadInOut;
+use aes_gcm::aead::inout::InOutBuf;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use thiserror::Error;
