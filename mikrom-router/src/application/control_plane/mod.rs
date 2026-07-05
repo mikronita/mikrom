@@ -251,6 +251,7 @@ impl ControlPlane {
     }
 }
 
+#[expect(dead_code)]
 fn normalize_route_target(target: &str) -> (String, bool) {
     if let Some(rest) = target.strip_prefix("https://") {
         return (rest.to_string(), true);
