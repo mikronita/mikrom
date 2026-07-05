@@ -12,7 +12,8 @@
   import Network from "@lucide/svelte/icons/network";
   import Settings from "@lucide/svelte/icons/settings";
   import { logout } from "$lib/auth";
-  import { Avatar, AvatarFallback } from "$lib/components";
+  import { Avatar, AvatarFallback, AvatarImage } from "$lib/components";
+  import { resolveAvatarUrl } from "$lib/api";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { profile } from "$lib/stores/profile";
@@ -197,6 +198,7 @@
                   aria-label="User menu"
                 >
                   <Avatar class="size-8 shrink-0 rounded-md">
+                    <AvatarImage src={resolveAvatarUrl($profile?.avatar_url) || undefined} alt="User avatar" />
                     <AvatarFallback
                       class="rounded-md text-xs font-medium text-foreground"
                     >
@@ -224,6 +226,7 @@
                   class="flex items-center gap-2 px-1 py-1.5 text-left text-sm"
                 >
                   <Avatar class="size-8 rounded-md">
+                    <AvatarImage src={resolveAvatarUrl($profile?.avatar_url) || undefined} alt="User avatar" />
                     <AvatarFallback
                       class="rounded-md text-xs font-medium text-foreground"
                     >
