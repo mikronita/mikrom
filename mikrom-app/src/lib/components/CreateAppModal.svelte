@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-    import GitPullRequest from "lucide-svelte/icons/git-pull-request";
-  import Globe from "lucide-svelte/icons/globe";
+    import GitPullRequest from "@lucide/svelte/icons/git-pull-request";
+  import Globe from "@lucide/svelte/icons/globe";
   import { 
     Modal, 
     Button, 

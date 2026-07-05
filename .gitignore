@@ -14,3 +14,4 @@ mikrom-app/coverage
 mikrom-app/playwright-report
 mikrom-app/test-results
 mikrom-api/data/
+mikrom-app/build/

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { tick } from "svelte";
-    import Loader2 from "lucide-svelte/icons/loader-2";
-  import UserPlus from "lucide-svelte/icons/user-plus";
+    import Loader2 from "@lucide/svelte/icons/loader-2";
+  import UserPlus from "@lucide/svelte/icons/user-plus";
   import { Card, Field, Input, Button } from "$lib/components";
   import { register } from "$lib/api";
   import { toast } from "$lib/toast";

@@ -1,17 +1,17 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-    import Activity from "lucide-svelte/icons/activity";
-  import ArrowRight from "lucide-svelte/icons/arrow-right";
-  import Bot from "lucide-svelte/icons/bot";
-  import CalendarClock from "lucide-svelte/icons/calendar-clock";
-  import Container from "lucide-svelte/icons/container";
-  import Cpu from "lucide-svelte/icons/cpu";
-  import Hammer from "lucide-svelte/icons/hammer";
-  import LayoutDashboard from "lucide-svelte/icons/layout-dashboard";
-  import Plus from "lucide-svelte/icons/plus";
-  import Rocket from "lucide-svelte/icons/rocket";
-  import Router from "lucide-svelte/icons/router";
-  import Server from "lucide-svelte/icons/server";
+    import Activity from "@lucide/svelte/icons/activity";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import Bot from "@lucide/svelte/icons/bot";
+  import CalendarClock from "@lucide/svelte/icons/calendar-clock";
+  import Container from "@lucide/svelte/icons/container";
+  import Cpu from "@lucide/svelte/icons/cpu";
+  import Hammer from "@lucide/svelte/icons/hammer";
+  import LayoutDashboard from "@lucide/svelte/icons/layout-dashboard";
+  import Plus from "@lucide/svelte/icons/plus";
+  import Rocket from "@lucide/svelte/icons/rocket";
+  import Router from "@lucide/svelte/icons/router";
+  import Server from "@lucide/svelte/icons/server";
   import {
     Card,
     CardHeader,

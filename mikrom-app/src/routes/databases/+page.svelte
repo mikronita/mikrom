@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
-    import DatabaseIcon from "lucide-svelte/icons/database";
-  import Plus from "lucide-svelte/icons/plus";
-  import Calendar from "lucide-svelte/icons/calendar";
-  import Cpu from "lucide-svelte/icons/cpu";
-  import HardDrive from "lucide-svelte/icons/hard-drive";
-  import Radio from "lucide-svelte/icons/radio";
+    import DatabaseIcon from "@lucide/svelte/icons/database";
+  import Plus from "@lucide/svelte/icons/plus";
+  import Calendar from "@lucide/svelte/icons/calendar";
+  import Cpu from "@lucide/svelte/icons/cpu";
+  import HardDrive from "@lucide/svelte/icons/hard-drive";
+  import Radio from "@lucide/svelte/icons/radio";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import {
     Card,

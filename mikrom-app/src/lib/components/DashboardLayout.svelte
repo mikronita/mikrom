@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { page } from "$app/stores";
-  import PanelLeft from "lucide-svelte/icons/panel-left";
+  import PanelLeft from "@lucide/svelte/icons/panel-left";
   import AuthGuard from "$lib/components/AuthGuard.svelte";
   import NotificationsMenu from "$lib/components/NotificationsMenu.svelte";
   import ProjectSwitcher from "$lib/components/ProjectSwitcher.svelte";

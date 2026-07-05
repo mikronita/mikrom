@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { page } from "$app/stores";
-    import ArrowLeft from "lucide-svelte/icons/arrow-left";
-  import Terminal from "lucide-svelte/icons/terminal";
-  import RefreshCw from "lucide-svelte/icons/refresh-cw";
+    import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import Terminal from "@lucide/svelte/icons/terminal";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "$lib/components";
   import { getToken } from "$lib/auth";
   import { type LogLine, watchAppLogsSSE } from "$lib/api";

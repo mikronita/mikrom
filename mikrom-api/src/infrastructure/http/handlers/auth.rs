@@ -73,7 +73,7 @@ pub struct UpdateProfileRequest {
 }
 
 fn avatar_storage_dir() -> PathBuf {
-    PathBuf::from("./data/avatars")
+    PathBuf::from("./data/v1/uploads/avatars")
 }
 
 fn public_avatar_url(filename: &str) -> String {

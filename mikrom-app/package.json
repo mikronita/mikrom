@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "preview": "vite preview",
+    "start": "node build",
+    "preview": "node build",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "lint": "svelte-kit sync && eslint .",
     "test": "vitest",
@@ -15,17 +16,14 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test"
   },
-  "pnpm": {
-    "overrides": {
-      "cookie": "0.7.2"
-    }
+  "overrides": {
+    "cookie": "0.7.2"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
-    "@sveltejs/adapter-auto": "^7.0.1",
+    "@lucide/svelte": "^1.23.0",
     "@sveltejs/kit": "^2.19.0",
     "clsx": "^2.1.1",
-    "lucide-svelte": "^1.0.1",
     "svelte": "^5.0.0",
     "svelte-sonner": "^1.1.1",
     "tailwind-merge": "^3.6.0",
@@ -35,6 +33,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.60.0",
+    "@sveltejs/adapter-node": "^5.5.7",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tailwindcss/vite": "^4.3.2",
     "@testing-library/svelte": "^5.3.1",

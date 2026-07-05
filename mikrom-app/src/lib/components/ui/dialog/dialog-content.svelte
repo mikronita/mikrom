@@ -6,7 +6,7 @@
 	import { cn, type WithoutChildrenOrChild } from "$lib/utils.js";
 	import type { ComponentProps } from "svelte";
 	import { Button } from "$lib/components/ui/button/index.js";
-	import { X as XIcon } from 'lucide-svelte';
+	import { X as XIcon } from '@lucide/svelte';
 
 	let {
 		ref = $bindable(null),

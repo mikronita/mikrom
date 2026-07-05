@@ -2,8 +2,8 @@
   import { goto } from "$app/navigation";
   import { tick } from "svelte";
   import { onMount } from "svelte";
-    import Loader2 from "lucide-svelte/icons/loader-2";
-  import Box from "lucide-svelte/icons/box";
+    import Loader2 from "@lucide/svelte/icons/loader-2";
+  import Box from "@lucide/svelte/icons/box";
   import { Card, Field, Input, Button } from "$lib/components";
   import { login } from "$lib/api";
   import { setToken } from "$lib/auth";

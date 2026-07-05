@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
-    import Settings from "lucide-svelte/icons/settings";
+  import Settings from "@lucide/svelte/icons/settings";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import SettingsApiSection from "$lib/components/settings/SettingsApiSection.svelte";
   import SettingsBillingSection from "$lib/components/settings/SettingsBillingSection.svelte";
@@ -22,11 +22,9 @@
     updateBillingCheckoutProduct,
     updateUserProfile,
     uploadUserAvatar,
-    resolveAvatarUrl,
     type GithubAccount,
     type BillingProduct,
   } from "$lib/api";
-  import { Avatar, AvatarFallback, AvatarImage } from "$lib/components";
   import { getBillingStatusConfig } from "$lib/domain/billing";
   import { toast } from "$lib/toast";
   import { profile, refreshProfile } from "$lib/stores/profile";
@@ -58,7 +56,6 @@
   let avatarUploading = $state(false);
   let canManageBilling = $derived((($profile?.role || "").toLowerCase()) === "admin");
   let billingStatus = $derived(getBillingStatusConfig($billing?.status));
-  let resolvedAvatarUrl = $derived(resolveAvatarUrl($profile?.avatar_url));
 
   const settingsTabValues = new Set<SettingsTab>(settingsTabs.map((tab) => tab.value));
 
@@ -388,24 +385,10 @@
         profile={$profile}
         {loading}
         {saving}
+        avatarUploading={avatarUploading}
         onSave={saveProfile}
+        onAvatarSelected={handleAvatarSelected}
       />
-      <div class="mt-6 flex items-center gap-4 rounded-lg border border-border bg-background p-4">
-        <Avatar class="size-16">
-          <AvatarImage src={resolvedAvatarUrl || undefined} alt="User avatar" />
-          <AvatarFallback>
-            {($profile?.first_name?.[0] || $profile?.email?.[0] || "U").toUpperCase()}
-          </AvatarFallback>
-        </Avatar>
-        <div class="space-y-2">
-          <div class="text-sm font-medium">Profile avatar</div>
-          <div class="text-xs text-muted-foreground">PNG, JPG or WebP. Up to a small image file.</div>
-          <label class="inline-flex cursor-pointer items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50">
-            <span>{avatarUploading ? "Uploading..." : "Change avatar"}</span>
-            <input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" onchange={handleAvatarSelected} disabled={avatarUploading} />
-          </label>
-        </div>
-      </div>
     {:else if activeTab === "security"}
       <SettingsSecuritySection />
     {:else if activeTab === "api"}

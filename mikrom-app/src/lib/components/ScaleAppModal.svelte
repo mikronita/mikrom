@@ -13,8 +13,8 @@
   } from "$lib/components";
   import { toast } from "$lib/toast";
   import { refreshApps } from "$lib/stores/apps";
-    import Loader2 from "lucide-svelte/icons/loader-2";
-  import Scale from "lucide-svelte/icons/scale";
+    import Loader2 from "@lucide/svelte/icons/loader-2";
+  import Scale from "@lucide/svelte/icons/scale";
 
   let {
     open = $bindable(false),

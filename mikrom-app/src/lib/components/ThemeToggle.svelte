@@ -1,6 +1,6 @@
 <script lang="ts">
-    import Moon from "lucide-svelte/icons/moon";
-  import Sun from "lucide-svelte/icons/sun";
+    import Moon from "@lucide/svelte/icons/moon";
+  import Sun from "@lucide/svelte/icons/sun";
   import { setTheme, themeStore } from "$lib/theme";
 
   function toggle() {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, CardSkeleton } from "$lib/components";
   import GithubIcon from "$lib/components/GithubIcon.svelte";
-  import Plus from "lucide-svelte/icons/plus";
+  import Plus from "@lucide/svelte/icons/plus";
   import type { GithubAccount } from "$lib/api";
 
   let {

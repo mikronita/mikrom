@@ -1,9 +1,10 @@
 <script lang="ts">
-    import Loader2 from "lucide-svelte/icons/loader-2";
-  import Mail from "lucide-svelte/icons/mail";
+  import Loader2 from "@lucide/svelte/icons/loader-2";
+  import Mail from "@lucide/svelte/icons/mail";
   import {
     Avatar,
     AvatarFallback,
+    AvatarImage,
     Button,
     Card,
     CardContent,
@@ -18,24 +19,30 @@
     Separator,
     Skeleton,
   } from "$lib/components";
-  import type { UserProfile } from "$lib/api";
+  import { resolveAvatarUrl, type UserProfile } from "$lib/api";
   import { getProfileInitials } from "$lib/domain/settings";
 
   let {
     profile = null,
     loading = false,
     saving = false,
+    avatarUploading = false,
     firstNameDraft = $bindable(""),
     lastNameDraft = $bindable(""),
     onSave,
+    onAvatarSelected,
   } = $props<{
     profile?: UserProfile | null;
     loading?: boolean;
     saving?: boolean;
+    avatarUploading?: boolean;
     firstNameDraft?: string;
     lastNameDraft?: string;
     onSave: () => Promise<void> | void;
+    onAvatarSelected: (event: Event) => Promise<void> | void;
   }>();
+
+  let resolvedAvatarUrl = $derived(resolveAvatarUrl(profile?.avatar_url));
 </script>
 
 <Card size="sm">
@@ -68,20 +75,23 @@
     {:else}
       <div class="flex flex-col gap-8">
         <div class="flex flex-col items-start gap-5 sm:flex-row sm:items-center">
-          <Avatar class="size-20">
-            <AvatarFallback class="text-xl font-semibold">
-              {getProfileInitials(profile?.first_name, profile?.last_name, profile?.email)}
-            </AvatarFallback>
-          </Avatar>
+          {#key resolvedAvatarUrl}
+            <Avatar class="size-20">
+              <AvatarImage src={resolvedAvatarUrl || undefined} alt="User avatar" />
+              <AvatarFallback class="text-xl font-semibold">
+                {getProfileInitials(profile?.first_name, profile?.last_name, profile?.email)}
+              </AvatarFallback>
+            </Avatar>
+          {/key}
           <div class="flex flex-1 flex-col gap-3">
             <div class="flex flex-col gap-1">
-              <h3 class="text-base font-semibold">Profile picture</h3>
-              <p class="text-sm text-muted-foreground">JPG, GIF or PNG. Max size of 800K.</p>
+              <h3 class="text-base font-semibold">Profile avatar</h3>
+              <p class="text-sm text-muted-foreground">PNG, JPG or WebP. Up to a small image file.</p>
             </div>
-            <div class="flex flex-wrap gap-2">
-              <Button size="sm">Upload new</Button>
-              <Button variant="outline" size="sm">Remove</Button>
-            </div>
+            <label class="inline-flex w-fit cursor-pointer items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50">
+              <span>{avatarUploading ? "Uploading..." : "Change avatar"}</span>
+              <input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" onchange={onAvatarSelected} disabled={avatarUploading} />
+            </label>
           </div>
         </div>
 
