@@ -12,7 +12,7 @@ fn binary_shows_help() {
 fn binary_shows_version() {
     let mut cmd = Command::cargo_bin("mikrom").unwrap();
     cmd.arg("--version");
-    cmd.assert().success().stdout(contains("0.3.1"));
+    cmd.assert().success().stdout(contains("0.4.5"));
 }
 
 #[test]
