@@ -1,6 +1,6 @@
 [package]
 name = "mikrom-builder"
-version = "0.3.1"
+version = "0.4.5"
 edition = "2024"
 
 [dependencies]
@@ -24,6 +24,6 @@ walkdir = "2"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 
-mikrom-proto = { version = "0.3.0", path = "../mikrom-proto", features = ["telemetry"] }
+mikrom-proto = { version = "0.4.5", path = "../mikrom-proto", features = ["telemetry"] }
 git2 = "0.21.0"
 tempfile = "3.27"

@@ -3353,7 +3353,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-agent"
-version = "0.3.1"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -3399,7 +3399,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-agent-ebpf"
-version = "0.3.0"
+version = "0.4.5"
 dependencies = [
  "aya-ebpf",
  "mikrom-agent-ebpf-common",
@@ -3408,14 +3408,14 @@ dependencies = [
 
 [[package]]
 name = "mikrom-agent-ebpf-common"
-version = "0.3.0"
+version = "0.4.5"
 dependencies = [
  "aya",
 ]
 
 [[package]]
 name = "mikrom-api"
-version = "0.3.1"
+version = "0.4.5"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3470,7 +3470,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-builder"
-version = "0.3.1"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -3498,7 +3498,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-ci"
-version = "0.1.0"
+version = "0.4.5"
 dependencies = [
  "clap",
  "dagger-sdk",
@@ -3510,7 +3510,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-cli"
-version = "0.3.1"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3538,7 +3538,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-dns"
-version = "0.1.0"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -3557,7 +3557,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-network"
-version = "0.1.0"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -3585,7 +3585,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-proto"
-version = "0.3.0"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -3621,7 +3621,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-router"
-version = "0.3.1"
+version = "0.4.5"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3673,7 +3673,7 @@ dependencies = [
 
 [[package]]
 name = "mikrom-scheduler"
-version = "0.3.1"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "async-nats",

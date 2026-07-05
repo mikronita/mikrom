@@ -1,6 +1,6 @@
 [package]
 name = "mikrom-router"
-version = "0.3.1"
+version = "0.4.5"
 edition = "2024"
 
 [dependencies]
@@ -14,7 +14,7 @@ hostname = "0.4.2"
 http = "1.4"
 envy.workspace = true
 mikrom-api = { path = "../mikrom-api", optional = true }
-mikrom-proto = { version = "0.3.0", path = "../mikrom-proto" }
+mikrom-proto = { version = "0.4.5", path = "../mikrom-proto" }
 mikrom-network = { path = "../mikrom-network" }
 mikrom-scheduler = { path = "../mikrom-scheduler", optional = true }
 openssl = "0.10.80"
