@@ -174,81 +174,6 @@
 
 <div class="flex flex-col gap-4">
   <Card>
-    <CardHeader class="flex flex-row items-start justify-between gap-4 border-b bg-muted/30">
-      <div class="flex flex-col gap-1">
-        {#if loading}
-          <Skeleton class="h-8 w-48 rounded-md" />
-          <Skeleton class="h-4 w-28 rounded-md" />
-        {:else}
-          <CardTitle class="text-2xl">{billing?.plan_name || "No active subscription"}</CardTitle>
-          <p class="text-sm text-muted-foreground">{formatMoney(billing?.amount_cents ?? null, billing?.currency ?? null)}</p>
-        {/if}
-      </div>
-      <div class="flex shrink-0 flex-wrap gap-2">
-        <Badge variant="outline" class={currentBilling.tone}>
-          {currentBilling.label}
-        </Badge>
-        {#if isTestMode}
-          <Badge variant="secondary">Test mode</Badge>
-        {/if}
-      </div>
-    </CardHeader>
-
-    <CardContent class="pt-6">
-      {#if error}
-        <div class="rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {error}
-        </div>
-      {/if}
-
-      {#if !loading && currentBilling.message}
-        <div class="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-700">
-          {currentBilling.message}
-        </div>
-      {/if}
-
-      {#if loading}
-        <Skeleton class="h-5 w-32 rounded-md" />
-      {:else}
-        <div class="text-sm">
-          <span class="text-muted-foreground">Next renewal: </span>
-          <span class="font-medium">{formatDate(billing?.current_period_end ?? null)}</span>
-        </div>
-        <div class="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span><span class="font-medium text-foreground">Subscription:</span> {billing?.polar_subscription_id || "None"}</span>
-          <span aria-label="separator">·</span>
-          <span><span class="font-medium text-foreground">Product:</span> {resolveProductName(billing?.polar_product_id) || resolveProductName(billing?.default_checkout_product_id) || billing?.polar_product_id || billing?.default_checkout_product_id || "Not configured"}</span>
-        </div>
-      {/if}
-    </CardContent>
-
-    <CardFooter class="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/30">
-      <div class="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          onclick={handlePrimaryAction}
-          disabled={isActionDisabled(currentBilling.primaryHandler)}
-        >
-          {currentBilling.primaryLabel}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onclick={handleSecondaryAction}
-          disabled={isActionDisabled(currentBilling.secondaryHandler)}
-        >
-          {currentBilling.secondaryLabel}
-        </Button>
-      </div>
-      {#if billing?.has_billing_record}
-        <p class="text-xs text-muted-foreground">
-          Payments are managed by Polar. Customer ID: {billing.customer_external_id}
-        </p>
-      {/if}
-    </CardFooter>
-  </Card>
-
-  <Card>
     <CardHeader>
       <div class="flex items-start justify-between gap-3">
         <div>
@@ -340,5 +265,80 @@
         </EmptyState>
       {/if}
     </CardContent>
+  </Card>
+
+  <Card>
+    <CardHeader class="flex flex-row items-start justify-between gap-4 border-b bg-muted/30">
+      <div class="flex flex-col gap-1">
+        {#if loading}
+          <Skeleton class="h-8 w-48 rounded-md" />
+          <Skeleton class="h-4 w-28 rounded-md" />
+        {:else}
+          <CardTitle class="text-2xl">{billing?.plan_name || "No active subscription"}</CardTitle>
+          <p class="text-sm text-muted-foreground">{formatMoney(billing?.amount_cents ?? null, billing?.currency ?? null)}</p>
+        {/if}
+      </div>
+      <div class="flex shrink-0 flex-wrap gap-2">
+        <Badge variant="outline" class={currentBilling.tone}>
+          {currentBilling.label}
+        </Badge>
+        {#if isTestMode}
+          <Badge variant="secondary">Test mode</Badge>
+        {/if}
+      </div>
+    </CardHeader>
+
+    <CardContent class="pt-6">
+      {#if error}
+        <div class="rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      {/if}
+
+      {#if !loading && currentBilling.message}
+        <div class="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-700">
+          {currentBilling.message}
+        </div>
+      {/if}
+
+      {#if loading}
+        <Skeleton class="h-5 w-32 rounded-md" />
+      {:else}
+        <div class="text-sm">
+          <span class="text-muted-foreground">Next renewal: </span>
+          <span class="font-medium">{formatDate(billing?.current_period_end ?? null)}</span>
+        </div>
+        <div class="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span><span class="font-medium text-foreground">Subscription:</span> {billing?.polar_subscription_id || "None"}</span>
+          <span aria-label="separator">·</span>
+          <span><span class="font-medium text-foreground">Product:</span> {resolveProductName(billing?.polar_product_id) || resolveProductName(billing?.default_checkout_product_id) || billing?.polar_product_id || billing?.default_checkout_product_id || "Not configured"}</span>
+        </div>
+      {/if}
+    </CardContent>
+
+    <CardFooter class="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/30">
+      <div class="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          onclick={handlePrimaryAction}
+          disabled={isActionDisabled(currentBilling.primaryHandler)}
+        >
+          {currentBilling.primaryLabel}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={handleSecondaryAction}
+          disabled={isActionDisabled(currentBilling.secondaryHandler)}
+        >
+          {currentBilling.secondaryLabel}
+        </Button>
+      </div>
+      {#if billing?.has_billing_record}
+        <p class="text-xs text-muted-foreground">
+          Payments are managed by Polar. Customer ID: {billing.customer_external_id}
+        </p>
+      {/if}
+    </CardFooter>
   </Card>
 </div>
