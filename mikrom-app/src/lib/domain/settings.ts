@@ -9,7 +9,7 @@ export const settingsTabs = [
   { value: "profile", label: "Profile", icon: User },
   { value: "security", label: "Security", icon: KeyRound },
   { value: "api", label: "API access", icon: CloudDownload },
-  { value: "billing", label: "Billing", icon: CreditCard },
+  { value: "payments", label: "Payments", icon: CreditCard },
   { value: "integrations", label: "Integrations", icon: Puzzle },
   { value: "notifications", label: "Notifications", icon: Bell },
 ] as const;

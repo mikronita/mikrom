@@ -5,7 +5,7 @@
   import Settings from "@lucide/svelte/icons/settings";
   import DashboardLayout from "$lib/components/DashboardLayout.svelte";
   import SettingsApiSection from "$lib/components/settings/SettingsApiSection.svelte";
-  import SettingsBillingSection from "$lib/components/settings/SettingsBillingSection.svelte";
+  import SettingsPaymentsSection from "$lib/components/settings/SettingsPaymentsSection.svelte";
   import SettingsIntegrationsSection from "$lib/components/settings/SettingsIntegrationsSection.svelte";
   import SettingsNotificationsSection from "$lib/components/settings/SettingsNotificationsSection.svelte";
   import SettingsProfileSection from "$lib/components/settings/SettingsProfileSection.svelte";
@@ -96,7 +96,7 @@
     ensureValidTab();
 
     if ($page.url.searchParams.get("checkout") === "success") {
-      toast.success("Billing updated successfully");
+      toast.success("Plan updated successfully");
 
       const nextUrl = new URL($page.url);
       nextUrl.searchParams.delete("checkout");
@@ -335,7 +335,7 @@
           <h1 class="text-3xl font-semibold tracking-tight">Settings</h1>
         </div>
         <p class="max-w-2xl text-sm text-muted-foreground">
-          Manage your personal information, security preferences and billing.
+          Manage your personal information, security preferences and payments.
         </p>
 
       </div>
@@ -375,8 +375,8 @@
       <SettingsSecuritySection />
     {:else if activeTab === "api"}
       <SettingsApiSection />
-    {:else if activeTab === "billing"}
-      <SettingsBillingSection
+    {:else if activeTab === "payments"}
+      <SettingsPaymentsSection
         billing={$billing}
         products={billingProducts}
         productsLoading={loadingBillingProducts}

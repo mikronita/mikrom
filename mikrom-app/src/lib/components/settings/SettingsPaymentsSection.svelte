@@ -207,24 +207,19 @@
         </div>
       {/if}
 
-      <div class="flex flex-wrap items-center gap-x-8 gap-y-2">
-        {#if loading}
-          <Skeleton class="h-5 w-32 rounded-md" />
-        {:else}
-          <div>
-            <p class="text-xs text-muted-foreground">Next renewal</p>
-            <p class="text-sm font-medium">{formatDate(billing?.current_period_end ?? null)}</p>
-          </div>
-          <div>
-            <p class="text-xs text-muted-foreground">Subscription ID</p>
-            <p class="text-sm font-medium">{billing?.polar_subscription_id || "No subscription yet"}</p>
-          </div>
-          <div>
-            <p class="text-xs text-muted-foreground">Product</p>
-            <p class="text-sm font-medium">{resolveProductName(billing?.polar_product_id) || resolveProductName(billing?.default_checkout_product_id) || billing?.polar_product_id || billing?.default_checkout_product_id || "Not configured"}</p>
-          </div>
-        {/if}
-      </div>
+      {#if loading}
+        <Skeleton class="h-5 w-32 rounded-md" />
+      {:else}
+        <div class="text-sm">
+          <span class="text-muted-foreground">Next renewal: </span>
+          <span class="font-medium">{formatDate(billing?.current_period_end ?? null)}</span>
+        </div>
+        <div class="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span><span class="font-medium text-foreground">Subscription:</span> {billing?.polar_subscription_id || "None"}</span>
+          <span aria-label="separator">·</span>
+          <span><span class="font-medium text-foreground">Product:</span> {resolveProductName(billing?.polar_product_id) || resolveProductName(billing?.default_checkout_product_id) || billing?.polar_product_id || billing?.default_checkout_product_id || "Not configured"}</span>
+        </div>
+      {/if}
     </CardContent>
 
     <CardFooter class="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/30">
@@ -247,7 +242,7 @@
       </div>
       {#if billing?.has_billing_record}
         <p class="text-xs text-muted-foreground">
-          Billing is managed by Polar. Customer ID: {billing.customer_external_id}
+          Payments are managed by Polar. Customer ID: {billing.customer_external_id}
         </p>
       {/if}
     </CardFooter>
@@ -257,8 +252,7 @@
     <CardHeader>
       <div class="flex items-start justify-between gap-3">
         <div>
-          <CardTitle>Products</CardTitle>
-          <CardDescription>Available plans and checkout configuration.</CardDescription>
+          <CardTitle>Plans</CardTitle>
         </div>
         <Button
           variant="outline"

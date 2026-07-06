@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import SettingsBillingSection from "$lib/components/settings/SettingsBillingSection.svelte";
+import SettingsPaymentsSection from "$lib/components/settings/SettingsPaymentsSection.svelte";
 
 const billing = {
   tenant_id: "tenant-1",
@@ -49,7 +49,7 @@ describe("SettingsBillingSection", () => {
     const onChangePlan = vi.fn();
     const onManageBilling = vi.fn();
 
-    render(SettingsBillingSection, {
+    render(SettingsPaymentsSection, {
       props: {
         billing,
         products,
@@ -65,8 +65,8 @@ describe("SettingsBillingSection", () => {
 
     expect(screen.getByText("Pro", { selector: "[data-slot='card-title']" })).toBeTruthy();
     expect(screen.getByText("Active")).toBeTruthy();
-    expect(screen.getByText("Billing is managed by Polar. Customer ID: tenant-1")).toBeTruthy();
-    expect(screen.getByText("Subscription ID")).toBeTruthy();
+    expect(screen.getByText("Payments are managed by Polar. Customer ID: tenant-1")).toBeTruthy();
+    expect(screen.getByText("Subscription:")).toBeTruthy();
     expect(screen.queryByText("prod_123")).toBeNull();
     expect(screen.queryByText("prod_default")).toBeNull();
 
@@ -88,7 +88,7 @@ describe("SettingsBillingSection", () => {
   });
 
   it("disables the primary action when no checkout product is configured", () => {
-    render(SettingsBillingSection, {
+    render(SettingsPaymentsSection, {
       props: {
         billing: {
           ...billing,
@@ -121,7 +121,7 @@ describe("SettingsBillingSection", () => {
     const onChangePlan = vi.fn();
     const onManageBilling = vi.fn();
 
-    render(SettingsBillingSection, {
+    render(SettingsPaymentsSection, {
       props: {
         billing: {
           ...billing,
@@ -154,7 +154,7 @@ describe("SettingsBillingSection", () => {
     const onChangePlan = vi.fn();
     const onManageBilling = vi.fn();
 
-    render(SettingsBillingSection, {
+    render(SettingsPaymentsSection, {
       props: {
         billing: {
           ...billing,
@@ -186,7 +186,7 @@ describe("SettingsBillingSection", () => {
     const onChangePlan = vi.fn();
     const onManageBilling = vi.fn();
 
-    render(SettingsBillingSection, {
+    render(SettingsPaymentsSection, {
       props: {
         billing: {
           ...billing,
@@ -213,7 +213,7 @@ describe("SettingsBillingSection", () => {
     const onChangePlan = vi.fn();
     const onManageBilling = vi.fn();
 
-    render(SettingsBillingSection, {
+    render(SettingsPaymentsSection, {
       props: {
         billing: {
           ...billing,
@@ -246,7 +246,7 @@ describe("SettingsBillingSection", () => {
   });
 
   it("disables catalog editing for non-admin users", () => {
-    render(SettingsBillingSection, {
+    render(SettingsPaymentsSection, {
       props: {
         billing,
         products,
@@ -267,7 +267,7 @@ describe("SettingsBillingSection", () => {
     const onChangePlan = vi.fn();
     const onCheckoutProductChange = vi.fn();
 
-    render(SettingsBillingSection, {
+    render(SettingsPaymentsSection, {
       props: {
         billing,
         products,
@@ -295,7 +295,7 @@ describe("SettingsBillingSection", () => {
     const onChangePlan = vi.fn();
     const onCheckoutProductChange = vi.fn();
 
-    render(SettingsBillingSection, {
+    render(SettingsPaymentsSection, {
       props: {
         billing: {
           ...billing,
@@ -330,7 +330,7 @@ describe("SettingsBillingSection", () => {
     const onChangePlan = vi.fn();
     const onManageBilling = vi.fn();
 
-    render(SettingsBillingSection, {
+    render(SettingsPaymentsSection, {
       props: {
         billing: {
           ...billing,
