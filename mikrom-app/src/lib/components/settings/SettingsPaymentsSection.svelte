@@ -189,27 +189,26 @@
         </Button>
       </div>
     </CardHeader>
-    <CardContent>
-      <p class="mb-4 text-xs text-muted-foreground">
-        Last synced: {formatSyncedAt(lastSyncedAt)}
+    <CardContent class="pt-0">
+      <p class="mb-2 text-xs text-muted-foreground">
+        {formatSyncedAt(lastSyncedAt)}
         {#if !canManageBilling && !isTestMode}
           (admin only)
         {:else if isTestMode} (sandbox)
         {/if}
       </p>
       {#if productsLoading}
-        <Skeleton class="h-10 w-full rounded-2xl" />
-        <div class="mt-3 grid gap-3">
+        <div class="grid gap-3 sm:grid-cols-2">
           <Skeleton class="h-16 w-full rounded-2xl" />
           <Skeleton class="h-16 w-full rounded-2xl" />
         </div>
       {:else if products.length > 0}
         {#if !canManageBilling && !isTestMode}
-          <p class="mb-4 text-xs text-muted-foreground">
+          <p class="mb-2 text-xs text-muted-foreground">
             Only tenant admins can save the default checkout product or refresh the catalog.
           </p>
         {:else if isTestMode}
-          <p class="mb-4 text-xs text-muted-foreground">
+          <p class="mb-2 text-xs text-muted-foreground">
             Sandbox checkout is active. You can pick a plan and buy it without saving the selection.
           </p>
         {/if}
