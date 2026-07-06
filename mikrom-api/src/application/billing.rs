@@ -1478,7 +1478,9 @@ async fn handle_polar_webhook_with_secret(
             row.updated_at = Utc::now();
             sync_billing_record_from_event(state, tenant_id, row).await?;
         },
-        PolarWebhookEvent::CustomerStateChanged { data: customer_state } => {
+        PolarWebhookEvent::CustomerStateChanged {
+            data: customer_state,
+        } => {
             let Some(external_id) = customer_state.external_id.as_deref() else {
                 return Ok(());
             };
@@ -2350,7 +2352,7 @@ mod tests {
                 | PolarWebhookEvent::SubscriptionPastDue { data: s } => {
                     assert_eq!(s.id, "sub_123");
                     assert_eq!(s.status.as_deref(), Some(*expected_status));
-                }
+                },
                 _ => panic!("Expected subscription variant for {event_type}"),
             }
         }
