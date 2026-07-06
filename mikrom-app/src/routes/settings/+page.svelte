@@ -25,7 +25,6 @@
     type GithubAccount,
     type BillingProduct,
   } from "$lib/api";
-  import { getBillingStatusConfig } from "$lib/domain/billing";
   import { toast } from "$lib/toast";
   import { profile, refreshProfile } from "$lib/stores/profile";
   import {
@@ -37,7 +36,6 @@
     useBillingBootstrap,
   } from "$lib/stores/billing";
   import { settingsTabs, type SettingsTab } from "$lib/domain/settings";
-  import { cn } from "$lib/utils";
 
   let githubAccounts = $state<GithubAccount[]>([]);
   let loading = $state(true);
@@ -55,7 +53,6 @@
   let billingProductsLastSyncedAt = $state<string | null>(null);
   let avatarUploading = $state(false);
   let canManageBilling = $derived((($profile?.role || "").toLowerCase()) === "admin");
-  let billingStatus = $derived(getBillingStatusConfig($billing?.status));
 
   const settingsTabValues = new Set<SettingsTab>(settingsTabs.map((tab) => tab.value));
 
@@ -68,11 +65,6 @@
   }
 
   let activeTab = $derived(parseSettingsTab($page.url.searchParams.get("tab")));
-  let billingTabNotice = $derived(
-    activeTab === "billing"
-      ? $billingError || ($billingLoading ? "Loading billing status..." : "")
-      : "",
-  );
 
   async function setActiveTab(tab: SettingsTab) {
     const nextUrl = new URL($page.url);
@@ -345,17 +337,7 @@
         <p class="max-w-2xl text-sm text-muted-foreground">
           Manage your personal information, security preferences and billing.
         </p>
-        {#if activeTab === "billing"}
-          <div class="inline-flex w-fit items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
-            <span class={cn("inline-flex items-center rounded-full px-2 py-0.5", billingStatus.tone)}>
-              {billingStatus.label}
-            </span>
-            <span>Billing status</span>
-          </div>
-          {#if billingTabNotice}
-            <p class="text-xs text-muted-foreground">{billingTabNotice}</p>
-          {/if}
-        {/if}
+
       </div>
     </div>
 

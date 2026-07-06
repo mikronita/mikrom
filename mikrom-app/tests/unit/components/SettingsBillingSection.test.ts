@@ -7,7 +7,7 @@ const billing = {
   customer_external_id: "tenant-1",
   polar_customer_id: "cus_123",
   polar_subscription_id: "sub_123",
-  polar_product_id: "prod_123",
+  polar_product_id: "prod_default",
   plan_name: "Pro",
   status: "active",
   amount_cents: 2500,
@@ -67,7 +67,8 @@ describe("SettingsBillingSection", () => {
     expect(screen.getByText("Active")).toBeTruthy();
     expect(screen.getByText("Billing is managed by Polar. Customer ID: tenant-1")).toBeTruthy();
     expect(screen.getByText("Subscription ID")).toBeTruthy();
-    expect(screen.getByText("prod_123")).toBeTruthy();
+    expect(screen.queryByText("prod_123")).toBeNull();
+    expect(screen.queryByText("prod_default")).toBeNull();
 
     const expectedRenewal = new Intl.DateTimeFormat("en-US", {
       dateStyle: "medium",
@@ -281,9 +282,10 @@ describe("SettingsBillingSection", () => {
       },
     });
 
-    await fireEvent.click(screen.getByRole("button", { name: "Checkout product" }));
-
-    expect((screen.getByRole("button", { name: "Checkout product" }) as HTMLButtonElement).disabled).toBe(false);
+    const proCard = screen.getByRole("button", { name: "Pro" });
+    expect(proCard).toBeTruthy();
+    expect((proCard as HTMLButtonElement).disabled).toBe(false);
+    await fireEvent.click(proCard);
     expect(onCheckoutProductChange).not.toHaveBeenCalled();
     await fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
     expect(onChangePlan).toHaveBeenCalledWith("prod_default");
@@ -311,12 +313,12 @@ describe("SettingsBillingSection", () => {
       },
     });
 
-    const select = screen.getByRole("button", { name: "Checkout product" });
-    expect(select).toBeTruthy();
-    expect((select as HTMLButtonElement).disabled).toBe(false);
+    const proCard = screen.getByRole("button", { name: "Pro" });
+    expect(proCard).toBeTruthy();
+    expect((proCard as HTMLButtonElement).disabled).toBe(false);
 
     await expect(screen.getByText("Test mode")).toBeTruthy();
-    expect(select).toBeTruthy();
+    expect(proCard).toBeTruthy();
     await fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
 
     expect(onCheckoutProductChange).not.toHaveBeenCalled();
