@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 aya-ebpf = "0.1"
 mikrom-agent-ebpf-common = { path = "../mikrom-agent-ebpf-common" }
-network-types = "0.0.5"
+network-types = "0.2.0"
 
 [[bin]]
 name = "mikrom-agent-ebpf"
