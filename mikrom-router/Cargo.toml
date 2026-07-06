@@ -37,8 +37,8 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 aes-gcm = "0.11"
 base64 = "0.22"
 futures = "0.3.32"
-rtnetlink = "0.21"
-netlink-packet-route = "0.19"
+rtnetlink = "0.14"
+netlink-packet-route = "0.31"
 neli = { version = "0.7.4", features = ["async"] }
 libc = "0.2"
 sha2 = "0.11"
