@@ -156,20 +156,32 @@ pub struct BillingProductListResponse {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type", content = "data")]
+#[serde(tag = "type")]
 enum PolarWebhookEvent {
     #[serde(rename = "customer.created")]
-    CustomerCreated(PolarCustomer),
+    CustomerCreated { data: PolarCustomer },
     #[serde(rename = "customer.updated")]
-    CustomerUpdated(PolarCustomer),
+    CustomerUpdated { data: PolarCustomer },
     #[serde(rename = "customer.deleted")]
-    CustomerDeleted(PolarCustomer),
+    CustomerDeleted { data: PolarCustomer },
     #[serde(rename = "customer.state_changed")]
-    CustomerStateChanged(PolarCustomerState),
+    CustomerStateChanged { data: PolarCustomerState },
     #[serde(rename = "subscription.created")]
-    SubscriptionCreated(PolarSubscription),
+    SubscriptionCreated { data: PolarSubscription },
     #[serde(rename = "subscription.updated")]
-    SubscriptionUpdated(PolarSubscription),
+    SubscriptionUpdated { data: PolarSubscription },
+    #[serde(rename = "subscription.active")]
+    SubscriptionActive { data: PolarSubscription },
+    #[serde(rename = "subscription.canceled")]
+    SubscriptionCanceled { data: PolarSubscription },
+    #[serde(rename = "subscription.revoked")]
+    SubscriptionRevoked { data: PolarSubscription },
+    #[serde(rename = "subscription.uncanceled")]
+    SubscriptionUncanceled { data: PolarSubscription },
+    #[serde(rename = "subscription.past_due")]
+    SubscriptionPastDue { data: PolarSubscription },
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -546,7 +558,7 @@ async fn create_customer_session(
     return_url: &str,
 ) -> ApiResult<String> {
     let response = http_client()
-        .post(polar_api_url(&settings.base_url, "/customer-sessions"))
+        .post(polar_api_url(&settings.base_url, "/customer-sessions/"))
         .bearer_auth(&settings.access_token)
         .json(&serde_json::json!({
             "external_customer_id": tenant.id.to_string(),
@@ -617,7 +629,7 @@ async fn create_customer_in_polar(
     email: &str,
 ) -> ApiResult<()> {
     let response = http_client()
-        .post(polar_api_url(&settings.base_url, "/customers"))
+        .post(polar_api_url(&settings.base_url, "/customers/"))
         .bearer_auth(&settings.access_token)
         .json(&serde_json::json!({
             "external_id": external_customer_id,
@@ -669,7 +681,7 @@ async fn create_checkout_session(
     success_url: &str,
 ) -> ApiResult<String> {
     let response = http_client()
-        .post(polar_api_url(&settings.base_url, "/checkouts"))
+        .post(polar_api_url(&settings.base_url, "/checkouts/"))
         .bearer_auth(&settings.access_token)
         .json(&serde_json::json!({
             "products": [product_id],
@@ -1071,7 +1083,7 @@ fn parse_polar_products(
 
 async fn list_polar_products(settings: &PolarSettings) -> ApiResult<Vec<BillingProduct>> {
     let response = http_client()
-        .get(polar_api_url(&settings.base_url, "/products"))
+        .get(polar_api_url(&settings.base_url, "/products?limit=100"))
         .bearer_auth(&settings.access_token)
         .send()
         .await
@@ -1369,6 +1381,31 @@ pub async fn handle_polar_webhook(
     handle_polar_webhook_with_secret(state, headers, body, &webhook_secret).await
 }
 
+async fn ensure_webhook_idempotent(
+    pool: &sqlx::PgPool,
+    webhook_id: &str,
+    event_type: &str,
+) -> bool {
+    sqlx::query(
+        "INSERT INTO polar_webhook_deliveries (webhook_id, event_type)
+         VALUES ($1, $2)
+         ON CONFLICT (webhook_id) DO NOTHING",
+    )
+    .bind(webhook_id)
+    .bind(event_type)
+    .execute(pool)
+    .await
+    .map(|r| r.rows_affected() > 0)
+    .unwrap_or_else(|e| {
+        tracing::error!(
+            error = %e,
+            webhook_id = %webhook_id,
+            "Failed to record webhook delivery, processing anyway"
+        );
+        true
+    })
+}
+
 async fn handle_polar_webhook_with_secret(
     state: &AppState,
     headers: &HeaderMap,
@@ -1376,12 +1413,33 @@ async fn handle_polar_webhook_with_secret(
     webhook_secret: &str,
 ) -> ApiResult<()> {
     let webhook_id = verify_webhook_signature(headers, body, webhook_secret)?;
+
     let event: PolarWebhookEvent = serde_json::from_slice(body)
         .map_err(|e| ApiError::BadRequest(format!("Invalid Polar webhook payload: {e}")))?;
 
+    let event_type = match &event {
+        PolarWebhookEvent::CustomerCreated { .. } => "customer.created",
+        PolarWebhookEvent::CustomerUpdated { .. } => "customer.updated",
+        PolarWebhookEvent::CustomerDeleted { .. } => "customer.deleted",
+        PolarWebhookEvent::CustomerStateChanged { .. } => "customer.state_changed",
+        PolarWebhookEvent::SubscriptionCreated { .. } => "subscription.created",
+        PolarWebhookEvent::SubscriptionUpdated { .. } => "subscription.updated",
+        PolarWebhookEvent::SubscriptionActive { .. } => "subscription.active",
+        PolarWebhookEvent::SubscriptionCanceled { .. } => "subscription.canceled",
+        PolarWebhookEvent::SubscriptionRevoked { .. } => "subscription.revoked",
+        PolarWebhookEvent::SubscriptionUncanceled { .. } => "subscription.uncanceled",
+        PolarWebhookEvent::SubscriptionPastDue { .. } => "subscription.past_due",
+        PolarWebhookEvent::Unknown => "unknown",
+    };
+
+    if !ensure_webhook_idempotent(&state.api_db, &webhook_id, event_type).await {
+        tracing::debug!(webhook_id = %webhook_id, event_type = %event_type, "Skipping duplicate Polar webhook");
+        return Ok(());
+    }
+
     match event {
-        PolarWebhookEvent::CustomerCreated(customer)
-        | PolarWebhookEvent::CustomerUpdated(customer) => {
+        PolarWebhookEvent::CustomerCreated { data: customer }
+        | PolarWebhookEvent::CustomerUpdated { data: customer } => {
             let Some(external_id) = customer.external_id.as_deref() else {
                 return Ok(());
             };
@@ -1391,7 +1449,7 @@ async fn handle_polar_webhook_with_secret(
             let row = customer_row_from_event(tenant_id, existing, &customer, "none");
             sync_billing_record_from_event(state, tenant_id, row).await?;
         },
-        PolarWebhookEvent::CustomerDeleted(customer) => {
+        PolarWebhookEvent::CustomerDeleted { data: customer } => {
             let Some(external_id) = customer.external_id.as_deref() else {
                 return Ok(());
             };
@@ -1420,7 +1478,7 @@ async fn handle_polar_webhook_with_secret(
             row.updated_at = Utc::now();
             sync_billing_record_from_event(state, tenant_id, row).await?;
         },
-        PolarWebhookEvent::CustomerStateChanged(customer_state) => {
+        PolarWebhookEvent::CustomerStateChanged { data: customer_state } => {
             let Some(external_id) = customer_state.external_id.as_deref() else {
                 return Ok(());
             };
@@ -1430,8 +1488,13 @@ async fn handle_polar_webhook_with_secret(
             let row = state_changed_row_from_event(tenant_id, existing, &customer_state);
             sync_billing_record_from_event(state, tenant_id, row).await?;
         },
-        PolarWebhookEvent::SubscriptionCreated(subscription)
-        | PolarWebhookEvent::SubscriptionUpdated(subscription) => {
+        PolarWebhookEvent::SubscriptionCreated { data: subscription }
+        | PolarWebhookEvent::SubscriptionUpdated { data: subscription }
+        | PolarWebhookEvent::SubscriptionActive { data: subscription }
+        | PolarWebhookEvent::SubscriptionCanceled { data: subscription }
+        | PolarWebhookEvent::SubscriptionRevoked { data: subscription }
+        | PolarWebhookEvent::SubscriptionUncanceled { data: subscription }
+        | PolarWebhookEvent::SubscriptionPastDue { data: subscription } => {
             let customer = subscription.customer.as_ref().ok_or_else(|| {
                 ApiError::BadRequest("Polar subscription payload missing customer".into())
             })?;
@@ -1444,6 +1507,9 @@ async fn handle_polar_webhook_with_secret(
             let row =
                 subscription_row_from_event(tenant_id, existing, Some(customer), &subscription);
             sync_billing_record_from_event(state, tenant_id, row).await?;
+        },
+        PolarWebhookEvent::Unknown => {
+            tracing::debug!("Received unknown Polar webhook event, skipping");
         },
     }
 
@@ -1460,7 +1526,7 @@ mod tests {
     use serde_json::json;
     use serial_test::serial;
     use sha2::Sha256;
-    use wiremock::matchers::{body_json, header, method, path};
+    use wiremock::matchers::{body_json, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     type TestHmacSha256 = Hmac<Sha256>;
@@ -1646,7 +1712,7 @@ mod tests {
         let success_url = "http://localhost:3000/settings?tab=billing&checkout=success";
 
         Mock::given(method("POST"))
-            .and(path("/checkouts"))
+            .and(path("/checkouts/"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "products": ["prod_checkout"],
@@ -1661,7 +1727,7 @@ mod tests {
             .await;
 
         Mock::given(method("POST"))
-            .and(path("/customer-sessions"))
+            .and(path("/customer-sessions/"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "external_customer_id": tenant.id.to_string(),
@@ -1699,7 +1765,7 @@ mod tests {
         let success_url = "http://localhost:3000/settings?tab=billing&checkout=success";
 
         Mock::given(method("POST"))
-            .and(path("/checkouts"))
+            .and(path("/checkouts/"))
             .and(header("authorization", "Bearer polar-token"))
             .respond_with(
                 ResponseTemplate::new(422)
@@ -1741,7 +1807,7 @@ mod tests {
             .await;
 
         Mock::given(method("POST"))
-            .and(path("/customers"))
+            .and(path("/customers/"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "external_id": tenant.id.to_string(),
@@ -1752,7 +1818,7 @@ mod tests {
             .await;
 
         Mock::given(method("POST"))
-            .and(path("/customer-sessions"))
+            .and(path("/customer-sessions/"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "external_customer_id": tenant.id.to_string(),
@@ -1789,7 +1855,7 @@ mod tests {
         let polar_email = polar_customer_email_for_tenant(email, tenant.id);
 
         Mock::given(method("POST"))
-            .and(path("/customers"))
+            .and(path("/customers/"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "external_id": tenant.id.to_string(),
@@ -1830,7 +1896,7 @@ mod tests {
         let polar_email = polar_customer_email_for_tenant(email, tenant.id);
 
         Mock::given(method("POST"))
-            .and(path("/customers"))
+            .and(path("/customers/"))
             .and(header("authorization", "Bearer polar-token"))
             .and(body_json(json!({
                 "external_id": tenant.id.to_string(),
@@ -2246,5 +2312,84 @@ mod tests {
             result,
             Err(ApiError::BadRequest(message)) if message.contains("Polar subscription payload missing customer")
         ));
+    }
+
+    #[test]
+    fn subscription_lifecycle_variants_all_deserialize() {
+        let variants = [
+            ("subscription.created", "created"),
+            ("subscription.updated", "updated"),
+            ("subscription.active", "active"),
+            ("subscription.canceled", "canceled"),
+            ("subscription.revoked", "revoked"),
+            ("subscription.uncanceled", "uncanceled"),
+            ("subscription.past_due", "past_due"),
+        ];
+
+        for (event_type, expected_status) in &variants {
+            let json = serde_json::json!({
+                "type": event_type,
+                "data": {
+                    "id": "sub_123",
+                    "status": expected_status,
+                    "customer": {
+                        "id": "cus_123",
+                        "external_id": "550e8400-e29b-41d4-a716-446655440000"
+                    }
+                }
+            });
+
+            let event: PolarWebhookEvent = serde_json::from_value(json).expect("deserialize");
+            match &event {
+                PolarWebhookEvent::SubscriptionCreated { data: s }
+                | PolarWebhookEvent::SubscriptionUpdated { data: s }
+                | PolarWebhookEvent::SubscriptionActive { data: s }
+                | PolarWebhookEvent::SubscriptionCanceled { data: s }
+                | PolarWebhookEvent::SubscriptionRevoked { data: s }
+                | PolarWebhookEvent::SubscriptionUncanceled { data: s }
+                | PolarWebhookEvent::SubscriptionPastDue { data: s } => {
+                    assert_eq!(s.id, "sub_123");
+                    assert_eq!(s.status.as_deref(), Some(*expected_status));
+                }
+                _ => panic!("Expected subscription variant for {event_type}"),
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_webhook_event_deserializes_to_unknown_variant() {
+        let json = serde_json::json!({
+            "type": "checkout.created",
+            "data": {
+                "id": "chk_123"
+            }
+        });
+
+        let event: PolarWebhookEvent = serde_json::from_value(json).expect("deserialize");
+        assert!(matches!(event, PolarWebhookEvent::Unknown));
+    }
+
+    #[tokio::test]
+    async fn list_polar_products_includes_limit_query_parameter() {
+        let server = MockServer::start().await;
+        let settings = PolarSettings {
+            access_token: "polar-token".to_string(),
+            webhook_secret: "webhook-secret".to_string(),
+            base_url: server.uri(),
+            default_product_id: None,
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/products"))
+            .and(query_param("limit", "100"))
+            .and(header("authorization", "Bearer polar-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "items": []
+            })))
+            .mount(&server)
+            .await;
+
+        let products = list_polar_products(&settings).await.expect("products");
+        assert!(products.is_empty());
     }
 }
