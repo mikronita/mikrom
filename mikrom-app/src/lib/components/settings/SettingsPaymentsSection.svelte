@@ -107,7 +107,7 @@
 
   function resolveProductName(productId: string | null | undefined): string | null {
     if (!productId) return null;
-    return products.find((p) => p.id === productId)?.name ?? null;
+    return products.find((p: BillingProduct) => p.id === productId)?.name ?? null;
   }
 
   let currentBilling = $derived(getBillingStatusConfig(billing?.status));
