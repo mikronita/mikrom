@@ -7,13 +7,7 @@ use aya_ebpf::{
     programs::TcContext,
 };
 use mikrom_agent_ebpf_common::{FirewallRule, NetworkStats};
-use network_types::{
-    eth::{EthHdr, EtherType},
-    ip::IpProto,
-    ip::Ipv6Hdr,
-    tcp::TcpHdr,
-    udp::UdpHdr,
-};
+use network_types::{eth::EthHdr, ip::Ipv6Hdr, tcp::TcpHdr, udp::UdpHdr};
 
 #[map]
 static STATS: PerCpuHashMap<u32, NetworkStats> = PerCpuHashMap::with_max_entries(1024, 0);
@@ -74,24 +68,23 @@ pub fn mikrom_egress(ctx: TcContext) -> i32 {
 }
 fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
     let ethhdr: EthHdr = ctx.load(0).map_err(|_| ())?;
-    match ethhdr.ether_type {
-        EtherType::Ipv6 => {},
-        _ => return Ok(TC_ACT_OK),
+    if ethhdr.ether_type != 0x86DD_u16 {
+        return Ok(TC_ACT_OK);
     }
 
     // TODO: Handle IPv6 extension headers (Fragment, Hop-by-Hop, etc.)
     // Current implementation only parses the fixed header.
     let ipv6hdr: Ipv6Hdr = ctx.load(EthHdr::LEN).map_err(|_| ())?;
-    let src_ip = unsafe { ipv6hdr.src_addr.in6_u.u6_addr8 };
+    let src_ip = ipv6hdr.src_addr;
     let protocol = ipv6hdr.next_hdr;
     let dst_port = match protocol {
-        IpProto::Tcp => {
+        6 => {
             let tcphdr: TcpHdr = ctx.load(EthHdr::LEN + Ipv6Hdr::LEN).map_err(|_| ())?;
-            u16::from_be(tcphdr.dest)
+            u16::from_be_bytes(tcphdr.dest)
         },
-        IpProto::Udp => {
+        17 => {
             let udphdr: UdpHdr = ctx.load(EthHdr::LEN + Ipv6Hdr::LEN).map_err(|_| ())?;
-            u16::from_be(udphdr.dest)
+            u16::from_be_bytes(udphdr.dst)
         },
         _ => 0,
     };
