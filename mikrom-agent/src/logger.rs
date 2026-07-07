@@ -82,17 +82,18 @@ impl TailedFile {
 
         // If the buffer doesn't end with a newline, the last "line" is incomplete;
         // stash it back for the next read.
-        if !text.ends_with('\n') && !lines.is_empty() {
-            let incomplete = lines.pop().unwrap();
-            let new_offset = offset + text.len() as u64 - incomplete.len() as u64;
-            self.offset.store(new_offset, Ordering::SeqCst);
-            // If there are no complete lines, return empty and keep the incomplete chunk.
-            if lines.is_empty() {
-                return Ok(Vec::new());
+        if !text.ends_with('\n') {
+            if let Some(incomplete) = lines.pop() {
+                let new_offset = offset + text.len() as u64 - incomplete.len() as u64;
+                self.offset.store(new_offset, Ordering::SeqCst);
+                // If there are no complete lines, return empty and keep the incomplete chunk.
+                if lines.is_empty() {
+                    return Ok(Vec::new());
+                }
+            } else {
+                self.offset
+                    .store(offset + text.len() as u64, Ordering::SeqCst);
             }
-        } else {
-            self.offset
-                .store(offset + text.len() as u64, Ordering::SeqCst);
         }
 
         Ok(lines)

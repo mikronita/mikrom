@@ -539,7 +539,10 @@ impl AgentServer {
                     .map_err(|e| anyhow::anyhow!("Invalid VM ID: {e}"))?;
                 let app_id = AppId::from_str(&req.app_id)
                     .map_err(|e| anyhow::anyhow!("Invalid App ID: {e}"))?;
-                let config = self.map_proto_config(req.config.as_ref().unwrap());
+                let proto_config = req.config.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("StartVm command missing config")
+                })?;
+                let config = self.map_proto_config(proto_config);
                 let res = hv.start_vm(vm_id, app_id, req.image, config).await;
                 let response = StartVmResponse {
                     success: res.is_ok(),

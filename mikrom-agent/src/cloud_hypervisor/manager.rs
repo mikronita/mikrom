@@ -1119,7 +1119,10 @@ impl VmHypervisor for CloudHypervisorManager {
                 // Reconstruct the process handle
                 // We use a command that exits immediately just to satisfy the tokio::process::Child requirement
                 let mut cmd = tokio::process::Command::new("true");
-                let child = cmd.spawn().unwrap();
+                let child = cmd.spawn().map_err(|e| {
+                    tracing::error!("Failed to spawn stub process for VM recovery: {e}");
+                    HypervisorError::ProcessError(format!("Failed to spawn stub process: {e}"))
+                })?;
 
                 let proc = CloudHypervisorProcess {
                     vm_id: state.vm_id.to_string(),

@@ -187,7 +187,7 @@ impl RouterOtelMetrics {
             let mut last = self
                 .last
                 .lock()
-                .expect("router otel metrics mutex poisoned");
+                .unwrap_or_else(|e| e.into_inner());
 
             macro_rules! emit_delta {
                 ($field:ident, $counter:expr) => {{
