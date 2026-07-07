@@ -70,11 +70,11 @@ fn build_route(host: &str, targets: &[String]) -> Result<Route> {
     let mut use_tls = false;
 
     for target in targets {
-        if target.starts_with("https://") {
+        if let Some(rest) = target.strip_prefix("https://") {
             use_tls = true;
-            normalized_targets.push(target.strip_prefix("https://").unwrap().to_string());
-        } else if target.starts_with("http://") {
-            normalized_targets.push(target.strip_prefix("http://").unwrap().to_string());
+            normalized_targets.push(rest.to_string());
+        } else if let Some(rest) = target.strip_prefix("http://") {
+            normalized_targets.push(rest.to_string());
         } else {
             normalized_targets.push(target.clone());
         }

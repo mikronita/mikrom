@@ -74,10 +74,10 @@ impl ReqwestApiClient {
             || status == reqwest::StatusCode::REQUEST_TIMEOUT
     }
 
-    async fn execute_with_retry<F, Fut>(&self, operation: F) -> CliResult<reqwest::Response>
+    async fn execute_with_retry<F, Fut>(&self, mut operation: F) -> CliResult<reqwest::Response>
     where
-        F: Fn() -> Fut,
-        Fut: std::future::Future<Output = Result<reqwest::Response, reqwest::Error>>,
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = CliResult<reqwest::Response>>,
     {
         let max_retries = 3;
 
@@ -101,7 +101,8 @@ impl ReqwestApiClient {
                     tokio::time::sleep(delay).await;
                 },
                 Err(e) => {
-                    if (e.is_timeout() || e.is_connect()) && attempt < max_retries - 1 {
+                    let is_retryable = matches!(&e, CliError::Http(inner) if inner.is_timeout() || inner.is_connect());
+                    if is_retryable && attempt < max_retries - 1 {
                         let delay = std::time::Duration::from_millis(200 * (1 << attempt));
                         tracing::warn!(
                             error = %e,
@@ -111,7 +112,7 @@ impl ReqwestApiClient {
                         );
                         tokio::time::sleep(delay).await;
                     } else {
-                        return Err(CliError::Http(e));
+                        return Err(e);
                     }
                 },
             }
@@ -160,8 +161,12 @@ impl ReqwestApiClient {
     ) -> CliResult<T> {
         let builder = self.build_request(method, endpoint, body);
         let resp = self
-            .execute_with_retry(|| async {
-                builder.try_clone().unwrap().timeout(timeout).send().await
+            .execute_with_retry(|| {
+                // SAFETY: JSON request bodies are always clonable via try_clone().
+                // Streaming/non-clonable bodies are never used with this client.
+                let cloned = builder.try_clone()
+                    .expect("JSON request body should be clonable");
+                async move { cloned.timeout(timeout).send().await.map_err(CliError::Http) }
             })
             .await?;
 
@@ -186,8 +191,10 @@ impl ReqwestApiClient {
     ) -> CliResult<()> {
         let builder = self.build_request(method, endpoint, body);
         let resp = self
-            .execute_with_retry(|| async {
-                builder.try_clone().unwrap().timeout(timeout).send().await
+            .execute_with_retry(|| {
+                let cloned = builder.try_clone()
+                    .expect("JSON request body should be clonable");
+                async move { cloned.timeout(timeout).send().await.map_err(CliError::Http) }
             })
             .await?;
 

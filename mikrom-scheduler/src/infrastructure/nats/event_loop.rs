@@ -358,7 +358,7 @@ impl NatsEventLoop {
     ) -> Option<RouterRestoreGuard> {
         let mut in_progress = router_restore_in_progress
             .lock()
-            .expect("router restore guard mutex poisoned");
+            .unwrap_or_else(|e| e.into_inner());
 
         if !in_progress.insert(app_id.to_string()) {
             tracing::debug!(event = "router_restore_deduplicated", app_id = %app_id, "Router restore already in progress");

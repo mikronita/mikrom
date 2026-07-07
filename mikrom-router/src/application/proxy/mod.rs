@@ -892,13 +892,14 @@ impl ProxyHttp for MikromProxy {
         };
 
         if code > 0 {
-            let mut response = match ResponseHeader::build(code, Some(0)) {
-                Ok(response) => response,
-                Err(err) => {
-                    warn!("Failed to build router error response: {err}");
-                    ResponseHeader::build(500, Some(0))
-                        .expect("failed to build fallback error response")
-                },
+            let Some(mut response) = (ResponseHeader::build(code, Some(0)).ok())
+                .or_else(|| ResponseHeader::build(500, Some(0)).ok())
+            else {
+                warn!("Failed to build any error response, returning empty 500");
+                return pingora::proxy::FailToProxy {
+                    error_code: 500,
+                    can_reuse_downstream: false,
+                };
             };
             if let Err(err) = set_router_server_header(&mut response) {
                 warn!("Failed to set router server header on error response: {err}");

@@ -794,14 +794,14 @@ impl RateLimiter {
         let now = Instant::now();
         let ttl = self.config.entry_ttl;
         self.entries.retain(|_, entry| {
-            let guard = entry.lock().expect("rate limit bucket mutex poisoned");
+            let guard = entry.lock().unwrap_or_else(|e| e.into_inner());
             now.duration_since(guard.last_seen) <= ttl
         });
     }
 
     fn check_bucket(&self, key: RateLimitKey, policy: &BucketPolicy) -> RateLimitOutcome {
         let bucket = self.get_bucket(key, policy);
-        let mut guard = bucket.lock().expect("rate limit bucket mutex poisoned");
+        let mut guard = bucket.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
         let elapsed = now.duration_since(guard.last_refill).as_secs_f64();
         let refill = elapsed * policy.refill_per_second;

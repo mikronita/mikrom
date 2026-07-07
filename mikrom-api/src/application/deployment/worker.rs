@@ -248,7 +248,9 @@ pub async fn resume_pending_builds(state: AppState) {
     };
 
     for dep in deployments {
-        let build_id = dep.build_id.clone().unwrap();
+        let Some(build_id) = dep.build_id.clone() else {
+            continue;
+        };
         let app = match state.app_repo.get_app(dep.app_id).await {
             Ok(Some(a)) => a,
             _ => continue,

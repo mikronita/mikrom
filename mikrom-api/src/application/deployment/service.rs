@@ -364,10 +364,12 @@ impl DeploymentService {
             disk_mib,
             port,
             env,
-            image,
             hypervisor,
+            ..
         } = params;
-        let image_tag = image.expect("direct_image_deploy requires an image");
+        let image_tag = params.image.ok_or_else(|| {
+            ApiError::BadRequest("Image tag is required for direct deployment".into())
+        })?;
         let final_port = port.unwrap_or(app.port);
         let deployment_id = deployment.id;
         let inner = Self::deploy_to_scheduler(

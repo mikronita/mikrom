@@ -37,9 +37,9 @@ fn encode_base62(mut value: u128) -> String {
         value /= 62;
     }
 
-    std::str::from_utf8(&buf[index..])
-        .expect("base62 alphabet is valid UTF-8")
-        .to_string()
+    // SAFETY: BASE62_ALPHABET contains only ASCII bytes [0-9A-Za-z],
+    // so the buffer is always valid UTF-8.
+    unsafe { std::str::from_utf8_unchecked(&buf[index..]) }.to_string()
 }
 
 macro_rules! define_id {
