@@ -1,6 +1,6 @@
 use crate::domain::{
     AppConfig, AppRepository, DomainResult, HostMetrics, Job, JobRepository, JobStatus, VmConfig,
-    Worker, WorkerRepository,
+    Volume, Worker, WorkerRepository,
 };
 use async_trait::async_trait;
 use sqlx::{PgPool, Row};
@@ -10,7 +10,7 @@ pub struct PgJobRepository {
     pool: PgPool,
 }
 
-const JOB_COLUMNS: &str = "job_id, app_id, app_name, image, tenant_id, status, host_id, vm_id, vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path, ipv6_address, ipv6_gateway, scheduled_at, started_at, stopped_at, error_message, hypervisor, workload_type";
+const JOB_COLUMNS: &str = "job_id, app_id, app_name, image, tenant_id, status, host_id, vm_id, vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path, ipv6_address, ipv6_gateway, scheduled_at, started_at, stopped_at, error_message, hypervisor, workload_type, volumes";
 
 impl PgJobRepository {
     pub fn new(pool: PgPool) -> Self {
@@ -24,13 +24,15 @@ impl JobRepository for PgJobRepository {
         let env_json = serde_json::to_value(&job.config.env).unwrap_or_default();
         let status_str = job.status.as_str();
 
+        let volumes_json = serde_json::to_value(&job.config.volumes).unwrap_or_default();
+
         sqlx::query(
             r#"
             INSERT INTO jobs (
                 job_id, app_id, app_name, image, tenant_id, status, host_id, vm_id,
                 vcpus, memory_mib, disk_mib, port, env_vars, created_at, deployment_id, health_check_path,
-                ipv6_address, ipv6_gateway, hypervisor, workload_type
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+                ipv6_address, ipv6_gateway, hypervisor, workload_type, volumes
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
             "#
         )
         .bind(&job.job_id)
@@ -53,6 +55,7 @@ impl JobRepository for PgJobRepository {
         .bind(&job.config.ipv6_gateway)
         .bind(job.config.hypervisor as i32)
         .bind(job.config.workload_type as i32)
+        .bind(volumes_json)
         .execute(&self.pool)
         .await?;
 
@@ -331,6 +334,9 @@ fn map_row_to_job(r: &sqlx::postgres::PgRow) -> Job {
     let env_vars: serde_json::Value = r.get("env_vars");
     let env: HashMap<String, String> = serde_json::from_value(env_vars).unwrap_or_default();
 
+    let volumes_val: serde_json::Value = r.get("volumes");
+    let volumes: Vec<Volume> = serde_json::from_value(volumes_val).unwrap_or_default();
+
     Job {
         job_id: r.get("job_id"),
         app_id: r.get("app_id"),
@@ -354,7 +360,7 @@ fn map_row_to_job(r: &sqlx::postgres::PgRow) -> Job {
             env,
             ipv6_address: r.get("ipv6_address"),
             ipv6_gateway: r.get("ipv6_gateway"),
-            volumes: vec![], // TODO: Volumes
+            volumes,
             health_check_path: r.get("health_check_path"),
             hypervisor: crate::domain::job::HypervisorType::from_i32(r.get("hypervisor"))
                 .unwrap_or_default(),

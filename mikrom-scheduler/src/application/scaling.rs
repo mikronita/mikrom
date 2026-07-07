@@ -301,9 +301,11 @@ impl ScalingService {
                         .host_id
                         .as_ref()
                         .zip(job.vm_id.as_ref())
-                        .and_then(|(h, _v)| worker_map.get(h.as_ref()))
-                        .and_then(|w| w.metrics.as_ref())
-                        .and_then(|m| m.vms.get(job.vm_id.as_ref().unwrap().as_ref()));
+                        .and_then(|(h, v)| {
+                            let w = worker_map.get(h.as_ref())?;
+                            let m = w.metrics.as_ref()?;
+                            m.vms.get(v.as_ref())
+                        });
 
                     if let Some(vm_metrics) = vm_metrics {
                         let entry = app_metrics

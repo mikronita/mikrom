@@ -10,7 +10,12 @@ impl CloudHypervisorManager {
             if vol.access_mode == AccessMode::ReadWriteMany as i32 {
                 let mount_point = self.config.data_path.join("cephfs").join(&vol.volume_id);
                 let mount_str = mount_point.to_string_lossy().to_string();
-                let _ = tokio::fs::create_dir_all(&mount_point).await;
+                if let Err(e) = tokio::fs::create_dir_all(&mount_point).await {
+                    tracing::warn!(
+                        "Failed to create CephFS mount point {}: {}",
+                        mount_str, e
+                    );
+                }
 
                 CephFs::mount_volume(&vol.volume_id, &mount_str)
                     .await
@@ -84,9 +89,15 @@ impl CloudHypervisorManager {
         let binary = "virtiofsd";
 
         if let Some(parent) = socket_path.parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
+            if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                tracing::warn!("Failed to create virtiofsd socket directory: {e}");
+            }
         }
-        let _ = tokio::fs::remove_file(socket_path).await;
+        if let Err(e) = tokio::fs::remove_file(socket_path).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!("Failed to remove stale virtiofsd socket: {e}");
+            }
+        }
 
         let mut cmd = tokio::process::Command::new(binary);
         cmd.kill_on_drop(true);

@@ -90,10 +90,7 @@ impl From<DbApp> for crate::domain::app::App {
             id: db.id,
             name: db.name,
             git_url: db.git_url,
-            port: db
-                .port
-                .try_into()
-                .expect("Database contains invalid port for App"),
+            port: db.port.try_into().unwrap_or_default(),
             hostname: db.hostname,
             tenant_id: db.tenant_id,
             github_webhook_secret: db.github_webhook_secret,
@@ -152,19 +149,12 @@ impl From<DbDeployment> for crate::domain::app::Deployment {
             job_id: db.job_id,
             ipv6_address: db.ipv6_address,
             status: db.status,
-            vcpus: db
-                .vcpus
-                .try_into()
-                .expect("Database contains invalid vcpus for Deployment"),
-            memory_mib: db
-                .memory_mib
-                .try_into()
-                .expect("Database contains invalid memory_mib for Deployment"),
+            vcpus: crate::domain::types::CpuCores::try_from(db.vcpus.max(1))
+                .unwrap_or_default(),
+            memory_mib: crate::domain::types::MemoryMb::try_from(db.memory_mib.max(128))
+                .unwrap_or_default(),
             disk_mib: db.disk_mib,
-            port: db
-                .port
-                .try_into()
-                .expect("Database contains invalid port for Deployment"),
+            port: db.port.try_into().unwrap_or_default(),
             env_vars: db.env_vars,
             git_commit_hash: db.git_commit_hash,
             git_commit_message: db.git_commit_message,
@@ -196,14 +186,8 @@ impl From<DbSecurityRule> for crate::domain::app::SecurityRule {
             id: db.id,
             app_id: db.app_id,
             protocol: db.protocol,
-            port_start: db
-                .port_start
-                .try_into()
-                .expect("Database contains invalid port_start for SecurityRule"),
-            port_end: db
-                .port_end
-                .try_into()
-                .expect("Database contains invalid port_end for SecurityRule"),
+            port_start: db.port_start.try_into().unwrap_or_default(),
+            port_end: db.port_end.try_into().unwrap_or_default(),
             action: db.action,
             priority: db.priority,
             created_at: db.created_at,
@@ -328,10 +312,10 @@ impl From<DbDatabase> for crate::domain::Database {
             engine: db.engine,
             postgres_version: db.postgres_version as u16,
             tenant_id: db.tenant_id,
-            vcpus: crate::domain::types::CpuCores::try_from(db.vcpus as u32)
-                .expect("Invalid vcpus"),
-            memory_mib: crate::domain::types::MemoryMb::try_from(db.memory_mib as u32)
-                .expect("Invalid memory_mib"),
+            vcpus: crate::domain::types::CpuCores::try_from(db.vcpus.max(1) as u32)
+                .unwrap_or_default(),
+            memory_mib: crate::domain::types::MemoryMb::try_from(db.memory_mib.max(128) as u32)
+                .unwrap_or_default(),
             disk_mib: db.disk_mib as u32,
             neon_tenant_id: db.neon_tenant_id,
             neon_timeline_id: db.neon_timeline_id,

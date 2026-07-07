@@ -18,6 +18,12 @@ pub enum TypeError {
 #[serde(transparent)]
 pub struct Port(u32);
 
+impl Default for Port {
+    fn default() -> Self {
+        Self(8080)
+    }
+}
+
 impl Port {
     pub fn new(val: u32) -> Result<Self, TypeError> {
         if val > 0 && val <= 65535 {
@@ -94,6 +100,12 @@ impl PartialEq<Port> for u32 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
 #[serde(transparent)]
 pub struct MemoryMb(u32);
+
+impl Default for MemoryMb {
+    fn default() -> Self {
+        Self(128)
+    }
+}
 
 impl MemoryMb {
     pub fn new(val: u32) -> Result<Self, TypeError> {
@@ -177,6 +189,12 @@ impl PartialEq<MemoryMb> for u32 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
 #[serde(transparent)]
 pub struct CpuCores(u32);
+
+impl Default for CpuCores {
+    fn default() -> Self {
+        Self(1)
+    }
+}
 
 impl CpuCores {
     pub fn new(val: u32) -> Result<Self, TypeError> {

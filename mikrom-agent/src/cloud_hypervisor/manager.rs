@@ -36,10 +36,7 @@ const DATABASE_CONFIGURE_RETRY_WINDOW_ENV: &str = "MIKROM_DATABASE_CONFIGURE_WIN
 
 impl CloudHypervisorManager {
     pub async fn new(config: AgentConfig) -> Self {
-        let builder = crate::builder::ImageBuilder::new().unwrap_or_else(|e| {
-            tracing::error!("ImageBuilder::new failed (should never happen): {e}");
-            crate::builder::ImageBuilder
-        });
+        let builder = crate::builder::ImageBuilder::new().expect("ImageBuilder::new is infallible");
 
         Self {
             config,
@@ -384,7 +381,9 @@ impl CloudHypervisorManager {
 
     fn get_vm_paths(&self, vm_id: &VmId) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
         let base = self.config.data_path.join("vms").join(vm_id.to_string());
-        let _ = std::fs::create_dir_all(&base);
+        if let Err(e) = std::fs::create_dir_all(&base) {
+            tracing::warn!("Failed to create VM directory {}: {e}", base.display());
+        }
         (
             base.join("ch.sock"),
             base.join("ch.log"),
@@ -883,7 +882,9 @@ impl VmHypervisor for CloudHypervisorManager {
 
         // Remove state file
         let path = self.config.data_path.join("vms").join(vm_id.to_string());
-        let _ = tokio::fs::remove_dir_all(path).await;
+        if let Err(e) = tokio::fs::remove_dir_all(&path).await {
+            tracing::warn!("Failed to remove VM state directory: {e}");
+        }
 
         Ok(())
     }
@@ -1152,7 +1153,12 @@ impl VmHypervisor for CloudHypervisorManager {
                 );
 
                 // Ensure routing is still there
-                let _ = self.setup_routing(state.ipv6.as_deref()).await;
+                if let Err(e) = self.setup_routing(state.ipv6.as_deref()).await {
+                    tracing::warn!(
+                        "Failed to restore routing for recovered VM {}: {e}",
+                        state.vm_id
+                    );
+                }
             }
         }
 
@@ -1186,7 +1192,9 @@ impl VmHypervisor for CloudHypervisorManager {
                 && uuid::Uuid::parse_str(vm_id_str).is_ok()
             {
                 tracing::debug!(vm_id = %vm_id_str, "Removing stale Cloud Hypervisor VM directory");
-                let _ = tokio::fs::remove_dir_all(&path).await;
+                if let Err(e) = tokio::fs::remove_dir_all(&path).await {
+                    tracing::warn!("Failed to remove stale VM directory: {e}");
+                }
             }
         }
     }

@@ -167,8 +167,14 @@ impl CephRbd {
 
             let config =
                 CString::new("/etc/ceph/ceph.conf").map_err(|e| anyhow!("Invalid path: {}", e))?;
-            let _ = rados_conf_read_file(cluster.0, config.as_ptr());
-            let _ = rados_connect(cluster.0);
+            let conf_ret = rados_conf_read_file(cluster.0, config.as_ptr());
+            if conf_ret < 0 {
+                warn!("Failed to read ceph.conf for pool existence check: {}", conf_ret);
+            }
+            let conn_ret = rados_connect(cluster.0);
+            if conn_ret < 0 {
+                warn!("Failed to connect to ceph cluster for pool existence check: {}", conn_ret);
+            }
 
             let mut ioctx: rados_ioctx_t = ptr::null_mut();
             let pool_name_c =
@@ -258,7 +264,17 @@ impl CephRbd {
             if rbd_snap_list(image, &mut snaps, &mut num_snaps) >= 0 && !snaps.is_null() {
                 let snap_slice = std::slice::from_raw_parts(snaps, num_snaps as usize);
                 for snap in snap_slice {
-                    let _ = librbd_sys::rbd_snap_remove(image, snap.name);
+                    let snap_name = if snap.name.is_null() {
+                        "<null>".to_string()
+                    } else {
+                        std::ffi::CStr::from_ptr(snap.name)
+                            .to_string_lossy()
+                            .into_owned()
+                    };
+                    let snap_ret = librbd_sys::rbd_snap_remove(image, snap.name);
+                    if snap_ret < 0 {
+                        warn!("Failed to remove snapshot {}: {}", snap_name, snap_ret);
+                    }
                 }
                 rbd_snap_list_end(snaps);
             }
@@ -314,10 +330,14 @@ impl CephRbd {
 
         // Try to unmap first in case it's still mapped
         let spec = format!("{pool}/{name}");
-        let _ = Self::unmap_volume(&spec).await;
+        if let Err(e) = Self::unmap_volume(&spec).await {
+            warn!("Failed to unmap volume before deletion {}: {}", spec, e);
+        }
 
         // Purge snapshots before removing (Ceph requires this)
-        let _ = Self::purge_image_snapshots(pool, name).await;
+        if let Err(e) = Self::purge_image_snapshots(pool, name).await {
+            warn!("Failed to purge snapshots before deletion {}/{}: {}", pool, name, e);
+        }
 
         let io = Self::connect(pool)?;
         let name_c = CString::new(name).map_err(|e| anyhow!("Invalid volume name: {}", e))?;
@@ -688,7 +708,9 @@ impl CephRbd {
             }
         };
 
-        let _ = tokio::fs::write("/sys/bus/rbd/remove", id).await;
+        if let Err(e) = tokio::fs::write("/sys/bus/rbd/remove", &id).await {
+            warn!("Failed to unmap RBD device {}: {}", id, e);
+        }
         Ok(())
     }
 }
@@ -761,7 +783,13 @@ impl CephFs {
                 if rados_create(&mut cluster, cluster_id.as_ptr()) < 0 {
                     return Err(anyhow!("Failed to create rados handle"));
                 }
-                rados_conf_read_file(cluster, CString::new("/etc/ceph/ceph.conf")?.as_ptr());
+                let conf_ret = rados_conf_read_file(
+                    cluster,
+                    CString::new("/etc/ceph/ceph.conf")?.as_ptr(),
+                );
+                if conf_ret < 0 {
+                    warn!("Failed to read ceph.conf in CephFs::mount_volume: {}", conf_ret);
+                }
                 let mut mon_host = vec![0u8; 1024];
                 librados_sys::rados_conf_get(
                     cluster,
