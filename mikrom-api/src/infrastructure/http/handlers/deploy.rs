@@ -221,7 +221,13 @@ pub async fn create_app_handler(
     state
         .ctx
         .tenant_usage_repo
-        .increment_apps(tenant_id, 1, default_vcpus, default_memory_mib, default_storage_gb)
+        .increment_apps(
+            tenant_id,
+            1,
+            default_vcpus,
+            default_memory_mib,
+            default_storage_gb,
+        )
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 

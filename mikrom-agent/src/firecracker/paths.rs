@@ -72,7 +72,13 @@ impl VmPaths {
     pub fn vfs_socket_path(&self, vol_id: &str) -> PathBuf {
         let safe_id: String = vol_id
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         self.data_dir
             .join(format!("vfs-{}-{}.socket", self.vm_id, safe_id))

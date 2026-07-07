@@ -184,10 +184,7 @@ impl RouterOtelMetrics {
     fn record_snapshot(&self, snapshot: &TelemetrySnapshot) {
         let attrs = [KeyValue::new("router_id", snapshot.router_id.clone())];
         {
-            let mut last = self
-                .last
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
 
             macro_rules! emit_delta {
                 ($field:ident, $counter:expr) => {{

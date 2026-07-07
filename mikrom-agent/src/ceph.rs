@@ -169,11 +169,17 @@ impl CephRbd {
                 CString::new("/etc/ceph/ceph.conf").map_err(|e| anyhow!("Invalid path: {}", e))?;
             let conf_ret = rados_conf_read_file(cluster.0, config.as_ptr());
             if conf_ret < 0 {
-                warn!("Failed to read ceph.conf for pool existence check: {}", conf_ret);
+                warn!(
+                    "Failed to read ceph.conf for pool existence check: {}",
+                    conf_ret
+                );
             }
             let conn_ret = rados_connect(cluster.0);
             if conn_ret < 0 {
-                warn!("Failed to connect to ceph cluster for pool existence check: {}", conn_ret);
+                warn!(
+                    "Failed to connect to ceph cluster for pool existence check: {}",
+                    conn_ret
+                );
             }
 
             let mut ioctx: rados_ioctx_t = ptr::null_mut();
@@ -336,7 +342,10 @@ impl CephRbd {
 
         // Purge snapshots before removing (Ceph requires this)
         if let Err(e) = Self::purge_image_snapshots(pool, name).await {
-            warn!("Failed to purge snapshots before deletion {}/{}: {}", pool, name, e);
+            warn!(
+                "Failed to purge snapshots before deletion {}/{}: {}",
+                pool, name, e
+            );
         }
 
         let io = Self::connect(pool)?;
@@ -783,12 +792,13 @@ impl CephFs {
                 if rados_create(&mut cluster, cluster_id.as_ptr()) < 0 {
                     return Err(anyhow!("Failed to create rados handle"));
                 }
-                let conf_ret = rados_conf_read_file(
-                    cluster,
-                    CString::new("/etc/ceph/ceph.conf")?.as_ptr(),
-                );
+                let conf_ret =
+                    rados_conf_read_file(cluster, CString::new("/etc/ceph/ceph.conf")?.as_ptr());
                 if conf_ret < 0 {
-                    warn!("Failed to read ceph.conf in CephFs::mount_volume: {}", conf_ret);
+                    warn!(
+                        "Failed to read ceph.conf in CephFs::mount_volume: {}",
+                        conf_ret
+                    );
                 }
                 let mut mon_host = vec![0u8; 1024];
                 librados_sys::rados_conf_get(

@@ -164,7 +164,8 @@ impl ReqwestApiClient {
             .execute_with_retry(|| {
                 // SAFETY: JSON request bodies are always clonable via try_clone().
                 // Streaming/non-clonable bodies are never used with this client.
-                let cloned = builder.try_clone()
+                let cloned = builder
+                    .try_clone()
                     .expect("JSON request body should be clonable");
                 async move { cloned.timeout(timeout).send().await.map_err(CliError::Http) }
             })
@@ -192,7 +193,8 @@ impl ReqwestApiClient {
         let builder = self.build_request(method, endpoint, body);
         let resp = self
             .execute_with_retry(|| {
-                let cloned = builder.try_clone()
+                let cloned = builder
+                    .try_clone()
                     .expect("JSON request body should be clonable");
                 async move { cloned.timeout(timeout).send().await.map_err(CliError::Http) }
             })

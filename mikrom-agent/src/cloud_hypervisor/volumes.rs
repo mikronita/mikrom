@@ -11,10 +11,7 @@ impl CloudHypervisorManager {
                 let mount_point = self.config.data_path.join("cephfs").join(&vol.volume_id);
                 let mount_str = mount_point.to_string_lossy().to_string();
                 if let Err(e) = tokio::fs::create_dir_all(&mount_point).await {
-                    tracing::warn!(
-                        "Failed to create CephFS mount point {}: {}",
-                        mount_str, e
-                    );
+                    tracing::warn!("Failed to create CephFS mount point {}: {}", mount_str, e);
                 }
 
                 CephFs::mount_volume(&vol.volume_id, &mount_str)

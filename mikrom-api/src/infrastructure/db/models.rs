@@ -149,8 +149,7 @@ impl From<DbDeployment> for crate::domain::app::Deployment {
             job_id: db.job_id,
             ipv6_address: db.ipv6_address,
             status: db.status,
-            vcpus: crate::domain::types::CpuCores::try_from(db.vcpus.max(1))
-                .unwrap_or_default(),
+            vcpus: crate::domain::types::CpuCores::try_from(db.vcpus.max(1)).unwrap_or_default(),
             memory_mib: crate::domain::types::MemoryMb::try_from(db.memory_mib.max(128))
                 .unwrap_or_default(),
             disk_mib: db.disk_mib,

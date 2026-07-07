@@ -54,7 +54,13 @@ pub(crate) async fn ensure_bridge() -> Result<(), HypervisorError> {
 
     // Always try to add addresses, ignore "File exists" errors
     let _ = add_ip_address(&handle, index, addr, prefix).await;
-    let _ = add_ip_address(&handle, index, IpAddr::V6(std::net::Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)), 64).await;
+    let _ = add_ip_address(
+        &handle,
+        index,
+        IpAddr::V6(std::net::Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
+        64,
+    )
+    .await;
 
     set_proc_sysctl("net/ipv6/conf/all/forwarding", "1").await?;
     set_proc_sysctl("net/ipv6/conf/default/forwarding", "1").await?;

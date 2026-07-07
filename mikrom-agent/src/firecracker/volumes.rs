@@ -28,7 +28,11 @@ impl crate::firecracker::FirecrackerManager {
         let storage = CephRbd;
         if !storage.exists(&vol.pool_name, &vol.volume_id).await {
             storage
-                .create_volume(&vol.pool_name, &vol.volume_id, vol.size_mib.min(i32::MAX as u64) as i32)
+                .create_volume(
+                    &vol.pool_name,
+                    &vol.volume_id,
+                    vol.size_mib.min(i32::MAX as u64) as i32,
+                )
                 .await
                 .map_err(|e| {
                     HypervisorError::ProcessError(format!("Failed to create RBD volume: {e}"))
@@ -173,6 +177,12 @@ impl crate::firecracker::FirecrackerManager {
 
 fn sanitize_filename(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }

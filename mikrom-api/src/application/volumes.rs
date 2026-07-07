@@ -113,9 +113,7 @@ pub async fn create_volume_handler(
     ent_service
         .check_entitlement(
             tenant_id,
-            crate::application::entitlements::EntitlementCheck::CreateVolume {
-                size_gb,
-            },
+            crate::application::entitlements::EntitlementCheck::CreateVolume { size_gb },
         )
         .await
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;

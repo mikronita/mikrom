@@ -124,12 +124,17 @@ impl Drop for VmStartupGuard {
                         Err(e) => {
                             tracing::error!(vm_id = %vm_id, tap = %tap, error = %e, "Failed to create netlink connection for TAP cleanup");
                             return;
-                        }
+                        },
                     };
                     tokio::spawn(connection);
                     let mut links = handle.link().get().match_name(tap.clone()).execute();
                     if let Ok(Some(msg)) = links.try_next().await {
-                        let _ = handle.link().set(msg.header.index).nocontroller().execute().await;
+                        let _ = handle
+                            .link()
+                            .set(msg.header.index)
+                            .nocontroller()
+                            .execute()
+                            .await;
                         let _ = handle.link().del(msg.header.index).execute().await;
                     }
                 }

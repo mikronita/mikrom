@@ -1198,7 +1198,7 @@ impl FirecrackerManager {
                 chroot_dir: None,
                 app_started: Arc::new(AtomicBool::new(true)),
                 app_started_at_ms: Arc::new(AtomicU64::new(
-                    chrono::Utc::now().timestamp_millis().max(0) as u64
+                    chrono::Utc::now().timestamp_millis().max(0) as u64,
                 )),
                 vfs_processes: Vec::new(),
                 vfs_pids: Vec::new(),
