@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
 };
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 use tracing::{error, info, warn};
@@ -191,7 +191,7 @@ mod tests {
     use crate::domain::MockAppRepository;
     use crate::domain::MockDatabaseRepository;
     use crate::domain::user::MockUserRepository;
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use sha2::Sha256;
     use std::sync::Arc;
     use uuid::Uuid;

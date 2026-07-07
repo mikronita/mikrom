@@ -4,7 +4,6 @@
     Button,
     Card,
     CardContent,
-    CardDescription,
     CardFooter,
     CardHeader,
     CardTitle,
@@ -112,9 +111,6 @@
 
   let currentBilling = $derived(getBillingStatusConfig(billing?.status));
   let isTestMode = $derived(billing?.is_test_mode ?? false);
-  let defaultCheckoutProduct: BillingProduct | null = $derived(
-    products.find((product: BillingProduct) => product.id === billing?.default_checkout_product_id) || null,
-  );
   let selectedCheckoutProductId = $state("");
   let checkoutSelectionSourceKey = $derived(
     [

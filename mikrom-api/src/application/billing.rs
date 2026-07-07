@@ -6,7 +6,7 @@ use crate::normalize_service_url;
 use axum::http::HeaderMap;
 use base64::Engine;
 use chrono::{DateTime, Utc};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use sqlx::FromRow;
@@ -1558,7 +1558,7 @@ mod tests {
     use super::*;
     use axum::http::HeaderValue;
     use chrono::Utc;
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use serde_json::json;
     use serial_test::serial;
     use sha2::Sha256;

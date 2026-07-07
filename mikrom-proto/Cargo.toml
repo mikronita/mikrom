@@ -33,16 +33,14 @@ name = "cert-gen"
 path = "src/bin/cert_gen.rs"
 
 [build-dependencies]
-tonic-build = { workspace = true }
+tonic-prost-build = "0.14.6"
 
 [dev-dependencies]
 async-trait = "0.1"
 futures = "0.3"
 opentelemetry-proto = { version = "0.32.0", features = ["gen-tonic"] }
-tonic14 = { package = "tonic", version = "0.14.6", features = ["transport"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 axum = "0.8"
-prost14 = { package = "prost", version = "0.14" }
 
 [features]
 default = ["build"]

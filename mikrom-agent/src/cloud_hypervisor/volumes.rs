@@ -85,15 +85,15 @@ impl CloudHypervisorManager {
         // Assume virtiofsd is in PATH or specify in config.
         let binary = "virtiofsd";
 
-        if let Some(parent) = socket_path.parent() {
-            if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                tracing::warn!("Failed to create virtiofsd socket directory: {e}");
-            }
+        if let Some(parent) = socket_path.parent()
+            && let Err(e) = tokio::fs::create_dir_all(parent).await
+        {
+            tracing::warn!("Failed to create virtiofsd socket directory: {e}");
         }
-        if let Err(e) = tokio::fs::remove_file(socket_path).await {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!("Failed to remove stale virtiofsd socket: {e}");
-            }
+        if let Err(e) = tokio::fs::remove_file(socket_path).await
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!("Failed to remove stale virtiofsd socket: {e}");
         }
 
         let mut cmd = tokio::process::Command::new(binary);

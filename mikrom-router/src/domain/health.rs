@@ -99,7 +99,10 @@ impl RouterHealth {
             let control_plane_synced = self.control_plane_synced.load(Ordering::Acquire);
             let wireguard_ready = self.wireguard_ready.load(Ordering::Acquire);
             let upstream_ca_ready = self.upstream_ca_ready.load(Ordering::Acquire);
-            let startup_error = self.startup_error.lock().unwrap_or_else(|e| e.into_inner());
+            let startup_error = self
+                .startup_error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             if !bootstrapped && startup_error.is_some() {
                 RouterHealthState::Fatal
@@ -157,12 +160,18 @@ impl RouterHealth {
     }
 
     pub fn set_startup_error(&self, error: impl Into<String>) {
-        *self.startup_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(error.into());
+        *self
+            .startup_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.into());
         self.update_state();
     }
 
     pub fn clear_startup_error(&self) {
-        *self.startup_error.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self
+            .startup_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.update_state();
     }
 
@@ -177,7 +186,7 @@ impl RouterHealth {
         let startup_error = self
             .startup_error
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
 
         HealthSnapshot {

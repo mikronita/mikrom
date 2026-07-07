@@ -108,7 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("PATH").unwrap_or_default()
     );
     let _ = protoc_dir;
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .out_dir(std::path::Path::new("src"))
         .build_server(false)
         .build_client(false)
