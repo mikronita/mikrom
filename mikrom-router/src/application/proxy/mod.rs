@@ -937,13 +937,10 @@ impl ProxyHttp for MikromProxy {
         // Add standard proxy headers.
         strip_untrusted_forwarding_headers(upstream_request);
 
-        #[allow(clippy::collapsible_if)]
-        if let Some(addr) = session.client_addr() {
-            if let Some(inet) = addr.as_inet() {
-                let ip = inet.ip().to_string();
-                upstream_request.insert_header("X-Forwarded-For", &ip)?;
-                upstream_request.insert_header("X-Real-IP", &ip)?;
-            }
+        if let Some(inet) = session.client_addr().and_then(|a| a.as_inet()) {
+            let ip = inet.ip().to_string();
+            upstream_request.insert_header("X-Forwarded-For", &ip)?;
+            upstream_request.insert_header("X-Real-IP", &ip)?;
         }
 
         let is_tls = session

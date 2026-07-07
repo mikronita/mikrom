@@ -251,19 +251,6 @@ impl ControlPlane {
     }
 }
 
-#[expect(dead_code)]
-fn normalize_route_target(target: &str) -> (String, bool) {
-    if let Some(rest) = target.strip_prefix("https://") {
-        return (rest.to_string(), true);
-    }
-
-    if let Some(rest) = target.strip_prefix("http://") {
-        return (rest.to_string(), false);
-    }
-
-    (target.to_string(), false)
-}
-
 #[async_trait]
 impl BackgroundService for ControlPlane {
     async fn start(&self, mut _shutdown: ShutdownWatch) {

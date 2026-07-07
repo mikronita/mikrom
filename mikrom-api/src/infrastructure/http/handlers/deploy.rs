@@ -312,7 +312,6 @@ pub async fn delete_app_handler(
     )
     .await?;
 
-    #[allow(clippy::collapsible_if)]
     if let Some(hostname) = &app.hostname {
         state.remove_route(hostname).await.map_err(|e| {
             ApiError::Internal(format!("Failed to remove route for app in router: {}", e))

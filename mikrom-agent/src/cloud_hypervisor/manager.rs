@@ -248,7 +248,6 @@ impl CloudHypervisorManager {
             .filter(|token| !token.is_empty())
     }
 
-    #[allow(clippy::collapsible_if)]
     async fn configure_database_vm(
         &self,
         vm_id: &VmId,
@@ -802,7 +801,6 @@ impl VmHypervisor for CloudHypervisorManager {
         &self.config.host_id
     }
 
-    #[allow(clippy::collapsible_if)]
     async fn start_vm(
         &self,
         vm_id: VmId,
@@ -897,7 +895,7 @@ impl VmHypervisor for CloudHypervisorManager {
         Err(HypervisorError::UnsupportedOperation("resume".to_string()))
     }
 
-    #[allow(clippy::single_match, clippy::collapsible_if)]
+    #[allow(clippy::single_match)]
     async fn delete_vm(&self, vm_id: &VmId) -> Result<(), HypervisorError> {
         // 1. Best-effort stop
         let _ = self.stop_vm(vm_id).await;
@@ -968,7 +966,7 @@ impl VmHypervisor for CloudHypervisorManager {
         Err(HypervisorError::UnsupportedOperation("restart".to_string()))
     }
 
-    #[allow(clippy::single_match, clippy::collapsible_if)]
+    #[allow(clippy::single_match)]
     async fn get_vm_info(&self, vm_id: &VmId) -> Option<VmInfo> {
         let mut info = self.vms.get(vm_id)?.clone();
 

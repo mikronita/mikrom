@@ -66,24 +66,61 @@ pub fn mikrom_egress(ctx: TcContext) -> i32 {
         Err(_) => TC_ACT_SHOT,
     }
 }
+#[inline(always)]
+fn get_transport_offset_and_proto(ctx: &TcContext, ipv6hdr: &Ipv6Hdr) -> Result<(usize, u8), ()> {
+    let mut next_hdr = ipv6hdr.next_hdr;
+    let mut offset = EthHdr::LEN + Ipv6Hdr::LEN;
+
+    for _ in 0..8 {
+        match next_hdr {
+            0 | 43 | 60 => {
+                let hdr: [u8; 2] = ctx.load(offset).map_err(|_| ())?;
+                next_hdr = hdr[0];
+                offset += ((hdr[1] as usize) * 8) + 8;
+            },
+            44 => {
+                let hdr: [u8; 8] = ctx.load(offset).map_err(|_| ())?;
+                next_hdr = hdr[0];
+                let frag_off_and_flags = ((hdr[2] as u16) << 8) | (hdr[3] as u16);
+                let frag_offset = frag_off_and_flags >> 3;
+                let more_frags = (frag_off_and_flags & 0x01) != 0;
+                if frag_offset != 0 || more_frags {
+                    return Ok((offset, 0));
+                }
+                offset += 8;
+            },
+            51 => {
+                let hdr: [u8; 2] = ctx.load(offset).map_err(|_| ())?;
+                next_hdr = hdr[0];
+                offset += ((hdr[1] as usize) + 2) * 4;
+            },
+            _ => {
+                return Ok((offset, next_hdr));
+            },
+        }
+    }
+
+    Err(())
+}
+
 fn try_mikrom_egress(ctx: TcContext, ifindex: u32) -> Result<i32, ()> {
     let ethhdr: EthHdr = ctx.load(0).map_err(|_| ())?;
     if ethhdr.ether_type != 0x86DD_u16 {
         return Ok(TC_ACT_OK);
     }
 
-    // TODO: Handle IPv6 extension headers (Fragment, Hop-by-Hop, etc.)
-    // Current implementation only parses the fixed header.
     let ipv6hdr: Ipv6Hdr = ctx.load(EthHdr::LEN).map_err(|_| ())?;
     let src_ip = ipv6hdr.src_addr;
-    let protocol = ipv6hdr.next_hdr;
+
+    let (transport_offset, protocol) = get_transport_offset_and_proto(&ctx, &ipv6hdr)?;
+
     let dst_port = match protocol {
         6 => {
-            let tcphdr: TcpHdr = ctx.load(EthHdr::LEN + Ipv6Hdr::LEN).map_err(|_| ())?;
+            let tcphdr: TcpHdr = ctx.load(transport_offset).map_err(|_| ())?;
             u16::from_be_bytes(tcphdr.dest)
         },
         17 => {
-            let udphdr: UdpHdr = ctx.load(EthHdr::LEN + Ipv6Hdr::LEN).map_err(|_| ())?;
+            let udphdr: UdpHdr = ctx.load(transport_offset).map_err(|_| ())?;
             u16::from_be_bytes(udphdr.dst)
         },
         _ => 0,

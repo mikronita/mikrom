@@ -4,7 +4,6 @@ use std::env;
 pub mod integration;
 
 /// Returns a connected NATS client for testing, or `None` when NATS is unavailable.
-#[allow(dead_code)]
 pub async fn get_nats_client_or_skip() -> Option<Client> {
     dotenvy::dotenv().ok();
     let nats_url =
@@ -19,7 +18,6 @@ pub async fn get_nats_client_or_skip() -> Option<Client> {
 }
 
 /// Returns a connected NATS client for tests that require a live broker.
-#[allow(dead_code)]
 pub async fn get_nats_client() -> Client {
     get_nats_client_or_skip()
         .await

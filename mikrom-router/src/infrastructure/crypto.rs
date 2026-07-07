@@ -1,5 +1,4 @@
-use aes_gcm::aead::AeadInOut;
-use aes_gcm::aead::inout::InOutBuf;
+use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use thiserror::Error;
@@ -16,9 +15,9 @@ pub enum CryptoError {
     InvalidUtf8,
 }
 
-#[allow(deprecated)]
 pub fn decrypt(encrypted_data: &str, master_key: &str) -> Result<String, CryptoError> {
     let key_bytes = hash_key(master_key);
+    #[allow(deprecated)]
     let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
     let cipher = Aes256Gcm::new(key);
 
@@ -30,18 +29,15 @@ pub fn decrypt(encrypted_data: &str, master_key: &str) -> Result<String, CryptoE
         return Err(CryptoError::InvalidLength);
     }
 
-    let (nonce_bytes, rest) = combined.split_at(12);
-    let (ciphertext, tag_bytes) = rest.split_at(rest.len() - 16);
-
+    let (nonce_bytes, ciphertext) = combined.split_at(12);
+    #[allow(deprecated)]
     let nonce = Nonce::from_slice(nonce_bytes);
-    let tag = aes_gcm::aead::Tag::<Aes256Gcm>::from_slice(tag_bytes);
-    let mut buffer = ciphertext.to_vec();
 
-    cipher
-        .decrypt_inout_detached(nonce, b"", InOutBuf::from(buffer.as_mut_slice()), tag)
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext)
         .map_err(|_| CryptoError::DecryptionFailed)?;
 
-    String::from_utf8(buffer).map_err(|_| CryptoError::InvalidUtf8)
+    String::from_utf8(plaintext).map_err(|_| CryptoError::InvalidUtf8)
 }
 
 fn hash_key(key: &str) -> [u8; 32] {

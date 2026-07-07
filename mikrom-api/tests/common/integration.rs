@@ -7,7 +7,6 @@ use sqlx::PgPool;
 
 use super::get_nats_client_or_skip;
 
-#[allow(dead_code)]
 pub async fn create_integration_app(pool: PgPool, jwt_secret: &str) -> Option<axum::Router> {
     let user_repo = PostgresUserRepository::new(pool.clone());
     let app_repo = PostgresAppRepository::new(pool.clone(), "test-key".to_string());
