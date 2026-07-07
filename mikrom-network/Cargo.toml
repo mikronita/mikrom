@@ -12,7 +12,7 @@ async-trait = "0.1"
 futures = "0.3"
 anyhow = { workspace = true } # keeping for some internal conversions if needed, but mainly using thiserror
 async-nats = { workspace = true }
-prost = "0.13"
+prost = "0.14"
 
 mikrom-proto = { path = "../mikrom-proto" }
 

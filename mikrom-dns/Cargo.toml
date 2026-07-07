@@ -11,7 +11,7 @@ dashmap = { workspace = true }
 async-trait = "0.1"
 async-nats = { workspace = true }
 mikrom-proto = { path = "../mikrom-proto" }
-prost = "0.13"
+prost = "0.14"
 futures = "0.3"
 tracing = "0.1"
 anyhow = { workspace = true }
