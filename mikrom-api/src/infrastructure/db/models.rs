@@ -376,6 +376,85 @@ impl From<DbDatabaseDeployment> for crate::domain::DatabaseDeployment {
     }
 }
 
+#[derive(Debug, sqlx::FromRow, Clone)]
+pub struct DbPlanTier {
+    pub id: uuid::Uuid,
+    pub polar_product_id: Option<String>,
+    pub tier_slug: String,
+    pub name: String,
+    pub max_apps: i32,
+    pub max_databases: i32,
+    pub max_volumes: i32,
+    pub max_vcpus_total: i32,
+    pub max_memory_mb_total: i32,
+    pub max_storage_gb_total: i32,
+    pub max_deployments_per_app: i32,
+    pub max_team_members: i32,
+    pub autoscaling_allowed: bool,
+    pub custom_domains: bool,
+    pub trial_days: i32,
+    pub is_default: bool,
+    pub sort_order: i32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<DbPlanTier> for crate::domain::plan_tier::PlanTier {
+    fn from(db: DbPlanTier) -> Self {
+        Self {
+            id: db.id,
+            polar_product_id: db.polar_product_id,
+            tier_slug: crate::domain::plan_tier::TierSlug::from_slug(&db.tier_slug)
+                .unwrap_or(crate::domain::plan_tier::TierSlug::Free),
+            name: db.name,
+            max_apps: db.max_apps,
+            max_databases: db.max_databases,
+            max_volumes: db.max_volumes,
+            max_vcpus_total: db.max_vcpus_total,
+            max_memory_mb_total: db.max_memory_mb_total,
+            max_storage_gb_total: db.max_storage_gb_total,
+            max_deployments_per_app: db.max_deployments_per_app,
+            max_team_members: db.max_team_members,
+            autoscaling_allowed: db.autoscaling_allowed,
+            custom_domains: db.custom_domains,
+            trial_days: db.trial_days,
+            is_default: db.is_default,
+            sort_order: db.sort_order,
+            created_at: db.created_at,
+        }
+    }
+}
+
+#[derive(Debug, sqlx::FromRow, Clone)]
+pub struct DbTenantUsage {
+    pub tenant_id: uuid::Uuid,
+    pub apps_count: i32,
+    pub databases_count: i32,
+    pub volumes_count: i32,
+    pub vcpus_total: i32,
+    pub memory_mb_total: i32,
+    pub storage_gb_total: i32,
+    pub deployments_count: i32,
+    pub bandwidth_gb_billed: i32,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<DbTenantUsage> for crate::domain::plan_tier::TenantUsage {
+    fn from(db: DbTenantUsage) -> Self {
+        Self {
+            tenant_id: db.tenant_id,
+            apps_count: db.apps_count,
+            databases_count: db.databases_count,
+            volumes_count: db.volumes_count,
+            vcpus_total: db.vcpus_total,
+            memory_mb_total: db.memory_mb_total,
+            storage_gb_total: db.storage_gb_total,
+            deployments_count: db.deployments_count,
+            bandwidth_gb_billed: db.bandwidth_gb_billed,
+            updated_at: db.updated_at,
+        }
+    }
+}
+
 #[cfg(any())]
 mod tests {
     use super::*;

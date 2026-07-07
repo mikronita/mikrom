@@ -37,6 +37,7 @@ pub trait TenantRepository: Send + Sync {
     async fn find_by_slug(&self, slug: &str) -> DomainResult<Option<Tenant>>;
     async fn list_by_user(&self, user_id: Uuid) -> DomainResult<Vec<Tenant>>;
     async fn update(&self, tenant_id: Uuid, name: String) -> DomainResult<Tenant>;
+    async fn list_all(&self) -> DomainResult<Vec<Tenant>>;
     async fn delete(&self, tenant_id: Uuid) -> DomainResult<bool>;
     async fn add_member(&self, tenant_id: Uuid, user_id: Uuid, role: &str) -> DomainResult<()>;
     async fn get_members(&self, tenant_id: Uuid) -> DomainResult<Vec<TenantMember>>;

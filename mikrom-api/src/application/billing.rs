@@ -119,6 +119,8 @@ pub struct BillingSummary {
     pub selected_checkout_product_id: Option<String>,
     pub is_test_mode: bool,
     pub has_billing_record: bool,
+    pub tier_slug: Option<String>,
+    pub plan_limits: Option<crate::domain::plan_tier::PlanLimits>,
 }
 
 #[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
@@ -513,6 +515,8 @@ fn billing_summary_from_row(
             selected_checkout_product_id,
             is_test_mode,
             has_billing_record: true,
+            tier_slug: None,
+            plan_limits: None,
         }
     } else {
         BillingSummary {
@@ -532,6 +536,8 @@ fn billing_summary_from_row(
             selected_checkout_product_id,
             is_test_mode,
             has_billing_record: false,
+            tier_slug: None,
+            plan_limits: None,
         }
     }
 }
@@ -1254,13 +1260,27 @@ pub async fn get_billing_summary(
     let default_checkout_product_id = env::var("POLAR_CHECKOUT_PRODUCT_ID").ok();
     let row = load_billing_row(&state.api_db, tenant_ctx.tenant.id).await?;
     let preference = load_billing_preference(&state.api_db, tenant_ctx.tenant.id).await?;
-    Ok(billing_summary_from_row(
+    let mut summary = billing_summary_from_row(
         row,
         tenant_ctx.tenant.id,
         default_checkout_product_id,
         preference.and_then(|preference| preference.checkout_product_id),
         polar_is_test_mode(),
-    ))
+    );
+
+    // Populate plan tier info
+    let tier = state
+        .ctx
+        .plan_tier_repo
+        .get_tenant_tier(tenant_ctx.tenant.id)
+        .await
+        .ok();
+    if let Some(ref tier) = tier {
+        summary.tier_slug = Some(tier.tier_slug.as_str().to_string());
+        summary.plan_limits = Some(crate::domain::plan_tier::PlanLimits::from(tier));
+    }
+
+    Ok(summary)
 }
 
 pub async fn update_billing_checkout_product(
@@ -1509,6 +1529,20 @@ async fn handle_polar_webhook_with_secret(
             let row =
                 subscription_row_from_event(tenant_id, existing, Some(customer), &subscription);
             sync_billing_record_from_event(state, tenant_id, row).await?;
+
+            if let Some(ref product_id) = subscription.product_id
+                && let Ok(Some(tier)) = state
+                    .ctx
+                    .plan_tier_repo
+                    .get_by_polar_product_id(product_id)
+                    .await
+            {
+                let _ = state
+                    .ctx
+                    .plan_tier_repo
+                    .assign_to_tenant(tenant_id, &tier.tier_slug)
+                    .await;
+            }
         },
         PolarWebhookEvent::Unknown => {
             tracing::debug!("Received unknown Polar webhook event, skipping");

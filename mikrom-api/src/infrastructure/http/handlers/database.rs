@@ -122,7 +122,26 @@ pub async fn create_database(
         settings: payload.settings.unwrap_or_default(),
     };
 
+    let ent_service = crate::application::entitlements::EntitlementService::new(
+        state.ctx.plan_tier_repo.clone(),
+        state.ctx.tenant_usage_repo.clone(),
+    );
+    ent_service
+        .check_entitlement(
+            tenant_id,
+            crate::application::entitlements::EntitlementCheck::CreateDatabase,
+        )
+        .await
+        .map_err(|e| crate::error::ApiError::BadRequest(e.to_string()))?;
+
     let db = DatabaseService::create_database(&state, params).await?;
+
+    state
+        .ctx
+        .tenant_usage_repo
+        .increment_databases(tenant_id, 1)
+        .await
+        .map_err(|e| crate::error::ApiError::Internal(e.to_string()))?;
 
     state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::DatabaseCreated,
@@ -218,6 +237,13 @@ pub async fn delete_database(
     }
 
     DatabaseService::delete_database(&state, id).await?;
+
+    state
+        .ctx
+        .tenant_usage_repo
+        .decrement_databases(tenant_ctx.tenant.id)
+        .await
+        .map_err(|e| crate::error::ApiError::Internal(e.to_string()))?;
 
     state.publish_workspace_event(WorkspaceEvent {
         kind: WorkspaceEventKind::DatabaseDeleted,

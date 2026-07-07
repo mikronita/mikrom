@@ -213,6 +213,8 @@ pub fn create_test_app_state(db: PgPool) -> AppState {
         database_repo: database_repo.clone(),
         github_repo: github_repo.clone(),
         volume_repo: volume_repo.clone(),
+        plan_tier_repo: Arc::new(crate::domain::MockPlanTierRepository::new()),
+        tenant_usage_repo: Arc::new(crate::domain::MockTenantUsageRepository::new()),
         scheduler: scheduler.clone(),
         nats: nats.clone(),
         db: db.clone(),

@@ -2,8 +2,9 @@ use crate::config::ApiConfig;
 use crate::domain::MockDatabaseRepository;
 use crate::domain::{
     AppRepository, DatabaseRepository, GithubRepository, MockAppRepository, MockGithubRepository,
-    MockScheduler, MockTenantRepository, MockUserRepository, MockVolumeRepository, Scheduler,
-    TenantRepository, UserRepository, VolumeRepository,
+    MockPlanTierRepository, MockScheduler, MockTenantRepository, MockTenantUsageRepository,
+    MockUserRepository, MockVolumeRepository, PlanTierRepository, Scheduler, TenantRepository,
+    TenantUsageRepository, UserRepository, VolumeRepository,
 };
 use crate::nats::TypedNatsClient;
 use std::sync::Arc;
@@ -22,6 +23,8 @@ pub struct ApiContext {
     pub database_repo: Arc<dyn DatabaseRepository>,
     pub github_repo: Arc<dyn GithubRepository>,
     pub volume_repo: Arc<dyn VolumeRepository>,
+    pub plan_tier_repo: Arc<dyn PlanTierRepository>,
+    pub tenant_usage_repo: Arc<dyn TenantUsageRepository>,
     pub scheduler: Arc<dyn Scheduler>,
     pub nats: TypedNatsClient,
     pub db: sqlx::PgPool,
@@ -43,6 +46,8 @@ impl Default for ApiContext {
             database_repo: Arc::new(MockDatabaseRepository::new()),
             github_repo: Arc::new(MockGithubRepository::new()),
             volume_repo: Arc::new(MockVolumeRepository::new()),
+            plan_tier_repo: Arc::new(MockPlanTierRepository::new()),
+            tenant_usage_repo: Arc::new(MockTenantUsageRepository::new()),
             scheduler: Arc::new(MockScheduler::new()),
             nats: TypedNatsClient::default(),
             db: sqlx::PgPool::connect_lazy("postgres://localhost/test").expect("Valid lazy pool"),
@@ -62,6 +67,8 @@ impl ApiContext {
         database_repo: Arc<dyn DatabaseRepository>,
         github_repo: Arc<dyn GithubRepository>,
         volume_repo: Arc<dyn VolumeRepository>,
+        plan_tier_repo: Arc<dyn PlanTierRepository>,
+        tenant_usage_repo: Arc<dyn TenantUsageRepository>,
         scheduler: Arc<dyn Scheduler>,
         nats: TypedNatsClient,
         db: sqlx::PgPool,
@@ -76,6 +83,8 @@ impl ApiContext {
             database_repo,
             github_repo,
             volume_repo,
+            plan_tier_repo,
+            tenant_usage_repo,
             scheduler,
             nats,
             db,

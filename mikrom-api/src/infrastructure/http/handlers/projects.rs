@@ -83,6 +83,15 @@ pub async fn create_project(
         .add_member(tenant.id, user_id, "admin")
         .await?;
 
+    let default_tier = state.ctx.plan_tier_repo.get_default_tier().await?;
+    state
+        .ctx
+        .plan_tier_repo
+        .assign_to_tenant(tenant.id, &default_tier.tier_slug)
+        .await?;
+
+    state.ctx.tenant_usage_repo.get_or_create(tenant.id).await?;
+
     Ok((StatusCode::CREATED, Json(tenant)))
 }
 

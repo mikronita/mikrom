@@ -105,6 +105,21 @@ pub async fn create_volume_handler(
 
     let pool_name = format!("user_{}_volumes", tenant_id.to_string().replace('-', "_"));
 
+    let size_gb = (req.size_mib + 1023) / 1024;
+    let ent_service = crate::application::entitlements::EntitlementService::new(
+        state.ctx.plan_tier_repo.clone(),
+        state.ctx.tenant_usage_repo.clone(),
+    );
+    ent_service
+        .check_entitlement(
+            tenant_id,
+            crate::application::entitlements::EntitlementCheck::CreateVolume {
+                size_gb,
+            },
+        )
+        .await
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+
     let volume = state
         .volume_repo
         .create_volume(CreateVolumeParams {
@@ -115,6 +130,13 @@ pub async fn create_volume_handler(
             pool_name: pool_name.clone(),
         })
         .await?;
+
+    state
+        .ctx
+        .tenant_usage_repo
+        .increment_volumes(tenant_id, 1, size_gb)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Physically create the volume via Scheduler
     let nats_req = mikrom_proto::scheduler::CreateVolumeRequest {
@@ -459,7 +481,15 @@ pub async fn delete_volume_handler(
         return Err(ApiError::Scheduler(resp.message));
     }
 
+    let deleted_size_gb = (volume.size_mib + 1023) / 1024;
     state.volume_repo.delete_volume(volume_id).await?;
+
+    state
+        .ctx
+        .tenant_usage_repo
+        .decrement_volumes(volume.tenant_id, deleted_size_gb)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Emit workspace event
     state.publish_workspace_event(WorkspaceEvent {

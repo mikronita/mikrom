@@ -174,6 +174,26 @@ pub async fn create_app_handler(
         ));
     }
 
+    let ent_service = crate::application::entitlements::EntitlementService::new(
+        state.ctx.plan_tier_repo.clone(),
+        state.ctx.tenant_usage_repo.clone(),
+    );
+    let default_vcpus = crate::application::deployment::DEFAULT_DEPLOYMENT_VCPUS as i32;
+    let default_memory_mib = crate::application::deployment::DEFAULT_DEPLOYMENT_MEMORY_MIB as i32;
+    let default_storage_gb = 1;
+    ent_service
+        .check_entitlement(
+            tenant_id,
+            crate::application::entitlements::EntitlementCheck::CreateApp {
+                vcpus: default_vcpus,
+                memory_mb: default_memory_mib,
+                storage_gb: default_storage_gb,
+                autoscaling: payload.autoscaling_enabled.unwrap_or(false),
+            },
+        )
+        .await
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+
     let app = DeploymentService::create_app(
         &state,
         CreateAppParams {
@@ -197,6 +217,13 @@ pub async fn create_app_handler(
         },
     )
     .await?;
+
+    state
+        .ctx
+        .tenant_usage_repo
+        .increment_apps(tenant_id, 1, default_vcpus, default_memory_mib, default_storage_gb)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     DeploymentService::maybe_create_github_webhook(&state, &app, &webhook_secret).await?;
 
@@ -293,6 +320,18 @@ pub async fn delete_app_handler(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    state
+        .ctx
+        .tenant_usage_repo
+        .decrement_apps(
+            tenant_ctx.tenant.id,
+            crate::application::deployment::DEFAULT_DEPLOYMENT_VCPUS as i32,
+            crate::application::deployment::DEFAULT_DEPLOYMENT_MEMORY_MIB as i32,
+            1,
+        )
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
     let cleanup_state = state.clone();
     let app_id = app.id.to_string();
     let tenant_id = app.tenant_id.to_string();
@@ -367,6 +406,20 @@ pub async fn scale_app_handler(
         return Err(ApiError::BadRequest(
             "Desired replicas cannot be greater than maximum replicas".to_string(),
         ));
+    }
+
+    if payload.autoscaling_enabled == Some(true) && !app.autoscaling_enabled {
+        let ent_service = crate::application::entitlements::EntitlementService::new(
+            state.ctx.plan_tier_repo.clone(),
+            state.ctx.tenant_usage_repo.clone(),
+        );
+        ent_service
+            .check_entitlement(
+                tenant_ctx.tenant.id,
+                crate::application::entitlements::EntitlementCheck::EnableAutoscaling,
+            )
+            .await
+            .map_err(|e| ApiError::BadRequest(e.to_string()))?;
     }
 
     state
@@ -772,6 +825,18 @@ pub async fn deploy_app(
         },
     };
 
+    let ent_service = crate::application::entitlements::EntitlementService::new(
+        state.ctx.plan_tier_repo.clone(),
+        state.ctx.tenant_usage_repo.clone(),
+    );
+    ent_service
+        .check_entitlement(
+            tenant_ctx.tenant.id,
+            crate::application::entitlements::EntitlementCheck::CreateDeployment,
+        )
+        .await
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+
     let deployment = state
         .app_repo
         .create_deployment(crate::domain::NewDeployment::from_handler(
@@ -787,6 +852,13 @@ pub async fn deploy_app(
             None, // No git metadata for direct deploy
             hypervisor,
         ))
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    state
+        .ctx
+        .tenant_usage_repo
+        .increment_deployments(tenant_ctx.tenant.id, 1)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 

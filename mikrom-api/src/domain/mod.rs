@@ -3,6 +3,7 @@ pub mod database;
 pub mod error;
 pub mod github;
 pub mod nats;
+pub mod plan_tier;
 pub mod scheduler;
 pub mod tenant;
 pub mod types;
@@ -21,6 +22,10 @@ pub use database::{
 pub use error::{DomainError, DomainResult};
 pub use github::{GithubRepository, MockGithubRepository, UserGithubAccount};
 pub use nats::NatsClient;
+pub use plan_tier::{
+    MockPlanTierRepository, MockTenantUsageRepository, PlanLimits, PlanTier, PlanTierRepository,
+    TenantUsage, TenantUsageRepository, TierSlug,
+};
 pub use scheduler::{MockScheduler, Scheduler};
 pub use tenant::{MockTenantRepository, Tenant, TenantMember, TenantRepository};
 pub use types::{CpuCores, MemoryMb, Port, TypeError};

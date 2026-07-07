@@ -86,6 +86,15 @@ impl TenantRepository for PostgresTenantRepository {
         Ok(db_tenant.into())
     }
 
+    async fn list_all(&self) -> DomainResult<Vec<Tenant>> {
+        let db_tenants = sqlx::query_as::<_, DbTenant>(
+            "SELECT id, tenant_id, name, created_at, updated_at FROM tenants ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(db_tenants.into_iter().map(Into::into).collect())
+    }
+
     async fn delete(&self, tenant_id: Uuid) -> DomainResult<bool> {
         let result = sqlx::query("DELETE FROM tenants WHERE id = $1")
             .bind(tenant_id)
