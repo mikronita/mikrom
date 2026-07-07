@@ -40,6 +40,9 @@ fn build_state(
             last_name: None,
             avatar_url: None,
             vpc_ipv6_prefix: Some("fd00::".to_string()),
+            totp_secret: None,
+            totp_enabled: false,
+            deleted_at: None,
         }))
     });
 

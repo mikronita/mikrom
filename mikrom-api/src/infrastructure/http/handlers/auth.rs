@@ -44,6 +44,7 @@ pub struct UserResponse {
     pub last_name: Option<String>,
     pub avatar_url: Option<String>,
     pub vpc_ipv6_prefix: Option<String>,
+    pub totp_enabled: bool,
 }
 
 impl From<User> for UserResponse {
@@ -56,6 +57,7 @@ impl From<User> for UserResponse {
             last_name: user.last_name,
             avatar_url: user.avatar_url,
             vpc_ipv6_prefix: user.vpc_ipv6_prefix,
+            totp_enabled: user.totp_enabled,
         }
     }
 }
@@ -211,6 +213,84 @@ pub async fn upload_avatar(
     upload_avatar_impl(auth, State(state), multipart).await
 }
 
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+#[rovo::rovo]
+pub async fn change_password(
+    auth: crate::AuthUser,
+    State(state): State<AppState>,
+    Json(payload): Json<ChangePasswordRequest>,
+) -> ApiResult<StatusCode> {
+    AuthService::change_password(
+        &state,
+        &auth.user_id,
+        payload.current_password,
+        payload.new_password,
+    )
+    .await?;
+
+    Ok(StatusCode::OK)
+}
+
+#[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
+pub struct TotpSetupResponse {
+    pub secret: String,
+    pub otpauth_url: String,
+}
+
+#[rovo::rovo]
+pub async fn setup_totp(
+    auth: crate::AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<TotpSetupResponse>> {
+    let result = AuthService::setup_totp(&state, &auth.user_id).await?;
+
+    Ok(Json(TotpSetupResponse {
+        secret: result.secret,
+        otpauth_url: result.otpauth_url,
+    }))
+}
+
+#[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
+pub struct VerifyTotpRequest {
+    pub code: String,
+}
+
+#[rovo::rovo]
+pub async fn verify_totp(
+    auth: crate::AuthUser,
+    State(state): State<AppState>,
+    Json(payload): Json<VerifyTotpRequest>,
+) -> ApiResult<StatusCode> {
+    AuthService::verify_totp(&state, &auth.user_id, payload.code).await?;
+
+    Ok(StatusCode::OK)
+}
+
+#[rovo::rovo]
+pub async fn disable_totp(
+    auth: crate::AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<StatusCode> {
+    AuthService::disable_totp(&state, &auth.user_id).await?;
+
+    Ok(StatusCode::OK)
+}
+
+#[rovo::rovo]
+pub async fn delete_account(
+    auth: crate::AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<StatusCode> {
+    AuthService::delete_account(&state, &auth.user_id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,6 +299,7 @@ mod tests {
         MockAppRepository, MockDatabaseRepository, MockTenantRepository, MockUserRepository,
         MockVolumeRepository, Tenant, User,
     };
+    use axum::http::StatusCode;
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -239,6 +320,9 @@ mod tests {
                 last_name: None,
                 avatar_url: None,
                 vpc_ipv6_prefix: None,
+                totp_secret: None,
+                totp_enabled: false,
+                deleted_at: None,
             }))
         });
         mock_tenant_repo.expect_create().returning(|name, slug| {
@@ -316,6 +400,9 @@ mod tests {
                 last_name: None,
                 avatar_url: None,
                 vpc_ipv6_prefix: None,
+                totp_secret: None,
+                totp_enabled: false,
+                deleted_at: None,
             }))
         });
 
@@ -375,6 +462,9 @@ mod tests {
                 last_name: None,
                 avatar_url: Some("/uploads/avatars/test.png".into()),
                 vpc_ipv6_prefix: None,
+                totp_secret: None,
+                totp_enabled: false,
+                deleted_at: None,
             }))
         });
         mock_repo
@@ -393,6 +483,9 @@ mod tests {
                     last_name: None,
                     avatar_url: None,
                     vpc_ipv6_prefix: None,
+                    totp_secret: None,
+                    totp_enabled: false,
+                    deleted_at: None,
                 })
             });
 
@@ -450,5 +543,320 @@ mod tests {
                 .next()
                 .is_some()
         );
+    }
+
+    #[tokio::test]
+    async fn test_change_password_success() {
+        let user_id = Uuid::new_v4();
+        let password_hash = crate::crypto::hash_password("current-password").unwrap();
+
+        let mut mock_repo = MockUserRepository::new();
+        mock_repo.expect_find_by_id().returning(move |id| {
+            Ok(Some(User {
+                id,
+                email: "test@example.com".into(),
+                password_hash: password_hash.clone(),
+                role: crate::domain::UserRole::User,
+                first_name: None,
+                last_name: None,
+                avatar_url: None,
+                vpc_ipv6_prefix: None,
+                totp_secret: None,
+                totp_enabled: false,
+                deleted_at: None,
+            }))
+        });
+        mock_repo
+            .expect_update_password()
+            .returning(|_, _| Ok(()));
+
+        let state = AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(mock_repo),
+            tenant_repo: Arc::new(MockTenantRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
+            nats: crate::nats::TypedNatsClient::new_custom(Arc::new(
+                crate::nats::MockNatsClient::new(),
+            )),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/dummy")
+                .unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "admin@mikrom.spluca.org".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        let auth = crate::AuthUser {
+            user_id: user_id.to_string(),
+            email: "test@example.com".to_string(),
+            role: crate::domain::UserRole::User,
+        };
+
+        let payload = ChangePasswordRequest {
+            current_password: "current-password".to_string(),
+            new_password: "new-password-123".to_string(),
+        };
+
+        let response = __change_password_impl(auth, State(state), Json(payload)).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_change_password_wrong_current() {
+        let user_id = Uuid::new_v4();
+        let password_hash = crate::crypto::hash_password("actual-password").unwrap();
+
+        let mut mock_repo = MockUserRepository::new();
+        let captured_id = user_id;
+        mock_repo.expect_find_by_id().returning(move |id| {
+            Ok(Some(User {
+                id,
+                email: "test@example.com".into(),
+                password_hash: password_hash.clone(),
+                role: crate::domain::UserRole::User,
+                first_name: None,
+                last_name: None,
+                avatar_url: None,
+                vpc_ipv6_prefix: None,
+                totp_secret: None,
+                totp_enabled: false,
+                deleted_at: None,
+            }))
+        });
+
+        let state = AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(mock_repo),
+            tenant_repo: Arc::new(MockTenantRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
+            nats: crate::nats::TypedNatsClient::new_custom(Arc::new(
+                crate::nats::MockNatsClient::new(),
+            )),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/dummy")
+                .unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "admin@mikrom.spluca.org".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        let auth = crate::AuthUser {
+            user_id: captured_id.to_string(),
+            email: "test@example.com".to_string(),
+            role: crate::domain::UserRole::User,
+        };
+
+        let payload = ChangePasswordRequest {
+            current_password: "wrong-password".to_string(),
+            new_password: "new-password-123".to_string(),
+        };
+
+        let response = __change_password_impl(auth, State(state), Json(payload)).await;
+        assert!(response.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_setup_totp_success() {
+        let user_id = Uuid::new_v4();
+
+        let mut mock_repo = MockUserRepository::new();
+        mock_repo.expect_find_by_id().returning(move |id| {
+            Ok(Some(User {
+                id,
+                email: "test@example.com".into(),
+                password_hash: "hash".into(),
+                role: crate::domain::UserRole::User,
+                first_name: None,
+                last_name: None,
+                avatar_url: None,
+                vpc_ipv6_prefix: None,
+                totp_secret: None,
+                totp_enabled: false,
+                deleted_at: None,
+            }))
+        });
+        mock_repo
+            .expect_update_totp_secret()
+            .returning(|_, _| Ok(()));
+
+        let state = AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(mock_repo),
+            tenant_repo: Arc::new(MockTenantRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
+            nats: crate::nats::TypedNatsClient::new_custom(Arc::new(
+                crate::nats::MockNatsClient::new(),
+            )),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/dummy")
+                .unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "admin@mikrom.spluca.org".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        let auth = crate::AuthUser {
+            user_id: user_id.to_string(),
+            email: "test@example.com".to_string(),
+            role: crate::domain::UserRole::User,
+        };
+
+        let response = __setup_totp_impl(auth, State(state)).await;
+        assert!(response.is_ok());
+        let result = response.unwrap();
+        assert!(!result.secret.is_empty());
+        assert!(result.otpauth_url.starts_with("otpauth://"));
+    }
+
+    #[tokio::test]
+    async fn test_disable_totp_success() {
+        let user_id = Uuid::new_v4();
+
+        let mut mock_repo = MockUserRepository::new();
+        mock_repo.expect_disable_totp().returning(|_| Ok(()));
+
+        let state = AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(mock_repo),
+            tenant_repo: Arc::new(MockTenantRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
+            nats: crate::nats::TypedNatsClient::new_custom(Arc::new(
+                crate::nats::MockNatsClient::new(),
+            )),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/dummy")
+                .unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "admin@mikrom.spluca.org".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        let auth = crate::AuthUser {
+            user_id: user_id.to_string(),
+            email: "test@example.com".to_string(),
+            role: crate::domain::UserRole::User,
+        };
+
+        let response = __disable_totp_impl(auth, State(state)).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_delete_account_success() {
+        let user_id = Uuid::new_v4();
+
+        let mut mock_repo = MockUserRepository::new();
+        mock_repo.expect_soft_delete().returning(|_| Ok(()));
+
+        let state = AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(mock_repo),
+            tenant_repo: Arc::new(MockTenantRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
+            nats: crate::nats::TypedNatsClient::new_custom(Arc::new(
+                crate::nats::MockNatsClient::new(),
+            )),
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/dummy")
+                .unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "admin@mikrom.spluca.org".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        let auth = crate::AuthUser {
+            user_id: user_id.to_string(),
+            email: "test@example.com".to_string(),
+            role: crate::domain::UserRole::User,
+        };
+
+        let response = __delete_account_impl(auth, State(state)).await;
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap(), StatusCode::NO_CONTENT);
     }
 }

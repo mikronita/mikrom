@@ -52,6 +52,7 @@ export interface UserProfile {
   last_name: string | null;
   avatar_url: string | null;
   vpc_ipv6_prefix: string | null;
+  totp_enabled?: boolean;
 }
 
 export interface ProjectInfo {
@@ -1525,3 +1526,91 @@ export const pauseVm = async (_token: string, _appName: string, _jobId: string) 
 export const resumeVm = async (_token: string, _appName: string, _jobId: string) => ({ success: false, error: "Not implemented" });
 export const stopVm = async (_token: string, _appName: string, _jobId: string) => ({ success: false, error: "Not implemented" });
 export const deleteVm = async (_token: string, _appName: string, _jobId: string) => ({ success: false, error: "Not implemented" });
+
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+
+export async function changePassword(token: string, data: ChangePasswordRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/password`, {
+      method: "POST",
+      headers: { ...authHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (response.status === 401) logout();
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to change password") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export interface TotpSetupResponse {
+  secret: string;
+  otpauth_url: string;
+}
+
+export async function setupTotp(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/2fa/setup`, { headers: authHeaders(token) });
+    if (response.status === 401) logout();
+    const result = await parseJson<TotpSetupResponse>(response);
+    if (!response.ok) return { error: getErrorMessage(result, "Failed to setup 2FA") };
+    return { data: result as TotpSetupResponse };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export interface VerifyTotpRequest {
+  code: string;
+}
+
+export async function verifyTotp(token: string, data: VerifyTotpRequest) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/2fa/verify`, {
+      method: "POST",
+      headers: { ...authHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (response.status === 401) logout();
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to verify 2FA code") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function disableTotp(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/2fa/disable`, {
+      method: "POST",
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to disable 2FA") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
+export async function deleteAccount(token: string) {
+  try {
+    const response = await fetch(`${API_PROXY_BASE}/auth/me`, {
+      method: "DELETE",
+      headers: authHeaders(token),
+    });
+    if (response.status === 401) logout();
+    if (response.ok) return { success: true };
+    const result = await parseJson<ApiError>(response);
+    return { success: false, error: getErrorMessage(result, "Failed to delete account") };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}

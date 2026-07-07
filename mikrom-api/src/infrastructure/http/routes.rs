@@ -12,7 +12,10 @@ use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
 use crate::infrastructure::http::handlers::{
-    auth::{get_profile, login, register, update_profile, upload_avatar},
+    auth::{
+        change_password, delete_account, disable_totp, get_profile, login, register, setup_totp,
+        update_profile, upload_avatar, verify_totp,
+    },
     billing::{
         create_billing_checkout, create_billing_portal, get_billing_summary, list_billing_products,
         polar_webhook, refresh_billing_products, update_billing_checkout_product,
@@ -83,11 +86,29 @@ pub fn create_app_with_rate_limits(
         )
         .route(
             &format!("{}/auth/me", crate::API_V1),
-            get(get_profile).put(update_profile),
+            get(get_profile)
+                .put(update_profile)
+                .delete(delete_account),
         )
         .route(
             &format!("{}/auth/me/avatar", crate::API_V1),
             axum_post(upload_avatar),
+        )
+        .route(
+            &format!("{}/auth/password", crate::API_V1),
+            post(change_password),
+        )
+        .route(
+            &format!("{}/auth/2fa/setup", crate::API_V1),
+            get(setup_totp),
+        )
+        .route(
+            &format!("{}/auth/2fa/verify", crate::API_V1),
+            post(verify_totp),
+        )
+        .route(
+            &format!("{}/auth/2fa/disable", crate::API_V1),
+            post(disable_totp),
         )
         .route(
             &format!("{}/billing", crate::API_V1),

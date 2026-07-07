@@ -60,6 +60,9 @@ fn user(id: Uuid, email: &str) -> User {
         last_name: None,
         avatar_url: None,
         vpc_ipv6_prefix: Some("fd00::".to_string()),
+        totp_secret: None,
+        totp_enabled: false,
+        deleted_at: None,
     }
 }
 
@@ -139,6 +142,9 @@ async fn login_returns_token_for_valid_credentials() {
             last_name: None,
             avatar_url: None,
             vpc_ipv6_prefix: Some("fd00::".to_string()),
+            totp_secret: None,
+            totp_enabled: false,
+            deleted_at: None,
         }))
     });
 
@@ -167,6 +173,9 @@ async fn login_rejects_invalid_password() {
             last_name: None,
             avatar_url: None,
             vpc_ipv6_prefix: Some("fd00::".to_string()),
+            totp_secret: None,
+            totp_enabled: false,
+            deleted_at: None,
         }))
     });
 
@@ -198,6 +207,9 @@ async fn update_profile_emits_workspace_event() {
                 last_name,
                 avatar_url: None,
                 vpc_ipv6_prefix: Some("fd00::".to_string()),
+                totp_secret: None,
+                totp_enabled: false,
+                deleted_at: None,
             })
         });
     user_repo.expect_find_by_id().returning(move |id| {
@@ -210,6 +222,9 @@ async fn update_profile_emits_workspace_event() {
             last_name: Some("Lovelace".to_string()),
             avatar_url: None,
             vpc_ipv6_prefix: Some("fd00::".to_string()),
+            totp_secret: None,
+            totp_enabled: false,
+            deleted_at: None,
         }))
     });
 
@@ -236,4 +251,167 @@ async fn update_profile_emits_workspace_event() {
         rx.recv().await.unwrap().kind,
         WorkspaceEventKind::ProfileUpdated
     ));
+}
+
+#[tokio::test]
+async fn change_password_success() {
+    let user_id = Uuid::new_v4();
+    let current_password = "current-password";
+    let password_hash = mikrom_api::crypto::hash_password(current_password).unwrap();
+
+    let mut user_repo = MockUserRepository::new();
+    user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(User {
+            id,
+            email: "test@example.com".to_string(),
+            password_hash: password_hash.clone(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            avatar_url: None,
+            vpc_ipv6_prefix: Some("fd00::".to_string()),
+            totp_secret: None,
+            totp_enabled: false,
+            deleted_at: None,
+        }))
+    });
+    user_repo
+        .expect_update_password()
+        .returning(|_, _| Ok(()));
+
+    let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
+    let result = AuthService::change_password(
+        &state,
+        &user_id.to_string(),
+        current_password.to_string(),
+        "new-strong-password".to_string(),
+    )
+    .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn change_password_rejects_wrong_current() {
+    let user_id = Uuid::new_v4();
+    let password_hash = mikrom_api::crypto::hash_password("actual-password").unwrap();
+
+    let mut user_repo = MockUserRepository::new();
+    user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(User {
+            id,
+            email: "test@example.com".to_string(),
+            password_hash: password_hash.clone(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            avatar_url: None,
+            vpc_ipv6_prefix: Some("fd00::".to_string()),
+            totp_secret: None,
+            totp_enabled: false,
+            deleted_at: None,
+        }))
+    });
+
+    let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
+    let result = AuthService::change_password(
+        &state,
+        &user_id.to_string(),
+        "wrong-password".to_string(),
+        "new-strong-password".to_string(),
+    )
+    .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn setup_totp_returns_secret_and_url() {
+    let user_id = Uuid::new_v4();
+
+    let mut user_repo = MockUserRepository::new();
+    user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(User {
+            id,
+            email: "totp@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            avatar_url: None,
+            vpc_ipv6_prefix: Some("fd00::".to_string()),
+            totp_secret: None,
+            totp_enabled: false,
+            deleted_at: None,
+        }))
+    });
+    user_repo
+        .expect_update_totp_secret()
+        .returning(|_, _| Ok(()));
+
+    let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
+    let result = AuthService::setup_totp(&state, &user_id.to_string())
+        .await
+        .unwrap();
+
+    assert!(!result.secret.is_empty());
+    assert!(result.otpauth_url.starts_with("otpauth://"), "URL: {}", result.otpauth_url);
+    assert!(result.otpauth_url.contains("issuer=Mikrom"), "URL: {}", result.otpauth_url);
+}
+
+#[tokio::test]
+async fn setup_totp_fails_when_already_enabled() {
+    let user_id = Uuid::new_v4();
+
+    let mut user_repo = MockUserRepository::new();
+    user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(User {
+            id,
+            email: "totp@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            avatar_url: None,
+            vpc_ipv6_prefix: Some("fd00::".to_string()),
+            totp_secret: Some("secret".to_string()),
+            totp_enabled: true,
+            deleted_at: None,
+        }))
+    });
+
+    let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
+    let result = AuthService::setup_totp(&state, &user_id.to_string()).await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn disable_totp_clears_secret_and_flag() {
+    let user_id = Uuid::new_v4();
+
+    let mut user_repo = MockUserRepository::new();
+    user_repo
+        .expect_disable_totp()
+        .returning(|_| Ok(()));
+
+    let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
+    let result = AuthService::disable_totp(&state, &user_id.to_string()).await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn delete_account_marks_deleted_at() {
+    let user_id = Uuid::new_v4();
+
+    let mut user_repo = MockUserRepository::new();
+    user_repo
+        .expect_soft_delete()
+        .returning(|_| Ok(()));
+
+    let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
+    let result = AuthService::delete_account(&state, &user_id.to_string()).await;
+
+    assert!(result.is_ok());
 }

@@ -1,6 +1,7 @@
 use crate::domain::error::DomainResult;
 use crate::domain::user::{NewUser, User, UserRepository, UserRole};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -18,8 +19,8 @@ impl PostgresUserRepository {
 #[async_trait]
 impl UserRepository for PostgresUserRepository {
     async fn find_by_email(&self, email: &str) -> DomainResult<Option<User>> {
-        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>)>(
-            "SELECT id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix FROM users WHERE email = $1",
+        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, Option<DateTime<Utc>>)>(
+            "SELECT id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix, totp_secret, totp_enabled, deleted_at FROM users WHERE email = $1",
         )
         .bind(email)
         .fetch_optional(&self.pool)
@@ -34,6 +35,9 @@ impl UserRepository for PostgresUserRepository {
             last_name,
             avatar_url,
             vpc_ipv6_prefix,
+            totp_secret,
+            totp_enabled,
+            deleted_at,
         )) = result
         {
             let role = match role_str.as_str() {
@@ -49,6 +53,9 @@ impl UserRepository for PostgresUserRepository {
                 last_name,
                 avatar_url,
                 vpc_ipv6_prefix,
+                totp_secret,
+                totp_enabled,
+                deleted_at,
             }))
         } else {
             Ok(None)
@@ -58,9 +65,9 @@ impl UserRepository for PostgresUserRepository {
     async fn find_by_id(&self, id: Uuid) -> DomainResult<Option<User>> {
         let result = sqlx::query_as::<
             _,
-            (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>),
+            (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, Option<DateTime<Utc>>),
         >(
-            "SELECT id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix FROM users WHERE id = $1",
+            "SELECT id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix, totp_secret, totp_enabled, deleted_at FROM users WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -75,6 +82,9 @@ impl UserRepository for PostgresUserRepository {
             last_name,
             avatar_url,
             vpc_ipv6_prefix,
+            totp_secret,
+            totp_enabled,
+            deleted_at,
         )) = result
         {
             let role = match role_str.as_str() {
@@ -90,6 +100,9 @@ impl UserRepository for PostgresUserRepository {
                 last_name,
                 avatar_url,
                 vpc_ipv6_prefix,
+                totp_secret,
+                totp_enabled,
+                deleted_at,
             }))
         } else {
             Ok(None)
@@ -135,9 +148,9 @@ impl UserRepository for PostgresUserRepository {
         last_name: Option<String>,
         avatar_url: Option<String>,
     ) -> DomainResult<User> {
-        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>)>(
+        let result = sqlx::query_as::<_, (Uuid, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, bool, Option<DateTime<Utc>>)>(
             "UPDATE users SET first_name = COALESCE($1, first_name), last_name = COALESCE($2, last_name), avatar_url = COALESCE($3, avatar_url) \
-             WHERE id = $4 RETURNING id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix",
+             WHERE id = $4 RETURNING id, email, password_hash, role, first_name, last_name, avatar_url, vpc_ipv6_prefix, totp_secret, totp_enabled, deleted_at",
         )
         .bind(first_name)
         .bind(last_name)
@@ -155,6 +168,9 @@ impl UserRepository for PostgresUserRepository {
             last_name,
             avatar_url,
             vpc_ipv6_prefix,
+            totp_secret,
+            totp_enabled,
+            deleted_at,
         ) = result;
         let role = match role_str.as_str() {
             "admin" => UserRole::Admin,
@@ -170,7 +186,52 @@ impl UserRepository for PostgresUserRepository {
             last_name,
             avatar_url,
             vpc_ipv6_prefix,
+            totp_secret,
+            totp_enabled,
+            deleted_at,
         })
+    }
+
+    async fn update_password(&self, id: Uuid, new_password_hash: String) -> DomainResult<()> {
+        sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+            .bind(new_password_hash)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn update_totp_secret(&self, id: Uuid, secret: Option<String>) -> DomainResult<()> {
+        sqlx::query("UPDATE users SET totp_secret = $1 WHERE id = $2")
+            .bind(secret)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn enable_totp(&self, id: Uuid) -> DomainResult<()> {
+        sqlx::query("UPDATE users SET totp_enabled = TRUE WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn disable_totp(&self, id: Uuid) -> DomainResult<()> {
+        sqlx::query("UPDATE users SET totp_enabled = FALSE, totp_secret = NULL WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn soft_delete(&self, id: Uuid) -> DomainResult<()> {
+        sqlx::query("UPDATE users SET deleted_at = NOW() WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 }
 

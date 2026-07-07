@@ -372,7 +372,7 @@
         onAvatarSelected={handleAvatarSelected}
       />
     {:else if activeTab === "security"}
-      <SettingsSecuritySection />
+      <SettingsSecuritySection profile={$profile} />
     {:else if activeTab === "api"}
       <SettingsApiSection />
     {:else if activeTab === "payments"}

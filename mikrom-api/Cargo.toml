@@ -51,6 +51,7 @@ rand = { version = "0.10.1", features = ["sys_rng"] }
 rustls = { version = "0.23", features = ["ring"] }
 reqwest = { workspace = true, default-features = false, features = ["json", "rustls"] }
 dashmap.workspace = true
+totp-rs = { version = "5.6", features = ["gen_secret", "otpauth"] }
 socket2.workspace = true
 
 [dev-dependencies]

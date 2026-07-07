@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::domain::{NewUser, Tenant, User};
 use crate::error::{ApiError, ApiResult};
 use crate::workspace::{WorkspaceEvent, WorkspaceEventKind};
+use totp_rs::{Secret, TOTP};
 use uuid::Uuid;
 
 pub struct AuthService;
@@ -201,4 +202,171 @@ impl AuthService {
         )
         .await
     }
+
+    pub async fn change_password(
+        state: &AppState,
+        auth_user_id: &str,
+        current_password: String,
+        new_password: String,
+    ) -> ApiResult<()> {
+        let user_id = Uuid::parse_str(auth_user_id)
+            .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
+
+        let user = state
+            .user_repo
+            .find_by_id(user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::NotFound("User not found".into()))?;
+
+        if !crate::infrastructure::crypto::verify_password(&current_password, &user.password_hash)
+            .map_err(|_| ApiError::Auth("Invalid current password".into()))?
+        {
+            return Err(ApiError::Auth("Invalid current password".into()));
+        }
+
+        if new_password.len() < 8 {
+            return Err(ApiError::BadRequest(
+                "New password must be at least 8 characters".into(),
+            ));
+        }
+
+        let new_hash = crate::infrastructure::crypto::hash_password(&new_password)
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        state
+            .user_repo
+            .update_password(user_id, new_hash)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub async fn setup_totp(state: &AppState, auth_user_id: &str) -> ApiResult<TotpSetupResponse> {
+        let user_id = Uuid::parse_str(auth_user_id)
+            .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
+
+        let user = state
+            .user_repo
+            .find_by_id(user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::NotFound("User not found".into()))?;
+
+        if user.totp_enabled {
+            return Err(ApiError::BadRequest("2FA is already enabled".into()));
+        }
+
+        let raw_secret = Secret::generate_secret();
+        let secret_bytes = raw_secret
+            .to_bytes()
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        let secret_encoded = raw_secret.to_encoded().to_string();
+        let issuer = Some("Mikrom".to_string());
+        let account_name = user.email.clone();
+
+        let totp = TOTP::new(
+            totp_rs::Algorithm::SHA1,
+            6,
+            1,
+            30,
+            secret_bytes,
+            issuer,
+            account_name,
+        )
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        let otpauth_url = totp.get_url();
+
+        state
+            .user_repo
+            .update_totp_secret(user_id, Some(secret_encoded.clone()))
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        Ok(TotpSetupResponse {
+            secret: secret_encoded,
+            otpauth_url,
+        })
+    }
+
+    pub async fn verify_totp(
+        state: &AppState,
+        auth_user_id: &str,
+        code: String,
+    ) -> ApiResult<()> {
+        let user_id = Uuid::parse_str(auth_user_id)
+            .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
+
+        let user = state
+            .user_repo
+            .find_by_id(user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::NotFound("User not found".into()))?;
+
+        let secret = user
+            .totp_secret
+            .ok_or(ApiError::BadRequest("2FA not set up. Request setup first.".into()))?;
+
+        let totp = TOTP::new(
+            totp_rs::Algorithm::SHA1,
+            6,
+            1,
+            30,
+            Secret::Encoded(secret).to_bytes().map_err(|e| ApiError::Internal(e.to_string()))?,
+            None,
+            String::new(),
+        )
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        let is_valid = totp
+            .check_current(&code)
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        if !is_valid {
+            return Err(ApiError::Auth("Invalid 2FA code".into()));
+        }
+
+        state
+            .user_repo
+            .enable_totp(user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub async fn disable_totp(state: &AppState, auth_user_id: &str) -> ApiResult<()> {
+        let user_id = Uuid::parse_str(auth_user_id)
+            .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
+
+        state
+            .user_repo
+            .disable_totp(user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub async fn delete_account(state: &AppState, auth_user_id: &str) -> ApiResult<()> {
+        let user_id = Uuid::parse_str(auth_user_id)
+            .map_err(|_| ApiError::Auth("Invalid user ID in token".into()))?;
+
+        state
+            .user_repo
+            .soft_delete(user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TotpSetupResponse {
+    pub secret: String,
+    pub otpauth_url: String,
 }

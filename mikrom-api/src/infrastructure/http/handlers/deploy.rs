@@ -1158,6 +1158,9 @@ mod tests {
                 last_name: None,
                 avatar_url: None,
                 vpc_ipv6_prefix: None,
+                totp_secret: None,
+                totp_enabled: false,
+                deleted_at: None,
             }))
         });
         state.user_repo = Arc::new(mock_user_repo);
@@ -1262,6 +1265,9 @@ mod tests {
                 last_name: None,
                 avatar_url: None,
                 vpc_ipv6_prefix: Some("fd00::".to_string()),
+                totp_secret: None,
+                totp_enabled: false,
+                deleted_at: None,
             }))
         });
         state.user_repo = Arc::new(mock_user_repo);

@@ -1,5 +1,6 @@
 use crate::domain::error::DomainResult;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 #[derive(
@@ -21,6 +22,9 @@ pub struct User {
     pub last_name: Option<String>,
     pub avatar_url: Option<String>,
     pub vpc_ipv6_prefix: Option<String>,
+    pub totp_secret: Option<String>,
+    pub totp_enabled: bool,
+    pub deleted_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,4 +51,9 @@ pub trait UserRepository: Send + Sync {
         last_name: Option<String>,
         avatar_url: Option<String>,
     ) -> DomainResult<User>;
+    async fn update_password(&self, id: Uuid, new_password_hash: String) -> DomainResult<()>;
+    async fn update_totp_secret(&self, id: Uuid, secret: Option<String>) -> DomainResult<()>;
+    async fn enable_totp(&self, id: Uuid) -> DomainResult<()>;
+    async fn disable_totp(&self, id: Uuid) -> DomainResult<()>;
+    async fn soft_delete(&self, id: Uuid) -> DomainResult<()>;
 }

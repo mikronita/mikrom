@@ -156,6 +156,9 @@ async fn test_port_propagation_from_builder_to_deployment() {
             first_name: None,
             last_name: None,
             vpc_ipv6_prefix: Some("fd00::/64".to_string()),
+            totp_secret: None,
+            totp_enabled: false,
+            deleted_at: None,
         }))
     });
 
@@ -244,6 +247,9 @@ async fn test_zero_reported_port_keeps_original_deployment_port() {
             first_name: None,
             last_name: None,
             vpc_ipv6_prefix: Some("fd00::/64".to_string()),
+            totp_secret: None,
+            totp_enabled: false,
+            deleted_at: None,
         }))
     });
 
