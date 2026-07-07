@@ -204,4 +204,115 @@ describe("SettingsSecuritySection", () => {
       expect(mocks.error).toHaveBeenCalledWith("Failed to setup 2FA");
     });
   });
+
+  describe("Change password modal", () => {
+    it("opens change password modal on 'Change password' click", async () => {
+      render(SettingsSecuritySection, { props: { profile: defaultProfile } });
+
+      await fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+      expect(screen.getByPlaceholderText("Current password")).toBeTruthy();
+      expect(screen.getByPlaceholderText("New password")).toBeTruthy();
+      expect(screen.getByPlaceholderText("Confirm new password")).toBeTruthy();
+    });
+
+    it("shows error toast if any of the password fields are empty", async () => {
+      render(SettingsSecuritySection, { props: { profile: defaultProfile } });
+
+      await fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+      
+      const currentInput = screen.getByPlaceholderText("Current password");
+      await fireEvent.input(currentInput, { target: { value: "old-password" } });
+
+      await fireEvent.click(screen.getByText("Update password"));
+
+      await waitFor(() => {
+        expect(mocks.error).toHaveBeenCalledWith("All password fields are required");
+      });
+    });
+
+    it("shows error toast if new and confirm passwords do not match", async () => {
+      render(SettingsSecuritySection, { props: { profile: defaultProfile } });
+
+      await fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+      const currentInput = screen.getByPlaceholderText("Current password");
+      const newInput = screen.getByPlaceholderText("New password");
+      const confirmInput = screen.getByPlaceholderText("Confirm new password");
+
+      await fireEvent.input(currentInput, { target: { value: "old-pass1" } });
+      await fireEvent.input(newInput, { target: { value: "new-pass1" } });
+      await fireEvent.input(confirmInput, { target: { value: "new-pass2" } });
+
+      await fireEvent.click(screen.getByText("Update password"));
+
+      await waitFor(() => {
+        expect(mocks.error).toHaveBeenCalledWith("New passwords do not match");
+      });
+    });
+
+    it("shows error toast if new password is less than 8 characters", async () => {
+      render(SettingsSecuritySection, { props: { profile: defaultProfile } });
+
+      await fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+      const currentInput = screen.getByPlaceholderText("Current password");
+      const newInput = screen.getByPlaceholderText("New password");
+      const confirmInput = screen.getByPlaceholderText("Confirm new password");
+
+      await fireEvent.input(currentInput, { target: { value: "old-pass1" } });
+      await fireEvent.input(newInput, { target: { value: "short" } });
+      await fireEvent.input(confirmInput, { target: { value: "short" } });
+
+      await fireEvent.click(screen.getByText("Update password"));
+
+      await waitFor(() => {
+        expect(mocks.error).toHaveBeenCalledWith("New password must be at least 8 characters");
+      });
+    });
+
+    it("successfully updates password and closes modal on valid input", async () => {
+      mocks.changePassword.mockResolvedValue({ success: true });
+
+      render(SettingsSecuritySection, { props: { profile: defaultProfile } });
+
+      await fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+      const currentInput = screen.getByPlaceholderText("Current password");
+      const newInput = screen.getByPlaceholderText("New password");
+      const confirmInput = screen.getByPlaceholderText("Confirm new password");
+
+      await fireEvent.input(currentInput, { target: { value: "current-password" } });
+      await fireEvent.input(newInput, { target: { value: "new-password-123" } });
+      await fireEvent.input(confirmInput, { target: { value: "new-password-123" } });
+
+      await fireEvent.click(screen.getByText("Update password"));
+
+      await waitFor(() => {
+        expect(mocks.changePassword).toHaveBeenCalledWith("test-token", {
+          current_password: "current-password",
+          new_password: "new-password-123",
+        });
+      });
+
+      await waitFor(() => {
+        expect(mocks.success).toHaveBeenCalledWith("Password updated successfully");
+      });
+
+      expect(screen.queryByPlaceholderText("Current password")).toBeNull();
+    });
+
+    it("closes change password modal and resets fields on cancel click", async () => {
+      render(SettingsSecuritySection, { props: { profile: defaultProfile } });
+
+      await fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+      const currentInput = screen.getByPlaceholderText("Current password");
+      await fireEvent.input(currentInput, { target: { value: "some-password" } });
+
+      await fireEvent.click(screen.getByText("Cancel"));
+
+      expect(screen.queryByPlaceholderText("Current password")).toBeNull();
+    });
+  });
 });

@@ -34,7 +34,9 @@
 
   let currentPassword = $state("");
   let newPassword = $state("");
+  let confirmPassword = $state("");
   let changingPassword = $state(false);
+  let showChangePasswordDialog = $state(false);
 
   let settingUp2fa = $state(false);
   let totpSecret = $state("");
@@ -54,8 +56,13 @@
     const token = getToken();
     if (!token) return;
 
-    if (!currentPassword || !newPassword) {
-      toast.error("Both current and new password are required");
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      toast.error("All password fields are required");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast.error("New passwords do not match");
       return;
     }
 
@@ -79,6 +86,15 @@
     toast.success("Password updated successfully");
     currentPassword = "";
     newPassword = "";
+    confirmPassword = "";
+    showChangePasswordDialog = false;
+  }
+
+  function handleCancelChangePassword() {
+    showChangePasswordDialog = false;
+    currentPassword = "";
+    newPassword = "";
+    confirmPassword = "";
   }
 
   async function handleSetupTotp() {
@@ -179,58 +195,48 @@
 
 <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
   <Card size="sm">
-    <CardHeader>
-      <CardTitle>Change password</CardTitle>
-      <CardDescription>Use a strong password that you do not use anywhere else.</CardDescription>
-    </CardHeader>
-    <CardContent>
-      <div class="flex max-w-md flex-col gap-4">
-        <Field label="Current password">
-          <Input type="password" bind:value={currentPassword} />
-        </Field>
-        <Field label="New password">
-          <Input type="password" bind:value={newPassword} />
-        </Field>
+    <CardHeader class="flex flex-row items-start justify-between gap-4">
+      <div class="flex flex-col gap-1.5">
+        <CardTitle>Two-factor authentication</CardTitle>
+        <CardDescription>Add an extra layer of security to your account.</CardDescription>
       </div>
-    </CardContent>
+      {#if totpEnabled}
+        <Badge variant="outline" class="gap-1 text-green-600">
+          <Check class="size-4" />
+          Enabled
+        </Badge>
+      {:else}
+        <Badge variant="outline" class="gap-1">
+          <ShieldX class="size-4" />
+          Not enabled
+        </Badge>
+      {/if}
+    </CardHeader>
     <CardFooter>
-      <Button onclick={handleChangePassword} disabled={changingPassword}>
-        {changingPassword ? "Updating..." : "Update password"}
-      </Button>
+      {#if totpEnabled}
+        <Button size="sm" variant="outline" onclick={handleDisableTotp} disabled={disabling2fa}>
+          <ShieldX class="size-4" />
+          {disabling2fa ? "Disabling..." : "Disable 2FA"}
+        </Button>
+      {:else}
+        <Button size="sm" onclick={handleSetupTotp} disabled={settingUp2fa}>
+          <ShieldCheck class="size-4" />
+          {settingUp2fa ? "Setting up..." : "Configure 2FA"}
+        </Button>
+      {/if}
     </CardFooter>
   </Card>
 
   <div class="flex flex-col gap-4">
     <Card size="sm">
-      <CardHeader class="flex flex-row items-start justify-between gap-4">
-        <div class="flex flex-col gap-1.5">
-          <CardTitle>Two-factor authentication</CardTitle>
-          <CardDescription>Add an extra layer of security to your account.</CardDescription>
-        </div>
-        {#if totpEnabled}
-          <Badge variant="outline" class="gap-1 text-green-600">
-            <Check class="size-4" />
-            Enabled
-          </Badge>
-        {:else}
-          <Badge variant="outline" class="gap-1">
-            <ShieldX class="size-4" />
-            Not enabled
-          </Badge>
-        {/if}
+      <CardHeader>
+        <CardTitle>Change password</CardTitle>
+        <CardDescription>Use a strong password that you do not use anywhere else.</CardDescription>
       </CardHeader>
       <CardFooter>
-        {#if totpEnabled}
-          <Button size="sm" variant="outline" onclick={handleDisableTotp} disabled={disabling2fa}>
-            <ShieldX class="size-4" />
-            {disabling2fa ? "Disabling..." : "Disable 2FA"}
-          </Button>
-        {:else}
-          <Button size="sm" onclick={handleSetupTotp} disabled={settingUp2fa}>
-            <ShieldCheck class="size-4" />
-            {settingUp2fa ? "Setting up..." : "Configure 2FA"}
-          </Button>
-        {/if}
+        <Button onclick={() => (showChangePasswordDialog = true)}>
+          Change password
+        </Button>
       </CardFooter>
     </Card>
 
@@ -291,3 +297,26 @@
   loading={deletingAccount}
   onconfirm={handleDeleteAccount}
 />
+
+<Modal bind:open={showChangePasswordDialog} title="Change password" description="Please enter your current password and your new password twice to confirm." onclose={handleCancelChangePassword}>
+  <div class="flex flex-col gap-4 py-4">
+    <Field label="Current password">
+      <Input type="password" placeholder="Current password" bind:value={currentPassword} />
+    </Field>
+    <Field label="New password">
+      <Input type="password" placeholder="New password" bind:value={newPassword} />
+    </Field>
+    <Field label="Confirm new password">
+      <Input type="password" placeholder="Confirm new password" bind:value={confirmPassword} />
+    </Field>
+    <div class="flex w-full gap-2 pt-2">
+      <Button onclick={handleChangePassword} disabled={changingPassword} class="flex-1">
+        {changingPassword ? "Updating..." : "Update password"}
+      </Button>
+      <Button variant="outline" onclick={handleCancelChangePassword} disabled={changingPassword}>
+        <X class="size-4" />
+        Cancel
+      </Button>
+    </div>
+  </div>
+</Modal>
