@@ -117,7 +117,10 @@ impl ReqwestApiClient {
             }
         }
 
-        unreachable!()
+        Err(CliError::Api {
+            status: 500,
+            message: "request failed after all retry attempts".to_string(),
+        })
     }
 
     fn build_request<B: Serialize>(

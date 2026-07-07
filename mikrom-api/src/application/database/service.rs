@@ -551,7 +551,9 @@ impl DatabaseService {
             }
         }
 
-        unreachable!()
+        Err(ApiError::Internal(
+            "Database provisioning failed after all retry attempts".to_string(),
+        ))
     }
 
     async fn provision_and_deploy_database(state: AppState, database_id: Uuid) -> ApiResult<()> {
