@@ -859,7 +859,7 @@ impl DeploymentService {
                     .into_iter()
                     .map(|v| mikrom_proto::scheduler::Volume {
                         volume_id: v.volume.id.to_string(),
-                        size_mib: v.volume.size_mib as u64,
+                        size_mib: v.volume.size_mib.max(0) as u64,
                         read_only: VolumeAccessMode::from_i32(v.access_mode)
                             .is_some_and(|mode| mode.is_read_only()),
                         pool_name: v.volume.pool_name,

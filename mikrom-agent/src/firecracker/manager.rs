@@ -306,7 +306,12 @@ impl FirecrackerManager {
     }
 
     async fn queue_vm_failure_event(&self, vm_id: &VmId, error_message: String) {
+        const MAX_PENDING_FAILURES: usize = 10_000;
         let mut pending = self.pending_vm_failure_events.lock().await;
+        if pending.len() >= MAX_PENDING_FAILURES {
+            tracing::warn!(vm_id = %vm_id, "Dropping VM failure event, queue full");
+            return;
+        }
         pending.push(PendingVmFailureEvent {
             vm_id: *vm_id,
             error_message,
@@ -979,7 +984,7 @@ impl FirecrackerManager {
     fn mark_vm_app_started_now(&self, guard: &mut VmStartupGuard) {
         guard.app_started.store(true, Ordering::SeqCst);
         guard.app_started_at_ms.store(
-            chrono::Utc::now().timestamp_millis() as u64,
+            chrono::Utc::now().timestamp_millis().max(0) as u64,
             Ordering::SeqCst,
         );
     }
@@ -1193,7 +1198,7 @@ impl FirecrackerManager {
                 chroot_dir: None,
                 app_started: Arc::new(AtomicBool::new(true)),
                 app_started_at_ms: Arc::new(AtomicU64::new(
-                    chrono::Utc::now().timestamp_millis() as u64
+                    chrono::Utc::now().timestamp_millis().max(0) as u64
                 )),
                 vfs_processes: Vec::new(),
                 vfs_pids: Vec::new(),

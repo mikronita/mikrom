@@ -7,7 +7,8 @@ impl crate::firecracker::FirecrackerManager {
         if !vol.pool_name.is_empty() {
             use mikrom_proto::agent::AccessMode;
             if vol.access_mode == AccessMode::ReadWriteMany as i32 {
-                let mount_point = format!("{}/cephfs/{}", self.fc_config.data_dir, vol.volume_id);
+                let safe_id = sanitize_filename(&vol.volume_id);
+                let mount_point = format!("{}/cephfs/{safe_id}", self.fc_config.data_dir);
                 CephFs::mount_volume(&vol.volume_id, &mount_point)
                     .await
                     .map_err(|e| {
@@ -27,7 +28,7 @@ impl crate::firecracker::FirecrackerManager {
         let storage = CephRbd;
         if !storage.exists(&vol.pool_name, &vol.volume_id).await {
             storage
-                .create_volume(&vol.pool_name, &vol.volume_id, vol.size_mib as i32)
+                .create_volume(&vol.pool_name, &vol.volume_id, vol.size_mib.min(i32::MAX as u64) as i32)
                 .await
                 .map_err(|e| {
                     HypervisorError::ProcessError(format!("Failed to create RBD volume: {e}"))
@@ -88,7 +89,7 @@ impl crate::firecracker::FirecrackerManager {
             HypervisorError::ProcessError(format!("Failed to create volumes dir: {e}"))
         })?;
 
-        let vol_path = format!("{vol_dir}/{}.ext4", vol.volume_id);
+        let vol_path = format!("{vol_dir}/{}.ext4", sanitize_filename(&vol.volume_id));
         if tokio::fs::metadata(&vol_path).await.is_err() {
             let file = tokio::fs::File::create(&vol_path).await.map_err(|e| {
                 HypervisorError::ProcessError(format!("Failed to create volume file: {e}"))
@@ -109,7 +110,7 @@ impl crate::firecracker::FirecrackerManager {
         chroot_dir: &Option<String>,
     ) -> Result<String, HypervisorError> {
         if let Some(chroot) = chroot_dir {
-            let filename = format!("{}.ext4", vol.volume_id);
+            let filename = format!("{}.ext4", sanitize_filename(&vol.volume_id));
             let c_path = format!("{chroot}/root/{filename}");
 
             if !vol.pool_name.is_empty() {
@@ -168,4 +169,10 @@ impl crate::firecracker::FirecrackerManager {
 
         Ok(child)
     }
+}
+
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect()
 }

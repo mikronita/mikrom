@@ -118,7 +118,20 @@ impl Drop for VmStartupGuard {
                 }
 
                 if let Some(tap) = tap_name {
-                    tracing::warn!(vm_id = %vm_id, tap = %tap, "Tap cleanup skipped in guard drop (needs manual cleanup or manager reference)");
+                    use futures::stream::TryStreamExt;
+                    let (connection, handle, _) = match rtnetlink::new_connection() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::error!(vm_id = %vm_id, tap = %tap, error = %e, "Failed to create netlink connection for TAP cleanup");
+                            return;
+                        }
+                    };
+                    tokio::spawn(connection);
+                    let mut links = handle.link().get().match_name(tap.clone()).execute();
+                    if let Ok(Some(msg)) = links.try_next().await {
+                        let _ = handle.link().set(msg.header.index).nocontroller().execute().await;
+                        let _ = handle.link().del(msg.header.index).execute().await;
+                    }
                 }
             });
         }

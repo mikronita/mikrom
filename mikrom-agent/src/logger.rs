@@ -142,7 +142,7 @@ impl LogShipper {
                                     app_started = true;
                                     self.app_started.store(true, Ordering::SeqCst);
                                     self.app_started_at_ms.store(
-                                        chrono::Utc::now().timestamp_millis() as u64,
+                                        chrono::Utc::now().timestamp_millis().max(0) as u64,
                                         Ordering::SeqCst,
                                     );
                                     tracing::info!(app_id = %self.app_id, vm_id = %self.vm_id, "Application started marker received");
@@ -207,7 +207,7 @@ impl LogShipper {
                                         app_started = true;
                                         self.app_started.store(true, Ordering::SeqCst);
                                         self.app_started_at_ms.store(
-                                            chrono::Utc::now().timestamp_millis() as u64,
+                                            chrono::Utc::now().timestamp_millis().max(0) as u64,
                                             Ordering::SeqCst,
                                         );
                                         tracing::info!(app_id = %self.app_id, vm_id = %self.vm_id, "Application started marker received");

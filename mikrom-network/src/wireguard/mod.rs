@@ -141,6 +141,11 @@ impl WireGuardManager {
         }
         let _ = tokio::fs::write(&conf_path, &conf).await;
 
+        // Restrict config file to owner-only read
+        if (tokio::fs::metadata(&conf_path).await).is_ok() {
+            let _ = tokio::fs::set_permissions(&conf_path, std::os::unix::fs::PermissionsExt::from_mode(0o600)).await;
+        }
+
         self.configure_device_with_retry(private_key, self.listen_port, peers, true)
             .await?;
 

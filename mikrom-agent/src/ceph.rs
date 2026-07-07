@@ -226,7 +226,7 @@ impl CephRbd {
         );
         let io = Self::connect(pool)?;
         let name_c = CString::new(name).map_err(|e| anyhow!("Invalid volume name: {}", e))?;
-        let size_bytes = (size_mib as u64) * 1024 * 1024;
+        let size_bytes = (size_mib.max(0) as u64) * 1024 * 1024;
 
         unsafe {
             let mut order = 0;

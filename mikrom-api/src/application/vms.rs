@@ -414,7 +414,7 @@ impl VmService {
                 id: s.id,
                 name: s.name,
                 created_at: s.created_at,
-                size_bytes: s.size_bytes as u64,
+                size_bytes: s.size_bytes.max(0) as u64,
                 vm_status: s.vm_status,
             })
             .collect();

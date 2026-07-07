@@ -171,7 +171,10 @@ impl crate::firecracker::FirecrackerManager {
                 guard.vfs_processes.push(vfs_child);
 
                 let vfs_socket_api_path = if let Some(chroot) = chroot_dir {
-                    let filename = format!("vfs_{}.socket", vol.volume_id);
+                    let safe_id: String = vol.volume_id.chars()
+                        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                        .collect();
+                    let filename = format!("vfs_{safe_id}.socket");
                     let c_path = format!("{chroot}/root/{filename}");
                     self.mknod_at(&socket_path.to_string_lossy(), &c_path)
                         .await?;
