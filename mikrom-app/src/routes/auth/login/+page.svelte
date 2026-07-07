@@ -2,16 +2,18 @@
   import { goto } from "$app/navigation";
   import { tick } from "svelte";
   import { onMount } from "svelte";
-    import Loader2 from "@lucide/svelte/icons/loader-2";
+  import Loader2 from "@lucide/svelte/icons/loader-2";
   import Box from "@lucide/svelte/icons/box";
   import { Card, Field, Input, Button } from "$lib/components";
   import { login } from "$lib/api";
   import { setToken } from "$lib/auth";
   import { toast } from "$lib/toast";
 
-  let email = "";
-  let password = "";
-  let loading = false;
+  let email = $state("");
+  let password = $state("");
+  let code = $state("");
+  let requires2fa = $state(false);
+  let loading = $state(false);
 
   onMount(() => {
     const registered = new URLSearchParams(window.location.search).get("registered") === "true";
@@ -28,8 +30,17 @@
       return;
     }
 
+    if (requires2fa && !code) {
+      toast.error("Verification code is required");
+      return;
+    }
+
     loading = true;
-    const result = await login({ email, password });
+    const result = await login({
+      email,
+      password,
+      code: requires2fa ? code : undefined
+    });
     loading = false;
 
     if (result.error) {
@@ -38,9 +49,19 @@
     }
 
     if (result.data) {
-      setToken(result.data.token);
-      await tick();
-      await goto("/");
+      if (result.data.requires_2fa) {
+        requires2fa = true;
+        toast.info("Two-factor authentication required");
+        return;
+      }
+
+      if (result.data.token) {
+        setToken(result.data.token);
+        await tick();
+        await goto("/");
+      } else {
+        toast.error("An unexpected error occurred: token not received.");
+      }
     }
   }
 </script>
@@ -64,36 +85,81 @@
     <Card class="w-full max-w-md">
       <div class="p-7">
         <form class="flex flex-col gap-5" onsubmit={handleSubmit}>
-          <Field label="Email address" forId="email">
-            <Input id="email" type="email" bind:value={email} placeholder="name@example.com" required disabled={loading} />
-          </Field>
+          {#if !requires2fa}
+            <Field label="Email address" forId="email">
+              <Input id="email" type="email" bind:value={email} placeholder="name@example.com" required disabled={loading} />
+            </Field>
 
-          <div class="flex flex-col gap-1.5">
-            <div class="flex items-center justify-between">
-              <label for="password" class="text-sm font-medium">Password</label>
-              <button type="button" class="text-xs text-muted-foreground transition-colors hover:text-foreground">Forgot password?</button>
+            <div class="flex flex-col gap-1.5">
+              <div class="flex items-center justify-between">
+                <label for="password" class="text-sm font-medium">Password</label>
+                <button type="button" class="text-xs text-muted-foreground transition-colors hover:text-foreground">Forgot password?</button>
+              </div>
+              <Input id="password" type="password" bind:value={password} placeholder="••••••••" required disabled={loading} />
             </div>
-            <Input id="password" type="password" bind:value={password} placeholder="••••••••" required disabled={loading} />
-          </div>
 
-          <div class="flex flex-col gap-4 pt-2">
-            <Button
-              type="submit"
-              disabled={loading}
-              class="w-full"
-            >
-              {#if loading}
-                <Loader2 class="size-4 animate-spin" />
-                Signing in...
-              {:else}
-                Sign In
-              {/if}
-            </Button>
-            <div class="text-center text-sm text-muted-foreground">
-              Don&apos;t have an account?
-              <a href="/auth/register" class="font-semibold text-foreground hover:underline"> Create one for free</a>
+            <div class="flex flex-col gap-4 pt-2">
+              <Button
+                type="submit"
+                disabled={loading}
+                class="w-full"
+              >
+                {#if loading}
+                  <Loader2 class="size-4 animate-spin" />
+                  Signing in...
+                {:else}
+                  Sign In
+                {/if}
+              </Button>
+              <div class="text-center text-sm text-muted-foreground">
+                Don&apos;t have an account?
+                <a href="/auth/register" class="font-semibold text-foreground hover:underline"> Create one for free</a>
+              </div>
             </div>
-          </div>
+          {:else}
+            <div class="flex flex-col gap-2 text-center pb-2">
+              <h2 class="text-lg font-medium tracking-tight">Two-Factor Verification</h2>
+              <p class="text-xs text-muted-foreground">Enter the 6-digit verification code from your authenticator application.</p>
+            </div>
+
+            <Field label="Verification Code" forId="code">
+              <Input
+                id="code"
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                maxlength={6}
+                bind:value={code}
+                placeholder="123456"
+                required
+                disabled={loading}
+                class="text-center text-xl tracking-[0.5em] font-mono placeholder:tracking-normal placeholder:font-sans"
+              />
+            </Field>
+
+            <div class="flex flex-col gap-3 pt-2">
+              <Button
+                type="submit"
+                disabled={loading}
+                class="w-full"
+              >
+                {#if loading}
+                  <Loader2 class="size-4 animate-spin" />
+                  Verifying...
+                {:else}
+                  Verify & Sign In
+                {/if}
+              </Button>
+              <button
+                type="button"
+                onclick={() => { requires2fa = false; code = ""; }}
+                disabled={loading}
+                class="text-xs text-muted-foreground transition-colors hover:text-foreground underline underline-offset-4"
+              >
+                Back to credentials
+              </button>
+            </div>
+          {/if}
         </form>
       </div>
     </Card>

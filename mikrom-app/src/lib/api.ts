@@ -38,10 +38,12 @@ export interface RegisterResponse {
 export interface LoginRequest {
   email: string;
   password: string;
+  code?: string;
 }
 
 export interface LoginResponse {
-  token: string;
+  token?: string;
+  requires_2fa?: boolean;
 }
 
 export interface UserProfile {

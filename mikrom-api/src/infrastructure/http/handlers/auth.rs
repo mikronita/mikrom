@@ -23,7 +23,8 @@ pub struct RegisterRequest {
 #[derive(Debug, Serialize, rovo::schemars::JsonSchema)]
 pub struct AuthResponse {
     pub user: UserResponse,
-    pub token: String,
+    pub token: Option<String>,
+    pub requires_2fa: bool,
 }
 
 impl From<AuthResult> for AuthResponse {
@@ -31,6 +32,7 @@ impl From<AuthResult> for AuthResponse {
         Self {
             user: result.user.into(),
             token: result.token,
+            requires_2fa: result.requires_2fa,
         }
     }
 }
@@ -66,6 +68,7 @@ impl From<User> for UserResponse {
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
+    pub code: Option<String>,
 }
 
 #[derive(Debug, Deserialize, rovo::schemars::JsonSchema)]
@@ -113,7 +116,7 @@ pub async fn login(
 ) -> ApiResult<Json<AuthResponse>> {
     info!(email = %payload.email, "User login attempt");
 
-    let result = AuthService::login(&state, payload.email, payload.password).await?;
+    let result = AuthService::login(&state, payload.email, payload.password, payload.code).await?;
 
     Ok(Json(result.into()))
 }
@@ -443,10 +446,232 @@ mod tests {
         let payload = LoginRequest {
             email,
             password: password.into(),
+            code: None,
         };
 
         let response = __login_impl(State(state), Json(payload)).await;
         assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_login_requires_2fa() {
+        let mut mock_repo = MockUserRepository::new();
+        let email = "test@example.com".to_string();
+        let password = "password";
+        let password_hash = crate::crypto::hash_password(password).unwrap();
+
+        mock_repo.expect_find_by_email().returning(move |e| {
+            Ok(Some(User {
+                id: Uuid::new_v4(),
+                email: e.to_string(),
+                password_hash: password_hash.clone(),
+                role: crate::domain::UserRole::User,
+                first_name: None,
+                last_name: None,
+                avatar_url: None,
+                vpc_ipv6_prefix: None,
+                totp_secret: Some("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP".to_string()),
+                totp_enabled: true,
+                deleted_at: None,
+            }))
+        });
+
+        let nats =
+            crate::nats::TypedNatsClient::new_custom(Arc::new(crate::nats::MockNatsClient::new()));
+
+        let state = AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(mock_repo),
+            tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
+            nats,
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/dummy")
+                .unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "admin@mikrom.spluca.org".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        let payload = LoginRequest {
+            email,
+            password: password.into(),
+            code: None,
+        };
+
+        let response = __login_impl(State(state), Json(payload)).await;
+        assert!(response.is_ok());
+        let res = response.unwrap().0;
+        assert!(res.requires_2fa);
+        assert!(res.token.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_login_with_invalid_2fa() {
+        let mut mock_repo = MockUserRepository::new();
+        let email = "test@example.com".to_string();
+        let password = "password";
+        let password_hash = crate::crypto::hash_password(password).unwrap();
+
+        mock_repo.expect_find_by_email().returning(move |e| {
+            Ok(Some(User {
+                id: Uuid::new_v4(),
+                email: e.to_string(),
+                password_hash: password_hash.clone(),
+                role: crate::domain::UserRole::User,
+                first_name: None,
+                last_name: None,
+                avatar_url: None,
+                vpc_ipv6_prefix: None,
+                totp_secret: Some("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP".to_string()),
+                totp_enabled: true,
+                deleted_at: None,
+            }))
+        });
+
+        let nats =
+            crate::nats::TypedNatsClient::new_custom(Arc::new(crate::nats::MockNatsClient::new()));
+
+        let state = AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(mock_repo),
+            tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
+            nats,
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/dummy")
+                .unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "admin@mikrom.spluca.org".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        let payload = LoginRequest {
+            email,
+            password: password.into(),
+            code: Some("000000".into()),
+        };
+
+        let response = __login_impl(State(state), Json(payload)).await;
+        assert!(response.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_login_with_valid_2fa() {
+        let mut mock_repo = MockUserRepository::new();
+        let email = "test@example.com".to_string();
+        let password = "password";
+        let password_hash = crate::crypto::hash_password(password).unwrap();
+
+        mock_repo.expect_find_by_email().returning(move |e| {
+            Ok(Some(User {
+                id: Uuid::new_v4(),
+                email: e.to_string(),
+                password_hash: password_hash.clone(),
+                role: crate::domain::UserRole::User,
+                first_name: None,
+                last_name: None,
+                avatar_url: None,
+                vpc_ipv6_prefix: None,
+                totp_secret: Some("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP".to_string()),
+                totp_enabled: true,
+                deleted_at: None,
+            }))
+        });
+
+        let nats =
+            crate::nats::TypedNatsClient::new_custom(Arc::new(crate::nats::MockNatsClient::new()));
+
+        let state = AppState {
+            ctx: crate::application::ApiContext::default(),
+            user_repo: Arc::new(mock_repo),
+            tenant_repo: Arc::new(crate::domain::MockTenantRepository::new()),
+            app_repo: Arc::new(MockAppRepository::new()),
+            database_repo: Arc::new(MockDatabaseRepository::new()),
+            github_repo: Arc::new(MockGithubRepository::default()),
+            volume_repo: Arc::new(MockVolumeRepository::new()),
+            scheduler: Arc::new(crate::domain::MockScheduler::new()),
+            nats,
+            router_addr: "http://localhost:8080".to_string(),
+            frontend_url: "http://localhost:3000".to_string(),
+            api_db: sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://localhost/dummy")
+                .unwrap(),
+            jwt_secret: "secret".to_string(),
+            master_key: "key".into(),
+            deployment_events: tokio::sync::broadcast::channel(1).0,
+            workspace_events: tokio::sync::broadcast::channel(1).0,
+            mesh_status:
+                tokio::sync::watch::channel(crate::application::vms::MeshStatus::default()).0,
+            acme_email: "admin@mikrom.spluca.org".to_string(),
+            acme_staging: true,
+            acme_check_interval: 3600,
+            github_app_id: None,
+            github_private_key: None,
+            github_app_slug: None,
+            github_webhook_url_base: None,
+            active_deployment_flows: std::sync::Arc::new(dashmap::DashSet::new()),
+        };
+
+        // Generate correct current OTP
+        use totp_rs::{Secret, TOTP};
+        let totp = TOTP::new(
+            totp_rs::Algorithm::SHA1,
+            6,
+            1,
+            30,
+            Secret::Encoded("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP".to_string()).to_bytes().unwrap(),
+            None,
+            String::new(),
+        )
+        .unwrap();
+        let valid_code = totp.generate_current().unwrap();
+
+        let payload = LoginRequest {
+            email,
+            password: password.into(),
+            code: Some(valid_code),
+        };
+
+        let response = __login_impl(State(state), Json(payload)).await;
+        assert!(response.is_ok());
+        let res = response.unwrap().0;
+        assert!(!res.requires_2fa);
+        assert!(res.token.is_some());
     }
 
     #[tokio::test]

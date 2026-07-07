@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   disableTotp: vi.fn(),
   changePassword: vi.fn(),
   deleteAccount: vi.fn(),
+  getUserProfile: vi.fn(),
   getToken: vi.fn(),
   goto: vi.fn(),
   logout: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock("$lib/api", () => ({
   disableTotp: mocks.disableTotp,
   changePassword: mocks.changePassword,
   deleteAccount: mocks.deleteAccount,
+  getUserProfile: mocks.getUserProfile,
 }));
 
 vi.mock("$lib/components", async (importOriginal) => {
@@ -76,6 +78,7 @@ const totpSetupResponse = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getToken.mockReturnValue("test-token");
+  mocks.getUserProfile.mockResolvedValue({ data: defaultProfile });
 });
 
 describe("SettingsSecuritySection", () => {

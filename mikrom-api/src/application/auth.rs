@@ -24,7 +24,8 @@ pub struct UpdateProfileParams {
 
 pub struct AuthResult {
     pub user: User,
-    pub token: String,
+    pub token: Option<String>,
+    pub requires_2fa: bool,
 }
 
 impl AuthService {
@@ -110,10 +111,19 @@ impl AuthService {
         )
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-        Ok(AuthResult { user, token })
+        Ok(AuthResult {
+            user,
+            token: Some(token),
+            requires_2fa: false,
+        })
     }
 
-    pub async fn login(state: &AppState, email: String, password: String) -> ApiResult<AuthResult> {
+    pub async fn login(
+        state: &AppState,
+        email: String,
+        password: String,
+        code: Option<String>,
+    ) -> ApiResult<AuthResult> {
         let user = state
             .user_repo
             .find_by_email(&email)
@@ -128,6 +138,43 @@ impl AuthService {
             return Err(ApiError::Auth("Invalid credentials".into()));
         }
 
+        // Check if TOTP is enabled
+        if user.totp_enabled {
+            if let Some(code) = code {
+                // User provided code, verify it
+                let secret = user
+                    .totp_secret
+                    .clone()
+                    .ok_or(ApiError::Internal("User has 2FA enabled but no secret".into()))?;
+
+                let totp = TOTP::new(
+                    totp_rs::Algorithm::SHA1,
+                    6,
+                    1,
+                    30,
+                    Secret::Encoded(secret).to_bytes().map_err(|e| ApiError::Internal(e.to_string()))?,
+                    None,
+                    String::new(),
+                )
+                .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+                let is_valid = totp
+                    .check_current(&code)
+                    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+                if !is_valid {
+                    return Err(ApiError::Auth("Invalid 2FA code".into()));
+                }
+            } else {
+                // User has not provided code, return requires_2fa: true
+                return Ok(AuthResult {
+                    user,
+                    token: None,
+                    requires_2fa: true,
+                });
+            }
+        }
+
         // Generate JWT
         let token = crate::infrastructure::auth::jwt::create_token(
             &user.id.to_string(),
@@ -137,7 +184,11 @@ impl AuthService {
         )
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-        Ok(AuthResult { user, token })
+        Ok(AuthResult {
+            user,
+            token: Some(token),
+            requires_2fa: false,
+        })
     }
 
     pub async fn get_profile(state: &AppState, user_id: Uuid) -> ApiResult<User> {

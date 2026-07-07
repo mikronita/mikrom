@@ -5,6 +5,7 @@
   import { toast } from "$lib/toast";
   import { logout } from "$lib/auth";
   import { goto } from "$app/navigation";
+  import { refreshProfile } from "$lib/stores/profile";
   import {
     AlertDialog,
     Badge,
@@ -123,6 +124,7 @@
     }
 
     toast.success("Two-factor authentication enabled");
+    await refreshProfile();
     showTotpDialog = false;
     totpSecret = "";
     totpUrl = "";
@@ -152,6 +154,7 @@
     }
 
     toast.success("Two-factor authentication disabled");
+    await refreshProfile();
   }
 
   async function handleDeleteAccount() {
