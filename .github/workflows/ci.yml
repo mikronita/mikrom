@@ -172,7 +172,6 @@ jobs:
   frontend-e2e:
     name: Frontend E2E
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
