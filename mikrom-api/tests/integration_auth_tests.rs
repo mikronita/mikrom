@@ -8,6 +8,7 @@ use mikrom_api::domain::{
 };
 use mikrom_api::workspace::WorkspaceEventKind;
 use std::sync::Arc;
+use totp_rs::{Secret, TOTP};
 use uuid::Uuid;
 
 fn build_state(
@@ -399,6 +400,105 @@ async fn disable_totp_clears_secret_and_flag() {
     let result = AuthService::disable_totp(&state, &user_id.to_string()).await;
 
     assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn verify_totp_succeeds_with_valid_code() {
+    let user_id = Uuid::new_v4();
+    let raw_secret = Secret::generate_secret();
+    let secret_encoded = raw_secret.to_encoded().to_string();
+    let secret_bytes = raw_secret.to_bytes().unwrap().to_vec();
+
+    let mut user_repo = MockUserRepository::new();
+    user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(User {
+            id,
+            email: "totp@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            avatar_url: None,
+            vpc_ipv6_prefix: Some("fd00::".to_string()),
+            totp_secret: Some(secret_encoded.clone()),
+            totp_enabled: false,
+            deleted_at: None,
+        }))
+    });
+    user_repo.expect_enable_totp().returning(|_| Ok(()));
+
+    let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
+    let totp = TOTP::new(
+        totp_rs::Algorithm::SHA1,
+        6,
+        1,
+        30,
+        secret_bytes,
+        None,
+        String::new(),
+    )
+    .unwrap();
+    let code = totp.generate_current().unwrap();
+
+    let result = AuthService::verify_totp(&state, &user_id.to_string(), code).await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn verify_totp_fails_with_invalid_code() {
+    let user_id = Uuid::new_v4();
+    let raw_secret = Secret::generate_secret();
+    let secret_encoded = raw_secret.to_encoded().to_string();
+
+    let mut user_repo = MockUserRepository::new();
+    user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(User {
+            id,
+            email: "totp@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            avatar_url: None,
+            vpc_ipv6_prefix: Some("fd00::".to_string()),
+            totp_secret: Some(secret_encoded.clone()),
+            totp_enabled: false,
+            deleted_at: None,
+        }))
+    });
+
+    let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
+    let result = AuthService::verify_totp(&state, &user_id.to_string(), "000000".to_string()).await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn verify_totp_fails_when_no_secret_stored() {
+    let user_id = Uuid::new_v4();
+
+    let mut user_repo = MockUserRepository::new();
+    user_repo.expect_find_by_id().returning(move |id| {
+        Ok(Some(User {
+            id,
+            email: "totp@example.com".to_string(),
+            password_hash: "hash".to_string(),
+            role: UserRole::User,
+            first_name: None,
+            last_name: None,
+            avatar_url: None,
+            vpc_ipv6_prefix: Some("fd00::".to_string()),
+            totp_secret: None,
+            totp_enabled: false,
+            deleted_at: None,
+        }))
+    });
+
+    let state = build_state(Arc::new(user_repo), Arc::new(MockTenantRepository::new()));
+    let result = AuthService::verify_totp(&state, &user_id.to_string(), "000000".to_string()).await;
+
+    assert!(result.is_err());
 }
 
 #[tokio::test]

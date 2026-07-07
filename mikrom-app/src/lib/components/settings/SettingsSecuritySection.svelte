@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getToken } from "$lib/auth";
   import { changePassword, setupTotp, verifyTotp, disableTotp, deleteAccount as deleteAccountApi, type UserProfile } from "$lib/api";
+  import QRCode from "qrcode";
   import { toast } from "$lib/toast";
   import { logout } from "$lib/auth";
   import { goto } from "$app/navigation";
@@ -16,6 +17,7 @@
     CardTitle,
     Field,
     Input,
+    Modal,
   } from "$lib/components";
   import Check from "@lucide/svelte/icons/check";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
@@ -36,10 +38,12 @@
   let settingUp2fa = $state(false);
   let totpSecret = $state("");
   let totpUrl = $state("");
+  let qrCodeDataUrl = $state("");
   let totpCode = $state("");
   let verifying2fa = $state(false);
   let disabling2fa = $state(false);
 
+  let showTotpDialog = $state(false);
   let showDeleteDialog = $state(false);
   let deletingAccount = $state(false);
 
@@ -92,6 +96,11 @@
     if (result.data) {
       totpSecret = result.data.secret;
       totpUrl = result.data.otpauth_url;
+      qrCodeDataUrl = await QRCode.toDataURL(result.data.otpauth_url, {
+        width: 300,
+        margin: 2,
+      });
+      showTotpDialog = true;
     }
   }
 
@@ -114,14 +123,18 @@
     }
 
     toast.success("Two-factor authentication enabled");
+    showTotpDialog = false;
     totpSecret = "";
     totpUrl = "";
+    qrCodeDataUrl = "";
     totpCode = "";
   }
 
   function handleCancelTotpSetup() {
+    showTotpDialog = false;
     totpSecret = "";
     totpUrl = "";
+    qrCodeDataUrl = "";
     totpCode = "";
   }
 
@@ -204,38 +217,7 @@
         {/if}
       </CardHeader>
       <CardFooter>
-        {#if totpUrl}
-          <div class="flex w-full flex-col gap-4">
-            <p class="text-sm text-muted-foreground">
-              Scan this QR code with your authenticator app (e.g. Google Authenticator, Authy):
-            </p>
-            <div class="flex justify-center">
-              <img src={totpUrl} alt="TOTP QR Code" class="size-40 rounded border" />
-            </div>
-            <div class="text-center">
-              <p class="text-xs text-muted-foreground">Or enter this secret manually:</p>
-              <code class="select-all rounded bg-muted px-2 py-1 text-xs font-mono">{totpSecret}</code>
-            </div>
-            <Field label="Authenticator code">
-              <Input
-                type="text"
-                inputmode="numeric"
-                maxlength={6}
-                placeholder="000000"
-                bind:value={totpCode}
-              />
-            </Field>
-            <div class="flex gap-2">
-              <Button onclick={handleVerifyTotp} disabled={verifying2fa} class="flex-1">
-                {verifying2fa ? "Verifying..." : "Verify & enable"}
-              </Button>
-              <Button variant="outline" onclick={handleCancelTotpSetup} disabled={verifying2fa}>
-                <X class="size-4" />
-                Cancel
-              </Button>
-            </div>
-          </div>
-        {:else if totpEnabled}
+        {#if totpEnabled}
           <Button size="sm" variant="outline" onclick={handleDisableTotp} disabled={disabling2fa}>
             <ShieldX class="size-4" />
             {disabling2fa ? "Disabling..." : "Disable 2FA"}
@@ -267,6 +249,34 @@
     </Card>
   </div>
 </div>
+
+<Modal bind:open={showTotpDialog} title="Set up two-factor authentication" description="Scan this QR code with your authenticator app (e.g. Google Authenticator, Authy)." onclose={handleCancelTotpSetup}>
+  <div class="flex flex-col items-center gap-4 py-4">
+    <img src={qrCodeDataUrl} alt="TOTP QR Code" class="size-48 rounded border" />
+    <div class="text-center">
+      <p class="text-xs text-muted-foreground">Or enter this secret manually:</p>
+      <code class="select-all rounded bg-muted px-2 py-1 text-xs font-mono">{totpSecret}</code>
+    </div>
+    <Field label="Authenticator code">
+      <Input
+        type="text"
+        inputmode="numeric"
+        maxlength={6}
+        placeholder="000000"
+        bind:value={totpCode}
+      />
+    </Field>
+    <div class="flex w-full gap-2">
+      <Button onclick={handleVerifyTotp} disabled={verifying2fa} class="flex-1">
+        {verifying2fa ? "Verifying..." : "Verify & enable"}
+      </Button>
+      <Button variant="outline" onclick={handleCancelTotpSetup} disabled={verifying2fa}>
+        <X class="size-4" />
+        Cancel
+      </Button>
+    </div>
+  </div>
+</Modal>
 
 <AlertDialog
   bind:open={showDeleteDialog}
